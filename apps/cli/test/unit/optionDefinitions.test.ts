@@ -7,9 +7,19 @@ import type { Arguments } from "yargs";
 import { UsageError } from "@psilink/core";
 
 import {
+  CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS,
   connectionOverridesFrom,
   hostKeyFingerprintFlag,
+  warnConnectionPerPollShortInterval,
+  warnOptionsOverridesIgnoredOffline,
+  warnUnsupportedFileSyncFlags,
 } from "../../src/optionDefinitions";
+
+/** Collect the warnings a helper emits, for assertion. */
+function warnCollector(): { warn: (m: string) => void; messages: string[] } {
+  const messages: string[] = [];
+  return { warn: (m: string) => messages.push(m), messages };
+}
 
 function argv(extra: Record<string, unknown>): Arguments {
   return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
@@ -142,4 +152,99 @@ test("connectionOverridesFrom: an absent serverHostKeyFingerprint stays absent",
     outboundPath: undefined,
   });
   expect(overrides.server?.hostKeyFingerprint).toBeUndefined();
+});
+
+test("connectionOverridesFrom: fans connectionPerPoll into the options override block", () => {
+  const overrides = connectionOverridesFrom({ connectionPerPoll: true });
+  expect(overrides.options?.connectionPerPoll).toBe(true);
+});
+
+// --- warnUnsupportedFileSyncFlags: --connection-per-poll ----------------------
+
+test("warnUnsupportedFileSyncFlags: --connection-per-poll warns on filedrop (SFTP-only)", () => {
+  // Unlike the file-sync flags, connection-per-poll warns on filedrop too: the
+  // ephemeral-session mode needs a real SFTP socket, which filedrop lacks.
+  const log = warnCollector();
+  warnUnsupportedFileSyncFlags("filedrop", { connectionPerPoll: true }, log);
+  expect(log.messages).toHaveLength(1);
+  expect(log.messages[0]).toContain("--connection-per-poll");
+  expect(log.messages[0]).toContain("filedrop");
+  expect(log.messages[0]).toContain("only supported on sftp");
+});
+
+test("warnUnsupportedFileSyncFlags: --connection-per-poll warns on webrtc", () => {
+  const log = warnCollector();
+  warnUnsupportedFileSyncFlags("webrtc", { connectionPerPoll: true }, log);
+  expect(log.messages.some((m) => m.includes("--connection-per-poll"))).toBe(
+    true,
+  );
+});
+
+test("warnUnsupportedFileSyncFlags: --connection-per-poll is silent on sftp", () => {
+  const log = warnCollector();
+  warnUnsupportedFileSyncFlags("sftp", { connectionPerPoll: true }, log);
+  expect(log.messages).toHaveLength(0);
+});
+
+// --- warnConnectionPerPollShortInterval --------------------------------------
+
+test("warnConnectionPerPollShortInterval: warns below the threshold on sftp", () => {
+  const log = warnCollector();
+  warnConnectionPerPollShortInterval(
+    "sftp",
+    true,
+    CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS - 1,
+    log,
+  );
+  expect(log.messages).toHaveLength(1);
+  expect(log.messages[0]).toContain("--connection-per-poll");
+  expect(log.messages[0]).toContain("--polling-frequency");
+});
+
+test("warnConnectionPerPollShortInterval: warns at the default interval when none is set", () => {
+  // Unset poll interval resolves to the 5s default, which is short, so the mode's
+  // most common misconfiguration (turned on, interval left at the default) warns.
+  const log = warnCollector();
+  warnConnectionPerPollShortInterval("sftp", true, undefined, log);
+  expect(log.messages).toHaveLength(1);
+});
+
+test("warnConnectionPerPollShortInterval: silent at or above the threshold", () => {
+  const log = warnCollector();
+  warnConnectionPerPollShortInterval(
+    "sftp",
+    true,
+    CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS,
+    log,
+  );
+  expect(log.messages).toHaveLength(0);
+});
+
+test("warnConnectionPerPollShortInterval: silent when the mode is off", () => {
+  const log = warnCollector();
+  warnConnectionPerPollShortInterval("sftp", undefined, 1000, log);
+  expect(log.messages).toHaveLength(0);
+});
+
+test("warnConnectionPerPollShortInterval: silent off the sftp channel", () => {
+  // The mode is SFTP-only; on filedrop the ignored-flag warning covers it instead,
+  // so this advisory must not also fire (a poll never runs the mode there).
+  const log = warnCollector();
+  warnConnectionPerPollShortInterval("filedrop", true, 1000, log);
+  expect(log.messages).toHaveLength(0);
+});
+
+// --- warnOptionsOverridesIgnoredOffline: --connection-per-poll ----------------
+
+test("warnOptionsOverridesIgnoredOffline: names --connection-per-poll when set", () => {
+  const log = warnCollector();
+  warnOptionsOverridesIgnoredOffline({ connectionPerPoll: true }, log);
+  expect(log.messages).toHaveLength(1);
+  expect(log.messages[0]).toContain("--connection-per-poll");
+});
+
+test("warnOptionsOverridesIgnoredOffline: does not name --connection-per-poll when unset", () => {
+  const log = warnCollector();
+  warnOptionsOverridesIgnoredOffline({ connectionPerPoll: undefined }, log);
+  expect(log.messages).toHaveLength(0);
 });

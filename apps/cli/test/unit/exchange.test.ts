@@ -418,6 +418,69 @@ test("filedrop config throws a UsageError when key file is absent", () => {
   expect(() => loadConfig(baseOptions())).toThrow("does not exist");
 });
 
+// --- connection_per_poll ignored-warning -------------------------------------
+// connection_per_poll is SFTP-only, so a non-sftp config that carries it (or a
+// CLI --connection-per-poll against one) must draw the ignored-warning rather
+// than silently no-op. The persisted case is the mode's documented primary home
+// and only the merged connection.options carries it; the CLI case is dropped off
+// sftp by applyConnectionOverrides, so only the raw flag carries it -- loadConfig
+// reads both. The signature `will be ignored ... only supported on sftp`
+// distinguishes this warning from the wasteful-short-interval advisory, which
+// also names --connection-per-poll but fires only on sftp.
+
+/** Whether any collected warning is the connection_per_poll ignored-warning. */
+function warnedConnectionPerPollIgnored(): boolean {
+  return mockState.warnings.some(
+    (m) =>
+      m.includes("--connection-per-poll") &&
+      m.includes("will be ignored") &&
+      m.includes("only supported on sftp"),
+  );
+}
+
+test("a persisted connection_per_poll: true in a filedrop config warns it is ignored", () => {
+  const filedropWithConnPerPoll = {
+    connection: {
+      channel: "filedrop",
+      path: "/mnt/share/drop",
+      options: { connection_per_poll: true },
+    },
+    linkageTerms: minimalLinkageTerms,
+  };
+  fs.writeFileSync(configFile, YAML.stringify(filedropWithConnPerPoll));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  loadConfig(baseOptions());
+  expect(warnedConnectionPerPollIgnored()).toBe(true);
+});
+
+test("a CLI --connection-per-poll against a filedrop config warns it is ignored", () => {
+  // applyConnectionOverrides drops the flag off sftp, so the merged config never
+  // carries it here; the raw CLI intent is the only carrier and must still warn.
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  loadConfig({ ...baseOptions(), connectionPerPoll: true });
+  expect(warnedConnectionPerPollIgnored()).toBe(true);
+});
+
+test("a persisted connection_per_poll: true in an sftp config does not warn it is ignored", () => {
+  const sftpWithConnPerPoll = {
+    connection: {
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      options: { connection_per_poll: true, poll_interval_ms: 3_600_000 },
+    },
+    linkageTerms: minimalLinkageTerms,
+  };
+  fs.writeFileSync(configFile, YAML.stringify(sftpWithConnPerPoll));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  loadConfig(baseOptions());
+  // A long poll interval keeps the short-interval advisory silent too, so no
+  // connection_per_poll warning of any kind should appear on its own channel.
+  expect(
+    mockState.warnings.some((m) => m.includes("--connection-per-poll")),
+  ).toBe(false);
+});
+
 // --- config warnings ---------------------------------------------------------
 // These tests exercise the warn-and-strip on the top-level authentication block:
 // a warning when an injected field (shared_secret/sharedSecret, expires) appears

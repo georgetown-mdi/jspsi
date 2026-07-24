@@ -50,9 +50,11 @@ import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
   parseCommonBootstrapArgs,
+  warnConnectionPerPollShortInterval,
   warnLowPollingFrequency,
   warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
+  warnUnsupportedFileSyncFlags,
   type CommonBootstrapOptions,
 } from "../optionDefinitions";
 import {
@@ -406,6 +408,31 @@ export async function validateAccept(params: {
     warnLowPollingFrequency(
       connection.channel,
       options.pollingFrequencyMs,
+      log,
+    );
+    // Warn when --connection-per-poll resolves to a channel that ignores it (a
+    // file:// URL is filedrop, which holds no session). connectionFromURL applies
+    // the override only on sftp, so on filedrop the raw flag is the only carrier
+    // of the operator's intent; read it too, not just the merged value that a
+    // future persisted source would set. A no-op on sftp (the mode's own channel),
+    // where warnConnectionPerPollShortInterval covers the short-interval case
+    // instead -- the two are channel-exclusive and never double-warn.
+    warnUnsupportedFileSyncFlags(
+      connection.channel,
+      {
+        connectionPerPoll:
+          options.connectionPerPoll === true ||
+          connection.options?.connectionPerPoll === true,
+      },
+      log,
+    );
+    // Warn when --connection-per-poll is paired with a short poll interval. Built
+    // from the URL (endpoint-seeded), so `connection` carries the effective mode
+    // and interval; a no-op off sftp (the mode is SFTP-only).
+    warnConnectionPerPollShortInterval(
+      connection.channel,
+      connection.options?.connectionPerPoll,
+      connection.options?.pollIntervalMs,
       log,
     );
     // Reconcile a pre-existing config against the invitation AND the connection

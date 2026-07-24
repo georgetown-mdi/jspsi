@@ -145,6 +145,54 @@ test("an existing pollIntervalMs in the config is overridden by --polling-freque
   expect(result.options?.pollIntervalMs).toBe(100);
 });
 
+// --- connectionPerPoll override (--connection-per-poll) ----------------------
+
+test("connectionPerPoll override is applied on the sftp channel", () => {
+  const result = applyConnectionOverrides(baseSFTP, {
+    options: { connectionPerPoll: true },
+  }) as SFTPConnectionConfig;
+  expect(result.options?.connectionPerPoll).toBe(true);
+});
+
+test("connectionPerPoll override is dropped on filedrop (SFTP-only)", () => {
+  // Unlike pollIntervalMs (valid on both file-sync channels), connectionPerPoll is
+  // SFTP-only: filedrop holds no session, so the override is not written there and
+  // the CLI warns it is ignored instead.
+  const base: ConnectionConfig = { channel: "filedrop", path: "/mnt/drop" };
+  const result = applyConnectionOverrides(base, {
+    options: { connectionPerPoll: true },
+  }) as FileDropConnectionConfig;
+  expect(
+    (result.options as Record<string, unknown> | undefined)?.[
+      "connectionPerPoll"
+    ],
+  ).toBeUndefined();
+});
+
+test("connectionPerPoll override is dropped on webrtc", () => {
+  const result = applyConnectionOverrides(baseWebRTC, {
+    options: { connectionPerPoll: true },
+  });
+  expect(
+    (result.options as Record<string, unknown> | undefined)?.[
+      "connectionPerPoll"
+    ],
+  ).toBeUndefined();
+});
+
+test("connectionPerPoll override preserves other existing options on sftp", () => {
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { pollIntervalMs: 300_000 },
+  };
+  const result = applyConnectionOverrides(base, {
+    options: { connectionPerPoll: true },
+  }) as SFTPConnectionConfig;
+  expect(result.options?.connectionPerPoll).toBe(true);
+  expect(result.options?.pollIntervalMs).toBe(300_000);
+});
+
 // --- timeout override re-validation ------------------------------------------
 // The timeout-override block re-validates its merged options through the same
 // schema the FileSync-field block uses, so the peerTimeoutMs/serverConnectTimeoutMs

@@ -1176,6 +1176,55 @@ test("unexpected_files is accepted on filedrop", () => {
   expect(result.success).toBe(true);
 });
 
+// --- FileSyncOptions: connection_per_poll ------------------------------------
+
+test("connection_per_poll is accepted on sftp", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    options: { connectionPerPoll: true },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.options?.connectionPerPoll).toBe(true);
+});
+
+test("connection_per_poll defaults to undefined when unset", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    options: { pollIntervalMs: 60_000 },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.options?.connectionPerPoll).toBeUndefined();
+});
+
+test("parses snake_case connection_per_poll from disk", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    options: { connection_per_poll: true },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.options?.connectionPerPoll).toBe(true);
+});
+
+test("connection_per_poll rejects a non-boolean", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { connectionPerPoll: "yes" },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("connection_per_poll is schema-accepted on filedrop (inert; the CLI warns)", () => {
+  // The field lives on FileSyncOptions for schema uniformity, so a filedrop
+  // config carrying it parses; it is inert there (filedrop holds no session), and
+  // the CLI surfaces the warning rather than the schema hard-blocking it.
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    path: "/mnt/share",
+    options: { connectionPerPoll: true },
+  });
+  expect(result.success).toBe(true);
+});
+
 // --- generateSharedSecret ----------------------------------------------------
 
 test("generateSharedSecret always matches SHARED_SECRET_REGEX", () => {

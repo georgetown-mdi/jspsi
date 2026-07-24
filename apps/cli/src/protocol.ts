@@ -421,7 +421,14 @@ export async function runProtocol(
     client =
       connection.channel === "filedrop"
         ? new LocalFSClient()
-        : new SSH2SFTPClientAdapter({ verbosity });
+        : new SSH2SFTPClientAdapter({
+            verbosity,
+            // connection_per_poll (SFTP-only) turns on the adapter's
+            // ephemeral-session mode: a fresh session per poll cycle, released
+            // before the idle gap. Resolved from the merged config; undefined
+            // (unset) leaves the adapter's held-session default.
+            ephemeralSessions: connection.options?.connectionPerPoll,
+          });
     // CLI-only sweep controls are passed straight to the constructor (the
     // verbose/joinerRecoveryMs precedent), never through config.options, so they
     // cannot be persisted to psilink.yaml. Spread conditionally so an unset value

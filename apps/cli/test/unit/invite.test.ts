@@ -255,6 +255,62 @@ test("validateInvite: online still aborts on a pre-existing config file", async 
   ).rejects.toThrow(options.configFile);
 });
 
+// --- connection_per_poll ignored on a non-sftp online URL --------------------
+// A file:// URL resolves to filedrop, which holds no session, so an online invite
+// carrying --connection-per-poll must warn it is ignored rather than silently
+// drop it. connectionFromURL applies the override only on sftp, so on filedrop
+// the raw flag is the sole carrier of the operator's intent; validateInvite reads
+// it and warns. On sftp the mode is valid, so the ignored-warning stays silent.
+
+test("validateInvite: online file:// URL with --connection-per-poll warns it is ignored", async () => {
+  const { input, options } = onlineFixture();
+  const dir = path.dirname(input);
+  const log = getLogger("invite-cpp-filedrop-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  await validateInvite({
+    resolved: { mode: "online", url: new URL(`file://${dir}`), input },
+    options: { ...options, connectionPerPoll: true },
+    acceptTimeout: 900,
+    log,
+  });
+  expect(
+    warnSpy.mock.calls.some(
+      (c) =>
+        typeof c[0] === "string" &&
+        c[0].includes("--connection-per-poll") &&
+        c[0].includes("will be ignored") &&
+        c[0].includes("only supported on sftp"),
+    ),
+  ).toBe(true);
+  warnSpy.mockRestore();
+});
+
+test("validateInvite: online sftp URL with --connection-per-poll does not warn it is ignored", async () => {
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-cpp-sftp-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  await validateInvite({
+    resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+    // A long poll interval keeps the wasteful-short-interval advisory silent too,
+    // so no connection_per_poll warning of any kind should appear on its channel.
+    options: {
+      ...options,
+      connectionPerPoll: true,
+      pollingFrequencyMs: 3_600_000,
+    },
+    acceptTimeout: 900,
+    log,
+  });
+  expect(
+    warnSpy.mock.calls.some(
+      (c) => typeof c[0] === "string" && c[0].includes("--connection-per-poll"),
+    ),
+  ).toBe(false);
+  warnSpy.mockRestore();
+});
+
 // --- online invite emits a connection endpoint -------------------------------
 
 test("validateInvite: online sftp emits a credential-free endpoint the acceptor seeds from", async () => {

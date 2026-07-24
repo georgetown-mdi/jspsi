@@ -407,6 +407,98 @@ test("validateAccept: an unsupported URL is rejected before the input file is re
   ).rejects.toBeInstanceOf(UsageError);
 });
 
+// --- connection_per_poll ignored on a non-sftp online URL --------------------
+// A file:// URL resolves to filedrop, which holds no session, so an online accept
+// carrying --connection-per-poll must warn it is ignored rather than silently
+// drop it. connectionFromURL applies the override only on sftp, so on filedrop the
+// raw flag is the sole carrier of the operator's intent; validateAccept reads it
+// and warns. On sftp the mode is valid, so the ignored-warning stays silent.
+
+const CPP_CSV =
+  "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n";
+
+test("validateAccept: online file:// URL with --connection-per-poll warns it is ignored", async () => {
+  const dir = fs.mkdtempSync(
+    path.join(tmpdir(), "psilink-accept-cpp-filedrop-"),
+  );
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(input, CPP_CSV);
+  const encoded = await encodeInvitation(
+    sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+  );
+  const log = getLogger("accept-cpp-filedrop-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    await validateAccept({
+      resolved: {
+        mode: "online",
+        url: new URL(`file://${dir}`),
+        invitation: encoded,
+        input,
+      },
+      options: testOptions({
+        configFile: path.join(dir, "psilink.yaml"),
+        keyFile: path.join(dir, ".psilink.key"),
+        connectionPerPoll: true,
+      }),
+      log,
+    });
+    expect(
+      warnSpy.mock.calls.some(
+        (c) =>
+          typeof c[0] === "string" &&
+          c[0].includes("--connection-per-poll") &&
+          c[0].includes("will be ignored") &&
+          c[0].includes("only supported on sftp"),
+      ),
+    ).toBe(true);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateAccept: online sftp URL with --connection-per-poll does not warn it is ignored", async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-cpp-sftp-"));
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(input, CPP_CSV);
+  const encoded = await encodeInvitation(
+    sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+  );
+  const log = getLogger("accept-cpp-sftp-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    await validateAccept({
+      resolved: {
+        mode: "online",
+        url: new URL("sftp://host/drop"),
+        invitation: encoded,
+        input,
+      },
+      options: testOptions({
+        configFile: path.join(dir, "psilink.yaml"),
+        keyFile: path.join(dir, ".psilink.key"),
+        connectionPerPoll: true,
+        // A long poll interval keeps the wasteful-short-interval advisory silent
+        // too, so no connection_per_poll warning of any kind appears on sftp.
+        pollingFrequencyMs: 3_600_000,
+      }),
+      log,
+    });
+    expect(
+      warnSpy.mock.calls.some(
+        (c) =>
+          typeof c[0] === "string" && c[0].includes("--connection-per-poll"),
+      ),
+    ).toBe(false);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- linkage pre-flight (block vs warn) --------------------------------------
 
 const FUTURE = () => new Date(Date.now() + 3_600_000).toISOString();

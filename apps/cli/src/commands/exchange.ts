@@ -10,7 +10,11 @@ import {
   prepareForExchange,
   UsageError,
 } from "@psilink/core";
-import type { ExchangeDataSpec, PreparedExchange } from "@psilink/core";
+import type {
+  ExchangeDataSpec,
+  FileSyncOptions,
+  PreparedExchange,
+} from "@psilink/core";
 
 import {
   applyConnectionOverrides,
@@ -47,6 +51,7 @@ import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
   parseCommonBootstrapArgs,
+  warnConnectionPerPollShortInterval,
   warnLowPollingFrequency,
   warnUnsupportedFileSyncFlags,
   type CommonBootstrapOptions,
@@ -390,12 +395,32 @@ export function loadConfig(options: ExchangeOptions): {
 
   // The channel here comes from the loaded config (post-override); warn on the
   // file-sync-only flags before the unsupported-channel throw below.
+  //
+  // connectionPerPoll is read from BOTH the raw CLI flag and the merged config,
+  // not just one: it is the mode's documented primary home, so a persisted
+  // connection_per_poll: true in a filedrop config must draw the ignored-warning
+  // (only the merged connection.options carries that). But applyConnectionOverrides
+  // applies the CLI override only on sftp, dropping it off any other channel, so a
+  // CLI --connection-per-poll against a filedrop config never reaches
+  // connection.options -- only the raw flag carries that intent. Either source
+  // being on means the operator asked for a mode this channel ignores. The other
+  // three flags stay raw-CLI-only: they warn solely on a non-file-sync channel
+  // (webrtc), whose SharedOptions cannot express them, so no merged value exists.
   warnUnsupportedFileSyncFlags(
     connection.channel,
     {
       locklessRendezvous: options.locklessRendezvous,
       retainFiles: options.retainFiles,
       pollingFrequencyMs: options.pollingFrequencyMs,
+      // This call runs before the channel is narrowed to sftp/filedrop below, so
+      // connection.options is typed SharedOptions | FileSyncOptions; read
+      // connectionPerPoll through a FileSyncOptions cast (as the core webrtc
+      // refines do), which yields undefined on a SharedOptions block that cannot
+      // carry it.
+      connectionPerPoll:
+        options.connectionPerPoll === true ||
+        (connection.options as FileSyncOptions | undefined)
+          ?.connectionPerPoll === true,
     },
     log,
   );
@@ -411,6 +436,17 @@ export function loadConfig(options: ExchangeOptions): {
     throw new UsageError(
       `the ${connection.channel} channel is not yet supported in the CLI`,
     );
+
+  // Warn when connection-per-poll is paired with a short poll interval. Placed
+  // after the channel narrowing above so the effective merged FileSyncOptions
+  // read here -- so a wasteful setting persisted in psilink.yaml is flagged, not
+  // only a CLI --connection-per-poll. A no-op off sftp (the mode is SFTP-only).
+  warnConnectionPerPollShortInterval(
+    connection.channel,
+    connection.options?.connectionPerPoll,
+    connection.options?.pollIntervalMs,
+    log,
+  );
 
   let keyData: KeyFile | undefined;
   try {

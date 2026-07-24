@@ -38,6 +38,7 @@ import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
   parseCommonBootstrapArgs,
+  warnConnectionPerPollShortInterval,
   warnLowPollingFrequency,
   warnUnsupportedFileSyncFlags,
   type CommonBootstrapOptions,
@@ -497,6 +498,7 @@ export async function handler(argv: Arguments): Promise<void> {
           locklessRendezvous: options.locklessRendezvous,
           retainFiles: options.retainFiles,
           pollingFrequencyMs: options.pollingFrequencyMs,
+          connectionPerPoll: options.connectionPerPoll,
         },
         log,
       );
@@ -506,6 +508,15 @@ export async function handler(argv: Arguments): Promise<void> {
     // non-file-sync (or unresolved) channel, where the override is dropped and
     // warnUnsupportedFileSyncFlags above emits the ignored-flag warning instead.
     warnLowPollingFrequency(channel, options.pollingFrequencyMs, log);
+    // Warn when --connection-per-poll is paired with a short poll interval. The
+    // zero-setup connection is built from the URL with no loaded config, so the
+    // CLI flag and override are the effective mode and interval here.
+    warnConnectionPerPollShortInterval(
+      channel,
+      options.connectionPerPoll,
+      options.pollingFrequencyMs,
+      log,
+    );
 
     // Detect a pre-existing config/key before any network activity. With --save,
     // a target that already exists is an error -- a half-finished bootstrap must
