@@ -173,11 +173,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // teardown has begun (a re-dial's readyTimeout would slow a clean close, and a
   // freshly-dialed session would outlive the teardown).
   private closing = false;
-  // The in-flight recovery re-dial's connect() (settled either way), or undefined
-  // when none is running. end() awaits it before tearing down the shared
-  // Ssh2SftpClient so a re-dial's connect() -- a fresh handshake -- and end()'s
-  // client.end() never run concurrently on the one client (ssh2-sftp-client shares
-  // connection-level listeners, so two ops in flight on one client is unsafe). The
+  // The in-flight re-dial's connect() (settled either way), or undefined when none
+  // is running. Published by both re-dial paths -- a mid-exchange session-recovery
+  // re-dial (redialForRecovery) and, in ephemeral mode, a cycle-start reconnect
+  // (ensureConnected) -- so end() and a concurrent ensureConnected serialize behind
+  // whichever is running rather than opening a second connect() on the one shared
+  // Ssh2SftpClient: a re-dial's connect() -- a fresh handshake -- and end()'s
+  // client.end(), or two connect()s, never run concurrently on the one client
+  // (ssh2-sftp-client shares connection-level listeners, so two ops in flight on one
+  // client is unsafe). The
   // op that owns the re-dial can be abandoned before it completes: core's per-op
   // peerTimeoutMs budget (a Promise.race) rejects a stalled op to the caller while
   // the adapter op keeps running, so the caller can reach close() -> end() while
@@ -723,10 +727,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // while connect() re-establishes it -- a concurrent op. connect() re-arms a
     // fresh heartbeat via start() at the end of its sequence.
     this.heartbeat.stop();
-    const redial = this.connect(this.originalConnectOptions);
-    // Publish the re-dial (settled either way) so a concurrent end() serializes
-    // its client.end() behind it; clear the handle once this same re-dial settles
-    // so a later end() is never held by a stale one.
+    return this.publishRedial(this.connect(this.originalConnectOptions));
+  }
+
+  // Publish an in-flight re-dial to redialInFlight so a concurrent end() or
+  // ensureConnected serializes behind it rather than opening a second connect() on
+  // the one shared Ssh2SftpClient (two handshakes at once is unsafe). The stored
+  // handle swallows the re-dial's outcome (settled either way) so a concurrent
+  // awaiter never sees an unhandled rejection, and self-clears once this same
+  // re-dial settles so a later awaiter is never held by a stale one. Returns the
+  // raw re-dial promise with its rejection intact for the caller.
+  private publishRedial(redial: Promise<void>): Promise<void> {
     const tracked = redial.then(
       () => {},
       () => {},
@@ -975,13 +986,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    */
   async ensureConnected(): Promise<boolean> {
     if (!this.ephemeralSessions || this.closing) return true;
-    // Serialize behind an in-flight recovery re-dial so two connect()s never run
-    // on the one shared Ssh2SftpClient (it shares connection-level listeners, so
-    // two handshakes at once is unsafe) -- the same guard end() applies.
-    await this.redialInFlight;
+    // Serialize behind any in-flight re-dial -- a mid-exchange recovery re-dial OR
+    // a concurrent ensureConnected (poll()'s cycle start and close()'s pre-drain
+    // reconnect can both fire) -- so two connect()s never run on the one shared
+    // Ssh2SftpClient (it shares connection-level listeners, so two handshakes at
+    // once is unsafe), the same guard end() applies. Loop, not a single await: an
+    // awaited re-dial can settle with the session still down (a transient failure)
+    // while another re-dial has begun, and a bare await, entered before the first
+    // caller has published its own re-dial, would let a second caller slip past and
+    // open a parallel connect(). Publishing our connect below (publishRedial)
+    // synchronously before the first await is what makes the loop see it.
+    while (this.redialInFlight !== undefined) await this.redialInFlight;
     const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
-    // A concurrent recovery re-dial (e.g. the close() abort-marker write) already
-    // reconnected; nothing to do.
+    // A concurrent recovery re-dial or ensureConnected (e.g. the close() abort-marker
+    // write) already reconnected; nothing to do.
     if (sftp) return true;
     if (this.originalConnectOptions === undefined)
       throw new Error(
@@ -989,7 +1007,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           "poll cycle ran before connect()",
       );
     try {
-      await this.connect(this.originalConnectOptions);
+      await this.publishRedial(this.connect(this.originalConnectOptions));
       return true;
     } catch (error: unknown) {
       if (this.isFatalDialError(error)) throw error;
