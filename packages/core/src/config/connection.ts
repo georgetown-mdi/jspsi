@@ -725,7 +725,7 @@ export interface FileSyncOptions extends SharedOptions {
   /**
    * When `true`, the SFTP transport opens a fresh SFTP session at the start of
    * each poll cycle and releases it before the loop goes idle again, instead of
-   * holding one session for the whole exchange. A session then need only survive
+   * holding one session for the whole exchange. A session then needs only survive
    * one cycle's seconds, so it never reaches a server's maximum-session-duration
    * or idle cap. Use it when the partner's SFTP server caps session lifetime and
    * a single exchange spans many idle poll gaps (a slow, once-an-hour-reconciling

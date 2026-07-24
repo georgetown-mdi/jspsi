@@ -286,11 +286,10 @@ export function addCommonBootstrapOptions(
         "open a fresh SFTP session for each poll cycle instead of holding one " +
         "session for the whole exchange; the session is released before the loop " +
         "goes idle. Use it when the partner's SFTP server caps session lifetime " +
-        "and the exchange spans many idle poll gaps. sftp-only, and a purely " +
-        "local dialing choice the peer does not observe (set it or not, " +
-        "independently of the partner). Meant to pair with a long " +
-        "--polling-frequency, since a handshake per cycle is wasteful at a " +
-        "seconds-scale interval",
+        "and the exchange spans many idle poll gaps. This is an SFTP-only, purely " +
+        "local dialing choice that the peer does not observe, so each party sets " +
+        "it independently. Pair it with a long --polling-frequency, since a fresh " +
+        "SSH handshake per cycle is wasteful at a seconds-scale interval",
     })
     .option("outbound-path", {
       type: "string",

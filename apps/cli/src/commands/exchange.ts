@@ -10,7 +10,11 @@ import {
   prepareForExchange,
   UsageError,
 } from "@psilink/core";
-import type { ExchangeDataSpec, PreparedExchange } from "@psilink/core";
+import type {
+  ExchangeDataSpec,
+  FileSyncOptions,
+  PreparedExchange,
+} from "@psilink/core";
 
 import {
   applyConnectionOverrides,
@@ -391,13 +395,32 @@ export function loadConfig(options: ExchangeOptions): {
 
   // The channel here comes from the loaded config (post-override); warn on the
   // file-sync-only flags before the unsupported-channel throw below.
+  //
+  // connectionPerPoll is read from BOTH the raw CLI flag and the merged config,
+  // not just one: it is the mode's documented primary home, so a persisted
+  // connection_per_poll: true in a filedrop config must draw the ignored-warning
+  // (only the merged connection.options carries that). But applyConnectionOverrides
+  // applies the CLI override only on sftp, dropping it off any other channel, so a
+  // CLI --connection-per-poll against a filedrop config never reaches
+  // connection.options -- only the raw flag carries that intent. Either source
+  // being on means the operator asked for a mode this channel ignores. The other
+  // three flags stay raw-CLI-only: they warn solely on a non-file-sync channel
+  // (webrtc), whose SharedOptions cannot express them, so no merged value exists.
   warnUnsupportedFileSyncFlags(
     connection.channel,
     {
       locklessRendezvous: options.locklessRendezvous,
       retainFiles: options.retainFiles,
       pollingFrequencyMs: options.pollingFrequencyMs,
-      connectionPerPoll: options.connectionPerPoll,
+      // This call runs before the channel is narrowed to sftp/filedrop below, so
+      // connection.options is typed SharedOptions | FileSyncOptions; read
+      // connectionPerPoll through a FileSyncOptions cast (as the core webrtc
+      // refines do), which yields undefined on a SharedOptions block that cannot
+      // carry it.
+      connectionPerPoll:
+        options.connectionPerPoll === true ||
+        (connection.options as FileSyncOptions | undefined)
+          ?.connectionPerPoll === true,
     },
     log,
   );
