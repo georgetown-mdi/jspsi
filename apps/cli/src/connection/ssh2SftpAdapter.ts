@@ -213,8 +213,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // op that owns the re-dial can be abandoned before it completes: core's per-op
   // peerTimeoutMs budget (a Promise.race) rejects a stalled op to the caller while
   // the adapter op keeps running, so the caller can reach close() -> end() while
-  // the abandoned op is still mid-re-dial. Bounded: connect() is finite (its own
-  // retry budget and readyTimeout), so the await cannot hang teardown.
+  // the abandoned op is still mid-re-dial. Ordinarily that await is short: connect()
+  // carries its own retry budget and each attempt its readyTimeout. It is NOT
+  // bounded in every case, and a teardown awaiting this handle inherits that: ssh2
+  // defers a connect() issued while the socket is still writable behind a 'close'
+  // it arms no readyTimeout for, so against a peer that never FINs the deferred
+  // attempt never settles and only core's per-op peerTimeoutMs bounds the wait.
   private redialInFlight: Promise<void> | undefined;
   // The in-flight idle-boundary release's close (settled either way), or undefined
   // when none is running. Published by releaseForIdle exactly as publishRedial
