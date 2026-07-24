@@ -102,9 +102,81 @@ export interface SftpFaultInjection {
 }
 
 /**
+ * Opt-in session-lifecycle controls the in-process backend exposes so the
+ * connection-per-poll and mid-exchange-recovery tests can drive a server that
+ * drops sessions the way the real partner's does. Every control is OFF by
+ * default (a zero cap, no armed drop, a fresh handshake count), so a suite that
+ * never touches them runs exactly as before. All durations are milliseconds.
+ *
+ * The standing caps model the partner's server policy: they apply to EVERY
+ * session while set, so a held session is dropped again on each re-dial (the
+ * operator's actual thrash) while a connection-per-poll cycle that stays under
+ * the bound is never dropped. The one-shot drops instead target a single active
+ * session, for a within-batch or mid-rendezvous drop the re-dial recovers from.
+ * Set the standing caps before the exchange starts; each newly established
+ * session reads them as it comes up.
+ */
+export interface SftpSessionControls {
+  /**
+   * Wall-clock session-lifetime cap: a session is dropped this many ms after its
+   * SSH handshake completes, regardless of traffic -- a keepalive cannot beat it,
+   * reproducing the partner's hard max-session-duration cap. 0 disables it.
+   */
+  maxLifetimeMs: number;
+  /**
+   * Op-count session cap: the drop is armed once a session has been dispatched
+   * this many SFTP operations. The teardown may pre-empt that Nth op's own reply
+   * (a mid-request cut), so the op that trips the cap is not guaranteed to
+   * complete. 0 disables it.
+   */
+  maxOps: number;
+  /**
+   * Idle cap: a session is dropped after going this many ms without an SFTP
+   * operation; each op resets the timer, so unlike {@link maxLifetimeMs} a
+   * keepalive op CAN beat it. 0 disables it.
+   */
+  maxIdleMs: number;
+  /**
+   * Arm a one-shot drop keyed to the `ops`th further SFTP operation, then
+   * disarm -- a within-batch or mid-rendezvous drop the re-dial recovers from,
+   * distinct from the standing {@link maxOps} cap. The drop is armed as that op
+   * is counted and may pre-empt its own reply (a mid-request cut), so it is not
+   * guaranteed to complete. "The active session" is the single-active-session
+   * appliance model: the counter is server-wide, not per-connection, so if a
+   * connection-per-poll re-dial overlaps the prior connection (a new session
+   * comes up before the old one closes), the count spans both and the drop may
+   * land on a different connection than the one active when it was armed. A
+   * value <= 0 disarms it.
+   */
+  dropActiveAfterOps(ops: number): void;
+  /**
+   * Arm a one-shot drop of the active session `ms` from now, on wall-clock
+   * regardless of traffic, then disarm. A no-op when no session is currently
+   * established; a value <= 0 cancels any pending one-shot timer. "The active
+   * session" is the single-active-session appliance model: the target is fixed
+   * to the connection active when this is armed, so if a connection-per-poll
+   * re-dial replaces it before the timer fires, the drop still lands on the
+   * original connection, not the current one.
+   */
+  dropActiveAfterMs(ms: number): void;
+  /**
+   * The number of SSH session establishments (handshakes) served since the
+   * server started or since the last {@link resetHandshakeCount}. A held-session
+   * exchange handshakes once; a connection-per-poll exchange handshakes once per
+   * cycle; each mid-exchange re-dial adds one. A test asserts on this to prove
+   * connection-per-poll is NOT establishing per poll at the default interval.
+   */
+  handshakeCount(): number;
+  /** Reset {@link handshakeCount} to zero (e.g. after a fixture's own connect). */
+  resetHandshakeCount(): void;
+}
+
+/**
  * The in-process backend, which additionally exposes its fault hooks for the
- * adversarial tests that stand up their own worker-local instance.
+ * adversarial tests and its session controls for the connection-lifecycle tests
+ * that stand up their own worker-local instance.
  */
 export interface InProcessSftpServer extends SftpTestServer {
   inject: SftpFaultInjection;
+  sessionControls: SftpSessionControls;
 }

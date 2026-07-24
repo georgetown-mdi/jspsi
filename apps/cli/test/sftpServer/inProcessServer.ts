@@ -8,6 +8,7 @@ import type { Attributes, Connection, SFTPWrapper } from "ssh2";
 
 import { computeHostKeyFingerprint } from "@psilink/core";
 
+import { COUNTED_SFTP_OPS, createSftpSessionControls } from "./sessionControls";
 import type {
   InProcessSftpServer,
   SftpFaultInjection,
@@ -47,6 +48,13 @@ interface RawChannelSftp {
 // @types/ssh2 only declares it on the client; cast to reach it server-side.
 interface NoDelayConnection {
   setNoDelay(noDelay: boolean): void;
+}
+
+// @types/ssh2 types sftp.on() with a per-opcode overload, so one counting
+// listener registered across the whole opcode set goes through the plain
+// EventEmitter shape instead.
+interface RequestCounterTarget {
+  on(event: string, listener: () => void): void;
 }
 
 // Frame an SFTP packet: [length u32][type u8][reqid u32][...body].
@@ -119,8 +127,10 @@ function publicKeyOf(generated: { public: string }): {
 /**
  * Start an in-process ssh2 SFTP server bound to loopback on an ephemeral port,
  * serving a fresh temporary directory. Returns the connection handle, the fault
- * hooks, and a teardown. The globalSetup uses only the handle and stop(); the
- * adversarial tests stand up their own instance to drive the fault hooks.
+ * hooks, the session-lifecycle controls, and a teardown. The globalSetup uses
+ * only the handle and stop(); the adversarial tests stand up their own instance
+ * to drive the fault hooks, and the connection-lifecycle tests to drive the
+ * session controls.
  *
  * @internal exported for testing
  */
@@ -139,6 +149,8 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     renameFailuresRemaining: 0,
     readdirBatchSize: 0,
   };
+
+  const sessionControls = createSftpSessionControls();
 
   const acceptableKey: Record<string, { algo: string; data: Buffer }> = {
     usera: publicKeyOf(parties.usera.key),
@@ -163,6 +175,7 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     // process. There is nothing to recover here -- the connection is going away.
     client.on("error", () => {});
     client.on("close", () => clients.delete(client));
+    client.on("close", () => sessionControls.releaseConnection(client));
 
     client.on("authentication", (ctx) => {
       const party =
@@ -203,10 +216,19 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     });
 
     client.on("ready", () => {
+      sessionControls.onConnectionReady(client);
       client.on("session", (acceptSession) => {
         const session = acceptSession();
         session.on("sftp", (acceptSftp) => {
           const sftp = acceptSftp();
+          // Count each SFTP request for the session op caps and one-shot op
+          // drop. A cap that fires arms the drop as this request is counted; the
+          // teardown may pre-empt this request's own reply (a mid-request cut),
+          // so a counted op is not guaranteed to complete before the drop.
+          const counter = sftp as unknown as RequestCounterTarget;
+          for (const op of COUNTED_SFTP_OPS) {
+            counter.on(op, () => sessionControls.recordOp(client));
+          }
           const closeOpenHandles = attachSftpHandlers(sftp, backingDir, inject);
           // A graceful client sends CLOSE per handle; an abrupt disconnect (the
           // adversarial tests abort mid-stream) does not, so close any fds still
@@ -267,6 +289,7 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
   return {
     handle,
     inject,
+    sessionControls,
     async stop() {
       // Force any still-open connection closed so server.close()'s callback can
       // fire, then bound the wait so a connection that refuses to end cannot hang
@@ -328,6 +351,29 @@ function attachSftpHandlers(
   backingDir: string,
   inject: SftpFaultInjection,
 ): () => void {
+  // A forced session drop (the session-control tests cut a connection mid-batch)
+  // can land while an fs callback below is still pending; when that callback then
+  // writes its reply, the channel is already ended. ssh2's send path no-ops a
+  // write to a closed channel today, but a synchronous throw on that path would
+  // escape the connection-level error handler and crash the test worker, so wrap
+  // every server reply write to swallow it. The full drop-path interaction is
+  // validated in the CI-only SFTP integration suite.
+  const replyMethods = ["status", "data", "name", "attrs", "handle"] as const;
+  const guarded = sftp as unknown as Record<
+    (typeof replyMethods)[number],
+    (...args: unknown[]) => void
+  >;
+  for (const method of replyMethods) {
+    const original = guarded[method];
+    guarded[method] = (...args: unknown[]): void => {
+      try {
+        original.call(sftp, ...args);
+      } catch {
+        // channel already ended by a forced session drop
+      }
+    };
+  }
+
   const handles = new Map<number, OpenHandle>();
   let nextHandle = 0;
   const newHandle = (entry: OpenHandle): Buffer => {
