@@ -42,32 +42,35 @@ to success, a rename confirms its self-owned destination, a `createExclusive`
 resolves its own `EEXIST`). Only a clean loss re-dials; a fatal protocol error, a
 liveness stall, a memory bound, and a host-key mismatch stay terminal.
 
-For the scenario above this means the exchange **survives** rather than aborting:
-the session dies in each idle gap, and the next poll's first op silently re-dials.
-That is a genuine robustness floor, and it is the right behavior to keep. But it
-has three properties that make it the wrong resting *default* to leave unexamined.
+For the scenario above this means the exchange **survives** each drop rather than
+aborting on it: the session dies in each idle gap, and the next poll's first op
+silently re-dials. That is a genuine robustness floor. But held-session recovery
+must not be *infinite*: it is bounded by a cumulative budget, and it stays honest
+about the difference between a transiently flaky link and a server that
+structurally caps session lifetime.
 
-**It is unbounded by design, and that is deliberate and correct.** The recovery
-grants one fresh re-dial per op invocation with no cumulative lifetime cap. A
-lifetime cap would be the obvious "don't reconnect forever" lever, and it is the
-wrong lever: a partner that drops every ten minutes across a multi-hour exchange
-would exhaust any fixed budget and defeat the feature in exactly the case it exists
-for. The unboundedness must stay.
+**It is bounded by a cumulative budget, not infinite.** The default held-session
+mode grants at most `max_reconnect_attempts` mid-exchange re-dials over the whole
+exchange; once that budget is spent the next drop fails the exchange terminally
+with an actionable message. The budget is **strictly cumulative** -- it does not
+reset on a successful op -- because a server that caps session lifetime makes
+progress every cycle, so a reset-on-progress budget would never bound it and would
+silently slip back into infinite reconnect. A merely flaky link is served by
+raising the budget; a server that genuinely caps session lifetime is served by
+connection-per-poll (below), which does not hold a session across the idle gap and
+so is not subject to the count.
 
-**Genuine failures already terminate -- unboundedness does not mask a dead
-channel.** This is the crux, and it was verified against the tree. A re-dial
-against a genuinely gone or credential-rotated endpoint exhausts the per-connect
-dialing budget -- whose operative default is **three** retries (a fast-fail in
-seconds), not the seven-day sanity ceiling that bounds only the config field -- and
-the op then rejects, poll's catch emits an error, and the connection bridge makes
-that terminal. A vanished or silent peer trips the receive-inactivity deadline,
-which is set to `peer_timeout_ms` (default one hour). A stalled send is bounded by
-its time-to-live (also `peer_timeout_ms`). So the "infinite" reconnect persists
-*only* while re-dials keep succeeding **and** the peer keeps making progress within
-each inactivity window -- that is, only while the exchange is genuinely alive. An
-operator's instinct that "infinite reconnect when it is not known to be a failure
-is acceptable" is correct, and the code already draws that line: a real failure is
-not reconnected forever, it aborts within seconds to an hour.
+**Genuine failures already terminate on their own bounds, too.** A re-dial against
+a genuinely gone or credential-rotated endpoint exhausts the per-connect dialing
+budget -- whose operative default is **three** retries (a fast-fail in seconds),
+not the seven-day sanity ceiling that bounds only the config field -- and the op
+then rejects, poll's catch emits an error, and the connection bridge makes that
+terminal. A vanished or silent peer trips the receive-inactivity deadline, which is
+set to `peer_timeout_ms` (default one hour). A stalled send is bounded by its
+time-to-live (also `peer_timeout_ms`). These bounds terminate a dead channel
+independently of the mid-exchange reconnection budget; the budget is what
+additionally bounds the *succeeding-but-thrashing* case -- a server that re-dials
+cleanly every cycle yet keeps capping the session -- which none of them catches.
 
 **What cannot be told apart, and why that is the real gap.** The line the code
 *cannot* draw without help is between a **chronic-benign** drop (a server session
@@ -83,29 +86,39 @@ vantage is not possible; it requires either **observability** (so the operator c
 see the thrash and judge it) or an operator-supplied **declaration** that drops are
 expected here. That declaration is precisely what the opt-in mode below provides.
 
-One live legibility defect belongs to this same gap. The transport exposes a
-`max_reconnect_attempts` field (default three) whose name promises control over
-reconnection. It does not bound the number of mid-exchange recoveries -- it bounds
-only the dialing-retry loop inside a single `connect()`. The one knob whose name
-implies a
-reconnect ceiling has no effect on the reconnecting an operator would want to bound.
+Beyond observability, the `max_reconnect_attempts` field (default three) is what
+bounds this recovery. Its value sizes a cumulative mid-exchange-reconnection budget
+-- a counter separate from, but the same size as, the dialing-retry loop inside a
+single `connect()` -- so the one knob whose name implies a reconnect ceiling
+genuinely bounds the reconnecting an operator would want to bound, on top of each
+connect's own dialing retries.
 
 ## The reconnect posture
 
-Keep mid-exchange recovery on and survival-preserving. Keep it uncapped by a
-lifetime count. Change two things about the default:
+Keep mid-exchange recovery on and survival-preserving, but bound it and make it
+observable. Three properties define the default:
 
-- **Make it observable.** Emit an operator-facing warning on the first
-  mid-exchange re-dial that names the likely cause and the remedy, and escalate by
-  rate so a chronic capper is loud without spamming a one-off. Surface the live
-  reconnect count on the normal log, not only on the event stream. This turns a
-  silent, un-judgeable exchange into one whose degradation the operator can see.
-- **Let the operator bound it, opt-in.** Offer a give-up ceiling on a
-  drops-per-window or wall-clock basis -- default off, so the shipped survival
-  guarantee is unchanged -- that ends the exchange with an actionable terminal
-  message when tripped. This is the "not infinite by default" lever the maintainer
-  wants, expressed as a rate/deadline the slow-peer case survives, rather than a
-  lifetime count it would exhaust.
+- **Bound it by a cumulative budget that fails terminally.** In the default
+  held-session mode `max_reconnect_attempts` caps the cumulative number of
+  mid-exchange reconnections; once it is spent the next drop ends the exchange with
+  an actionable terminal error that names the partner-server drop, states the
+  exhausted budget, and gives the two remedies. The budget is strictly cumulative
+  and does not reset on progress -- a session-capping server makes progress every
+  cycle, so a reset-on-progress budget would never bound it. This is the "not
+  infinite by default" lever, expressed as the one knob whose name already promises
+  it rather than a new field.
+- **Make it observable.** Emit an operator-facing warning on the first mid-exchange
+  re-dial that names the likely cause and the remedy, and escalate by rate so a
+  chronic capper is loud without spamming a one-off. Surface the live reconnect
+  count on the normal log, not only on the event stream. This turns a silent,
+  un-judgeable exchange into one whose degradation the operator can see before the
+  budget is spent.
+- **Give the capping-server case its own escape.** A server that structurally caps
+  session lifetime would exhaust any held-session budget, so raising
+  `max_reconnect_attempts` is the answer only for a transiently flaky link. The
+  structural fix is connection-per-poll (below): it holds no session across the
+  idle gap, so it never reaches the cap and its within-cycle recovery is bounded
+  instead by the peer-inactivity ceiling.
 
 The recoverable-versus-terminal taxonomy stays exactly as it is: it keys on the
 session's post-drop state, not on message matching, and it is sound. This posture
@@ -268,17 +281,14 @@ snapshot nor resets the sequence shadow.
 The downstream slices:
 
 - **Reconnect posture first.** Make mid-exchange recovery observable (first-drop and
-  rate-escalated warnings, the live count on the normal log) and optionally
-  ceilinged (opt-in drops-per-window or wall-clock give-up, default off), and clarify
-  the misleading reconnect-attempts field -- operators misread it as bounding
-  mid-exchange recovery when it bounds only the per-connect dialing-retry loop, so
-  its documented meaning matches what it bounds (a rename would be breaking, a
-  separate naming call). This
-  is independent of the mode, answers the silent-unbounded-default concern directly,
-  and lets the operator observe the actual thrash before the mode is even built. The
-  operator reference currently states, wrongly since transparent recovery shipped,
-  that there is no reconnection after a mid-exchange drop; that line must be
-  corrected here.
+  rate-escalated warnings, the live count on the normal log) and bound it by a
+  cumulative `max_reconnect_attempts` budget that fails the exchange terminally when
+  spent, so the field's name finally matches what it bounds: the cumulative number
+  of mid-exchange reconnections in the default mode, on top of each connect's own
+  dialing retries. This is independent of the mode, answers the
+  silent-unbounded-default concern directly, and lets the operator observe the
+  actual thrash before the budget is spent. The operator reference must describe
+  that bounded behavior rather than an unbounded or absent one.
 - **Implement the lifecycle.** The adapter ephemeral-session mode reusing the
   recovery machinery, the core idle-boundary signal, the non-terminal release that
   never latches the `closing` flag (so recovery stays enabled across cycles), and the
@@ -309,8 +319,8 @@ The seam, scope, config shape, and reconnect posture were settled by an independ
 panel of four expert-model lenses reasoning from first principles with no seeded
 answer -- reliability and failure-mode, distributed-systems and protocol
 correctness, transport and systems architecture, and operator experience and config
-surface. They converged on the posture (observable and optionally rate/deadline-
-bounded, never lifetime-capped), on connection-per-poll as the structural fix kept
+surface. They converged on the posture (observable and bounded so a held session cannot
+reconnect forever), on connection-per-poll as the structural fix kept
 as a hybrid, on the local non-bilateral explicit opt-in, and -- three of four,
 including the architecture and reliability leads -- on the adapter-owned seam; the
 lone dissent for a core-owned seam rested on a concern (invariants live in core)

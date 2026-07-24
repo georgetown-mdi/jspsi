@@ -2636,29 +2636,14 @@ describe("session recovery", () => {
     expect(wrapper.open).toHaveBeenCalledOnce();
   });
 
-  test("surfaces a terminal non-zero failure when the recovery re-dial exhausts its budget", async () => {
-    // An exhausted re-dial must reject terminally (the caller maps it to a non-zero
-    // exit), never resolve silently or hang. maxReconnectAttempts: 0 makes the
-    // re-dial a single failing attempt with no retry delay.
+  test("fails terminally with no re-dial when max_reconnect_attempts is 0", async () => {
+    // The mid-exchange reconnection budget IS max_reconnect_attempts in the default
+    // held-session mode: a value of 0 permits zero reconnections, so the very first
+    // drop fails terminally with the actionable budget-exhausted message and no
+    // re-dial is even attempted. Terminal (a UsageError) so the caller maps it to a
+    // non-zero exit, never a silent resolve or hang.
     const wrapper = sessionWrapper();
-    const state = { live: true };
-    let calls = 0;
-    const connect = vi.fn().mockImplementation(async () => {
-      calls += 1;
-      if (calls === 1) {
-        state.live = true;
-        return;
-      }
-      throw new Error("connection refused");
-    });
-    const client = {
-      get sftp() {
-        return state.live ? wrapper : null;
-      },
-      connect,
-      client: noDelayClient(),
-      end: vi.fn().mockResolvedValue(true),
-    };
+    const { client, connect, state } = droppable(wrapper);
     const adapter = new SSH2SFTPClientAdapter();
     stub(adapter);
     install(adapter, client);
@@ -2666,11 +2651,13 @@ describe("session recovery", () => {
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
     state.live = false;
 
-    await expect(adapter.list("/remote/dir")).rejects.toThrow(
-      "connection refused",
-    );
-    // Initial connect + exactly one re-dial attempt.
-    expect(connect).toHaveBeenCalledTimes(2);
+    const err = await adapter.list("/remote/dir").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UsageError);
+    expect((err as Error).message).toContain("max_reconnect_attempts=0");
+    expect((err as Error).message).toContain("reconnection budget");
+    // No re-dial: the budget was already spent, so only the initial connect ran.
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(adapter.midExchangeReconnectCount).toBe(0);
   });
 
   test("fails immediately on a host-key mismatch during the recovery re-dial", async () => {
@@ -3079,7 +3066,9 @@ describe("session recovery", () => {
     (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
     install(adapter, client);
 
-    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    // A budget comfortably above the escalation interval so the cap does not fire:
+    // this test exercises the warn cadence, not the reconnection cap.
+    await adapter.connect({ host: "h", maxReconnectAttempts: 100 });
 
     // Drop and recover once per poll for a full escalation interval; connect()
     // restores state.live on each re-dial.
@@ -3212,6 +3201,129 @@ describe("session recovery", () => {
     expect((err as Error).message).toContain("No such file");
     expect(connect).toHaveBeenCalledTimes(2);
   });
+
+  // A raw SFTPWrapper stand-in that serves an empty directory (EOF on the first
+  // readdir), so each recovered list() re-dials and returns []. Used by the cap
+  // tests to drive a series of clean drops through withSessionRecovery.
+  const emptyDirWrapper = () =>
+    sessionWrapper({
+      opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
+        cb(null, Buffer.from("h")),
+      readdir: (
+        _h: Buffer,
+        cb: (e: (Error & { code?: number }) | null, l?: unknown[]) => void,
+      ) => cb(Object.assign(new Error("EOF"), { code: 1 })),
+      close: (_h: Buffer, cb: (e: Error | null) => void) => cb(null),
+    });
+
+  test("recovers up to the cap, then fails the next drop terminally (default mode)", async () => {
+    // max_reconnect_attempts caps the CUMULATIVE number of mid-exchange
+    // reconnections in the default held-session mode. With a budget of 3, three
+    // drops each recover; the fourth exhausts the budget and fails the exchange
+    // terminally with the actionable message rather than re-dialing again.
+    const { client, connect, state } = droppable(emptyDirWrapper());
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 3 });
+    for (let i = 0; i < 3; i += 1) {
+      state.live = false;
+      await adapter.list("/remote/dir");
+    }
+    // Three survived drops: budget spent exactly to the cap.
+    expect(adapter.midExchangeReconnectCount).toBe(3);
+    expect(connect).toHaveBeenCalledTimes(4); // initial + 3 recoveries
+
+    // The fourth drop is refused: terminal UsageError, no further re-dial.
+    state.live = false;
+    const err = await adapter.list("/remote/dir").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UsageError);
+    expect((err as Error).message).toContain("max_reconnect_attempts=3");
+    // Names the partner-server drop and both remedies.
+    expect((err as Error).message).toContain("session-duration or idle limit");
+    expect((err as Error).message).toContain("connection-per-poll");
+    // No re-dial and no count for the refused drop.
+    expect(connect).toHaveBeenCalledTimes(4);
+    expect(adapter.midExchangeReconnectCount).toBe(3);
+  });
+
+  test("the cumulative budget does not reset on a successful op (no reset on progress)", async () => {
+    // The budget is STRICTLY cumulative: a successful op between drops does not
+    // reset the count. A session-capping server makes progress every cycle, so a
+    // reset-on-progress budget would never bound it. Prove it by interleaving
+    // drop-free (progressing) list()s between the drops and showing the cap is
+    // still reached at the same cumulative drop count.
+    const { client, state } = droppable(emptyDirWrapper());
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+
+    // Drop #1 recovers.
+    state.live = false;
+    await adapter.list("/remote/dir");
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    // Progress: a successful op with no drop must NOT reset the count.
+    await adapter.list("/remote/dir");
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+
+    // Drop #2 recovers -- now at the cap.
+    state.live = false;
+    await adapter.list("/remote/dir");
+    expect(adapter.midExchangeReconnectCount).toBe(2);
+    // More progress between the drop and the exhausting drop.
+    await adapter.list("/remote/dir");
+
+    // Drop #3 exhausts the budget: reachable only because the intervening
+    // successful ops did NOT reset the cumulative count.
+    state.live = false;
+    const err = await adapter.list("/remote/dir").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UsageError);
+    expect((err as Error).message).toContain("reconnection budget");
+    expect(adapter.midExchangeReconnectCount).toBe(2);
+  });
+
+  test("a teardown re-dial is exempt from the cap, uncounted and unwarned, and still lands", async () => {
+    // The authenticated abort-marker write and the terminal-frame drain re-dial
+    // during teardown. Even with the mid-exchange budget already exhausted, a
+    // teardown re-dial (signaled by beginTeardown) is ALLOWED -- so the fast-fail
+    // marker still lands -- and is neither counted nor warned (it is teardown
+    // mechanics, not a survived mid-exchange drop).
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    let putCalls = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).put = vi.fn().mockImplementation(() => {
+      if (!state.live) return Promise.reject(notConnected("put"));
+      putCalls += 1;
+      return Promise.resolve("ok");
+    });
+    const adapter = new SSH2SFTPClientAdapter();
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    // Budget 0: a NON-teardown drop would fail terminally on the first drop.
+    await adapter.connect({ host: "h", retries: 0, maxReconnectAttempts: 0 });
+    // Teardown begins (as close() and the abort-marker write both signal), then the
+    // held session drops and the marker-style write is issued.
+    adapter.beginTeardown();
+    state.live = false;
+
+    await expect(
+      adapter.put(Buffer.from("abort"), "/remote/id-abort.tmp", { flags: "w" }),
+    ).resolves.toBe("ok");
+    // The re-dial happened despite the exhausted budget: the marker landed.
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(putCalls).toBe(1);
+    // ... and it was charged to neither reconnect metric and raised no warning.
+    expect(adapter.midExchangeReconnectCount).toBe(0);
+    expect(adapter.reconnectCount).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
 });
 
 // --- ephemeral session mode (connection-per-poll) ----------------------------
@@ -3340,6 +3452,38 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const result = await adapter.list("/remote/dir");
     expect(result.map((e) => e.name)).toEqual(["a.json"]);
     expect(connect).toHaveBeenCalledTimes(3);
+  });
+
+  test("within-cycle recovery is NOT bounded by the mid-exchange reconnection cap", async () => {
+    // The cumulative cap applies only to the default held-session mode.
+    // Connection-per-poll holds no session across the idle gap, so its within-cycle
+    // recovery floor is uncapped by the count (bounded instead by the
+    // peer-inactivity ceiling): more within-cycle drops than max_reconnect_attempts
+    // still recover, where the default mode would have failed terminally.
+    const wrapper = wrapperMethods({
+      opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
+        cb(null, Buffer.from("h")),
+      readdir: (
+        _h: Buffer,
+        cb: (e: (Error & { code?: number }) | null, l?: unknown[]) => void,
+      ) => cb(Object.assign(new Error("EOF"), { code: 1 })),
+      close: (_h: Buffer, cb: (e: Error | null) => void) => cb(null),
+    });
+    const { client, connect, state } = ephemeralClient(wrapper);
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    // Budget of 1: the default mode would fail on the SECOND drop.
+    await adapter.connect({ host: "h", maxReconnectAttempts: 1 });
+    for (let i = 0; i < 3; i += 1) {
+      state.live = false;
+      await adapter.list("/remote/dir");
+    }
+    // All three within-cycle drops recovered past the default cap.
+    expect(connect).toHaveBeenCalledTimes(4); // initial + 3 recoveries
+    // They still count as mid-exchange recoveries -- only the CAP is off in this mode.
+    expect(adapter.midExchangeReconnectCount).toBe(3);
   });
 
   test("re-dial reuses the retained connect options (no re-prompt / same key + credentials)", async () => {

@@ -268,6 +268,13 @@ export class AbortMarkerSubsystem {
   private async runAbortMarkerWrite(): Promise<void> {
     const inputs = this.abortWriteInputs;
     if (inputs === undefined || this.abortMarkerWritten) return;
+    // Signal teardown before issuing the write so its own re-dial is exempt from
+    // the transport's mid-exchange reconnection cap: this write is the fast-fail
+    // marker a waiting peer most needs precisely when a capping server has just
+    // exhausted that budget, and it can be issued from the orchestrator's catch
+    // BEFORE close() runs (close() also signals, but may lose that race). No-op on
+    // a transport that does not implement it.
+    inputs.client.beginTeardown?.();
     const tempPath = `${inputs.path}/temp-${uuidv4()}.tmp`;
     const finalPath = `${inputs.path}/${inputs.finalName}`;
     await this.deps.runBudgeted(

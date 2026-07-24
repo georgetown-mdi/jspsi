@@ -6,6 +6,7 @@
 // normal-path test exercises.
 import Ssh2SftpClient from "ssh2-sftp-client";
 import {
+  DEFAULT_MAX_RECONNECT_ATTEMPTS,
   DirectoryListingBoundsError,
   FileInfo,
   FileTransportClient,
@@ -14,6 +15,7 @@ import {
   PutOptions,
   PutSource,
   TransportOperationStalledError,
+  UsageError,
   getLoggerForVerbosity,
   retryPromise,
   sanitizeErrorForDisplay,
@@ -151,9 +153,10 @@ const SFTP_SESSION_CLOSED_MESSAGE =
  * adapter warns the operator on the FIRST successful mid-exchange re-dial, then
  * again only once every `SFTP_REDIAL_WARN_INTERVAL`-th re-dial, so a partner
  * whose server chronically caps session lifetime stays visible without a warn
- * line on every poll cycle. This is an observability cadence only, not a bound on
- * recovery: recovery itself is uncapped -- each operation invocation earns a
- * fresh round (see {@link SSH2SFTPClientAdapter.withSessionRecovery}).
+ * line on every poll cycle. This is an observability cadence only, independent of
+ * the mid-exchange reconnection cap that bounds how many re-dials the default mode
+ * performs before failing terminally (see
+ * {@link SSH2SFTPClientAdapter.withSessionRecovery}).
  */
 export const SFTP_REDIAL_WARN_INTERVAL = 10;
 
@@ -173,6 +176,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // teardown has begun (a re-dial's readyTimeout would slow a clean close, and a
   // freshly-dialed session would outlive the teardown).
   private closing = false;
+  // Latched true when the connection's close()/teardown begins, via
+  // beginTeardown(). Distinct from `closing` (set later, by end()): `closing`
+  // forbids a re-dial outright, whereas a teardown re-dial is still wanted -- the
+  // authenticated abort-marker write and the terminal-frame drain must be able to
+  // re-dial so the fast-fail marker still lands -- but is EXEMPT from the
+  // mid-exchange reconnection cap and is neither counted nor warned (it is teardown
+  // mechanics, not a survived mid-exchange drop). A capping-server failure is
+  // exactly when the peer most needs the marker, so the exemption is deliberate.
+  // A plain latch, never reset.
+  private tearingDown = false;
   // The in-flight re-dial's connect() (settled either way), or undefined when none
   // is running. Published by both re-dial paths -- a mid-exchange session-recovery
   // re-dial (redialForRecovery) and, in ephemeral mode, a cycle-start reconnect
@@ -212,9 +225,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private reconnectAttempts = 0;
   // Successful mid-exchange recovery re-dials over this adapter's life, tracked
   // apart from reconnectAttempts (which also counts connect-retry re-dials) to
-  // drive the operator warn cadence (SFTP_REDIAL_WARN_INTERVAL) and the
-  // end-of-run summary's mid-exchange sub-count (midExchangeReconnectCount). A
-  // plain operational counter, never a partner-controlled value.
+  // drive the operator warn cadence (SFTP_REDIAL_WARN_INTERVAL), the cumulative
+  // mid-exchange reconnection cap (max_reconnect_attempts; see withSessionRecovery),
+  // and the end-of-run summary's mid-exchange sub-count (midExchangeReconnectCount).
+  // A plain operational counter, never a partner-controlled value.
   private midExchangeRedials = 0;
   private transportRetries = 0;
   // The per-operation liveness bound (ms) every server-driven op is held to. See
@@ -578,25 +592,33 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
 
   // The outermost layer around every server-driven op: it runs the op once and,
   // if that rejection is a CLEAN session loss, re-dials the connection ONCE and
-  // re-issues the op ONCE before giving up. This is the interim robustness floor
-  // under the persistent-session model: an SFTP server that enforces a
+  // re-issues the op ONCE before giving up. An SFTP server that enforces a
   // max-session or idle cap the operator cannot change drops the one long-lived
-  // session mid-exchange (observed at ~10 min), after which the next op fails
-  // terminally and the exchange aborts. Recovery makes that drop transparent by
-  // re-dialing (reusing the pinned host key and stored credentials, no re-prompt)
-  // and re-running the operation.
+  // session mid-exchange (observed at ~10 min); recovery makes that drop
+  // transparent by re-dialing (reusing the pinned host key and stored credentials,
+  // no re-prompt) and re-running the operation.
   //
   // ONE round per op invocation, never a loop: if the re-issued op ALSO hits a
-  // clean loss it rejects terminally. There is deliberately no cumulative/lifetime
-  // reconnect cap -- each op invocation earns a fresh round -- because a partner
-  // that drops the session every ~10 min over a multi-hour exchange would exhaust
-  // any lifetime cap and defeat the whole feature. The op+re-dial is enclosed by
-  // boundTransport's per-op peerTimeoutMs budget in core (a Promise.race), which
-  // is the terminal ceiling against a pathological instant-drop server, so no
-  // bespoke total-time timer is added here. Serial op issuance (single-party
-  // appliance) guarantees no other tracked() op is in flight when the re-dial
-  // runs: the first attempt's promise has already settled by the time this catch
-  // fires, so connect()'s heartbeat re-arm never races a live op.
+  // clean loss it rejects terminally. In the default held-session mode the
+  // cumulative number of mid-exchange re-dials is bounded by max_reconnect_attempts
+  // -- a budget SEPARATE from, and the same size as, the per-connect dialing-retry
+  // loop inside connect(): once that many drops have been re-dialed this exchange,
+  // the next drop fails terminally with an actionable message rather than
+  // re-dialing (midExchangeReconnectBudgetExhaustedError). The count is strictly
+  // cumulative and never resets on progress, because a session-capping server makes
+  // progress every cycle and a reset-on-progress budget would never bound it. The
+  // escape hatches are raising max_reconnect_attempts (a flaky link) and
+  // connection-per-poll mode (a server that caps session lifetime), whose
+  // within-cycle recovery is left uncapped by this count -- it holds no session
+  // across the idle gap, so it is bounded instead by the peer-inactivity ceiling.
+  // A teardown re-dial (abort marker / drain) is exempt so the fast-fail marker
+  // still lands when the budget is spent. The op+re-dial is enclosed by
+  // boundTransport's per-op peerTimeoutMs budget in core (a Promise.race), which is
+  // the terminal ceiling against a pathological instant-drop server, so no bespoke
+  // total-time timer is added here. Serial op issuance (single-party appliance)
+  // guarantees no other tracked() op is in flight when the re-dial runs: the first
+  // attempt's promise has already settled by the time this catch fires, so
+  // connect()'s heartbeat re-arm never races a live op.
   //
   // `reissue` is applied ONLY on the re-issue, never the first attempt, so a
   // per-op idempotency relaxation (delete-absent, rename-dest-exists,
@@ -609,6 +631,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   ): Promise<T> {
     return op().catch(async (error: unknown) => {
       if (!this.shouldRecoverFromSessionLoss(error)) throw error;
+      // A teardown re-dial (the abort-marker write or the terminal-frame drain) is
+      // exempt from the cap and neither counted nor warned; see the `tearingDown`
+      // field and beginTeardown().
+      const teardown = this.tearingDown;
+      // Cap the cumulative mid-exchange reconnections in the default held-session
+      // mode: once max_reconnect_attempts drops have already been re-dialed this
+      // exchange, refuse the next and fail terminally. Gated off in
+      // connection-per-poll mode and for a teardown re-dial.
+      if (
+        !teardown &&
+        !this.ephemeralSessions &&
+        this.midExchangeRedials >= this.operativeMaxReconnectAttempts()
+      )
+        throw this.midExchangeReconnectBudgetExhaustedError();
       await this.redialForRecovery();
       // end() may have latched `closing` while the re-dial was in flight: close
       // the freshly-dialed session so it does not outlive the teardown, and
@@ -617,15 +653,54 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         await this.end().catch(() => {});
         throw error;
       }
-      // The re-dial re-established the dropped session: count it as a reconnection
-      // so the operator's metrics show the exchange survived a server-side drop.
-      // connect()'s own counter only bumps on an internal retry past the first, so
-      // a re-dial that succeeds on its first attempt registers zero without this.
-      this.reconnectAttempts += 1;
-      this.midExchangeRedials += 1;
-      this.warnSessionRecovered();
+      if (!teardown) {
+        // The re-dial re-established the dropped session: count it as a
+        // reconnection so the operator's metrics show the exchange survived a
+        // server-side drop. connect()'s own counter only bumps on an internal
+        // retry past the first, so a re-dial that succeeds on its first attempt
+        // registers zero without this. A teardown re-dial is counted in neither
+        // metric -- it is teardown mechanics, not a survived mid-exchange drop.
+        this.reconnectAttempts += 1;
+        this.midExchangeRedials += 1;
+        this.warnSessionRecovered();
+      }
       return reissue(op);
     });
+  }
+
+  // The operative mid-exchange reconnection budget: the max_reconnect_attempts
+  // value the last connect() ran with, defaulting to
+  // DEFAULT_MAX_RECONNECT_ATTEMPTS. Read from the retained original connect options
+  // so withSessionRecovery's cap and connect()'s dialing-retry loop draw the same
+  // number from one place.
+  private operativeMaxReconnectAttempts(): number {
+    return (
+      (this.originalConnectOptions?.["maxReconnectAttempts"] as
+        number | undefined) ?? DEFAULT_MAX_RECONNECT_ATTEMPTS
+    );
+  }
+
+  // The terminal error surfaced when the cumulative mid-exchange reconnection
+  // budget (max_reconnect_attempts) is exhausted in the default held-session mode.
+  // A UsageError so every op path treats it as terminal -- the poll loop stops on a
+  // UsageError, and the consume-delete retry rethrows one rather than swallowing it
+  // as a transient hiccup -- and so the CLI maps it to a non-zero exit. The message
+  // names the partner-server drop, states the exhausted budget, and gives the two
+  // remedies; it carries no partner-controlled text.
+  private midExchangeReconnectBudgetExhaustedError(): UsageError {
+    const max = this.operativeMaxReconnectAttempts();
+    return new UsageError(
+      `The SFTP session dropped mid-exchange and has already been transparently ` +
+        `re-dialed the maximum ${max} times allowed by ` +
+        `max_reconnect_attempts=${max}, so the mid-exchange reconnection budget ` +
+        `is exhausted and the exchange cannot continue. The partner's SFTP server ` +
+        `is dropping the held session -- typically a server-enforced ` +
+        `session-duration or idle limit you cannot change. Raise ` +
+        `max_reconnect_attempts if the link is merely flaky, or switch this ` +
+        `connection to connection-per-poll mode (a fresh session each poll cycle ` +
+        `instead of one held for the whole exchange) if the server caps session ` +
+        `lifetime.`,
+    );
   }
 
   // Surface a transparently-recovered mid-exchange session drop to the operator at
@@ -762,8 +837,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
 
   async connect(options: Record<string, unknown>): Promise<void> {
     this.originalConnectOptions = options;
-    const maxReconnects =
-      (options["maxReconnectAttempts"] as number | undefined) ?? 3;
+    const maxReconnects = this.operativeMaxReconnectAttempts();
     // Exclude the psilink-specific key before handing options to ssh2.
     // FileTransportClient uses Record<string,unknown> so the interface stays
     // transport-agnostic; cast here is intentional.
@@ -893,6 +967,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // batch (seconds) and is released before the idle gap, so there is no held
     // session to keep warm -- an armed heartbeat would be moot.
     if (!this.ephemeralSessions) this.heartbeat.start();
+  }
+
+  /**
+   * Marks the start of the connection's close()/teardown (see the class
+   * `tearingDown` field). Core calls it at the top of close() so the
+   * terminal-frame drain re-dial is teardown-classified, and the authenticated
+   * abort-marker write calls it before issuing its put() -- which can race close()
+   * -- so whichever teardown op re-dials first is still exempt from the
+   * mid-exchange reconnection cap and neither counted nor warned. An idempotent
+   * latch; the connectionless transports do not implement it (it is optional on
+   * {@link FileTransportClient}).
+   */
+  beginTeardown(): void {
+    this.tearingDown = true;
   }
 
   async end(): Promise<void> {

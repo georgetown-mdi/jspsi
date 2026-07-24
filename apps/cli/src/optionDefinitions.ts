@@ -209,9 +209,13 @@ export function addCommonBootstrapOptions(
       type: "number",
       describe:
         "how many times to retry dialing the connection within a single " +
-        "connect attempt after a fast transient failure; default: 3. It bounds " +
-        "every connect, including each mid-exchange re-dial's own dialing " +
-        "retries, but not the number of mid-exchange re-dials, which is uncapped.",
+        "connect attempt after a fast transient failure; default: 3. The same " +
+        "value also caps the cumulative number of mid-exchange reconnections in " +
+        "the default held-session mode: once that many session drops have been " +
+        "re-dialed, the exchange fails terminally (raise it for a flaky link, or " +
+        "use connection-per-poll for a server that caps session lifetime). " +
+        "Connection-per-poll mode is not subject to that count, and the teardown " +
+        "abort-marker write is not charged against it.",
     })
     .option("log-level", {
       type: "string",
