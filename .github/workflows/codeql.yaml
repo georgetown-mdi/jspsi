@@ -66,6 +66,12 @@ jobs:
         with:
           languages: javascript-typescript
           build-mode: none
+          # Path scoping only (paths-ignore). Excludes test files, repo tooling,
+          # and generated test-vector helpers so alerts report on shipped code.
+          # Queries stay inline below, deliberately NOT in the config: declaring
+          # them there can replace rather than augment the suite and was seen to
+          # drop shipped-source alerts.
+          config-file: ./.github/codeql/codeql-config.yml
           # security-extended: broader security coverage than the default
           # code-scanning suite, without the maintainability and style queries
           # of security-and-quality (off-topic noise for a security control).

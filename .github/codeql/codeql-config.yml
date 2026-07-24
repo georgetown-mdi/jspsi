@@ -1,0 +1,15 @@
+# Scope CodeQL to shipped source. The security-extended file-race, temp-file,
+# and sanitization queries fire heavily on test setup, repo tooling, and
+# generated test-vector helpers, burying the shipped-code findings. Exclude
+# those non-shipped classes so alerts report on shipped code only.
+#
+# Queries are deliberately NOT declared here: they stay inline in the workflow
+# as `queries: security-extended`. Moving the query suite into this config file
+# changes the effective query set (it can replace rather than augment the
+# default suite) and was observed to silently drop shipped-source alerts. This
+# file adds path scoping ONLY, leaving the query set identical to today's.
+paths-ignore:
+  - "**/test/**"
+  - "**/*.test.ts"
+  - "scripts/**"
+  - "**/vectors/**"
