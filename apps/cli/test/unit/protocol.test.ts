@@ -3396,6 +3396,74 @@ test("a successful run under --event-stream reports stage timing and counters", 
   expect(metrics.reconnects).toBe(0);
 });
 
+test("summarizes the reconnect count at normal verbosity when the session was re-established", async () => {
+  // Without --event-stream the reconnect count reaches the operator nowhere, so a
+  // server that repeatedly dropped and was re-dialed would be invisible on a
+  // normal run. runProtocol logs a one-line teardown summary at info instead.
+  // Force a non-zero count on the (real) file-drop client via its reconnectCount
+  // getter.
+  const reconnectSpy = vi
+    .spyOn(LocalFSClient.prototype, "reconnectCount", "get")
+    .mockReturnValue(3);
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    reconnectSpy.mockRestore();
+  }
+
+  expect(
+    mockState.infos.some(
+      (line) =>
+        line.includes("re-established 3 times") &&
+        line.includes("during this exchange"),
+    ),
+  ).toBe(true);
+});
+
+test("logs no reconnect summary on a clean run (zero reconnects)", async () => {
+  // The teardown summary is guarded on a non-zero count, so a normal exchange
+  // stays quiet.
+  await Promise.all([
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      null,
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+    ),
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      null,
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-b",
+    ),
+  ]);
+
+  expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
+    false,
+  );
+});
+
 test("an aborted run under --event-stream reports metrics then the classified reason", async () => {
   // A mid-run fault after a stage started: the completed stage's timing is
   // already on the stream, and the terminal sequence is the metrics summary

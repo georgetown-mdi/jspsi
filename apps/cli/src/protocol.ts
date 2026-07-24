@@ -567,6 +567,20 @@ export async function runProtocol(
         log.debug("conn.close() during cleanup:", sanitizeErrorForDisplay(err));
       }
     });
+    // Surface the total reconnect count at normal verbosity so the operator sees
+    // a server that repeatedly dropped and was re-dialed even without
+    // --event-stream (which carries the same count as a machine metric). The
+    // per-drop WARN in the SFTP adapter already flags each recovery burst; this is
+    // the one end-of-run summary. Counts connect-retry re-dials plus any
+    // mid-exchange session re-dials (SFTP only); zero on a clean run, so the guard
+    // keeps a normal exchange quiet.
+    const reconnects = client?.reconnectCount ?? 0;
+    if (reconnects > 0)
+      log.info(
+        `the connection was re-established ${reconnects} ` +
+          `time${reconnects === 1 ? "" : "s"} during this exchange ` +
+          `(connect retries and any mid-exchange session re-dials)`,
+      );
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
     // Undo our own contribution to the max-listeners threshold rather than

@@ -9,7 +9,10 @@ import {
   UsageError,
 } from "@psilink/core";
 
-import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
+import {
+  SSH2SFTPClientAdapter,
+  SFTP_REDIAL_WARN_INTERVAL,
+} from "../../src/connection/ssh2SftpAdapter";
 import {
   MAX_DIRECTORY_ENTRIES,
   MAX_FILENAME_LENGTH,
@@ -2999,6 +3002,88 @@ describe("session recovery", () => {
     // The recovery re-dial's connect() succeeded on its first attempt, so connect()
     // added zero; the recovery increment is what surfaces the survived drop.
     expect(adapter.reconnectCount).toBe(1);
+  });
+
+  test("warns the operator on the first mid-exchange re-dial, naming cause and remedy", async () => {
+    // A silent recovery would hide a partner whose server caps session lifetime,
+    // exactly the case this feature exists for. The first re-dial must WARN, and
+    // the line must name the drop, the likely (partner-side, unchangeable) cause,
+    // and the remedy so the operator can act.
+    const wrapper = sessionWrapper({
+      opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
+        cb(null, Buffer.from("h")),
+      readdir: (
+        _h: Buffer,
+        cb: (e: (Error & { code?: number }) | null, l?: unknown[]) => void,
+      ) => cb(Object.assign(new Error("EOF"), { code: 1 })),
+      close: (_h: Buffer, cb: (e: Error | null) => void) => cb(null),
+    });
+    const { client, state } = droppable(wrapper);
+    const adapter = new SSH2SFTPClientAdapter();
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+    await adapter.list("/remote/dir");
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const message = warn.mock.calls[0][0] as string;
+    // (a) states the drop was mid-exchange and transparently re-dialed
+    expect(message).toContain("dropped mid-exchange");
+    expect(message).toContain("transparently");
+    // (b) names the likely cause: a partner-side session/idle cap the operator
+    //     cannot change
+    expect(message).toContain("session-time or idle limit");
+    expect(message).toContain("cannot");
+    // (c) names the remedy: a longer poll interval, and the planned
+    //     connection-per-poll mode
+    expect(message).toContain("--polling-frequency");
+    expect(message).toContain("connection-per-poll");
+  });
+
+  test("escalates by rate, not one warn line per mid-exchange drop", async () => {
+    // A chronic capper must stay visible without spamming a warn line every poll
+    // cycle: after the first re-dial the adapter warns only every
+    // SFTP_REDIAL_WARN_INTERVAL-th, so a full interval of drops yields two lines
+    // (the first drop and the Nth), never one per drop.
+    const wrapper = sessionWrapper({
+      opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
+        cb(null, Buffer.from("h")),
+      readdir: (
+        _h: Buffer,
+        cb: (e: (Error & { code?: number }) | null, l?: unknown[]) => void,
+      ) => cb(Object.assign(new Error("EOF"), { code: 1 })),
+      close: (_h: Buffer, cb: (e: Error | null) => void) => cb(null),
+    });
+    const { client, state } = droppable(wrapper);
+    const adapter = new SSH2SFTPClientAdapter();
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+
+    // Drop and recover once per poll for a full escalation interval; connect()
+    // restores state.live on each re-dial.
+    for (let i = 0; i < SFTP_REDIAL_WARN_INTERVAL; i += 1) {
+      state.live = false;
+      await adapter.list("/remote/dir");
+    }
+
+    // Every drop was transparently recovered ...
+    expect(adapter.reconnectCount).toBe(SFTP_REDIAL_WARN_INTERVAL);
+    // ... but the operator saw only two warn lines (the first drop and the Nth),
+    // never one per drop.
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls.length).toBeLessThan(SFTP_REDIAL_WARN_INTERVAL);
+    const escalation = warn.mock.calls[1][0] as string;
+    expect(escalation).toContain(`${SFTP_REDIAL_WARN_INTERVAL} times`);
+    expect(escalation).toContain("--polling-frequency");
+    expect(escalation).toContain("connection-per-poll");
   });
 
   test("closes a session dialed during teardown and surfaces the original loss", async () => {

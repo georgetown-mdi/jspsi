@@ -129,6 +129,17 @@ const SFTP_SESSION_CLOSED_MESSAGE =
   "successful connect (typically a server idle or session-time-limit " +
   "policy, or a network drop), so this operation cannot run.";
 
+/**
+ * Warn cadence for transparently-recovered mid-exchange session drops. The
+ * adapter warns the operator on the FIRST successful mid-exchange re-dial, then
+ * again only once every `SFTP_REDIAL_WARN_INTERVAL`-th re-dial, so a partner
+ * whose server chronically caps session lifetime stays visible without a warn
+ * line on every poll cycle. This is an observability cadence only, not a bound on
+ * recovery: recovery itself is uncapped -- each operation invocation earns a
+ * fresh round (see {@link SSH2SFTPClientAdapter.withSessionRecovery}).
+ */
+export const SFTP_REDIAL_WARN_INTERVAL = 10;
+
 export class SSH2SFTPClientAdapter implements FileTransportClient {
   private client: Ssh2SftpClient;
   private options: Ssh2SftpClient.ConnectOptions | undefined;
@@ -178,6 +189,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // warning. See attachKeyboardInteractive.
   private keyboardInteractiveAttached = false;
   private reconnectAttempts = 0;
+  // Successful mid-exchange recovery re-dials over this adapter's life, tracked
+  // apart from reconnectAttempts (which also counts connect-retry re-dials) solely
+  // to drive the operator warn cadence (SFTP_REDIAL_WARN_INTERVAL). A plain
+  // operational counter, never a partner-controlled value.
+  private midExchangeRedials = 0;
   private transportRetries = 0;
   // The per-operation liveness bound (ms) every server-driven op is held to. See
   // the constructor's stallDeadlineMs doc for the test-seam and
@@ -551,8 +567,41 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // connect()'s own counter only bumps on an internal retry past the first, so
       // a re-dial that succeeds on its first attempt registers zero without this.
       this.reconnectAttempts += 1;
+      this.midExchangeRedials += 1;
+      this.warnSessionRecovered();
       return reissue(op);
     });
+  }
+
+  // Surface a transparently-recovered mid-exchange session drop to the operator at
+  // default verbosity: silent recovery would hide a partner whose SFTP server
+  // chronically caps session lifetime, exactly the case this feature exists for.
+  // Warn on the FIRST re-dial, then only every SFTP_REDIAL_WARN_INTERVAL-th, so a
+  // chronic capper stays visible without a warn line every poll cycle. Each message
+  // names the drop, the likely cause (a partner-side session/idle cap the operator
+  // cannot change), and the remedy (a longer poll interval, plus the planned
+  // connection-per-poll mode); nothing beyond that is disclosed.
+  private warnSessionRecovered(): void {
+    const count = this.midExchangeRedials;
+    if (count !== 1 && count % SFTP_REDIAL_WARN_INTERVAL !== 0) return;
+    if (count === 1) {
+      this.log.warn(
+        "The SFTP session dropped mid-exchange and was transparently " +
+          "re-dialed; the exchange continues. This is typically the partner's " +
+          "SFTP server enforcing a session-time or idle limit you cannot " +
+          "change. If it recurs, raise the poll interval (--polling-frequency) " +
+          "so the session is held open less often; a connection-per-poll mode " +
+          "for this slow-peer case is planned.",
+      );
+      return;
+    }
+    this.log.warn(
+      `The SFTP session has now dropped and been transparently re-dialed ` +
+        `${count} times this exchange; the partner's server is capping session ` +
+        `lifetime aggressively. Raise the poll interval (--polling-frequency) to ` +
+        `reduce the reconnect rate; a connection-per-poll mode for this ` +
+        `slow-peer case is planned.`,
+    );
   }
 
   // Decide whether an op rejection is the CLEAN session loss recovery re-dials on.
