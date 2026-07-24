@@ -50,6 +50,7 @@ import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
   parseCommonBootstrapArgs,
+  warnConnectionPerPollShortInterval,
   warnLowPollingFrequency,
   warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
@@ -406,6 +407,15 @@ export async function validateAccept(params: {
     warnLowPollingFrequency(
       connection.channel,
       options.pollingFrequencyMs,
+      log,
+    );
+    // Warn when --connection-per-poll is paired with a short poll interval. Built
+    // from the URL (endpoint-seeded), so `connection` carries the effective mode
+    // and interval; a no-op off sftp (the mode is SFTP-only).
+    warnConnectionPerPollShortInterval(
+      connection.channel,
+      connection.options?.connectionPerPoll,
+      connection.options?.pollIntervalMs,
       log,
     );
     // Reconcile a pre-existing config against the invitation AND the connection

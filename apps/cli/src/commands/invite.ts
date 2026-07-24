@@ -48,6 +48,7 @@ import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
   parseCommonBootstrapArgs,
+  warnConnectionPerPollShortInterval,
   warnLowPollingFrequency,
   warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
@@ -337,6 +338,15 @@ export async function validateInvite(params: {
     warnLowPollingFrequency(
       connection.channel,
       options.pollingFrequencyMs,
+      log,
+    );
+    // Warn when --connection-per-poll is paired with a short poll interval. Built
+    // from the URL with no loaded config, so `connection` carries the effective
+    // mode and interval (the CLI overrides applied by connectionFromURL).
+    warnConnectionPerPollShortInterval(
+      connection.channel,
+      connection.options?.connectionPerPoll,
+      connection.options?.pollIntervalMs,
       log,
     );
 

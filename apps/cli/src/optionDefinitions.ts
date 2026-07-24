@@ -2,6 +2,7 @@ import type { Argv, Arguments } from "yargs";
 import logLibrary from "loglevel";
 
 import {
+  DEFAULT_POLLING_FREQUENCY_MS,
   HOST_KEY_FINGERPRINT_REGEX,
   MAX_RECONNECT_ATTEMPTS,
   UsageError,
@@ -279,6 +280,18 @@ export function addCommonBootstrapOptions(
           "deleting them after consumption. Requires --timestamp-in-filename. " +
           "Both parties must set this flag identically",
     })
+    .option("connection-per-poll", {
+      type: "boolean",
+      describe:
+        "open a fresh SFTP session for each poll cycle instead of holding one " +
+        "session for the whole exchange; the session is released before the loop " +
+        "goes idle. Use it when the partner's SFTP server caps session lifetime " +
+        "and the exchange spans many idle poll gaps. sftp-only, and a purely " +
+        "local dialing choice the peer does not observe (set it or not, " +
+        "independently of the partner). Meant to pair with a long " +
+        "--polling-frequency, since a handshake per cycle is wasteful at a " +
+        "seconds-scale interval",
+    })
     .option("outbound-path", {
       type: "string",
       describe:
@@ -331,6 +344,7 @@ export interface CommonBootstrapOptions {
   peerId?: string;
   timestampInFilename?: boolean;
   retainFiles?: boolean;
+  connectionPerPoll?: boolean;
   outboundPath?: string;
   record: boolean;
   recordFile?: string;
@@ -406,6 +420,9 @@ export function parseCommonBootstrapArgs(
     peerId: singleValue(argv, "peer-id") as string | undefined,
     timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
     retainFiles: argv["retain-files"] as boolean | undefined,
+    // Boolean toggle, so it keeps a plain cast (a repeat is valid, last-one-wins);
+    // yargs yields true only when the enabling form is passed.
+    connectionPerPoll: argv["connection-per-poll"] as boolean | undefined,
     outboundPath: singleValue(argv, "outbound-path") as string | undefined,
     // yargs sets `record` to false on --no-record and true by the option's
     // default otherwise, so it is always a boolean here.
@@ -443,6 +460,7 @@ export type ConnectionOverrideOptions = Pick<
   | "peerId"
   | "timestampInFilename"
   | "retainFiles"
+  | "connectionPerPoll"
   | "outboundPath"
 >;
 
@@ -480,6 +498,7 @@ export function connectionOverridesFrom(
       peerId: options.peerId,
       timestampInFilename: options.timestampInFilename,
       retainFiles: options.retainFiles,
+      connectionPerPoll: options.connectionPerPoll,
     },
   };
 }
@@ -492,6 +511,13 @@ export function connectionOverridesFrom(
  * from the loaded connection (post-override), `zero-setup` from the server URL
  * (pre-connection). A file-sync channel warns for none of them. Shared so the
  * wording cannot drift between the two commands.
+ *
+ * `--connection-per-poll` is the exception to "file-sync": it is SFTP-only (the
+ * ephemeral-session mode dials a real SFTP socket, which filedrop's
+ * connectionless client has none of), so it warns on any non-`sftp` channel --
+ * INCLUDING `filedrop`, where the other three are silent -- and is therefore
+ * checked before the file-sync early return below. Warn-not-block, per the
+ * trusted-operator posture.
  *
  * `--polling-frequency` belongs here because `pollIntervalMs` is a FileSyncOptions
  * field {@link applyConnectionOverrides} applies only on `sftp`/`filedrop`, so on
@@ -512,9 +538,17 @@ export function warnUnsupportedFileSyncFlags(
     locklessRendezvous?: boolean;
     retainFiles?: boolean;
     pollingFrequencyMs?: number;
+    connectionPerPoll?: boolean;
   },
   log: { warn: (message: string) => void },
 ): void {
+  // SFTP-only, so it warns on filedrop too (unlike the three below) -- checked
+  // before the file-sync early return.
+  if (channel !== "sftp" && flags.connectionPerPoll === true)
+    log.warn(
+      `--connection-per-poll has no effect on the ${channel} channel and will ` +
+        "be ignored; it is only supported on sftp",
+    );
   if (channel === "sftp" || channel === "filedrop") return;
   if (flags.locklessRendezvous === true)
     log.warn(
@@ -587,6 +621,60 @@ export function warnLowPollingFrequency(
       `${LOW_POLLING_FREQUENCY_WARN_MS}ms; polling this aggressively may trip ` +
       "an SFTP server's anti-flood/DoS protection and drop the connection. Use " +
       "a sub-second interval only against a controlled server (for example a demo).",
+  );
+}
+
+/**
+ * Millisecond threshold below which pairing `--connection-per-poll` with the
+ * poll interval draws the wasteful-dialing warning
+ * ({@link warnConnectionPerPollShortInterval}). One minute: connection-per-poll
+ * pays a full SSH handshake every cycle, which is negligible at the minutes-scale
+ * interval the mode is meant for but wasteful at a seconds-scale one (the 5s
+ * default included) -- the mode exists to survive a server session-lifetime cap
+ * across long idle gaps, so it is only sane paired with a long interval (see
+ * docs/notes/connection-per-poll-sftp.md). Higher than
+ * {@link LOW_POLLING_FREQUENCY_WARN_MS}, which flags an aggressively-low poll for
+ * anti-flood reasons; this flags a poll merely too short to justify per-cycle
+ * dialing.
+ */
+export const CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS = 60_000;
+
+/**
+ * Warn -- but do not block -- when `--connection-per-poll` is set with a poll
+ * interval short enough that a fresh SSH handshake every cycle is wasteful
+ * (below {@link CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS}). The mode dials a new
+ * session each cycle to survive a server's session-lifetime cap across long idle
+ * gaps; that only pays off at a long interval, so a sub-minute effective interval
+ * -- including the {@link DEFAULT_POLLING_FREQUENCY_MS} default when none is set --
+ * draws this advisory pointing at a longer `--polling-frequency`. Warn-not-block,
+ * per the trusted-operator posture: a controlled test may legitimately want it.
+ *
+ * A no-op unless the mode is effectively on and the channel is `sftp` (it is
+ * SFTP-only; on any other channel {@link warnUnsupportedFileSyncFlags} reports it
+ * ignored instead, and `undefined` -- an unresolved zero-setup URL scheme -- is
+ * likewise not `sftp`). Reads the EFFECTIVE merged values, not just the CLI flag,
+ * so a wasteful pairing sitting in a loaded `psilink.yaml` still warns on every
+ * `exchange` run -- the mode's natural home is the persisted config for a
+ * recurring slow-peer exchange, so a CLI-only scope would miss its main case. The
+ * interpolated interval is the operator's own numeric value (non-secret), so
+ * echoing it is safe.
+ */
+export function warnConnectionPerPollShortInterval(
+  channel: ConnectionConfig["channel"] | undefined,
+  connectionPerPoll: boolean | undefined,
+  pollIntervalMs: number | undefined,
+  log: { warn: (message: string) => void },
+): void {
+  if (channel !== "sftp" || connectionPerPoll !== true) return;
+  const effectiveIntervalMs = pollIntervalMs ?? DEFAULT_POLLING_FREQUENCY_MS;
+  if (effectiveIntervalMs >= CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS) return;
+  log.warn(
+    `--connection-per-poll with a ${effectiveIntervalMs}ms poll interval opens ` +
+      "a fresh SFTP session every cycle, paying a full SSH handshake each time; " +
+      `that is wasteful below ${CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS}ms. ` +
+      "The mode exists to survive a server's session-lifetime cap across long " +
+      "idle gaps, so pair it with a long --polling-frequency (minutes-scale); a " +
+      "short interval is better served by the default held session.",
   );
 }
 
@@ -719,13 +807,14 @@ export type OfflineIgnoredOptionsOverrides = Pick<
   | "peerId"
   | "timestampInFilename"
   | "retainFiles"
+  | "connectionPerPoll"
 >;
 
 /**
  * Warn that the connection-OPTIONS overrides (`--connection-timeout`,
  * `--peer-timeout`, `--polling-frequency`, `--max-reconnect-attempts`,
  * `--lockless-rendezvous`, `--peer-id`, `--timestamp-in-filename`,
- * `--retain-files`) have no effect on an
+ * `--retain-files`, `--connection-per-poll`) have no effect on an
  * OFFLINE invite/accept. Like the server-block overrides those paths go through
  * {@link connectionFromEndpoint}, which applies no connection overrides, but
  * these target `connection.options` -- a block the offline placeholder does not
@@ -768,6 +857,7 @@ export function warnOptionsOverridesIgnoredOffline(
   if (options.timestampInFilename === true)
     ignored.push("--timestamp-in-filename");
   if (options.retainFiles === true) ignored.push("--retain-files");
+  if (options.connectionPerPoll === true) ignored.push("--connection-per-poll");
   if (ignored.length === 0) return;
   log.warn(
     `${ignored.join(", ")} ${ignored.length === 1 ? "has" : "have"} no effect ` +

@@ -100,6 +100,26 @@ describe("bilateralMismatch", () => {
       ),
     ).toBeUndefined();
   });
+
+  test("a connection_per_poll asymmetry does not mismatch (it is local)", () => {
+    // connection_per_poll is a purely local dialing choice, not a bilateral mode
+    // flag: it is never advertised in the hello, so one party may dial per-poll
+    // while the other holds a session with no fast-fail. Both sides' lockless and
+    // retain match here, so the mismatch check must return undefined regardless of
+    // how either side dials. Built through helloEnvelope from options that carry
+    // connectionPerPoll to prove the flag is dropped before the comparison.
+    const dialsPerPoll = helloEnvelope({
+      locklessRendezvous: false,
+      retainFiles: false,
+      connectionPerPoll: true,
+    } as unknown as { locklessRendezvous: boolean; retainFiles: boolean });
+    expect(
+      bilateralMismatch(dialsPerPoll, {
+        locklessRendezvous: false,
+        retainFiles: false,
+      }),
+    ).toBeUndefined();
+  });
 });
 
 describe("helloEnvelope", () => {
@@ -110,6 +130,38 @@ describe("helloEnvelope", () => {
     expect(
       helloEnvelope({ locklessRendezvous: false, retainFiles: true }),
     ).toEqual({ locklessRendezvous: false, retainFiles: true });
+  });
+
+  test("advertises only lockless and retain, never connection_per_poll", () => {
+    // The party's own options carry connection_per_poll, but the advertised hello
+    // must exclude it: it is a local dialing choice the peer neither observes nor
+    // agrees on. A regression that added it to the envelope would let it drive a
+    // spurious mismatch.
+    const advertised = helloEnvelope({
+      locklessRendezvous: true,
+      retainFiles: false,
+      connectionPerPoll: true,
+    } as unknown as { locklessRendezvous: boolean; retainFiles: boolean });
+    expect(advertised).toEqual({
+      locklessRendezvous: true,
+      retainFiles: false,
+    });
+    expect(advertised).not.toHaveProperty("connectionPerPoll");
+  });
+});
+
+describe("HelloEnvelopeSchema", () => {
+  test("strips a peer-sent connection_per_poll rather than acting on it", () => {
+    // The reader's side of the same invariant: even if a peer serialized
+    // connection_per_poll into its hello, the schema strips it, so it reaches no
+    // comparison and cannot influence this party's rendezvous.
+    const parsed = HelloEnvelopeSchema.parse({
+      locklessRendezvous: false,
+      retainFiles: false,
+      connectionPerPoll: true,
+    });
+    expect(parsed).toEqual({ locklessRendezvous: false, retainFiles: false });
+    expect(parsed).not.toHaveProperty("connectionPerPoll");
   });
 });
 

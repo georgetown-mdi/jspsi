@@ -115,6 +115,13 @@ export interface ConnectionOptionsOverrides {
   peerId?: string;
   retainFiles?: boolean;
   timestampInFilename?: boolean;
+  /**
+   * The `--connection-per-poll` override, feeding the connection's
+   * `connectionPerPoll`. SFTP-only (the ephemeral-session mode dials a real SFTP
+   * socket), so {@link applyConnectionOverrides} applies it only on `sftp` and
+   * drops it on `filedrop`, where the CLI reports it ignored.
+   */
+  connectionPerPoll?: boolean;
 }
 
 /**
@@ -280,6 +287,22 @@ export function applyConnectionOverrides(
         result.options.timestampInFilename = true;
     }
 
+    optionsModified = true;
+  }
+
+  // connectionPerPoll is SFTP-only: the ephemeral-session mode dials a real SFTP
+  // socket, which filedrop's connectionless client lacks. Apply it only on sftp,
+  // so a filedrop config never carries an inert setting; on filedrop it is dropped
+  // and warnUnsupportedFileSyncFlags reports it ignored. Unlike the file-sync
+  // block above (which spans sftp and filedrop), this is gated to sftp alone.
+  if (
+    result.channel === "sftp" &&
+    optionsOverrides.connectionPerPoll !== undefined
+  ) {
+    result.options = {
+      ...result.options,
+      connectionPerPoll: optionsOverrides.connectionPerPoll,
+    };
     optionsModified = true;
   }
 

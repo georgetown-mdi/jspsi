@@ -47,6 +47,7 @@ import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
   parseCommonBootstrapArgs,
+  warnConnectionPerPollShortInterval,
   warnLowPollingFrequency,
   warnUnsupportedFileSyncFlags,
   type CommonBootstrapOptions,
@@ -396,6 +397,7 @@ export function loadConfig(options: ExchangeOptions): {
       locklessRendezvous: options.locklessRendezvous,
       retainFiles: options.retainFiles,
       pollingFrequencyMs: options.pollingFrequencyMs,
+      connectionPerPoll: options.connectionPerPoll,
     },
     log,
   );
@@ -411,6 +413,17 @@ export function loadConfig(options: ExchangeOptions): {
     throw new UsageError(
       `the ${connection.channel} channel is not yet supported in the CLI`,
     );
+
+  // Warn when connection-per-poll is paired with a short poll interval. Placed
+  // after the channel narrowing above so the effective merged FileSyncOptions
+  // read here -- so a wasteful setting persisted in psilink.yaml is flagged, not
+  // only a CLI --connection-per-poll. A no-op off sftp (the mode is SFTP-only).
+  warnConnectionPerPollShortInterval(
+    connection.channel,
+    connection.options?.connectionPerPoll,
+    connection.options?.pollIntervalMs,
+    log,
+  );
 
   let keyData: KeyFile | undefined;
   try {

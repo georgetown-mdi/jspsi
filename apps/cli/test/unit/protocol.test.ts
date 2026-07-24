@@ -17,6 +17,9 @@ const mockState = vi.hoisted(() => ({
   // before injecting its fault, so the first party to fail cannot tear down files
   // the second still needs to finish its own handshake.
   runExchangeEntries: 0,
+  // Constructor options the mock SFTP adapter last received, so a test can assert
+  // runProtocol threads connection_per_poll into the adapter's ephemeralSessions.
+  lastSftpAdapterOptions: undefined as Record<string, unknown> | undefined,
 }));
 
 // Keep FileSyncConnection and authenticateConnection real so the key exchange runs over a
@@ -180,6 +183,9 @@ vi.mock("../../src/connection/ssh2SftpAdapter", () => {
     Promise.reject(new Error(`mock sftp adapter: ${op} not implemented`));
 
   class MockHostKeySftpAdapter {
+    constructor(options: Record<string, unknown> = {}) {
+      mockState.lastSftpAdapterOptions = options;
+    }
     connect(options: Record<string, unknown>): Promise<void> {
       const verifier = options["hostVerifier"] as
         | ((keyBlob: Buffer, verify: (permitted: boolean) => void) => void)
@@ -291,6 +297,7 @@ beforeEach(() => {
   mockState.warnings.length = 0;
   mockState.errors.length = 0;
   mockState.runExchangeEntries = 0;
+  mockState.lastSftpAdapterOptions = undefined;
   fs.mkdirSync(dropDir);
 
   fd3Chunks = [];
@@ -3113,6 +3120,54 @@ test("a hostile stage label and terms warning reach the human log neutralized", 
   expect(warnLine).toBeDefined();
   expect(warnLine).not.toContain("\x1b");
   expect(warnLine).toContain("\\x1b");
+});
+
+// --- connection_per_poll threads to the SFTP adapter -------------------------
+//
+// The resolved config's connectionPerPoll must set the SFTP adapter's
+// ephemeralSessions constructor option, turning on connection-per-poll
+// (ephemeral-session) mode end to end. The mock adapter records its constructor
+// options so the wiring is asserted with no live server; the run then rejects at
+// the pinned-host-key verifier, which is irrelevant here -- the constructor has
+// already run and recorded its options.
+
+test("runProtocol threads connection_per_poll into the adapter's ephemeralSessions", async () => {
+  await runProtocol(
+    {
+      channel: "sftp",
+      server: {
+        host: "sftp.example.org",
+        hostKeyFingerprint: "SHA256:" + "A".repeat(43),
+      },
+      options: { connectionPerPoll: true },
+    },
+    null,
+    minimalPrepared,
+    undefined,
+    -1,
+    "test",
+  ).catch(() => undefined);
+  expect(mockState.lastSftpAdapterOptions?.["ephemeralSessions"]).toBe(true);
+});
+
+test("runProtocol leaves ephemeralSessions unset when connection_per_poll is absent", async () => {
+  await runProtocol(
+    {
+      channel: "sftp",
+      server: {
+        host: "sftp.example.org",
+        hostKeyFingerprint: "SHA256:" + "A".repeat(43),
+      },
+    },
+    null,
+    minimalPrepared,
+    undefined,
+    -1,
+    "test",
+  ).catch(() => undefined);
+  expect(
+    mockState.lastSftpAdapterOptions?.["ephemeralSessions"],
+  ).toBeUndefined();
 });
 
 // --- Security classification, end to end ---------------------------------------

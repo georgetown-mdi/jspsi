@@ -722,6 +722,29 @@ export interface FileSyncOptions extends SharedOptions {
    * Default: `error` (plain) / `warn` (sync-mediated), as above.
    */
   unexpectedFiles?: "error" | "warn" | "ignore";
+  /**
+   * When `true`, the SFTP transport opens a fresh SFTP session at the start of
+   * each poll cycle and releases it before the loop goes idle again, instead of
+   * holding one session for the whole exchange. A session then need only survive
+   * one cycle's seconds, so it never reaches a server's maximum-session-duration
+   * or idle cap. Use it when the partner's SFTP server caps session lifetime and
+   * a single exchange spans many idle poll gaps (a slow, once-an-hour-reconciling
+   * peer); pair it with a long `poll_interval_ms`, since a full SSH handshake per
+   * cycle is wasteful at a seconds-scale interval. Default: `false`.
+   *
+   * **Local, not bilateral.** How one party dials changes nothing on the wire or
+   * in the shared directory state machine, so the peer neither observes nor cares:
+   * it is NOT advertised in the hello and cannot trigger a mismatch. One party may
+   * cycle its session while the other holds one, with no rendezvous fast-fail. It
+   * is in the family of the unilateral `unexpected_files` policy, not the bilateral
+   * `retain_files`/`lockless_rendezvous` axes.
+   *
+   * **SFTP-only.** Only the SFTP adapter holds a socket; the file-drop client is
+   * already connectionless, so the flag has no effect there. It stays a
+   * FileSyncOptions field for schema uniformity; a filedrop config carrying it is
+   * accepted but inert, and the CLI warns that it is ignored off `sftp`.
+   */
+  connectionPerPoll?: boolean;
 }
 
 const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
@@ -735,6 +758,7 @@ const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
     peerId: z.string().min(1).optional(),
     retainFiles: z.boolean().optional(),
     unexpectedFiles: z.enum(["error", "warn", "ignore"]).optional(),
+    connectionPerPoll: z.boolean().optional(),
   })
   .refine((opts) => !opts.peerId || opts.timestampInFilename === true, {
     message:
