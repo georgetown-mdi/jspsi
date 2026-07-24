@@ -614,6 +614,29 @@ export class FileSyncMessageLoop {
 
     let reachedGet = false;
     try {
+      // Cycle-boundary reconnect for a transport in connection-per-poll mode: the
+      // previous cycle released its session at the idle boundary (the finally
+      // below), so re-establish one before this cycle's ops run. A no-op for the
+      // default whole-exchange session and for a connectionless transport (the
+      // method is absent, so the optional call short-circuits to undefined). A
+      // transient re-dial failure returns false -- skip this cycle and retry on
+      // the next tick (the peer-inactivity ceiling still terminates the exchange
+      // if dials keep failing for the whole budget); a fatal one (host-key or
+      // credential rejection) rejects and is surfaced terminally.
+      let sessionReady: boolean | undefined;
+      try {
+        sessionReady = await deps.client().ensureConnected?.();
+      } catch (dialErr: unknown) {
+        // Stop the poller before emitting so the finally does not reschedule into
+        // the same rejection, then surface it as the terminal error it is.
+        this.pollerActive = false;
+        deps.emit(
+          "error",
+          dialErr instanceof Error ? dialErr : new Error(errMessage(dialErr)),
+        );
+        return;
+      }
+      if (sessionReady === false) return;
       deps
         .log()
         .trace(
@@ -1151,6 +1174,28 @@ export class FileSyncMessageLoop {
       }
     } finally {
       if (this.pollerActive) {
+        // Idle boundary: release the session for the inter-poll gap before
+        // scheduling the next cycle, so a transport in connection-per-poll mode
+        // does not hold one across an idle gap a server's max-session/idle cap
+        // would drop. A no-op for the default whole-exchange session and for a
+        // connectionless transport (the method is absent). This runs only when
+        // the poller is still active -- a terminal error or stop() clears
+        // pollerActive, so the last cycle before teardown does not release out
+        // from under close(), which owns the final session teardown. A release
+        // failure must never break the loop: this reschedule runs in a bare
+        // setTimeout, so a rejection here would surface as an unhandled rejection
+        // rather than a poll error -- swallow it (the session is torn down at
+        // close() regardless) and reschedule.
+        try {
+          await deps.client().releaseForIdle?.();
+        } catch (releaseErr: unknown) {
+          deps
+            .log()
+            .debug(
+              `[${deps.role()}] idle-boundary session release failed: ` +
+                sanitizeForDisplay(errMessage(releaseErr)),
+            );
+        }
         this.poller = setTimeout(
           () => this.poll(),
           deps.options().pollingFrequency,
