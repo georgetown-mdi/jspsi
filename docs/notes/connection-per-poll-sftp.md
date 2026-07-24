@@ -258,10 +258,12 @@ by the boundary that follows it. The boundary is not a global idle point, though
 send's publish is in flight. An op that reaches the transport at or after the
 release is serialized against it at the adapter's recovery chokepoint, which waits
 the close out and re-establishes the session before the op's first attempt. An op
-already on the wire when the release begins is torn with the session instead: the
-retained recovery resolvers cover the re-issue where the tear reads as a clean
-loss, and it fails terminally where it does not. Closing that case outright means
-holding the release while an operation is outstanding.
+already on the wire when the release begins is torn with the session instead: at
+the pinned ssh2 and ssh2-sftp-client versions that tear clears the session in the
+same tick it rejects the op, so it reads as the clean loss it is and the retained
+recovery resolvers cover the re-issue. Closing the case outright -- rather than
+resting on that ordering -- means holding the release while an operation is
+outstanding.
 
 **Close, drain, and the authenticated abort marker -- real code, the one genuine
 gap.** At teardown the last cycle's connection is already released, but `close()`
