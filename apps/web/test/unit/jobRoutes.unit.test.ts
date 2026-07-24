@@ -25,6 +25,7 @@ import { Route as SlotRoute } from "../../src/routes/api/jobs/slot";
 import {
   STUB_CLI_PATH,
   TEST_HOST_KEY_FINGERPRINT,
+  composedServer,
   tempDataRoot,
   validInputFileIntent,
   validIntent,
@@ -840,8 +841,9 @@ describe("POST /api/jobs and the authored sftp connection", () => {
     expect(response.status).toBe(201);
     const { id } = (await response.json()) as { id: string };
     const composed = fs.readFileSync(`${root}/${id}/psilink.yaml`, "utf8");
-    expect(composed).toContain("sftp.example.org");
-    expect(composed).toContain(credentialRef);
+    const server = composedServer(composed);
+    expect(server.host).toBe("sftp.example.org");
+    expect(server.password).toBe(credentialRef);
     expect(composed).not.toContain("s3cret");
   });
 });
@@ -1230,8 +1232,9 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(response.status).toBe(201);
     const { id } = (await response.json()) as { id: string };
     const composed = fs.readFileSync(`${dataRoot}/${id}/psilink.yaml`, "utf8");
-    expect(composed).toContain("host: authored.partner.example");
-    expect(composed).toContain(`@${ref}`);
+    const server = composedServer(composed);
+    expect(server.host).toBe("authored.partner.example");
+    expect(server.password).toBe(`@${ref}`);
     expect(composed).not.toContain("s3cret");
   });
 

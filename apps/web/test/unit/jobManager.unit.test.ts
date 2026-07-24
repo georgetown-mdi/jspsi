@@ -16,6 +16,7 @@ import { JobInputNotFoundError } from "@jobs/workInputs";
 import {
   STUB_CLI_PATH,
   TEST_HOST_KEY_FINGERPRINT,
+  composedServer,
   tempDataRoot,
   validInputFileIntent,
   validIntent,
@@ -53,6 +54,7 @@ function makeManager(options: {
   delayMs?: number;
   ignoreSigint?: boolean;
   ignoreSigterm?: boolean;
+  readyFile?: string;
   eventBufferCap?: number;
   jobInputDir?: string;
   jobRendezvousDir?: string;
@@ -76,6 +78,8 @@ function makeManager(options: {
     childEnv.STUB_DELAY_MS = String(options.delayMs);
   if (options.ignoreSigint) childEnv.STUB_IGNORE_SIGINT = "1";
   if (options.ignoreSigterm) childEnv.STUB_IGNORE_SIGTERM = "1";
+  if (options.readyFile !== undefined)
+    childEnv.STUB_READY_FILE = options.readyFile;
 
   // A filedrop job requires a configured rendezvous directory; default one so the
   // filedrop tests run, unless the case under test overrides it. Created before the
@@ -171,6 +175,16 @@ async function waitForTerminal(
   while (!record.terminalEmitted) {
     if (Date.now() > deadline)
       throw new Error("timed out waiting for terminal");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** Resolve once the stub child has written its readiness marker. */
+async function waitForFile(filePath: string, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!fs.existsSync(filePath)) {
+    if (Date.now() > deadline)
+      throw new Error(`timed out waiting for ${filePath}`);
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
@@ -410,10 +424,21 @@ describe("cancellation and deletion", () => {
   });
 
   test("SIGINT-ignoring child escalates to SIGTERM", async () => {
-    const manager = makeManager({ delayMs: 5000, ignoreSigint: true });
+    // Wait for the child to report its handlers installed, not for a fixed
+    // interval: SIGINT delivered before registration takes the default action and
+    // kills the child outright, so the escalation under test never happens and the
+    // terminal carries no exit code at all.
+    const readyFile = path.join(tempDataRoot("sigint-ready"), "ready");
+    fs.mkdirSync(path.dirname(readyFile), { recursive: true });
+    roots.push(path.dirname(readyFile));
+    const manager = makeManager({
+      delayMs: 5000,
+      ignoreSigint: true,
+      readyFile,
+    });
     const id = await manager.createJob(validIntent());
     const record = manager.getJob(id)!;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitForFile(readyFile);
     manager.cancelJob(record);
     await waitForTerminal(record);
     expect(record.status).toBe("cancelled");
@@ -599,11 +624,12 @@ describe("sftp server resolution", () => {
       `${record.workdir}/psilink.yaml`,
       "utf8",
     );
+    const server = composedServer(configYaml);
     expect(configYaml).toContain("channel: sftp");
-    expect(configYaml).toContain("host: sftp.example.org");
+    expect(server.host).toBe("sftp.example.org");
     // The authored connection's @path credential reference lands verbatim; no
     // secret byte reaches the composed config.
-    expect(configYaml).toContain(credentialRef);
+    expect(server.password).toBe(credentialRef);
     expect(configYaml).not.toContain("s3cret");
   });
 
@@ -688,10 +714,11 @@ describe("the in-app authored sftp connection", () => {
       `${record.workdir}/psilink.yaml`,
       "utf8",
     );
+    const server = composedServer(configYaml);
     expect(configYaml).toContain("channel: sftp");
-    expect(configYaml).toContain("host: authored.partner.example");
+    expect(server.host).toBe("authored.partner.example");
     // The @path reference lands verbatim; the secret bytes never reach the config.
-    expect(configYaml).toContain(`@${secretPath}`);
+    expect(server.password).toBe(`@${secretPath}`);
     expect(configYaml).not.toContain("s3cret");
   });
 
@@ -876,8 +903,9 @@ describe("the in-app authored sftp connection", () => {
       "utf8",
     );
     // The composed config carries the @path reference, never the pasted value.
+    const server = composedServer(configYaml);
     expect(configYaml).toContain("channel: sftp");
-    expect(configYaml).toContain(scratch);
+    expect(String(server.password).startsWith(`@${scratch}/`)).toBe(true);
     expect(configYaml).not.toContain("s3cret-in-config");
   });
 

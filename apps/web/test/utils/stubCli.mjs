@@ -28,6 +28,9 @@
 //                     the wait the process is interruptible.
 //   STUB_IGNORE_SIGINT  When "1", SIGINT is ignored (to test SIGTERM escalation).
 //   STUB_IGNORE_SIGTERM When "1", SIGTERM is ignored (to test SIGKILL).
+//   STUB_READY_FILE   When set, this path is written once the signal handlers
+//                     above are installed, so a signalling test can wait for the
+//                     child to be genuinely ready rather than sleeping.
 //   STUB_ARGV_FILE    When set, the process argv (JSON array) is written to this
 //                     path, so a test can assert exactly how the driver invoked
 //                     the CLI (subcommand, flags, and positional order).
@@ -124,6 +127,14 @@ function runExchangeStub() {
     process.on("SIGINT", () => process.exit(130));
   if (process.env.STUB_IGNORE_SIGTERM !== "1")
     process.on("SIGTERM", () => process.exit(143));
+
+  // Written only once every handler above is installed, so a signalling test can
+  // wait for the disposition it is exercising to actually be in place. Sleeping
+  // instead races the child's startup: a signal delivered before registration
+  // takes the DEFAULT action, so an ignore-and-escalate case silently becomes a
+  // first-signal kill and the terminal carries the wrong code.
+  if (process.env.STUB_READY_FILE !== undefined)
+    fs.writeFileSync(process.env.STUB_READY_FILE, "ready");
 
   exitAfterDelay(exitCode);
 }
