@@ -686,20 +686,28 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // UsageError, and the consume-delete retry rethrows one rather than swallowing it
   // as a transient hiccup -- and so the CLI maps it to a non-zero exit. The message
   // names the partner-server drop, states the exhausted budget, and gives the two
-  // remedies; it carries no partner-controlled text.
+  // remedies by their operator-reachable names (the flag and the config field); it
+  // carries no partner-controlled text. A budget of zero gets its own opening
+  // clause: it permits no reconnection at all, so "re-dialed the maximum 0 times"
+  // would misdescribe an exchange whose very first drop is terminal.
   private midExchangeReconnectBudgetExhaustedError(): UsageError {
     const max = this.operativeMaxReconnectAttempts();
+    const budgetClause =
+      max === 0
+        ? `max_reconnect_attempts=0 permits no mid-exchange reconnection, so ` +
+          `this first drop is terminal and the exchange cannot continue`
+        : `has already been transparently re-dialed the maximum ${max} times ` +
+          `allowed by max_reconnect_attempts=${max}, so the mid-exchange ` +
+          `reconnection budget is exhausted and the exchange cannot continue`;
     return new UsageError(
-      `The SFTP session dropped mid-exchange and has already been transparently ` +
-        `re-dialed the maximum ${max} times allowed by ` +
-        `max_reconnect_attempts=${max}, so the mid-exchange reconnection budget ` +
-        `is exhausted and the exchange cannot continue. The partner's SFTP server ` +
-        `is dropping the held session -- typically a server-enforced ` +
+      `The SFTP session dropped mid-exchange and ${budgetClause}. The partner's ` +
+        `SFTP server is dropping the held session -- typically a server-enforced ` +
         `session-duration or idle limit you cannot change. Raise ` +
         `max_reconnect_attempts if the link is merely flaky, or switch this ` +
-        `connection to connection-per-poll mode (a fresh session each poll cycle ` +
-        `instead of one held for the whole exchange) if the server caps session ` +
-        `lifetime.`,
+        `connection to connection-per-poll mode (--connection-per-poll, or ` +
+        `connection_per_poll: true in the connection options) if the server caps ` +
+        `session lifetime: it dials a fresh session each poll cycle instead of ` +
+        `holding one for the whole exchange.`,
     );
   }
 
@@ -707,41 +715,54 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // default verbosity: silent recovery would hide a partner whose SFTP server
   // chronically caps session lifetime, exactly the case this feature exists for.
   // Warn on the FIRST re-dial, then only every SFTP_REDIAL_WARN_INTERVAL-th, so a
-  // chronic capper stays visible without a warn line every poll cycle. Each message
-  // reassures that the drop was recovered and the exchange continues, names the
-  // likely cause (a partner-side session-duration or idle limit the operator
-  // cannot change), and gives guidance honest about the current model: because one
-  // SFTP session is held open for the WHOLE exchange, a hard session-duration cap
-  // recurs regardless of settings and only the planned connection-per-poll mode
-  // fixes it, while a longer poll interval helps solely when the server is reacting
-  // to how often this exchange queries it. Nothing beyond that is disclosed.
+  // chronic capper stays visible without a warn line every poll cycle. Every message
+  // reassures that the drop was recovered and the exchange continues, then reads the
+  // drop in the mode the operator is actually running: the two modes differ in
+  // likely cause, remedy, and bound, so one blended line would misdescribe both. In
+  // the default mode the drop is the classic partner-side session cap, the remedy is
+  // --connection-per-poll, and the remaining cumulative budget is stated so "the
+  // exchange continues" is not read as open-ended (exhausting it is terminal, see
+  // midExchangeReconnectBudgetExhaustedError). In connection-per-poll the session is
+  // re-dialed every cycle anyway, so a recovered drop is a WITHIN-cycle one that the
+  // cap does not charge -- quoting a remaining budget there would state a bound that
+  // does not apply, and the remedy is already in force -- leaving the per-operation
+  // peer-inactivity ceiling as the honest bound to name. Nothing beyond that is
+  // disclosed.
   private warnSessionRecovered(): void {
     const count = this.midExchangeRedials;
     if (count !== 1 && count % SFTP_REDIAL_WARN_INTERVAL !== 0) return;
-    if (count === 1) {
+    const recovered =
+      count === 1
+        ? "The SFTP session dropped mid-exchange and was transparently " +
+          "re-dialed; the exchange continues."
+        : `The SFTP session has now dropped and been transparently re-dialed ` +
+          `${count} times this exchange; each drop was recovered and the ` +
+          `exchange continues.`;
+    if (this.ephemeralSessions) {
       this.log.warn(
-        "The SFTP session dropped mid-exchange and was transparently " +
-          "re-dialed; the exchange continues. This is typically the partner's " +
-          "SFTP server enforcing a session-duration or idle limit you cannot " +
-          "change. psilink holds one SFTP session open for the whole exchange, " +
-          "so a hard session-duration cap will keep recurring regardless of your " +
-          "settings; the planned connection-per-poll mode, which avoids holding " +
-          "one session across the whole exchange, is the real fix for that case. " +
-          "A longer poll interval (--polling-frequency) helps only if the server " +
-          "is instead reacting to how often this exchange queries it.",
+        `${recovered} Connection-per-poll already dials a fresh session each ` +
+          "poll cycle, so this drop came during a cycle's own work rather than " +
+          "from a session-lifetime cap: suspect a flaky link or a server limit " +
+          "that bites within the cycle. This within-cycle recovery is not " +
+          "charged against max_reconnect_attempts; each operation remains " +
+          "bounded by the peer-inactivity timeout (peer_timeout_ms), which ends " +
+          "the exchange if the drops stop it from making progress.",
       );
       return;
     }
+    const budget = this.operativeMaxReconnectAttempts();
+    const remaining = Math.max(budget - count, 0);
     this.log.warn(
-      `The SFTP session has now dropped and been transparently re-dialed ` +
-        `${count} times this exchange; each drop was recovered and the exchange ` +
-        `continues. The partner's server appears to be enforcing an aggressive ` +
-        `session-duration or idle limit, which you cannot change. Because psilink ` +
-        `holds one SFTP session open for the whole exchange, this will keep ` +
-        `recurring regardless of your settings until the planned ` +
-        `connection-per-poll mode lands; a longer poll interval ` +
-        `(--polling-frequency) helps only if the server is reacting to how often ` +
-        `this exchange queries it.`,
+      `${recovered} This is typically the partner's SFTP server enforcing a ` +
+        `session-duration or idle limit you cannot change. Because the default ` +
+        `mode holds one SFTP session open for the whole exchange, it will keep ` +
+        `recurring regardless of your settings; --connection-per-poll, which ` +
+        `dials a fresh session each poll cycle instead of holding one, is the ` +
+        `real fix for that case, and a longer poll interval ` +
+        `(--polling-frequency) helps only if the server is instead reacting to ` +
+        `how often this exchange queries it. ${remaining} further mid-exchange ` +
+        `re-dial${remaining === 1 ? " is" : "s are"} allowed by ` +
+        `max_reconnect_attempts=${budget} before the exchange fails.`,
     );
   }
 

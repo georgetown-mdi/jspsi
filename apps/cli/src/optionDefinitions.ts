@@ -213,8 +213,8 @@ export function addCommonBootstrapOptions(
         "value also caps the cumulative number of mid-exchange reconnections in " +
         "the default held-session mode: once that many session drops have been " +
         "re-dialed, the exchange fails terminally (raise it for a flaky link, or " +
-        "use connection-per-poll for a server that caps session lifetime). " +
-        "Connection-per-poll mode is not subject to that count, and the teardown " +
+        "use --connection-per-poll for a server that caps session lifetime). " +
+        "--connection-per-poll is not subject to that count, and the teardown " +
         "abort-marker write is not charged against it.",
     })
     .option("log-level", {

@@ -2639,9 +2639,11 @@ describe("session recovery", () => {
   test("fails terminally with no re-dial when max_reconnect_attempts is 0", async () => {
     // The mid-exchange reconnection budget IS max_reconnect_attempts in the default
     // held-session mode: a value of 0 permits zero reconnections, so the very first
-    // drop fails terminally with the actionable budget-exhausted message and no
-    // re-dial is even attempted. Terminal (a UsageError) so the caller maps it to a
-    // non-zero exit, never a silent resolve or hang.
+    // drop fails terminally and no re-dial is even attempted. Terminal (a
+    // UsageError) so the caller maps it to a non-zero exit, never a silent resolve
+    // or hang. The message describes THIS case rather than the exhausted-budget one:
+    // "re-dialed the maximum 0 times" would misdescribe an exchange that never
+    // reconnected at all.
     const wrapper = sessionWrapper();
     const { client, connect, state } = droppable(wrapper);
     const adapter = new SSH2SFTPClientAdapter();
@@ -2653,9 +2655,14 @@ describe("session recovery", () => {
 
     const err = await adapter.list("/remote/dir").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(UsageError);
-    expect((err as Error).message).toContain("max_reconnect_attempts=0");
-    expect((err as Error).message).toContain("reconnection budget");
-    // No re-dial: the budget was already spent, so only the initial connect ran.
+    expect((err as Error).message).toContain(
+      "max_reconnect_attempts=0 permits no mid-exchange reconnection",
+    );
+    expect((err as Error).message).toContain("this first drop is terminal");
+    expect((err as Error).message).not.toContain("re-dialed the maximum");
+    // Both remedies are still named by their operator-reachable names.
+    expect((err as Error).message).toContain("--connection-per-poll");
+    // No re-dial: the budget permits none, so only the initial connect ran.
     expect(connect).toHaveBeenCalledTimes(1);
     expect(adapter.midExchangeReconnectCount).toBe(0);
   });
@@ -3034,15 +3041,22 @@ describe("session recovery", () => {
     //     operator cannot change
     expect(message).toContain("session-duration or idle limit");
     expect(message).toContain("cannot");
-    // (c) names the real remedy under the current single-session model -- the
-    //     planned connection-per-poll mode -- and is honest that a longer poll
-    //     interval helps only for a query-frequency reaction
+    // (c) names the real remedy under the held-session model by the flag the
+    //     operator can actually type, and is honest that a longer poll interval
+    //     helps only for a query-frequency reaction
     expect(message).toContain("--polling-frequency");
-    expect(message).toContain("connection-per-poll");
+    expect(message).toContain("--connection-per-poll");
     // (d) does NOT repeat the stale, inaccurate claim that raising the poll
     //     interval holds the session open less often (it does not: one session is
     //     held open for the whole exchange regardless of poll cadence)
     expect(message).not.toContain("held open less often");
+    // (e) states what is left of the cumulative budget, so "the exchange
+    //     continues" is not read as an open-ended survival guarantee: one of the
+    //     two re-dials is spent, and exhausting the budget is terminal.
+    expect(message).toContain(
+      "1 further mid-exchange re-dial is allowed by max_reconnect_attempts=2",
+    );
+    expect(message).toContain("before the exchange fails");
   });
 
   test("escalates by rate, not one warn line per mid-exchange drop", async () => {
@@ -3092,6 +3106,12 @@ describe("session recovery", () => {
     const escalation = warn.mock.calls[1][0] as string;
     expect(escalation).toContain(`${SFTP_REDIAL_WARN_INTERVAL} times`);
     expect(escalation).toContain("the exchange continues");
+    // Each line reports the budget REMAINING at that point, so a rising count is
+    // legible as an approach to the terminal failure, not just as a tally.
+    expect(first).toContain("99 further mid-exchange re-dials are allowed");
+    expect(escalation).toContain(
+      `${100 - SFTP_REDIAL_WARN_INTERVAL} further mid-exchange re-dials are allowed`,
+    );
     // The escalation hedges the cause exactly as the first-drop message does: the
     // adapter cannot tell a session-duration cap from an idle cap, so it names
     // both rather than asserting one, and never claims to know it is a duration cap.
@@ -3240,9 +3260,11 @@ describe("session recovery", () => {
     const err = await adapter.list("/remote/dir").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(UsageError);
     expect((err as Error).message).toContain("max_reconnect_attempts=3");
-    // Names the partner-server drop and both remedies.
+    // Names the partner-server drop and both remedies, each by the name the
+    // operator can actually reach: the flag and the config field.
     expect((err as Error).message).toContain("session-duration or idle limit");
-    expect((err as Error).message).toContain("connection-per-poll");
+    expect((err as Error).message).toContain("--connection-per-poll");
+    expect((err as Error).message).toContain("connection_per_poll: true");
     // No re-dial and no count for the refused drop.
     expect(connect).toHaveBeenCalledTimes(4);
     expect(adapter.midExchangeReconnectCount).toBe(3);
@@ -3484,6 +3506,46 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(connect).toHaveBeenCalledTimes(4); // initial + 3 recoveries
     // They still count as mid-exchange recoveries -- only the CAP is off in this mode.
     expect(adapter.midExchangeReconnectCount).toBe(3);
+  });
+
+  test("the recovery warning describes the per-poll case, quoting no budget", async () => {
+    // The warn line must match the mode the operator is running. In per-poll the
+    // session is re-dialed every cycle anyway, so a recovered drop is a
+    // WITHIN-CYCLE one, the count is not charged against max_reconnect_attempts,
+    // and the remedy the default-mode line recommends is already in force. Quoting
+    // a remaining budget here would state a bound that does not apply, and
+    // recommending --connection-per-poll would advise a mode already on.
+    const wrapper = wrapperMethods({
+      opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
+        cb(null, Buffer.from("h")),
+      readdir: (
+        _h: Buffer,
+        cb: (e: (Error & { code?: number }) | null, l?: unknown[]) => void,
+      ) => cb(Object.assign(new Error("EOF"), { code: 1 })),
+      close: (_h: Buffer, cb: (e: Error | null) => void) => cb(null),
+    });
+    const { client, state } = ephemeralClient(wrapper);
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+    await adapter.list("/remote/dir");
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const message = warn.mock.calls[0][0] as string;
+    // Recovered and continuing, framed as a within-cycle drop.
+    expect(message).toContain("the exchange continues");
+    expect(message).toContain("within the cycle");
+    // No budget quoted, and no advice to enable the mode already running.
+    expect(message).not.toContain("max_reconnect_attempts=2");
+    expect(message).not.toContain("further mid-exchange re-dial");
+    expect(message).not.toContain("--connection-per-poll");
+    // The bound that DOES apply is named instead.
+    expect(message).toContain("peer_timeout_ms");
   });
 
   test("re-dial reuses the retained connect options (no re-prompt / same key + credentials)", async () => {

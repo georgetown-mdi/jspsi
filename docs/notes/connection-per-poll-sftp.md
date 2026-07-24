@@ -72,19 +72,21 @@ independently of the mid-exchange reconnection budget; the budget is what
 additionally bounds the *succeeding-but-thrashing* case -- a server that re-dials
 cleanly every cycle yet keeps capping the session -- which none of them catches.
 
-**What cannot be told apart, and why that is the real gap.** The line the code
-*cannot* draw without help is between a **chronic-benign** drop (a server session
-cap: the re-dial succeeds every cycle and the exchange progresses) and a
-**chronic-degraded** channel (the re-dial succeeds but the exchange barely moves).
-Both present identically as "healthy, quietly reconnecting," and at plain default
-verbosity there is no signal at all: the recovery path logs nothing per drop, and
-the only trace, an aggregate reconnect count, is emitted solely on the opt-in
-machine event stream, never on the operator's normal log. So an operator running a
-six-hour exchange cannot distinguish one that is fine from one that is thrashing a
-reconnect every cycle. Recognizing benign-versus-degraded from the code's own
-vantage is not possible; it requires either **observability** (so the operator can
-see the thrash and judge it) or an operator-supplied **declaration** that drops are
-expected here. That declaration is precisely what the opt-in mode below provides.
+**What cannot be told apart, and why that is the real gap.** The re-dialing itself
+is visible: the transport warns at default verbosity on the first mid-exchange
+re-dial and at a rate-escalated cadence after it, each line naming the drop count
+and what remains of the budget, and the end-of-run reconnect totals land on the
+operator's normal log rather than only on the opt-in machine event stream. What the *code* still cannot draw, even with that signal in hand, is the
+line between a **chronic-benign** drop (a server session cap: the re-dial succeeds
+every cycle and the exchange progresses) and a **chronic-degraded** channel (the
+re-dial succeeds but the exchange barely moves). The two are identical from the
+code's vantage -- same clean loss, same successful re-dial -- so the warning can
+report the thrash but not classify it, and only the operator, who knows the
+partner's server, can say which one they are watching. Closing that gap therefore
+needs either the operator's own judgment on the warning or an operator-supplied
+**declaration** that drops are expected here. That declaration is precisely what the
+opt-in mode below provides; the cumulative budget is what keeps an unjudged exchange
+from thrashing indefinitely in the meantime.
 
 Beyond observability, the `max_reconnect_attempts` field (default three) is what
 bounds this recovery. Its value sizes a cumulative mid-exchange-reconnection budget
@@ -110,9 +112,9 @@ observable. Three properties define the default:
 - **Make it observable.** Emit an operator-facing warning on the first mid-exchange
   re-dial that names the likely cause and the remedy, and escalate by rate so a
   chronic capper is loud without spamming a one-off. Surface the live reconnect
-  count on the normal log, not only on the event stream. This turns a silent,
-  un-judgeable exchange into one whose degradation the operator can see before the
-  budget is spent.
+  count on the normal log, not only on the event stream. This makes the exchange's
+  degradation visible to the operator before the budget is spent, rather than
+  leaving it un-judgeable.
 - **Give the capping-server case its own escape.** A server that structurally caps
   session lifetime would exhaust any held-session budget, so raising
   `max_reconnect_attempts` is the answer only for a transiently flaky link. The
@@ -280,15 +282,15 @@ snapshot nor resets the sequence shadow.
 
 The downstream slices:
 
-- **Reconnect posture first.** Make mid-exchange recovery observable (first-drop and
-  rate-escalated warnings, the live count on the normal log) and bound it by a
+- **Reconnect posture first.** Observability (a first-drop warning, a
+  rate-escalated cadence after it, and the live count on the normal log) plus a
   cumulative `max_reconnect_attempts` budget that fails the exchange terminally when
-  spent, so the field's name finally matches what it bounds: the cumulative number
-  of mid-exchange reconnections in the default mode, on top of each connect's own
+  spent, so the field's name matches what it bounds: the cumulative number of
+  mid-exchange reconnections in the default mode, on top of each connect's own
   dialing retries. This is independent of the mode, answers the
   silent-unbounded-default concern directly, and lets the operator observe the
-  actual thrash before the budget is spent. The operator reference must describe
-  that bounded behavior rather than an unbounded or absent one.
+  actual thrash before the budget is spent. The operator reference describes that
+  bounded behavior rather than an unbounded or absent one.
 - **Implement the lifecycle.** The adapter ephemeral-session mode reusing the
   recovery machinery, the core idle-boundary signal, the non-terminal release that
   never latches the `closing` flag (so recovery stays enabled across cycles), and the
@@ -326,10 +328,10 @@ including the architecture and reliability leads -- on the adapter-owned seam; t
 lone dissent for a core-owned seam rested on a concern (invariants live in core)
 that the adapter seam satisfies by keeping the teardown ordering in `close()`. The
 load-bearing factual claims underneath the decision -- the operative dialing-retry
-default of three, the surrounding bounds that terminate genuine failures, the silent-at-
-default-verbosity recovery, the sticky `closing` latch, the drain-budget exposure,
-and the publish-shape safety of an idle-aligned boundary -- were then adversarially
-verified against the current tree.
+default of three, the surrounding bounds that terminate genuine failures, the
+recovery's then-absent default-verbosity signal, the sticky `closing` latch, the
+drain-budget exposure, and the publish-shape safety of an idle-aligned boundary --
+were then adversarially verified against the tree as it stood.
 
 ## See also
 
