@@ -2209,6 +2209,44 @@ describe("bench at a narrow viewport", () => {
   // Mount already narrow so the layout hook renders the small-viewport IA from
   // the first paint, read the sample file so the ledger fills and the Customize
   // surfaces become reachable, then walk to Matching & sharing (spine step 2).
+  /**
+   * Scroll a control into view and click it once it is genuinely hittable.
+   *
+   * At this viewport the spine's step nav is sticky and overlays the top of the
+   * scroll area, so a row can be present, matched and visible while the point a
+   * synthetic click targets -- its centre -- belongs to the nav instead. The
+   * click is then delivered to the overlay and silently does nothing: no error,
+   * no navigation, and the failure surfaces later as an unrelated assertion
+   * timeout on whatever the click should have opened. Mantine's Collapse
+   * animation compounds it by moving the row while it expands. Poll on the hit
+   * test rather than sleeping, so this waits exactly as long as the layout takes
+   * and fails loudly if the control never becomes reachable.
+   */
+  async function clickWhenHittable(
+    locator: { element: () => Element; click: () => Promise<void> },
+    timeoutMs = 2000,
+  ): Promise<void> {
+    const frame = () =>
+      new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    const element = () => locator.element() as HTMLElement;
+    element().scrollIntoView({ block: "center" });
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const rect = element().getBoundingClientRect();
+      const atCentre = document.elementFromPoint(
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+      );
+      if (atCentre !== null && element().contains(atCentre)) break;
+      if (Date.now() > deadline)
+        throw new Error(
+          `control never became hittable; its centre belongs to <${atCentre?.tagName.toLowerCase() ?? "none"}>`,
+        );
+      await frame();
+    }
+    await locator.click();
+  }
+
   async function reachMatchingSharingNarrow() {
     await page.viewport(400, 800);
     mount(createElement(InviterBench));
@@ -2280,7 +2318,13 @@ describe("bench at a narrow viewport", () => {
 
     // Opening the disclosure reaches each tab: the matching-keys editor opens
     // its work column.
-    await keysRow.click();
+    // Wait for the disclosure's expand animation to finish before clicking.
+    // Mantine's Collapse animates the panel's height, so the row is present and
+    // matchable while it is still travelling; a click dispatched at its
+    // pre-animation coordinates lands off-target and is silently swallowed, and
+    // the work column never opens. Settle on observed position rather than a
+    // fixed delay, which only trades one race for a slower one.
+    await clickWhenHittable(keysRow);
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Matching keys");

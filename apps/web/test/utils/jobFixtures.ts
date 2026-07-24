@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import { getDefaultLinkageTerms } from "@psilink/core";
+import { parse as parseYaml } from "yaml";
 
 import type {
   JobFiledropExchangeIntent,
@@ -128,4 +129,26 @@ export function tempDataRoot(label: string): string {
     process.env.TMPDIR ?? "/tmp",
     `psilink-jobs-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   );
+}
+
+/**
+ * The composed psilink.yaml's `connection.server` block, read as data.
+ *
+ * Parsed rather than string-matched because the emitter folds a long scalar
+ * across lines: a credential ref rooted under a long TMPDIR -- macOS hands out
+ * `/var/folders/<...>/T`, where these fixtures put their temp dirs -- is written
+ * with a line break mid-path, so `toContain(ref)` fails on a config that is in
+ * fact correct. Parsing also makes the assertion exact, where a substring match
+ * would accept the value appearing anywhere under any key. Assertions that a
+ * secret does NOT appear should stay on the raw text, where a leak anywhere in
+ * the file is what matters.
+ */
+export function composedServer(composed: string): Record<string, unknown> {
+  const parsed = parseYaml(composed) as {
+    connection?: { server?: Record<string, unknown> };
+  };
+  const server = parsed.connection?.server;
+  if (server === undefined)
+    throw new Error("composed psilink.yaml has no connection.server");
+  return server;
 }
