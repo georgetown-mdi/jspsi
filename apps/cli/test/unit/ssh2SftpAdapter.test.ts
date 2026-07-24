@@ -4185,6 +4185,13 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("did not close the connection"),
       );
+      // What the operator is told about that state has to match what the next
+      // cycle does: the cycle-start re-dial runs only on a CLEARED session, and
+      // this one still reads set, so promising a re-dial that replaces it would
+      // send the operator looking for the wrong symptom.
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("the next poll cycle will not replace it"),
+      );
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("stall"));
       expect(releaseLatched(adapter)).toBe(true);
       // Nothing was left waiting on the ssh2 Client for a close that may never
@@ -4207,15 +4214,20 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     }
   });
 
-  test("a release that finds the transport still writable says so instead", async () => {
+  test("a release that finds the transport still writable drops the latch", async () => {
     // The warning above rests on an ssh2 premise -- end() ends the socket -- so it
     // is checked, not asserted: an ssh2 whose end() stopped ending the socket would
     // leave a genuinely live session held across the idle gap, the one thing this
     // mode exists to prevent, and the operator must be pointed at the changelog
-    // rather than told to expect a stall.
+    // rather than told to expect a stall. It is also the one branch where the
+    // session may still be LIVE, so the check has to carry the latch as well as the
+    // log line: a latch standing over a live session exempts its next genuine drop
+    // from the count and the warning. Proven by dropping that session and requiring
+    // the re-dial to be reported.
     vi.useFakeTimers();
     try {
-      const { client, rawClient } = ephemeralClient(wrapperMethods());
+      const { client, connect, state, rawClient } =
+        ephemeralClient(wrapperMethods());
       // An end() that neither ends the transport nor closes anything.
       rawClient.end = vi.fn();
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
@@ -4234,6 +4246,19 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       );
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("ssh2 changelog"),
+      );
+      expect(releaseLatched(adapter)).toBe(false);
+      expect(state.live).toBe(true);
+
+      // The server drops the session the release could not close: a real loss.
+      state.live = false;
+      await expect(adapter.exists("/remote/out.json")).resolves.toBe(true);
+
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(adapter.reconnectCount).toBe(1);
+      expect(adapter.midExchangeReconnectCount).toBe(1);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("dropped mid-exchange"),
       );
     } finally {
       vi.useRealTimers();
@@ -4719,6 +4744,76 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(releaseLatched(adapter)).toBe(true);
   });
 
+  test("an idle release that was waiting when teardown began releases nothing", async () => {
+    // The mirror of the cycle-start case below: the release can be parked for a
+    // dial's whole budget, and close() can land in the middle of that wait, so the
+    // check it made on entry is stale by the time it resumes. Driving the ssh2
+    // Client's end() on the far side would run this release's teardown alongside
+    // close()'s own client.end() on the one shared client, and latch a deliberate
+    // release over a session the teardown is what ended.
+    const wrapper = wrapperMethods();
+    const state = { live: true };
+    let dialReached!: () => void;
+    const dialing = new Promise<void>((resolve) => {
+      dialReached = resolve;
+    });
+    let finishDial!: () => void;
+    const handshake = new Promise<void>((resolve) => {
+      finishDial = resolve;
+    });
+    let dials = 0;
+    const connect = vi.fn().mockImplementation(async () => {
+      dials += 1;
+      // The initial dial completes at once; the cycle-start re-dial is held open
+      // by the test so the boundary and the teardown can both fall inside it.
+      if (dials > 1) {
+        dialReached();
+        await handshake;
+      }
+      state.live = true;
+    });
+    const rawClient = new EventEmitter() as EventEmitter &
+      Record<string, unknown>;
+    Object.assign(rawClient, {
+      setNoDelay: vi.fn(),
+      _sock: { setKeepAlive: vi.fn() },
+      end: vi.fn(() => {
+        state.live = false;
+        rawClient.emit("close");
+      }),
+    });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: rawClient,
+      end: vi.fn().mockResolvedValue(true),
+      realPath: vi.fn().mockResolvedValue("/"),
+    };
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    // The previous cycle released; this cycle's re-dial is in flight.
+    state.live = false;
+    const ready = adapter.ensureConnected();
+    await dialing;
+
+    const release = adapter.releaseForIdle();
+    // The teardown begins while that release is waiting the dial out.
+    const closed = adapter.end();
+    finishDial();
+    await Promise.all([ready, release, closed]);
+
+    // The release drove no ssh2 Client end() of its own: close() owns the final
+    // teardown, and nothing was classified as a deliberate idle release.
+    expect(rawClient.end).not.toHaveBeenCalled();
+    expect(releaseLatched(adapter)).toBe(false);
+    expect(client.end).toHaveBeenCalledOnce();
+  });
+
   test("end() waits the in-flight release out before tearing the client down", async () => {
     // The release's ssh2 Client end() and this teardown's client.end() must not
     // overlap on the one shared Ssh2SftpClient. close() can reach end() while the
@@ -4889,5 +4984,108 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // The initial dial is the only one: no session was established past the
     // teardown.
     expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  test("teardown never runs the client down under a recovery re-dial", async () => {
+    // The recovery of the operation the release tore off the wire and the
+    // teardown both park on that release, and the recovery parks FIRST, so it
+    // wakes first -- and what it does on waking is publish a re-dial, one
+    // microtask after end() read the re-dial handle and found it empty. Both
+    // halves of the outcome are wrong: a handshake runs against the teardown's
+    // client.end() on the one shared Ssh2SftpClient, and ssh2-sftp-client's own
+    // end() short-circuits on the cleared session, resolving WITHOUT ending the
+    // ssh2 Client -- so close() returns while an SSH handshake still holds a
+    // ref'd socket, and the CLI's clean close lingers for the dial's budget.
+    const wrapper = wrapperMethods();
+    const state = { live: true };
+    let failInFlight: ((error: unknown) => void) | undefined;
+    let dialsInFlight = 0;
+    let dials = 0;
+    // Every session transition in the order it happened, each teardown carrying
+    // the number of handshakes live at that instant -- the sequence is the
+    // assertion, since a teardown recorded alongside a dial is the overlap.
+    const events: string[] = [];
+    const connect = vi.fn().mockImplementation(async () => {
+      dials += 1;
+      // The initial dial completes at once; a re-dial takes a real handshake's
+      // worth of time, so a teardown that runs inside one is unmistakable.
+      if (dials === 1) {
+        state.live = true;
+        return;
+      }
+      dialsInFlight += 1;
+      events.push("dial:start");
+      try {
+        await new Promise((settle) => setTimeout(settle, 20));
+        state.live = true;
+      } finally {
+        dialsInFlight -= 1;
+        events.push("dial:end");
+      }
+    });
+    const rawClient = new EventEmitter() as EventEmitter &
+      Record<string, unknown>;
+    Object.assign(rawClient, {
+      setNoDelay: vi.fn(),
+      _sock: { setKeepAlive: vi.fn() },
+      end: vi.fn(() => {
+        state.live = false;
+        failInFlight?.(notConnected("exists"));
+        failInFlight = undefined;
+        setTimeout(() => rawClient.emit("close"), 0);
+      }),
+    });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: rawClient,
+      end: vi.fn(async () => {
+        events.push(`teardown:client.end (dialsInFlight=${dialsInFlight})`);
+        return true;
+      }),
+      realPath: vi.fn().mockResolvedValue("/"),
+      exists: vi.fn(
+        () =>
+          new Promise<boolean>((resolve, reject) => {
+            if (!state.live) {
+              reject(notConnected("exists"));
+              return;
+            }
+            const answer = setTimeout(() => resolve(true), 0);
+            failInFlight = (error: unknown) => {
+              clearTimeout(answer);
+              reject(error);
+            };
+          }),
+      ),
+    };
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+    const torn = adapter.exists("/remote/out.json");
+    // The boundary falls with that operation on the wire: the release publishes
+    // itself, tears the operation, and owes a 'close' a macrotask later.
+    const release = adapter.releaseForIdle();
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    // Let the torn operation's rejection travel its promise chain into the
+    // recovery path, so the recovery is parked on the release before the
+    // teardown parks behind it. Draining microtasks cannot advance the release's
+    // 'close', which lands on a macrotask, so the wait is still in flight here.
+    for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+    const closed = adapter.end();
+    await Promise.allSettled([release, torn, closed]);
+
+    expect(events).not.toContainEqual(
+      expect.stringMatching(/^teardown:.*dialsInFlight=[1-9]/),
+    );
+    // Nothing was dialed at all: the recovery woke into a begun teardown and
+    // turned back rather than establishing a session for close() to reclaim.
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(events).not.toContain("dial:start");
   });
 });
