@@ -3437,6 +3437,51 @@ test("summarizes the reconnect count at normal verbosity when the session was re
   ).toBe(true);
 });
 
+test("summary reports the mid-exchange sub-count apart from the total", async () => {
+  // A single merged reconnect number cannot tell benign startup retries from
+  // chronic mid-exchange session drops. The summary reports the mid-exchange
+  // sub-count distinctly so the operator sees the signal that matters. Force a
+  // total of 4 with 3 of them mid-exchange re-dials on the (real) file-drop
+  // client via its metric getters.
+  const reconnectSpy = vi
+    .spyOn(LocalFSClient.prototype, "reconnectCount", "get")
+    .mockReturnValue(4);
+  const midExchangeSpy = vi
+    .spyOn(LocalFSClient.prototype, "midExchangeReconnectCount", "get")
+    .mockReturnValue(3);
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    reconnectSpy.mockRestore();
+    midExchangeSpy.mockRestore();
+  }
+
+  expect(
+    mockState.infos.some(
+      (line) =>
+        line.includes("re-established 4 times") &&
+        line.includes("3 were mid-exchange session re-dials"),
+    ),
+  ).toBe(true);
+});
+
 test("logs no reconnect summary on a clean run (zero reconnects)", async () => {
   // The teardown summary is guarded on a non-zero count, so a normal exchange
   // stays quiet.

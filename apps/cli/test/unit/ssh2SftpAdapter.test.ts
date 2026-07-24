@@ -121,6 +121,9 @@ describe("connect retry", () => {
       // per-operation transport-retry counter is untouched by connect.
       expect(adapter.reconnectCount).toBe(2);
       expect(adapter.transportRetryCount).toBe(0);
+      // Connect-time retries are NOT mid-exchange re-dials, so the sub-count the
+      // summary reports apart from the total stays zero.
+      expect(adapter.midExchangeReconnectCount).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -2996,12 +2999,16 @@ describe("session recovery", () => {
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
     expect(adapter.reconnectCount).toBe(0);
+    expect(adapter.midExchangeReconnectCount).toBe(0);
     state.live = false;
 
     await adapter.list("/remote/dir");
     // The recovery re-dial's connect() succeeded on its first attempt, so connect()
-    // added zero; the recovery increment is what surfaces the survived drop.
+    // added zero; the recovery increment is what surfaces the survived drop. It
+    // registers in BOTH the merged reconnect total and the mid-exchange sub-count,
+    // which the end-of-run summary reports apart from connect-time retries.
     expect(adapter.reconnectCount).toBe(1);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
   });
 
   test("warns the operator on the first mid-exchange re-dial, naming cause and remedy", async () => {
@@ -3031,17 +3038,24 @@ describe("session recovery", () => {
 
     expect(warn).toHaveBeenCalledTimes(1);
     const message = warn.mock.calls[0][0] as string;
-    // (a) states the drop was mid-exchange and transparently re-dialed
+    // (a) states the drop was mid-exchange and transparently re-dialed, and
+    //     reassures that the exchange continues
     expect(message).toContain("dropped mid-exchange");
     expect(message).toContain("transparently");
-    // (b) names the likely cause: a partner-side session/idle cap the operator
-    //     cannot change
-    expect(message).toContain("session-time or idle limit");
+    expect(message).toContain("the exchange continues");
+    // (b) names the likely cause: a partner-side session-duration/idle cap the
+    //     operator cannot change
+    expect(message).toContain("session-duration or idle limit");
     expect(message).toContain("cannot");
-    // (c) names the remedy: a longer poll interval, and the planned
-    //     connection-per-poll mode
+    // (c) names the real remedy under the current single-session model -- the
+    //     planned connection-per-poll mode -- and is honest that a longer poll
+    //     interval helps only for a query-frequency reaction
     expect(message).toContain("--polling-frequency");
     expect(message).toContain("connection-per-poll");
+    // (d) does NOT repeat the stale, inaccurate claim that raising the poll
+    //     interval holds the session open less often (it does not: one session is
+    //     held open for the whole exchange regardless of poll cadence)
+    expect(message).not.toContain("held open less often");
   });
 
   test("escalates by rate, not one warn line per mid-exchange drop", async () => {
@@ -3076,14 +3090,22 @@ describe("session recovery", () => {
 
     // Every drop was transparently recovered ...
     expect(adapter.reconnectCount).toBe(SFTP_REDIAL_WARN_INTERVAL);
+    expect(adapter.midExchangeReconnectCount).toBe(SFTP_REDIAL_WARN_INTERVAL);
     // ... but the operator saw only two warn lines (the first drop and the Nth),
     // never one per drop.
     expect(warn).toHaveBeenCalledTimes(2);
     expect(warn.mock.calls.length).toBeLessThan(SFTP_REDIAL_WARN_INTERVAL);
+    // Both messages reassure that the exchange survives the drop and stay honest
+    // about the current single-session model (no "held open less often" claim).
+    const first = warn.mock.calls[0][0] as string;
+    expect(first).toContain("the exchange continues");
+    expect(first).not.toContain("held open less often");
     const escalation = warn.mock.calls[1][0] as string;
     expect(escalation).toContain(`${SFTP_REDIAL_WARN_INTERVAL} times`);
+    expect(escalation).toContain("the exchange continues");
     expect(escalation).toContain("--polling-frequency");
     expect(escalation).toContain("connection-per-poll");
+    expect(escalation).not.toContain("held open less often");
   });
 
   test("closes a session dialed during teardown and surfaces the original loss", async () => {
