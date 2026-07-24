@@ -89,6 +89,23 @@ not a platform-specific one, or the multi-platform release build cannot resolve
 every architecture; obtain it with `docker buildx imagetools inspect
 node:26-alpine`.
 
+## The crossws peer conflict blocks the release SBOM
+
+`npm sbom` and `npm ls --omit=dev` both refuse to run, so release step 9 in [RELEASES.md](../RELEASES.md) cannot currently produce the CycloneDX BOM that records the release's dependency and license set, and the "what is actually in the shipped tree" query is unavailable. This is a known upstream-driven breakage with no local fix worth taking; it is recorded here so the dead ends below are not re-walked.
+
+```
+npm error code ESBOMPROBLEMS
+npm error invalid: crossws@0.3.5, ^0.4.1 required by h3-v2@npm:h3@2.0.1-rc.20
+```
+
+`@tanstack/start-server-core` depends on `h3-v2`, an alias for a prerelease `h3@2`, which declares an **optional** peer on `crossws ^0.4.1`. `nitropack` and `h3@1.x`, both development dependencies, hard-depend on `^0.3.5`. npm hoists one `crossws` for the whole tree, resolves it to the 0.3 line the hard dependents require, and then reports the unsatisfied optional peer as `invalid` -- which is enough for both commands to refuse. Nothing is broken at runtime: the peer is optional, and the signaling WebSocket is the vendored `ws`-based PeerJS server, not h3's.
+
+**Why the obvious fixes are wrong.** Forcing the 0.4 line into the root -- the only directory on `h3-v2`'s resolution path, since it resolves upward from `node_modules/@tanstack/start-server-core/node_modules/` and never reaches a workspace's -- does produce a fully valid tree: 0.4 at the root for the peer, 0.3 nested beside `nitropack` and `h3`, and `listhen`'s `>=0.2.0 <0.5.0` satisfied by the root copy. It also breaks `npm run typecheck`. `apps/web/server/custom-entry.ts` imports `crossws/adapters/node` directly and feeds it `nitroApp.h3App.websocket`, which h3@1 types from its own nested copy, so the entry then straddles two incompatible crossws majors. Silencing that seam would be worse than the type error: it wires the WebSocket `upgrade` handler, a path that block's own comment already marks unsafe to enable while PeerJS shares the HTTP server, and it would pair a 0.4 adapter with 0.3-shaped hooks there. The tree-wide consistency that makes the current single hoisted `crossws` correct for that entry is worth more than the BOM.
+
+The other candidates fail outright: `overrides` scoped to the parent or to the alias do not move the hoisted copy; a global override collapses the tree to one version and drops `crossws` below the dev dependents that genuinely require it; declaring it in `apps/web` leaves the peer unsatisfied because that directory is not on the resolution path; and `npm sbom --omit peer` still runs the tree-validity check.
+
+**Resolution path.** This clears upstream, without action here, once `h3` v2 ships stable (so `@tanstack/start-server-core` stops depending on a prerelease) or `nitropack` / `h3@1.x` move to the 0.4 line -- at which point the ranges are mutually satisfiable, npm hoists one version that satisfies everyone, and both commands work again. Until then, treat step 9 as blocked and re-check after any `@tanstack/*` or `nitropack` bump. A local workaround should be reconsidered only if a release becomes due before upstream converges, and then only alongside a fix for the `custom-entry.ts` type seam.
+
 ## Upgrading the SFTP Stack (ssh2 / ssh2-sftp-client)
 
 The channel-security bounds specified in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md) reach past the public `ssh2-sftp-client` API and drive ssh2 internals directly (`apps/cli/src/connection/ssh2SftpAdapter.ts`), so they rest on premises about ssh2's internal behavior that an upgrade can silently break. Re-verify the following on any `ssh2` or `ssh2-sftp-client` version bump, before the bump merges.

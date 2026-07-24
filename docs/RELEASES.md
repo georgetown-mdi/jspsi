@@ -108,6 +108,8 @@ npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev -w packages/core
 
 The image now bundles `apps/web`'s runtime dependencies into the Nitro `.output`, so the SBOM includes `apps/web`. That `.output` is a tree-shaken subset, so the `apps/web` entry is a superset of what actually ships -- acceptable for a security SBOM, which errs toward listing more. `--omit=dev` stays: `apps/web`'s build tools are `devDependencies` and are not shipped.
 
+**This command currently fails** with `ESBOMPROBLEMS` on an unsatisfiable `crossws` peer range, and the same conflict also disables `npm ls --omit=dev`. It is an upstream prerelease conflict that clears without action here, and the local workarounds cost more than the BOM is worth; the diagnosis, the rejected fixes, and what to re-check after a `@tanstack/*` or `nitropack` bump are in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-crossws-peer-conflict-blocks-the-release-sbom). A release cut before it clears ships without an SBOM, so weigh that against waiting.
+
 ### 10. Publish the GitHub Release
 
 Create a GitHub Release for tag `vX.Y.Z`. Copy the CHANGELOG section for this version as the release body. Attach `psilink-X.Y.Z.cdx.json` and record the Docker image digest from step 8 in the release notes.
