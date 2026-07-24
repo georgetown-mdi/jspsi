@@ -86,6 +86,41 @@ describe("SFTP session controls: wall-clock caps and forced drops", () => {
     vi.advanceTimersByTime(60);
     expect(end).not.toHaveBeenCalled();
   });
+
+  test("two armed mechanisms drop the connection exactly once", () => {
+    const controls = createSftpSessionControls();
+    const { conn, end } = stubConnection();
+    controls.maxIdleMs = 30;
+    controls.maxLifetimeMs = 50;
+    controls.onConnectionReady(conn);
+    vi.advanceTimersByTime(35); // idle cap fires first
+    expect(end).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(30); // lifetime cap fires, but the session is dropped
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  test("release clears the idle timer and a pending one-shot ms drop", () => {
+    const controls = createSftpSessionControls();
+    const { conn, end } = stubConnection();
+    controls.maxIdleMs = 40;
+    controls.onConnectionReady(conn);
+    controls.dropActiveAfterMs(50);
+    controls.releaseConnection(conn);
+    vi.advanceTimersByTime(100);
+    expect(end).not.toHaveBeenCalled();
+  });
+
+  test("clearing maxIdleMs mid-session disables the drop on the next op", () => {
+    const controls = createSftpSessionControls();
+    const { conn, end } = stubConnection();
+    controls.maxIdleMs = 50;
+    controls.onConnectionReady(conn);
+    vi.advanceTimersByTime(30);
+    controls.maxIdleMs = 0;
+    controls.recordOp(conn); // re-reads maxIdleMs and clears the idle timer
+    vi.advanceTimersByTime(100);
+    expect(end).not.toHaveBeenCalled();
+  });
 });
 
 describe("SFTP session controls: op counting and handshakes", () => {

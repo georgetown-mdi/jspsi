@@ -90,9 +90,12 @@ export function createSftpSessionControls(): SftpSessionControlHub {
     }
   };
 
-  // Op-driven drop: defer past the current request's handler so the triggering
-  // op still gets its reply and only the NEXT op meets a dropped session -- a
-  // clean "drop after N ops" rather than a mid-handler teardown.
+  // Op-driven drop: the op counter runs synchronously inside ssh2's poll-phase
+  // packet dispatch, so defer the teardown to the check phase via setImmediate.
+  // The drop is armed the moment the triggering op is counted; because that op's
+  // own reply is written from a later async fs callback, the setImmediate can
+  // fire first and pre-empt the reply -- a realistic mid-request cut, not a clean
+  // between-ops boundary. The triggering op is not guaranteed to complete.
   const dropAfterCurrentOp = (conn: DroppableConnection): void => {
     if (!claimDrop(conn)) return;
     const handle = setImmediate(() => {

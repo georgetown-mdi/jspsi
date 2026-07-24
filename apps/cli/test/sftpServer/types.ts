@@ -124,8 +124,10 @@ export interface SftpSessionControls {
    */
   maxLifetimeMs: number;
   /**
-   * Op-count session cap: a session is dropped once it has served this many SFTP
-   * operations. 0 disables it.
+   * Op-count session cap: the drop is armed once a session has been dispatched
+   * this many SFTP operations. The teardown may pre-empt that Nth op's own reply
+   * (a mid-request cut), so the op that trips the cap is not guaranteed to
+   * complete. 0 disables it.
    */
   maxOps: number;
   /**
@@ -135,16 +137,26 @@ export interface SftpSessionControls {
    */
   maxIdleMs: number;
   /**
-   * Arm a one-shot drop of the active session after it serves `ops` more SFTP
-   * operations, then disarm -- a within-batch or mid-rendezvous drop the re-dial
-   * recovers from, distinct from the standing {@link maxOps} cap. A value <= 0
-   * disarms it.
+   * Arm a one-shot drop keyed to the `ops`th further SFTP operation, then
+   * disarm -- a within-batch or mid-rendezvous drop the re-dial recovers from,
+   * distinct from the standing {@link maxOps} cap. The drop is armed as that op
+   * is counted and may pre-empt its own reply (a mid-request cut), so it is not
+   * guaranteed to complete. "The active session" is the single-active-session
+   * appliance model: the counter is server-wide, not per-connection, so if a
+   * connection-per-poll re-dial overlaps the prior connection (a new session
+   * comes up before the old one closes), the count spans both and the drop may
+   * land on a different connection than the one active when it was armed. A
+   * value <= 0 disarms it.
    */
   dropActiveAfterOps(ops: number): void;
   /**
    * Arm a one-shot drop of the active session `ms` from now, on wall-clock
    * regardless of traffic, then disarm. A no-op when no session is currently
-   * established; a value <= 0 cancels any pending one-shot timer.
+   * established; a value <= 0 cancels any pending one-shot timer. "The active
+   * session" is the single-active-session appliance model: the target is fixed
+   * to the connection active when this is armed, so if a connection-per-poll
+   * re-dial replaces it before the timer fires, the drop still lands on the
+   * original connection, not the current one.
    */
   dropActiveAfterMs(ms: number): void;
   /**
