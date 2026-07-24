@@ -126,6 +126,13 @@ function makeAbortTestClient(opts?: {
       files.set(path, Buffer.alloc(0));
     },
     exists: async (path: string) => files.has(path),
+    // A session-holding transport uses this to exempt a teardown re-dial from its
+    // mid-exchange reconnection cap; record the call so the wiring test can assert
+    // close() and the marker write both signal it (and the write signals BEFORE its
+    // put, so a catch-path write racing close() is still exempt).
+    beginTeardown: () => {
+      ops.push("beginTeardown");
+    },
   };
 
   return { client, files, ops };
@@ -271,6 +278,33 @@ for (const retainFiles of [false, true]) {
     },
   );
 }
+
+// --- teardown signal: exempt the teardown re-dial from the reconnection cap ---
+
+test("teardown is signaled to the transport before the marker write's put, and at close()", async () => {
+  // A session-holding transport that bounds its mid-exchange reconnections caps the
+  // number of re-dials; a teardown re-dial (the abort-marker write, the drain) must
+  // be EXEMPT so the fast-fail marker still lands even when a capping server just
+  // spent the budget. The write signals beginTeardown BEFORE issuing its put -- the
+  // race-proof guarantee, because a catch-path write can run before close() sets
+  // the flag -- and close() signals it too, for the terminal-frame drain.
+  const { client, ops } = makeAbortTestClient();
+  const conn = await makeArmedConn(client);
+
+  await conn.writeAbortMarker().catch(() => {});
+  const beginIdx = ops.indexOf("beginTeardown");
+  const putIdx = ops.findIndex((o) => o.startsWith("put-start:"));
+  expect(beginIdx).toBeGreaterThanOrEqual(0);
+  expect(putIdx).toBeGreaterThanOrEqual(0);
+  expect(beginIdx).toBeLessThan(putIdx);
+
+  // A clean close (no fault, no marker) still signals teardown at its top.
+  const { client: cleanClient, ops: cleanOps } = makeAbortTestClient();
+  const cleanConn = await makeArmedConn(cleanClient);
+  cleanConn.sealAbort();
+  await cleanConn.close();
+  expect(cleanOps).toContain("beginTeardown");
+});
 
 // --- echo path: a PeerAbortError must NOT trigger a marker write -------------
 

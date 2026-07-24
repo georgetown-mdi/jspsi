@@ -89,7 +89,7 @@ The per-run operational-counter summary. Emitted exactly once, immediately befor
 | ----- | ---- | ------- |
 | `recordsProcessed` | integer | This party's input record count fed into the exchange. |
 | `transportRetries` | integer | Data-operation retries over the run: the count of transport-operation re-issues past the first attempt (the SFTP put/rename retry loops). `0` when none occurred, and always `0` on the filedrop channel, whose per-operation resilience is the poll-read loop rather than an operation re-issue. |
-| `reconnects` | integer | Connection re-establishment attempts over the run: connect-time dialing retries past the first attempt (the dialing-retry loop bounded by `max_reconnect_attempts`) plus every mid-exchange session re-dial (SFTP only; the number of mid-exchange re-dials is uncapped). `0` when none occurred. |
+| `reconnects` | integer | Connection re-establishment attempts over the run: connect-time dialing retries past the first attempt (the dialing-retry loop bounded by `max_reconnect_attempts`) plus every mid-exchange session re-dial (SFTP only; in the default held-session mode their cumulative number is capped by the same `max_reconnect_attempts` value, in `connection_per_poll` mode it is not). `0` when none occurred. |
 
 ```json
 {"v":1,"type":"metrics","recordsProcessed":1000,"transportRetries":0,"reconnects":1}

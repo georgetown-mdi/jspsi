@@ -379,6 +379,19 @@ export interface FileTransportClient {
    * and mode-gated exactly like {@link FileTransportClient.releaseForIdle}.
    */
   ensureConnected?: () => Promise<boolean>;
+  /**
+   * Optional teardown signal for a session-holding transport that bounds its
+   * mid-exchange reconnections: {@link FileSyncConnection.close} invokes it once at
+   * the top of teardown so the transport can mark that the re-dials teardown still
+   * issues -- the authenticated abort-marker write and the terminal-frame drain --
+   * are exempt from that reconnection cap and neither counted nor warned. Without
+   * it a capping server that exhausted the budget mid-exchange would refuse the
+   * marker write's own re-dial, dropping the fast-fail marker exactly when a
+   * waiting peer most needs it. Optional and no-op-when-absent exactly like
+   * {@link FileTransportClient.releaseForIdle}: a connectionless transport
+   * (`LocalFSClient`) simply omits it.
+   */
+  beginTeardown?: () => void;
 }
 
 /**
@@ -796,6 +809,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // poll loop's optional calls no-op.
       releaseForIdle: raw.releaseForIdle?.bind(raw),
       ensureConnected: raw.ensureConnected?.bind(raw),
+      // Forward the teardown signal unwrapped (it is a synchronous local latch
+      // set, no peer round-trip to bound), and only when the transport implements
+      // it, exactly like the two cycle-boundary signals above.
+      beginTeardown: raw.beginTeardown?.bind(raw),
     };
   }
 
@@ -1128,6 +1145,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    * call repeatedly and on a connection that was never opened.
    */
   async close() {
+    // Signal teardown to the transport FIRST, before the abort-marker gate below,
+    // so the terminal-frame drain's re-dial (and the marker write's, when close()
+    // wins the race with the catch-path write) is exempt from the transport's
+    // mid-exchange reconnection cap and is neither counted nor warned. No-op on a
+    // transport that does not bound reconnections. The abort-marker write also
+    // signals this itself, because a catch-path write can precede this close().
+    this.client.beginTeardown?.();
     // Abort-marker decision gate, FIRST -- before stop()/the drain/client.end()
     // and before identity/token fields are cleared. On a connection-originated
     // fault the bridge fire-and-forgets this close() BEFORE the error reaches the
