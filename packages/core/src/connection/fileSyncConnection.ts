@@ -353,6 +353,32 @@ export interface FileTransportClient {
    */
   createExclusive: (path: string) => Promise<void>;
   exists: (remotePath: string) => Promise<boolean>;
+  /**
+   * Optional cycle-boundary signal for a session-holding transport running in
+   * connection-per-poll (ephemeral-session) mode: the poll loop invokes it at an
+   * idle boundary (the inter-poll reschedule) so the transport may release its
+   * session for the idle gap rather than holding it across a server's
+   * max-session/idle cap. Modeled on {@link MessageConnection.setInboundFrameCap}:
+   * core calls it only when the transport implements it, so a connectionless
+   * transport (`LocalFSClient`) simply omits it and is unaffected, and a
+   * session-holding transport with the mode off implements it as a no-op. The
+   * release MUST be non-terminal -- it must not tear the transport down in a way
+   * that disables the next cycle's reconnect. See
+   * docs/notes/connection-per-poll-sftp.md.
+   */
+  releaseForIdle?: () => Promise<void>;
+  /**
+   * Optional companion to {@link FileTransportClient.releaseForIdle}: the poll
+   * loop invokes it at the START of a cycle (and close() invokes it before the
+   * terminal-frame drain) so a transport that released its session for the idle
+   * gap re-establishes one before the cycle's ops run, rather than lazily
+   * re-dialing on the next op's rejection. Resolves `true` once a session is live
+   * and `false` when the re-dial failed transiently (the caller skips this cycle
+   * and retries on the next tick); rejects only on a genuinely fatal condition (a
+   * host-key or credential rejection) that must terminate the exchange. Optional
+   * and mode-gated exactly like {@link FileTransportClient.releaseForIdle}.
+   */
+  ensureConnected?: () => Promise<boolean>;
 }
 
 /**
@@ -762,6 +788,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // budget and resolves rather than throwing.
       safeDelete: (path) =>
         withTransportBudgetVoid(raw.safeDelete(path), budgetMs()),
+      // Forward the optional cycle-boundary signals unwrapped, and only when the
+      // transport implements them: releaseForIdle is a local session close (no
+      // peer round-trip to bound) and ensureConnected's re-dial carries its own
+      // connect-time bounds, so neither belongs under the peer-inactivity budget.
+      // A connectionless transport omits them, leaving them undefined here so the
+      // poll loop's optional calls no-op.
+      releaseForIdle: raw.releaseForIdle?.bind(raw),
+      ensureConnected: raw.ensureConnected?.bind(raw),
     };
   }
 
@@ -1142,6 +1176,25 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     );
 
     if (this.path !== undefined) {
+      // Connection-per-poll mode released the last cycle's session, so
+      // re-establish one BEFORE the drain deadline clock starts below: a re-dial
+      // handshake billed to the terminal-frame drain budget could time the drain
+      // out and drop the terminal frame to the cleanup fallback, silently
+      // regressing the fast-fail abort guarantee, and cleanup()'s sweeps below
+      // also need a live session. No-op when a session is already live (the
+      // default whole-exchange mode, or the abort-marker write above already
+      // re-dialed via the transport's within-cycle recovery) and when the
+      // transport does not implement it (filedrop). Best-effort and non-throwing,
+      // as close() must be: a failed or refused re-dial leaves the drain to its
+      // cleanup fallback and cleanup() to its swallowed delete, exactly as a
+      // still-dropped session does. The abort-marker write above was NOT preceded
+      // by this call on purpose -- it rides its own within-cycle recovery, so a
+      // re-dial here would race that write's re-dial on the one shared session.
+      try {
+        await this.client.ensureConnected?.();
+      } catch {
+        /* best-effort; teardown proceeds against whatever session state results */
+      }
       // Drain the last sent file before sweeping: a clean close must not
       // delete a terminal frame the peer has not yet consumed. Bounded by the
       // short fixed TERMINAL_FRAME_DRAIN_TIMEOUT_MS (min'd with peerTimeoutMs),

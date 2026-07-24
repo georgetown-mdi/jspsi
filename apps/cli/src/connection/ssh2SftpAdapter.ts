@@ -58,6 +58,14 @@ type Ssh2SftpError = Error & { code?: number };
 // handling relies on).
 const SSH_FX_FAILURE = 4;
 
+// Upper bound (ms) on how long the connection-per-poll release
+// ({@link SSH2SFTPClientAdapter.releaseForIdle}) waits for the ssh2 Client's
+// 'close' after driving its end(). A local socket close completes in
+// milliseconds; this only bounds a pathological withheld close so it cannot hang
+// the poll loop's idle boundary. Deliberately not operator-configurable -- it is
+// a liveness backstop, not a tunable, exactly like the other SFTP liveness bounds.
+const EPHEMERAL_RELEASE_CLOSE_TIMEOUT_MS = 5_000;
+
 // Typed interface for the internal ssh2 SFTPWrapper that ssh2-sftp-client
 // exposes as `this.sftp`. Defined at file scope so connect(), createExclusive(),
 // and list() can share it without repeating the declaration.
@@ -87,6 +95,15 @@ interface Ssh2SftpClientInternals {
         finish: (answers: string[]) => void,
       ) => void,
     ): void;
+    // The connection-per-poll release drives the ssh2 Client's own end() (NOT
+    // ssh2-sftp-client's end(), which latches endCalled and disables the
+    // constructor's global 'close' listener that clears this.sftp on a later
+    // server drop) and awaits its 'close' to know the session is torn down. Both
+    // are on the ssh2 Client's EventEmitter surface; typed optional so the guarded
+    // release can warn-and-hold if an upgrade relocates them. See
+    // releaseForIdle().
+    once?(event: "close", listener: () => void): void;
+    end?(): void;
   };
   sftp: {
     open(
@@ -156,11 +173,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // teardown has begun (a re-dial's readyTimeout would slow a clean close, and a
   // freshly-dialed session would outlive the teardown).
   private closing = false;
-  // The in-flight recovery re-dial's connect() (settled either way), or undefined
-  // when none is running. end() awaits it before tearing down the shared
-  // Ssh2SftpClient so a re-dial's connect() -- a fresh handshake -- and end()'s
-  // client.end() never run concurrently on the one client (ssh2-sftp-client shares
-  // connection-level listeners, so two ops in flight on one client is unsafe). The
+  // The in-flight re-dial's connect() (settled either way), or undefined when none
+  // is running. Published by both re-dial paths -- a mid-exchange session-recovery
+  // re-dial (redialForRecovery) and, in ephemeral mode, a cycle-start reconnect
+  // (ensureConnected) -- so end() and a concurrent ensureConnected serialize behind
+  // whichever is running rather than opening a second connect() on the one shared
+  // Ssh2SftpClient: a re-dial's connect() -- a fresh handshake -- and end()'s
+  // client.end(), or two connect()s, never run concurrently on the one client
+  // (ssh2-sftp-client shares connection-level listeners, so two ops in flight on one
+  // client is unsafe). The
   // op that owns the re-dial can be abandoned before it completes: core's per-op
   // peerTimeoutMs budget (a Promise.race) rejects a stalled op to the caller while
   // the adapter op keeps running, so the caller can reach close() -> end() while
@@ -204,8 +225,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // issuing a periodic no-op realPath. Created here (never null) so the op-bracket
   // helper can call opStarted/opSettled unconditionally; armed by connect() on
   // success and torn down by end() and the fatal-'error' guard. See
-  // {@link ./sftpHeartbeat}.
+  // {@link ./sftpHeartbeat}. Not armed in ephemeral-session mode: no session is
+  // held long enough to idle out.
   private readonly heartbeat: SftpHeartbeat;
+  // Connection-per-poll (ephemeral-session) mode. When true, the adapter releases
+  // its SFTP session at each poll-loop idle boundary (releaseForIdle) and re-dials
+  // at the start of the next cycle (ensureConnected), so no session is held across
+  // an idle gap a server's max-session/idle cap would drop. Off by default (the
+  // whole-exchange single-session model). Internal-only; the CLI/config surface
+  // and the flag name are a separate item. See docs/notes/connection-per-poll-sftp.md.
+  private readonly ephemeralSessions: boolean;
 
   /**
    * `options.verbosity` sets the adapter's log verbosity (default 1).
@@ -217,8 +246,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * unmistakable and a future production constructor parameter can never be
    * passed as the deadline by accident. Deliberately not surfaced via config so
    * the bound cannot be widened by an operator.
+   *
+   * `options.ephemeralSessions` turns on connection-per-poll (ephemeral-session)
+   * mode: the adapter releases its SFTP session at each poll-loop idle boundary
+   * and re-dials at the start of the next cycle, so no session is held across an
+   * idle gap a server's max-session/idle cap would drop. Off by default.
+   * Internal-only -- the CLI/config surface and the flag name are a separate item.
    */
-  constructor(options: { verbosity?: number; stallDeadlineMs?: number } = {}) {
+  constructor(
+    options: {
+      verbosity?: number;
+      stallDeadlineMs?: number;
+      ephemeralSessions?: boolean;
+    } = {},
+  ) {
     this.log = getLoggerForVerbosity("sftp-adapter", options.verbosity ?? 1);
     // ssh2-sftp-client's bare constructor installs default callbacks that
     // console.error/console.log the underlying ssh2 Client's error/end/close
@@ -255,6 +296,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         this.log.trace("ssh2 client connection closed outside an operation"),
     });
     this.stallDeadlineMs = options.stallDeadlineMs ?? SFTP_STALL_DEADLINE_MS;
+    this.ephemeralSessions = options.ephemeralSessions ?? false;
     this.heartbeat = new SftpHeartbeat({
       ping: () => this.sendKeepalive(),
       log: this.log,
@@ -685,10 +727,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // while connect() re-establishes it -- a concurrent op. connect() re-arms a
     // fresh heartbeat via start() at the end of its sequence.
     this.heartbeat.stop();
-    const redial = this.connect(this.originalConnectOptions);
-    // Publish the re-dial (settled either way) so a concurrent end() serializes
-    // its client.end() behind it; clear the handle once this same re-dial settles
-    // so a later end() is never held by a stale one.
+    return this.publishRedial(this.connect(this.originalConnectOptions));
+  }
+
+  // Publish an in-flight re-dial to redialInFlight so a concurrent end() or
+  // ensureConnected serializes behind it rather than opening a second connect() on
+  // the one shared Ssh2SftpClient (two handshakes at once is unsafe). The stored
+  // handle swallows the re-dial's outcome (settled either way) so a concurrent
+  // awaiter never sees an unhandled rejection, and self-clears once this same
+  // re-dial settles so a later awaiter is never held by a stale one. Returns the
+  // raw re-dial promise with its rejection intact for the caller.
+  private publishRedial(redial: Promise<void>): Promise<void> {
     const tracked = redial.then(
       () => {},
       () => {},
@@ -839,8 +888,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // The session is established: arm the keepalive heartbeat so a long idle
     // stretch (a PSI round on the computing side) does not let the server's idle
     // timeout drop it. start() resets the idle clock, so a reconnect re-arms
-    // cleanly. It is torn down by end() and by the fatal-'error' guard.
-    this.heartbeat.start();
+    // cleanly. It is torn down by end() and by the fatal-'error' guard. Skipped in
+    // ephemeral-session mode, where each cycle's session lives only for its op
+    // batch (seconds) and is released before the idle gap, so there is no held
+    // session to keep warm -- an armed heartbeat would be moot.
+    if (!this.ephemeralSessions) this.heartbeat.start();
   }
 
   async end(): Promise<void> {
@@ -857,6 +909,133 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // teardown, and so the unref'd timer never lingers past the session.
     this.heartbeat.stop();
     await this.client.end();
+  }
+
+  /**
+   * Connection-per-poll idle-boundary RELEASE (see the class `ephemeralSessions`
+   * field and {@link FileTransportClient.releaseForIdle}). Closes the SFTP
+   * session NON-TERMINALLY so the next cycle's {@link ensureConnected} re-dials,
+   * without latching this adapter's `closing` (which would disable recovery) and
+   * without going through ssh2-sftp-client's `end()`.
+   *
+   * It drives the underlying ssh2 Client's own `end()`, not ssh2-sftp-client's:
+   * the latter latches `endCalled`, permanently disabling the constructor's
+   * global 'close' listener that clears `this.sftp` on a later server-driven drop
+   * -- the within-cycle recovery floor (retained in this mode) relies on that
+   * listener. Closing the ssh2 Client instead fires the same global 'close'
+   * listener with `endCalled` still false, clearing `this.sftp` and leaving the
+   * adapter in the exact cleared-session state a server drop produces, ready to
+   * re-dial. A no-op when the mode is off, during teardown, or when no session is
+   * live. Awaits the 'close' so the release is complete before the loop idles;
+   * bounded so a pathological withheld local close cannot hang the poll loop.
+   */
+  async releaseForIdle(): Promise<void> {
+    if (!this.ephemeralSessions || this.closing) return;
+    // No held session to keep warm across the idle gap.
+    this.heartbeat.stop();
+    const internals = this.client as unknown as Ssh2SftpClientInternals;
+    const rawClient = internals.client;
+    if (!internals.sftp || rawClient === undefined) return;
+    if (
+      typeof rawClient.end !== "function" ||
+      typeof rawClient.once !== "function"
+    ) {
+      // An upgrade relocated the ssh2 Client's end()/once(): hold the session
+      // this cycle (correct, just not released) rather than failing the exchange.
+      // Re-verify on any ssh2 upgrade per docs/spec/DEPENDENCY_PINS.md.
+      this.log.warn(
+        "ssh2 client end()/once() unavailable; the ephemeral SFTP session is " +
+          "held this cycle instead of released. Check the ssh2 changelog.",
+      );
+      return;
+    }
+    const end = rawClient.end.bind(rawClient);
+    const once = rawClient.once.bind(rawClient);
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const timer = setTimeout(finish, EPHEMERAL_RELEASE_CLOSE_TIMEOUT_MS);
+      // The bound is the safety net, not real work: unref'd so it never holds a
+      // healthy process open (the deliberately-unref'd SFTP-liveness-timer
+      // contract), and cleared the instant 'close' fires.
+      timer.unref();
+      once("close", () => {
+        clearTimeout(timer);
+        finish();
+      });
+      end();
+    });
+  }
+
+  /**
+   * Connection-per-poll cycle-START reconnect (see
+   * {@link FileTransportClient.ensureConnected}). Re-establishes the session
+   * {@link releaseForIdle} released, reusing the retained full connect options
+   * (pinned host key, stored credentials, reconnect bound) with NO re-prompt and
+   * NO re-pinning: connect() re-runs the enforcing fail-closed host-key verifier
+   * that rides those options, so a server presenting a different key on a re-dial
+   * is still rejected. Resolves `true` once a session is live, `false` on a
+   * transient dial failure (the caller skips this cycle and retries next tick),
+   * and rejects only on a fatal condition (a host-key rejection) that terminates
+   * the exchange. A no-op returning `true` when the mode is off, during teardown,
+   * or when a session is already live.
+   */
+  async ensureConnected(): Promise<boolean> {
+    if (!this.ephemeralSessions || this.closing) return true;
+    // Serialize behind any in-flight re-dial -- a mid-exchange recovery re-dial OR
+    // a concurrent ensureConnected (poll()'s cycle start and close()'s pre-drain
+    // reconnect can both fire) -- so two connect()s never run on the one shared
+    // Ssh2SftpClient (it shares connection-level listeners, so two handshakes at
+    // once is unsafe), the same guard end() applies. Loop, not a single await: an
+    // awaited re-dial can settle with the session still down (a transient failure)
+    // while another re-dial has begun, and a bare await, entered before the first
+    // caller has published its own re-dial, would let a second caller slip past and
+    // open a parallel connect(). Publishing our connect below (publishRedial)
+    // synchronously before the first await is what makes the loop see it.
+    while (this.redialInFlight !== undefined) await this.redialInFlight;
+    const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
+    // A concurrent recovery re-dial or ensureConnected (e.g. the close() abort-marker
+    // write) already reconnected; nothing to do.
+    if (sftp) return true;
+    if (this.originalConnectOptions === undefined)
+      throw new Error(
+        "ephemeral SFTP re-dial reached with no retained connect options; a " +
+          "poll cycle ran before connect()",
+      );
+    try {
+      await this.publishRedial(this.connect(this.originalConnectOptions));
+      return true;
+    } catch (error: unknown) {
+      if (this.isFatalDialError(error)) throw error;
+      // A transient dial failure (server briefly unreachable, connection refused,
+      // auth exhaustion) is not fatal in this mode: report it and let the poll
+      // loop skip this cycle and retry on the next tick. The exchange's
+      // peer-inactivity ceiling terminates the run if dials keep failing for the
+      // whole budget, so an indefinitely-unreachable server still fails loudly.
+      this.log.warn(
+        "ephemeral SFTP re-dial failed; skipping this poll cycle and retrying " +
+          `on the next tick: ${sanitizeErrorForDisplay(error)}`,
+      );
+      return false;
+    }
+  }
+
+  // A dial failure that must terminate the exchange rather than be retried on the
+  // next tick. A host-key verification failure means the server is presenting a
+  // different or unknown key -- a trust-boundary fault (possible MITM) that must
+  // fail loudly and fast, never be papered over as a transient network blip and
+  // ridden to a generic peer-silence timeout. ssh2 surfaces it as "Host denied
+  // (verification failed)", the same stable fragment connect()'s retry predicate
+  // treats as terminal (re-verify on any ssh2 upgrade per
+  // docs/spec/DEPENDENCY_PINS.md). Bad credentials are caught at the initial
+  // connect() before any cycle; a mid-exchange credential rotation is transient
+  // here and bounded by the peer-inactivity ceiling.
+  private isFatalDialError(error: unknown): boolean {
+    return error instanceof Error && error.message.includes("Host denied");
   }
 
   /**

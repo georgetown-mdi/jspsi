@@ -1,4 +1,4 @@
-import { expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   FileSyncConnection,
@@ -9645,3 +9645,165 @@ for (const [a, b] of SAME_DIR_PAIRS) {
     ).rejects.toBeInstanceOf(UsageError);
   });
 }
+
+// --- connection-per-poll idle-boundary signal --------------------------------
+//
+// A transport that implements the optional releaseForIdle()/ensureConnected()
+// methods (the SFTP adapter in ephemeral mode) is driven by the core loop at its
+// idle boundaries: ensureConnected() at the start of each poll cycle and before
+// close()'s drain, releaseForIdle() at the inter-poll reschedule. A transport
+// that omits them (the default; LocalFSClient) is unaffected. These pin the
+// call sites, the transient-vs-fatal dial handling, and the ensure-connected
+// -before-drain teardown, all against a mock client with the optional methods.
+
+describe("connection-per-poll idle-boundary signal", () => {
+  test("the poll loop ensures a connection at cycle start and releases it at the idle boundary", async () => {
+    const { client } = makeMockClient();
+    const seq: string[] = [];
+    // Set the optional methods BEFORE constructing the connection: the
+    // constructor's boundTransport wrap binds them once, so a later assignment
+    // would not be forwarded.
+    client.ensureConnected = async () => {
+      seq.push("ensure");
+      return true;
+    };
+    client.releaseForIdle = async () => {
+      seq.push("release");
+    };
+    const origList = client.list.bind(client);
+    client.list = async (dir: string) => {
+      seq.push("list");
+      return origList(dir);
+    };
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.peerId = "stub-peer";
+    conn.start();
+    // Let a few poll cycles run.
+    await new Promise((r) => setTimeout(r, 40));
+    conn.stop();
+
+    // Multiple cycles ran, each bracketed ensure -> list -> release.
+    expect(seq.filter((s) => s === "ensure").length).toBeGreaterThanOrEqual(2);
+    expect(seq.filter((s) => s === "release").length).toBeGreaterThanOrEqual(1);
+    expect(seq.indexOf("ensure")).toBeLessThan(seq.indexOf("list"));
+    expect(seq.indexOf("list")).toBeLessThan(seq.indexOf("release"));
+  });
+
+  test("a transient re-dial failure skips the cycle and retries on the next tick", async () => {
+    const { client } = makeMockClient();
+    let listCalls = 0;
+    let ensureCalls = 0;
+    // ensureConnected reports a transient dial failure every cycle (false): the
+    // ops must be skipped and the loop must keep retrying, not fail the exchange.
+    client.ensureConnected = async () => {
+      ensureCalls += 1;
+      return false;
+    };
+    client.releaseForIdle = async () => {};
+    const origList = client.list.bind(client);
+    client.list = async (dir: string) => {
+      listCalls += 1;
+      return origList(dir);
+    };
+    const errors: unknown[] = [];
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.peerId = "stub-peer";
+    conn.on("error", (e) => errors.push(e));
+    conn.start();
+    await new Promise((r) => setTimeout(r, 40));
+    const active = messageLoopInternals(conn).pollerActive;
+    conn.stop();
+
+    // Every cycle skipped its ops, emitted no terminal error, and rescheduled.
+    expect(listCalls).toBe(0);
+    expect(errors).toEqual([]);
+    expect(ensureCalls).toBeGreaterThanOrEqual(2);
+    expect(active).toBe(true);
+  });
+
+  test("a fatal re-dial failure terminates the exchange and stops the poller", async () => {
+    const { client } = makeMockClient();
+    client.ensureConnected = async () => {
+      throw new Error("SFTP host-key verification failed: Host denied");
+    };
+    client.releaseForIdle = async () => {};
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.peerId = "stub-peer";
+
+    const { errors, pollerActiveBeforeDriverStop } =
+      await driveUntilError(conn);
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as Error).message).toContain("Host denied");
+    // The fatal dial stopped the poller itself (no reschedule into the same
+    // rejection).
+    expect(pollerActiveBeforeDriverStop).toBe(false);
+  });
+
+  test("close() re-establishes a session before the drain deadline starts", async () => {
+    const { client, files } = makeMockClient();
+    const calls: string[] = [];
+    let recording = false;
+    client.ensureConnected = async () => {
+      if (recording) calls.push("ensure");
+      return true;
+    };
+    client.releaseForIdle = async () => {
+      if (recording) calls.push("release");
+    };
+    const origList = client.list.bind(client);
+    client.list = async (dir: string) => {
+      if (recording) calls.push("list");
+      return origList(dir);
+    };
+
+    const conn = await makeConnectedConn(client, {
+      pollingFrequency: 5,
+      peerTimeoutMs: 200,
+    });
+    conn.peerId = "stub-peer";
+    await conn.send({ terminal: true });
+    const msgPath = [...files.keys()].find((p) =>
+      new RegExp(`^/test/${conn.id}-\\d+\\.json$`).test(p),
+    );
+    expect(msgPath).toBeDefined();
+
+    // Record only the close() phase, so send()'s own list calls do not confound
+    // the ordering assertion.
+    recording = true;
+    const closeP = conn.close();
+    // Let the drain poll at least once before the peer "consumes" the frame.
+    await new Promise((r) => setTimeout(r, 15));
+    files.delete(msgPath!);
+    await closeP;
+
+    // The teardown re-dial ran, and it ran BEFORE the first drain list() -- so a
+    // re-dial handshake is not billed to the drain budget.
+    expect(calls).toContain("ensure");
+    expect(calls).toContain("list");
+    expect(calls.indexOf("ensure")).toBeLessThan(calls.indexOf("list"));
+  });
+
+  test("a transport without the optional methods polls unchanged (default mode)", async () => {
+    // The default mock omits releaseForIdle/ensureConnected; the loop's optional
+    // calls must no-op and the cycle must run exactly as before.
+    const { client } = makeMockClient();
+    expect(client.ensureConnected).toBeUndefined();
+    expect(client.releaseForIdle).toBeUndefined();
+    let listCalls = 0;
+    const origList = client.list.bind(client);
+    client.list = async (dir: string) => {
+      listCalls += 1;
+      return origList(dir);
+    };
+    const errors: unknown[] = [];
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.peerId = "stub-peer";
+    conn.on("error", (e) => errors.push(e));
+    conn.start();
+    await new Promise((r) => setTimeout(r, 30));
+    conn.stop();
+
+    expect(listCalls).toBeGreaterThanOrEqual(2);
+    expect(errors).toEqual([]);
+  });
+});

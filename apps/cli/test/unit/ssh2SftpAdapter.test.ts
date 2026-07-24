@@ -3213,3 +3213,377 @@ describe("session recovery", () => {
     expect(connect).toHaveBeenCalledTimes(2);
   });
 });
+
+// --- ephemeral session mode (connection-per-poll) ----------------------------
+//
+// In this mode the adapter releases its SFTP session at each poll-loop idle
+// boundary (releaseForIdle) and re-dials at the start of the next cycle
+// (ensureConnected), so no session is held across an idle gap a server's
+// max-session/idle cap would drop. The release is NON-TERMINAL: it drives the
+// underlying ssh2 Client's own end() (not ssh2-sftp-client's, which would latch
+// endCalled and disable drop detection) so `closing` stays unlatched and the
+// within-cycle recovery floor survives. Off by default, so all of this is inert
+// unless the adapter is constructed with ephemeralSessions: true.
+
+describe("ephemeral session mode (connection-per-poll)", () => {
+  function wrapperMethods(overrides: Record<string, unknown> = {}) {
+    return {
+      open: vi.fn(),
+      close: vi.fn(),
+      opendir: vi.fn(),
+      readdir: vi.fn(),
+      on: vi.fn(),
+      ...overrides,
+    };
+  }
+  const stub = (adapter: SSH2SFTPClientAdapter) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn: vi.fn(), trace: vi.fn(), error: vi.fn() };
+  };
+  const install = (adapter: SSH2SFTPClientAdapter, client: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = client;
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const adapterLog = (adapter: SSH2SFTPClientAdapter) => (adapter as any).log;
+
+  // A droppable client whose underlying ssh2 Client is a real EventEmitter: its
+  // end() clears the session (state.live=false) and emits 'close', modeling the
+  // ssh2-sftp-client global 'close' listener that clears this.sftp when the
+  // connection closes. connect() restores the session. This lets releaseForIdle's
+  // "drive the ssh2 Client's end() and await its 'close'" path run against a
+  // faithful stand-in without a live server.
+  function ephemeralClient(wrapper: ReturnType<typeof wrapperMethods>) {
+    const state = { live: true };
+    const rawClient = new EventEmitter() as EventEmitter &
+      Record<string, unknown>;
+    Object.assign(rawClient, {
+      setNoDelay: vi.fn(),
+      _sock: { setKeepAlive: vi.fn() },
+      end: vi.fn(() => {
+        state.live = false;
+        rawClient.emit("close");
+      }),
+    });
+    const connect = vi.fn().mockImplementation(async () => {
+      state.live = true;
+    });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: rawClient,
+      end: vi.fn().mockResolvedValue(true),
+      realPath: vi.fn().mockResolvedValue("/"),
+    };
+    return { client, connect, state, rawClient };
+  }
+
+  test("connect-then-release-then-reconnect brackets a single cycle's ops", async () => {
+    const wrapper = wrapperMethods();
+    const { client, connect, state, rawClient } = ephemeralClient(wrapper);
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    // Idle boundary: the session is released for the inter-poll gap.
+    await adapter.releaseForIdle();
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    expect(state.live).toBe(false);
+
+    // Start of the next cycle: an explicit re-dial re-establishes the session
+    // (no lazy re-dial on a first-op failure).
+    await expect(adapter.ensureConnected()).resolves.toBe(true);
+    expect(state.live).toBe(true);
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("the boundary release does not latch closing; recovery still works after it", async () => {
+    // The release must be NON-TERMINAL: it must not run the adapter's end()
+    // (which latches `closing` and disables recovery). Prove it by releasing,
+    // re-dialing, then dropping mid-cycle and confirming the within-cycle
+    // recovery floor still re-dials and completes the op.
+    const wrapper = wrapperMethods({
+      opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
+        cb(null, Buffer.from("h")),
+      readdir: (() => {
+        let served = false;
+        return (
+          _h: Buffer,
+          cb: (e: (Error & { code?: number }) | null, l?: unknown[]) => void,
+        ) => {
+          if (served) return cb(Object.assign(new Error("EOF"), { code: 1 }));
+          served = true;
+          cb(null, [{ filename: "a.json", attrs: { mtime: 1, size: 1 } }]);
+        };
+      })(),
+      close: (_h: Buffer, cb: (e: Error | null) => void) => cb(null),
+    });
+    const { client, connect, state } = ephemeralClient(wrapper);
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.releaseForIdle();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((adapter as any).closing).toBe(false);
+    await adapter.ensureConnected();
+    expect(connect).toHaveBeenCalledTimes(2);
+
+    // Mid-cycle clean drop: the within-cycle recovery floor must still re-dial.
+    state.live = false;
+    const result = await adapter.list("/remote/dir");
+    expect(result.map((e) => e.name)).toEqual(["a.json"]);
+    expect(connect).toHaveBeenCalledTimes(3);
+  });
+
+  test("re-dial reuses the retained connect options (no re-prompt / same key + credentials)", async () => {
+    const wrapper = wrapperMethods();
+    const { client, connect, state } = ephemeralClient(wrapper);
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    const hostVerifier = () => true;
+    await adapter.connect({
+      host: "h",
+      username: "u",
+      password: "pw",
+      hostVerifier,
+      maxReconnectAttempts: 0,
+    });
+    await adapter.releaseForIdle();
+    await adapter.ensureConnected();
+
+    // The re-dial passed ssh2 the identical connect options as the first dial
+    // (host, credentials, and the enforcing host-key verifier), minus the
+    // psilink-specific maxReconnectAttempts connect() strips -- no re-prompt, no
+    // freshly-built options.
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(connect.mock.calls[1][0]).toEqual(connect.mock.calls[0][0]);
+    expect(connect.mock.calls[1][0]).toMatchObject({
+      host: "h",
+      username: "u",
+      password: "pw",
+      hostVerifier,
+    });
+    expect(state.live).toBe(true);
+  });
+
+  test("a transient dial failure returns false (skip the cycle), not a throw", async () => {
+    const wrapper = wrapperMethods();
+    const state = { live: true };
+    let calls = 0;
+    const connect = vi.fn().mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) {
+        state.live = true;
+        return;
+      }
+      throw new Error("connect ECONNREFUSED");
+    });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: noDelayClient(),
+      end: vi.fn().mockResolvedValue(true),
+      realPath: vi.fn().mockResolvedValue("/"),
+    };
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    // Model a released (dropped) session so ensureConnected attempts a re-dial.
+    state.live = false;
+
+    await expect(adapter.ensureConnected()).resolves.toBe(false);
+    expect(connect).toHaveBeenCalledTimes(2);
+    // The transient failure is reported for observability, not thrown.
+    expect(adapterLog(adapter).warn).toHaveBeenCalledWith(
+      expect.stringContaining("retrying"),
+    );
+  });
+
+  test("a host-key mismatch on the re-dial is fatal (rejects, not skipped)", async () => {
+    const wrapper = wrapperMethods();
+    const state = { live: true };
+    let calls = 0;
+    const connect = vi.fn().mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) {
+        state.live = true;
+        return;
+      }
+      throw new Error("Host denied (verification failed)");
+    });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: noDelayClient(),
+      end: vi.fn().mockResolvedValue(true),
+      realPath: vi.fn().mockResolvedValue("/"),
+    };
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    // A non-zero reconnect budget makes the single-attempt assertion meaningful:
+    // a working predicate refuses to spend it re-running the key exchange against
+    // the same untrusted host.
+    await adapter.connect({ host: "h", maxReconnectAttempts: 3 });
+    state.live = false;
+
+    await expect(adapter.ensureConnected()).rejects.toThrow("Host denied");
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("releaseForIdle and ensureConnected are no-ops when the mode is off", async () => {
+    const wrapper = wrapperMethods();
+    const { client, connect, rawClient } = ephemeralClient(wrapper);
+    // Default construction: ephemeral mode off.
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    // Neither boundary method touches the session in the default whole-exchange
+    // model.
+    await adapter.releaseForIdle();
+    expect(rawClient.end).not.toHaveBeenCalled();
+    await expect(adapter.ensureConnected()).resolves.toBe(true);
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    // Stop the (default-mode) heartbeat so no unref'd timer lingers past the test.
+    await adapter.end();
+  });
+
+  test("the heartbeat is not armed in ephemeral mode (no keepalive fires)", async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = wrapperMethods();
+      const { client } = ephemeralClient(wrapper);
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      stubAdapterLog(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      // No session is held long enough to idle out, so the heartbeat is never
+      // armed: however long an idle stretch runs, no realPath keepalive fires.
+      await vi.advanceTimersByTimeAsync(SFTP_HEARTBEAT_INTERVAL_MS * 3);
+      expect(client.realPath).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("an intentional cycle release + re-dial is not counted or warned as a drop", async () => {
+    // The mode's OWN idle-boundary release (releaseForIdle drives the ssh2 Client's
+    // end(), clearing this.sftp) and the next cycle's re-dial (ensureConnected) are
+    // its designed behavior, NOT a server-forced mid-exchange drop. ensureConnected
+    // re-dials at cycle start, repopulating this.sftp BEFORE any op's
+    // withSessionRecovery could observe the cleared session as a loss -- so the
+    // intentional release must never increment the mid-exchange recovery counter or
+    // fire the recovery WARN (reserved for a genuine unexpected drop the operator
+    // should see). Proven across several cycles, each running a real op against the
+    // freshly re-dialed session so the within-cycle recovery path would show up if
+    // the boundary were mistaken for a drop.
+    const wrapper = wrapperMethods({
+      opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
+        cb(null, Buffer.from("h")),
+      readdir: (
+        _h: Buffer,
+        cb: (e: (Error & { code?: number }) | null, l?: unknown[]) => void,
+      ) => cb(Object.assign(new Error("EOF"), { code: 1 })),
+      close: (_h: Buffer, cb: (e: Error | null) => void) => cb(null),
+    });
+    const { client, connect } = ephemeralClient(wrapper);
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      await adapter.releaseForIdle();
+      await expect(adapter.ensureConnected()).resolves.toBe(true);
+      // A normal op runs against the freshly re-dialed session; ensureConnected
+      // repopulated this.sftp, so withSessionRecovery must not treat it as a loss.
+      await expect(adapter.list("/remote/dir")).resolves.toEqual([]);
+    }
+
+    // The designed release + re-dial is invisible to the recovery accounting: no
+    // server-forced drop happened, so the mid-exchange sub-count stays zero (and no
+    // internal connect-retry bumped the merged total either).
+    expect(adapter.midExchangeReconnectCount).toBe(0);
+    expect(adapter.reconnectCount).toBe(0);
+    // ... and the recovery WARN never fired: no message names a transparently
+    // re-dialed mid-exchange drop. (connect() called once per cycle to re-dial,
+    // never via the recovery path.)
+    const recoveryWarns = warn.mock.calls.filter((c) =>
+      (c[0] as string).includes("transparently"),
+    );
+    expect(recoveryWarns).toEqual([]);
+    // Initial dial plus one re-dial per cycle -- all through ensureConnected, none
+    // through withSessionRecovery.
+    expect(connect).toHaveBeenCalledTimes(4);
+  });
+
+  test("two concurrent ensureConnected calls open a single connect (serialized)", async () => {
+    // poll()'s cycle-start ensureConnected and close()'s pre-drain ensureConnected
+    // can fire concurrently; both must not open a parallel connect() on the one
+    // shared Ssh2SftpClient (it shares connection-level listeners, so two handshakes
+    // at once is unsafe). The second call must serialize behind the first's
+    // published re-dial and observe the now-live session rather than dialing again.
+    const wrapper = wrapperMethods();
+    const state = { live: true };
+    // A realistic handshake: the session becomes live only AFTER an async tick, not
+    // synchronously. That lag is what makes the race real -- a second concurrent
+    // ensureConnected that resumes before the first's connect settles still sees a
+    // cleared session, so without serialization it would open a parallel connect().
+    const connect = vi.fn().mockImplementation(async () => {
+      await Promise.resolve();
+      state.live = true;
+    });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: noDelayClient(),
+      end: vi.fn().mockResolvedValue(true),
+      realPath: vi.fn().mockResolvedValue("/"),
+    };
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    // A released session, then two ensureConnected fired without awaiting between.
+    state.live = false;
+    const [a, b] = await Promise.all([
+      adapter.ensureConnected(),
+      adapter.ensureConnected(),
+    ]);
+    expect(a).toBe(true);
+    expect(b).toBe(true);
+    // The initial dial plus a SINGLE cycle-start re-dial: the second call awaited
+    // the first's re-dial and saw the live session, so no parallel connect().
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(state.live).toBe(true);
+  });
+});
