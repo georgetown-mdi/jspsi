@@ -726,12 +726,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   //   --connection-per-poll, and the remaining budget is stated so "the exchange
   //   continues" is not read as open-ended (exhausting it is terminal, see
   //   midExchangeReconnectBudgetExhaustedError).
-  //   Connection-per-poll: the mode releases the session between cycles, so an
-  //   operation issued in an idle gap -- a send, or an ack write, neither of which
-  //   goes through ensureConnected -- reaches this same path with no server-side
-  //   drop involved. The line therefore reports the re-dial without asserting a
-  //   cause it cannot distinguish, quotes no budget (the cap does not charge this
-  //   mode), and names the per-operation peer-inactivity ceiling that does bound it.
+  //   Connection-per-poll: the mode releases the session between cycles, and a
+  //   send resumes after that release without going through ensureConnected, so an
+  //   ordinary send lands here with no server-side drop involved. The line
+  //   therefore reports the re-dial without asserting a cause it cannot
+  //   distinguish, quotes no budget (the cap does not charge this mode), and names
+  //   the per-operation peer-inactivity ceiling that does bound it.
   // Nothing beyond that is disclosed.
   private warnSessionRecovered(): void {
     const count = this.midExchangeRedials;

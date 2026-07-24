@@ -3553,9 +3553,9 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // default-mode line recommends is already in force, so quoting a remaining
     // budget would state a bound that does not apply and naming the flag would
     // advise a mode already on. The line must also not assert a server-side drop:
-    // the mode releases the session between cycles, so an operation issued in an
-    // idle gap (a send or an ack write, neither of which goes through
-    // ensureConnected) reaches this path with nothing having dropped.
+    // the mode releases the session between cycles and a send resumes after that
+    // release without going through ensureConnected, so an ordinary send reaches
+    // this path with nothing having dropped.
     const wrapper = wrapperMethods({
       opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
         cb(null, Buffer.from("h")),
