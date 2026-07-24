@@ -297,7 +297,7 @@ Every `psilink` command exits with one of the following codes. The two failure c
 | Code | Name | Meaning |
 | ---- | ---- | ------- |
 | 0 | success | The command completed. For an exchange, the run finished and any result was written. |
-| 64 | `EX_USAGE` | Invalid caller input or configuration: a bad flag or positional, an unrecognized or repeated option, a missing/malformed config or key file, an unsupported channel, or -- with `--event-stream` -- fd 3 not wired. A problem the operator fixes locally; retrying unchanged will not help. |
+| 64 | `EX_USAGE` | Invalid caller input or configuration: a bad flag or positional, an unrecognized or repeated option, a missing/malformed config or key file, an unsupported channel, or -- with `--event-stream` -- fd 3 not wired. One mid-run condition also lands here rather than under 69, because its remedy is likewise a local settings change: an SFTP exchange whose cumulative mid-exchange reconnection budget (`max_reconnect_attempts`) is exhausted by a partner server that keeps dropping the held session. A problem the operator fixes locally; retrying unchanged will not help. |
 | 69 | `EX_UNAVAILABLE` | A transport or availability failure: the exchange server, peer, or shared storage was unreachable, rejected an operation, or went silent. Retrying once the transport recovers may succeed. |
 | 130 | interrupted (SIGINT) | The run was interrupted by `SIGINT` (Ctrl-C). 128 + 2, the conventional signal exit. |
 | 143 | terminated (SIGTERM) | The run was terminated by `SIGTERM`. 128 + 15. |

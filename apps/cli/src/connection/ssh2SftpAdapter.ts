@@ -714,23 +714,50 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // Surface a transparently-recovered mid-exchange session drop to the operator at
   // default verbosity: silent recovery would hide a partner whose SFTP server
   // chronically caps session lifetime, exactly the case this feature exists for.
-  // Warn on the FIRST re-dial, then only every SFTP_REDIAL_WARN_INTERVAL-th, so a
-  // chronic capper stays visible without a warn line every poll cycle. Every message
-  // reassures that the drop was recovered and the exchange continues, then reads the
-  // drop in the mode the operator is actually running: the two modes differ in
-  // likely cause, remedy, and bound, so one blended line would misdescribe both. In
-  // the default mode the drop is the classic partner-side session cap, the remedy is
-  // --connection-per-poll, and the remaining cumulative budget is stated so "the
-  // exchange continues" is not read as open-ended (exhausting it is terminal, see
-  // midExchangeReconnectBudgetExhaustedError). In connection-per-poll the session is
-  // re-dialed every cycle anyway, so a recovered drop is a WITHIN-cycle one that the
-  // cap does not charge -- quoting a remaining budget there would state a bound that
-  // does not apply, and the remedy is already in force -- leaving the per-operation
-  // peer-inactivity ceiling as the honest bound to name. Nothing beyond that is
-  // disclosed.
+  // Warn on the FIRST re-dial and on every SFTP_REDIAL_WARN_INTERVAL-th after it,
+  // so a chronic capper stays visible without a warn line every poll cycle; in the
+  // default mode also warn on the LAST re-dial the budget permits, because with a
+  // budget below that interval (the default 3 is) the escalation step never fires
+  // and the operator would otherwise go from one early warning straight to the
+  // terminal error. Each message then reads the re-dial in the mode the operator is
+  // running -- the two differ in likely cause, remedy, and bound, so one blended
+  // line would misdescribe both:
+  //   Default: the drop is the classic partner-side session cap, the remedy is
+  //   --connection-per-poll, and the remaining budget is stated so "the exchange
+  //   continues" is not read as open-ended (exhausting it is terminal, see
+  //   midExchangeReconnectBudgetExhaustedError).
+  //   Connection-per-poll: the mode releases the session between cycles, so an
+  //   operation issued in an idle gap -- a send, or an ack write, neither of which
+  //   goes through ensureConnected -- reaches this same path with no server-side
+  //   drop involved. The line therefore reports the re-dial without asserting a
+  //   cause it cannot distinguish, quotes no budget (the cap does not charge this
+  //   mode), and names the per-operation peer-inactivity ceiling that does bound it.
+  // Nothing beyond that is disclosed.
   private warnSessionRecovered(): void {
     const count = this.midExchangeRedials;
-    if (count !== 1 && count % SFTP_REDIAL_WARN_INTERVAL !== 0) return;
+    if (this.ephemeralSessions) {
+      if (count !== 1 && count % SFTP_REDIAL_WARN_INTERVAL !== 0) return;
+      this.log.warn(
+        `An SFTP operation found no live session and transparently re-dialed ` +
+          `(${count} so far this exchange); the exchange continues. ` +
+          "Connection-per-poll releases the session between poll cycles, so " +
+          "this may be an operation issued during an idle gap rather than a " +
+          "server-side drop; a rising count against a long poll interval points " +
+          "at the link or the server instead. These re-dials are not charged " +
+          "against max_reconnect_attempts; each operation remains bounded by the " +
+          "peer-inactivity timeout (peer_timeout_ms), which ends the exchange if " +
+          "they stop it from making progress.",
+      );
+      return;
+    }
+    const budget = this.operativeMaxReconnectAttempts();
+    const remaining = Math.max(budget - count, 0);
+    if (
+      count !== 1 &&
+      remaining !== 0 &&
+      count % SFTP_REDIAL_WARN_INTERVAL !== 0
+    )
+      return;
     const recovered =
       count === 1
         ? "The SFTP session dropped mid-exchange and was transparently " +
@@ -738,20 +765,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         : `The SFTP session has now dropped and been transparently re-dialed ` +
           `${count} times this exchange; each drop was recovered and the ` +
           `exchange continues.`;
-    if (this.ephemeralSessions) {
-      this.log.warn(
-        `${recovered} Connection-per-poll already dials a fresh session each ` +
-          "poll cycle, so this drop came during a cycle's own work rather than " +
-          "from a session-lifetime cap: suspect a flaky link or a server limit " +
-          "that bites within the cycle. This within-cycle recovery is not " +
-          "charged against max_reconnect_attempts; each operation remains " +
-          "bounded by the peer-inactivity timeout (peer_timeout_ms), which ends " +
-          "the exchange if the drops stop it from making progress.",
-      );
-      return;
-    }
-    const budget = this.operativeMaxReconnectAttempts();
-    const remaining = Math.max(budget - count, 0);
+    const budgetLeft =
+      remaining === 0
+        ? `That was the last re-dial allowed by ` +
+          `max_reconnect_attempts=${budget}: the next mid-exchange drop ends ` +
+          `the exchange.`
+        : `${remaining} further mid-exchange re-dial` +
+          `${remaining === 1 ? " is" : "s are"} allowed by ` +
+          `max_reconnect_attempts=${budget} before the exchange fails.`;
     this.log.warn(
       `${recovered} This is typically the partner's SFTP server enforcing a ` +
         `session-duration or idle limit you cannot change. Because the default ` +
@@ -760,9 +781,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         `dials a fresh session each poll cycle instead of holding one, is the ` +
         `real fix for that case, and a longer poll interval ` +
         `(--polling-frequency) helps only if the server is instead reacting to ` +
-        `how often this exchange queries it. ${remaining} further mid-exchange ` +
-        `re-dial${remaining === 1 ? " is" : "s are"} allowed by ` +
-        `max_reconnect_attempts=${budget} before the exchange fails.`,
+        `how often this exchange queries it. ${budgetLeft}`,
     );
   }
 

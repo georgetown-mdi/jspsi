@@ -3307,6 +3307,45 @@ describe("session recovery", () => {
     expect(adapter.midExchangeReconnectCount).toBe(2);
   });
 
+  test("warns on the last permitted re-dial, even below the escalation interval", async () => {
+    // The rate cadence alone leaves a hole at any budget under
+    // SFTP_REDIAL_WARN_INTERVAL -- the default 3 included: the first drop warns,
+    // the escalation step never fires, and the operator's next signal would be the
+    // terminal error. So the last re-dial the budget permits always warns, saying
+    // plainly that the next drop ends the exchange.
+    const { client, state } = droppable(emptyDirWrapper());
+    const adapter = new SSH2SFTPClientAdapter();
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    // The shipped default: a budget well below the escalation interval.
+    await adapter.connect({ host: "h", maxReconnectAttempts: 3 });
+    for (let i = 0; i < 3; i += 1) {
+      state.live = false;
+      await adapter.list("/remote/dir");
+    }
+
+    // Two lines: the first drop and the last permitted re-dial, not one per drop
+    // and not silence after the first.
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls[0][0]).toContain(
+      "2 further mid-exchange re-dials are allowed",
+    );
+    const last = warn.mock.calls[1][0] as string;
+    expect(last).toContain(
+      "That was the last re-dial allowed by max_reconnect_attempts=3",
+    );
+    expect(last).toContain("the next mid-exchange drop ends the exchange");
+
+    // And the warning told the truth: the next drop is terminal.
+    state.live = false;
+    await expect(adapter.list("/remote/dir")).rejects.toBeInstanceOf(
+      UsageError,
+    );
+  });
+
   test("a teardown re-dial is exempt from the cap, uncounted and unwarned, and still lands", async () => {
     // The authenticated abort-marker write and the terminal-frame drain re-dial
     // during teardown. Even with the mid-exchange budget already exhausted, a
@@ -3510,11 +3549,13 @@ describe("ephemeral session mode (connection-per-poll)", () => {
 
   test("the recovery warning describes the per-poll case, quoting no budget", async () => {
     // The warn line must match the mode the operator is running. In per-poll the
-    // session is re-dialed every cycle anyway, so a recovered drop is a
-    // WITHIN-CYCLE one, the count is not charged against max_reconnect_attempts,
-    // and the remedy the default-mode line recommends is already in force. Quoting
-    // a remaining budget here would state a bound that does not apply, and
-    // recommending --connection-per-poll would advise a mode already on.
+    // count is not charged against max_reconnect_attempts and the remedy the
+    // default-mode line recommends is already in force, so quoting a remaining
+    // budget would state a bound that does not apply and naming the flag would
+    // advise a mode already on. The line must also not assert a server-side drop:
+    // the mode releases the session between cycles, so an operation issued in an
+    // idle gap (a send or an ack write, neither of which goes through
+    // ensureConnected) reaches this path with nothing having dropped.
     const wrapper = wrapperMethods({
       opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
         cb(null, Buffer.from("h")),
@@ -3537,9 +3578,11 @@ describe("ephemeral session mode (connection-per-poll)", () => {
 
     expect(warn).toHaveBeenCalledTimes(1);
     const message = warn.mock.calls[0][0] as string;
-    // Recovered and continuing, framed as a within-cycle drop.
+    // Recovered and continuing, reported without asserting a cause.
     expect(message).toContain("the exchange continues");
-    expect(message).toContain("within the cycle");
+    expect(message).toContain("found no live session");
+    expect(message).toContain("rather than a server-side drop");
+    expect(message).not.toContain("dropped mid-exchange");
     // No budget quoted, and no advice to enable the mode already running.
     expect(message).not.toContain("max_reconnect_attempts=2");
     expect(message).not.toContain("further mid-exchange re-dial");

@@ -74,11 +74,12 @@ cleanly every cycle yet keeps capping the session -- which none of them catches.
 
 **What cannot be told apart, and why that is the real gap.** The re-dialing itself
 is visible: the transport warns at default verbosity on the first mid-exchange
-re-dial and at a rate-escalated cadence after it, each line naming the drop count
-and what remains of the budget, and the end-of-run reconnect totals land on the
-operator's normal log rather than only on the opt-in machine event stream. What the *code* still cannot draw, even with that signal in hand, is the
-line between a **chronic-benign** drop (a server session cap: the re-dial succeeds
-every cycle and the exchange progresses) and a **chronic-degraded** channel (the
+re-dial, on the last one the budget permits, and at a rate-escalated cadence in
+between, each line stating what remains of the budget, and the end-of-run reconnect
+totals land on the operator's normal log rather than only on the opt-in machine
+event stream. What the *code* still cannot draw, even with that signal in hand, is
+the line between a **chronic-benign** drop (a server session cap: the re-dial
+succeeds every cycle and the exchange progresses) and a **chronic-degraded** channel (the
 re-dial succeeds but the exchange barely moves). The two are identical from the
 code's vantage -- same clean loss, same successful re-dial -- so the warning can
 report the thrash but not classify it, and only the operator, who knows the
@@ -283,7 +284,8 @@ snapshot nor resets the sequence shadow.
 The downstream slices:
 
 - **Reconnect posture first.** Observability (a first-drop warning, a
-  rate-escalated cadence after it, and the live count on the normal log) plus a
+  rate-escalated cadence after it, a warning on the last re-dial the budget
+  permits, and the live count on the normal log) plus a
   cumulative `max_reconnect_attempts` budget that fails the exchange terminally when
   spent, so the field's name matches what it bounds: the cumulative number of
   mid-exchange reconnections in the default mode, on top of each connect's own
