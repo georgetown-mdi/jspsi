@@ -618,12 +618,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     this.log.warn(
       `The SFTP session has now dropped and been transparently re-dialed ` +
         `${count} times this exchange; each drop was recovered and the exchange ` +
-        `continues. The partner's server is capping session lifetime ` +
-        `aggressively, which you cannot change. Because psilink holds one SFTP ` +
-        `session open for the whole exchange, this will keep recurring regardless ` +
-        `of your settings until the planned connection-per-poll mode lands; a ` +
-        `longer poll interval (--polling-frequency) reduces it only if the server ` +
-        `is reacting to how often this exchange queries it.`,
+        `continues. The partner's server appears to be enforcing an aggressive ` +
+        `session-duration or idle limit, which you cannot change. Because psilink ` +
+        `holds one SFTP session open for the whole exchange, this will keep ` +
+        `recurring regardless of your settings until the planned ` +
+        `connection-per-poll mode lands; a longer poll interval ` +
+        `(--polling-frequency) helps only if the server is reacting to how often ` +
+        `this exchange queries it.`,
     );
   }
 

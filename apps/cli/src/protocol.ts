@@ -577,17 +577,21 @@ export async function runProtocol(
     // drops. Zero on a clean run, so the guard keeps a normal exchange quiet.
     const reconnects = client?.reconnectCount ?? 0;
     const midExchangeRedials = client?.midExchangeReconnectCount ?? 0;
-    if (reconnects > 0)
-      log.info(
+    if (reconnects > 0) {
+      const summary =
         `the connection was re-established ${reconnects} ` +
-          `time${reconnects === 1 ? "" : "s"} during this exchange, of which ` +
-          `${midExchangeRedials} ` +
-          `${
-            midExchangeRedials === 1
-              ? "was a mid-exchange session re-dial"
-              : "were mid-exchange session re-dials"
-          }`,
+        `time${reconnects === 1 ? "" : "s"} during this exchange`;
+      log.info(
+        midExchangeRedials > 0
+          ? `${summary}, of which ${midExchangeRedials} ` +
+              `${
+                midExchangeRedials === 1
+                  ? "was a mid-exchange session re-dial"
+                  : "were mid-exchange session re-dials"
+              }`
+          : summary,
       );
+    }
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
     // Undo our own contribution to the max-listeners threshold rather than

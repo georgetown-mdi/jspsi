@@ -3103,6 +3103,11 @@ describe("session recovery", () => {
     const escalation = warn.mock.calls[1][0] as string;
     expect(escalation).toContain(`${SFTP_REDIAL_WARN_INTERVAL} times`);
     expect(escalation).toContain("the exchange continues");
+    // The escalation hedges the cause exactly as the first-drop message does: the
+    // adapter cannot tell a session-duration cap from an idle cap, so it names
+    // both rather than asserting one, and never claims to know it is a duration cap.
+    expect(escalation).toContain("session-duration or idle limit");
+    expect(escalation).not.toContain("capping session lifetime");
     expect(escalation).toContain("--polling-frequency");
     expect(escalation).toContain("connection-per-poll");
     expect(escalation).not.toContain("held open less often");

@@ -3401,7 +3401,9 @@ test("summarizes the reconnect count at normal verbosity when the session was re
   // server that repeatedly dropped and was re-dialed would be invisible on a
   // normal run. runProtocol logs a one-line teardown summary at info instead.
   // Force a non-zero count on the (real) file-drop client via its reconnectCount
-  // getter.
+  // getter; midExchangeReconnectCount stays 0 (a file-drop channel holds no
+  // session), so this is the connect-retries-only case: the summary reports just
+  // the total and omits the mid-exchange session-re-dial clause entirely.
   const reconnectSpy = vi
     .spyOn(LocalFSClient.prototype, "reconnectCount", "get")
     .mockReturnValue(3);
@@ -3435,6 +3437,13 @@ test("summarizes the reconnect count at normal verbosity when the session was re
         line.includes("during this exchange"),
     ),
   ).toBe(true);
+  // No mid-exchange re-dials occurred, so the "of which ... mid-exchange session
+  // re-dials" clause -- and its session terminology, which does not apply to a
+  // file-drop channel -- must not appear.
+  expect(
+    mockState.infos.some((line) => line.includes("mid-exchange session")),
+  ).toBe(false);
+  expect(mockState.infos.some((line) => line.includes("of which"))).toBe(false);
 });
 
 test("summary reports the mid-exchange sub-count apart from the total", async () => {
@@ -3477,7 +3486,7 @@ test("summary reports the mid-exchange sub-count apart from the total", async ()
     mockState.infos.some(
       (line) =>
         line.includes("re-established 4 times") &&
-        line.includes("3 were mid-exchange session re-dials"),
+        line.includes("of which 3 were mid-exchange session re-dials"),
     ),
   ).toBe(true);
 });
