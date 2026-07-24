@@ -505,6 +505,43 @@ test("get returns a file at or under maxBytes unchanged", async () => {
   }
 });
 
+test("connection-per-poll: an op after the idle release re-establishes with no reported drop", async () => {
+  // The whole idle boundary against a real server: releaseForIdle drives the ssh2
+  // Client's own end() and awaits its 'close', which is what clears
+  // ssh2-sftp-client's session property, and the next operation re-establishes
+  // through the pinned host key and stored credentials. The unit tests model that
+  // sequence; this runs it, so a future ssh2 that stopped emitting 'close' on
+  // end(), or a re-establishment that quietly stopped happening, fails here.
+  // Neither the release nor the re-establishment is a session loss, so the run
+  // must report no reconnection at all.
+  const remote = await freshRendezvous();
+  const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+  const conn = new FileSyncConnection(adapter, {
+    verbose: -1,
+    pollingFrequency: 10,
+  });
+  await conn.open({
+    channel: "sftp",
+    server: {
+      host: srv.host,
+      port: srv.port,
+      ...serverAuth(srv.usera),
+      path: remote,
+    },
+  });
+  try {
+    await expect(adapter.list(remote)).resolves.toEqual([]);
+    await adapter.releaseForIdle();
+    // The idle-gap operation: no cycle-start reconnect precedes it, so it is the
+    // operation itself that must re-establish the session.
+    await expect(adapter.list(remote)).resolves.toEqual([]);
+    expect(adapter.reconnectCount).toBe(0);
+    expect(adapter.midExchangeReconnectCount).toBe(0);
+  } finally {
+    await conn.close();
+  }
+});
+
 inProcessOnly(
   "ssh2 hands back a raw SFTP wrapper carrying zero 'error' listeners of its own",
   async () => {

@@ -201,6 +201,26 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // the abandoned op is still mid-re-dial. Bounded: connect() is finite (its own
   // retry budget and readyTimeout), so the await cannot hang teardown.
   private redialInFlight: Promise<void> | undefined;
+  // The in-flight idle-boundary release's close (settled either way), or undefined
+  // when none is running. Published by releaseForIdle exactly as publishRedial
+  // publishes a dial, so an op, an ensureConnected, or an end() arriving between
+  // the ssh2 Client's end() and its 'close' waits the teardown out instead of
+  // racing it. Racing it is not survivable: in that window ssh2-sftp-client has not
+  // yet cleared `this.sftp` (its global 'close' listener does that), so an op that
+  // rejects there rejects with a live-LOOKING session, which
+  // shouldRecoverFromSessionLoss reads as "not a session loss" and fails terminally.
+  private releaseInFlight: Promise<void> | undefined;
+  // Latched by releaseForIdle when it actually drove the ssh2 Client's end() and
+  // awaited its 'close': the session is absent BY DESIGN, not because the server
+  // dropped it. Read by withSessionRecovery's gate (re-establish before the first
+  // attempt) and by its classification (a re-dial following a deliberate lifecycle
+  // transition is exempt from the reconnect counters and the operator warning,
+  // exactly as a teardown re-dial is). Cleared at the end of a successful connect()
+  // -- the single path every re-establishment goes through -- so a failed dial
+  // leaves it set and a genuine drop after a completed re-establishment is counted
+  // and warned as one. Never latched by releaseForIdle's early returns: an already
+  // absent session there is a REAL drop and must stay countable.
+  private idleReleased = false;
   private log: ReturnType<typeof getLoggerForVerbosity>;
   // The raw SFTPWrapper this adapter has already attached its fatal-'error'
   // listener to, so connect() attaches exactly once per wrapper instance (see
@@ -322,7 +342,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * re-attempts past the first, plus each successful mid-exchange session-recovery
    * re-dial (a re-dial that survived a server-side drop is itself a reconnection,
    * and connect()'s own counter does not see one that succeeds on its first
-   * attempt). A plain operational counter, never a partner-controlled value.
+   * attempt). A re-establishment that follows a DELIBERATE lifecycle transition --
+   * the connection-per-poll idle release, or teardown -- is not counted: nothing
+   * was lost, so counting it would report drops a healthy exchange never had. A
+   * plain operational counter, never a partner-controlled value.
    */
   get reconnectCount(): number {
     return this.reconnectAttempts;
@@ -330,11 +353,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
 
   /**
    * The subset of {@link reconnectCount} that were mid-exchange session-recovery
-   * re-dials -- a server dropping the one long-lived session mid-exchange, which
-   * the adapter transparently re-dialed and re-issued the interrupted operation
-   * on. Surfaced apart from the merged reconnect total so the end-of-run summary
-   * can distinguish chronic mid-exchange drops from benign connect-time retries.
-   * A plain operational counter, never a partner-controlled value.
+   * re-dials -- a server dropping a live session mid-exchange, which the adapter
+   * transparently re-dialed and re-issued the interrupted operation on. Surfaced
+   * apart from the merged reconnect total so the end-of-run summary can
+   * distinguish chronic mid-exchange drops from benign connect-time retries. It
+   * carries the same deliberate-transition exemption as {@link reconnectCount}, so
+   * in connection-per-poll mode it counts within-cycle drops only. A plain
+   * operational counter, never a partner-controlled value.
    */
   get midExchangeReconnectCount(): number {
     return this.midExchangeRedials;
@@ -629,12 +654,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     op: () => Promise<T>,
     reissue: (op: () => Promise<T>) => Promise<T> = (run) => run(),
   ): Promise<T> {
-    return op().catch(async (error: unknown) => {
+    const gate = this.awaitIdleReleaseAndReconnect();
+    const first = gate === undefined ? op() : gate.then(op);
+    return first.catch(async (error: unknown) => {
       if (!this.shouldRecoverFromSessionLoss(error)) throw error;
       // A teardown re-dial (the abort-marker write or the terminal-frame drain) is
       // exempt from the cap and neither counted nor warned; see the `tearingDown`
       // field and beginTeardown().
       const teardown = this.tearingDown;
+      // Likewise a re-dial that follows this adapter's OWN idle-boundary release
+      // (connection-per-poll): the session was released by design, so restoring it
+      // is a lifecycle transition, not a survived server-side drop. Read BEFORE the
+      // re-dial: connect() clears the latch, so reading it afterwards would classify
+      // every deliberate release as a drop -- the misreport this exists to stop.
+      const deliberateRelease = this.idleReleased;
       // Cap the cumulative mid-exchange reconnections in the default held-session
       // mode: once max_reconnect_attempts drops have already been re-dialed this
       // exchange, refuse the next and fail terminally. Gated off in
@@ -653,7 +686,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         await this.end().catch(() => {});
         throw error;
       }
-      if (!teardown) {
+      if (!teardown && !deliberateRelease) {
         // The re-dial re-established the dropped session: count it as a
         // reconnection so the operator's metrics show the exchange survived a
         // server-side drop. connect()'s own counter only bumps on an internal
@@ -666,6 +699,38 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       }
       return reissue(op);
     });
+  }
+
+  // The connection-per-poll session precondition, applied at withSessionRecovery --
+  // the one chokepoint every server-driven op already passes through. It is owned
+  // here, not by the callers in core, because the release that creates the gap is
+  // owned here: a precondition spread over call sites in another package is an
+  // invariant held by discipline, and every site that forgets it (a send resuming
+  // from the protocol continuation, a retain-mode ack write) reopens this hole.
+  //
+  // Returns undefined -- no gate, not even a microtask -- whenever the mode is off
+  // or no release has intervened, so the default held-session mode runs exactly as
+  // it did. Otherwise it waits the in-flight close out (an op must not race the
+  // teardown; see `releaseInFlight`) and re-establishes through ensureConnected
+  // before the first attempt, which both keeps the deliberate release out of the
+  // recovery path's accounting and spares one guaranteed-failed op per idle gap.
+  //
+  // Best-effort by contract: a dial failure here resolves rather than rejecting, so
+  // the never-reject callers are unaffected and a transient failure is left to the
+  // op's own recovery round. Nothing is swallowed for good -- a fatal dial condition
+  // (a host-key rejection) surfaces one step later out of the recovery path's own
+  // connect(), which is what keeps the fail-closed host-key behavior.
+  private awaitIdleReleaseAndReconnect(): Promise<void> | undefined {
+    if (!this.ephemeralSessions) return undefined;
+    if (this.releaseInFlight === undefined && !this.idleReleased)
+      return undefined;
+    return (async () => {
+      await this.releaseInFlight;
+      await this.ensureConnected().then(
+        () => {},
+        () => {},
+      );
+    })();
   }
 
   // The operative mid-exchange reconnection budget: the max_reconnect_attempts
@@ -726,24 +791,24 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   //   --connection-per-poll, and the remaining budget is stated so "the exchange
   //   continues" is not read as open-ended (exhausting it is terminal, see
   //   midExchangeReconnectBudgetExhaustedError).
-  //   Connection-per-poll: the mode releases the session between cycles, and a
-  //   send resumes after that release without going through ensureConnected, so an
-  //   ordinary send lands here with no server-side drop involved. The line
-  //   therefore reports the re-dial without asserting a cause it cannot
-  //   distinguish, quotes no budget (the cap does not charge this mode), and names
-  //   the per-operation peer-inactivity ceiling that does bound it.
+  //   Connection-per-poll: the mode's own idle release never reaches this warning
+  //   (withSessionRecovery exempts it), so a re-dial that does is a genuine drop
+  //   WITHIN a cycle -- stated plainly, and placed inside the cycle so the operator
+  //   reads it as the link or the server rather than as the mode's own boundary.
+  //   It quotes no budget (the cap does not charge this mode) and names the
+  //   per-operation peer-inactivity ceiling that does bound it.
   // Nothing beyond that is disclosed.
   private warnSessionRecovered(): void {
     const count = this.midExchangeRedials;
     if (this.ephemeralSessions) {
       if (count !== 1 && count % SFTP_REDIAL_WARN_INTERVAL !== 0) return;
       this.log.warn(
-        `An SFTP operation found no live session and transparently re-dialed ` +
+        `The SFTP session dropped mid-exchange and was transparently re-dialed ` +
           `(${count} so far this exchange); the exchange continues. ` +
-          "Connection-per-poll releases the session between poll cycles, so " +
-          "this may be an operation issued during an idle gap rather than a " +
-          "server-side drop; a rising count against a long poll interval points " +
-          "at the link or the server instead. These re-dials are not charged " +
+          "Connection-per-poll already dials a fresh session per poll cycle and " +
+          "releases it between cycles, so this drop happened within a cycle, on " +
+          "a session just established: the link or the partner's server, not the " +
+          "idle gap this mode exists to shed. These re-dials are not charged " +
           "against max_reconnect_attempts; each operation remains bounded by the " +
           "peer-inactivity timeout (peer_timeout_ms), which ends the exchange if " +
           "they stop it from making progress.",
@@ -794,7 +859,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // ERR_NOT_CONNECTED ("No SFTP connection available") rejection on the high-level
   // get/put/delete/rename/exists. Terminal (never re-dialed), in order:
   //   - no connect has succeeded yet (nothing to re-dial with);
-  //   - the session is still live (a stall or app-level failure, not a loss);
+  //   - the session is still live (a stall or app-level failure, not a loss); the
+  //     one case where that reading would be wrong -- an op rejecting mid-release,
+  //     while ssh2-sftp-client has not yet cleared `sftp` -- cannot reach here,
+  //     because withSessionRecovery's gate waits the release out first;
   //   - a fatal SFTP protocol error killed the session (the wrapper is destroyed
   //     and cannot recover -- fatalSftpError, deadSessionError());
   //   - a liveness stall (TransportOperationStalledError): re-dialing on a stall
@@ -862,6 +930,24 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       if (this.redialInFlight === tracked) this.redialInFlight = undefined;
     });
     return redial;
+  }
+
+  // Publish an in-flight idle-boundary release to releaseInFlight, the way
+  // publishRedial publishes a dial, so a concurrent op, ensureConnected, or end()
+  // serializes behind the close instead of racing the window in which the session
+  // still reads live (see `releaseInFlight`). MUST be called before the ssh2
+  // Client's end() is driven, so an op arriving immediately after that end() can
+  // already see the release. Self-clears once this same release settles, so a later
+  // caller is never held by a stale one.
+  private publishRelease(release: Promise<void>): void {
+    const tracked = release.then(
+      () => {},
+      () => {},
+    );
+    this.releaseInFlight = tracked;
+    void tracked.finally(() => {
+      if (this.releaseInFlight === tracked) this.releaseInFlight = undefined;
+    });
   }
 
   // SSH_FX_NO_SUCH_FILE: the source-absent status ssh2-sftp-client surfaces as the
@@ -1007,6 +1093,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // batch (seconds) and is released before the idle gap, so there is no held
     // session to keep warm -- an armed heartbeat would be moot.
     if (!this.ephemeralSessions) this.heartbeat.start();
+    // A session is live again, so the idle-boundary release is discharged: from
+    // here a cleared session is once more an unexpected loss, counted and warned as
+    // one. Cleared LAST, on success only: every re-establishment (initial dial,
+    // recovery re-dial, cycle-start ensureConnected) runs this method, and a dial
+    // that threw above leaves the latch set so the next op re-establishes rather
+    // than reporting the release as a drop.
+    this.idleReleased = false;
   }
 
   /**
@@ -1031,7 +1124,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // connect() and this teardown's client.end() must not overlap on the one
     // Ssh2SftpClient, so wait the re-dial out first (bounded by connect()'s own
     // retry/readyTimeout). withSessionRecovery's post-re-dial `closing` check then
-    // tears down whatever session it dialed, so none outlives this close.
+    // tears down whatever session it dialed, so none outlives this close. An
+    // in-flight idle release is waited out for the same reason -- its ssh2 Client
+    // end() and this teardown's client.end() must not overlap -- and is bounded by
+    // its own close timeout.
+    await this.releaseInFlight;
     await this.redialInFlight;
     // Stop the keepalive before tearing the client down so no beat races the
     // teardown, and so the unref'd timer never lingers past the session.
@@ -1056,6 +1153,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * re-dial. A no-op when the mode is off, during teardown, or when no session is
    * live. Awaits the 'close' so the release is complete before the loop idles;
    * bounded so a pathological withheld local close cannot hang the poll loop.
+   *
+   * The release is PUBLISHED (`releaseInFlight`) and LATCHED (`idleReleased`)
+   * before the close is driven, so an operation that arrives during or after it
+   * re-establishes the session through {@link withSessionRecovery}'s gate instead
+   * of racing the close or reporting the deliberate absence as a server drop.
    */
   async releaseForIdle(): Promise<void> {
     if (!this.ephemeralSessions || this.closing) return;
@@ -1079,24 +1181,34 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     }
     const end = rawClient.end.bind(rawClient);
     const once = rawClient.once.bind(rawClient);
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = (): void => {
-        if (settled) return;
-        settled = true;
-        resolve();
-      };
-      const timer = setTimeout(finish, EPHEMERAL_RELEASE_CLOSE_TIMEOUT_MS);
-      // The bound is the safety net, not real work: unref'd so it never holds a
-      // healthy process open (the deliberately-unref'd SFTP-liveness-timer
-      // contract), and cleared the instant 'close' fires.
-      timer.unref();
-      once("close", () => {
-        clearTimeout(timer);
-        finish();
-      });
-      end();
+    // This branch, and only this branch, drives the release: latch it so a
+    // subsequent op re-establishes the session rather than reading its absence as
+    // a server-side drop.
+    this.idleReleased = true;
+    let finish!: () => void;
+    const closed = new Promise<void>((resolve) => {
+      finish = resolve;
     });
+    // Published BEFORE end() so an op landing in the end()-to-'close' window sees
+    // the release and waits for it instead of racing it.
+    this.publishRelease(closed);
+    let settled = false;
+    const settle = (): void => {
+      if (settled) return;
+      settled = true;
+      finish();
+    };
+    const timer = setTimeout(settle, EPHEMERAL_RELEASE_CLOSE_TIMEOUT_MS);
+    // The bound is the safety net, not real work: unref'd so it never holds a
+    // healthy process open (the deliberately-unref'd SFTP-liveness-timer
+    // contract), and cleared the instant 'close' fires.
+    timer.unref();
+    once("close", () => {
+      clearTimeout(timer);
+      settle();
+    });
+    end();
+    await closed;
   }
 
   /**
@@ -1123,8 +1235,18 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // while another re-dial has begun, and a bare await, entered before the first
     // caller has published its own re-dial, would let a second caller slip past and
     // open a parallel connect(). Publishing our connect below (publishRedial)
-    // synchronously before the first await is what makes the loop see it.
-    while (this.redialInFlight !== undefined) await this.redialInFlight;
+    // synchronously before the first await is what makes the loop see it. An
+    // in-flight idle release is awaited on the same terms and in the same loop:
+    // dialing while the previous session's close is still landing would run a
+    // handshake and a teardown at once on the one client, and that 'close' would
+    // then clear the session this call had just established.
+    while (
+      this.releaseInFlight !== undefined ||
+      this.redialInFlight !== undefined
+    ) {
+      await this.releaseInFlight;
+      await this.redialInFlight;
+    }
     const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
     // A concurrent recovery re-dial or ensureConnected (e.g. the close() abort-marker
     // write) already reconnected; nothing to do.
