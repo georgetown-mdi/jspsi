@@ -108,7 +108,17 @@ npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev -w packages/core
 
 The image now bundles `apps/web`'s runtime dependencies into the Nitro `.output`, so the SBOM includes `apps/web`. That `.output` is a tree-shaken subset, so the `apps/web` entry is a superset of what actually ships -- acceptable for a security SBOM, which errs toward listing more. `--omit=dev` stays: `apps/web`'s build tools are `devDependencies` and are not shipped.
 
-**This command currently fails** with `ESBOMPROBLEMS` on an unsatisfiable `crossws` peer range, and the same conflict also disables `npm ls --omit=dev`. It is an upstream prerelease conflict that clears without action here, and the local workarounds cost more than the BOM is worth; the diagnosis, the rejected fixes, and what to re-check after a `@tanstack/*` or `nitropack` bump are in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-crossws-peer-conflict-blocks-the-release-sbom). A release cut before it clears ships without an SBOM, so weigh that against waiting.
+**This command currently fails** with `ESBOMPROBLEMS` on an unsatisfiable `crossws` peer range, and the same conflict also disables `npm ls --omit=dev`. It is an upstream prerelease conflict that clears without action here, and the local workarounds cost more than the BOM is worth; the diagnosis, the rejected fixes, and what to re-check after a `@tanstack/*` or `nitropack` bump are in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-crossws-peer-conflict-blocks-the-release-sbom).
+
+If a release cannot wait for that to clear, drop `-w apps/web`:
+
+```sh
+npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev -w packages/core -w apps/cli > psilink-X.Y.Z.cdx.json
+```
+
+The conflict lives under `apps/web`, and the validity check is scoped to the selected workspaces, so this still generates. It covers the shipped CLI image's runtime tree in full, including every dependency the [Dependency Policy](../CONTRIBUTING.md#dependency-policy) names -- `@openmined/psi.js`, `@noble/curves`, `re2js`, `ssh2` and `ssh2-sftp-client`. What it omits is the web console's runtime set (the Nitro `.output`), so a release attaching this BOM must say so rather than let it read as complete.
+
+Do not reach for `@cyclonedx/cyclonedx-npm --ignore-npm-errors` as the workaround. It does produce a BOM despite the conflict, but run over this workspace it silently omits `@openmined/psi.js` -- the vendored crypto addon, and the entry a security SBOM most needs -- along with the rest of the workspace packages' trees. A BOM that looks complete and is missing the crypto dependency is worse than a scoped one that says what it left out.
 
 ### 10. Publish the GitHub Release
 
