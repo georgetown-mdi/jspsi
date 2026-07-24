@@ -66,6 +66,10 @@ jobs:
         with:
           languages: javascript-typescript
           build-mode: none
+          # Path scoping only; the config file holds the globs and the rationale
+          # (including one known, assessed shipped-source drop). Queries stay
+          # inline below, not in the config.
+          config-file: ./.github/codeql/codeql-config.yml
           # security-extended: broader security coverage than the default
           # code-scanning suite, without the maintainability and style queries
           # of security-and-quality (off-topic noise for a security control).

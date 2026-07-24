@@ -1,0 +1,22 @@
+# Scope CodeQL to shipped source, cutting the test-setup and tooling noise the
+# security-extended file-race, temp-file, and sanitization queries produce.
+# Excludes test files, repo scripts, and generated test-vector helpers.
+#
+# Known effect on the shipped-source alert count: three js/insecure-temporary-file
+# alerts in apps/cli/src/fileUtils.ts also drop. They are data-flow findings
+# whose SOURCE is a test -- accept.test.ts builds config/key paths under
+# os.tmpdir() and passes them to the writers -- so excluding the test removes the
+# flow's source and the sink alert with it. Assessed as test-rooted: production
+# writers target the operator's own directories, never os.tmpdir(), so no
+# production finding is hidden. A shipped-code-SOURCED finding is unaffected --
+# only findings sourced in the excluded files drop.
+#
+# Queries stay declared inline in the workflow (queries: security-extended), not
+# here; this file scopes paths only. The suspicion that moving queries into this
+# config is what dropped those alerts was a confound: the drop is the path
+# scoping above, independent of where the query suite is declared.
+paths-ignore:
+  - "**/test/**"
+  - "**/*.test.ts"
+  - "scripts/**"
+  - "**/vectors/**"
