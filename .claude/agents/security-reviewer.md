@@ -16,7 +16,9 @@ be continued -- every response you produce is your final message to the caller.
   material, protocol invariants, and user-facing copy that misstates
   confidentiality -- what data leaves the machine and what the interface claims
   about it.
-- Scope `git diff staging...HEAD` (three-dot) unless the brief widens it.
+- Scope the branch the brief names, by ref: `git diff "origin/staging...<branch>"`
+  (three-dot), never `HEAD` and never a checkout -- your session's checkout is not
+  reliably the branch under review. Widen only if the brief says to.
 - Verify every finding in the code before you report it. Speculation is not a
   finding.
 - "No findings" is an honest result; report it plainly when the diff earns it.
