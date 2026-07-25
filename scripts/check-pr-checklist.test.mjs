@@ -118,6 +118,13 @@ describe("PR checklist guard", () => {
     expect(v.some((m) => m.includes('no "## Checklist" section'))).toBe(true);
   });
 
+  // GitHub stores a body edited in the browser with CRLF endings, so this is the
+  // shape most PR bodies arrive in, not an exotic one.
+  it("reads a body stored with CRLF endings", () => {
+    expect(checklistViolations(passingBody.replace(/\n/g, "\r\n"))).toEqual([]);
+    expect(checklistViolations(passingBody.replace(/\n/g, "\r"))).toEqual([]);
+  });
+
   it("does not mistake a flag mention for the resolution separator", () => {
     const body = passingBody.replace(
       "-- n/a: bug fix, not a major feature",
@@ -405,5 +412,13 @@ describe("the check as the workflow runs it", () => {
     const r = runCli(resolvedBody, { GITHUB_ACTIONS: "true" });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("could not read the head sha");
+  });
+
+  it("passes a body stored with CRLF endings", () => {
+    const r = runCli(resolvedBody.replace(/\n/g, "\r\n"), {
+      GITHUB_ACTIONS: "true",
+      PR_HEAD_SHA: HEAD,
+    });
+    expect(r.status).toBe(0);
   });
 });

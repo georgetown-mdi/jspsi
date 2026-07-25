@@ -84,6 +84,19 @@ function sectionBounds(lines, heading) {
   return { start, end };
 }
 
+// GitHub stores a body edited in the browser with CRLF endings, and a carriage
+// return is a line terminator that `.` does not match: unnormalized, every
+// checklist line parses as no item at all and all three required lines read as
+// deleted, so a fully resolved body fails.
+function normalizeLineEndings(text) {
+  return text.replace(/\r\n?/g, "\n");
+}
+
+/** The body's lines as every rule reads them: endings normalized, comments blanked. */
+function bodyLines(text) {
+  return stripHtmlComments(normalizeLineEndings(text)).split("\n");
+}
+
 /**
  * Parse the Checklist section's items, or null when the section is absent.
  *
@@ -93,7 +106,7 @@ function sectionBounds(lines, heading) {
  * deleted line's presence requirement.
  */
 function checklistItems(text) {
-  const lines = stripHtmlComments(text).split("\n");
+  const lines = bodyLines(text);
   const section = sectionBounds(lines, /^##\s+Checklist\s*$/);
   if (section === null) return null;
 
@@ -193,7 +206,7 @@ function readClaimsPlaceholders() {
     ),
     "utf8",
   );
-  const lines = template.split("\n");
+  const lines = normalizeLineEndings(template).split("\n");
   const section = sectionBounds(lines, CLAIMS_HEADING);
   if (section === null) return [];
   const text = lines.slice(section.start + 1, section.end).join("\n");
@@ -205,7 +218,7 @@ const CLAIMS_GUIDANCE =
 
 /** Return the list of Claims-to-refute violations in PR body `text`. */
 export function claimsViolations(text) {
-  const lines = stripHtmlComments(text).split("\n");
+  const lines = bodyLines(text);
 
   const section = sectionBounds(lines, CLAIMS_HEADING);
   if (section === null) {
