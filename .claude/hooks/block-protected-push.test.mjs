@@ -103,8 +103,6 @@ describe("block-protected-push hook", () => {
   });
 
   it("strips every quote before reading the destination", () => {
-    // A first/last-character strip left an inner quote, so the destination read
-    // back as `'staging` and slipped through.
     expect(verdict("git push origin HEAD:'staging'").status).toBe(2);
     expect(verdict('git push "origin" "HEAD:staging"').status).toBe(2);
   });
