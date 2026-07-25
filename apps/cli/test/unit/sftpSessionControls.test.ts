@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   createSftpSessionControls,
+  type ClosableSocket,
   type DroppableConnection,
 } from "../sftpServer/sessionControls";
 
@@ -120,6 +121,105 @@ describe("SFTP session controls: wall-clock caps and forced drops", () => {
     controls.recordOp(conn); // re-reads maxIdleMs and clears the idle timer
     vi.advanceTimersByTime(100);
     expect(end).not.toHaveBeenCalled();
+  });
+});
+
+describe("SFTP session controls: withheld close", () => {
+  function stubSocket(): {
+    socket: ClosableSocket;
+    end: ReturnType<typeof vi.fn>;
+    destroy: ReturnType<typeof vi.fn>;
+  } {
+    const end = vi.fn();
+    const destroy = vi.fn();
+    return { socket: { end, destroy }, end, destroy };
+  }
+
+  test("an accepted socket keeps its real closers while the control is off", () => {
+    const controls = createSftpSessionControls();
+    const { socket, end, destroy } = stubSocket();
+    controls.onConnectionAccepted(socket);
+    socket.end();
+    socket.destroy();
+    expect(end).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test("an armed control leaves an accepted connection unable to close itself", () => {
+    const controls = createSftpSessionControls();
+    const { socket, end, destroy } = stubSocket();
+    controls.withholdCloseOnDisconnect = true;
+    controls.onConnectionAccepted(socket);
+    // Whatever the server does with the client's disconnect, nothing reaches the
+    // wire: the client is left in half-close, waiting for a close that never comes.
+    socket.end();
+    socket.destroy();
+    expect(end).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  test("the control governs connections accepted while it is set, not earlier ones", () => {
+    const controls = createSftpSessionControls();
+    const earlier = stubSocket();
+    controls.onConnectionAccepted(earlier.socket);
+    controls.withholdCloseOnDisconnect = true;
+    const later = stubSocket();
+    controls.onConnectionAccepted(later.socket);
+
+    earlier.socket.end();
+    later.socket.end();
+    expect(earlier.end).toHaveBeenCalledTimes(1);
+    expect(later.end).not.toHaveBeenCalled();
+  });
+
+  test("stopping hands the real closers back so a teardown can complete", () => {
+    // The backend's stop() force-closes its tracked connections because
+    // server.close() waits for them; a silenced socket would leave that wait
+    // hanging, so this is what keeps teardown terminating.
+    const controls = createSftpSessionControls();
+    const { socket, end, destroy } = stubSocket();
+    controls.withholdCloseOnDisconnect = true;
+    controls.onConnectionAccepted(socket);
+    controls.stopWithholdingCloses();
+
+    socket.end();
+    socket.destroy();
+    expect(end).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test("a socket accepted twice is silenced once, so stopping reaches the real closers", () => {
+    const controls = createSftpSessionControls();
+    const { socket, end } = stubSocket();
+    controls.withholdCloseOnDisconnect = true;
+    controls.onConnectionAccepted(socket);
+    controls.onConnectionAccepted(socket);
+    controls.stopWithholdingCloses();
+
+    socket.end();
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  test("stopping also disarms the control, so a later connection closes normally", () => {
+    // Teardown typically dials once more (the pre-drain reconnect); leaving the
+    // control armed would silence that connection in turn and hang the close that
+    // follows it.
+    const controls = createSftpSessionControls();
+    controls.withholdCloseOnDisconnect = true;
+    controls.onConnectionAccepted(stubSocket().socket);
+    controls.stopWithholdingCloses();
+
+    const later = stubSocket();
+    controls.onConnectionAccepted(later.socket);
+    later.socket.end();
+    expect(controls.withholdCloseOnDisconnect).toBe(false);
+    expect(later.end).toHaveBeenCalledTimes(1);
+  });
+
+  test("an unreachable socket is tolerated rather than throwing", () => {
+    const controls = createSftpSessionControls();
+    controls.withholdCloseOnDisconnect = true;
+    expect(() => controls.onConnectionAccepted(undefined)).not.toThrow();
   });
 });
 

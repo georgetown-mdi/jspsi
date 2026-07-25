@@ -68,33 +68,55 @@ const SSH_FX_FAILURE = 4;
 // a liveness backstop, not a tunable, exactly like the other SFTP liveness bounds.
 const EPHEMERAL_RELEASE_CLOSE_TIMEOUT_MS = 5_000;
 
+// Upper bound (ms) on how long the release's forced close (see
+// {@link SSH2SFTPClientAdapter.releaseForIdle}) waits for the ssh2 Client's
+// 'close' after destroying the socket beneath it. Destroying a local socket
+// reaches that 'close' in single-digit milliseconds -- there is no peer to wait
+// for, which is the whole point of forcing it -- so this bounds only the case
+// where a Client stopped emitting 'close' on a destroyed socket, keeping that out
+// of the poll loop's idle boundary. It is the one bound armed on a REF'D timer
+// (see awaitClientClose), because the destroyed socket it waits on leaves no
+// ref'd handle of its own. Deliberately not operator-configurable, like every
+// other SFTP liveness bound.
+const EPHEMERAL_FORCED_CLOSE_TIMEOUT_MS = 1_000;
+
+// The ssh2 Client's underlying net.Socket, which the adapter reaches directly for
+// what ssh2 does not expose. Every member is optional so a relocated or
+// non-net.Socket transport reads undefined at each site; what that site does with
+// it differs -- setKeepAlive warns and continues, while the members the
+// connection-per-poll release drives are verified at connect time and fail the
+// dial (see resolveIdleReleaseSeams).
+interface Ssh2ClientSocket {
+  // ssh2 exposes setNoDelay but not setKeepAlive, so connect()'s kernel TCP
+  // keepalive backstop reaches the socket for it.
+  setKeepAlive?(enable: boolean, initialDelay: number): void;
+  // Node's own half-close flags, read by the connection-per-poll release to tell
+  // WHO ended the transport. `readableEnded` is true once the peer's FIN has been
+  // consumed (the peer began the teardown, so what follows is a server-side drop
+  // rather than this adapter's release); `writableEnded` is true once this side has
+  // ended it (ssh2's Client.end() calls _sock.end()). See releaseForIdle().
+  readableEnded?: boolean;
+  writableEnded?: boolean;
+  // net.Socket's own unconditional teardown, which -- unlike end() -- needs nothing
+  // from the peer. The connection-per-poll release drives it on a transport its
+  // end() already ended but whose close the partner withheld, so the ssh2 Client's
+  // 'close' fires and the session clears. See forceCloseEndedTransport().
+  destroy?(): void;
+}
+
 // Typed interface for the internal ssh2 SFTPWrapper that ssh2-sftp-client
 // exposes as `this.sftp`. Defined at file scope so connect(), createExclusive(),
 // and list() can share it without repeating the declaration.
 interface Ssh2SftpClientInternals {
   // The underlying ssh2 Client instance. ssh2-sftp-client constructs it as
   // `this.client` and drives every connection through it; its public
-  // setNoDelay(boolean) toggles TCP_NODELAY on the live socket. `_sock` is the
-  // ssh2 Client's underlying net.Socket, whose setKeepAlive(enable, initialDelay)
-  // enables kernel TCP keepalive -- ssh2 exposes setNoDelay but not setKeepAlive,
-  // so the keepalive backstop reaches the socket directly. Both are optional so
-  // the guarded calls in connect() can warn-and-continue (each is transport
-  // hygiene, not a correctness requirement) if an upgrade relocates them.
+  // setNoDelay(boolean) toggles TCP_NODELAY on the live socket, and `_sock` is the
+  // socket beneath it ({@link Ssh2ClientSocket}). Both are optional so the guarded
+  // calls in connect() can warn-and-continue (each is transport hygiene, not a
+  // correctness requirement) if an upgrade relocates them.
   client?: {
     setNoDelay(noDelay: boolean): void;
-    _sock?: {
-      setKeepAlive?(enable: boolean, initialDelay: number): void;
-      // Node's own net.Socket half-close flags, read by the connection-per-poll
-      // release to tell WHO ended the transport. `readableEnded` is true once the
-      // peer's FIN has been consumed (the peer began the teardown, so what follows
-      // is a server-side drop rather than this adapter's release);
-      // `writableEnded` is true once this side has ended it (ssh2's Client.end()
-      // calls _sock.end()). Optional, so a relocated or non-net.Socket transport
-      // reads undefined and each check falls back to its unguarded behavior rather
-      // than throwing. See releaseForIdle().
-      readableEnded?: boolean;
-      writableEnded?: boolean;
-    };
+    _sock?: Ssh2ClientSocket;
     // The ssh2 Client is an EventEmitter; the adapter registers a persistent
     // 'keyboard-interactive' listener on it to answer a server that authenticates
     // that method (see attachKeyboardInteractive). Typed narrowly to the one
@@ -115,9 +137,9 @@ interface Ssh2SftpClientInternals {
     // server drop) and awaits its 'close' to know the session is torn down;
     // removeListener drops that wait when the close never lands, so the shared
     // Client does not accumulate one listener per released cycle. All three are on
-    // the ssh2 Client's EventEmitter surface; typed optional so the guarded
-    // release can warn-and-hold if an upgrade relocates them. See
-    // releaseForIdle().
+    // the ssh2 Client's EventEmitter surface; typed optional so an upgrade that
+    // relocates them fails the connect-time seam check rather than the type.
+    // See resolveIdleReleaseSeams().
     once?(event: "close", listener: () => void): void;
     removeListener?(event: "close", listener: () => void): void;
     end?(): void;
@@ -248,8 +270,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // single path every re-establishment goes through -- so a failed dial leaves it
   // set and a genuine drop after a completed re-establishment is counted and warned
   // as one. Never held where nothing was deliberately ended: releaseForIdle's early
-  // returns (an already absent session, or a held one), a throwing end(), a release
-  // that finds the PEER already tearing the connection down, and a release whose
+  // return on an already absent session, a throwing end(), a release that finds
+  // the PEER already tearing the connection down, and a release whose
   // close never landed on a transport its end() left writable -- the one branch
   // where the session may genuinely still be live -- all of which are or precede a
   // real drop that must stay classifiable as one.
@@ -283,6 +305,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // and the end-of-run summary's mid-exchange sub-count (midExchangeReconnectCount).
   // A plain operational counter, never a partner-controlled value.
   private midExchangeRedials = 0;
+  // Idle-boundary releases this adapter forced closed itself, and the session
+  // cleared, because the partner withheld its close past the release's bound (see
+  // releaseForIdle). Drives that path's warn cadence (SFTP_REDIAL_WARN_INTERVAL):
+  // a partner that never closes forces one every cycle, so an unpaced warning
+  // would fill an hours-long exchange's log. A plain operational counter, never a
+  // partner-controlled value.
+  private forcedReleases = 0;
   private transportRetries = 0;
   // The per-operation liveness bound (ms) every server-driven op is held to. See
   // the constructor's stallDeadlineMs doc for the test-seam and
@@ -407,6 +436,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    */
   get transportRetryCount(): number {
     return this.transportRetries;
+  }
+
+  /**
+   * Idle boundaries at which the partner's SFTP server did not close the
+   * connection within the release's bound, so the connection-per-poll release
+   * ended the boundary itself (see {@link releaseForIdle}). NOT a reconnection
+   * and not a lost session: the mode's own boundary, deliberate on both the
+   * release and the dial that follows it, and therefore absent from
+   * {@link reconnectCount}. 0 in every other mode and against a server that
+   * closes on request. A plain operational counter, never a partner-controlled
+   * value.
+   */
+  get forcedReleaseCount(): number {
+    return this.forcedReleases;
   }
 
   /**
@@ -1026,20 +1069,23 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
 
   // Publish an in-flight idle-boundary release to releaseInFlight, the way
   // publishRedial publishes a dial, so a concurrent op, ensureConnected, re-dial, or
-  // end() serializes behind the close instead of racing the window in which the
+  // end() serializes behind the release instead of racing the window in which the
   // session still reads live (see `releaseInFlight`). MUST be called before the ssh2
   // Client's end() is driven, so an op arriving immediately after that end() can
   // already see the release. Self-clears once this same release settles, so a later
   // caller is never held by a stale one.
+  //
+  // The clear runs in the release's own settle reaction rather than a chained
+  // finally, so it lands before anything awaiting the releaseForIdle that published
+  // it: a caller resuming on a release that has finished must not still read one in
+  // flight, or its next operation waits out a release that is already over and
+  // re-establishes a session the release never closed.
   private publishRelease(release: Promise<void>): void {
-    const tracked = release.then(
-      () => {},
-      () => {},
-    );
-    this.releaseInFlight = tracked;
-    void tracked.finally(() => {
+    const discharge = (): void => {
       if (this.releaseInFlight === tracked) this.releaseInFlight = undefined;
-    });
+    };
+    const tracked: Promise<void> = release.then(discharge, discharge);
+    this.releaseInFlight = tracked;
   }
 
   // SSH_FX_NO_SUCH_FILE: the source-absent status ssh2-sftp-client surfaces as the
@@ -1172,6 +1218,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
             `the ssh2-sftp-client changelog`,
         );
     }
+    // The connection-per-poll idle release reaches past the public API for seams
+    // of its own; verify them here on the same terms and for the same reason,
+    // while the mode that drives them is the mode being connected. The default
+    // held-session mode touches none of them, so it is not held to them.
+    if (this.ephemeralSessions) this.resolveIdleReleaseSeams(internals);
     // Attach the guarded fatal-'error' listener to the raw wrapper now, while it
     // is known present and callable, so a malformed server reply can never crash
     // the process. See attachFatalErrorListener for the full rationale and the
@@ -1255,11 +1306,18 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * re-dial. A no-op when the mode is off, during teardown, or when no session is
    * live. Awaits the 'close' so the release is complete before the loop idles.
    *
+   * A partner that accepts the disconnect and never closes the connection leaves
+   * that 'close' outstanding past the bound, on a transport `end()` has already
+   * ended. The release does not hand that state to the next cycle -- it forces the
+   * socket closed itself, so the session clears and the cycle re-dials (see
+   * {@link forceCloseEndedTransport}).
+   *
    * The poll loop AWAITS this call and core forwards it unwrapped, outside the
    * per-operation `peerTimeoutMs` budget, so nothing above bounds it: its own
-   * duration is the loop's liveness bound. Only the close carries a ceiling, the
-   * local {@link EPHEMERAL_RELEASE_CLOSE_TIMEOUT_MS} backstop. The wait that
-   * precedes it does not: an in-flight dial ordinarily spends connect()'s whole
+   * duration is the loop's liveness bound. The close carries the
+   * {@link EPHEMERAL_RELEASE_CLOSE_TIMEOUT_MS} ceiling and the forced close that
+   * may follow it the {@link EPHEMERAL_FORCED_CLOSE_TIMEOUT_MS} one. The wait that
+   * precedes both does not: an in-flight dial ordinarily spends connect()'s whole
    * budget (`max_reconnect_attempts` attempts, each up to the connect timeout:
    * around a minute at the defaults, longer if the operator raises that setting),
    * but a dial ssh2 has deferred behind a 'close' it never sees may not settle at
@@ -1305,114 +1363,226 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // No held session to keep warm across the idle gap.
     this.heartbeat.stop();
     const internals = this.client as unknown as Ssh2SftpClientInternals;
-    const rawClient = internals.client;
-    if (!internals.sftp || rawClient === undefined) return;
-    if (
-      typeof rawClient.end !== "function" ||
-      typeof rawClient.once !== "function" ||
-      typeof rawClient.removeListener !== "function"
-    ) {
-      // An upgrade relocated the ssh2 Client's end()/once()/removeListener(): hold
-      // the session this cycle (correct, just not released) rather than failing the
-      // exchange. Re-verify on any ssh2 upgrade per docs/spec/DEPENDENCY_PINS.md.
-      this.log.warn(
-        "ssh2 client end()/once()/removeListener() unavailable; the ephemeral " +
-          "SFTP session is held this cycle instead of released. Check the ssh2 " +
-          "changelog.",
-      );
-      return;
-    }
-    const end = rawClient.end.bind(rawClient);
-    const once = rawClient.once.bind(rawClient);
-    const removeListener = rawClient.removeListener.bind(rawClient);
+    if (!internals.sftp) return;
+    const { end, once, removeListener, destroy, socket } =
+      this.resolveIdleReleaseSeams(internals);
     // The PEER started this teardown: its FIN has already been consumed, so ssh2
     // has emitted 'end' and the 'close' is on its way, and the end() below closes
     // nothing. ssh2-sftp-client's global 'end' listener leaves `sftp` set, so the
     // release runs its course as usual -- but it must not latch, because what
     // cleared the session was a server-side drop and the operator has to see it
     // counted and warned as one.
-    const peerEndedTransport = rawClient._sock?.readableEnded === true;
+    const peerEndedTransport = socket.readableEnded === true;
     if (!peerEndedTransport) this.idleReleased = true;
-    let finish!: () => void;
-    const closed = new Promise<void>((resolve) => {
-      finish = resolve;
+    // The published release spans the WHOLE call, not just the wait for the ssh2
+    // Client's 'close': the forced close below runs past that wait with the session
+    // still reading live, so an operation arriving inside it must serialize behind
+    // the state this call ends in rather than the state the bound expired in.
+    let finishRelease!: () => void;
+    const released = new Promise<void>((resolve) => {
+      finishRelease = resolve;
     });
-    this.publishRelease(closed);
-    let settled = false;
-    const settle = (): void => {
-      if (settled) return;
-      settled = true;
-      finish();
-    };
-    const timer = setTimeout(settle, EPHEMERAL_RELEASE_CLOSE_TIMEOUT_MS);
-    // The bound is the safety net, not real work: unref'd so it never holds a
-    // healthy process open (the deliberately-unref'd SFTP-liveness-timer
-    // contract), and cleared the instant 'close' fires.
-    timer.unref();
+    this.publishRelease(released);
+    try {
+      try {
+        await this.awaitClientClose(
+          once,
+          removeListener,
+          EPHEMERAL_RELEASE_CLOSE_TIMEOUT_MS,
+          end,
+          false,
+        );
+      } catch (error: unknown) {
+        // Nothing was ended, so drop the latch and surface the failure: a latch left
+        // set would exempt a later genuine drop from the count and the warning.
+        this.idleReleased = false;
+        throw error;
+      }
+      if (!internals.sftp) return;
+      // ssh2-sftp-client's global 'close' listener has not run, so the backstop
+      // settled that wait rather than the ssh2 Client's 'close'. Which state that is
+      // turns on whether the transport was ended, so it is a branch on the socket
+      // rather than a claim in a comment.
+      if (socket.writableEnded === false) {
+        // The transport this adapter's end() should have ended is still writable, so
+        // this is the one branch where the session may genuinely be live and held
+        // across the idle gap. Drop the latch: it may only stand over a session
+        // something deliberately ended, and exempting a live session's next drop from
+        // the counters and the operator warning is the misreport it exists to prevent.
+        this.idleReleased = false;
+        this.log.warn(
+          "The connection-per-poll idle release did not close the SFTP session " +
+            "and its transport is still writable, which the ssh2 client's end() " +
+            "should have ended: the session may still be live and held across " +
+            "this idle gap, which is the one thing this mode exists to prevent. " +
+            "Check the ssh2 changelog.",
+        );
+        return;
+      }
+      await this.forceCloseEndedTransport(
+        internals,
+        destroy,
+        once,
+        removeListener,
+      );
+    } finally {
+      finishRelease();
+    }
+  }
+
+  // Arm a wait for the ssh2 Client's 'close', drive a teardown action, and resolve
+  // once that 'close' lands or `timeoutMs` expires -- the shape both the release's
+  // end() and its forced close need.
+  //
+  // The listener is armed BEFORE the action runs, so a synchronous 'close' cannot
+  // land in the gap, and removed however the wait settles: against a server that
+  // withholds its close the wait expires every cycle, and an un-removed listener
+  // per cycle piles up on the shared ssh2 Client (ssh2-sftp-client keeps one across
+  // reconnects) until Node reports a listener leak. A throw out of `drive`
+  // propagates with the wait already dismantled, so nothing is left pending.
+  //
+  // `holdProcessAlive` decides whether the bound's own timer is ref'd. The release's
+  // end() wait leaves it unref'd (the deliberately-unref'd SFTP-liveness-timer
+  // contract): it waits on a half-ended socket, itself a ref'd handle, so the wait
+  // is observable without the timer's help. The forced close is the deviation, and
+  // it is what makes its bound a bound at all: it waits on a socket it has just
+  // DESTROYED, which leaves no ref'd handle behind it, so an unref'd timer would let
+  // the process exit -- silently, mid-exchange, code 0 -- in exactly the case the
+  // bound exists for (measured both ways).
+  private async awaitClientClose(
+    once: (event: "close", listener: () => void) => void,
+    removeListener: (event: "close", listener: () => void) => void,
+    timeoutMs: number,
+    drive: () => void,
+    holdProcessAlive: boolean,
+  ): Promise<void> {
+    let settle!: () => void;
+    const closed = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const timer = setTimeout(settle, timeoutMs);
+    // The bound is the safety net, not real work, and it is cleared the instant
+    // 'close' fires; a second of it is no meaningful hold on a healthy process.
+    if (!holdProcessAlive) timer.unref();
     const onClose = (): void => {
       clearTimeout(timer);
       settle();
     };
     once("close", onClose);
     try {
-      end();
+      drive();
     } catch (error: unknown) {
-      // Nothing was ended and nothing will settle the published release, so settle
-      // it here, drop the wait and the latch, and surface the failure: leaving the
-      // release pending would stall the next op's gate for the whole close bound,
-      // leaving the listener would add one to the shared client per failed cycle,
-      // and leaving the latch set would exempt a later genuine drop from the count.
       clearTimeout(timer);
       removeListener("close", onClose);
-      settle();
-      this.idleReleased = false;
       throw error;
     }
     await closed;
-    // A no-op when the 'close' already fired and consumed it; load-bearing when the
-    // backstop won instead, since the release is retried every cycle against a
-    // server that withholds its close and the listeners would otherwise pile up on
-    // the shared ssh2 Client until Node warns about the leak.
     removeListener("close", onClose);
+  }
+
+  // The seams the connection-per-poll idle release drives past the public API: the
+  // ssh2 Client's own end()/once()/removeListener(), and on the socket beneath it
+  // net.Socket's destroy() plus Node's writableEnded flag. connect() resolves them
+  // once so an upgrade that relocates any of them fails the dial with one
+  // actionable error rather than silently changing what an idle boundary does, and
+  // the release resolves them again where it uses them; going through this one
+  // site is what keeps the check and the use from drifting apart. Re-verify on any
+  // ssh2 / ssh2-sftp-client upgrade per docs/spec/DEPENDENCY_PINS.md.
+  private resolveIdleReleaseSeams(internals: Ssh2SftpClientInternals): {
+    end: () => void;
+    once: (event: "close", listener: () => void) => void;
+    removeListener: (event: "close", listener: () => void) => void;
+    destroy: () => void;
+    socket: Ssh2ClientSocket;
+  } {
+    const client = internals.client;
+    if (typeof client?.end !== "function")
+      throw this.idleReleaseSeamError("client.end()");
+    if (typeof client.once !== "function")
+      throw this.idleReleaseSeamError("client.once()");
+    if (typeof client.removeListener !== "function")
+      throw this.idleReleaseSeamError("client.removeListener()");
+    const socket = client._sock;
+    if (typeof socket?.destroy !== "function")
+      throw this.idleReleaseSeamError("client._sock.destroy()");
+    if (typeof socket.writableEnded !== "boolean")
+      throw this.idleReleaseSeamError("client._sock.writableEnded");
+    return {
+      end: client.end.bind(client),
+      once: client.once.bind(client),
+      removeListener: client.removeListener.bind(client),
+      destroy: socket.destroy.bind(socket),
+      socket,
+    };
+  }
+
+  private idleReleaseSeamError(seam: string): Error {
+    return new Error(
+      `connection-per-poll mode drives ssh2's ${seam}, which is not available ` +
+        `after connect(); the installed ssh2 / ssh2-sftp-client version may ` +
+        `have renamed, relocated, or removed it - re-verify the internal ` +
+        `premises per the "Upgrading the SFTP Stack" checklist in ` +
+        `docs/spec/DEPENDENCY_PINS.md`,
+    );
+  }
+
+  // The partner accepted the disconnect and never closed the connection, so the
+  // release's own end() left the transport ended (`writableEnded`) with the session
+  // still set: it can carry nothing, and the next cycle's ensureConnected reads it
+  // as live and skips the dial, which rides the cycle's first operation to the
+  // per-operation liveness deadline -- terminal. Force the socket closed instead:
+  // destroy() needs nothing from the peer, and the ssh2 Client's 'close' that
+  // follows is what fires ssh2-sftp-client's global listener to clear the session,
+  // leaving the next cycle a dial to make. The caller's latch stands across this:
+  // the boundary is the mode's own, not a server-side drop.
+  //
+  // That the destroyed transport takes the session with it is the one premise here
+  // connect() cannot check -- nothing at connect time destroys the socket -- so it
+  // is read back and raised where it is driven, and the boundary is counted only
+  // when it holds.
+  private async forceCloseEndedTransport(
+    internals: Ssh2SftpClientInternals,
+    destroy: () => void,
+    once: (event: "close", listener: () => void) => void,
+    removeListener: (event: "close", listener: () => void) => void,
+  ): Promise<void> {
+    await this.awaitClientClose(
+      once,
+      removeListener,
+      EPHEMERAL_FORCED_CLOSE_TIMEOUT_MS,
+      destroy,
+      true,
+    );
     if (internals.sftp) {
-      // ssh2-sftp-client's global 'close' listener has not run, so the backstop
-      // settled this release rather than the ssh2 Client's 'close'. Which of the two
-      // states that is turns on whether the transport was ended, so it is a branch
-      // on the socket rather than a claim in a comment; re-verify on any ssh2
-      // upgrade per docs/spec/DEPENDENCY_PINS.md.
-      if (rawClient._sock?.writableEnded === true) {
-        // Reachable against a server that withholds its FIN, since Client.end() ends
-        // the socket and the Client emits 'close' only from the socket's own. The
-        // session is NOT held in any useful sense -- the transport is ended, so it
-        // can serve nothing and only the far side's close is outstanding -- and
-        // there is no later genuine loss of it left to misclassify, so the latch
-        // stands.
-        this.log.warn(
-          "The connection-per-poll idle release ended the SFTP session's " +
-            "transport, but the partner server did not close the connection " +
-            "within the release's bound -- typically a server that leaves " +
-            "connections half-open. That session can carry nothing further, and " +
-            "the next poll cycle will not replace it: the cycle-start re-dial " +
-            "runs only once the session is cleared, which the partner's close is " +
-            "what does. Until it lands, operations issued on that session stall " +
-            "out at the per-operation liveness deadline, which ends the exchange.",
-        );
-        return;
-      }
-      // The transport this adapter's end() should have ended is still writable, so
-      // this is the one branch where the session may genuinely be live and held
-      // across the idle gap. Drop the latch: it may only stand over a session
-      // something deliberately ended, and exempting a live session's next drop from
-      // the counters and the operator warning is the misreport it exists to prevent.
+      // Drop the latch on the way out, as every other failing path here does: it
+      // may only stand over a session something deliberately ended, and this one
+      // did not end.
       this.idleReleased = false;
-      this.log.warn(
-        "The connection-per-poll idle release did not close the SFTP session " +
-          "and its transport is still writable, which the ssh2 client's end() " +
-          "should have ended: the session may still be live and held across " +
-          "this idle gap, which is the one thing this mode exists to prevent. " +
-          "Check the ssh2 changelog.",
+      throw new Error(
+        `the connection-per-poll idle release destroyed the SFTP session's ` +
+          `transport and the session did not clear within ` +
+          `${EPHEMERAL_FORCED_CLOSE_TIMEOUT_MS} ms; the installed ssh2 may no ` +
+          `longer emit the client 'close' that clears it - re-verify the ` +
+          `internal premises per the "Upgrading the SFTP Stack" checklist in ` +
+          `docs/spec/DEPENDENCY_PINS.md`,
       );
     }
+    // A partner that never closes forces one of these every cycle, so the operator
+    // hears it on the cadence a chronic mid-exchange re-dial gets: the first, then
+    // every SFTP_REDIAL_WARN_INTERVAL-th. Nothing was lost and nothing leaks, so
+    // pacing it costs the operator nothing.
+    this.forcedReleases += 1;
+    const count = this.forcedReleases;
+    if (count === 1 || count % SFTP_REDIAL_WARN_INTERVAL === 0)
+      this.log.warn(
+        `The partner's SFTP server did not close the connection within the ` +
+          `connection-per-poll idle release's bound -- a server that leaves ` +
+          `connections half-open, or one merely slower to answer than the ` +
+          `bound allows for. The release closed it from this side and the next ` +
+          `poll cycle dials a fresh session; the exchange continues (${count} ` +
+          `idle ${count === 1 ? "boundary" : "boundaries"} closed this way so ` +
+          `far this exchange).`,
+      );
   }
 
   /**
