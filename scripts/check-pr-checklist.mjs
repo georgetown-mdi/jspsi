@@ -277,7 +277,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     );
     process.exit(2);
   }
-  const violations = bodyViolations(body, prHeadSha());
+  // On the runner the head must be readable, or the attestation degrades to a
+  // presence check and a green result would mean nothing: say so and stop
+  // instead of passing quietly.
+  const headSha = prHeadSha();
+  if (headSha === null && process.env.GITHUB_ACTIONS === "true") {
+    console.error(
+      "PR description check could not read the head sha from the workflow event payload, so the Security review line's attestation cannot be verified.",
+    );
+    process.exit(2);
+  }
+  const violations = bodyViolations(body, headSha);
   if (violations.length > 0) {
     console.error(
       `PR description check failed (${violations.length} issue${violations.length === 1 ? "" : "s"}):\n`,

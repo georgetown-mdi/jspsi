@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -309,5 +310,53 @@ describe("the shipped PR template", () => {
 
   it("never passes unresolved", () => {
     expect(bodyViolations(template, HEAD).length).toBeGreaterThan(0);
+  });
+});
+
+const SCRIPT = fileURLToPath(
+  new URL("./check-pr-checklist.mjs", import.meta.url),
+);
+
+// The script as the workflow runs it: a real subprocess with a controlled
+// environment, so the exit codes and the runner's head resolution are exercised
+// rather than assumed.
+function runCli(bodyText, env) {
+  const dir = mkdtempSync(join(tmpdir(), "pr-body-"));
+  const file = join(dir, "body.md");
+  writeFileSync(file, bodyText);
+  try {
+    execFileSync(process.execPath, [SCRIPT, file], { encoding: "utf8", env });
+    return { status: 0, stderr: "" };
+  } catch (error) {
+    return { status: error.status, stderr: error.stderr };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("the check as the workflow runs it", () => {
+  const resolvedBody = `${claimsSection}\n${passingBody}`;
+
+  it("passes a resolved body attesting the head", () => {
+    const r = runCli(resolvedBody, {
+      GITHUB_ACTIONS: "true",
+      PR_HEAD_SHA: HEAD,
+    });
+    expect(r.status).toBe(0);
+  });
+
+  it("fails a body attesting anything else", () => {
+    const r = runCli(resolvedBody, {
+      GITHUB_ACTIONS: "true",
+      PR_HEAD_SHA: "f".repeat(40),
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("is not this PR's head");
+  });
+
+  it("refuses to pass on a runner whose head it cannot read", () => {
+    const r = runCli(resolvedBody, { GITHUB_ACTIONS: "true" });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("could not read the head sha");
   });
 });
