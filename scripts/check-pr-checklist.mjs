@@ -13,7 +13,8 @@
 //      once: a second copy hides whatever the first one's rules would have read.
 //   2. No box may be left unchecked: `- [ ]` means unresolved.
 //   3. The three required lines (Docs, CHANGELOG.md, Security review) must each
-//      be present -- the template says "Do not delete lines here".
+//      open a line of their own -- the template says "Do not delete lines here"
+//      -- so prose naming one inside another line cannot stand in for it.
 //   4. Every checked line must carry a `-- <resolution>` clause with real text.
 //   5. An n/a resolution must be `n/a: <reason>` with a non-empty reason; a bare
 //      "n/a" (or "n/a" plus punctuation only) earns nothing.
@@ -21,13 +22,12 @@
 // The Claims to refute section is the same shape of obligation for the
 // description's assertions about its own code: nothing else in the process reads
 // a PR's claims against the code, so the section must exist once and say
-// something --
-// the enumerated claims, or `none -- <reason>`. A bare "none" fails exactly as a
-// bare "n/a" does, and so does a line still carrying one of the template's own
-// placeholders verbatim. The none test reads what a line renders as, not what it
-// means: it collapses the spellings of an unreasoned none, while a sentence that
-// says nothing at length passes it -- that, like whether an enumerated claim is
-// true, is a review call.
+// something -- the enumerated claims, or `none -- <reason>`. A bare "none" fails
+// exactly as a bare "n/a" does, and so does a line still carrying one of the
+// template's own placeholders verbatim. The none test reads what a line renders
+// as, not what it means: it collapses the spellings of an unreasoned none, while
+// a sentence that says nothing at length passes it -- that, like whether an
+// enumerated claim is true, is a review call.
 //
 // The Security review line additionally names the sha it reviewed, and that sha
 // must be the PR head. pr_checklist.yaml re-runs on `synchronize`, so a commit
@@ -43,11 +43,18 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-/** The checklist lines the template requires, matched by a stable substring. */
+/** The template's Security review line, whose sha the attestation gate reads. */
+const REVIEW_PREFIX = "Security review";
+
+/**
+ * The checklist lines the template requires, each matched by the literal text
+ * its label opens with: a mention inside another line -- "the Security review is
+ * recorded below" -- is prose, and can never stand in for the line itself.
+ */
 export const REQUIRED_LINES = [
-  { name: "Docs", substring: "Docs:" },
-  { name: "Changelog", substring: "CHANGELOG.md" },
-  { name: "Security review", substring: "Security review" },
+  { name: "Docs", prefix: "Docs:" },
+  { name: "Changelog", prefix: "CHANGELOG.md" },
+  { name: "Security review", prefix: REVIEW_PREFIX },
 ];
 
 // The `-- <resolution>` separator: `--` bounded by whitespace (or line end), so
@@ -61,8 +68,9 @@ const EMPHASIS_MARKERS = /[*_`~]/g;
  * Reduce a line to the answer it renders as. HTML tags, `&nbsp;`, the
  * backslashes of escaped punctuation, emphasis and code markers, an ordered-list
  * marker, and every leading and trailing character that is neither letter nor
- * digit come off, so `+ none`, `> none`, `(none)`, `<b>none</b>` and `None...`
- * are one spelling to judge rather than a list of renderings to chase.
+ * digit come off. The label, none, and n/a tests read this form, so `+ none`,
+ * `> none`, `(none)`, `<b>none</b>` and `None...` are one spelling to judge
+ * rather than a list of renderings to chase.
  */
 function renderedText(line) {
   return line
@@ -73,6 +81,11 @@ function renderedText(line) {
     .replace(/^\s*\d+[.)]\s*/, "")
     .replace(/^[^\p{L}\p{N}]+/u, "")
     .replace(/[^\p{L}\p{N}]+$/u, "");
+}
+
+/** Whether `label` opens with the template's `prefix`, however it is decorated. */
+function opensWith(label, prefix) {
+  return renderedText(label).toLowerCase().startsWith(prefix.toLowerCase());
 }
 
 /**
@@ -192,10 +205,10 @@ export function checklistViolations(text) {
     );
   }
 
-  for (const { name, substring } of REQUIRED_LINES) {
-    if (!items.some((item) => item.label.includes(substring))) {
+  for (const { name, prefix } of REQUIRED_LINES) {
+    if (!items.some((item) => opensWith(item.label, prefix))) {
       violations.push(
-        `required ${name} checklist line (matching "${substring}") is missing -- the template says "Do not delete lines here"`,
+        `required ${name} checklist line (opening "${prefix}") is missing -- the template says "Do not delete lines here"`,
       );
     }
   }
@@ -308,10 +321,13 @@ export function claimsViolations(text) {
   return [];
 }
 
-// A sha named on the Security review line: hex, abbreviated or full. Read from
-// the label rather than the resolution clause, so a hex string inside a reason
-// is never mistaken for the attestation.
-const ATTESTED_SHA = /\b([0-9a-f]{7,40})\b/i;
+// The attested sha, hex and abbreviated or full, read only from the slot the
+// template gives it -- `Security review of <sha>` at the head of the label. A
+// hex string anywhere else, in a parenthetical or a resolution clause, is prose
+// a reader weighs, not the commit this line attests. The suite runs this against
+// the shipped template, so a reword of that line fails here rather than quietly
+// leaving every attestation unread.
+const ATTESTED_SHA = /^Security review of\s+([0-9a-f]{7,40})\b/i;
 
 /**
  * Return the list of review-attestation violations in PR body `text`, given the
@@ -319,11 +335,17 @@ const ATTESTED_SHA = /\b([0-9a-f]{7,40})\b/i;
  * checks only that the line names a sha).
  */
 export function attestationViolations(text, headSha) {
-  const review = checklistItems(text)?.find((item) =>
-    item.label.includes("Security review"),
+  const reviews = (checklistItems(text) ?? []).filter((item) =>
+    opensWith(item.label, REVIEW_PREFIX),
   );
-  if (review === undefined) return []; // a deleted line is the checklist's finding
-  const attested = ATTESTED_SHA.exec(review.label)?.[1];
+  if (reviews.length === 0) return []; // a deleted line is the checklist's finding
+  if (reviews.length > 1) {
+    return [
+      `line ${reviews[1].line}: more than one Security review line -- keep the template's single line, so the sha the check reads is the sha a reader reads`,
+    ];
+  }
+  const [review] = reviews;
+  const attested = ATTESTED_SHA.exec(renderedText(review.label))?.[1];
   if (attested === undefined) {
     return [
       `line ${review.line}: the Security review line names no sha -- write "Security review of <sha>" with the commit the review read`,
@@ -341,16 +363,28 @@ export function attestationViolations(text, headSha) {
 }
 
 /**
+ * A head sha only when it is one. The event payload is JSON this script does not
+ * write, so a non-string or blank `head.sha` is a head it could not read -- not
+ * a head that happens to match nothing, which would leave the attestation
+ * comparison silently skipped and the run green.
+ */
+function readableSha(value) {
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+/**
  * The PR head sha this run checks against, from the event payload the workflow
  * already receives, or null when there is none (a local run against a file).
  */
 export function prHeadSha() {
-  if (process.env.PR_HEAD_SHA !== undefined) return process.env.PR_HEAD_SHA;
+  if (process.env.PR_HEAD_SHA !== undefined) {
+    return readableSha(process.env.PR_HEAD_SHA);
+  }
   const eventPath = process.env.GITHUB_EVENT_PATH;
   if (eventPath === undefined) return null;
   try {
     const event = JSON.parse(readFileSync(eventPath, "utf8"));
-    return event?.pull_request?.head?.sha ?? null;
+    return readableSha(event?.pull_request?.head?.sha);
   } catch {
     return null;
   }

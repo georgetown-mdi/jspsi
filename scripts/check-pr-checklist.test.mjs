@@ -126,6 +126,29 @@ describe("PR checklist guard", () => {
     );
   });
 
+  it("does not let prose naming a line stand in for the line", () => {
+    const body = passingBody
+      .split("\n")
+      .filter((line) => !line.startsWith("- [x] Security review"))
+      .join("\n")
+      .replace(
+        "-- updated docs/CLI.md",
+        `and the Security review of \`${HEAD}\` is recorded below -- updated docs/CLI.md`,
+      );
+    const v = checklistViolations(body);
+    expect(
+      v.some((m) => m.includes("required Security review checklist line")),
+    ).toBe(true);
+  });
+
+  it("matches a required line through its markdown decoration", () => {
+    const body = passingBody.replace(
+      "- [x] Docs:",
+      "- [x] **Docs**: _enumerated_",
+    );
+    expect(checklistViolations(body)).toEqual([]);
+  });
+
   // GitHub stores a body edited in the browser with CRLF endings, so this is the
   // shape most PR bodies arrive in, not an exotic one.
   it("reads a body stored with CRLF endings", () => {
@@ -381,6 +404,52 @@ describe("PR review attestation", () => {
     expect(v.some((m) => m.includes("names no sha"))).toBe(true);
   });
 
+  it("reads the sha from the template's slot, not from anywhere in the line", () => {
+    const stale = "fedcba9876543210fedcba9876543210fedcba98";
+    for (const label of [
+      `Security review (the review read \`${HEAD}\`)`,
+      `Security review of the branch tip \`${HEAD}\``,
+    ]) {
+      const body = passingBody.replace(`Security review of \`${HEAD}\``, label);
+      const v = attestationViolations(body, HEAD);
+      expect(
+        v.some((m) => m.includes("names no sha")),
+        label,
+      ).toBe(true);
+    }
+    const parenthesized = passingBody.replace(
+      `Security review of \`${HEAD}\``,
+      `Security review of \`${stale}\` (head is \`${HEAD}\`)`,
+    );
+    const v = attestationViolations(parenthesized, HEAD);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toContain(stale);
+  });
+
+  it("is not satisfied by another line naming the head", () => {
+    const stale = "fedcba9876543210fedcba9876543210fedcba98";
+    const body = passingBody
+      .replace(HEAD, stale)
+      .replace(
+        "-- updated docs/CLI.md",
+        `; the Security review of \`${HEAD}\` is recorded below -- updated docs/CLI.md`,
+      );
+    const v = attestationViolations(body, HEAD);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toContain(stale);
+  });
+
+  it("flags more than one Security review line", () => {
+    const body = passingBody.replace(
+      `- [x] Security review of \`${HEAD}\``,
+      `- [x] Security review of \`${HEAD}\` -- reviewed the parser\n- [x] Security review of \`${HEAD}\``,
+    );
+    const v = attestationViolations(body, HEAD);
+    expect(
+      v.some((m) => m.includes("more than one Security review line")),
+    ).toBe(true);
+  });
+
   it("leaves a deleted review line to the checklist check", () => {
     const body = passingBody
       .split("\n")
@@ -417,6 +486,20 @@ describe("PR review attestation", () => {
       expect(prHeadSha()).toBe(HEAD);
       process.env.PR_HEAD_SHA = "abc1234";
       expect(prHeadSha()).toBe("abc1234");
+      // A head that is not a readable sha is an unreadable head, not one that
+      // matches nothing: the caller must stop, not compare against it.
+      for (const unreadable of ["", "   "]) {
+        process.env.PR_HEAD_SHA = unreadable;
+        expect(prHeadSha()).toBe(null);
+      }
+      delete process.env.PR_HEAD_SHA;
+      for (const sha of [12345, false, [HEAD], { sha: HEAD }, null]) {
+        writeFileSync(
+          payload,
+          JSON.stringify({ pull_request: { head: { sha } } }),
+        );
+        expect(prHeadSha(), JSON.stringify(sha)).toBe(null);
+      }
     } finally {
       const [head, event] = saved;
       if (head === undefined) delete process.env.PR_HEAD_SHA;
@@ -489,6 +572,27 @@ describe("the check as the workflow runs it", () => {
     const r = runCli(resolvedBody, { GITHUB_ACTIONS: "true" });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("could not read the head sha");
+  });
+
+  it("refuses to pass on a payload head that is not a sha", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pr-event-"));
+    try {
+      for (const sha of [12345, false, [HEAD], ""]) {
+        const payload = join(dir, "event.json");
+        writeFileSync(
+          payload,
+          JSON.stringify({ pull_request: { head: { sha } } }),
+        );
+        const r = runCli(resolvedBody, {
+          GITHUB_ACTIONS: "true",
+          GITHUB_EVENT_PATH: payload,
+        });
+        expect(r.status, JSON.stringify(sha)).toBe(2);
+        expect(r.stderr).toContain("could not read the head sha");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("passes a body stored with CRLF endings", () => {
