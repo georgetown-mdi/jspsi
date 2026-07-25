@@ -7,6 +7,11 @@ name: PR Checklist
 # line" rule and its claims enumeration (the honesty of a reason or a claim stays a
 # review call) -- see scripts/check-pr-checklist.mjs for the rules.
 #
+# It also gates the review attestation: the Security review line names the sha it
+# reviewed, and the check fails while that sha is not the PR head, so a commit
+# pushed after a review leaves the PR red until the new head is reviewed and the
+# line updated.
+#
 # Kept as its own workflow (rather than a job in static_checks.yaml) because it
 # runs on `edited` too: fixing the PR body re-runs the check without pushing a
 # new commit. static_checks stays commit-triggered -- its results depend only on
