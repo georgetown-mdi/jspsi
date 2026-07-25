@@ -224,7 +224,10 @@ export function attestationViolations(text, headSha) {
       `line ${review.line}: the Security review line names no sha -- write "Security review of <sha>" with the commit the review read`,
     ];
   }
-  if (headSha !== null && !headSha.startsWith(attested.toLowerCase())) {
+  if (
+    typeof headSha === "string" &&
+    !headSha.toLowerCase().startsWith(attested.toLowerCase())
+  ) {
     return [
       `line ${review.line}: the Security review line attests ${attested}, which is not this PR's head (${headSha.slice(0, 12)}) -- review the head and update the sha`,
     ];

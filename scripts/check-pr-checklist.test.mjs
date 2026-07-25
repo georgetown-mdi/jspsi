@@ -253,12 +253,14 @@ describe("PR review attestation", () => {
 
   it("checks only that a sha is named when the head is unknown", () => {
     const stale = passingBody.replace(HEAD, "fedcba98765");
-    expect(attestationViolations(stale, null)).toEqual([]);
-    const v = attestationViolations(
-      passingBody.replace(HEAD, "the head"),
-      null,
-    );
-    expect(v.some((m) => m.includes("names no sha"))).toBe(true);
+    for (const unknown of [null, undefined]) {
+      expect(attestationViolations(stale, unknown)).toEqual([]);
+      const v = attestationViolations(
+        passingBody.replace(HEAD, "the head"),
+        unknown,
+      );
+      expect(v.some((m) => m.includes("names no sha"))).toBe(true);
+    }
   });
 
   it("reads the head from the workflow event payload", () => {
