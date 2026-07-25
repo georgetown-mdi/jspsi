@@ -107,21 +107,42 @@ function opensWith(label, prefix) {
   return renderedText(label).toLowerCase().startsWith(prefix.toLowerCase());
 }
 
+const COMMENT_OPEN = "<!--";
+const COMMENT_CLOSE = "-->";
+
+/** A run's newlines alone, so blanking it leaves every later line number intact. */
+function newlinesOf(text) {
+  return text.replace(/[^\n]/g, "");
+}
+
 /**
  * Blank out HTML comments while preserving line numbers, so the template's
  * example checklist lines inside guidance comments are never parsed as content.
  * An unterminated `<!--` comments out the rest of the body, matching GitHub's
  * rendering.
+ *
+ * Scanned opener to closer rather than matched with a lazy `<!--[\s\S]*?-->`,
+ * which rescans to the end of the body from every opener and so is quadratic in
+ * a run of them: a PR body may be 65536 characters of anything an author likes.
  */
 export function stripHtmlComments(text) {
-  let result = text.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ""));
-  const unterminated = result.indexOf("<!--");
-  if (unterminated !== -1) {
-    result =
-      result.slice(0, unterminated) +
-      result.slice(unterminated).replace(/[^\n]/g, "");
+  const parts = [];
+  let cursor = 0;
+  for (;;) {
+    const open = text.indexOf(COMMENT_OPEN, cursor);
+    if (open === -1) {
+      parts.push(text.slice(cursor));
+      return parts.join("");
+    }
+    parts.push(text.slice(cursor, open));
+    const close = text.indexOf(COMMENT_CLOSE, open + COMMENT_OPEN.length);
+    if (close === -1) {
+      parts.push(newlinesOf(text.slice(open)));
+      return parts.join("");
+    }
+    parts.push(newlinesOf(text.slice(open, close + COMMENT_CLOSE.length)));
+    cursor = close + COMMENT_CLOSE.length;
   }
-  return result;
 }
 
 // The guarded sections, named by the text their heading opens with. Only the

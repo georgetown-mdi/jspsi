@@ -472,6 +472,71 @@ describe("guarded section headings", () => {
   });
 });
 
+// The stripper's contract, written as the pattern it must agree with byte for
+// byte: each `<!--...-->` reduced to the newlines it spans, and an opener with
+// no closer blanking the rest of the body.
+function stripByPattern(text) {
+  const terminated = text.replace(/<!--[\s\S]*?-->/g, (m) =>
+    m.replace(/[^\n]/g, ""),
+  );
+  const unterminated = terminated.indexOf("<!--");
+  if (unterminated === -1) return terminated;
+  return (
+    terminated.slice(0, unterminated) +
+    terminated.slice(unterminated).replace(/[^\n]/g, "")
+  );
+}
+
+const COMMENT_FIXTURES = [
+  "",
+  "no comments here",
+  "a\n<!-- one\ntwo -->\nb",
+  "<!---->",
+  "<!-->",
+  "<!--->",
+  "<!----->",
+  "<!--a--><!--b-->",
+  "<!--a--> tail",
+  "lead <!--a-->",
+  "<!--a <!--b--> c",
+  "a\n<!-- open\n- [ ] example\n",
+  "<!--a--> <!-- open\nmore\n",
+  "-->",
+  "text --> more",
+  "<!--\n\n\n-->\n",
+  "<!--".repeat(64),
+  "<!-- a\n".repeat(64),
+  "<!--a-->".repeat(64),
+  "<!--a-->\n".repeat(64) + "<!-- open\ntail\n",
+];
+
+// GitHub caps a PR body at 65536 characters.
+const BODY_CHARACTER_CAP = 65536;
+
+describe("the comment stripper", () => {
+  it("blanks comments exactly as the pattern it stands in for", () => {
+    for (const fixture of COMMENT_FIXTURES) {
+      expect(
+        stripHtmlComments(fixture),
+        JSON.stringify(fixture.slice(0, 48)),
+      ).toBe(stripByPattern(fixture));
+    }
+  });
+
+  // A body of comment openers with no closer is the stripper's worst input: a
+  // lazy `<!--[\s\S]*?-->` rescans to the end of the body from every one of
+  // them. At the cap that is hundreds of milliseconds against one for a scan,
+  // and the whole guard pays it -- so the bound is on the guard, and it is
+  // stated per test because the default timeout is too loose to fail on it.
+  it("reads a body of comment openers at the size cap without a quadratic scan", () => {
+    const resolved = `${claimsSection}\n${passingBody}`;
+    const flood = "<!--".repeat(BODY_CHARACTER_CAP / 4);
+    const body = (resolved + flood).slice(0, BODY_CHARACTER_CAP);
+    expect(body).toHaveLength(BODY_CHARACTER_CAP);
+    expect(bodyViolations(body, HEAD)).toEqual([]);
+  }, 200);
+});
+
 describe("PR review attestation", () => {
   it("passes when the line attests the PR head", () => {
     expect(attestationViolations(passingBody, HEAD)).toEqual([]);
