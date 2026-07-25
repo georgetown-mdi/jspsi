@@ -61,6 +61,14 @@ jobs:
       # overview enumerations silently stale.
       - name: Command inventory
         run: npm run check:command-inventory
+      # Encodes CLAUDE.md's agent-enforcement prose as a check: every "Enforced
+      # by <hook>" claim must name a hook that exists, is registered in
+      # .claude/settings.json, and names the tool its matcher actually gates,
+      # and every hook must carry a colocated test. A claim of enforcement the
+      # harness does not deliver is worse than no claim: an agent that believes
+      # a rule is gated stops holding it itself.
+      - name: Enforcement claims
+        run: npm run check:enforcement-claims
       # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
       # .mjs with no server or Docker dependency, so a stock runner suffices. This
       # is the repo-wide non-path-filtered gate that guarantees the suite is always
