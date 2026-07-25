@@ -21,7 +21,15 @@
 // description's assertions about its own code: nothing else in the process reads
 // a PR's claims against the code, so the section must exist and say something --
 // the enumerated claims, or `none -- <reason>`. A bare "none" fails exactly as a
-// bare "n/a" does. Whether an enumerated claim is true stays a review call.
+// bare "n/a" does, and so does a line still carrying the template's own
+// `<placeholder>`. Whether an enumerated claim is true stays a review call.
+//
+// The Security review line additionally names the sha it reviewed, and that sha
+// must be the PR head. pr_checklist.yaml re-runs on `synchronize`, so a commit
+// pushed after a review turns the PR red until the new head is reviewed and the
+// line updated. The check caps nothing -- a branch may take as many rounds as it
+// needs -- and it sits at the merge boundary, where the review actually has to
+// hold.
 //
 // The template's guidance comments contain example checklist lines, so HTML
 // comments are stripped before parsing -- an example can never satisfy or trip
@@ -76,26 +84,21 @@ function sectionBounds(lines, heading) {
   return { start, end };
 }
 
-/** Return the list of checklist violations in PR body `text` (empty = clean). */
-export function checklistViolations(text) {
-  const violations = [];
+/**
+ * Parse the Checklist section's items, or null when the section is absent.
+ *
+ * Each item is split at the first `--` separator: the label is the template's
+ * own line text, the clause is the author's resolution. The required-line check
+ * matches labels only, so free text in a reason clause can never satisfy a
+ * deleted line's presence requirement.
+ */
+function checklistItems(text) {
   const lines = stripHtmlComments(text).split("\n");
-
   const section = sectionBounds(lines, /^##\s+Checklist\s*$/);
-  if (section === null) {
-    violations.push(
-      'no "## Checklist" section -- restore the template\'s Checklist with every line resolved',
-    );
-    return violations;
-  }
-  const { start, end } = section;
+  if (section === null) return null;
 
-  // Split each item at the first `--` separator: the label is the template's
-  // own line text, the clause is the author's resolution. The required-line
-  // check matches labels only, so free text in a reason clause can never
-  // satisfy a deleted line's presence requirement.
   const items = [];
-  for (let i = start + 1; i < end; i++) {
+  for (let i = section.start + 1; i < section.end; i++) {
     const m = /^\s*-\s*\[([ xX])\]\s*(.*)$/.exec(lines[i]);
     if (!m) continue;
     const text = m[2];
@@ -108,6 +111,19 @@ export function checklistViolations(text) {
         ? text.slice(separator.index + separator[0].length).trim()
         : "",
     });
+  }
+  return items;
+}
+
+/** Return the list of checklist violations in PR body `text` (empty = clean). */
+export function checklistViolations(text) {
+  const violations = [];
+  const items = checklistItems(text);
+  if (items === null) {
+    violations.push(
+      'no "## Checklist" section -- restore the template\'s Checklist with every line resolved',
+    );
+    return violations;
   }
 
   for (const { name, substring } of REQUIRED_LINES) {
@@ -149,6 +165,12 @@ export function checklistViolations(text) {
 // The reason is what makes a none earned, exactly as for a checklist n/a.
 const BARE_NONE = /^[-*\s]*none\b[\s.,;:!-]*$/i;
 
+// An unfilled template placeholder: angle-bracketed prose, which takes a space to
+// distinguish from a type a real claim might quote (`Array<string>`). The test
+// runs this against the shipped template, so a reword that escapes the pattern
+// fails there rather than passing silently here.
+const UNFILLED_PLACEHOLDER = /<[^<>]*\s[^<>]*>/;
+
 const CLAIMS_GUIDANCE =
   'enumerate every behavioral assertion this PR makes about its own code ("bounded by", "idempotent", "cannot happen", "measured as") with what enforces each, or write "none -- <reason>"';
 
@@ -173,12 +195,66 @@ export function claimsViolations(text) {
       'bare "none" under "## Claims to refute" -- a none must be "none -- <reason>" tied to this diff',
     ];
   }
+  if (body.some((line) => UNFILLED_PLACEHOLDER.test(line))) {
+    return [
+      `unfilled placeholder under "## Claims to refute" -- ${CLAIMS_GUIDANCE}`,
+    ];
+  }
   return [];
 }
 
+// A sha named on the Security review line: hex, abbreviated or full. Read from
+// the label rather than the resolution clause, so a hex string inside a reason
+// is never mistaken for the attestation.
+const ATTESTED_SHA = /\b([0-9a-f]{7,40})\b/i;
+
+/**
+ * Return the list of review-attestation violations in PR body `text`, given the
+ * PR's head sha (null when it cannot be determined, as in a local run, which
+ * checks only that the line names a sha).
+ */
+export function attestationViolations(text, headSha) {
+  const review = checklistItems(text)?.find((item) =>
+    item.label.includes("Security review"),
+  );
+  if (review === undefined) return []; // a deleted line is the checklist's finding
+  const attested = ATTESTED_SHA.exec(review.label)?.[1];
+  if (attested === undefined) {
+    return [
+      `line ${review.line}: the Security review line names no sha -- write "Security review of <sha>" with the commit the review read`,
+    ];
+  }
+  if (headSha !== null && !headSha.startsWith(attested.toLowerCase())) {
+    return [
+      `line ${review.line}: the Security review line attests ${attested}, which is not this PR's head (${headSha.slice(0, 12)}) -- review the head and update the sha`,
+    ];
+  }
+  return [];
+}
+
+/**
+ * The PR head sha this run checks against, from the event payload the workflow
+ * already receives, or null when there is none (a local run against a file).
+ */
+export function prHeadSha() {
+  if (process.env.PR_HEAD_SHA !== undefined) return process.env.PR_HEAD_SHA;
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (eventPath === undefined) return null;
+  try {
+    const event = JSON.parse(readFileSync(eventPath, "utf8"));
+    return event?.pull_request?.head?.sha ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Every PR-body violation this guard checks for (empty = clean). */
-export function bodyViolations(text) {
-  return [...checklistViolations(text), ...claimsViolations(text)];
+export function bodyViolations(text, headSha) {
+  return [
+    ...checklistViolations(text),
+    ...claimsViolations(text),
+    ...attestationViolations(text, headSha),
+  ];
 }
 
 // CLI entry: only runs when invoked directly, so the test can import the pure
@@ -201,14 +277,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     );
     process.exit(2);
   }
-  const violations = bodyViolations(body);
+  const violations = bodyViolations(body, prHeadSha());
   if (violations.length > 0) {
     console.error(
       `PR description check failed (${violations.length} issue${violations.length === 1 ? "" : "s"}):\n`,
     );
     for (const v of violations) console.error("  " + source + ": " + v);
     console.error(
-      "\nSee .github/PULL_REQUEST_TEMPLATE.md: every Checklist line resolved with an earned reason, and every claim the description makes about its own code listed under Claims to refute.",
+      "\nSee .github/PULL_REQUEST_TEMPLATE.md: every Checklist line resolved with an earned reason, the Security review line naming the head it reviewed, and every claim the description makes about its own code listed under Claims to refute.",
     );
     process.exit(1);
   }

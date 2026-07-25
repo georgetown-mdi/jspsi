@@ -1,13 +1,21 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  attestationViolations,
   bodyViolations,
   checklistViolations,
   claimsViolations,
+  prHeadSha,
   stripHtmlComments,
 } from "./check-pr-checklist.mjs";
 
+const HEAD = "0123456789abcdef0123456789abcdef01234567";
+
 // A minimal resolved body in the template's shape: every required line present,
-// checked, and carrying a resolution clause.
+// checked, carrying a resolution clause, and attesting the head it reviewed.
 const passingBody = `## Summary
 
 Deliver the thing.
@@ -16,7 +24,7 @@ Deliver the thing.
 
 - [x] Docs: enumerated \`docs/\` and \`docs/spec/\` and updated affected pages (\`/docs\` high level + design; \`/docs/spec\` low level + details) -- updated docs/CLI.md
 - [x] \`CHANGELOG.md\` \`[Unreleased]\` updated -- n/a: bug fix, not a major feature
-- [x] Security review -- n/a: none of the listed surfaces touched
+- [x] Security review of \`${HEAD}\` -- n/a: none of the listed surfaces touched
 `;
 
 describe("PR checklist guard", () => {
@@ -182,11 +190,124 @@ describe("PR claims guard", () => {
     expect(claimsViolations(body)).toEqual([]);
   });
 
-  it("aggregates checklist and claims violations", () => {
-    const v = bodyViolations(passingBody);
+  it("flags an unfilled template placeholder", () => {
+    const body = claimsBody.replace(
+      /- "bounded.*/,
+      "- <claim, quoted from this description> -- <the line, test, or check that enforces it>",
+    );
+    const v = claimsViolations(body);
+    expect(v.some((m) => m.includes("unfilled placeholder"))).toBe(true);
+  });
+
+  it("does not mistake a quoted generic type for a placeholder", () => {
+    const body = claimsBody.replace(
+      /- "bounded.*/,
+      '- "parse() returns Array<string> or throws" -- asserted in parse.test.ts',
+    );
+    expect(claimsViolations(body)).toEqual([]);
+  });
+
+  it("aggregates checklist, claims, and attestation violations", () => {
+    const v = bodyViolations(passingBody, HEAD);
     expect(v.some((m) => m.includes('no "## Claims to refute" section'))).toBe(
       true,
     );
-    expect(bodyViolations(`${claimsSection}\n${passingBody}`)).toEqual([]);
+    expect(bodyViolations(`${claimsSection}\n${passingBody}`, HEAD)).toEqual(
+      [],
+    );
+  });
+});
+
+describe("PR review attestation", () => {
+  it("passes when the line attests the PR head", () => {
+    expect(attestationViolations(passingBody, HEAD)).toEqual([]);
+  });
+
+  it("accepts an abbreviated sha of the PR head", () => {
+    const body = passingBody.replace(HEAD, HEAD.slice(0, 7));
+    expect(attestationViolations(body, HEAD)).toEqual([]);
+  });
+
+  it("flags a sha that is not the PR head", () => {
+    const stale = "fedcba9876543210fedcba9876543210fedcba98";
+    const v = attestationViolations(passingBody.replace(HEAD, stale), HEAD);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toContain(stale);
+    expect(v[0]).toContain(HEAD.slice(0, 12));
+  });
+
+  it("flags a review line naming no sha", () => {
+    const body = passingBody.replace(`of \`${HEAD}\``, "");
+    const v = attestationViolations(body, HEAD);
+    expect(v.some((m) => m.includes("names no sha"))).toBe(true);
+  });
+
+  it("leaves a deleted review line to the checklist check", () => {
+    const body = passingBody
+      .split("\n")
+      .filter((line) => !line.includes("Security review"))
+      .join("\n");
+    expect(attestationViolations(body, HEAD)).toEqual([]);
+  });
+
+  it("checks only that a sha is named when the head is unknown", () => {
+    const stale = passingBody.replace(HEAD, "fedcba98765");
+    expect(attestationViolations(stale, null)).toEqual([]);
+    const v = attestationViolations(
+      passingBody.replace(HEAD, "the head"),
+      null,
+    );
+    expect(v.some((m) => m.includes("names no sha"))).toBe(true);
+  });
+
+  it("reads the head from the workflow event payload", () => {
+    const saved = [process.env.PR_HEAD_SHA, process.env.GITHUB_EVENT_PATH];
+    const dir = mkdtempSync(join(tmpdir(), "pr-head-"));
+    const payload = join(dir, "event.json");
+    writeFileSync(
+      payload,
+      JSON.stringify({ pull_request: { head: { sha: HEAD } } }),
+    );
+    try {
+      delete process.env.PR_HEAD_SHA;
+      delete process.env.GITHUB_EVENT_PATH;
+      expect(prHeadSha()).toBe(null);
+      process.env.GITHUB_EVENT_PATH = payload;
+      expect(prHeadSha()).toBe(HEAD);
+      process.env.PR_HEAD_SHA = "abc1234";
+      expect(prHeadSha()).toBe("abc1234");
+    } finally {
+      const [head, event] = saved;
+      if (head === undefined) delete process.env.PR_HEAD_SHA;
+      else process.env.PR_HEAD_SHA = head;
+      if (event === undefined) delete process.env.GITHUB_EVENT_PATH;
+      else process.env.GITHUB_EVENT_PATH = event;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// The shipped template, not a fixture: a reword that escapes a rule fails here
+// rather than passing silently in CI.
+const template = readFileSync(
+  fileURLToPath(
+    new URL("../.github/PULL_REQUEST_TEMPLATE.md", import.meta.url),
+  ),
+  "utf8",
+);
+
+describe("the shipped PR template", () => {
+  it("fails the claims check while its placeholder is unfilled", () => {
+    const v = claimsViolations(template);
+    expect(v.some((m) => m.includes("unfilled placeholder"))).toBe(true);
+  });
+
+  it("fails the attestation check while its sha is unfilled", () => {
+    const v = attestationViolations(template, HEAD);
+    expect(v.some((m) => m.includes("names no sha"))).toBe(true);
+  });
+
+  it("never passes unresolved", () => {
+    expect(bodyViolations(template, HEAD).length).toBeGreaterThan(0);
   });
 });
