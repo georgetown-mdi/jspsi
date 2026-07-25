@@ -40,6 +40,7 @@ export default tseslint.config(
       "**/node_modules/**",
       "apps/web/eslint.config.js",
       "scratch/**",
+      ".claude/worktrees/**",
       "**/.rollup.cache/**",
     ],
   },
