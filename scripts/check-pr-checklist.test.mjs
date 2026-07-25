@@ -324,6 +324,19 @@ describe("PR claims guard", () => {
     }
   });
 
+  // A PR body may be 65536 characters of anything the author likes, and the
+  // rendering pass runs over every claims line and every checklist label. The
+  // run of punctuation is what a quadratic trim chokes on: this case takes
+  // milliseconds when the scan is linear and blows the test timeout when it is
+  // not.
+  it("renders a line of punctuation without a quadratic scan", () => {
+    const body = claimsBody.replace(
+      /- "bounded.*/,
+      `- "bounded by 5" ${".".repeat(65000)} -- reconnect(), adapter.test.ts`,
+    );
+    expect(claimsViolations(body)).toEqual([]);
+  });
+
   it("does not mistake a claim that begins with none for a bare none", () => {
     const body = claimsBody.replace(
       /- "bounded.*/,

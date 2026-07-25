@@ -64,6 +64,22 @@ const RESOLUTION_SEPARATOR = /\s--(?:\s|$)/;
 // Markdown decoration: it changes how a line looks, never what it answers.
 const EMPHASIS_MARKERS = /[*_`~]/g;
 
+const WORD_CHARACTER = /[\p{L}\p{N}]/u;
+
+/**
+ * Cut the leading and trailing characters that carry no word -- markers, pipes,
+ * brackets, quotes, punctuation. Scanned rather than matched with an unanchored
+ * `[^\p{L}\p{N}]+$`, whose backtracking is quadratic in the length of a run: a
+ * PR body may be 65536 characters of anything an author likes.
+ */
+function trimToWords(text) {
+  let start = 0;
+  let end = text.length;
+  while (start < end && !WORD_CHARACTER.test(text[start])) start += 1;
+  while (end > start && !WORD_CHARACTER.test(text[end - 1])) end -= 1;
+  return text.slice(start, end);
+}
+
 /**
  * Reduce a line to the answer it renders as. HTML tags, `&nbsp;`, the
  * backslashes of escaped punctuation, emphasis and code markers, an ordered-list
@@ -73,14 +89,14 @@ const EMPHASIS_MARKERS = /[*_`~]/g;
  * rather than a list of renderings to chase.
  */
 function renderedText(line) {
-  return line
-    .replace(/<[^<>]*>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/\\/g, "")
-    .replace(EMPHASIS_MARKERS, "")
-    .replace(/^\s*\d+[.)]\s*/, "")
-    .replace(/^[^\p{L}\p{N}]+/u, "")
-    .replace(/[^\p{L}\p{N}]+$/u, "");
+  return trimToWords(
+    line
+      .replace(/<[^<>]*>/g, "")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/\\/g, "")
+      .replace(EMPHASIS_MARKERS, "")
+      .replace(/^\s*\d+[.)]\s*/, ""),
+  );
 }
 
 /** Whether `label` opens with the template's `prefix`, however it is decorated. */
