@@ -1553,7 +1553,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       destroy,
       true,
     );
-    if (internals.sftp)
+    if (internals.sftp) {
+      // Drop the latch on the way out, as every other failing path here does: it
+      // may only stand over a session something deliberately ended, and this one
+      // did not end.
+      this.idleReleased = false;
       throw new Error(
         `the connection-per-poll idle release destroyed the SFTP session's ` +
           `transport and the session did not clear within ` +
@@ -1562,6 +1566,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `internal premises per the "Upgrading the SFTP Stack" checklist in ` +
           `docs/spec/DEPENDENCY_PINS.md`,
       );
+    }
     // A partner that never closes forces one of these every cycle, so the operator
     // hears it on the cadence a chronic mid-exchange re-dial gets: the first, then
     // every SFTP_REDIAL_WARN_INTERVAL-th. Nothing was lost and nothing leaks, so
