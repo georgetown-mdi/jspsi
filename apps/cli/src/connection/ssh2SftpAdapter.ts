@@ -465,9 +465,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * ended the boundary itself (see {@link releaseForIdle}). NOT a reconnection
    * and not a lost session: the mode's own boundary, deliberate on both the
    * release and the dial that follows it, and therefore absent from
-   * {@link reconnectCount}. How it ended differs --
-   * {@link degradedForcedReleaseCount} is the subset whose session did not clear
-   * with a transport this side closed. 0 in every other mode and against a
+   * {@link reconnectCount}. How it ended differs -- see
+   * {@link degradedForcedReleaseCount}. 0 in every other mode and against a
    * server that closes on request. A plain operational counter, never a
    * partner-controlled value.
    */
@@ -476,9 +475,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   /**
-   * The subset of {@link forcedReleaseCount} whose session did not clear with a
-   * transport this side closed: it was discarded directly instead, or could not be
-   * cleared at all. Surfaced apart because those outcomes carry costs the closed
+   * The subset of {@link forcedReleaseCount} the forced close did not clear: the
+   * session was discarded by hand instead, or could not be cleared at all.
+   * Surfaced apart because those outcomes carry costs the closed
    * one does not -- a transport left open every cycle when the close itself was
    * what failed, and in every case a later close landing on whichever session is
    * live by then -- and because reaching it at all takes an ssh2 change. The
@@ -1452,10 +1451,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // settled that wait rather than the ssh2 Client's 'close'. Which state that is
       // turns on whether the transport was ended, so it is a branch on the socket
       // rather than a claim in a comment; re-verify on any ssh2 upgrade per
-      // docs/spec/DEPENDENCY_PINS.md. The flag has three readings, not two, and the
-      // third is the one that reaches this file's own defect: unreadable is not
-      // "still writable", and holding the session on it would hand the next cycle a
-      // session it reads as live over a transport that can carry nothing.
+      // docs/spec/DEPENDENCY_PINS.md. The flag has three readings, not two:
+      // unreadable is not "still writable".
       const transportEnded = rawClient._sock?.writableEnded;
       if (transportEnded === false) {
         // The transport this adapter's end() should have ended is still writable, so
@@ -1478,18 +1475,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         // this side cannot tell a partner that withheld its close from a session
         // ssh2 never ended. Drop the latch: leaving an operation issued in the gap
         // to count its own recovery re-dial is the safe direction, since it can
-        // only report a drop that did not happen, never hide one that did. The
-        // poll loop issues nothing there, so its own rhythm counts nothing either
-        // way; what the latch decides is the gap. The session is still closed from
-        // this side below, because a session the next cycle reads as live is the one
-        // state this mode may not end an idle boundary in.
+        // only report a drop that did not happen, never hide one that did.
         this.idleReleased = false;
         // Paced on the benign path's cadence (the first, then every
         // SFTP_REDIAL_WARN_INTERVAL-th) rather than warned every cycle, on its own
         // count: what it reports is a property of the ssh2 build, not of this
         // boundary, so it says the same thing at every boundary for the rest of the
-        // exchange, and the outcome that does differ per boundary is carried by
-        // whichever line the release ends on below.
+        // exchange. It reports that reading and nothing else: how the boundary ends
+        // is the forced close's to report, below.
         this.unreadableTransportFlagReleases += 1;
         const unreadableCount = this.unreadableTransportFlagReleases;
         if (
@@ -1503,10 +1496,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
               "its close from a session that is still live " +
               `(${unreadableCount} idle ` +
               `${unreadableCount === 1 ? "boundary" : "boundaries"} so far this ` +
-              "exchange). It does not hold the session on that reading: the " +
-              "release goes on to close it from this side, and a re-dial that " +
-              "follows may be reported as a mid-exchange drop that did not " +
-              "happen. Check the ssh2 changelog.",
+              "exchange). A re-dial that follows may be reported as a " +
+              "mid-exchange drop that did not happen. Check the ssh2 changelog.",
           );
       }
       await this.forceCloseEndedTransport(

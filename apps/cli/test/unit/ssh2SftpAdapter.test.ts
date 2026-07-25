@@ -4627,51 +4627,162 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     }
   });
 
-  test("the two lines a single boundary can log do not contradict each other", async () => {
-    // The unreadable reading and the session that cannot be cleared meet at one
-    // boundary, and the operator reads both lines about it. Neither may state
-    // what the other denies: the first cannot promise the dial the second says is
-    // skipped, and it cannot describe as ended a transport whose state it has
-    // just said is unreadable.
+  // Every way a boundary can end once the release has said it cannot read the
+  // transport-ended flag. The four differ in what the release managed -- whether
+  // the transport was closed from this side, whether the session was let go of,
+  // whether the next cycle has a dial to make -- and the boundary's second line is
+  // the one that reports it. Reached from a socket the release cannot see at all,
+  // from one it can destroy, from one it destroys without the session following,
+  // and from a session property that no longer takes the clear.
+  interface UnreadableFlagBoundary {
+    outcome: string;
+    shape: (parts: {
+      client: ReturnType<typeof ephemeralClient>["client"];
+      rawClient: ReturnType<typeof ephemeralClient>["rawClient"];
+      sock: ReturnType<typeof withheldCloseClient>["sock"];
+      wrapper: ReturnType<typeof wrapperMethods>;
+    }) => void;
+    reports: string;
+    andThen?: (parts: {
+      adapter: SSH2SFTPClientAdapter;
+      connect: ReturnType<typeof ephemeralClient>["connect"];
+    }) => Promise<void>;
+  }
+  const unreadableFlagBoundaries: UnreadableFlagBoundary[] = [
+    {
+      outcome: "an ssh2 whose client socket the release cannot reach",
+      shape: ({ rawClient }) => {
+        rawClient._sock = undefined;
+      },
+      reports: "could not close the SFTP session's transport",
+      andThen: async ({ adapter, connect }) => {
+        await expect(adapter.ensureConnected()).resolves.toBe(true);
+        expect(connect).toHaveBeenCalledTimes(2);
+      },
+    },
+    {
+      outcome: "a forced close that lands",
+      shape: () => {},
+      reports: "did not close the connection",
+      andThen: async ({ adapter, connect }) => {
+        await expect(adapter.ensureConnected()).resolves.toBe(true);
+        expect(connect).toHaveBeenCalledTimes(2);
+      },
+    },
+    {
+      outcome: "a destroy the session does not follow",
+      shape: ({ sock }) => {
+        sock.destroy = vi.fn(() => {
+          sock.destroyed = true;
+        });
+      },
+      reports: "closed the SFTP session's transport, but the session did not",
+    },
+    {
+      outcome: "a session property that no longer takes the clear",
+      shape: ({ client, wrapper }) => {
+        Object.defineProperty(client, "sftp", {
+          get: () => wrapper,
+          set: () => {},
+          configurable: true,
+        });
+      },
+      reports: "could not release the SFTP session at all",
+      andThen: async ({ adapter, connect }) => {
+        // The session the release could not let go of: the next cycle reads it as
+        // live and skips the dial, which is what its own line says.
+        await expect(adapter.ensureConnected()).resolves.toBe(true);
+        expect(connect).toHaveBeenCalledTimes(1);
+      },
+    },
+  ];
+
+  // A line saying this side closed the connection, in the idiom the release's own
+  // outcome lines use for it, positive polarity only: "the release closed it from
+  // this side" claims it, "its transport was not closed from this side" denies it.
+  const claimsThisSideClosedIt = ({ line }: { line: string }): boolean =>
+    /(?<!not )clos(?:e|ed|es)[^.]*from this side/.test(line);
+
+  test("the line logged before the outcome says the same thing whichever outcome follows", async () => {
+    // The unreadable reading and the outcome are two lines about one boundary, and
+    // the operator reads them in order. The first is logged while the release has
+    // done nothing about the session yet -- so it can report the reading and what
+    // that reading costs, and nothing about how the boundary ends. This is what
+    // holds it to that: it is logged identically at four boundaries that end four
+    // different ways, so anything it said about the outcome would be a claim
+    // contradicted by the line under it at three of them.
     vi.useFakeTimers();
     try {
-      const wrapper = wrapperMethods();
-      const { client, connect, rawClient } = withheldCloseClient(wrapper);
-      // An ssh2 whose client socket reports neither half-close flag, over an
-      // ssh2-sftp-client whose session property takes the write and keeps the
-      // session.
-      rawClient.end = vi.fn();
-      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
-      const warn = vi.fn();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
-      install(adapter, client);
+      const readingLines: string[] = [];
+      const outcomeLines: string[] = [];
+      for (const {
+        outcome,
+        shape,
+        reports,
+        andThen,
+      } of unreadableFlagBoundaries) {
+        const wrapper = wrapperMethods();
+        const { client, connect, rawClient, sock } =
+          withheldCloseClient(wrapper);
+        // An ssh2 whose client socket no longer reports Node's half-close flags.
+        rawClient.end = vi.fn();
+        const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+        // What the release had done when each line was logged, so "before the
+        // outcome" is read off the boundary rather than assumed from the order.
+        const logged: {
+          line: string;
+          sessionSet: boolean;
+          transportClosed: boolean;
+        }[] = [];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (adapter as any).log = {
+          warn: (line: string) =>
+            logged.push({
+              line,
+              sessionSet: client.sftp !== null,
+              transportClosed: sock.destroyed === true,
+            }),
+          trace: vi.fn(),
+          error: vi.fn(),
+        };
+        install(adapter, client);
 
-      await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
-      Object.defineProperty(client, "sftp", {
-        get: () => wrapper,
-        set: () => {},
-        configurable: true,
-      });
-      const release = adapter.releaseForIdle();
-      await vi.advanceTimersByTimeAsync(6_000);
-      await release;
+        await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+        shape({ client, rawClient, sock, wrapper });
+        const release = adapter.releaseForIdle();
+        // The release's own close bound, then the forced close's shorter one.
+        await vi.advanceTimersByTimeAsync(6_000);
+        await release;
 
-      const unreadableLine = warn.mock.calls[0][0] as string;
-      const stuckLine = warn.mock.calls[1][0] as string;
-      expect(unreadableLine).toContain("could not read whether");
-      expect(stuckLine).toContain("could not release the SFTP session at all");
-      // The dial this boundary does not make.
-      expect(stuckLine).toContain("skips its dial");
-      expect(unreadableLine).not.toContain("dials a fresh one");
-      // The transport state the line before it has just called unreadable.
-      expect(stuckLine).not.toContain("already ended");
-      expect(stuckLine).not.toContain("already-ended");
+        expect(logged, outcome).toHaveLength(2);
+        expect(logged[0].line, outcome).toContain("could not read whether");
+        expect(logged[1].line, outcome).toContain(reports);
+        // The first line is logged with the session still held and nothing closed
+        // from this side: at that point the boundary has no outcome to describe.
+        expect(logged[0].sessionSet, outcome).toBe(true);
+        expect(logged[0].transportClosed, outcome).toBe(false);
+        // Both lines are one report to the operator, so a claim in either has to
+        // hold for the boundary -- checked against the socket rather than against
+        // which line made it, so a claim that moves between them is caught the same
+        // way. Where the release closed nothing (there was no socket to destroy),
+        // neither line may say it did.
+        if (sock.destroyed !== true)
+          expect(logged.filter(claimsThisSideClosedIt), outcome).toEqual([]);
+        readingLines.push(logged[0].line);
+        outcomeLines.push(logged[1].line);
+        await andThen?.({ adapter, connect });
+      }
 
-      // The contradiction was about a real boundary: the next cycle reads the
-      // session it could not release as live and skips the dial.
-      await expect(adapter.ensureConnected()).resolves.toBe(true);
-      expect(connect).toHaveBeenCalledTimes(1);
+      // One line, four outcomes: it describes the reading, which is the same at
+      // all four, and not the boundary, which is not.
+      expect(new Set(readingLines).size).toBe(1);
+      expect(new Set(outcomeLines).size).toBe(unreadableFlagBoundaries.length);
+      // The claim above is one a boundary here does make -- the one that closed
+      // the transport says so -- so requiring its absence elsewhere is a check on
+      // the report rather than on a phrase no line uses.
+      expect(
+        outcomeLines.filter((line) => claimsThisSideClosedIt({ line })),
+      ).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
@@ -4951,19 +5062,13 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // number is any of the others is unreadable twice over: it names boundaries
     // the sentence around it does not describe, and its first-then-every-tenth
     // pacing is driven off the boundaries it is about -- a benign line paced on
-    // the boundary TOTAL prints nothing at the first benign boundary. A case
-    // whose boundaries all end the same way advances every counter in lockstep
-    // and cannot tell one from another; this one makes the series diverge, with
-    // the degraded boundaries FIRST and the unreadable reading spanning them all.
+    // the boundary TOTAL prints nothing at the first benign boundary. What makes
+    // a series pinnable is where it DIFFERS from the others, so no two of them
+    // run together here: every line below lands at a boundary, and reports a
+    // number, that no other series has at that point.
     vi.useFakeTimers();
     try {
       const { client, rawClient, sock } = withheldCloseClient(wrapperMethods());
-      // An ssh2 whose client socket reports neither half-close flag, for the whole
-      // exchange -- that reading belongs to the build, not to a boundary -- and
-      // whose destroy() is missing for the first two boundaries only.
-      rawClient.end = vi.fn();
-      const destroy = sock.destroy;
-      delete sock.destroy;
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       const warn = vi.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -4971,12 +5076,24 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
-      const degradedBoundaries = 2;
-      const cycles = degradedBoundaries + SFTP_REDIAL_WARN_INTERVAL;
+      const cycles = SFTP_REDIAL_WARN_INTERVAL + 3;
+      const flagReadsAt = new Set([1, 2, cycles - 1]);
+      const degradedAt = new Set([4, cycles]);
+      // ssh2's end() ends the socket; the boundaries where this ssh2 no longer
+      // reports Node's flag leave it absent rather than false -- the reading that
+      // is neither "ended" nor "still writable".
+      let flagReads = true;
+      rawClient.end = vi.fn(() => {
+        if (flagReads) sock.writableEnded = true;
+        else delete sock.writableEnded;
+      });
+      const destroy = sock.destroy;
       const lines: { cycle: number; message: string }[] = [];
       let read = 0;
       for (let cycle = 1; cycle <= cycles; cycle += 1) {
-        if (cycle === degradedBoundaries + 1) sock.destroy = destroy;
+        flagReads = flagReadsAt.has(cycle);
+        if (degradedAt.has(cycle)) delete sock.destroy;
+        else sock.destroy = destroy;
         const release = adapter.releaseForIdle();
         await vi.advanceTimersByTimeAsync(5_000);
         await release;
@@ -5000,22 +5117,23 @@ describe("ephemeral session mode (connection-per-poll)", () => {
           );
 
       expect(tallies("did not close the connection")).toEqual([
-        "cycle 3: 1 idle boundary closed this way so far this exchange",
-        `cycle ${cycles}: ${SFTP_REDIAL_WARN_INTERVAL} idle boundaries closed ` +
-          `this way so far this exchange`,
+        "cycle 1: 1 idle boundary closed this way so far this exchange",
+        `cycle ${SFTP_REDIAL_WARN_INTERVAL + 1}: ${SFTP_REDIAL_WARN_INTERVAL} ` +
+          `idle boundaries closed this way so far this exchange`,
       ]);
       expect(tallies("could not read whether")).toEqual([
-        "cycle 1: 1 idle boundary so far this exchange",
-        `cycle ${SFTP_REDIAL_WARN_INTERVAL}: ${SFTP_REDIAL_WARN_INTERVAL} idle ` +
-          `boundaries so far this exchange`,
+        "cycle 3: 1 idle boundary so far this exchange",
+        `cycle ${cycles}: ${SFTP_REDIAL_WARN_INTERVAL} idle boundaries so far ` +
+          `this exchange`,
       ]);
       expect(tallies("could not close the SFTP session's transport")).toEqual([
-        "cycle 1: 1 idle boundary did not release cleanly so far this exchange",
-        "cycle 2: 2 idle boundaries did not release cleanly so far this exchange",
+        "cycle 4: 1 idle boundary did not release cleanly so far this exchange",
+        `cycle ${cycles}: 2 idle boundaries did not release cleanly so far ` +
+          `this exchange`,
       ]);
       // The two release counters still add up to the summary's total.
       expect(adapter.forcedReleaseCount).toBe(cycles);
-      expect(adapter.degradedForcedReleaseCount).toBe(degradedBoundaries);
+      expect(adapter.degradedForcedReleaseCount).toBe(degradedAt.size);
     } finally {
       vi.useRealTimers();
     }
