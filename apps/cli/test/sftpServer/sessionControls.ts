@@ -11,6 +11,17 @@ export interface DroppableConnection {
 }
 
 /**
+ * The slice of a connection's transport socket the withheld-close control
+ * reaches: the two methods that would otherwise close it from the server side.
+ * Narrowing to this lets the hub be driven by a stub in its own unit test, with
+ * no live socket.
+ */
+export interface ClosableSocket {
+  end(...args: unknown[]): unknown;
+  destroy(...args: unknown[]): unknown;
+}
+
+/**
  * SFTP request opcodes the in-process backend serves. Each arriving request of
  * one of these types counts as a single session operation for the op-count cap
  * and the one-shot op drop; the backend registers a counting listener per opcode
@@ -47,6 +58,12 @@ interface TrackedSession {
  * backend.
  */
 export interface SftpSessionControlHub extends SftpSessionControls {
+  /**
+   * Apply the withheld-close control to a newly accepted connection's socket,
+   * before any SSH traffic runs on it. A no-op while the control is off, and
+   * when the backend cannot reach the socket.
+   */
+  onConnectionAccepted(socket: ClosableSocket | undefined): void;
   /** Record a completed SSH handshake and begin tracking the connection. */
   onConnectionReady(conn: DroppableConnection): void;
   /** Count one SFTP operation on a tracked connection, applying the op caps. */
@@ -56,14 +73,20 @@ export interface SftpSessionControlHub extends SftpSessionControls {
 }
 
 /**
- * Create a session-control hub. Every cap starts disabled and no drop is armed,
- * so a backend that exposes the hub to a suite that never touches it behaves
- * exactly as before.
+ * Create a session-control hub. Every cap starts disabled, no drop is armed, and
+ * closes are not withheld, so a backend that exposes the hub to a suite that
+ * never touches it behaves exactly as before.
  *
  * @internal exported for the in-process backend and its own unit test
  */
 export function createSftpSessionControls(): SftpSessionControlHub {
   const sessions = new Map<DroppableConnection, TrackedSession>();
+  // Sockets the withheld-close control has silenced, against the real methods it
+  // replaced, so stopWithholdingCloses can hand them back.
+  const withheldSockets = new Map<
+    ClosableSocket,
+    { end: ClosableSocket["end"]; destroy: ClosableSocket["destroy"] }
+  >();
   let handshakes = 0;
   let activeConnection: DroppableConnection | undefined;
   let oneShotOpsRemaining = 0;
@@ -126,6 +149,7 @@ export function createSftpSessionControls(): SftpSessionControlHub {
     maxLifetimeMs: 0,
     maxOps: 0,
     maxIdleMs: 0,
+    withholdCloseOnDisconnect: false,
 
     dropActiveAfterOps(ops: number): void {
       oneShotOpsRemaining = ops > 0 ? ops : 0;
@@ -154,6 +178,30 @@ export function createSftpSessionControls(): SftpSessionControlHub {
 
     resetHandshakeCount(): void {
       handshakes = 0;
+    },
+
+    onConnectionAccepted(socket: ClosableSocket | undefined): void {
+      if (!hub.withholdCloseOnDisconnect || socket === undefined) return;
+      if (withheldSockets.has(socket)) return;
+      withheldSockets.set(socket, {
+        end: socket.end.bind(socket),
+        destroy: socket.destroy.bind(socket),
+      });
+      // ssh2's server ends this socket itself when the client's DISCONNECT
+      // arrives, so half-open alone does not keep it quiet: both closers have to
+      // go. Reads still drain, so the connection serves traffic normally right up
+      // to the disconnect it then ignores.
+      socket.end = () => socket;
+      socket.destroy = () => socket;
+    },
+
+    stopWithholdingCloses(): void {
+      hub.withholdCloseOnDisconnect = false;
+      for (const [socket, real] of withheldSockets) {
+        socket.end = real.end;
+        socket.destroy = real.destroy;
+      }
+      withheldSockets.clear();
     },
 
     onConnectionReady(conn: DroppableConnection): void {

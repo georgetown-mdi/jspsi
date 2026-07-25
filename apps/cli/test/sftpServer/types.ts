@@ -137,6 +137,29 @@ export interface SftpSessionControls {
    */
   maxIdleMs: number;
   /**
+   * Accept the client's disconnect and then go quiet: while set, each newly
+   * accepted connection's socket is stopped from ever closing itself, so a
+   * client that disconnects is left in half-close -- its FIN is consumed, no FIN
+   * or reset comes back, and its ssh2 `Client` never emits `'close'`. This is the
+   * partner server the connection-per-poll idle release must force closed from
+   * its own side. Read as each connection is accepted, so it governs every
+   * connection established while it is set and leaves earlier ones untouched;
+   * false by default. In-process only, like the fault hooks: a native sshd cannot
+   * be told to withhold its close.
+   */
+  withholdCloseOnDisconnect: boolean;
+  /**
+   * Stop withholding closes entirely: clear {@link withholdCloseOnDisconnect} so
+   * later connections close normally, and hand the real closers back to every
+   * socket already silenced. Clearing the flag alone does neither of those for a
+   * connection already established under it. The backend's own `stop()` calls
+   * this before ending its connections; a test calls it before its own teardown,
+   * since a client's `end()` awaits a close a silenced server never sends -- and
+   * a teardown typically dials once more (the pre-drain reconnect), which the
+   * flag would silence in turn.
+   */
+  stopWithholdingCloses(): void;
+  /**
    * Arm a one-shot drop keyed to the `ops`th further SFTP operation, then
    * disarm -- a within-batch or mid-rendezvous drop the re-dial recovers from,
    * distinct from the standing {@link maxOps} cap. The drop is armed as that op

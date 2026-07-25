@@ -9,6 +9,7 @@ import type { Attributes, Connection, SFTPWrapper } from "ssh2";
 import { computeHostKeyFingerprint } from "@psilink/core";
 
 import { COUNTED_SFTP_OPS, createSftpSessionControls } from "./sessionControls";
+import type { ClosableSocket } from "./sessionControls";
 import type {
   InProcessSftpServer,
   SftpFaultInjection,
@@ -48,6 +49,13 @@ interface RawChannelSftp {
 // @types/ssh2 only declares it on the client; cast to reach it server-side.
 interface NoDelayConnection {
   setNoDelay(noDelay: boolean): void;
+}
+
+// ssh2 holds each connection's transport socket on the Connection's `_sock`,
+// server-side as well as client-side. The withheld-close control reaches it to
+// stop the server closing the connection on a client's disconnect.
+interface SocketBearingConnection {
+  _sock?: ClosableSocket;
 }
 
 // @types/ssh2 types sftp.on() with a per-opcode overload, so one counting
@@ -164,6 +172,12 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
 
   const server = new Server({ hostKeys: [hostKey.private] }, (client) => {
     clients.add(client);
+    // Before any SSH traffic: a connection accepted while the withheld-close
+    // control is armed keeps its socket for the whole exchange, so the control
+    // has to reach it here rather than at the disconnect it is meant to ignore.
+    sessionControls.onConnectionAccepted(
+      (client as unknown as SocketBearingConnection)._sock,
+    );
     // Disable Nagle, matching a real OpenSSH server. Left on, the small SFTP
     // request/response writes collide with TCP delayed-ACK and stall ~40ms each
     // on Linux; that is negligible per call but compounds over the thousands of
@@ -291,6 +305,10 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     inject,
     sessionControls,
     async stop() {
+      // Disarm the withheld-close control and hand the real closers back to the
+      // sockets it silenced: end() below reaches those sockets, and a silenced one
+      // would leave server.close() waiting on a connection that can never end.
+      sessionControls.stopWithholdingCloses();
       // Force any still-open connection closed so server.close()'s callback can
       // fire, then bound the wait so a connection that refuses to end cannot hang
       // teardown forever.

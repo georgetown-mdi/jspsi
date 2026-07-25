@@ -235,6 +235,22 @@ socket cycles -- the process stays alive. On-disk state is authoritative by desi
 ("the directory is the state machine"). Against that backdrop the three
 lifetime-sensitive subsystems divide cleanly.
 
+**The boundary itself: the release owns the end state, not the partner.** Closing
+a connection is nominally a two-party act -- this side disconnects, the server
+closes the connection -- and a server that accepts the disconnect and then goes
+quiet never completes it. The transport is ended on this side while the session
+stands in name only: it can carry nothing, yet a cycle that reads it as live would
+skip its dial and ride its first operation to the per-operation liveness deadline,
+which ends the exchange. That is exactly the slow, idiosyncratic partner the mode
+exists for, so the mode does not depend on the partner's cooperation to finish a
+release. Past its bound the release closes the transport from this side, so every
+idle boundary ends with the session gone and every cycle begins by dialing a fresh
+one. What the partner's silence costs is bounded and visible -- one release bound
+per cycle, and an operator warning at the same rate-escalated cadence a chronic
+mid-exchange re-dial gets -- rather than the exchange. A forced release is still
+this side's own deliberate boundary, so the re-dial that follows is neither counted
+as a reconnection nor reported as a dropped session.
+
 **Rendezvous handshake -- test-hardening, given two placement rules.** The hello,
 the zero-length ack, the lock-path joining sentinel, and the lock are committed
 files that outlive any session, and the in-memory role and peer id are cleared only
