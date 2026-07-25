@@ -60,6 +60,28 @@ PSILINK_SFTP_BACKEND=native PSILINK_SFTP_NATIVE_PROFILE=restricted-crypto npm ru
 sudo --preserve-env=PATH env "PATH=$PATH" npm run test:integration:native-chroot -w apps/cli
 ```
 
+The harness itself is `apps/cli/test/sftpServer/`: `index.ts` selects the backend
+from the environment, `inProcessServer.ts` and `nativeSshdServer.ts` implement
+the two, `globalSetup.ts` starts and stops the selected one, and `testContext.ts`
+hands each test its connection details, per-party credentials, and rendezvous
+paths. The in-process backend adds two surfaces a real `sshd` cannot offer:
+
+- Fault injection -- a malformed NAME or DATA packet, a request accepted and
+  never answered, transient RENAME failures, capped READDIR batches.
+- `sessionControls.ts`, the session-teardown hub -- lifetime, op-count, and idle
+  caps that drop a live session, one-shot drops armed on the Nth further
+  operation or on a wall clock, and a withheld-close mode that consumes the
+  client's FIN and sends nothing back, leaving it in half-close.
+
+Adapter behavior against a partner that cuts, stalls, or never closes is
+asserted through those controls. A probe that settles a dependency fact belongs
+in that tree too: questions about `ssh2` / `ssh2-sftp-client` behavior are
+decided by measurement rather than by reading the library, and the probe that
+decided one graduates into the suite with the PR relying on the answer, written
+as a test driven by this harness -- not left in `scratch/`. The premise is
+load-bearing once a change is built on it, and a premise no suite re-checks goes
+stale silently at the next pinned bump of either package.
+
 A standing console sentinel guards the CLI integration suite: it wraps `console`
 directly and fails a test file at `afterAll` on any `console.log`/`warn`/`error`
 that no allowlist matcher accepts (the inverse of blanket silencing, and the one
