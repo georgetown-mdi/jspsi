@@ -143,15 +143,13 @@ PSI-Link does not hold an ATO of its own; an ATO is granted to a specific deploy
 
 ## Privacy review
 
-A privacy review of PSI-Link should consider:
+The project's privacy posture is published as a standalone statement at [PRIVACY.md](../PRIVACY.md): what the project collects and retains on its own behalf, how the container deployment and the hosted web application differ in what the project operates and can observe, and what each supporting service sees. A privacy review should start there.
 
-- **What data flows.** Across the network during an exchange, only cryptographic protocol messages between the two parties (see [PROTOCOL.md](spec/PROTOCOL.md)). To third-party supporting services, only connection metadata or opaque ciphertext (see [SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security)).
-- **What is retained.** The shared secret in `.psilink.key` is the only persistent credential. The exchange output pairs each party's own row identifier with the matched partner records and the payload columns the partner designated for disclosure; the identifiers used for linkage are not part of it. Whether a designated payload column carries PII is the operator's determination, surfaced for consent before the exchange. See [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling) and [SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security).
-- **What is logged.** PSI-Link does not write PII to log output; see [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling).
-- **What third parties see.** Peer-coordination, STUN/TURN, and SFTP operators see metadata only; data-channel content is encrypted. See [SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security).
-- **Who can attack what.** Documented in [SECURITY_DESIGN.md#threat-model](SECURITY_DESIGN.md#threat-model).
+The statement points into the design documents for the underlying detail, and a reviewer working through it will want the same four: what data flows and what is retained ([SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling)), how the persistent credential is protected ([SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security)), what third-party supporting services can observe ([SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security)), and who can attack what ([SECURITY_DESIGN.md#threat-model](SECURITY_DESIGN.md#threat-model)).
 
-<!-- TODO: publish a standalone Privacy Impact Assessment (PIA) summary in the PIA template format used by most agencies. -->
+### Privacy Impact Assessment
+
+The project does not publish a PIA of its own, and a privacy statement is not a substitute for one. A PIA assesses a deployment, and the facts that determine its conclusions -- the system owner, the authority for collection, the populations whose records are linked, and the retention schedule applied to the output -- belong to the deploying agency, not to the software. An agency completing a PIA draws the project-side inputs from [PRIVACY.md](../PRIVACY.md) (data flows, retention, and third-party visibility) and from this document (the control mappings and sector-specific framings above). If an agency needs those inputs restated in a particular PIA template, ask through the channels in [SUPPORT.md](../SUPPORT.md).
 
 ## Reporting compliance gaps
 
@@ -166,4 +164,5 @@ If a reviewer identifies a compliance-relevant gap that is not addressed here, p
 - [PROTOCOL.md](spec/PROTOCOL.md) - PSI and key-exchange protocol specification
 - [RELEASES.md](RELEASES.md) - release artifacts, signing, and SBOM
 - [SECURITY.md](../SECURITY.md) - vulnerability reporting and response
+- [PRIVACY.md](../PRIVACY.md) - the project's privacy posture, by deployment, and what supporting services can observe
 - [NOTICE](../NOTICE) - third-party component attributions

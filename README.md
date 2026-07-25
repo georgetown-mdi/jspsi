@@ -194,5 +194,6 @@ Repository-level resources:
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) - development setup, code conventions, and pull request process
 - [SECURITY.md](SECURITY.md) - vulnerability reporting and supported versions
+- [PRIVACY.md](PRIVACY.md) - what the project collects and retains, and what supporting services can observe
 - [SUPPORT.md](SUPPORT.md) - bug reports, questions, and evaluation help
 - [CHANGELOG.md](CHANGELOG.md) - release history
