@@ -146,6 +146,48 @@ inProcessOnly(
   BOUNDARY_TEST_TIMEOUT_MS,
 );
 
+inProcessOnly(
+  "the backend's stop() closes a server whose connections were accepted under " +
+    "the withheld-close control",
+  async () => {
+    // A connection accepted under that control has both of its socket's closers
+    // silenced, so the backend cannot end it either: server.close() never fires its
+    // callback and stop() spends its whole bounded wait, leaving the socket open
+    // behind it. stop() therefore disarms the control and hands the real closers
+    // back before it ends anything. Measured: 3 ms as shipped, the full 2 s bound
+    // without that disarm.
+    const srv = await startInProcessSftpServer();
+    const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    conn.on("error", () => {});
+    try {
+      srv.sessionControls.withholdCloseOnDisconnect = true;
+      await conn.open({
+        channel: "sftp",
+        server: {
+          host: srv.handle.host,
+          port: srv.handle.port,
+          ...serverAuth(srv.handle.usera),
+          path: srv.handle.remoteRoot,
+        },
+      });
+
+      const started = Date.now();
+      await srv.stop();
+
+      expect(srv.sessionControls.withholdCloseOnDisconnect).toBe(false);
+      // Well inside the backend's own 2 s teardown bound: spending that bound is
+      // the failure this guards against, not a merely slow teardown.
+      expect(Date.now() - started).toBeLessThan(1_500);
+    } finally {
+      await conn.close().catch(() => {});
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
+
 // PENDING, still: the max-session/idle-cap half of the connection-per-poll
 // end-to-end proof. The harness now has the session caps and the forced drops
 // (test/sftpServer/sessionControls.ts), so what remains is the exchange that

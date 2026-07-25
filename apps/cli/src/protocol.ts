@@ -599,6 +599,29 @@ export async function runProtocol(
           : summary,
       );
     }
+    // The companion count for connection-per-poll mode, on the same terms and for
+    // the same reason: the inline WARN is paced (the first, then every tenth), so a
+    // run whose last forced release fell off that cadence states its true total
+    // nowhere else. It is deliberately NOT folded into the reconnect line above and
+    // does not reach the metrics event: nothing was lost here, the mode's own
+    // re-dials are deliberate, and a count of them among the reconnections would
+    // report drops the exchange never had. Zero in every other mode and against a
+    // server that closes on request, so the guard keeps a normal exchange quiet.
+    const forcedReleases = client?.forcedReleaseCount ?? 0;
+    const degradedReleases = client?.degradedForcedReleaseCount ?? 0;
+    if (forcedReleases > 0) {
+      const summary =
+        `the connection did not close when released at ${forcedReleases} idle ` +
+        `${forcedReleases === 1 ? "boundary" : "boundaries"} during this ` +
+        `exchange, so it was closed from this side (not a dropped session)`;
+      log.info(
+        degradedReleases > 0
+          ? `${summary}; ${degradedReleases} of ` +
+              `${degradedReleases === 1 ? "those" : "them"} could not be ` +
+              `closed and left an open socket behind`
+          : summary,
+      );
+    }
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
     // Undo our own contribution to the max-listeners threshold rather than

@@ -3546,7 +3546,59 @@ test("summary reports the mid-exchange sub-count apart from the total", async ()
   ).toBe(true);
 });
 
-test("logs no reconnect summary on a clean run (zero reconnects)", async () => {
+test("summarizes the forced idle-boundary releases apart from the reconnects", async () => {
+  // In connection-per-poll mode a partner that never closes the connection makes
+  // the release close it from this side, once per cycle. The inline WARN is paced
+  // (the first, then every tenth), so a run whose last one falls between those
+  // states its true total nowhere -- and an operator who left the run unattended
+  // cannot tell afterwards how the partner's server behaved. The teardown summary
+  // reports it, apart from the reconnect line and in terms that cannot be read as a
+  // dropped session, with the degraded sub-count named when there was one. Forced
+  // on the (real) file-drop client via its metric getters.
+  const forcedSpy = vi
+    .spyOn(LocalFSClient.prototype, "forcedReleaseCount", "get")
+    .mockReturnValue(7);
+  const degradedSpy = vi
+    .spyOn(LocalFSClient.prototype, "degradedForcedReleaseCount", "get")
+    .mockReturnValue(2);
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    forcedSpy.mockRestore();
+    degradedSpy.mockRestore();
+  }
+
+  const summary = mockState.infos.find((line) =>
+    line.includes("did not close when released at 7 idle boundaries"),
+  );
+  expect(summary).toBeDefined();
+  expect(summary).toContain("not a dropped session");
+  expect(summary).toContain("2 of them could not be closed");
+  // The mode's own boundaries are not reconnections, so nothing about them may
+  // reach the reconnect summary.
+  expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
+    false,
+  );
+});
+
+test("logs no reconnect or forced-release summary on a clean run", async () => {
   // The teardown summary is guarded on a non-zero count, so a normal exchange
   // stays quiet.
   await Promise.all([
@@ -3569,6 +3621,9 @@ test("logs no reconnect summary on a clean run (zero reconnects)", async () => {
   ]);
 
   expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
+    false,
+  );
+  expect(mockState.infos.some((line) => line.includes("idle boundar"))).toBe(
     false,
   );
 });

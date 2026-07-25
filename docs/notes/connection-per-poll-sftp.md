@@ -245,11 +245,21 @@ which ends the exchange. That is exactly the slow, idiosyncratic partner the mod
 exists for, so the mode does not depend on the partner's cooperation to finish a
 release. Past its bound the release closes the transport from this side, so every
 idle boundary ends with the session gone and every cycle begins by dialing a fresh
-one. What the partner's silence costs is bounded and visible -- one release bound
-per cycle, and an operator warning at the same rate-escalated cadence a chronic
-mid-exchange re-dial gets -- rather than the exchange. A forced release is still
-this side's own deliberate boundary, so the re-dial that follows is neither counted
-as a reconnection nor reported as a dropped session.
+one. Inside the poll loop that silence costs one release bound per cycle, an
+operator warning on the same rate-escalated cadence a chronic mid-exchange re-dial
+gets, and a total in the end-of-run summary -- rather than the exchange. A forced
+release is still this side's own deliberate boundary, so the re-dial that follows
+is neither counted as a reconnection nor reported as a dropped session.
+
+The teardown is where that silence is not bounded from this side. `close()` ends
+the connection for good through ssh2-sftp-client's own `end()`, which waits for a
+close this partner does not send, so a completed exchange parks there for the
+peer-inactivity budget above it: 17.2 s measured against a 12 s `peer_timeout_ms`,
+which at the production default is an hour of apparent silence after a successful
+exchange, logged only at debug. The exchange's own work is finished by then; what
+the operator waits out is a process that will not return. Giving that final
+`end()` a bound of its own is a separate change from the boundary this note
+covers.
 
 **Rendezvous handshake -- test-hardening, given two placement rules.** The hello,
 the zero-length ack, the lock-path joining sentinel, and the lock are committed
