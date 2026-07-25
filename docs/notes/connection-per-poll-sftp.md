@@ -243,15 +243,27 @@ make this hold and are the substance of the verification work: the one-time entr
 guard and directory sweep must run exactly once, never re-entered on a later cycle
 (a second entry would see this party's own hello and reject the directory as
 unclean, or a re-run sweep would delete the party's own just-written files); and no
-reconnect may reset the in-memory session state. The boundary must also never fall
-mid-publish. Each publish the transport performs is a contiguous run of ops with no
-idle wait in the middle -- a message is a temp write then an atomic rename; an ack
-is a zero-length put then a rename; the joiner sentinel is a put, a delete, then a
-rename; the hello is written directly to its final name and relies on the reader's
-partial-sync gate rather than a rename; a lock is a single atomic exclusive create
-at the transport seam. Since none of these straddles an idle wait, a boundary
-aligned to the loop's idle points cannot tear one. A within-batch drop mid-publish
-remains covered by the retained recovery resolvers.
+reconnect may reset the in-memory session state.
+
+Where the boundary and a publish meet, the poll loop's own publishes are safe and
+a concurrent send's are not. Each publish is a
+contiguous run of ops with no idle wait in the middle -- a message is a temp write
+then an atomic rename; an ack is a zero-length put then a rename; the joiner
+sentinel is a put, a delete, then a rename; the hello is written directly to its
+final name and relies on the reader's partial-sync gate rather than a rename; a
+lock is a single atomic exclusive create at the transport seam. None of them
+straddles an idle wait, so a publish the POLL LOOP itself performs cannot be torn
+by the boundary that follows it. The boundary is not a global idle point, though:
+`send()` has no mutual exclusion with `poll()`, so a release can fall while a
+send's publish is in flight. An op that reaches the transport at or after the
+release is serialized against it at the adapter's recovery chokepoint, which waits
+the close out and re-establishes the session before the op's first attempt. An op
+already on the wire when the release begins is torn with the session instead: at
+the pinned ssh2 and ssh2-sftp-client versions that tear clears the session in the
+same tick it rejects the op, so it reads as the clean loss it is and the retained
+recovery resolvers cover the re-issue. Closing the case outright -- rather than
+resting on that ordering -- means holding the release while an operation is
+outstanding.
 
 **Close, drain, and the authenticated abort marker -- real code, the one genuine
 gap.** At teardown the last cycle's connection is already released, but `close()`
