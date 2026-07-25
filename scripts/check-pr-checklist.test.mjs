@@ -171,6 +171,67 @@ const claimsSection = `## Claims to refute
 // rather than reading to the end of the body.
 const claimsBody = `${claimsSection}\n## Background\n\nContext.\n`;
 
+// Every spelling that renders as an unreasoned none, collected by driving the
+// check adversarially: markdown markers, list and quote and heading prefixes,
+// table cells, HTML tags, escaped emphasis, entities, wrapping punctuation, and
+// spaced letters. Each must fail.
+const UNEARNED_NONES = [
+  "none",
+  "None",
+  "NONE",
+  "none.",
+  "none:",
+  "None,",
+  "none;",
+  "none!",
+  "none -",
+  "none --",
+  "none ---",
+  "- none",
+  "- None.",
+  "  none  ",
+  "*none*",
+  "**none**",
+  "_none_",
+  "__none__",
+  "`none`",
+  "~~none~~",
+  "***none***",
+  "`**none**`",
+  "* none",
+  "*   none",
+  "- **None.**",
+  "none...",
+  "+ none",
+  "1. none",
+  "1) none",
+  "2. none",
+  "* none *",
+  "> none",
+  "  > none",
+  "#### none",
+  "| none |",
+  "<b>none</b>",
+  "<em>none</em>",
+  "\\*none\\*",
+  "&nbsp;none",
+  "none?",
+  "none)",
+  "(none)",
+  "[none]",
+  '"none"',
+  "None…",
+  "n o n e",
+];
+
+// A none is earned by the reason after it, whatever decorates the none itself.
+const REASONED_NONES = [
+  "none -- doc-only edit, no behavior asserted",
+  "**none** -- doc-only edit, no behavior asserted",
+  "- none -- test-only change",
+  "_none_ -- refactor with no behavioral assertion",
+];
+
 describe("PR claims guard", () => {
   it("passes an enumerated claim carrying what enforces it", () => {
     expect(claimsViolations(claimsBody)).toEqual([]);
@@ -218,36 +279,22 @@ describe("PR claims guard", () => {
     ).toBe(true);
   });
 
-  it("flags a bare none", () => {
-    for (const none of ["none", "- none", "none.", "None:"]) {
+  it("flags every spelling of an unreasoned none", () => {
+    for (const none of UNEARNED_NONES) {
       const body = claimsBody.replace(/- "bounded.*/, none);
       const v = claimsViolations(body);
-      expect(v.some((m) => m.includes('bare "none"'))).toBe(true);
+      expect(
+        v.some((m) => m.includes('bare "none"')),
+        none,
+      ).toBe(true);
     }
   });
 
-  it("flags a bare none wearing markdown emphasis", () => {
-    for (const none of [
-      "**none**",
-      "*none*",
-      "_none_",
-      "__none__",
-      "`none`",
-      "~~none~~",
-      "- **None.**",
-    ]) {
+  it("passes a none, however spelled, that carries a reason", () => {
+    for (const none of REASONED_NONES) {
       const body = claimsBody.replace(/- "bounded.*/, none);
-      const v = claimsViolations(body);
-      expect(v.some((m) => m.includes('bare "none"'))).toBe(true);
+      expect(claimsViolations(body), none).toEqual([]);
     }
-  });
-
-  it("passes an emphasized none that carries a reason", () => {
-    const body = claimsBody.replace(
-      /- "bounded.*/,
-      "**none** -- doc-only edit, no behavior asserted",
-    );
-    expect(claimsViolations(body)).toEqual([]);
   });
 
   it("does not mistake a claim that begins with none for a bare none", () => {

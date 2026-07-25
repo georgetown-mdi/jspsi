@@ -24,7 +24,10 @@
 // something --
 // the enumerated claims, or `none -- <reason>`. A bare "none" fails exactly as a
 // bare "n/a" does, and so does a line still carrying one of the template's own
-// placeholders verbatim. Whether an enumerated claim is true stays a review call.
+// placeholders verbatim. The none test reads what a line renders as, not what it
+// means: it collapses the spellings of an unreasoned none, while a sentence that
+// says nothing at length passes it -- that, like whether an enumerated claim is
+// true, is a review call.
 //
 // The Security review line additionally names the sha it reviewed, and that sha
 // must be the PR head. pr_checklist.yaml re-runs on `synchronize`, so a commit
@@ -50,6 +53,27 @@ export const REQUIRED_LINES = [
 // The `-- <resolution>` separator: `--` bounded by whitespace (or line end), so
 // a flag mention like `--event-stream` inside an item is never mistaken for it.
 const RESOLUTION_SEPARATOR = /\s--(?:\s|$)/;
+
+// Markdown decoration: it changes how a line looks, never what it answers.
+const EMPHASIS_MARKERS = /[*_`~]/g;
+
+/**
+ * Reduce a line to the answer it renders as. HTML tags, `&nbsp;`, the
+ * backslashes of escaped punctuation, emphasis and code markers, an ordered-list
+ * marker, and every leading and trailing character that is neither letter nor
+ * digit come off, so `+ none`, `> none`, `(none)`, `<b>none</b>` and `None...`
+ * are one spelling to judge rather than a list of renderings to chase.
+ */
+function renderedText(line) {
+  return line
+    .replace(/<[^<>]*>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\\/g, "")
+    .replace(EMPHASIS_MARKERS, "")
+    .replace(/^\s*\d+[.)]\s*/, "")
+    .replace(/^[^\p{L}\p{N}]+/u, "")
+    .replace(/[^\p{L}\p{N}]+$/u, "");
+}
 
 /**
  * Blank out HTML comments while preserving line numbers, so the template's
@@ -194,16 +218,14 @@ export function checklistViolations(text) {
 
 const CLAIMS_HEADING = /^##\s+Claims to refute\s*$/i;
 
-// A claims section that says nothing: "none" alone, or with punctuation only.
-// The reason is what makes a none earned, exactly as for a checklist n/a.
-// Emphasis and code markers come off first: `**none**` and `_none_` render as
-// the same unearned answer as `none`, and `_` is a word character, so `none\b`
-// would not otherwise see the end of the word.
-const EMPHASIS_MARKERS = /[*_`~]/g;
-const BARE_NONE = /^[-\s]*none\b[\s.,;:!-]*$/i;
+// A claims section that says nothing: "none" alone, whatever renders it -- a
+// list marker, a table cell, a blockquote, emphasis, an HTML tag, wrapping
+// quotes or brackets, trailing punctuation, letters spaced apart. What makes a
+// none earned is the reason after it, exactly as for a checklist n/a.
+const BARE_NONE = /^n\s*o\s*n\s*e$/i;
 
 function isBareNone(line) {
-  return BARE_NONE.test(line.replace(EMPHASIS_MARKERS, ""));
+  return BARE_NONE.test(renderedText(line));
 }
 
 /**
