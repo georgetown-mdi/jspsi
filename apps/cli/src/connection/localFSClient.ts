@@ -121,15 +121,6 @@ export class LocalFSClient implements FileTransportClient {
   }
 
   /**
-   * The subset of {@link forcedReleaseCount} that could not be closed. Always 0 for
-   * the filedrop transport, for the same reason. Present so both file-transport
-   * clients expose the same metrics surface.
-   */
-  get degradedForcedReleaseCount(): number {
-    return 0;
-  }
-
-  /**
    * Verifies read/write access to the directory specified by `options.path`.
    * Enforces `options.connectTimeoutMs` (default: 30s) per attempt. A fast
    * transient failure (e.g. the share or its permissions still settling) is

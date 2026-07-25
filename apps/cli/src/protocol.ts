@@ -608,24 +608,12 @@ export async function runProtocol(
     // report drops the exchange never had. Zero in every other mode and against a
     // server that closes on request, so the guard keeps a normal exchange quiet.
     const forcedReleases = client?.forcedReleaseCount ?? 0;
-    const degradedReleases = client?.degradedForcedReleaseCount ?? 0;
-    if (forcedReleases > 0) {
-      // Only what holds at EVERY boundary in the count belongs in the head.
-      // Which side closed the connection does not: a degraded release can leave a
-      // transport this side never closed, so that clause is confined to the arm
-      // whose total has no degraded releases in it.
-      const summary =
-        `the connection did not close when released at ${forcedReleases} idle ` +
-        `${forcedReleases === 1 ? "boundary" : "boundaries"} during this ` +
-        `exchange (not a dropped session)`;
+    if (forcedReleases > 0)
       log.info(
-        degradedReleases > 0
-          ? `${summary}; ${degradedReleases} of ` +
-              `${degradedReleases === 1 ? "those" : "them"} did not release ` +
-              `cleanly, and the warning logged at each says what it left behind`
-          : `${summary}, so it was closed from this side`,
+        `the connection did not close when released at ${forcedReleases} idle ` +
+          `${forcedReleases === 1 ? "boundary" : "boundaries"} during this ` +
+          `exchange (not a dropped session), so it was closed from this side`,
       );
-    }
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
     // Undo our own contribution to the max-listeners threshold rather than
