@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// PR-body checklist guard, run by pr_checklist.yaml on every PR (including a
-// body edit, so fixing the description re-runs the check without a new commit).
+// PR-body guard, run by pr_checklist.yaml on every PR (including a body edit, so
+// fixing the description re-runs the check without a new commit).
 //
 // The PR template's Checklist section is a set of pre-merge obligations CI does
 // not verify; the template requires every line resolved -- checked when done, or
@@ -16,6 +16,12 @@
 //   4. Every checked line must carry a `-- <resolution>` clause with real text.
 //   5. An n/a resolution must be `n/a: <reason>` with a non-empty reason; a bare
 //      "n/a" (or "n/a" plus punctuation only) earns nothing.
+//
+// The Claims to refute section is the same shape of obligation for the
+// description's assertions about its own code: nothing else in the process reads
+// a PR's claims against the code, so the section must exist and say something --
+// the enumerated claims, or `none -- <reason>`. A bare "none" fails exactly as a
+// bare "n/a" does. Whether an enumerated claim is true stays a review call.
 //
 // The template's guidance comments contain example checklist lines, so HTML
 // comments are stripped before parsing -- an example can never satisfy or trip
@@ -52,18 +58,14 @@ export function stripHtmlComments(text) {
   return result;
 }
 
-/** Return the list of checklist violations in PR body `text` (empty = clean). */
-export function checklistViolations(text) {
-  const violations = [];
-  const lines = stripHtmlComments(text).split("\n");
-
-  const start = lines.findIndex((line) => /^##\s+Checklist\s*$/.test(line));
-  if (start === -1) {
-    violations.push(
-      'no "## Checklist" section -- restore the template\'s Checklist with every line resolved',
-    );
-    return violations;
-  }
+/**
+ * Locate the body of the `##` section whose heading matches `heading`, returning
+ * `{start, end}` line indices (`start` is the heading itself, `end` is the next
+ * `##` heading or the end of the body), or null when the section is absent.
+ */
+function sectionBounds(lines, heading) {
+  const start = lines.findIndex((line) => heading.test(line));
+  if (start === -1) return null;
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
     if (/^##\s/.test(lines[i])) {
@@ -71,6 +73,22 @@ export function checklistViolations(text) {
       break;
     }
   }
+  return { start, end };
+}
+
+/** Return the list of checklist violations in PR body `text` (empty = clean). */
+export function checklistViolations(text) {
+  const violations = [];
+  const lines = stripHtmlComments(text).split("\n");
+
+  const section = sectionBounds(lines, /^##\s+Checklist\s*$/);
+  if (section === null) {
+    violations.push(
+      'no "## Checklist" section -- restore the template\'s Checklist with every line resolved',
+    );
+    return violations;
+  }
+  const { start, end } = section;
 
   // Split each item at the first `--` separator: the label is the template's
   // own line text, the clause is the author's resolution. The required-line
@@ -127,6 +145,42 @@ export function checklistViolations(text) {
   return violations;
 }
 
+// A claims section that says nothing: "none" alone, or with punctuation only.
+// The reason is what makes a none earned, exactly as for a checklist n/a.
+const BARE_NONE = /^[-*\s]*none\b[\s.,;:!-]*$/i;
+
+const CLAIMS_GUIDANCE =
+  'enumerate every behavioral assertion this PR makes about its own code ("bounded by", "idempotent", "cannot happen", "measured as") with what enforces each, or write "none -- <reason>"';
+
+/** Return the list of Claims-to-refute violations in PR body `text`. */
+export function claimsViolations(text) {
+  const lines = stripHtmlComments(text).split("\n");
+
+  const section = sectionBounds(lines, /^##\s+Claims to refute\s*$/i);
+  if (section === null) {
+    return [`no "## Claims to refute" section -- ${CLAIMS_GUIDANCE}`];
+  }
+
+  const body = lines
+    .slice(section.start + 1, section.end)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (body.length === 0) {
+    return [`empty "## Claims to refute" section -- ${CLAIMS_GUIDANCE}`];
+  }
+  if (body.some((line) => BARE_NONE.test(line))) {
+    return [
+      'bare "none" under "## Claims to refute" -- a none must be "none -- <reason>" tied to this diff',
+    ];
+  }
+  return [];
+}
+
+/** Every PR-body violation this guard checks for (empty = clean). */
+export function bodyViolations(text) {
+  return [...checklistViolations(text), ...claimsViolations(text)];
+}
+
 // CLI entry: only runs when invoked directly, so the test can import the pure
 // functions without the process.exit. The body comes from the PR_BODY
 // environment variable (how pr_checklist.yaml passes the attacker-influenceable
@@ -147,16 +201,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     );
     process.exit(2);
   }
-  const violations = checklistViolations(body);
+  const violations = bodyViolations(body);
   if (violations.length > 0) {
     console.error(
-      `PR checklist check failed (${violations.length} issue${violations.length === 1 ? "" : "s"}):\n`,
+      `PR description check failed (${violations.length} issue${violations.length === 1 ? "" : "s"}):\n`,
     );
     for (const v of violations) console.error("  " + source + ": " + v);
     console.error(
-      "\nSee .github/PULL_REQUEST_TEMPLATE.md, Checklist: every line resolved, and every n/a earned with a reason.",
+      "\nSee .github/PULL_REQUEST_TEMPLATE.md: every Checklist line resolved with an earned reason, and every claim the description makes about its own code listed under Claims to refute.",
     );
     process.exit(1);
   }
-  console.log("PR checklist check passed.");
+  console.log("PR description check passed.");
 }

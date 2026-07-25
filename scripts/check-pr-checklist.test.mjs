@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  bodyViolations,
   checklistViolations,
+  claimsViolations,
   stripHtmlComments,
 } from "./check-pr-checklist.mjs";
 
@@ -123,5 +125,68 @@ describe("PR checklist guard", () => {
   it("treats an unterminated comment as commenting out the rest", () => {
     const stripped = stripHtmlComments("a\n<!-- open\n- [ ] example\n");
     expect(stripped).not.toContain("example");
+  });
+});
+
+const claimsSection = `## Claims to refute
+
+- "bounded by the max reconnect attempts" -- the counter is compared in reconnect(), covered by adapter.test.ts
+`;
+
+// The section followed by another heading, so the section-bounds scan is exercised
+// rather than reading to the end of the body.
+const claimsBody = `${claimsSection}\n## Background\n\nContext.\n`;
+
+describe("PR claims guard", () => {
+  it("passes an enumerated claim carrying what enforces it", () => {
+    expect(claimsViolations(claimsBody)).toEqual([]);
+  });
+
+  it("passes a none that carries a reason", () => {
+    const body = claimsBody.replace(
+      /- "bounded.*/,
+      "none -- doc-only edit, no behavior asserted",
+    );
+    expect(claimsViolations(body)).toEqual([]);
+  });
+
+  it("flags a missing section", () => {
+    const v = claimsViolations("## Summary\n\nDeliver the thing.\n");
+    expect(v.some((m) => m.includes('no "## Claims to refute" section'))).toBe(
+      true,
+    );
+  });
+
+  it("flags a section whose only content is guidance comments", () => {
+    const body =
+      "## Claims to refute\n\n<!-- - <claim> -- <what enforces it> -->\n\n## Background\n";
+    const v = claimsViolations(body);
+    expect(
+      v.some((m) => m.includes('empty "## Claims to refute" section')),
+    ).toBe(true);
+  });
+
+  it("flags a bare none", () => {
+    for (const none of ["none", "- none", "none.", "None:"]) {
+      const body = claimsBody.replace(/- "bounded.*/, none);
+      const v = claimsViolations(body);
+      expect(v.some((m) => m.includes('bare "none"'))).toBe(true);
+    }
+  });
+
+  it("does not mistake a claim that begins with none for a bare none", () => {
+    const body = claimsBody.replace(
+      /- "bounded.*/,
+      '- "none of the retries are unbounded" -- the loop bound is asserted in retry.test.ts',
+    );
+    expect(claimsViolations(body)).toEqual([]);
+  });
+
+  it("aggregates checklist and claims violations", () => {
+    const v = bodyViolations(passingBody);
+    expect(v.some((m) => m.includes('no "## Claims to refute" section'))).toBe(
+      true,
+    );
+    expect(bodyViolations(`${claimsSection}\n${passingBody}`)).toEqual([]);
   });
 });

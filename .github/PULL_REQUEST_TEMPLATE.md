@@ -32,6 +32,15 @@ Board items are GitHub Project draft itemIds, not issue numbers -- `Closes #<id>
 Ran: <suites or files exercised locally, e.g. `npx vitest run packages/core/test/foo.test.ts`>
 New tests cover: <the specific behaviors verified, or n/a -- reason>
 
+## Claims to refute
+
+<!--
+Every behavioral assertion this PR makes about its own code, one per line, each pointing at what makes it true. An assertion is any claim a reader would otherwise take on faith: "bounded by", "idempotent", "cannot happen", "at most once", "measured as", "retries N times". Nothing else in the process reads a PR's claims against its code, so a claim whose enforcement you cannot name here is one nobody will check -- point at the line, test, or check that holds it, or delete the claim from the description. Bound a claim to what the code does, not what the surrounding design intends: a counter that increments is not a counter that gates.
+If this PR asserts nothing about its own behavior, replace the list with: none -- <why, e.g. doc-only edit>.
+-->
+
+- <claim, quoted from this description> -- <the line, test, or check that enforces it>
+
 ## Background
 
 <!-- Optional. Context that predates this PR: root cause, the invariant preserved, a non-obvious constraint. Omit if the Summary covers it. -->
