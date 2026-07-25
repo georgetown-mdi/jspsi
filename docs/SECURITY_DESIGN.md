@@ -19,7 +19,7 @@ What lives elsewhere:
 
 ## Overview
 
-PSI-Link protects an exchange with three layers.
+PSI-Link protects an exchange with four layers.
 
 1. **The PSI protocol protects the data itself.** Records are matched in encrypted form: each party encrypts its own linkage keys under an ephemeral key it never shares, and the protocol combines the two parties' keys so that neither side can recover the other's underlying values. Both learn only which records they hold in common. This holds regardless of which channel carries the traffic. See [Private set intersection](#private-set-intersection).
 
