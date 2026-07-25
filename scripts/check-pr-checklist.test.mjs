@@ -118,6 +118,14 @@ describe("PR checklist guard", () => {
     expect(v.some((m) => m.includes('no "## Checklist" section'))).toBe(true);
   });
 
+  it("flags a second Checklist section, whose lines go unread", () => {
+    const body = `${passingBody}\n## Checklist\n\n- [ ] Docs: -- <which pages>\n`;
+    const v = checklistViolations(body);
+    expect(v.some((m) => m.includes('duplicate "## Checklist" section'))).toBe(
+      true,
+    );
+  });
+
   // GitHub stores a body edited in the browser with CRLF endings, so this is the
   // shape most PR bodies arrive in, not an exotic one.
   it("reads a body stored with CRLF endings", () => {
@@ -181,6 +189,24 @@ describe("PR claims guard", () => {
     expect(v.some((m) => m.includes('no "## Claims to refute" section'))).toBe(
       true,
     );
+  });
+
+  it("flags a second Claims section, whose lines go unread", () => {
+    const v = claimsViolations(`${claimsBody}\n${claimsSection}`);
+    expect(
+      v.some((m) => m.includes('duplicate "## Claims to refute" section')),
+    ).toBe(true);
+  });
+
+  it("flags a prefilled template left below a resolved body", () => {
+    const resolved = `${claimsSection}\n${passingBody}`;
+    const v = bodyViolations(`${resolved}\n${template}`, HEAD);
+    expect(v.some((m) => m.includes('duplicate "## Checklist" section'))).toBe(
+      true,
+    );
+    expect(
+      v.some((m) => m.includes('duplicate "## Claims to refute" section')),
+    ).toBe(true);
   });
 
   it("flags a section whose only content is guidance comments", () => {

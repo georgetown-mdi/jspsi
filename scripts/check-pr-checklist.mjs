@@ -9,7 +9,8 @@
 // a stated reason is true stays a review call, the same philosophy as
 // check-contributing-scope.mjs.
 //
-//   1. The `## Checklist` section must exist (the template ships one).
+//   1. The `## Checklist` section must exist (the template ships one), and only
+//      once: a second copy hides whatever the first one's rules would have read.
 //   2. No box may be left unchecked: `- [ ]` means unresolved.
 //   3. The three required lines (Docs, CHANGELOG.md, Security review) must each
 //      be present -- the template says "Do not delete lines here".
@@ -19,7 +20,8 @@
 //
 // The Claims to refute section is the same shape of obligation for the
 // description's assertions about its own code: nothing else in the process reads
-// a PR's claims against the code, so the section must exist and say something --
+// a PR's claims against the code, so the section must exist once and say
+// something --
 // the enumerated claims, or `none -- <reason>`. A bare "none" fails exactly as a
 // bare "n/a" does, and so does a line still carrying one of the template's own
 // placeholders verbatim. Whether an enumerated claim is true stays a review call.
@@ -84,6 +86,15 @@ function sectionBounds(lines, heading) {
   return { start, end };
 }
 
+/**
+ * Whether `lines` carries more than one `##` heading matching `heading`. Only
+ * the first section is read, so a body that repeats one -- a prefilled template
+ * left below a resolved draft -- would hide every line the second one carries.
+ */
+function isDuplicated(lines, heading) {
+  return lines.filter((line) => heading.test(line)).length > 1;
+}
+
 // GitHub stores a body edited in the browser with CRLF endings, and a carriage
 // return is a line terminator that `.` does not match: unnormalized, every
 // checklist line parses as no item at all and all three required lines read as
@@ -97,6 +108,8 @@ function bodyLines(text) {
   return stripHtmlComments(normalizeLineEndings(text)).split("\n");
 }
 
+const CHECKLIST_HEADING = /^##\s+Checklist\s*$/;
+
 /**
  * Parse the Checklist section's items, or null when the section is absent.
  *
@@ -107,7 +120,7 @@ function bodyLines(text) {
  */
 function checklistItems(text) {
   const lines = bodyLines(text);
-  const section = sectionBounds(lines, /^##\s+Checklist\s*$/);
+  const section = sectionBounds(lines, CHECKLIST_HEADING);
   if (section === null) return null;
 
   const items = [];
@@ -137,6 +150,11 @@ export function checklistViolations(text) {
       'no "## Checklist" section -- restore the template\'s Checklist with every line resolved',
     );
     return violations;
+  }
+  if (isDuplicated(bodyLines(text), CHECKLIST_HEADING)) {
+    violations.push(
+      'duplicate "## Checklist" section -- only the first is read; delete the leftover copy rather than leave its lines unread',
+    );
   }
 
   for (const { name, substring } of REQUIRED_LINES) {
@@ -223,6 +241,11 @@ export function claimsViolations(text) {
   const section = sectionBounds(lines, CLAIMS_HEADING);
   if (section === null) {
     return [`no "## Claims to refute" section -- ${CLAIMS_GUIDANCE}`];
+  }
+  if (isDuplicated(lines, CLAIMS_HEADING)) {
+    return [
+      'duplicate "## Claims to refute" section -- only the first is read; delete the leftover copy rather than leave its lines unread',
+    ];
   }
 
   const body = lines
