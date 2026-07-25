@@ -14,6 +14,9 @@ you produce is your final message to the caller.
 
 - Review the user-facing consequences of the diff: flows, states, copy,
   accessibility, and CLI ergonomics.
+- Scope the branch the brief names, by ref: `git diff "origin/staging...<branch>"`
+  (three-dot), never `HEAD` and never a checkout -- your session's checkout is not
+  reliably the branch under review.
 - Verify each finding in the code before you report it.
 - Stay in your lane: do not flag what lint or format owns (style, formatting), nor
   what security-reviewer owns (confidentiality, key material, adversarial inputs).
