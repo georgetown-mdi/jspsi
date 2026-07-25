@@ -251,15 +251,16 @@ gets, and a total in the end-of-run summary -- rather than the exchange. A force
 release is still this side's own deliberate boundary, so the re-dial that follows
 is neither counted as a reconnection nor reported as a dropped session.
 
-The teardown is where that silence is not bounded from this side. `close()` ends
-the connection for good through ssh2-sftp-client's own `end()`, which waits for a
-close this partner does not send, so a completed exchange parks there for the
-peer-inactivity budget above it: 17.2 s measured against a 12 s `peer_timeout_ms`,
-which at the production default is an hour of apparent silence after a successful
-exchange, logged only at debug. The exchange's own work is finished by then; what
-the operator waits out is a process that will not return. Giving that final
-`end()` a bound of its own is a separate change from the boundary this note
-covers.
+The same partner silence at TEARDOWN is a defect of the SFTP transport itself,
+which this mode neither causes nor escapes, and it is out of scope here.
+`close()` ends the connection for good through ssh2-sftp-client's own `end()`,
+which waits for a close this partner does not send: measured with the mode both
+on and off, that `end()` is still pending 20 s later either way, and what returns
+the process is the peer-inactivity budget above it -- 17.2 s against a 12 s
+`peer_timeout_ms`, which at the production default is an hour of apparent silence
+after a successful exchange, logged only at debug. What the boundary release
+above buys is that the mode's own per-cycle releases never end in that state;
+giving the terminal `end()` a bound of its own is its own change.
 
 **Rendezvous handshake -- test-hardening, given two placement rules.** The hello,
 the zero-length ack, the lock-path joining sentinel, and the lock are committed

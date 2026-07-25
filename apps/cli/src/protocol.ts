@@ -617,8 +617,8 @@ export async function runProtocol(
       log.info(
         degradedReleases > 0
           ? `${summary}; ${degradedReleases} of ` +
-              `${degradedReleases === 1 ? "those" : "them"} could not be ` +
-              `closed and left an open socket behind`
+              `${degradedReleases === 1 ? "those" : "them"} did not release ` +
+              `cleanly, and the warning logged at each says what it left behind`
           : summary,
       );
     }

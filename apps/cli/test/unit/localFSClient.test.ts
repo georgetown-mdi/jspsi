@@ -115,6 +115,20 @@ test("end is a no-op and resolves", async () => {
   await expect(client.end()).resolves.toBeUndefined();
 });
 
+test("the release counters stay at zero across a connect and a write", async () => {
+  // This transport opens no connection, so it has none to release at a poll
+  // boundary -- the getters exist only so both file-transport clients expose the
+  // same metrics surface. A non-zero value here would print a forced-release
+  // summary at the end of a filedrop run describing a connection that never
+  // existed, and the summary is gated on the total, so it would print for a
+  // degraded count alone.
+  await client.connect({ path: dir });
+  await client.put(Buffer.from("payload"), path.join(dir, "counted.bin"));
+  await client.end();
+  expect(client.forcedReleaseCount).toBe(0);
+  expect(client.degradedForcedReleaseCount).toBe(0);
+});
+
 // --- list --------------------------------------------------------------------
 
 test("list returns an empty array for an empty directory", async () => {

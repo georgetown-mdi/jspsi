@@ -3590,7 +3590,15 @@ test("summarizes the forced idle-boundary releases apart from the reconnects", a
   );
   expect(summary).toBeDefined();
   expect(summary).toContain("not a dropped session");
-  expect(summary).toContain("2 of them could not be closed");
+  // What the degraded ones left behind differs per release -- a transport this side
+  // never closed, or one it closed that did not take the session with it -- and the
+  // summary has only the count, so it names the per-release warning rather than
+  // asserting the worse of them for all of them.
+  expect(summary).toContain("2 of them did not release cleanly");
+  expect(summary).toContain(
+    "the warning logged at each says what it left behind",
+  );
+  expect(summary).not.toContain("left an open socket");
   // The mode's own boundaries are not reconnections, so nothing about them may
   // reach the reconnect summary.
   expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(

@@ -129,7 +129,7 @@ inProcessOnly(
       );
       expect(forced).toHaveLength(1);
       expect(forced[0].level).toBe("WARN");
-      expect(forced[0].message).toContain("forced it closed");
+      expect(forced[0].message).toContain("closed it from this side");
       expect(forced[0].message).toContain("dials a fresh session");
     } finally {
       receiver.stop();
