@@ -21,8 +21,8 @@
 // description's assertions about its own code: nothing else in the process reads
 // a PR's claims against the code, so the section must exist and say something --
 // the enumerated claims, or `none -- <reason>`. A bare "none" fails exactly as a
-// bare "n/a" does, and so does a line still carrying the template's own
-// `<placeholder>`. Whether an enumerated claim is true stays a review call.
+// bare "n/a" does, and so does a line still carrying one of the template's own
+// placeholders verbatim. Whether an enumerated claim is true stays a review call.
 //
 // The Security review line additionally names the sha it reviewed, and that sha
 // must be the PR head. pr_checklist.yaml re-runs on `synchronize`, so a commit
@@ -161,15 +161,44 @@ export function checklistViolations(text) {
   return violations;
 }
 
+const CLAIMS_HEADING = /^##\s+Claims to refute\s*$/i;
+
 // A claims section that says nothing: "none" alone, or with punctuation only.
 // The reason is what makes a none earned, exactly as for a checklist n/a.
-const BARE_NONE = /^[-*\s]*none\b[\s.,;:!-]*$/i;
+// Emphasis and code markers come off first: `**none**` and `_none_` render as
+// the same unearned answer as `none`, and `_` is a word character, so `none\b`
+// would not otherwise see the end of the word.
+const EMPHASIS_MARKERS = /[*_`~]/g;
+const BARE_NONE = /^[-\s]*none\b[\s.,;:!-]*$/i;
 
-// An unfilled template placeholder: angle-bracketed prose, which takes a space to
-// distinguish from a type a real claim might quote (`Array<string>`). The test
-// runs this against the shipped template, so a reword that escapes the pattern
-// fails there rather than passing silently here.
-const UNFILLED_PLACEHOLDER = /<[^<>]*\s[^<>]*>/;
+function isBareNone(line) {
+  return BARE_NONE.test(line.replace(EMPHASIS_MARKERS, ""));
+}
+
+/**
+ * The claims section's placeholders, read verbatim from the shipped template
+ * (its guidance comment included, since an author can copy a placeholder out of
+ * one): a line still carrying one is unfilled. Matching the template's literal
+ * text rather than the shape of a placeholder is what lets a real claim quote a
+ * multi-parameter generic -- `Record<string, number>`, `Promise<Result<T, E>>`
+ * -- without reading as unfilled. A reword that escapes extraction fails the
+ * suite, which runs this rule against that same template.
+ */
+export const CLAIMS_PLACEHOLDERS = readClaimsPlaceholders();
+
+function readClaimsPlaceholders() {
+  const template = readFileSync(
+    fileURLToPath(
+      new URL("../.github/PULL_REQUEST_TEMPLATE.md", import.meta.url),
+    ),
+    "utf8",
+  );
+  const lines = template.split("\n");
+  const section = sectionBounds(lines, CLAIMS_HEADING);
+  if (section === null) return [];
+  const text = lines.slice(section.start + 1, section.end).join("\n");
+  return [...new Set(text.match(/<[^<>\n]+>/g) ?? [])];
+}
 
 const CLAIMS_GUIDANCE =
   'enumerate every behavioral assertion this PR makes about its own code ("bounded by", "idempotent", "cannot happen", "measured as") with what enforces each, or write "none -- <reason>"';
@@ -178,7 +207,7 @@ const CLAIMS_GUIDANCE =
 export function claimsViolations(text) {
   const lines = stripHtmlComments(text).split("\n");
 
-  const section = sectionBounds(lines, /^##\s+Claims to refute\s*$/i);
+  const section = sectionBounds(lines, CLAIMS_HEADING);
   if (section === null) {
     return [`no "## Claims to refute" section -- ${CLAIMS_GUIDANCE}`];
   }
@@ -190,12 +219,16 @@ export function claimsViolations(text) {
   if (body.length === 0) {
     return [`empty "## Claims to refute" section -- ${CLAIMS_GUIDANCE}`];
   }
-  if (body.some((line) => BARE_NONE.test(line))) {
+  if (body.some(isBareNone)) {
     return [
       'bare "none" under "## Claims to refute" -- a none must be "none -- <reason>" tied to this diff',
     ];
   }
-  if (body.some((line) => UNFILLED_PLACEHOLDER.test(line))) {
+  if (
+    body.some((line) =>
+      CLAIMS_PLACEHOLDERS.some((placeholder) => line.includes(placeholder)),
+    )
+  ) {
     return [
       `unfilled placeholder under "## Claims to refute" -- ${CLAIMS_GUIDANCE}`,
     ];

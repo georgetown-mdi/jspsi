@@ -9,6 +9,7 @@ import {
   bodyViolations,
   checklistViolations,
   claimsViolations,
+  CLAIMS_PLACEHOLDERS,
   prHeadSha,
   stripHtmlComments,
 } from "./check-pr-checklist.mjs";
@@ -137,6 +138,15 @@ describe("PR checklist guard", () => {
   });
 });
 
+// The shipped template, not a fixture: a reword that escapes a rule fails here
+// rather than passing silently in CI.
+const template = readFileSync(
+  fileURLToPath(
+    new URL("../.github/PULL_REQUEST_TEMPLATE.md", import.meta.url),
+  ),
+  "utf8",
+);
+
 const claimsSection = `## Claims to refute
 
 - "bounded by the max reconnect attempts" -- the counter is compared in reconnect(), covered by adapter.test.ts
@@ -183,6 +193,30 @@ describe("PR claims guard", () => {
     }
   });
 
+  it("flags a bare none wearing markdown emphasis", () => {
+    for (const none of [
+      "**none**",
+      "*none*",
+      "_none_",
+      "__none__",
+      "`none`",
+      "~~none~~",
+      "- **None.**",
+    ]) {
+      const body = claimsBody.replace(/- "bounded.*/, none);
+      const v = claimsViolations(body);
+      expect(v.some((m) => m.includes('bare "none"'))).toBe(true);
+    }
+  });
+
+  it("passes an emphasized none that carries a reason", () => {
+    const body = claimsBody.replace(
+      /- "bounded.*/,
+      "**none** -- doc-only edit, no behavior asserted",
+    );
+    expect(claimsViolations(body)).toEqual([]);
+  });
+
   it("does not mistake a claim that begins with none for a bare none", () => {
     const body = claimsBody.replace(
       /- "bounded.*/,
@@ -200,12 +234,32 @@ describe("PR claims guard", () => {
     expect(v.some((m) => m.includes("unfilled placeholder"))).toBe(true);
   });
 
+  it("flags every placeholder the shipped template carries", () => {
+    expect(CLAIMS_PLACEHOLDERS.length).toBeGreaterThan(0);
+    for (const placeholder of CLAIMS_PLACEHOLDERS) {
+      expect(template).toContain(placeholder);
+      const body = claimsBody.replace(
+        /- "bounded.*/,
+        `- "the claim" -- ${placeholder}`,
+      );
+      const v = claimsViolations(body);
+      expect(v.some((m) => m.includes("unfilled placeholder"))).toBe(true);
+    }
+  });
+
   it("does not mistake a quoted generic type for a placeholder", () => {
-    const body = claimsBody.replace(
-      /- "bounded.*/,
-      '- "parse() returns Array<string> or throws" -- asserted in parse.test.ts',
-    );
-    expect(claimsViolations(body)).toEqual([]);
+    for (const type of [
+      "Array<string>",
+      "Record<string, number>",
+      "Map<K, V>",
+      "Promise<Result<T, E>>",
+    ]) {
+      const body = claimsBody.replace(
+        /- "bounded.*/,
+        `- "parse() returns ${type} or throws" -- asserted in parse.test.ts`,
+      );
+      expect(claimsViolations(body)).toEqual([]);
+    }
   });
 
   it("aggregates checklist, claims, and attestation violations", () => {
@@ -289,15 +343,6 @@ describe("PR review attestation", () => {
     }
   });
 });
-
-// The shipped template, not a fixture: a reword that escapes a rule fails here
-// rather than passing silently in CI.
-const template = readFileSync(
-  fileURLToPath(
-    new URL("../.github/PULL_REQUEST_TEMPLATE.md", import.meta.url),
-  ),
-  "utf8",
-);
 
 describe("the shipped PR template", () => {
   it("fails the claims check while its placeholder is unfilled", () => {
