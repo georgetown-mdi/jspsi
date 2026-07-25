@@ -393,6 +393,85 @@ describe("PR claims guard", () => {
   });
 });
 
+// Every spelling of a guarded section's heading that renders as that heading:
+// ATX at the indent still short of a code block, in any case, closed with its
+// own `#` run, carrying a colon or a parenthetical, at a deeper level, and
+// setext underlined either way. A reader sees one section in each; so must both
+// halves of the guard.
+const GUARDED_HEADING_SPELLINGS = [
+  (name) => `## ${name}`,
+  (name) => `##  ${name}   `,
+  (name) => `## ${name.toLowerCase()}`,
+  (name) => `## ${name.toUpperCase()}`,
+  (name) => `## ${name.replace(/^./, (c) => c.toLowerCase())}S`,
+  (name) => `## ${name}:`,
+  (name) => `## ${name} ##`,
+  (name) => `   ## ${name}`,
+  (name) => `## ${name} (leftover)`,
+  (name) => `## **${name}**`,
+  (name) => `### ${name}`,
+  (name) => `${name}\n---------`,
+  (name) => `${name}\n=========`,
+];
+
+// The two guarded sections, each with the leftover copy its duplicate rule
+// exists for: the template's own unresolved lines left below a resolved draft.
+const GUARDED_SECTIONS = [
+  {
+    name: "Checklist",
+    leftover: `- [ ] Docs: enumerated \`docs/\` and \`docs/spec/\` -- <which pages>
+- [ ] \`CHANGELOG.md\` \`[Unreleased]\` updated -- <the entry>
+- [ ] Security review of \`fedcba9876543210fedcba9876543210fedcba98\` -- <type of review done>`,
+    hides: "unchecked box",
+  },
+  {
+    name: "Claims to refute",
+    leftover: "none",
+    hides: 'bare "none"',
+  },
+];
+
+describe("guarded section headings", () => {
+  it("counts a repeated guarded heading however it is spelled", () => {
+    for (const { name, leftover } of GUARDED_SECTIONS) {
+      for (const spell of GUARDED_HEADING_SPELLINGS) {
+        const second = `${spell(name)}\n\n${leftover}\n`;
+        const resolved = `${claimsSection}\n${passingBody}`;
+        for (const body of [
+          `${resolved}\n${second}`,
+          `${claimsSection}\n${second}\n${passingBody}`,
+        ]) {
+          expect(
+            bodyViolations(body, HEAD).some((m) =>
+              m.includes(`duplicate "## ${name}" section`),
+            ),
+            `${name}: ${JSON.stringify(spell(name))}`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("reads a guarded section through any spelling of its heading", () => {
+    for (const { name, leftover, hides } of GUARDED_SECTIONS) {
+      const other = GUARDED_SECTIONS.find((s) => s.name !== name);
+      for (const spell of GUARDED_HEADING_SPELLINGS) {
+        const body = `## Summary\n\nDeliver the thing.\n\n## ${other.name}\n\n${other.leftover}\n\n${spell(name)}\n\n${leftover}\n`;
+        const v = bodyViolations(body, HEAD);
+        const where = `${name}: ${JSON.stringify(spell(name))}`;
+        expect(
+          v.some((m) => m.includes(`no "## ${name}" section`)),
+          where,
+        ).toBe(false);
+        expect(
+          v.some((m) => m.includes(hides)),
+          where,
+        ).toBe(true);
+      }
+    }
+  });
+});
+
 describe("PR review attestation", () => {
   it("passes when the line attests the PR head", () => {
     expect(attestationViolations(passingBody, HEAD)).toEqual([]);

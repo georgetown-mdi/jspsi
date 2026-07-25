@@ -11,6 +11,9 @@
 //
 //   1. The `## Checklist` section must exist (the template ships one), and only
 //      once: a second copy hides whatever the first one's rules would have read.
+//      One heading scan answers both halves, so the section the rules read and
+//      the copies the duplicate rule counts are the same headings however they
+//      are spelled -- ATX or setext, any case, any trailing decoration.
 //   2. No box may be left unchecked: `- [ ]` means unresolved.
 //   3. The three required lines (Docs, CHANGELOG.md, Security review) must each
 //      open a line of their own -- the template says "Do not delete lines here"
@@ -121,31 +124,94 @@ export function stripHtmlComments(text) {
   return result;
 }
 
+// The guarded sections, named by the text their heading opens with. Only the
+// first of each is read, so the section scan and the duplicate rule ask this
+// same question of the same headings.
+const CHECKLIST_SECTION = "Checklist";
+const CLAIMS_SECTION = "Claims to refute";
+
+// An ATX heading: up to three leading spaces (a fourth makes it code), one to
+// six `#`, then the title an empty heading omits.
+const ATX_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/;
+
+// A setext underline: the run of `=` (H1) or `-` (H2) under a heading's text.
+const SETEXT_UNDERLINE = /^ {0,3}(=+|-+)[ \t]*$/;
+
+// A line no underline promotes to a heading: it opens a list item or a
+// blockquote, or is indented as code, so the run below it belongs to that block
+// as a thematic break rather than underlining it.
+const SETEXT_INELIGIBLE = /^ {4}|^ {0,3}(?:[-*+>]|\d+[.)])(?:[ \t]|$)/;
+
 /**
- * Locate the body of the `##` section whose heading matches `heading`, returning
- * `{start, end}` line indices (`start` is the heading itself, `end` is the next
- * `##` heading or the end of the body), or null when the section is absent.
+ * Every heading in `lines` as `{level, title, start, end}`, where `end` is the
+ * heading's last line -- its underline, for a setext heading.
+ *
+ * One scan answers for both guarded sections and for both questions asked of
+ * them, so there is no spelling that opens a section to one rule and hides it
+ * from the other: a respelled second copy is a duplicate rather than a section
+ * nothing reads.
  */
-function sectionBounds(lines, heading) {
-  const start = lines.findIndex((line) => heading.test(line));
-  if (start === -1) return null;
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i++) {
-    if (/^##\s/.test(lines[i])) {
-      end = i;
-      break;
+function scanHeadings(lines) {
+  const headings = [];
+  for (let i = 0; i < lines.length; i++) {
+    const atx = ATX_HEADING.exec(lines[i]);
+    if (atx !== null) {
+      headings.push({
+        level: atx[1].length,
+        title: atx[2] ?? "",
+        start: i,
+        end: i,
+      });
+      continue;
+    }
+    const underline = SETEXT_UNDERLINE.exec(lines[i + 1] ?? "");
+    if (
+      underline !== null &&
+      lines[i].trim() !== "" &&
+      !SETEXT_INELIGIBLE.test(lines[i])
+    ) {
+      headings.push({
+        level: underline[1][0] === "=" ? 1 : 2,
+        title: lines[i],
+        start: i,
+        end: i + 1,
+      });
+      i += 1;
     }
   }
-  return { start, end };
+  return headings;
+}
+
+/** Whether `heading` opens the guarded section `name`, however it is decorated. */
+function opensSection(heading, name) {
+  return opensWith(heading.title, name);
 }
 
 /**
- * Whether `lines` carries more than one `##` heading matching `heading`. Only
- * the first section is read, so a body that repeats one -- a prefilled template
- * left below a resolved draft -- would hide every line the second one carries.
+ * Locate the body of the guarded section `name`: `{start, end}` line indices,
+ * `start` being the heading's last line and `end` the next heading at that level
+ * or above (or the end of the body). Null when the section is absent.
  */
-function isDuplicated(lines, heading) {
-  return lines.filter((line) => heading.test(line)).length > 1;
+function sectionBounds(headings, lineCount, name) {
+  const index = headings.findIndex((heading) => opensSection(heading, name));
+  if (index === -1) return null;
+  const section = headings[index];
+  for (let i = index + 1; i < headings.length; i++) {
+    if (headings[i].level <= section.level) {
+      return { start: section.end, end: headings[i].start };
+    }
+  }
+  return { start: section.end, end: lineCount };
+}
+
+/**
+ * Whether `headings` carries more than one heading for the guarded section
+ * `name`. Only the first section is read, so a body that repeats one -- a
+ * prefilled template left below a resolved draft -- would hide every line the
+ * second one carries.
+ */
+function isDuplicated(headings, name) {
+  return headings.filter((heading) => opensSection(heading, name)).length > 1;
 }
 
 // GitHub stores a body edited in the browser with CRLF endings, and a carriage
@@ -156,12 +222,19 @@ function normalizeLineEndings(text) {
   return text.replace(/\r\n?/g, "\n");
 }
 
-/** The body's lines as every rule reads them: endings normalized, comments blanked. */
-function bodyLines(text) {
-  return stripHtmlComments(normalizeLineEndings(text)).split("\n");
+/**
+ * The body every rule reads: its lines with the endings normalized and the HTML
+ * comments blanked, its headings, and the Checklist section's items.
+ *
+ * Built once per invocation. `bodyViolations` runs three rules over one text,
+ * and stripping and splitting it per rule multiplies whatever a hostile body
+ * costs to scan.
+ */
+function parseBody(text) {
+  const lines = stripHtmlComments(normalizeLineEndings(text)).split("\n");
+  const headings = scanHeadings(lines);
+  return { lines, headings, items: checklistItems(lines, headings) };
 }
-
-const CHECKLIST_HEADING = /^##\s+Checklist\s*$/;
 
 /**
  * Parse the Checklist section's items, or null when the section is absent.
@@ -171,9 +244,8 @@ const CHECKLIST_HEADING = /^##\s+Checklist\s*$/;
  * matches labels only, so free text in a reason clause can never satisfy a
  * deleted line's presence requirement.
  */
-function checklistItems(text) {
-  const lines = bodyLines(text);
-  const section = sectionBounds(lines, CHECKLIST_HEADING);
+function checklistItems(lines, headings) {
+  const section = sectionBounds(headings, lines.length, CHECKLIST_SECTION);
   if (section === null) return null;
 
   const items = [];
@@ -205,17 +277,15 @@ function isUnreasonedNa(clause) {
   return colon !== ":" || !/\w/.test(reason);
 }
 
-/** Return the list of checklist violations in PR body `text` (empty = clean). */
-export function checklistViolations(text) {
+function checklistFindings({ headings, items }) {
   const violations = [];
-  const items = checklistItems(text);
   if (items === null) {
     violations.push(
       'no "## Checklist" section -- restore the template\'s Checklist with every line resolved',
     );
     return violations;
   }
-  if (isDuplicated(bodyLines(text), CHECKLIST_HEADING)) {
+  if (isDuplicated(headings, CHECKLIST_SECTION)) {
     violations.push(
       'duplicate "## Checklist" section -- only the first is read; delete the leftover copy rather than leave its lines unread',
     );
@@ -252,7 +322,10 @@ export function checklistViolations(text) {
   return violations;
 }
 
-const CLAIMS_HEADING = /^##\s+Claims to refute\s*$/i;
+/** Return the list of checklist violations in PR body `text` (empty = clean). */
+export function checklistViolations(text) {
+  return checklistFindings(parseBody(text));
+}
 
 // A claims section that says nothing: "none" alone, whatever renders it -- a
 // list marker, a table cell, a blockquote, emphasis, an HTML tag, wrapping
@@ -290,7 +363,11 @@ function readClaimsPlaceholders() {
     "utf8",
   );
   const lines = normalizeLineEndings(template).split("\n");
-  const section = sectionBounds(lines, CLAIMS_HEADING);
+  const section = sectionBounds(
+    scanHeadings(lines),
+    lines.length,
+    CLAIMS_SECTION,
+  );
   if (section === null) return [];
   const text = lines.slice(section.start + 1, section.end).join("\n");
   return [...new Set(text.match(/<[^<>\n]+>/g) ?? [])];
@@ -299,15 +376,12 @@ function readClaimsPlaceholders() {
 const CLAIMS_GUIDANCE =
   'enumerate every behavioral assertion this PR makes about its own code ("bounded by", "idempotent", "cannot happen", "measured as") with what enforces each, or write "none -- <reason>"';
 
-/** Return the list of Claims-to-refute violations in PR body `text`. */
-export function claimsViolations(text) {
-  const lines = bodyLines(text);
-
-  const section = sectionBounds(lines, CLAIMS_HEADING);
+function claimsFindings({ lines, headings }) {
+  const section = sectionBounds(headings, lines.length, CLAIMS_SECTION);
   if (section === null) {
     return [`no "## Claims to refute" section -- ${CLAIMS_GUIDANCE}`];
   }
-  if (isDuplicated(lines, CLAIMS_HEADING)) {
+  if (isDuplicated(headings, CLAIMS_SECTION)) {
     return [
       'duplicate "## Claims to refute" section -- only the first is read; delete the leftover copy rather than leave its lines unread',
     ];
@@ -337,6 +411,11 @@ export function claimsViolations(text) {
   return [];
 }
 
+/** Return the list of Claims-to-refute violations in PR body `text`. */
+export function claimsViolations(text) {
+  return claimsFindings(parseBody(text));
+}
+
 // The attested sha, hex and abbreviated or full, read only from the slot the
 // template gives it -- `Security review of <sha>` at the head of the label. A
 // hex string anywhere else, in a parenthetical or a resolution clause, is prose
@@ -345,13 +424,8 @@ export function claimsViolations(text) {
 // leaving every attestation unread.
 const ATTESTED_SHA = /^Security review of\s+([0-9a-f]{7,40})\b/i;
 
-/**
- * Return the list of review-attestation violations in PR body `text`, given the
- * PR's head sha (null when it cannot be determined, as in a local run, which
- * checks only that the line names a sha).
- */
-export function attestationViolations(text, headSha) {
-  const reviews = (checklistItems(text) ?? []).filter((item) =>
+function attestationFindings({ items }, headSha) {
+  const reviews = (items ?? []).filter((item) =>
     opensWith(item.label, REVIEW_PREFIX),
   );
   if (reviews.length === 0) return []; // a deleted line is the checklist's finding
@@ -376,6 +450,15 @@ export function attestationViolations(text, headSha) {
     ];
   }
   return [];
+}
+
+/**
+ * Return the list of review-attestation violations in PR body `text`, given the
+ * PR's head sha (null when it cannot be determined, as in a local run, which
+ * checks only that the line names a sha).
+ */
+export function attestationViolations(text, headSha) {
+  return attestationFindings(parseBody(text), headSha);
 }
 
 /**
@@ -408,10 +491,11 @@ export function prHeadSha() {
 
 /** Every PR-body violation this guard checks for (empty = clean). */
 export function bodyViolations(text, headSha) {
+  const body = parseBody(text);
   return [
-    ...checklistViolations(text),
-    ...claimsViolations(text),
-    ...attestationViolations(text, headSha),
+    ...checklistFindings(body),
+    ...claimsFindings(body),
+    ...attestationFindings(body, headSha),
   ];
 }
 
