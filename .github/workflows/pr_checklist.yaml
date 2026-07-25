@@ -1,16 +1,10 @@
 name: PR Checklist
 
-# Validates the PR description on every pull request: no box left unchecked, none
-# of the required Checklist lines deleted, every checked line carrying a resolution
-# clause, every n/a earned with a reason, and a Claims to refute section that says
-# something. This is the mechanical backstop for the template's "resolve every
-# line" rule and its claims enumeration (the honesty of a reason or a claim stays a
-# review call) -- see scripts/check-pr-checklist.mjs for the rules.
-#
-# It also gates the review attestation: the Security review line names the sha it
-# reviewed, and the check fails while that sha is not the PR head, so a commit
-# pushed after a review leaves the PR red until the new head is reviewed and the
-# line updated.
+# Validates the PR description's Checklist section on every pull request: no box
+# left unchecked, none of the required lines deleted, every checked line carrying
+# a resolution clause, and every n/a earned with a reason. This is the mechanical
+# backstop for the template's "resolve every line" rule (the honesty of a reason
+# stays a review call) -- see scripts/check-pr-checklist.mjs for the rules.
 #
 # Kept as its own workflow (rather than a job in static_checks.yaml) because it
 # runs on `edited` too: fixing the PR body re-runs the check without pushing a

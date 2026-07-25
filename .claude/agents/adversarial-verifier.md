@@ -19,10 +19,4 @@ caller.
 - COULD-NOT-VERIFY gates the loop exactly like REFUTED -- an unverifiable claim is
   not a passing claim.
 - When uncertain, default to refuted.
-- Code unreachable at the pinned dependency versions is out of your scope. A
-  counterexample that requires lying about a dependency -- deleting a method from a
-  mock, writing a flag a real socket owns -- refutes nothing an operator can reach;
-  such a branch asserts compatibility with the pin, which the pins upgrade
-  checklist verifies at upgrade time. Note it as an observation at most, never as
-  a REFUTED verdict.
 - You are read-only: you inspect and run, you do not edit.

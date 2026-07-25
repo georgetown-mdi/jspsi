@@ -32,15 +32,6 @@ Board items are GitHub Project draft itemIds, not issue numbers -- `Closes #<id>
 Ran: <suites or files exercised locally, e.g. `npx vitest run packages/core/test/foo.test.ts`>
 New tests cover: <the specific behaviors verified, or n/a -- reason>
 
-## Claims to refute
-
-<!--
-Every behavioral assertion this PR makes about its own code, one per line, each pointing at what makes it true. An assertion is any claim a reader would otherwise take on faith: "bounded by", "idempotent", "cannot happen", "at most once", "measured as", "retries N times". Nothing else in the process reads a PR's claims against its code, so a claim whose enforcement you cannot name here is one nobody will check -- point at the line, test, or check that holds it, or delete the claim from the description. Bound a claim to what the code does, not what the surrounding design intends: a counter that increments is not a counter that gates.
-If this PR asserts nothing about its own behavior, replace the list with: none -- <why, e.g. doc-only edit>.
--->
-
-- <claim, quoted from this description> -- <the line, test, or check that enforces it>
-
 ## Background
 
 <!-- Optional. Context that predates this PR: root cause, the invariant preserved, a non-obvious constraint. Omit if the Summary covers it. -->
@@ -71,6 +62,5 @@ Security review applies if this PR touches any of -- do it and record the type, 
 - what is disclosed: data sent, logged, displayed, or written to disk, or what the result reveals (cardinality, linkage terms, consent-surfaced fields)
 - a security-relevant dependency: @openmined/psi.js, @noble/curves, any AEAD / key-agreement / KDF library, or the SFTP stack (ssh2 / ssh2-sftp-client)
 Modifying an existing control counts, not only adding one. Full list: CONTRIBUTING Dependency Policy.
-The sha on this line is the commit the review read, and CI compares it to the PR head: push after a review and the PR goes red until the new head is reviewed and the sha updated. An n/a carries a sha too -- "none of the above touched" is a statement about a particular diff, and the next push can make it false.
 -->
-- [ ] Security review of `<sha>` -- <type of review done, or n/a: none of the above touched>
+- [ ] Security review -- <type of review done, or n/a: none of the above touched>
