@@ -3599,11 +3599,58 @@ test("summarizes the forced idle-boundary releases apart from the reconnects", a
     "the warning logged at each says what it left behind",
   );
   expect(summary).not.toContain("left an open socket");
+  // A degraded release can leave a transport this side never closed, so a total
+  // carrying one may not claim the close for all of them -- the per-release
+  // warning the line points at says the opposite of that claim at such a boundary.
+  expect(summary).not.toContain("closed from this side");
   // The mode's own boundaries are not reconnections, so nothing about them may
   // reach the reconnect summary.
   expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
     false,
   );
+});
+
+test("says the releases closed the connection when none was degraded", async () => {
+  // The claim the degraded total cannot carry is exactly what the operator wants
+  // when there is none: every one of these boundaries ended with the connection
+  // closed from this side and the next cycle dialing a fresh session.
+  const forcedSpy = vi
+    .spyOn(LocalFSClient.prototype, "forcedReleaseCount", "get")
+    .mockReturnValue(7);
+  const degradedSpy = vi
+    .spyOn(LocalFSClient.prototype, "degradedForcedReleaseCount", "get")
+    .mockReturnValue(0);
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    forcedSpy.mockRestore();
+    degradedSpy.mockRestore();
+  }
+
+  const summary = mockState.infos.find((line) =>
+    line.includes("did not close when released at 7 idle boundaries"),
+  );
+  expect(summary).toBeDefined();
+  expect(summary).toContain("not a dropped session");
+  expect(summary).toContain("so it was closed from this side");
+  expect(summary).not.toContain("did not release cleanly");
 });
 
 test("logs no reconnect or forced-release summary on a clean run", async () => {

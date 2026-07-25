@@ -4417,7 +4417,9 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const message = warn.mock.calls[0][0] as string;
       expect(message).toContain("closed the SFTP session's transport");
       expect(message).toContain("did not clear with it");
-      expect(message).toContain("(1 such release so far this exchange)");
+      expect(message).toContain(
+        "(1 idle boundary did not release cleanly so far this exchange)",
+      );
       expect(message).toContain("ssh2 changelog");
       // The costs of a transport left open are not this outcome's costs.
       expect(message).not.toContain("open-file limit");
@@ -4467,10 +4469,16 @@ describe("ephemeral session mode (connection-per-poll)", () => {
         .map((call) => call[0] as string)
         .filter((message) => message.includes("could not close the SFTP"));
       // Every degraded cycle warned -- not one in ten -- and each counted only the
-      // degraded releases.
+      // degraded releases, named as what that number counts: one counter carries
+      // all three degraded outcomes, so it is not a tally of the outcome the
+      // sentence around it describes.
       expect(degraded).toHaveLength(2);
-      expect(degraded[0]).toContain("(1 such release so far this exchange)");
-      expect(degraded[1]).toContain("(2 such releases so far this exchange)");
+      expect(degraded[0]).toContain(
+        "(1 idle boundary did not release cleanly so far this exchange)",
+      );
+      expect(degraded[1]).toContain(
+        "(2 idle boundaries did not release cleanly so far this exchange)",
+      );
       expect(adapter.forcedReleaseCount).toBe(4);
       expect(adapter.degradedForcedReleaseCount).toBe(2);
       // The benign path kept its own first-then-every-tenth cadence and its own
@@ -4607,9 +4615,63 @@ describe("ephemeral session mode (connection-per-poll)", () => {
           message.includes("could not release the SFTP session at all"),
         );
       expect(stuck).toHaveLength(2);
-      expect(stuck[0]).toContain("(1 such release so far this exchange)");
-      expect(stuck[1]).toContain("(2 such releases so far this exchange)");
+      expect(stuck[0]).toContain(
+        "(1 idle boundary did not release cleanly so far this exchange)",
+      );
+      expect(stuck[1]).toContain(
+        "(2 idle boundaries did not release cleanly so far this exchange)",
+      );
       expect(adapter.degradedForcedReleaseCount).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("the two lines a single boundary can log do not contradict each other", async () => {
+    // The unreadable reading and the session that cannot be cleared meet at one
+    // boundary, and the operator reads both lines about it. Neither may state
+    // what the other denies: the first cannot promise the dial the second says is
+    // skipped, and it cannot describe as ended a transport whose state it has
+    // just said is unreadable.
+    vi.useFakeTimers();
+    try {
+      const wrapper = wrapperMethods();
+      const { client, connect, rawClient } = withheldCloseClient(wrapper);
+      // An ssh2 whose client socket reports neither half-close flag, over an
+      // ssh2-sftp-client whose session property takes the write and keeps the
+      // session.
+      rawClient.end = vi.fn();
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      const warn = vi.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+      Object.defineProperty(client, "sftp", {
+        get: () => wrapper,
+        set: () => {},
+        configurable: true,
+      });
+      const release = adapter.releaseForIdle();
+      await vi.advanceTimersByTimeAsync(6_000);
+      await release;
+
+      const unreadableLine = warn.mock.calls[0][0] as string;
+      const stuckLine = warn.mock.calls[1][0] as string;
+      expect(unreadableLine).toContain("could not read whether");
+      expect(stuckLine).toContain("could not release the SFTP session at all");
+      // The dial this boundary does not make.
+      expect(stuckLine).toContain("skips its dial");
+      expect(unreadableLine).not.toContain("dials a fresh one");
+      // The transport state the line before it has just called unreadable.
+      expect(stuckLine).not.toContain("already ended");
+      expect(stuckLine).not.toContain("already-ended");
+
+      // The contradiction was about a real boundary: the next cycle reads the
+      // session it could not release as live and skips the dial.
+      await expect(adapter.ensureConnected()).resolves.toBe(true);
+      expect(connect).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
@@ -4884,13 +4946,89 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     }
   });
 
+  test("each paced release line counts its own series, not the boundary total", async () => {
+    // Three counters and three cadences share one exchange, and a line whose
+    // number is any of the others is unreadable twice over: it names boundaries
+    // the sentence around it does not describe, and its first-then-every-tenth
+    // pacing is driven off the boundaries it is about -- a benign line paced on
+    // the boundary TOTAL prints nothing at the first benign boundary. A case
+    // whose boundaries all end the same way advances every counter in lockstep
+    // and cannot tell one from another; this one makes the series diverge, with
+    // the degraded boundaries FIRST and the unreadable reading spanning them all.
+    vi.useFakeTimers();
+    try {
+      const { client, rawClient, sock } = withheldCloseClient(wrapperMethods());
+      // An ssh2 whose client socket reports neither half-close flag, for the whole
+      // exchange -- that reading belongs to the build, not to a boundary -- and
+      // whose destroy() is missing for the first two boundaries only.
+      rawClient.end = vi.fn();
+      const destroy = sock.destroy;
+      delete sock.destroy;
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      const warn = vi.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+      const degradedBoundaries = 2;
+      const cycles = degradedBoundaries + SFTP_REDIAL_WARN_INTERVAL;
+      const lines: { cycle: number; message: string }[] = [];
+      let read = 0;
+      for (let cycle = 1; cycle <= cycles; cycle += 1) {
+        if (cycle === degradedBoundaries + 1) sock.destroy = destroy;
+        const release = adapter.releaseForIdle();
+        await vi.advanceTimersByTimeAsync(5_000);
+        await release;
+        await adapter.ensureConnected();
+        warn.mock.calls.slice(read).forEach(([message]) => {
+          lines.push({ cycle, message: message as string });
+        });
+        read = warn.mock.calls.length;
+      }
+
+      // Where each line landed and what it counted there. A count that is any of
+      // the other two series lands at a different boundary, reports a different
+      // number, or does not print at all.
+      const tallies = (fragment: string): string[] =>
+        lines
+          .filter((line) => line.message.includes(fragment))
+          .map(
+            (line) =>
+              `cycle ${line.cycle}: ` +
+              `${/\(([^()]*so far this exchange)\)/.exec(line.message)?.[1] ?? "untallied"}`,
+          );
+
+      expect(tallies("did not close the connection")).toEqual([
+        "cycle 3: 1 idle boundary closed this way so far this exchange",
+        `cycle ${cycles}: ${SFTP_REDIAL_WARN_INTERVAL} idle boundaries closed ` +
+          `this way so far this exchange`,
+      ]);
+      expect(tallies("could not read whether")).toEqual([
+        "cycle 1: 1 idle boundary so far this exchange",
+        `cycle ${SFTP_REDIAL_WARN_INTERVAL}: ${SFTP_REDIAL_WARN_INTERVAL} idle ` +
+          `boundaries so far this exchange`,
+      ]);
+      expect(tallies("could not close the SFTP session's transport")).toEqual([
+        "cycle 1: 1 idle boundary did not release cleanly so far this exchange",
+        "cycle 2: 2 idle boundaries did not release cleanly so far this exchange",
+      ]);
+      // The two release counters still add up to the summary's total.
+      expect(adapter.forcedReleaseCount).toBe(cycles);
+      expect(adapter.degradedForcedReleaseCount).toBe(degradedBoundaries);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("a release that cannot read that flag drops its latch", async () => {
     // The latch may only stand where this side confirmed it ended something, and
-    // nothing here confirms it. Dropping it over-counts: the re-establishment that
-    // follows is reported as a drop that did not happen. That is the safe
-    // direction -- a latch left standing over a session something else ended
-    // exempts a real drop from the count and the warning, which is the misreport
-    // the latch exists to prevent.
+    // nothing here confirms it. Dropping it leaves an operation issued in the idle
+    // gap -- the only thing the latch shields, since the poll loop's own rhythm
+    // dials before it issues anything -- to count its own recovery re-dial as a
+    // drop that did not happen. That is the safe direction: a latch left standing
+    // over a session something else ended exempts a real drop from the count and
+    // the warning, which is the misreport the latch exists to prevent.
     vi.useFakeTimers();
     try {
       const { client, connect, rawClient } =
