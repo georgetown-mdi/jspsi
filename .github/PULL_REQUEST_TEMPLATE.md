@@ -52,7 +52,7 @@ Pre-release, the default is n/a: a CHANGELOG entry is needed only for a genuinel
 -->
 
 - [ ] Docs: enumerated `docs/` and `docs/spec/` and updated affected pages or added new ones at the appropriate level of detail for the document tier (`/docs` high level + design; `/docs/spec` low level + details) -- <which pages, or n/a: no documented behavior changed>
-- [ ] `CHANGELOG.md` `[Unreleased]` updated -- <the entry, or n/a: not a major feature or breaking change>
+- [ ] CHANGELOG.md [Unreleased] updated -- <the entry, or n/a: not a major feature or breaking change>
 <!--
 Security review applies if this PR touches any of -- do it and record the type, else n/a:
 - cryptographic code or its inputs: the PSI / key-exchange protocol, key derivation, or canonical encoding
@@ -62,5 +62,6 @@ Security review applies if this PR touches any of -- do it and record the type, 
 - what is disclosed: data sent, logged, displayed, or written to disk, or what the result reveals (cardinality, linkage terms, consent-surfaced fields)
 - a security-relevant dependency: @openmined/psi.js, @noble/curves, any AEAD / key-agreement / KDF library, or the SFTP stack (ssh2 / ssh2-sftp-client)
 Modifying an existing control counts, not only adding one. Full list: CONTRIBUTING Dependency Policy.
+The sha on this line is the commit the review read, and CI compares it to the PR head: push after a review and the PR goes red until the new head is reviewed and the sha updated. An n/a carries a sha too -- "none of the above touched" is a statement about a particular diff, and the next push can make it false.
 -->
-- [ ] Security review -- <type of review done, or n/a: none of the above touched>
+- [ ] Security review of <sha> -- <type of review done, or n/a: none of the above touched>
