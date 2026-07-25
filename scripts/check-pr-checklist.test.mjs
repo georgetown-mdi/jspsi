@@ -173,8 +173,8 @@ const claimsBody = `${claimsSection}\n## Background\n\nContext.\n`;
 
 // Every spelling that renders as an unreasoned none, collected by driving the
 // check adversarially: markdown markers, list and quote and heading prefixes,
-// table cells, HTML tags, escaped emphasis, entities, wrapping punctuation, and
-// spaced letters. Each must fail.
+// table cells, HTML tags, escaped emphasis, entities, wrapping punctuation,
+// spaced letters, and an n/a standing in for the reason. Each must fail.
 const UNEARNED_NONES = [
   "none",
   "None",
@@ -222,14 +222,18 @@ const UNEARNED_NONES = [
   '"none"',
   "None…",
   "n o n e",
+  "none -- n/a",
+  "- none -- n/a.",
+  "**none** -- n/a:",
 ];
 
-// A none is earned by the reason after it, whatever decorates the none itself.
+// A none is earned by the reason after it -- including an n/a that carries one.
 const REASONED_NONES = [
   "none -- doc-only edit, no behavior asserted",
   "**none** -- doc-only edit, no behavior asserted",
   "- none -- test-only change",
   "_none_ -- refactor with no behavioral assertion",
+  "none -- n/a: doc-only edit, nothing asserted about behavior",
 ];
 
 describe("PR claims guard", () => {

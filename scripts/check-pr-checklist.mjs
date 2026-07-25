@@ -165,6 +165,17 @@ function checklistItems(text) {
   return items;
 }
 
+/**
+ * An n/a resolution earns its place only as `n/a: <reason>`: a bare "n/a", or
+ * one whose reason is punctuation, resolves nothing.
+ */
+function isUnreasonedNa(clause) {
+  const na = /^n\/a\b\s*(:?)\s*(.*)$/i.exec(renderedText(clause));
+  if (na === null) return false;
+  const [, colon, reason] = na;
+  return colon !== ":" || !/\w/.test(reason);
+}
+
 /** Return the list of checklist violations in PR body `text` (empty = clean). */
 export function checklistViolations(text) {
   const violations = [];
@@ -202,14 +213,10 @@ export function checklistViolations(text) {
       );
       continue;
     }
-    const na = /^n\/a\b\s*(:?)\s*(.*)$/i.exec(clause);
-    if (na) {
-      const [, colon, reason] = na;
-      if (colon !== ":" || !/\w/.test(reason)) {
-        violations.push(
-          `line ${line}: n/a without a reason -- an n/a must be "n/a: <reason>" tied to this diff`,
-        );
-      }
+    if (isUnreasonedNa(clause)) {
+      violations.push(
+        `line ${line}: n/a without a reason -- an n/a must be "n/a: <reason>" tied to this diff`,
+      );
     }
   }
 
@@ -221,11 +228,18 @@ const CLAIMS_HEADING = /^##\s+Claims to refute\s*$/i;
 // A claims section that says nothing: "none" alone, whatever renders it -- a
 // list marker, a table cell, a blockquote, emphasis, an HTML tag, wrapping
 // quotes or brackets, trailing punctuation, letters spaced apart. What makes a
-// none earned is the reason after it, exactly as for a checklist n/a.
+// none earned is the reason after it, exactly as for a checklist n/a, so an
+// unreasoned n/a in that place says as little as no reason at all.
 const BARE_NONE = /^n\s*o\s*n\s*e$/i;
 
-function isBareNone(line) {
-  return BARE_NONE.test(renderedText(line));
+function isUnearnedNone(line) {
+  const separator = RESOLUTION_SEPARATOR.exec(line);
+  if (separator === null) return BARE_NONE.test(renderedText(line));
+  const clause = line.slice(separator.index + separator[0].length).trim();
+  return (
+    BARE_NONE.test(renderedText(line.slice(0, separator.index))) &&
+    (clause === "" || isUnreasonedNa(clause))
+  );
 }
 
 /**
@@ -277,7 +291,7 @@ export function claimsViolations(text) {
   if (body.length === 0) {
     return [`empty "## Claims to refute" section -- ${CLAIMS_GUIDANCE}`];
   }
-  if (body.some(isBareNone)) {
+  if (body.some(isUnearnedNone)) {
     return [
       'bare "none" under "## Claims to refute" -- a none must be "none -- <reason>" tied to this diff',
     ];
