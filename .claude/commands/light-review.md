@@ -154,10 +154,13 @@ Review the branch's own changes and nothing else. Anything attributable to stagi
 
 const salvage = (who) => `${who} returned no structured result -- the structured-output retries were exhausted. The analysis usually survives in the rejected attempts: read subagents/workflows/<runId>/agent-<id>.jsonl for this run and salvage it before re-running the round.`
 
-if (args.role) {
+// Presence, not truthiness: a role of "" is a mis-invocation for the allowlist below to
+// reject, not a lens round that silently drops the claims it was handed.
+if (args.role !== undefined && args.role !== null) {
   // The contract is matched on this form, so a list marker the caller left on a line and
-  // an enumeration the model echoed back both pair with the claim as written.
-  const normalizeClaim = (claim) => claim.trim().replace(/^([-*+]|\d+[.)])\s+/, '').trim()
+  // an enumeration the model echoed back both pair with the claim as written. A marker
+  // with nothing after it strips to empty, so a blank bullet cannot pass as a claim.
+  const normalizeClaim = (claim) => claim.trim().replace(/^([-*+]|\d+[.)])(\s+|$)/, '').trim()
   const ROLES = ['security-reviewer', 'adversarial-verifier']
   if (!ROLES.includes(args.role)) {
     throw new Error(`role must be ${ROLES.join(' or ')}, not "${args.role}"; no other agent runs under a refutation contract.`)
@@ -168,7 +171,7 @@ if (args.role) {
   const claims = []
   for (const raw of args.claims) {
     if (typeof raw !== 'string' || normalizeClaim(raw).length === 0) {
-      throw new Error(`every claim must be a non-empty string; got ${JSON.stringify(raw)}.`)
+      throw new Error(`every claim must be a non-empty string with text beyond a list marker; got ${JSON.stringify(raw)}.`)
     }
     const claim = normalizeClaim(raw)
     if (!claims.includes(claim)) claims.push(claim)
@@ -211,6 +214,10 @@ Anything else you find in this diff that is worth the caller knowing goes in fin
     gate: paired.some((entry) => entry.verdict !== 'HOLDS'),
     summary: result.summary,
   }
+}
+
+if (Array.isArray(args.claims) && args.claims.length > 0) {
+  throw new Error('claims were passed without a role: a lens round has no refutation contract to run them under, so it would drop them and review nothing they name. Pass --role security-reviewer or --role adversarial-verifier, or drop the claims.')
 }
 
 const reviewerPrompt = `You are a senior software engineer reviewing the current branch (HEAD) of this repository.

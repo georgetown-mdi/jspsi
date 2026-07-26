@@ -57,6 +57,17 @@ describe("light-review role mode", () => {
     ).rejects.toThrow(/security-reviewer or adversarial-verifier/);
   });
 
+  it("refuses a falsy role instead of falling through to a lens round", async () => {
+    for (const role of ["", 0, false]) {
+      await expect(
+        run(roleArgs(["a claim"], role), () => {
+          throw new Error("must not spawn");
+        }),
+        String(role),
+      ).rejects.toThrow(/security-reviewer or adversarial-verifier/);
+    }
+  });
+
   it("refuses a role round with no claims to refute", async () => {
     for (const claims of [[], undefined, "a claim"]) {
       await expect(
@@ -78,6 +89,21 @@ describe("light-review role mode", () => {
         }),
       ).rejects.toThrow(/non-empty string/);
     }
+  });
+
+  it("refuses a claim that is nothing but a list marker", async () => {
+    for (const marker of ["- ", "* ", "1. ", "  -  "]) {
+      await expect(
+        run(roleArgs([marker]), () => {
+          throw new Error("must not spawn");
+        }),
+        JSON.stringify(marker),
+      ).rejects.toThrow(/non-empty string with text beyond a list marker/);
+    }
+    const result = await run(roleArgs(["- real claim"]), () =>
+      roleReply([verdict("real claim")]),
+    );
+    expect(result.claims.map((entry) => entry.claim)).toEqual(["real claim"]);
   });
 
   it("deduplicates claims after stripping list markers", async () => {
@@ -161,6 +187,17 @@ describe("light-review lens mode", () => {
       },
     ],
   };
+
+  it("refuses claims handed to it without a role to run them under", async () => {
+    for (const role of [null, undefined]) {
+      await expect(
+        run({ docs: [], role, claims: ["a claim"] }, () => {
+          throw new Error("must not spawn");
+        }),
+        String(role),
+      ).rejects.toThrow(/claims were passed without a role/);
+    }
+  });
 
   it("consolidates what the reviewers that returned found", async () => {
     const result = await run(lensArgs, (prompt, options) =>
