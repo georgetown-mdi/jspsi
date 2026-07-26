@@ -127,6 +127,29 @@ describe("workflow agent model check", () => {
     expect(violations[0].problem).toContain("no literal `model:`");
   });
 
+  it("flags a spread into the options object, pinned or not", () => {
+    for (const code of [
+      "agent(prompt, { model: 'opus', ...override })",
+      "agent(prompt, { ...override })",
+    ]) {
+      const violations = modelViolations("cmd.md", block(code));
+      expect(violations, code).toHaveLength(1);
+      expect(violations[0].problem).toContain(
+        "spreads into its options object",
+      );
+    }
+  });
+
+  it("does not read a member access or a nested spread as a spread", () => {
+    const violations = modelViolations(
+      "cmd.md",
+      block(
+        "agent(a, { model: 'opus', label: names.first })\nagent(b, { model: 'opus', extra: { ...more } })",
+      ),
+    );
+    expect(violations).toEqual([]);
+  });
+
   it("flags both Fable spellings and names Fable in the message", () => {
     for (const model of ["fable", "claude-fable-5"]) {
       const violations = modelViolations(

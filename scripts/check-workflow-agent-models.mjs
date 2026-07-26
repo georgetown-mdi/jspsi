@@ -13,7 +13,9 @@
 // under .claude/commands/, .claude/agents/, or .claude/skills/ must pass a literal
 // `model:` from the tier set in its own options object, and Fable (which requires
 // the owner's per-spawn approval and is never inherited) may not be pinned in a
-// committed script at all.
+// committed script at all. That options object is spelled out in the call: a
+// spread into it can carry a `model` of its own and settle the tier at run time,
+// so the spread is itself a violation whether or not a literal sits beside it.
 //
 // The scan lexes a block rather than pattern-matching it: strings, template
 // literals, regex literals, and comments are read as tokens, so a `model: 'opus'`
@@ -23,14 +25,17 @@
 // in for its caller's.
 //
 // What the scan cannot see, exactly:
-//   - a computed or spread model value (`model: tier`, `...options`) resolves only
-//     at run time; it reads as no pin at all and is reported as one. A hoisted
-//     options const reads the same way, deliberately -- the convention is an
-//     inline literal in the call.
+//   - a computed model value (`model: tier`) resolves only at run time; it reads
+//     as no pin at all and is reported as one. A hoisted options const reads the
+//     same way, deliberately -- the convention is an inline literal in the call.
 //   - `agent` reached under another name. A non-call use of the identifier is
 //     itself reported, because the scan cannot follow it; but a binding taken off
 //     a property (`const spawn = deps.agent`) is a member access, which this check
-//     leaves alone, and a call through that binding is invisible.
+//     leaves alone, and a call through that binding is invisible -- as is a call
+//     made straight through the member access (`deps.agent(...)`).
+//   - a js fence nested inside another fence. The outer fence's info string decides
+//     the block, so js nested in a markdown block -- documentation whose examples
+//     are themselves Workflow scripts -- is not scanned at all.
 //   - a script that is not a fenced js block under a scanned directory: an ad-hoc
 //     inline Workflow script, or one passed by scriptPath. The
 //     require-workflow-fable-approval.mjs hook covers the inline form for Fable.
@@ -330,28 +335,38 @@ const literalValue = (token) =>
     ? token.value
     : undefined;
 
-// The `model` literals written at the top level of a call's options object --
-// its second argument, and only when that argument is an object literal spelled
-// out in the call. A key may be quoted; a value that is not a string or a
-// substitution-free template is not a literal and yields nothing, so the call
-// reads as unpinned.
-function optionsModels(tokens, openIndex, closeIndex) {
+// What a call's options object -- its second argument, and only when that
+// argument is an object literal spelled out in the call -- pins at its top level:
+// the `model` literals it writes, and whether it spreads anything in. A key may be
+// quoted; a value that is not a string or a substitution-free template is not a
+// literal and yields nothing, so the call reads as unpinned. A spread nested
+// deeper cannot reach the top-level `model` key, so only a top-level one counts.
+function optionsPins(tokens, openIndex, closeIndex) {
   const options = argumentSpans(tokens, openIndex, closeIndex)[1];
   if (
     !options ||
     !isPunct(tokens[options.start], "{") ||
     !isPunct(tokens[options.end - 1], "}")
   ) {
-    return [];
+    return { models: [], spread: false };
   }
 
   const models = [];
+  let spread = false;
   let depth = 0;
   for (let i = options.start + 1; i < options.end - 1; i++) {
     const token = tokens[i];
     if (token.kind === "punct") {
       if ("([{".includes(token.text)) depth++;
       else if (")]}".includes(token.text)) depth--;
+      else if (
+        depth === 0 &&
+        token.text === "." &&
+        isPunct(tokens[i + 1], ".") &&
+        isPunct(tokens[i + 2], ".")
+      ) {
+        spread = true;
+      }
       continue;
     }
     if (depth !== 0) continue;
@@ -360,7 +375,7 @@ function optionsModels(tokens, openIndex, closeIndex) {
     const value = literalValue(tokens[i + 2]);
     if (value !== undefined) models.push(value);
   }
-  return models;
+  return { models, spread };
 }
 
 const lineOf = (code, index) => code.slice(0, index).split("\n").length;
@@ -375,8 +390,9 @@ function summarize(text) {
 /**
  * Every appearance of the injected `agent` binding in a block, in source order,
  * as `{kind: "call" | "alias", text, line}`; a call also carries the literal
- * `models` its options object pins. A member access (`runner.agent`) is somebody
- * else's method and is not an appearance at all.
+ * `models` its options object pins and whether that object `spread`s anything in.
+ * A member access (`runner.agent`) is somebody else's method and is not an
+ * appearance at all.
  */
 export function agentUses(code) {
   const tokens = tokenize(code);
@@ -401,11 +417,7 @@ export function agentUses(code) {
       kind: "call",
       text: code.slice(token.start, end),
       line,
-      models: optionsModels(
-        tokens,
-        i + 1,
-        close === -1 ? tokens.length : close,
-      ),
+      ...optionsPins(tokens, i + 1, close === -1 ? tokens.length : close),
     });
   }
   return uses;
@@ -436,6 +448,14 @@ export function modelViolations(file, source) {
           file,
           line,
           problem: `${where}: \`${use.text}\` uses \`agent\` as a value rather than calling it; the tier pin is read off the call's own options object, so aliasing defeats this check -- spawn through a direct \`agent(...)\` call`,
+        });
+        continue;
+      }
+      if (use.spread) {
+        violations.push({
+          file,
+          line,
+          problem: `${where}: \`${summarize(use.text)}\` spreads into its options object, which can carry a \`model\` of its own and decide the tier at run time -- write the options out in the call with a literal \`model:\``,
         });
         continue;
       }
