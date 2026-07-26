@@ -245,12 +245,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // teardown has begun (a re-dial's readyTimeout would slow a clean close, and a
   // freshly-dialed session would outlive the teardown).
   private closing = false;
-  // Latched true by end() when the partner withheld its close past the terminal
-  // bound, so the connection was closed from this side instead (see
-  // forceCloseTerminalTransport). A repeat end() then returns at once: the client
-  // it would drive has been abandoned mid-end(), its socket is already destroyed,
-  // and the operator has already been told once. A plain latch, never reset.
-  private terminalCloseForced = false;
+  // The connection's one terminal close, memoized by end() on its first call: a
+  // repeat or concurrent close awaits this one instead of driving a second on the
+  // same client. Driving a second is not merely wasteful -- past the bound the
+  // client has been abandoned mid-end() with its socket destroyed under it, so the
+  // second drive spends the whole bound again and tells the operator a second time
+  // about one close. Never cleared (terminal is terminal), so a rejection is shared
+  // by every caller rather than re-attempted; core logs an end() rejection at debug
+  // either way, and there is nothing left for a second attempt to close.
+  private terminalClose: Promise<void> | undefined;
   // Latched true when the connection's close()/teardown begins, via
   // beginTeardown(). Distinct from `closing` (set later, by end()): `closing`
   // forbids a re-dial outright, whereas a teardown re-dial is still wanted -- the
@@ -1304,19 +1307,35 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * modes: nothing on this path is gated on connection-per-poll. A partner that
    * does close is unchanged -- its `end()` wins the bound and returns with no
    * added wait.
+   *
+   * Runs at most once per connection (see the class `terminalClose` field): a
+   * repeat or concurrent call -- the re-entrant one {@link withSessionRecovery}
+   * issues when a re-dial lands inside a teardown is the concurrent case -- awaits
+   * that same close and returns when it is complete, never over a connection still
+   * being closed.
    */
   async end(): Promise<void> {
     // Mark teardown so an op racing this close cannot trigger a NEW mid-exchange
-    // re-dial (see withSessionRecovery).
+    // re-dial (see withSessionRecovery). Latched and the close memoized in one
+    // synchronous step, so a caller that reaches end() off a `closing` reading --
+    // withSessionRecovery's re-entrant close -- finds the memo already set.
     this.closing = true;
+    this.terminalClose ??= this.closeTerminally();
+    await this.terminalClose;
+  }
+
+  private async closeTerminally(): Promise<void> {
     // A recovery re-dial may already be mid-handshake on the shared client, and an
     // idle release may be sitting between the ssh2 Client's end() and its 'close'.
     // Neither may overlap this teardown's client.end() on the one Ssh2SftpClient, so
     // wait both out, in the same loop and on the same terms as the other three
     // paths. What keeps a handle from appearing BEHIND that wait is that each of the
-    // three publishers re-reads `closing` (latched above, before any await here)
-    // immediately before it publishes -- a discipline spread over three methods, so
-    // the loop is the backstop that keeps this teardown correct without depending on
+    // three publishers re-reads `closing` (latched by end() before this runs) and
+    // publishes in the same synchronous step, so no fresh handle can appear once the
+    // latch is set -- which is also why running this wait once for the connection
+    // covers a caller that arrives later (see end()'s memo) rather than merely
+    // sparing it a second loop. It is a discipline spread over three methods, so the
+    // loop is the backstop that keeps this teardown correct without depending on
     // all three keeping it, not a second guarantee. Getting it wrong is expensive
     // twice over: client.end() runs against a live handshake, and ssh2-sftp-client's
     // end() short-circuits on the session that handshake has not restored yet, so
@@ -1335,9 +1354,6 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // Stop the keepalive before tearing the client down so no beat races the
     // teardown, and so the unref'd timer never lingers past the session.
     this.heartbeat.stop();
-    // A repeat close after a bounded teardown re-enters nothing: the client was
-    // abandoned mid-end() and its socket destroyed under it.
-    if (this.terminalCloseForced) return;
     // Captured once so the forced close below waits on the SAME end() rather than
     // issuing a second one on the abandoned client.
     const ending = this.client.end();
@@ -1354,9 +1370,6 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       await ending;
       return;
     }
-    // Latched before the force so a repeat end() cannot re-enter it, whichever
-    // branch below this close takes.
-    this.terminalCloseForced = true;
     await this.forceCloseTerminalTransport(ending);
   }
 
@@ -1395,10 +1408,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       );
       return;
     }
-    // Once per exchange at most, at default verbosity, and informational: the
-    // exchange has already completed and nothing was lost. It is deliberately not
-    // rolled into the connection-per-poll release's forced-release count, whose
-    // wording and end-of-run total are that mode's per-cycle boundary.
+    // At default verbosity and informational: the exchange has already completed
+    // and nothing was lost. It is deliberately not rolled into the
+    // connection-per-poll release's forced-release count, whose wording and
+    // end-of-run total are that mode's per-cycle boundary.
     this.log.info(
       `The partner's SFTP server did not close the connection within the ` +
         `${CLIENT_CLOSE_TIMEOUT_MS} ms teardown bound -- a server that leaves ` +

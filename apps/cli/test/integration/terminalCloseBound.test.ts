@@ -148,76 +148,82 @@ for (const [mode, connectionPerPoll] of [
     },
     TEST_TIMEOUT_MS,
   );
-}
 
-inProcessOnly(
-  "the process exits after a bounded teardown against a server that " +
-    "withholds its close",
-  async () => {
-    // The load-bearing assertion, and the reason it is a child process: an
-    // in-process check that close() settled passes even when the teardown left a
-    // live half-open socket behind, and this runner's own handles mask the leak.
-    // Only a separate process can show that a completed run actually finishes.
-    const srv = await startInProcessSftpServer();
-    const password = srv.handle.usera.password;
-    expect(password).toBeDefined();
-    try {
-      srv.sessionControls.withholdCloseOnDisconnect = true;
-      const child = spawn(
-        process.execPath,
-        [
-          "--import",
-          "tsx",
-          path.join(import.meta.dirname, "terminalCloseChild.ts"),
-        ],
-        {
-          cwd: path.join(import.meta.dirname, "..", ".."),
-          env: {
-            ...process.env,
-            PSILINK_TEST_HOST: srv.handle.host,
-            PSILINK_TEST_PORT: String(srv.handle.port),
-            PSILINK_TEST_USERNAME: srv.handle.usera.username,
-            PSILINK_TEST_PASSWORD: password as string,
-            PSILINK_TEST_HOST_KEY: srv.handle.hostKeyFingerprint,
-            PSILINK_TEST_REMOTE_PATH: srv.handle.remoteRoot,
+  inProcessOnly(
+    `the process exits after a bounded teardown in ${mode}, against a server ` +
+      `that withholds its close`,
+    async () => {
+      // The load-bearing assertion, and the reason it is a child process: an
+      // in-process check that close() settled passes even when the teardown left a
+      // live half-open socket behind, and this runner's own handles mask the leak.
+      // Only a separate process can show that a completed run actually finishes.
+      const srv = await startInProcessSftpServer();
+      const password = srv.handle.usera.password;
+      expect(password).toBeDefined();
+      try {
+        srv.sessionControls.withholdCloseOnDisconnect = true;
+        const child = spawn(
+          process.execPath,
+          [
+            "--import",
+            "tsx",
+            path.join(import.meta.dirname, "terminalCloseChild.ts"),
+          ],
+          {
+            cwd: path.join(import.meta.dirname, "..", ".."),
+            env: {
+              ...process.env,
+              PSILINK_TEST_HOST: srv.handle.host,
+              PSILINK_TEST_PORT: String(srv.handle.port),
+              PSILINK_TEST_USERNAME: srv.handle.usera.username,
+              PSILINK_TEST_PASSWORD: password as string,
+              PSILINK_TEST_HOST_KEY: srv.handle.hostKeyFingerprint,
+              PSILINK_TEST_REMOTE_PATH: srv.handle.remoteRoot,
+              PSILINK_TEST_CONNECTION_PER_POLL: connectionPerPoll ? "1" : "0",
+            },
+            stdio: ["ignore", "pipe", "pipe"],
           },
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
-      let out = "";
-      child.stdout.on("data", (chunk) => {
-        out += String(chunk);
-      });
-      child.stderr.on("data", (chunk) => {
-        out += String(chunk);
-      });
-      const started = Date.now();
-      const code = await new Promise<number | null>((resolve) => {
-        const giveUp = setTimeout(() => {
-          child.kill("SIGKILL");
-          resolve(null);
-        }, BOUNDED_TEARDOWN_MS + 20_000);
-        child.on("exit", (exitCode) => {
-          clearTimeout(giveUp);
-          resolve(exitCode);
+        );
+        let out = "";
+        child.stdout.on("data", (chunk) => {
+          out += String(chunk);
         });
-      });
+        child.stderr.on("data", (chunk) => {
+          out += String(chunk);
+        });
+        const started = Date.now();
+        const code = await new Promise<number | null>((resolve) => {
+          const giveUp = setTimeout(() => {
+            child.kill("SIGKILL");
+            resolve(null);
+          }, BOUNDED_TEARDOWN_MS + 20_000);
+          child.on("exit", (exitCode) => {
+            clearTimeout(giveUp);
+            resolve(exitCode);
+          });
+        });
 
-      expect({ code, out }).toEqual({ code: 0, out: expect.any(String) });
-      expect(Date.now() - started).toBeLessThan(BOUNDED_TEARDOWN_MS);
-      // close() returned and the run continued past it, rather than the process
-      // dying inside teardown.
-      expect(out).toContain("OPENED");
-      expect(out).toContain("CLOSED");
-      // The operator hears it once, at the CLI's default log level, as
-      // information rather than a failure.
-      expect(out).toContain("did not close the connection");
-      expect(out).not.toContain("[WARN]");
-      expect(out).not.toContain("[ERROR]");
-    } finally {
-      srv.sessionControls.stopWithholdingCloses();
-      await srv.stop();
-    }
-  },
-  TEST_TIMEOUT_MS,
-);
+        expect({ code, out }).toEqual({ code: 0, out: expect.any(String) });
+        expect(Date.now() - started).toBeLessThan(BOUNDED_TEARDOWN_MS);
+        // The child reports the mode it ran in, so a case that stopped reaching
+        // the mode it names fails rather than passing as a duplicate of the other.
+        expect(out).toContain(
+          `MODE ${connectionPerPoll ? "connection-per-poll" : "held-session"}`,
+        );
+        // close() returned and the run continued past it, rather than the process
+        // dying inside teardown.
+        expect(out).toContain("OPENED");
+        expect(out).toContain("CLOSED");
+        // The operator hears it once, at the CLI's default log level, as
+        // information rather than a failure.
+        expect(out).toContain("did not close the connection");
+        expect(out).not.toContain("[WARN]");
+        expect(out).not.toContain("[ERROR]");
+      } finally {
+        srv.sessionControls.stopWithholdingCloses();
+        await srv.stop();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+}

@@ -5622,4 +5622,69 @@ describe("terminal close against a partner that withholds its close", () => {
       vi.useRealTimers();
     }
   });
+
+  test.each([
+    { when: "in the same tick", advanceMs: 0 },
+    { when: "inside the bound", advanceMs: TERMINAL_CLOSE_BOUND_MS - 1 },
+  ])(
+    "a second close issued $when while the first is in flight forces the teardown once between them",
+    async ({ advanceMs }) => {
+      // Two closes can be in flight at once: withSessionRecovery issues a
+      // re-entrant one when a re-dial lands inside a teardown an external close
+      // has already latched. The forced close belongs to the CONNECTION, not to a
+      // caller -- one client.end(), one destroy(), one line to the operator,
+      // however many callers are waiting on it.
+      vi.useFakeTimers();
+      try {
+        const { client, socket } = partnerThatNeverCloses();
+        const { adapter, log } = loggedAdapter();
+        install(adapter, client);
+        await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+        const first = adapter.end();
+        if (advanceMs > 0) await vi.advanceTimersByTimeAsync(advanceMs);
+        let secondSettled = false;
+        const second = adapter.end().then(() => {
+          secondSettled = true;
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        // The second caller waits for the close in flight rather than returning
+        // over a connection still being closed.
+        expect(secondSettled).toBe(false);
+        expect(socket.destroy).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(
+          TERMINAL_CLOSE_BOUND_MS + FORCED_CLOSE_BOUND_MS + 2,
+        );
+        await Promise.all([first, second]);
+
+        expect(secondSettled).toBe(true);
+        expect(client.end).toHaveBeenCalledOnce();
+        expect(socket.destroy).toHaveBeenCalledOnce();
+        expect(socket.destroyed).toBe(true);
+        expect(log.info).toHaveBeenCalledTimes(1);
+        expect(log.warn).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  test("a close that rejects is shared by a repeat rather than re-attempted", async () => {
+    // The connection has one terminal close and one outcome. Re-driving a client
+    // whose own end() has already rejected has nothing left to close, and core
+    // logs an end() rejection at debug either way, so the rejection is handed to
+    // every caller instead.
+    const { client } = partnerThatNeverCloses({ closes: true });
+    const { adapter } = loggedAdapter();
+    install(adapter, client);
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const failure = new Error("Unexpected close event");
+    client.end = vi.fn().mockRejectedValue(failure);
+
+    await expect(adapter.end()).rejects.toBe(failure);
+    await expect(adapter.end()).rejects.toBe(failure);
+
+    expect(client.end).toHaveBeenCalledOnce();
+  });
 });

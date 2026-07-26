@@ -7,8 +7,11 @@
 // completed run would never exit -- and the test runner's own handles mask it.
 //
 // Every connection parameter arrives in the environment so the file is a plain
-// script with no argument parsing. Deliberately no process.exit(): the exit code
-// must come from a drained event loop.
+// script with no argument parsing, and the session mode it selected is echoed
+// back on stdout so the parent's per-mode case cannot silently run the other mode
+// (an unset variable defaults, and a defaulted one looks exactly like a passing
+// case). Deliberately no process.exit(): the exit code must come from a drained
+// event loop.
 import logLibrary from "loglevel";
 import { FileSyncConnection } from "@psilink/core";
 
@@ -26,9 +29,14 @@ async function main(): Promise<void> {
   // line is emitted here exactly as an operator would see it. loglevel binds a
   // logger's level at creation, so this precedes the adapter.
   logLibrary.setDefaultLevel("info");
+  const connectionPerPoll =
+    process.env.PSILINK_TEST_CONNECTION_PER_POLL === "1";
+  process.stdout.write(
+    `MODE ${connectionPerPoll ? "connection-per-poll" : "held-session"}\n`,
+  );
   const adapter = new SSH2SFTPClientAdapter({
     verbosity: 0,
-    ephemeralSessions: process.env.PSILINK_TEST_CONNECTION_PER_POLL === "1",
+    ephemeralSessions: connectionPerPoll,
   });
   const conn = new FileSyncConnection(adapter, {
     verbose: -1,
