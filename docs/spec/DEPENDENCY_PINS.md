@@ -89,6 +89,62 @@ not a platform-specific one, or the multi-platform release build cannot resolve
 every architecture; obtain it with `docker buildx imagetools inspect
 node:26-alpine`.
 
+## The install-script policy (`allowScripts`)
+
+The root `package.json` carries an `allowScripts` map. It is npm's own
+install-script policy field (npm 11.17 and later, maintained with
+`npm approve-scripts`), not a local convention: npm reads it from the
+`package.json` at the install prefix -- so the root map governs every workspace --
+and consults it per installed package before running that package's `preinstall`,
+`install`, or `postinstall` (and `prepare`, for a non-registry source). A
+registry package is identified by the name and version parsed out of the
+lockfile's `resolved` tarball URL, not by the tarball's own manifest, which its
+publisher controls.
+
+**Enforcement status.** A `false` verdict blocks that package's install script
+today: the install still succeeds, the script does not run, and whatever it would
+have produced is absent from the tree. A package with **no** verdict is only
+reported -- its script runs and the install prints it as unreviewed -- and npm's
+own documentation says a future release will block unreviewed scripts. The knob
+that makes an unreviewed script a hard failure now is `strict-allow-scripts`,
+which fails the install with `ESTRICTALLOWSCRIPTS` listing every uncovered
+package. This repo does not set it, in `.npmrc` or anywhere else, so an
+unreviewed script would install and warn rather than ground the build. The map is
+complete against the committed lockfile regardless (below), which is what keeps
+adopting that flag a one-line change rather than an audit.
+
+**Why the allow and deny entries are pinned differently.** npm honors three key
+forms: a bare name (equivalently `name@*`), one exact version, and exact versions
+joined by `||`. A semver range or a dist-tag is dropped from the policy with a
+single warning, so an entry written that way states a verdict that is not in
+force.
+
+- **Allows are pinned to an exact version** (`esbuild`, `ssh2`, `cpu-features`).
+  The approval is a review of one version's script, so it must not carry to the
+  next one: a bump arrives with no verdict and has to be reviewed rather than
+  inheriting the answer.
+- **Denials are name-only** (`@parcel/watcher`, `unrs-resolver`), which covers
+  every version. Both are dev-only native builds unreachable from the shipped
+  image, so no future version of either needs a fresh review to stay blocked.
+- **`fsevents` is denied at both installed versions** (`"fsevents@2.3.2 || 2.3.3"`,
+  the two the lockfile carries -- the second nested under `playwright`). It is a
+  `darwin`-only optional dependency whose published `install` script is
+  `node-gyp rebuild`, recompiling the prebuilt `fsevents.node` that the tarball
+  already ships and that its entry point requires, so the denial takes nothing
+  away from a macOS install.
+
+**The map is held in step with the lockfile by a check, not by prose.**
+`scripts/allow-scripts-policy.test.mjs` (run by `npm run test:scripts`, a CI
+static check) reads the committed `package.json` and `package-lock.json` and
+fails on a disagreement in either direction: an entry in a spec form npm would
+drop, an entry matching no package in the lockfile (a dead verdict that still
+reads as policy), or a lockfile package with an install script and no verdict --
+the same set npm's `--strict-allow-scripts` preflight computes, since both walk
+the lockfile rather than the installed tree. Neither of the first two failures
+produces any npm diagnostic at all, which is why they are pinned here: a
+dependency bump that adds, moves, or removes an install script reddens
+`npm run test:scripts` instead of silently widening or hollowing out the policy.
+
 ## The crossws peer conflict blocks the release SBOM
 
 `npm sbom` and `npm ls --omit=dev` both refuse to run, so release step 9 in [RELEASES.md](../RELEASES.md) cannot currently produce the CycloneDX BOM that records the release's dependency and license set, and the "what is actually in the shipped tree" query is unavailable. This is a known upstream-driven breakage with no local fix worth taking; it is recorded here so the dead ends below are not re-walked.
