@@ -12,9 +12,16 @@
 // rounds ledger, so the round never counts against the review-tier ceiling.
 // The block is unconditional rather than claims-sniffing: a prompt that pastes
 // a claims list still evades the gate and the ledger, so prompt content is not
-// a tell. Measured 2026-07-26: a Workflow-internal agent() call raises no Agent
-// PreToolUse event, so the sanctioned /light-review --role path never reaches
-// this hook.
+// a tell.
+//
+// Dated basis (2026-07-26, harness 2.1.220), not a checkable invariant: a
+// Workflow-internal agent() call raised no Agent PreToolUse event, so the
+// sanctioned /light-review --role path does not reach this hook. Re-verify
+// after a harness upgrade by re-running the probe -- a throwaway Workflow
+// whose agent() prompt matches require-declared-worktree-isolation's block
+// regex without the isolation flag; if that probe is blocked, internal spawns
+// have become visible and this hook must exempt by spawn origin or it wedges
+// /light-review --role.
 //
 // Fail-open scaffolding follows block-protected-push.mjs: JSON event on stdin,
 // exit 0 allows, exit 2 blocks and feeds stderr back to Claude. A missed block

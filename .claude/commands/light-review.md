@@ -298,6 +298,7 @@ Common to both:
    not `refuted`.
 6. Append one JSON line to the ledger:
    `{"round": N, "kind": "light", "date": "<date -I>", "reviewerCount": <reviewerCount>, "clusters": [{"name", "file", "severity", "verification"}], "simplerShapeVotes": <count of simpler=true>}`.
+   A branch's first row also carries `"cap": <the round budget>` (Common item 1).
 7. Write `review_findings.md`: a header line (branch, round N, kind `light`,
    `reviewerCount` reviewers), then the clusters sorted by severity (critical first) then
    flaggedBy (descending) -- one row each with issue number, name, description, severity,
@@ -321,6 +322,7 @@ number you asked for.
    for assess-review, which reads them off the artifact.
 6. Append one JSON line to the ledger:
    `{"round": N, "kind": "<role>", "date": "<date -I>", "gate": <gate>, "claims": [{"claim", "verdict", "file"}], "findings": [{"name", "file", "severity"}]}`.
+   A branch's first row also carries `"cap": <the round budget>` (Common item 1).
 7. Write `review_findings.md`: a header block naming the role, the number of claims it
    was contracted to refute, and the gate outcome (`gate` true is GATED, false is CLEAR),
    then a verdict table -- one row per claim with the claim, its verdict, the evidence,

@@ -25,11 +25,14 @@ Security review line.
 
 ## Step 1 -- Clean base
 
-Panelists read the merge base, never your working tree: a candidate edit
-sitting in the tree is a leading answer. Commit any work in progress (the
+Panelists read a clean mainline checkout, never your working tree: a candidate
+edit sitting in the tree is a leading answer. Commit any work in progress (the
 clean-tree hook blocks every Workflow call from a dirty tree), then run:
 
+    git worktree remove --force /tmp/panel-base 2>/dev/null; rm -rf /tmp/panel-base
     git worktree add --detach /tmp/panel-base origin/staging
+
+The first line clears a stale base left by an interrupted run.
 
 `/tmp/panel-base` has no `node_modules`: a question that needs code RUN rather
 than read is out of this command's scope -- measure it yourself first instead.
@@ -84,7 +87,7 @@ return (await parallel([
 3. A 2-1 split where the majority's rationale answers the dissent's keyRisk:
    proceed on the majority, record the dissent.
 4. No convergence, or a dissent the majority does not answer: take the
-   question to the owner in prose with all three positions. Do NOT re-run the
+   question to the owner in prose with each returned position. Do NOT re-run the
    panel -- a re-run is for contamination evidence only (a panelist read a
    candidate edit or was told a preferred answer), never for disagreement, and
    never because agreement came quickly.
