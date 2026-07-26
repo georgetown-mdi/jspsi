@@ -329,6 +329,14 @@ describe("the check as the workflow runs it", () => {
     expect(r.status).toBe(0);
   });
 
+  it("fails a body whose attested sha is not the head", () => {
+    const r = runCli(passingBody, {
+      GITHUB_ACTIONS: "true",
+      PR_HEAD_SHA: "fedcba9876543210fedcba9876543210fedcba98",
+    });
+    expect(r.status).toBe(1);
+  });
+
   it("refuses to pass on a runner whose head it cannot read", () => {
     const r = runCli(passingBody, { GITHUB_ACTIONS: "true" });
     expect(r.status).toBe(2);
