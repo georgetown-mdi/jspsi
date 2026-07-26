@@ -32,29 +32,58 @@ const lastFromIndex = instructions.reduce(
 const builder = instructions.slice(0, lastFromIndex);
 const runtime = instructions.slice(lastFromIndex);
 
-// Resolve the runtime stage's COPY destinations against the WORKDIR in effect
-// at each instruction, so assertions hold absolute in-image paths.
+// One COPY's sources and its absolute in-image destinations, resolved against
+// the WORKDIR in effect at that instruction.
+const copyTargets = (cwd, rest) => {
+  const tokens = rest.split(/\s+/);
+  const flags = tokens.filter((t) => t.startsWith("--"));
+  const paths = tokens.filter((t) => !t.startsWith("--"));
+  const sources = paths.slice(0, -1);
+  const rawDest = paths[paths.length - 1];
+  // A directory destination (trailing "/" or ".") receives the source's
+  // basename; a file destination is the path itself.
+  const dests =
+    rawDest.endsWith("/") || rawDest === "."
+      ? sources.map((s) => posix.resolve(cwd, rawDest, posix.basename(s)))
+      : [posix.resolve(cwd, rawDest)];
+  return { flags, sources, dests };
+};
+
 const runtimeCopies = [];
 {
   let cwd = "/";
   for (const { inst, rest } of runtime) {
     if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
-    if (inst !== "COPY") continue;
-    const tokens = rest.split(/\s+/);
-    const flags = tokens.filter((t) => t.startsWith("--"));
-    const paths = tokens.filter((t) => !t.startsWith("--"));
-    const sources = paths.slice(0, -1);
-    const rawDest = paths[paths.length - 1];
-    // A directory destination (trailing "/" or ".") receives the source's
-    // basename; a file destination is the path itself.
-    const dests =
-      rawDest.endsWith("/") || rawDest === "."
-        ? sources.map((s) => posix.resolve(cwd, rawDest, posix.basename(s)))
-        : [posix.resolve(cwd, rawDest)];
-    runtimeCopies.push({ flags, sources, dests });
+    if (inst === "COPY") runtimeCopies.push(copyTargets(cwd, rest));
   }
 }
 const allRuntimeDests = runtimeCopies.flatMap(({ dests }) => dests);
+
+// Every `npm ci` in the file, paired with whether the root .npmrc had already
+// been copied into the directory that install runs in. npm reads its project
+// config from the install prefix, so an install running anywhere else is one the
+// repo's npm policy does not reach.
+const installSites = [];
+{
+  let cwd = "/";
+  let npmrcDirs = new Set();
+  for (const { inst, rest } of instructions) {
+    if (inst === "FROM") {
+      cwd = "/";
+      npmrcDirs = new Set();
+    }
+    if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
+    if (inst === "COPY") {
+      for (const dest of copyTargets(cwd, rest).dests) {
+        if (posix.basename(dest) === ".npmrc")
+          npmrcDirs.add(posix.dirname(dest));
+      }
+    }
+    if (inst === "RUN" && /\bnpm ci\b/.test(rest)) {
+      installSites.push({ run: rest, cwd, underRootNpmrc: npmrcDirs.has(cwd) });
+    }
+  }
+}
 
 const builderRuns = builder
   .filter(({ inst }) => inst === "RUN")
@@ -75,6 +104,16 @@ describe("Dockerfile dependency freeze", () => {
     );
     expect(lockCopy).toBeGreaterThanOrEqual(0);
     expect(firstCi).toBeGreaterThan(lockCopy);
+  });
+
+  it("runs every npm ci under the root .npmrc, so its install policy binds", () => {
+    // Without the .npmrc in the install directory the image builds under npm's
+    // defaults: strict-allow-scripts is off, and a package that gains an
+    // install script runs it here while grounding every other install.
+    expect(installSites.length).toBeGreaterThan(0);
+    expect(
+      installSites.filter(({ underRootNpmrc }) => !underRootNpmrc),
+    ).toEqual([]);
   });
 
   it("ships a production-only tree: the builder's last npm command is npm ci --omit=dev", () => {
@@ -104,6 +143,23 @@ describe("Dockerfile dependency freeze", () => {
     // node_modules/psilink -> ../apps/cli must not dangle.
     expect(allRuntimeDests).toContain("/app/packages/core/package.json");
     expect(allRuntimeDests).toContain("/app/apps/cli/package.json");
+  });
+});
+
+describe("the root .npmrc the builder installs under", () => {
+  // The file is committed and public, and the builder copies it into the build
+  // context, so it may state configuration and nothing else: registry
+  // credentials belong in the user-level ~/.npmrc, which no build reads.
+  const settings = readFileSync(resolve(here, "..", ".npmrc"), "utf8")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !/^[#;]/.test(line));
+
+  it("states no credential-bearing key", () => {
+    const credentials = settings.filter((line) =>
+      /^(?:\/\/\S+:)?(?:_auth|_authToken|_password|username)\s*=/i.test(line),
+    );
+    expect(credentials).toEqual([]);
   });
 });
 
