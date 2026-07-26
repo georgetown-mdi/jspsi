@@ -13,8 +13,8 @@
 // haiku, fable} alias set, so "fable" is the only spelling that reaches a spawn.
 //
 // This gates the Agent tool. Fable requested inside a Workflow script's own
-// agent() call is a separate, unhooked vector (the model is buried in the script,
-// not a top-level tool input); it is tracked separately, not covered here.
+// agent() call is buried in the script rather than a top-level tool input, so it
+// is out of reach here; require-workflow-fable-approval.mjs covers that vector.
 //
 // Fail-open on any error EXCEPT the directly-detected explicit Fable model, which
 // needs no filesystem and always asks. The pinned-Fable path reads the agents dir
