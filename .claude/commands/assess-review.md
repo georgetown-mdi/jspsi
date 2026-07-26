@@ -33,10 +33,12 @@ Start with the whole, not the parts:
   zero; churn is fixes spawning findings.
 - **Kind.** Each ledger row carries a `kind`: `light` for a lens round, or the
   name of the role that ran it (`security-reviewer`, `adversarial-verifier`).
-  Compare a round only against prior rounds of the same kind -- a role round's
-  claims and a lens round's clusters count different things. In a role row, a
-  claim whose verdict is `REFUTED` or `COULD-NOT-VERIFY` is a confirmed finding
-  on its file.
+  A row with no `kind` predates the field and is a `light` round. Compare a
+  round only against prior rounds of the same kind -- a role round's claims and
+  a lens round's clusters count different things. In a role row, a claim whose
+  verdict is `REFUTED` or `COULD-NOT-VERIFY` is a confirmed finding on its file,
+  and so is an out-of-claim `finding` of severity critical or major -- the role
+  round's gate ignores those by design, the trajectory does not.
 
 Then check the **step-back triggers**. If ANY fires, do NOT proceed to
 fix-and-rerun: stop, and recommend a structural pivot instead -- a focused

@@ -1,6 +1,6 @@
 ---
 name: light-review
-description: Code review of the current branch (HEAD) against staging, through one Workflow. Default lens mode runs three independent schema-forced Sonnet reviewers and a Sonnet consolidator. Role mode (--role security-reviewer|adversarial-verifier --claims <file>) runs one schema-forced Opus role reviewer against a named list of claims to refute. Either mode computes the round's trajectory against prior rounds of its kind and writes review_findings.md in the working directory. Takes an optional list of documentation files the reviewers should consult for design justification. Pure orchestration -- it does not review the code itself.
+description: Code review of the current branch (HEAD) against staging, through one Workflow. Default lens mode runs three independent schema-forced Sonnet reviewers and a Sonnet consolidator. Role mode (--role security-reviewer|adversarial-verifier --claims <file>) runs one schema-forced Opus role reviewer against a named list of claims to refute. Either mode computes the round's trajectory against prior rounds of its kind and writes review_findings.md in the working directory. Takes an optional list of documentation files every agent it spawns should consult for design justification. Pure orchestration -- it does not review the code itself.
 ---
 
 You are ORCHESTRATING a code review. You do not review the code yourself and you
@@ -27,17 +27,20 @@ roles run only under a named list of claims to refute -- and do not restate it a
 of your own.
 
 In role mode, read the claims file in the main thread: every non-empty line is one
-claim, with a leading `- ` list marker stripped. Call this list CLAIMS.
+claim, trimmed, with a leading list marker (`- `, `* `, `1. `) stripped. Call this list
+CLAIMS.
 
 ## Step 1 -- Empty guard (cheap)
 
-Run `git diff "staging...HEAD" --stat`. If it reports no changes, say there is nothing to
-review and stop.
+Run `git diff "origin/staging...HEAD" --stat`. If it reports no changes, say there is
+nothing to review and stop.
 
-Three-dot (`staging...HEAD`) means "what the current branch changed since its merge-base
-with staging", i.e. PR semantics -- it ignores commits staging gained after the branch
-forked. Every agent below uses the same three-dot form. Only this `--stat` runs in the
-main thread, so the full diff never enters this conversation's context.
+Three-dot (`origin/staging...HEAD`) means "what the current branch changed since its
+merge-base with staging", i.e. PR semantics -- it ignores commits staging gained after
+the branch forked. The remote-tracking ref is the base, not a local `staging`, which
+goes stale and silently widens the round with work that already merged. Every agent
+below uses the same ref and the same three-dot form. Only this `--stat` runs in the main
+thread, so the full diff never enters this conversation's context.
 
 ## Step 2 -- Run the review Workflow
 
@@ -49,8 +52,8 @@ Agent tool instead: plain agents cannot have their output format enforced, and t
 is the point (prompt-side "return only JSON" instructions have a long failure record
 here).
 
-Commit before you invoke it: the clean-tree hook inspects the tree you are launching
-from, so even a by-ref round over another branch is blocked while this tree is dirty.
+Commit before you invoke it: this round reviews HEAD, and the clean-tree hook blocks any
+Workflow call made from a dirty tree.
 
 ```js
 export const meta = {
@@ -145,20 +148,39 @@ const docsClause = args.docs && args.docs.length
   ? 'First read these docs for design context: ' + args.docs.join(', ') + '. When an issue could be a deliberate design decision, check whether these docs justify it before flagging it.\n\n'
   : ''
 
-const diffScope = `Generate the diff yourself with git diff "staging...HEAD" -- the three-dot form is deliberate and non-negotiable: it shows ONLY what this branch added since it forked from staging, and it excludes every commit staging gained after the fork. That diff is the complete and exclusive scope of your review. Never widen it: do not run a two-dot git diff staging HEAD, do not diff against HEAD~N, the tip of staging, or any other base.
+const diffScope = `Generate the diff yourself with git diff "origin/staging...HEAD" -- the ref and the three-dot form are both deliberate and non-negotiable: it shows ONLY what this branch added since it forked from staging, and it excludes every commit staging gained after the fork. That diff is the complete and exclusive scope of your review. Never widen it: do not run a two-dot git diff origin/staging HEAD, do not substitute a local staging ref (it goes stale and drags in merged work), do not diff against HEAD~N, the tip of staging, or any other base.
 
 Review the branch's own changes and nothing else. Anything attributable to staging advancing since the branch forked -- the branch's base or starting point moving, the "root" of the branch changing, upstream commits the branch has not yet absorbed -- is OUT OF SCOPE and not this branch's responsibility. Do not flag it, describe it, or even mention that the base moved; treat such material as invisible. If a hunk merely re-states upstream staging work rather than introducing new behavior authored on this branch, ignore it. Open another file only if a hunk cannot be judged without it.`
 
 const salvage = (who) => `${who} returned no structured result -- the structured-output retries were exhausted. The analysis usually survives in the rejected attempts: read subagents/workflows/<runId>/agent-<id>.jsonl for this run and salvage it before re-running the round.`
 
 if (args.role) {
+  // The contract is matched on this form, so a list marker the caller left on a line and
+  // an enumeration the model echoed back both pair with the claim as written.
+  const normalizeClaim = (claim) => claim.trim().replace(/^([-*+]|\d+[.)])\s+/, '').trim()
+  const ROLES = ['security-reviewer', 'adversarial-verifier']
+  if (!ROLES.includes(args.role)) {
+    throw new Error(`role must be ${ROLES.join(' or ')}, not "${args.role}"; no other agent runs under a refutation contract.`)
+  }
+  if (!Array.isArray(args.claims) || args.claims.length === 0) {
+    throw new Error('a role round needs a non-empty claims array: with nothing to refute it would return a CLEAR artifact for a round that tested nothing.')
+  }
+  const claims = []
+  for (const raw of args.claims) {
+    if (typeof raw !== 'string' || normalizeClaim(raw).length === 0) {
+      throw new Error(`every claim must be a non-empty string; got ${JSON.stringify(raw)}.`)
+    }
+    const claim = normalizeClaim(raw)
+    if (!claims.includes(claim)) claims.push(claim)
+  }
+
   const rolePrompt = `You are reviewing the current branch (HEAD) of this repository under a refutation contract.
 ${diffScope}
 
 ${docsClause}Your contract is the named list of claims below. Take each one as something to REFUTE, not to confirm, and run the evidence yourself rather than taking the claim's own justification on faith. Return exactly one entry per claim, with the claim text copied verbatim so the caller can pair it back up, and a verdict of HOLDS, REFUTED, or COULD-NOT-VERIFY. COULD-NOT-VERIFY is not a pass: an unverifiable claim gates the round exactly as a refuted one does, and uncertainty defaults to refuted.
 
 The claims:
-${args.claims.map((claim, i) => `${i + 1}. ${claim}`).join('\n')}
+${claims.map((claim, i) => `${i + 1}. ${claim}`).join('\n')}
 
 Anything else you find in this diff that is worth the caller knowing goes in findings, separate from the claims -- do not stretch a claim to cover it, and do not invent a claim you were not given.`
 
@@ -167,24 +189,26 @@ Anything else you find in this diff that is worth the caller knowing goes in fin
   })
   if (!result) throw new Error(salvage(args.role))
 
-  const asked = args.claims.map((claim) => claim.trim())
-  const answered = result.claims.map((entry) => entry.claim.trim())
-  for (const claim of asked) {
-    const verdicts = answered.filter((a) => a === claim).length
-    if (verdicts !== 1) {
-      throw new Error(`${args.role} returned ${verdicts} verdicts for the claim "${claim}"; the contract needs exactly one per claim.`)
+  const answered = result.claims.map((entry) => normalizeClaim(String(entry.claim ?? '')))
+  const unpairable = (detail) => new Error(`${args.role} ${detail}\nIts verdicts in full, so the completed analysis is not lost with the round:\n${JSON.stringify(result.claims, null, 1)}`)
+  const paired = []
+  for (const claim of claims) {
+    const matches = result.claims.filter((entry, i) => answered[i] === claim)
+    if (matches.length !== 1) {
+      throw unpairable(`returned ${matches.length} verdicts for the claim "${claim}"; the contract needs exactly one per claim.`)
     }
+    paired.push({ ...matches[0], claim })
   }
   for (const claim of answered) {
-    if (!asked.includes(claim)) {
-      throw new Error(`${args.role} returned a verdict for "${claim}", which is not one of the claims it was given.`)
+    if (!claims.includes(claim)) {
+      throw unpairable(`returned a verdict for "${claim}", which is not one of the claims it was given.`)
     }
   }
 
   return {
-    claims: result.claims,
+    claims: paired,
     findings: result.findings,
-    gate: result.claims.some((entry) => entry.verdict !== 'HOLDS'),
+    gate: paired.some((entry) => entry.verdict !== 'HOLDS'),
     summary: result.summary,
   }
 }
@@ -203,7 +227,7 @@ const reviews = (await parallel([1, 2, 3].map((n) => () =>
 ))).filter(Boolean)
 if (reviews.length === 0) throw new Error(salvage('Every lens reviewer'))
 
-const consolidatorPrompt = `You are consolidating a code review of the current branch. ${reviews.length} independent reviewers examined git diff "staging...HEAD" (three-dot; the branch's own changes only -- never widen the diff). Their findings:
+const consolidatorPrompt = `You are consolidating a code review of the current branch. ${reviews.length} independent reviewers examined git diff "origin/staging...HEAD" (three-dot; the branch's own changes only -- never widen the diff). Their findings:
 ${JSON.stringify(reviews.map((r, i) => ({ reviewer: i + 1, findings: r.findings })), null, 1)}
 
 ${docsClause}In a single pass -- no sub-agents, no iteration:
@@ -214,6 +238,7 @@ ${docsClause}In a single pass -- no sub-agents, no iteration:
 const consolidated = await agent(consolidatorPrompt, {
   label: 'consolidator', phase: 'Consolidate', schema: CONSOLIDATOR_SCHEMA, model: 'sonnet',
 })
+if (!consolidated) throw new Error(salvage('The consolidator'))
 
 return {
   reviewerCount: reviews.length,
@@ -239,17 +264,20 @@ Common to both:
    Trajectory comparisons -- REPEAT files, hotspots, whether the contested list grew --
    run against prior rounds of the SAME kind only. A role round's claims and a lens
    round's clusters are not comparable evidence.
+3. REPEATs and hotspots are computed on file paths. An entry whose `file` is empty names
+   no file, so it is never a repeat and never a hotspot -- skip it rather than letting
+   every fileless entry collide into one.
 
 ### Lens mode -- the Workflow returned `{reviewerCount, simplerShapeVotes, clusters}`
 
-3. CONFIRMED = clusters with verification `confirmed`. A confirmed file that also carried
+4. CONFIRMED = clusters with verification `confirmed`. A confirmed file that also carried
    a confirmed cluster in the PREVIOUS light round is a REPEAT; repeat files are the
    round's hotspots.
-4. CONTESTED = clusters with `flaggedBy` 1, severity critical or major, and verification
+5. CONTESTED = clusters with `flaggedBy` 1, severity critical or major, and verification
    not `refuted`.
-5. Append one JSON line to the ledger:
+6. Append one JSON line to the ledger:
    `{"round": N, "kind": "light", "date": "<date -I>", "reviewerCount": <reviewerCount>, "clusters": [{"name", "file", "severity", "verification"}], "simplerShapeVotes": <count of simpler=true>}`.
-6. Write `review_findings.md`: a header line (branch, round N, kind `light`,
+7. Write `review_findings.md`: a header line (branch, round N, kind `light`,
    `reviewerCount` reviewers), then the clusters sorted by severity (critical first) then
    flaggedBy (descending) -- one row each with issue number, name, description, severity,
    file, "flagged by N of `<reviewerCount>`", and the verification outcome with its note
@@ -264,12 +292,15 @@ number you asked for.
 
 ### Role mode -- the Workflow returned `{claims, findings, gate, summary}`
 
-3. GATING = claims whose verdict is `REFUTED` or `COULD-NOT-VERIFY`. A gating claim's
+4. GATING = claims whose verdict is `REFUTED` or `COULD-NOT-VERIFY`. A gating claim's
    file that also carried a gating claim in the PREVIOUS round of this same role is a
    REPEAT; repeat files are the round's hotspots.
-4. Append one JSON line to the ledger:
+5. The gate is claim-scoped by design: `gate` reflects the contract's verdicts and
+   nothing else. The out-of-claim `findings` never move it -- they are triage material
+   for assess-review, which reads them off the artifact.
+6. Append one JSON line to the ledger:
    `{"round": N, "kind": "<role>", "date": "<date -I>", "gate": <gate>, "claims": [{"claim", "verdict", "file"}], "findings": [{"name", "file", "severity"}]}`.
-5. Write `review_findings.md`: a header block naming the role, the number of claims it
+7. Write `review_findings.md`: a header block naming the role, the number of claims it
    was contracted to refute, and the gate outcome (`gate` true is GATED, false is CLEAR),
    then a verdict table -- one row per claim with the claim, its verdict, the evidence,
    and `file:lines` -- then a `## Findings outside the claims` section (the findings, one
@@ -277,6 +308,10 @@ number you asked for.
    empty), then a `## Trajectory` section with: the round number and kind; the gate
    outcome; the gating claims split into new vs repeat; the hotspot files; and the role's
    summary.
+
+Each returned entry's `claim` is the contract's own text -- the Workflow paired the
+role's answer back to the claim as asked. Write it verbatim into the table and the
+ledger; a paraphrase makes the round untraceable to the contract it ran under.
 
 ## What you do NOT do
 
