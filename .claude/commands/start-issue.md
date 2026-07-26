@@ -131,7 +131,9 @@ with a one-line review-tier recommendation:
 An instruction-file diff -- `CLAUDE.md` or anything under `.claude/` -- is not
 docs-only for this ladder: those files steer every future session, and an
 unreviewed edit can silently drop a working constraint. It draws exactly one
-lens round; a role round runs only on the owner's word.
+lens round; a role round runs only on the owner's word. This lifts such a diff
+out of the first bucket only -- one that lands in a higher bucket by size or
+security surface keeps that bucket's treatment.
 
 State the bucket, the numbers behind it, and any file that forces the third
 bucket. Whether to run the tier is the owner's call in the plain flow (stop at
@@ -145,8 +147,11 @@ of every kind count against it, and only the owner raises it.
 steps above. When the instruction is to orchestrate:
 
 - **Delegate the writing.** Implementation goes to an `implementer` spawn with a
-  self-contained brief; fix rounds are fresh `implementer` spawns. The
-  orchestrating session edits nothing on the branch itself.
+  self-contained brief; fix rounds are fresh `implementer` spawns. The one
+  exception is /assess-review's own triage pass, which you run and whose small,
+  clearly-right fixes you apply directly -- a fix worth a brief of its own goes
+  to a fresh spawn instead. Outside that pass, the orchestrating session edits
+  nothing on the branch itself.
 - **Run the tier yourself.** Size Step 5's bucket from the diff and run exactly
   what it names without pausing for permission -- asking to run a tier you
   already determined is deferral, not caution. The ceiling still binds; only
@@ -154,4 +159,5 @@ steps above. When the instruction is to orchestrate:
 - **Proceed to an open PR.** The terminal state is a pushed branch, an open PR
   against staging with its checklist resolved, and a final report -- or a
   stated blocker. Raise concerns in prose as you go and keep moving; stop only
-  for Step 4's STOP-and-ask cases, batched into one message.
+  for Step 4's STOP-and-ask cases or a fired step-back trigger (assess-review,
+  Step 2), batched into one message.
