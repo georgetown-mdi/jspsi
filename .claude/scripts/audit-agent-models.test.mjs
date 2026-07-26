@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { classifySpawn, tierOf } from "./audit-agent-models.mjs";
+import {
+  classifySpawn,
+  classifyWorkflowAgent,
+  tierOf,
+} from "./audit-agent-models.mjs";
 
 // Build the two transcript indexes classifySpawn expects (tool_use.id -> input,
 // tool_use.id -> canonical resolved model id) from plain object literals, so a
@@ -112,6 +116,71 @@ describe("classifySpawn", () => {
       frontmatter,
     );
     expect(result.category).toBe("skip");
+  });
+});
+
+describe("classifyWorkflowAgent", () => {
+  const frontmatter = new Map([
+    ["security-reviewer", "opus"],
+    ["adversarial-verifier", "opus"],
+  ]);
+  const meta = (fields) => ({
+    workflow: "run-1/agent-a.meta.json",
+    description: "d",
+    ...fields,
+  });
+
+  it("reports a role spawned off its pinned tier", () => {
+    const result = classifyWorkflowAgent(
+      meta({ agentType: "security-reviewer", model: "claude-sonnet-5" }),
+      frontmatter,
+    );
+    expect(result.category).toBe("audited");
+    expect(result.kind).toBe("mismatch");
+    expect(result.row.intended).toBe("opus");
+    expect(result.row.intendedTier).toBe("opus");
+    expect(result.row.resolvedTier).toBe("sonnet");
+    expect(result.row.workflow).toBe("run-1/agent-a.meta.json");
+  });
+
+  it("accepts a role on its pinned tier, whether the model is an alias or a canonical id", () => {
+    for (const model of ["opus", "claude-opus-5"]) {
+      const result = classifyWorkflowAgent(
+        meta({ agentType: "adversarial-verifier", model }),
+        frontmatter,
+      );
+      expect(result.kind).toBe("ok");
+      expect(result.row.resolvedTier).toBe("opus");
+    }
+  });
+
+  it("reports a meta that recorded no model at all", () => {
+    const result = classifyWorkflowAgent(
+      meta({ agentType: "security-reviewer" }),
+      frontmatter,
+    );
+    expect(result.kind).toBe("inherited");
+    expect(result.row.intended).toBe("session-inherited");
+    expect(result.row.resolved).toBe("(unrecorded)");
+  });
+
+  it("passes an unpinned agent, which has no intent to compare against", () => {
+    const result = classifyWorkflowAgent(
+      meta({ model: "claude-sonnet-5" }),
+      frontmatter,
+    );
+    expect(result.kind).toBe("ok");
+    expect(result.row.agentType).toBe("(none)");
+    expect(result.row.intended).toBe("claude-sonnet-5");
+  });
+
+  it("audits without a toolUseId, which a workflow meta never carries", () => {
+    const result = classifyWorkflowAgent(
+      meta({ agentType: "security-reviewer", model: "claude-opus-5" }),
+      frontmatter,
+    );
+    expect(result.category).toBe("audited");
+    expect(result.row.toolUseId).toBeUndefined();
   });
 });
 
