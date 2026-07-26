@@ -1456,27 +1456,6 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       );
       return;
     }
-    // At default verbosity and informational: teardown's close runs last, so
-    // nothing it reports changes what the run produced -- and this adapter has no
-    // notion of that outcome (end() runs from core's close() on every teardown,
-    // a failed run and a bare connect/close included), so the line claims nothing
-    // about it. It is deliberately not rolled into the connection-per-poll
-    // release's forced-release count, whose wording and end-of-run total are that
-    // mode's per-cycle boundary. The two outcomes get their own sentence: nothing
-    // ran out of time on the rejecting one, so the bound is not what to tell the
-    // operator about it.
-    this.log.info(
-      (outcome.status === "expired"
-        ? `The partner's SFTP server did not close the connection within the ` +
-          `${CLIENT_CLOSE_TIMEOUT_MS} ms teardown bound -- a server that ` +
-          `leaves connections half-open, or one merely slower to answer than ` +
-          `the bound allows for -- so this side closed it. `
-        : `Closing the SFTP connection did not complete: ` +
-          `${sanitizeErrorForDisplay(outcome.error)}. The connection was left ` +
-          `open, so this side closed it. `) +
-        `This close is the last step of teardown, so it changes neither the ` +
-        `run's results nor its exit code.`,
-    );
     try {
       await this.awaitBoundedTeardown(
         ending,
@@ -1496,7 +1475,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // That the destroyed socket actually closed is the one premise connect()
     // cannot check -- nothing at connect time destroys the socket -- so it is read
     // back where it is driven.
-    if (seam.socket.destroyed !== true)
+    if (seam.socket.destroyed !== true) {
       this.log.warn(
         `The SFTP connection's transport did not close after this side ` +
           `destroyed it at teardown, so the connection may stay half-open, and ` +
@@ -1505,6 +1484,34 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `Re-verify the internal premises per the "Upgrading the SFTP Stack" ` +
           `checklist in docs/spec/DEPENDENCY_PINS.md`,
       );
+      return;
+    }
+    // At default verbosity and informational: teardown's close runs last, so
+    // nothing it reports changes what the run produced -- and this adapter has no
+    // notion of that outcome (end() runs from core's close() on every teardown,
+    // a failed run and a bare connect/close included), so the line claims nothing
+    // about it. It is deliberately not rolled into the connection-per-poll
+    // release's forced-release count, whose wording and end-of-run total are that
+    // mode's per-cycle boundary. The two outcomes get their own sentence: nothing
+    // ran out of time on the rejecting one, so the bound is not what to tell the
+    // operator about it.
+    //
+    // It reports the close in the past tense, so it follows the close rather
+    // than preceding it: on either degraded branch above, an operator told the
+    // connection was closed would be reading a claim that branch's warning then
+    // takes back. Waiting costs at most the forced close's own bound.
+    this.log.info(
+      (outcome.status === "expired"
+        ? `The partner's SFTP server did not close the connection within the ` +
+          `${CLIENT_CLOSE_TIMEOUT_MS} ms teardown bound -- a server that ` +
+          `leaves connections half-open, or one merely slower to answer than ` +
+          `the bound allows for -- so this side closed it. `
+        : `Closing the SFTP connection did not complete: ` +
+          `${sanitizeErrorForDisplay(outcome.error)}. The connection was left ` +
+          `open, so this side closed it. `) +
+        `This close is the last step of teardown, so it changes neither the ` +
+        `run's results nor its exit code.`,
+    );
   }
 
   /**

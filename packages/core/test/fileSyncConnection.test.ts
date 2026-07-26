@@ -2823,7 +2823,18 @@ test("a failing end() reaches no caller, and the teardown before it still ran", 
   // what the run reports. Everything teardown owed the transport -- the drain's
   // fallback delete and cleanup()'s sweep -- has landed by the time end() is
   // reached, and end()'s failure is logged at debug rather than surfaced.
+  const order: string[] = [];
   const { client, files } = makeMockClient();
+  const listed = client.list.bind(client);
+  client.list = async (path: string) => {
+    order.push("list");
+    return listed(path);
+  };
+  const safeDeleted = client.safeDelete.bind(client);
+  client.safeDelete = async (path: string) => {
+    order.push("safeDelete");
+    return safeDeleted(path);
+  };
   const conn = await makeConnectedConn(client, {
     peerTimeoutMs: 500,
     timeToLiveMs: 60_000,
@@ -2835,14 +2846,23 @@ test("a failing end() reaches no caller, and the teardown before it still ran", 
   expect(mine()).not.toEqual([]);
   let ended = 0;
   client.end = async () => {
+    order.push("end");
     ended += 1;
     throw new Error("Unexpected close event");
   };
+  // Only teardown's own ordering is under test; send() has already listed.
+  order.length = 0;
 
   await expect(conn.close()).resolves.toBeUndefined();
 
   expect(ended).toBe(1);
   expect(mine()).toEqual([]);
+  // Recorded rather than inferred from the swept files: their absence once
+  // close() returns says nothing about whether the sweep preceded the throwing
+  // end(), and the sibling test above pins that order only for one that resolves.
+  expect(order.at(-1)).toBe("end");
+  expect(order.indexOf("list")).toBeGreaterThan(-1);
+  expect(order.indexOf("safeDelete")).toBeGreaterThan(order.indexOf("list"));
 });
 
 test("synchronize() throws when createExclusive throws EEXIST but lock file is already gone (peer abandoned)", async () => {

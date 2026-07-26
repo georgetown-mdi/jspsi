@@ -5650,6 +5650,9 @@ describe("terminal close against a partner that withholds its close", () => {
       const message = log.warn.mock.calls[0][0] as string;
       expect(message).toContain("did not close after this side destroyed it");
       expect(message).toContain("DEPENDENCY_PINS.md");
+      // The connection was not closed on this branch, so the operator is not
+      // told it was: the informational line follows the close it reports.
+      expect(log.info).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -5677,6 +5680,8 @@ describe("terminal close against a partner that withholds its close", () => {
       expect(log.warn.mock.calls[0][0] as string).toContain(
         "socket already destroyed",
       );
+      // Nothing closed here either, so nothing claims it did.
+      expect(log.info).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
