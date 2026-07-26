@@ -90,9 +90,9 @@ const FORCED_CLOSE_TIMEOUT_MS = 1_000;
 // non-net.Socket transport reads undefined at each site; what that site does with
 // it differs -- setKeepAlive warns and continues, the members the
 // connection-per-poll release drives are verified at connect time and fail the
-// dial (see resolveTransportCloseSeams), and the terminal close resolves those
-// same seams lazily and warns rather than failing a dial over a teardown-only
-// mechanism.
+// dial (see resolveTransportCloseSeams), and the one member the terminal close
+// drives is resolved lazily and warns rather than failing a dial over a
+// teardown-only mechanism (see resolveTerminalCloseSeam).
 interface Ssh2ClientSocket {
   // ssh2 exposes setNoDelay but not setKeepAlive, so connect()'s kernel TCP
   // keepalive backstop reaches the socket for it.
@@ -190,22 +190,40 @@ interface Ssh2SftpClientInternals {
   } | null;
 }
 
-// The ssh2 seams this adapter's two closes drive, resolved and bound together so
-// a caller cannot reach one without having checked all of them. See
-// SSH2SFTPClientAdapter.resolveTransportCloseSeams.
-interface TransportCloseSeams {
-  end: () => void;
-  once: (event: "close", listener: () => void) => void;
-  removeListener: (event: "close", listener: () => void) => void;
+// The single ssh2 seam the connection's terminal close drives. Resolved on its
+// own, apart from the wider set below, so a relocated member the terminal close
+// never touches cannot disable its forced destroy -- which in the default
+// held-session mode would leave a completed run holding a ref'd half-open socket,
+// i.e. a process that never exits. See
+// SSH2SFTPClientAdapter.resolveTerminalCloseSeam.
+interface TerminalCloseSeam {
   destroy: () => void;
   socket: Ssh2ClientSocket;
 }
 
-// The first of those seams the installed ssh2 / ssh2-sftp-client no longer
-// exposes, named as the adapter reaches it (e.g. `client._sock.destroy()`).
+// The ssh2 seams the connection-per-poll idle release drives, resolved and bound
+// together so a caller cannot reach one without having checked all of them. See
+// SSH2SFTPClientAdapter.resolveTransportCloseSeams.
+interface TransportCloseSeams extends TerminalCloseSeam {
+  end: () => void;
+  once: (event: "close", listener: () => void) => void;
+  removeListener: (event: "close", listener: () => void) => void;
+}
+
+// The first seam the installed ssh2 / ssh2-sftp-client no longer exposes, named
+// as the adapter reaches it (e.g. `client._sock.destroy()`).
 interface UnavailableTransportCloseSeam {
   missing: string;
 }
+
+// How a bounded teardown wait ended (see
+// SSH2SFTPClientAdapter.awaitBoundedTeardown). `settled` is the only one meaning
+// the close completed: `failed` is a close that raised having closed nothing, and
+// `expired` a close still outstanding at the bound.
+type BoundedTeardownOutcome =
+  | { status: "settled" }
+  | { status: "failed"; error: unknown }
+  | { status: "expired" };
 
 // list() and createExclusive() both run only after connect() has already
 // verified the 'sftp' session and every method it drives (see the guard
@@ -247,12 +265,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private closing = false;
   // The connection's one terminal close, memoized by end() on its first call: a
   // repeat or concurrent close awaits this one instead of driving a second on the
-  // same client. Driving a second is not merely wasteful -- past the bound the
-  // client has been abandoned mid-end() with its socket destroyed under it, so the
-  // second drive spends the whole bound again and tells the operator a second time
-  // about one close. Never cleared (terminal is terminal), so a rejection is shared
-  // by every caller rather than re-attempted; core logs an end() rejection at debug
-  // either way, and there is nothing left for a second attempt to close.
+  // same client. Driving a second is not merely wasteful -- this close does not
+  // settle, either way, until the client's socket has been destroyed beneath it or
+  // a degraded branch has warned, so the second drive spends the whole bound again
+  // and tells the operator a second time about one close. Never cleared (terminal
+  // is terminal), so a rejection is shared by every caller rather than
+  // re-attempted: what it reports is ssh2-sftp-client's own end() raising, which
+  // core logs at debug, and the connection that end() failed to close has already
+  // been closed from this side by the time any caller can see it.
   private terminalClose: Promise<void> | undefined;
   // Latched true when the connection's close()/teardown begins, via
   // beginTeardown(). Distinct from `closing` (set later, by end()): `closing`
@@ -276,11 +296,19 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // op that owns the re-dial can be abandoned before it completes: core's per-op
   // peerTimeoutMs budget (a Promise.race) rejects a stalled op to the caller while
   // the adapter op keeps running, so the caller can reach close() -> end() while
-  // the abandoned op is still mid-re-dial. The dial waited on here carries
-  // connect()'s own retry budget and each attempt its readyTimeout. A data-plane op
-  // and end() sit under core's per-op peerTimeoutMs budget on top of that;
-  // releaseForIdle and ensureConnected are forwarded UNWRAPPED (deliberately --
-  // neither is a peer round trip), so those two carry nothing above the dial.
+  // the abandoned op is still mid-re-dial. What bounds this wait is the dial: its
+  // connect() retry budget, and each attempt its readyTimeout -- ssh2's one
+  // unbounded dial, the attempt it defers behind a 'close' it arms no readyTimeout
+  // for, is a state no adapter dial path reaches, which the dial census in
+  // test/integration/dialDeferral.test.ts checks rather than this comment claiming.
+  // The ceilings ABOVE the wait differ by caller: a data-plane op rides core's
+  // per-op peerTimeoutMs budget, end() rides core's much shorter teardown budget,
+  // and releaseForIdle and ensureConnected are forwarded UNWRAPPED (deliberately --
+  // neither is a peer round trip), so those two carry nothing above the dial. That
+  // teardown budget is short enough to abandon core's wait for end() while a dial
+  // is still running here, which the old fresh-peerTimeoutMs wrap never did; it
+  // abandons the wait only -- closeTerminally keeps running behind it and still
+  // closes the connection from this side.
   private redialInFlight: Promise<void> | undefined;
   // The in-flight idle-boundary release's close (settled either way), or undefined
   // when none is running. Published by releaseForIdle exactly as publishRedial
@@ -1303,10 +1331,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * the ssh2 Client's `'close'`, which a partner that accepts the disconnect and
    * then goes quiet never produces -- so the wait is bounded here by
    * {@link CLIENT_CLOSE_TIMEOUT_MS} and, past it, the connection is closed from
-   * this side (see {@link forceCloseTerminalTransport}). Common to BOTH session
-   * modes: nothing on this path is gated on connection-per-poll. A partner that
-   * does close is unchanged -- its `end()` wins the bound and returns with no
-   * added wait.
+   * this side (see {@link forceCloseTerminalTransport}). An `end()` that REJECTS
+   * closed nothing either, so it reaches that same close and the rejection is
+   * re-raised only behind it. Common to BOTH session modes: nothing on this path
+   * is gated on connection-per-poll. A partner that does close is unchanged -- its
+   * `end()` resolves inside the bound and returns with no added wait.
    *
    * Runs at most once per connection (see the class `terminalClose` field): a
    * repeat or concurrent call -- the re-entrant one {@link withSessionRecovery}
@@ -1357,29 +1386,36 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // Captured once so the forced close below waits on the SAME end() rather than
     // issuing a second one on the abandoned client.
     const ending = this.client.end();
-    if (
-      await this.awaitBoundedTeardown(
-        ending,
-        CLIENT_CLOSE_TIMEOUT_MS,
-        undefined,
-        false,
-      )
-    ) {
-      // The partner closed: surface end()'s own outcome, rejection included,
-      // exactly as an unbounded await did.
-      await ending;
-      return;
-    }
-    await this.forceCloseTerminalTransport(ending);
+    const outcome = await this.awaitBoundedTeardown(
+      ending,
+      CLIENT_CLOSE_TIMEOUT_MS,
+      undefined,
+      false,
+    );
+    // Resolving is the ONLY outcome that means the partner closed the connection.
+    // A rejection closed nothing: ssh2-sftp-client raises it from a temporary
+    // 'error' listener whose end/close listeners are gated off by `endCalled`, so
+    // it leaves the socket exactly as a withheld close does -- half-open, and a
+    // ref'd handle that keeps the process alive. It is a reason to force the close,
+    // not a reason to skip it.
+    if (outcome.status === "settled") return;
+    await this.forceCloseTerminalTransport(ending, outcome);
+    // Forced FIRST, then surfaced: no caller can observe this rejection over a
+    // socket still alive, including the ones sharing the memo, since the memoized
+    // promise does not settle until the destroy above has run. What the rejection
+    // reports is unchanged from an unbounded await -- core logs it at debug and the
+    // exit code is untouched -- so it is not swallowed here.
+    if (outcome.status === "failed") throw outcome.error;
   }
 
-  // The partner accepted the disconnect and never closed the connection, so the
-  // ssh2 Client's 'close' that settles ssh2-sftp-client's end() is still
-  // outstanding past the bound, on a transport this side has already ended. Close
-  // it from this side: net.Socket's destroy() needs nothing from the peer, and
-  // beneath a pending end() it SETTLES that end() rather than abandoning it, so
-  // teardown finishes and the process is left holding no half-open socket (which,
-  // being a ref'd handle, would otherwise keep a completed run alive indefinitely).
+  // ssh2-sftp-client's end() did not close the connection: either the partner
+  // accepted the disconnect and never closed it, leaving the ssh2 Client's 'close'
+  // outstanding past the bound, or end() rejected without closing anything. Both
+  // leave a transport this side has already ended. Close it from this side:
+  // net.Socket's destroy() needs nothing from the peer, and beneath a pending
+  // end() it SETTLES that end() rather than abandoning it, so teardown finishes
+  // and the process is left holding no half-open socket (which, being a ref'd
+  // handle, would otherwise keep a completed run alive indefinitely).
   //
   // Nothing here throws, and every degraded branch is a warning that names what
   // broke and where to re-verify it. The exchange has already succeeded by the
@@ -1387,64 +1423,72 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // at debug, so a throw would be invisible and would accomplish nothing.
   private async forceCloseTerminalTransport(
     ending: Promise<unknown>,
+    outcome: { status: "failed"; error: unknown } | { status: "expired" },
   ): Promise<void> {
     const internals = this.client as unknown as Ssh2SftpClientInternals;
     // Resolved HERE rather than at connect: the default held-session mode does not
-    // verify these seams at dial time (see connect()), and failing a dial over a
+    // verify this seam at dial time (see connect()), and failing a dial over a
     // teardown-only mechanism would ground every default-mode exchange on an ssh2
     // bump that costs it nothing. An unavailable seam degrades to a warning and a
     // bounded return instead.
-    const seams = this.resolveTransportCloseSeams(internals);
-    if ("missing" in seams) {
+    const seam = this.resolveTerminalCloseSeam(internals);
+    if ("missing" in seam) {
       this.log.warn(
-        `The partner's SFTP server did not close the SFTP connection at ` +
+        `The SFTP connection was not closed by the partner's SFTP server at ` +
           `teardown, and closing it from this side drives ssh2's ` +
-          `${seams.missing}, which is not available after connect(): the ` +
-          `connection is left to the operating system and may stay half-open ` +
-          `until this process exits. The installed ssh2 / ssh2-sftp-client ` +
-          `version may have renamed, relocated, or removed it - re-verify the ` +
-          `internal premises per the "Upgrading the SFTP Stack" checklist in ` +
-          `docs/spec/DEPENDENCY_PINS.md`,
+          `${seam.missing}, which is not available after connect(): the ` +
+          `connection is left to the operating system, may stay half-open, and ` +
+          `a half-open connection can keep this process from exiting. The ` +
+          `installed ssh2 / ssh2-sftp-client version may have renamed, ` +
+          `relocated, or removed it - re-verify the internal premises per the ` +
+          `"Upgrading the SFTP Stack" checklist in docs/spec/DEPENDENCY_PINS.md`,
       );
       return;
     }
     // At default verbosity and informational: the exchange has already completed
     // and nothing was lost. It is deliberately not rolled into the
     // connection-per-poll release's forced-release count, whose wording and
-    // end-of-run total are that mode's per-cycle boundary.
+    // end-of-run total are that mode's per-cycle boundary. The two outcomes get
+    // their own sentence: nothing ran out of time on the rejecting one, so the
+    // bound is not what to tell the operator about it.
     this.log.info(
-      `The partner's SFTP server did not close the connection within the ` +
-        `${CLIENT_CLOSE_TIMEOUT_MS} ms teardown bound -- a server that leaves ` +
-        `connections half-open, or one merely slower to answer than the bound ` +
-        `allows for -- so this side closed it. The exchange had already ` +
-        `completed; nothing was lost.`,
+      (outcome.status === "expired"
+        ? `The partner's SFTP server did not close the connection within the ` +
+          `${CLIENT_CLOSE_TIMEOUT_MS} ms teardown bound -- a server that ` +
+          `leaves connections half-open, or one merely slower to answer than ` +
+          `the bound allows for -- so this side closed it. `
+        : `Closing the SFTP connection did not complete: ` +
+          `${sanitizeErrorForDisplay(outcome.error)}. The connection was left ` +
+          `open, so this side closed it. `) +
+        `The exchange had already completed; nothing was lost.`,
     );
     try {
       await this.awaitBoundedTeardown(
         ending,
         FORCED_CLOSE_TIMEOUT_MS,
-        seams.destroy,
+        seam.destroy,
         true,
       );
     } catch (error: unknown) {
       this.log.warn(
         `Closing the SFTP connection from this side failed at teardown: ` +
           `${sanitizeErrorForDisplay(error)}. The connection is left to the ` +
-          `operating system and may stay half-open until this process exits.`,
+          `operating system, may stay half-open, and a half-open connection ` +
+          `can keep this process from exiting.`,
       );
       return;
     }
     // That the destroyed socket actually closed is the one premise connect()
     // cannot check -- nothing at connect time destroys the socket -- so it is read
     // back where it is driven.
-    if (seams.socket.destroyed !== true)
+    if (seam.socket.destroyed !== true)
       this.log.warn(
         `The SFTP connection's transport did not close after this side ` +
-          `destroyed it at teardown, so the connection may stay half-open ` +
-          `until this process exits; the installed ssh2 may no longer expose ` +
-          `the socket beneath its client. Re-verify the internal premises per ` +
-          `the "Upgrading the SFTP Stack" checklist in ` +
-          `docs/spec/DEPENDENCY_PINS.md`,
+          `destroyed it at teardown, so the connection may stay half-open, and ` +
+          `a half-open connection can keep this process from exiting; the ` +
+          `installed ssh2 may no longer expose the socket beneath its client. ` +
+          `Re-verify the internal premises per the "Upgrading the SFTP Stack" ` +
+          `checklist in docs/spec/DEPENDENCY_PINS.md`,
       );
   }
 
@@ -1623,15 +1667,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   // Drive a teardown action (when one is supplied) and wait for `settled` under
-  // `timeoutMs`, reporting whether `settled` won the race. The one bounded-wait
-  // mechanism both closes are built from: the connection-per-poll idle release's
-  // end() and forced close reach it through {@link awaitClientClose}, waiting on
-  // the ssh2 Client's 'close'; the connection's terminal close and its forced
-  // close call it directly, waiting on ssh2-sftp-client's pending end().
+  // `timeoutMs`, reporting which of the three outcomes the race reached. The one
+  // bounded-wait mechanism both closes are built from: the connection-per-poll idle
+  // release's end() and forced close reach it through {@link awaitClientClose},
+  // waiting on the ssh2 Client's 'close'; the connection's terminal close and its
+  // forced close call it directly, waiting on ssh2-sftp-client's pending end().
   //
-  // `settled`'s own rejection is absorbed -- it counts as settling, and the caller
-  // decides what to do about the outcome -- so a promise that loses the race and
-  // rejects later never surfaces as an unhandled rejection.
+  // A rejection of `settled` is REPORTED, not folded into settling: on the terminal
+  // close it means the close failed having closed nothing, which the caller must
+  // tell apart from the partner having closed the connection. It is absorbed here
+  // so a promise that loses the race and rejects later never surfaces as an
+  // unhandled rejection, and handed back on `error` instead.
   //
   // `holdProcessAlive` decides whether the bound's own timer is ref'd. A wait on a
   // socket this adapter merely ENDED leaves it unref'd (the deliberately-unref'd
@@ -1646,10 +1692,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     timeoutMs: number,
     drive: (() => void) | undefined,
     holdProcessAlive: boolean,
-  ): Promise<boolean> {
+  ): Promise<BoundedTeardownOutcome> {
     let expire!: () => void;
-    const bound = new Promise<false>((resolve) => {
-      expire = () => resolve(false);
+    const bound = new Promise<BoundedTeardownOutcome>((resolve) => {
+      expire = () => resolve({ status: "expired" });
     });
     const timer = setTimeout(expire, timeoutMs);
     // The bound is the safety net, not real work, and it is cleared the instant the
@@ -1664,8 +1710,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     try {
       return await Promise.race([
         settled.then(
-          () => true,
-          () => true,
+          (): BoundedTeardownOutcome => ({ status: "settled" }),
+          (error: unknown): BoundedTeardownOutcome => ({
+            status: "failed",
+            error,
+          }),
         ),
         bound,
       ]);
@@ -1674,17 +1723,31 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     }
   }
 
-  // The seams this adapter's two closes drive past the public API: the ssh2
-  // Client's own end()/once()/removeListener(), and on the socket beneath it
-  // net.Socket's destroy() plus Node's writableEnded flag. In connection-per-poll
+  // The one seam the connection's terminal close drives past the public API:
+  // net.Socket's destroy() on the socket beneath the ssh2 Client. Resolved alone,
+  // and required alone, because that close drives nothing else -- it reads back
+  // `destroyed` but treats an absent flag as "did not close" rather than as a
+  // missing mechanism. Requiring the wider set below would let a relocated
+  // once/removeListener/writableEnded, none of which this path calls, disable the
+  // forced destroy and leave a completed run holding a half-open socket.
+  private resolveTerminalCloseSeam(
+    internals: Ssh2SftpClientInternals,
+  ): TerminalCloseSeam | UnavailableTransportCloseSeam {
+    const socket = internals.client?._sock;
+    if (typeof socket?.destroy !== "function")
+      return { missing: "client._sock.destroy()" };
+    return { destroy: socket.destroy.bind(socket), socket };
+  }
+
+  // The seams the connection-per-poll idle release drives past the public API: the
+  // ssh2 Client's own end()/once()/removeListener(), plus the terminal close's
+  // socket seam above and Node's writableEnded flag on that same socket. In this
   // mode connect() resolves them once so an upgrade that relocates any of them
   // fails the dial with one actionable error rather than silently changing what an
-  // idle boundary does, and the release resolves them again where it uses them;
-  // the terminal close resolves them only where it uses them, since failing a dial
-  // over a teardown-only mechanism would ground the default mode on an upgrade
-  // that costs it nothing. Going through this one site is what keeps the check and
-  // the uses from drifting apart. Re-verify on any ssh2 / ssh2-sftp-client upgrade
-  // per docs/spec/DEPENDENCY_PINS.md.
+  // idle boundary does, and the release resolves them again where it uses them.
+  // Going through this one site is what keeps the check and the uses from drifting
+  // apart. Re-verify on any ssh2 / ssh2-sftp-client upgrade per
+  // docs/spec/DEPENDENCY_PINS.md.
   private resolveTransportCloseSeams(
     internals: Ssh2SftpClientInternals,
   ): TransportCloseSeams | UnavailableTransportCloseSeam {
@@ -1693,17 +1756,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     if (typeof client.once !== "function") return { missing: "client.once()" };
     if (typeof client.removeListener !== "function")
       return { missing: "client.removeListener()" };
-    const socket = client._sock;
-    if (typeof socket?.destroy !== "function")
-      return { missing: "client._sock.destroy()" };
-    if (typeof socket.writableEnded !== "boolean")
+    const terminal = this.resolveTerminalCloseSeam(internals);
+    if ("missing" in terminal) return terminal;
+    if (typeof terminal.socket.writableEnded !== "boolean")
       return { missing: "client._sock.writableEnded" };
     return {
       end: client.end.bind(client),
       once: client.once.bind(client),
       removeListener: client.removeListener.bind(client),
-      destroy: socket.destroy.bind(socket),
-      socket,
+      ...terminal,
     };
   }
 

@@ -321,11 +321,16 @@ snapshot nor resets the sequence shadow.
 
 ssh2 defers a `Client.connect()` issued on a socket that is still WRITABLE: the
 attempt is registered behind `once('close', ...)`, and no `readyTimeout` is armed
-for it, so nothing on psilink's side bounds it. That state is UNREACHABLE from
-every dial path this mode drives. The verdict comes from DRIVING each path
-against the real stack -- the in-process ssh2 1.17.0 server, ssh2-sftp-client
+for it, so nothing on psilink's side bounds it. No dial path this mode drives
+reaches that state, and that is a check rather than a claim:
+`apps/cli/test/integration/dialDeferral.test.ts` drives each path and censuses
+the socket beneath every dial the adapter issues, failing on a writable one, on
+a dial that does not settle, and on the live-session gate ceasing to fire.
+
+What follows is the measurement that check came from -- DRIVING each path
+against the real stack (the in-process ssh2 1.17.0 server, ssh2-sftp-client
 12.1.1, and the production `SSH2SFTPClientAdapter`, with the partner's close
-withheld -- not from reading the library:
+withheld), not reading the library:
 
 - **Cycle-start re-dial** (`ensureConnected`): every dial is issued on a socket
   already `destroyed: true, closed: true`, settling in 219-232 ms. A full driven
@@ -359,18 +364,20 @@ rather than discard. A raw `ssh2.Client` second `connect()` on a LIVE socket
 `ready`, no `error`, the `readyTimeout` never fired -- and the same at the
 ssh2-sftp-client layer (44998 ms) with the session force-cleared. The
 precondition is therefore `writable === true` (a transport not yet ended)
-TOGETHER WITH a cleared session, narrower than "an open connection". The
-re-verification method for a pin bump is in
-[DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md).
+TOGETHER WITH a cleared session, narrower than "an open connection". What that
+means for a pin bump is in [DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md).
 
-What the verdict does not cover:
+What the verdict, and the check that carries it, do not cover:
 
-- **Scope.** Three named paths plus one real-exchange census were driven. "No
-  path can" is not proven in general.
+- **Scope.** Three named paths plus one real-exchange census were driven, and the
+  check drives the same three. "No path can" is not proven in general, so a new
+  dial path needs a case of its own.
 - **The session-lifetime premise.** The dial gates rest on ssh2-sftp-client never
   clearing its session property while the transport is live. The evidence is
   positive (the property stayed set on a half-open transport for 20 s) but is not
-  a proof, and it is what the re-verification method targets.
+  a proof. The check reaches it only indirectly: a version that cleared the
+  property over a live transport would put a dial on a writable socket, which the
+  census fails on.
 - **A true half-close server.** A server that sends its FIN and then never
   completes the close is not reproducible with this harness: the withheld-close
   control silences both `end` and `destroy` on the server socket, so it cannot

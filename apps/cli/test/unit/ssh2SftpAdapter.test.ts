@@ -5495,7 +5495,7 @@ describe("terminal close against a partner that withholds its close", () => {
     }
   });
 
-  test("end() surfaces a rejection from a partner that closes, as an unbounded await did", async () => {
+  test("end() surfaces the transport's own end() rejection, as an unbounded await did", async () => {
     const { client } = partnerThatNeverCloses({ closes: true });
     const { adapter } = loggedAdapter();
     install(adapter, client);
@@ -5504,6 +5504,87 @@ describe("terminal close against a partner that withholds its close", () => {
 
     await expect(adapter.end()).rejects.toThrow("Unexpected close event");
   });
+
+  test("a teardown whose end() rejects still closes the connection from this side", async () => {
+    // ssh2-sftp-client's end() rejects from its temporary 'error' listener on a
+    // non-ECONNRESET client error during teardown, having closed nothing: its
+    // end/close listeners are gated off by endCalled, so the socket is left
+    // exactly as a withheld close leaves it. A rejection is therefore not
+    // "the partner closed" -- reading it that way skips the forced close and
+    // hands the caller a live half-open socket, which is the process that never
+    // exits.
+    const { client, socket } = partnerThatNeverCloses();
+    const { adapter, log } = loggedAdapter();
+    install(adapter, client);
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const failure = new Error("Unexpected close event");
+    client.end = vi.fn(() => {
+      socket.writableEnded = true;
+      return Promise.reject(failure);
+    });
+
+    await expect(adapter.end()).rejects.toBe(failure);
+
+    expect(socket.destroy).toHaveBeenCalledOnce();
+    expect(socket.destroyed).toBe(true);
+    // The operator hears what actually happened: nothing timed out here, so the
+    // line names the failed close rather than a partner that ran out the bound.
+    expect(log.info).toHaveBeenCalledTimes(1);
+    const message = log.info.mock.calls[0][0] as string;
+    expect(message).toContain("Unexpected close event");
+    expect(message).toContain("this side closed");
+    expect(message).not.toContain("teardown bound");
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    { seam: "client.once" },
+    { seam: "client.removeListener" },
+    { seam: "client._sock.writableEnded" },
+  ])(
+    "a teardown still closes the connection when only $seam has moved",
+    async ({ seam }) => {
+      // The terminal close drives client._sock.destroy() and reads
+      // _sock.destroyed; it touches none of the seams the connection-per-poll
+      // release needs. Giving up on one of those would disable the forced destroy
+      // over a member this path never calls -- and in the default mode connect()
+      // checks nothing, so the first sign would be a completed run that never
+      // exits.
+      vi.useFakeTimers();
+      try {
+        const { client, rawClient, socket } = partnerThatNeverCloses();
+        const { adapter, log } = loggedAdapter();
+        install(adapter, client);
+        await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+        // Defined as an inert accessor rather than assigned: the stand-in's own
+        // end() writes writableEnded back to true, so a plain assignment would
+        // be undone before the close reads it and the case would pass vacuously.
+        const relocate = (host: object, member: string): void => {
+          Object.defineProperty(host, member, {
+            get: () => undefined,
+            set: () => {},
+            configurable: true,
+          });
+        };
+        if (seam === "client._sock.writableEnded")
+          relocate(socket, "writableEnded");
+        else relocate(rawClient, seam.slice("client.".length));
+
+        const closing = adapter.end();
+        await vi.advanceTimersByTimeAsync(
+          TERMINAL_CLOSE_BOUND_MS + FORCED_CLOSE_BOUND_MS + 2,
+        );
+        await expect(closing).resolves.toBeUndefined();
+
+        expect(socket.destroy).toHaveBeenCalledOnce();
+        expect(socket.destroyed).toBe(true);
+        expect(log.info).toHaveBeenCalledTimes(1);
+        expect(log.warn).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   test("a teardown whose forced close has no mechanism takes its safe branch", async () => {
     // The seams are verified at connect only in connection-per-poll mode, so the
@@ -5671,11 +5752,11 @@ describe("terminal close against a partner that withholds its close", () => {
   );
 
   test("a close that rejects is shared by a repeat rather than re-attempted", async () => {
-    // The connection has one terminal close and one outcome. Re-driving a client
-    // whose own end() has already rejected has nothing left to close, and core
-    // logs an end() rejection at debug either way, so the rejection is handed to
-    // every caller instead.
-    const { client } = partnerThatNeverCloses({ closes: true });
+    // The connection has one terminal close and one outcome. The rejection is only
+    // ever visible over a connection this side has already closed -- the memo does
+    // not settle until the forced close has run -- so re-driving the client has
+    // nothing left to close, and core logs an end() rejection at debug either way.
+    const { client, socket } = partnerThatNeverCloses({ closes: true });
     const { adapter } = loggedAdapter();
     install(adapter, client);
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
@@ -5683,8 +5764,10 @@ describe("terminal close against a partner that withholds its close", () => {
     client.end = vi.fn().mockRejectedValue(failure);
 
     await expect(adapter.end()).rejects.toBe(failure);
+    expect(socket.destroyed).toBe(true);
     await expect(adapter.end()).rejects.toBe(failure);
 
     expect(client.end).toHaveBeenCalledOnce();
+    expect(socket.destroy).toHaveBeenCalledOnce();
   });
 });
