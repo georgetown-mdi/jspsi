@@ -92,7 +92,7 @@ not add one. Rationale and what the report covers: [docs/TESTING.md](docs/TESTIN
 - **Validation**: define the TypeScript interface first, then derive the Zod schema with `z.ZodType<Interface>`. Apply `camelizeKeys` before Zod parsing so user-facing YAML/JSON remains `snake_case` while TypeScript sees `camelCase`.
 - **Transport branching**: `connection.channel` is the discriminant. Use allowlists (not blocklists) in `exchange.ts` and `protocol.ts` so a new channel is rejected unless explicitly added.
 - **New channels**: add a discriminant value and config interface to `packages/core/src/config/connection.ts`, update the `ConnectionConfig` union, then update the guards. See existing `sftp`, `webrtc`, and `filedrop` entries for examples.
-- **Security primitives**: extract shared cryptographic helpers as soon as they are correct and tested. Do not defer to a "second caller" rule for security code - silent independent re-implementations are a failure mode. A security-relevant fix lands at the single upstream chokepoint that closes the whole class, preferring a misuse made unrepresentable over one documented; say so when that reaches past an issue's stated scope.
+- **Security primitives**: extract shared cryptographic helpers as soon as they are correct and tested. Do not defer to a "second caller" rule for security code - silent independent re-implementations are a failure mode. A security-relevant fix lands at the single upstream chokepoint that closes the whole class, preferring a misuse made unrepresentable over one documented; when that reaches past the issue's stated scope, say so and ask before landing it.
 - **Sensitive-file parsing**: parse any secret-bearing config or credential document -- the CLI's operator config (`psilink.yaml`), key file (`.psilink.key`), and signing identity, and the web app's imported YAML/JSON linkage-terms document (untrusted free text an operator could paste a secret into) -- only through the shared sensitive-parse chokepoint in `@psilink/core` (`parseSensitiveYaml` / `parseSensitiveJson`), which `apps/cli/src/sensitiveFile.ts` re-exports, never a raw YAML/JSON parser. An ESLint rule enforces this: raw YAML parsers are banned across `packages/core/src`, `apps/cli/src`, and `apps/web/src`, and raw `JSON.parse` in `apps/cli/src` (the web app's JSON half is deferred until the browser secret-store work, its current JSON being non-secret peer/wire data); the rule message names the entry points and the one-line `eslint-disable` opt-out for a non-sensitive parse. Rationale and the leak channels: the module header and `docs/SECURITY_DESIGN.md` (Diagnostics hardening).
 - **Untrusted-JSON parsing**: parse any untrusted JSON -- a partner wire frame, a transport-controlled file, an invitation token -- only through the `packages/core/src/utils/boundedJson.ts` chokepoint (`parseBoundedJson`), never a raw `JSON.parse` -- an ESLint rule enforces this across `@psilink/core` (its message names the entry point and the one-line `eslint-disable` opt-out for a trusted parse). The chokepoint structurally bounds the body before `JSON.parse` so a pathological object or array cannot drive the parser into an uncatchable, process-terminating abort. Rationale: the module header and `docs/spec/CHANNEL_SECURITY.md` (Application-layer parsed-input bounds).
 - **CLI durations**: a duration-valued CLI flag parses its value through the shared `parseDuration` / human-readable `<int><unit>` format (`apps/cli/src/util/duration.ts`), read from args via `durationFlagSeconds` (`apps/cli/src/util/cli.ts`), never a bare integer of seconds, so the accepted value syntax stays consistent across flags.
@@ -125,6 +125,8 @@ If you are writing a constant value, a byte/wire layout, an HKDF info string or 
 
 Overview docs must stay scannable: no multi-hundred-word paragraphs -- use subheadings and lists. When an edit lands in a section that is already a wall of text, restructure the section rather than growing a sentence in place.
 
+Write documentation as the target state, not a narration of what changed -- no "now", "previously", or "no longer"; the reader cannot see the diff, and change history belongs in the commit message.
+
 Documentation-tier placement is in scope for code review: a reviewer flags spec-level detail written into a `docs/` overview doc.
 
 ## Changelog
@@ -149,7 +151,7 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
 3. Ensure typecheck, lint, format, and the relevant tests pass before marking the PR ready for review (CI enforces all four). Record what you ran and the coverage you added in the PR's Test plan, and resolve every line of the template Checklist.
 4. Changes within the security-review scope -- cryptographic code, the channel-security controls, credential or disclosure surfaces, or a security-relevant dependency -- require explicit security review before merging (see [Dependency Policy](#dependency-policy) for the full enumeration).
 5. Update documentation when behavior changes - see [Documentation](#documentation) for which tier. Add a `CHANGELOG.md` entry when the change is visible to an operator or a reviewer - see [Changelog](#changelog).
-6. A maintainer will review and merge. Force-pushes to `main` are not permitted.
+6. A maintainer will review and squash-merge. Force-pushes to `main` are not permitted.
 
 ### Pull Request Description
 
@@ -175,6 +177,8 @@ PSI-Link is licensed under [Apache 2.0](LICENSE.md); add third-party dependencie
 2. Run `npm audit` and resolve any known vulnerabilities before merging.
 3. Prefer packages that are actively maintained and publish a security policy.
 4. If the package ships its own `NOTICE` file and is redistributed to end users, fold its attribution into the top-level [`NOTICE`](NOTICE).
+
+On a dependency-bump pull request, scope the review by the changed (`+`/`-`) manifest lines against this policy, and treat a green check on a PR opened days ago as stale until it is re-run against the current `staging` (`@dependabot rebase`).
 
 **Cryptographic dependencies** - `@openmined/psi.js`, `@noble/curves`, and any AEAD, key-agreement, or key-derivation library - require explicit security review and maintainer approval before merging. These libraries underpin the privacy and integrity guarantees of every exchange. Dependency upgrades driven by security advisories take priority over feature work.
 

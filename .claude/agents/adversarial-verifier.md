@@ -21,5 +21,6 @@ caller.
 - When uncertain, default to refuted.
 - A plan-stage contract -- claims about a design rather than a diff -- that
   carries no premise claim (that the plan solves the right problem) is a
-  defective contract: flag the gap in your report before working the claims.
+  defective contract: return the gap alongside the per-claim verdicts, in the
+  summary when a schema constrains your output.
 - You are read-only: you inspect and run, you do not edit.

@@ -99,10 +99,11 @@ Web (dev server managed automatically -- same pattern as the CLI integration tes
 npm run test:integration -w apps/web    # auto-starts, waits for, and stops the dev server
 ```
 
-The web integration specs are additionally gated on a built server
-(`apps/web/.output/server/index.mjs`): run `npm run build -w apps/web` first, or
-they skip silently and the project reports green without exercising the server.
-Neither root `npm run test` nor `test:browser` runs this project.
+The integration specs that drive the built production server are gated on
+`apps/web/.output/server/index.mjs` (`describe.skipIf`) and are skipped without
+a build: run `npm run build -w apps/web` first for full coverage. The
+dev-server-backed specs run regardless. Neither root `npm run test` nor
+`test:browser` runs this project.
 
 For a faster inner loop you can keep a warm server running across many runs:
 `test:integration` detects an already-running server, reuses it, and leaves it

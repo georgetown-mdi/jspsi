@@ -30,6 +30,10 @@ In role mode, read the claims file in the main thread: every non-empty line is o
 claim, trimmed, with a leading list marker (`- `, `* `, `1. `) stripped. Call this list
 CLAIMS.
 
+A plan-stage contract -- claims about a design rather than the code -- must include
+the premise claim, that the plan solves the right problem, among CLAIMS; commit the
+design document on the branch first, so the diff the round reviews is non-empty.
+
 ## Step 1 -- Empty guard (cheap)
 
 Run `git diff "origin/staging...HEAD" --stat`. If it reports no changes, say there is
