@@ -99,11 +99,23 @@ Web (dev server managed automatically -- same pattern as the CLI integration tes
 npm run test:integration -w apps/web    # auto-starts, waits for, and stops the dev server
 ```
 
-The integration specs that drive the built production server are gated on
-`apps/web/.output/server/index.mjs` (`describe.skipIf`) and are skipped without
-a build: run `npm run build -w apps/web` first for full coverage. The
-dev-server-backed specs run regardless. Neither root `npm run test` nor
-`test:browser` runs this project.
+Some of these specs drive the built production server at
+`apps/web/.output/server/index.mjs`, so run `npm run build -w apps/web` first.
+Without that build the project fails at setup, naming the missing path and the
+build command, rather than reporting a pass with those specs quietly skipped.
+
+For a deliberate dev-server-only run, set `PSILINK_ALLOW_MISSING_WEB_BUILD=1`:
+the built-server specs report as skipped and the run passes. That is the one
+opt-out, and it is the only way an absent build is not an error.
+
+```sh
+PSILINK_ALLOW_MISSING_WEB_BUILD=1 npm run test:integration -w apps/web
+```
+
+The dev-server-backed specs (`backendRemoved`, `securityHeaders`) run either
+way. Neither root `npm run test` nor `test:browser` runs this project, so
+neither is affected by the build requirement; `test:integration:browser` does
+run it, and so needs the build.
 
 For a faster inner loop you can keep a warm server running across many runs:
 `test:integration` detects an already-running server, reuses it, and leaves it

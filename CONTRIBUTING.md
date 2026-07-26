@@ -64,7 +64,7 @@ npx vitest run path/to/file.test.ts   # single file
 
 Must pass before a PR merges to `main` or `staging`. Each suite is
 self-managing -- it starts and stops the server it needs -- so no manual setup
-is required:
+beyond the builds above is required:
 
 ```sh
 npm run test:integration -w apps/cli   # SFTP adapter driven over a loopback server

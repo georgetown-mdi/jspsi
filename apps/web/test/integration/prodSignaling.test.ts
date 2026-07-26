@@ -1,7 +1,3 @@
-import { dirname, resolve } from "node:path";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import {
@@ -11,6 +7,7 @@ import {
 
 import {
   getFreePort,
+  hasBuild,
   spawnProdServer,
   stopProdServer,
   waitForRoot,
@@ -31,21 +28,12 @@ import type { ChildProcess } from "node:child_process";
 // Verified to fail (assertion, exit 1) when the custom-entry warm is removed and
 // the server rebuilt, so this is a real guard rather than a no-op.
 //
-// Build-gated: the production entry exists only after `npm run build`. CI builds
-// the web app before this suite runs (eb_build_and_test.yaml: "Build server"
-// precedes "Web integration and browser tests"), so this runs there; a local
-// `npm run test:integration` without a prior build skips it rather than failing.
-//
-// A non-skipped LOCAL run tests whatever `.output` currently holds: if you change
-// the startup warm and re-run without rebuilding, an OLD build still on disk makes
-// this pass green against stale code. To validate a warm change locally, rebuild
-// first (`npm run build -w apps/web`); CI always rebuilds before this suite, so it
-// is unaffected.
-const here = dirname(fileURLToPath(import.meta.url));
-// apps/web/test/integration -> apps/web is two levels up.
-const webRoot = resolve(here, "../..");
-const prodEntry = resolve(webRoot, ".output/server/index.mjs");
-const hasBuild = existsSync(prodEntry);
+// This runs against whatever `.output` currently holds: if you change the startup
+// warm and re-run without rebuilding, an OLD build still on disk makes it pass
+// green against stale code. To validate a warm change locally, rebuild first
+// (`npm run build -w apps/web`); CI always rebuilds before this suite, so it is
+// unaffected. A run with no build at all is failed by requireProdBuild unless the
+// opt-out is set, in which case the skip below takes effect.
 
 const READY_TIMEOUT_MS = 30_000;
 const COLD_PROBE_DEADLINE_MS = 20_000;
@@ -59,11 +47,7 @@ describe.skipIf(!hasBuild)(
 
     beforeAll(async () => {
       port = await getFreePort();
-      const { child: proc, getLaunchError } = await spawnProdServer(
-        prodEntry,
-        webRoot,
-        port,
-      );
+      const { child: proc, getLaunchError } = await spawnProdServer(port);
       child = proc;
 
       // Readiness is the ROOT route only -- deliberately not /api/peerjs/*, which
