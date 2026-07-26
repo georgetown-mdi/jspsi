@@ -1,6 +1,5 @@
-import { dirname, join, resolve } from "node:path";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -9,9 +8,11 @@ import { getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   getFreePort,
+  hasBuild,
   spawnProdServer,
   stopProdServer,
   waitForRoot,
+  webRoot,
 } from "./prodServer.js";
 
 import type { ChildProcess } from "node:child_process";
@@ -23,14 +24,6 @@ import type { ChildProcess } from "node:child_process";
 // VITE_DEPLOYMENT_PROFILE=console alongside the data root; the CLI is stubbed so no real
 // exchange (or built CLI) is needed. A filedrop job composes its connection against the
 // configured rendezvous mount, so the server needs JOB_RENDEZVOUS_DIR set.
-//
-// Build-gated exactly like csvWorkerProd: the production entry exists only after
-// `npm run build -w apps/web`. CI builds the web app before the integration step,
-// so it runs there; a local run without a prior build skips it.
-const here = dirname(fileURLToPath(import.meta.url));
-const webRoot = resolve(here, "../..");
-const prodEntry = resolve(webRoot, ".output/server/index.mjs");
-const hasBuild = existsSync(prodEntry);
 const stubCli = resolve(webRoot, "test/utils/stubCli.mjs");
 
 const READY_TIMEOUT_MS = 30_000;
@@ -60,19 +53,14 @@ describe.skipIf(!hasBuild)(
       writeFileSync(join(inputDir, "mounted.csv"), SOURCE_CSV);
 
       port = await getFreePort();
-      const { child: proc, getLaunchError } = await spawnProdServer(
-        prodEntry,
-        webRoot,
-        port,
-        {
-          VITE_DEPLOYMENT_PROFILE: "console",
-          JOB_DATA_ROOT: dataRoot,
-          JOB_INPUT_DIR: inputDir,
-          JOB_RENDEZVOUS_DIR: rendezvousDir,
-          JOB_SFTP_CREDENTIAL_DIR: scratchDir,
-          JOB_CLI_BINARY: stubCli,
-        },
-      );
+      const { child: proc, getLaunchError } = await spawnProdServer(port, {
+        VITE_DEPLOYMENT_PROFILE: "console",
+        JOB_DATA_ROOT: dataRoot,
+        JOB_INPUT_DIR: inputDir,
+        JOB_RENDEZVOUS_DIR: rendezvousDir,
+        JOB_SFTP_CREDENTIAL_DIR: scratchDir,
+        JOB_CLI_BINARY: stubCli,
+      });
       child = proc;
       await waitForRoot(`http://127.0.0.1:${port}/`, proc, getLaunchError);
     }, READY_TIMEOUT_MS + 10_000);

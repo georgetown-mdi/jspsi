@@ -1,6 +1,5 @@
-import { dirname, join, resolve } from "node:path";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -9,6 +8,7 @@ import { chromium } from "playwright";
 
 import {
   getFreePort,
+  hasBuild,
   sleep,
   spawnProdServer,
   stopProdServer,
@@ -31,17 +31,8 @@ import type { ChildProcess } from "node:child_process";
 // CSV is sized above CSV_WORKER_FILE_BYTE_THRESHOLD so the off-thread routing takes
 // the worker rather than the inline fallback.
 //
-// Build-gated: the production entry exists only after `npm run build`. CI builds the
-// web app before this suite (eb_build_and_test.yaml: "Build server" precedes the
-// integration/browser step), so it runs there; a local `npm run test:integration`
-// without a prior build skips it. A non-skipped LOCAL run tests whatever `.output`
-// currently holds -- rebuild (`npm run build -w apps/web`) before re-running to
-// validate a change; CI always rebuilds first.
-const here = dirname(fileURLToPath(import.meta.url));
-// apps/web/test/integration -> apps/web is two levels up.
-const webRoot = resolve(here, "../..");
-const prodEntry = resolve(webRoot, ".output/server/index.mjs");
-const hasBuild = existsSync(prodEntry);
+// This runs against whatever `.output` currently holds -- rebuild (`npm run build
+// -w apps/web`) before re-running to validate a change; CI always rebuilds first.
 
 const READY_TIMEOUT_MS = 30_000;
 const GENERATE_TIMEOUT_MS = 30_000;
@@ -75,11 +66,7 @@ describe.skipIf(!hasBuild)(
     beforeAll(async () => {
       tempDir = mkdtempSync(join(tmpdir(), "psilink-csv-worker-"));
       port = await getFreePort();
-      const { child: proc, getLaunchError } = await spawnProdServer(
-        prodEntry,
-        webRoot,
-        port,
-      );
+      const { child: proc, getLaunchError } = await spawnProdServer(port);
       child = proc;
 
       await waitForRoot(`http://127.0.0.1:${port}/`, proc, getLaunchError);

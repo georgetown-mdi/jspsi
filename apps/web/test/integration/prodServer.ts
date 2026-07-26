@@ -1,15 +1,40 @@
+import { dirname, resolve } from "node:path";
 import { createServer } from "node:net";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 import type { ChildProcess } from "node:child_process";
 
 // Shared production-server harness for the integration suites that drive the
-// real built app (csvWorkerProd, prodSignaling): probe a free loopback port,
+// real built app: resolve and probe the built entry, probe a free loopback port,
 // spawn `node .output/server/index.mjs` as its own process group, wait for it to
 // answer HTTP, and tear the whole group down on teardown.
 
 const READY_TIMEOUT_MS = 30_000;
 const STOP_TIMEOUT_MS = 5_000;
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+/** `apps/web`, the working directory a built server is spawned from. */
+export const webRoot = resolve(here, "../..");
+
+/** The Nitro entry `npm run build -w apps/web` emits. */
+export const prodEntry = resolve(webRoot, ".output/server/index.mjs");
+
+/** The command that produces {@link prodEntry}, quoted in the guard's message so
+ * a failing run says how to fix itself. */
+export const BUILD_COMMAND = "npm run build -w apps/web";
+
+/** Set to `1` to run the integration project without a production build: the
+ * built-server suites skip instead of failing it (see requireProdBuild.ts). */
+export const ALLOW_MISSING_BUILD_ENV = "PSILINK_ALLOW_MISSING_WEB_BUILD";
+
+/** The single build-presence predicate, probed at import: the guard fails the
+ * project on it, and every suite that drives the built server gates itself on
+ * it, so an absent build cannot mean one thing to the guard and another to a
+ * suite. */
+export const hasBuild = existsSync(prodEntry);
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -99,8 +124,6 @@ export interface ProdServer {
  * dotenv override). `extraEnv` merges over the inherited environment, for suites
  * that enable a feature-gated surface (e.g. the job API) at boot. */
 export async function spawnProdServer(
-  prodEntry: string,
-  webRoot: string,
   port: number,
   extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<ProdServer> {

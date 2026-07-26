@@ -156,7 +156,14 @@ export default defineConfig((_configEnv) => {
             ],
             name: "integration",
             environment: "node",
-            globalSetup: ["./test/devServer/globalSetup.ts"],
+            // requireProdBuild runs FIRST: it fails the project when the built
+            // server the suites drive is absent, before the dev server is paid
+            // for. It is scoped to this project -- the `browser` project below
+            // shares the dev-server setup and needs no production build.
+            globalSetup: [
+              "./test/integration/requireProdBuild.ts",
+              "./test/devServer/globalSetup.ts",
+            ],
           },
         },
         {

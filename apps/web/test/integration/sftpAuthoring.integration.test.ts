@@ -1,6 +1,5 @@
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -8,16 +7,17 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import {
   getFreePort,
+  hasBuild,
   spawnProdServer,
   stopProdServer,
   waitForRoot,
+  webRoot,
 } from "./prodServer.js";
 
 import type { ChildProcess } from "node:child_process";
@@ -28,13 +28,6 @@ import type { ChildProcess } from "node:child_process";
 // with no UI. The job API runs only in a console build, so the server env sets
 // VITE_DEPLOYMENT_PROFILE=console alongside the data root; the secrets mount is a
 // separate directory (JOB_SECRETS_DIR has no data-root fallback).
-//
-// Build-gated exactly like jobWorkInput: the production entry exists only after
-// `npm run build -w apps/web`. CI builds the web app before the integration step.
-const here = dirname(fileURLToPath(import.meta.url));
-const webRoot = resolve(here, "../..");
-const prodEntry = resolve(webRoot, ".output/server/index.mjs");
-const hasBuild = existsSync(prodEntry);
 const stubCli = resolve(webRoot, "test/utils/stubCli.mjs");
 
 const READY_TIMEOUT_MS = 30_000;
@@ -60,19 +53,14 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     writeFileSync(join(secretsDir, ".ssh", "id_ed25519"), "PRIVATE\n");
 
     port = await getFreePort();
-    const { child: proc, getLaunchError } = await spawnProdServer(
-      prodEntry,
-      webRoot,
-      port,
-      {
-        VITE_DEPLOYMENT_PROFILE: "console",
-        JOB_DATA_ROOT: dataRoot,
-        JOB_RENDEZVOUS_DIR: rendezvousDir,
-        JOB_SECRETS_DIR: secretsDir,
-        JOB_SFTP_CREDENTIAL_DIR: scratchDir,
-        JOB_CLI_BINARY: stubCli,
-      },
-    );
+    const { child: proc, getLaunchError } = await spawnProdServer(port, {
+      VITE_DEPLOYMENT_PROFILE: "console",
+      JOB_DATA_ROOT: dataRoot,
+      JOB_RENDEZVOUS_DIR: rendezvousDir,
+      JOB_SECRETS_DIR: secretsDir,
+      JOB_SFTP_CREDENTIAL_DIR: scratchDir,
+      JOB_CLI_BINARY: stubCli,
+    });
     child = proc;
     await waitForRoot(`http://127.0.0.1:${port}/`, proc, getLaunchError);
   }, READY_TIMEOUT_MS + 10_000);
