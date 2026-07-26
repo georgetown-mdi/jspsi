@@ -119,11 +119,27 @@ which is what keeps adopting that flag a one-line change rather than an audit.
 **The key forms npm matches.** For a registry package npm honors three key forms:
 a bare name (equivalently `name@*`), one exact version, and exact versions joined
 by `||`. A semver range or a dist-tag is dropped from the policy with a single
-warning. A version spelled any other way semver accepts -- `v1.0.0`, `=1.0.0`, a
-leading zero, build metadata -- is kept in the policy and never matched, with no
-warning at all, because npm compares a single exact version to the URL-parsed one
-as text (only inside a `||` disjunction does the comparison run through semver,
-which ignores those). Either way the entry states a verdict that is not in force.
+warning. How a version may be spelled differs between the last two forms, because
+npm parses a lone version loosely and every `||` part strictly:
+
+- **Alone**, a version spelled any way loose semver accepts -- `v1.0.0`,
+  `=1.0.0`, a leading zero, build metadata -- is kept in the policy and never
+  matched, with no diagnostic at all: npm compares the key's text to the
+  canonical version it parsed out of the tarball URL.
+- **Inside a `||` disjunction**, a leading `v` and build metadata are accepted
+  and normalized away, so `v1.0.0 || 9.9.9` covers `1.0.0`. A leading `=` and a
+  leading zero are not: `=1.0.0 || 9.9.9` and `1.0.01 || 9.9.9` draw the same
+  `npm warn allow-scripts ... ignoring "..."` a semver range does, and the whole
+  key is dropped.
+
+Either way an entry npm does not match states a verdict that is not in force.
+
+The identity a name key is matched against comes from the lockfile's `resolved`
+tarball URL, and npm reads the filename off that URL with `basename`: a URL
+carrying a query string or a fragment, which private registries do emit, yields
+npm no identity at all. It then falls back to the package name its consumer's
+dependency spec writes, with no version, so only a bare-name key can cover such a
+package.
 
 A non-registry source is matched by its resolved spec instead, and no name key
 reaches it: a `file:` tarball or directory, a git URL, or a remote tarball URL is
@@ -135,6 +151,10 @@ takes no name-keyed verdict. A path key is compared against the path npm resolve
 from the key at install time, so only an absolute one matches a `file:` entry;
 the vendored `@openmined/psi.js` tarball could therefore not be given a verdict
 any checkout could reuse, and needs none because it declares no install script.
+A git key is compared through hosted-git-info, which canonicalizes every spelling
+of a repository -- `github:owner/repo`, a `git+https://` URL, a
+`git@host:owner/repo` scp address -- to one ssh URL first, and then requires the
+lockfile's 40-character committish to start with the key's.
 
 **Why the allow and deny entries are pinned differently.**
 
@@ -148,9 +168,10 @@ any checkout could reuse, and needs none because it declares no install script.
   future version that added a `bin` would lose its `.bin` links along with its
   script, which is the one change to either that would need a fresh look.
 - **`fsevents` is denied at both installed versions** (`"fsevents@2.3.2 || 2.3.3"`,
-  the two the lockfile carries -- the second nested under `playwright`). Nothing
-  runs either way: both published tarballs declare `clean`, `build`, `test` and
-  `prepublishOnly` and no install-relevant lifecycle script at all, and ship no
+  the two the lockfile carries -- 2.3.3 at the root, 2.3.2 nested under
+  `playwright`). Nothing runs either way: both published tarballs declare
+  `clean`, `build`, `test` and `prepublishOnly` and no install-relevant
+  lifecycle script at all, and ship no
   `binding.gyp` (the `node-gyp rebuild` sits in `build`, which an install never
   runs). The lockfile's `hasInstallScript: true` comes from the registry
   packument's flag, which is why npm reports the sentinel `(install scripts
@@ -166,16 +187,46 @@ any checkout could reuse, and needs none because it declares no install script.
 static check) reads the committed `package.json` and `package-lock.json` and
 fails on a disagreement in either direction: an entry in a spec form npm does not
 match, an entry matching no package in the lockfile (a dead verdict that still
-reads as policy), or a lockfile package with an install script and no verdict.
-Neither of the first two failures produces any npm diagnostic at all, which is
-why they are pinned here: a dependency bump that adds, moves, or removes an
-install script reddens `npm run test:scripts` instead of silently widening or
-hollowing out the policy.
+reads as policy), a lockfile package with an install script and no verdict, or a
+manifest, key or source form the check does not model (below). A dead entry draws
+no npm diagnostic at all and an unmatchable spelling draws one only sometimes,
+which is why both are pinned here: a dependency bump that adds an install script,
+or moves one to a version no entry names, reddens `npm run test:scripts` instead
+of silently widening the policy.
 
-**What that check does not cover.** npm gates on a tree, not on the lockfile: the
-`--strict-allow-scripts` preflight walks the ideal tree, the post-install
-advisory walks the actual one, and the script enumeration additionally reads each
-extracted `package.json` from disk. So the two sets are close but not equal.
+**What that check holds, and what it does not.** npm decides from a tree and this
+check from the lockfile, so the two are not equivalent and the check is not npm's
+own unreviewed set. npm's `--strict-allow-scripts` preflight walks the ideal
+tree, its post-install advisory walks the actual one, it reads each package's
+source from the dependency edges an `overrides` entry rewrites, and its script
+enumeration reads each extracted `package.json` from disk. What the check holds
+is the lockfile-level property: every verdict in the map is one npm would match
+against the committed lockfile, and every install script that lockfile records
+has one.
+
+npm's own matcher (`@npmcli/arborist/lib/script-allowed.js`) is driven over the
+committed lockfile as part of the check and has to reach the same verdicts, so a
+bump of npm itself that changes the matcher fails the check rather than leaving
+its model asserting stale semantics; where npm's internals are not resolvable
+from the runtime, that comparison skips with its reason stated rather than
+passing.
+
+Where reading the lockfile could grant coverage npm refuses, the check refuses
+the input instead of modeling it, and fails red naming what has to be extended:
+
+- **A manifest declaring `overrides`.** An override rewrites the spec on a
+  dependency edge, and npm reads a package's registry-ness from those edges: an
+  override pointing a package at a git, file or remote source makes npm refuse
+  every name-keyed verdict for it and run the script. The lockfile records
+  neither the override nor a rewritten spec, so nothing in it distinguishes that
+  tree from one where the verdict is in force. This repo declares none.
+- **A git key or a git source.** Matching either means canonicalizing both sides
+  through hosted-git-info, which the check does not implement; refusing is what
+  keeps it from reporting a verdict npm enforces as a dead key to delete.
+- **A key npm-package-arg reads as something other than a package name** -- a
+  bare `owner/repo` (a GitHub shorthand), `owner/repo@1.0.0` (a directory).
+
+The rest are limits rather than refusals:
 
 - A package whose tarball ships a `binding.gyp` and declares no install script
   gets a synthetic `install: node-gyp rebuild` that npm discovers only after
@@ -187,6 +238,10 @@ extracted `package.json` from disk. So the two sets are close but not equal.
   advisory reports those: in a worktree still carrying a previous branch's
   dependencies, `npm approve-scripts --allow-scripts-pending` lists packages the
   check is silent about. A clean install reconciles the two.
+- A denial whose package stops declaring an install script keeps matching that
+  package, so nothing reddens and the entry stays in the map. That is deliberate:
+  a `false` verdict still costs the package its bin links, so requiring every
+  entry to govern a script would demand deleting verdicts npm still enforces.
 
 **What the dead-key rule costs.** Requiring every entry to match a package the
 lockfile installs means the map cannot carry a standing "never run this package's
@@ -194,8 +249,8 @@ scripts" verdict for a package absent from the tree. That is what dropping
 `protoc-gen-js: false` gives up: with `strict-allow-scripts` unset, a
 reintroduced `protoc-gen-js` would install, warn once, and run its `postinstall`.
 The protection lives in a stronger control instead --
-`scripts/vendored-psi-deps.test.mjs` fails if that package appears in the tree at
-all, which no install-script verdict does.
+`scripts/vendored-psi-deps.test.mjs` fails if that package appears anywhere in
+the committed lockfile at all, which no install-script verdict does.
 
 ## The crossws peer conflict blocks the release SBOM
 
