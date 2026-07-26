@@ -103,21 +103,40 @@ publisher controls.
 
 **Enforcement status.** A `false` verdict blocks that package's install script
 today: the install still succeeds, the script does not run, and whatever it would
-have produced is absent from the tree. A package with **no** verdict is only
-reported -- its script runs and the install prints it as unreviewed -- and npm's
-own documentation says a future release will block unreviewed scripts. The knob
-that makes an unreviewed script a hard failure now is `strict-allow-scripts`,
-which fails the install with `ESTRICTALLOWSCRIPTS` listing every uncovered
-package. This repo does not set it, in `.npmrc` or anywhere else, so an
-unreviewed script would install and warn rather than ground the build. The map is
-complete against the committed lockfile regardless (below), which is what keeps
-adopting that flag a one-line change rather than an audit.
+have produced is absent from the tree. It also costs the package its bin links --
+npm builds the bin queue from the same build set the verdict keeps the package
+out of, so `node_modules/.bin/<name>` is not created for a denied package either.
+None of the three denied packages declares a `bin` today. A package with **no**
+verdict is only reported -- its script runs and the install prints it as
+unreviewed -- and npm's own documentation says a future release will block
+unreviewed scripts. The knob that makes an unreviewed script a hard failure now
+is `strict-allow-scripts`, which fails the install with `ESTRICTALLOWSCRIPTS`
+listing every uncovered package. This repo does not set it, in `.npmrc` or
+anywhere else, so an unreviewed script would install and warn rather than ground
+the build. The map is complete against the committed lockfile regardless (below),
+which is what keeps adopting that flag a one-line change rather than an audit.
 
-**Why the allow and deny entries are pinned differently.** npm honors three key
-forms: a bare name (equivalently `name@*`), one exact version, and exact versions
-joined by `||`. A semver range or a dist-tag is dropped from the policy with a
-single warning, so an entry written that way states a verdict that is not in
-force.
+**The key forms npm matches.** For a registry package npm honors three key forms:
+a bare name (equivalently `name@*`), one exact version, and exact versions joined
+by `||`. A semver range or a dist-tag is dropped from the policy with a single
+warning. A version spelled any other way semver accepts -- `v1.0.0`, `=1.0.0`, a
+leading zero, build metadata -- is kept in the policy and never matched, with no
+warning at all, because npm compares a single exact version to the URL-parsed one
+as text (only inside a `||` disjunction does the comparison run through semver,
+which ignores those). Either way the entry states a verdict that is not in force.
+
+A non-registry source is matched by its resolved spec instead, and no name key
+reaches it: a `file:` tarball or directory, a git URL, or a remote tarball URL is
+matched against `file:`, git and URL keys respectively. Whether a source counts
+as registry is decided by the specs its consumers wrote, not by the shape of the
+URL it resolved to -- a dependency written as a registry-shaped tarball URL
+produces a lockfile entry indistinguishable from a registry install and still
+takes no name-keyed verdict. A path key is compared against the path npm resolves
+from the key at install time, so only an absolute one matches a `file:` entry;
+the vendored `@openmined/psi.js` tarball could therefore not be given a verdict
+any checkout could reuse, and needs none because it declares no install script.
+
+**Why the allow and deny entries are pinned differently.**
 
 - **Allows are pinned to an exact version** (`esbuild`, `ssh2`, `cpu-features`).
   The approval is a review of one version's script, so it must not carry to the
@@ -125,25 +144,58 @@ force.
   inheriting the answer.
 - **Denials are name-only** (`@parcel/watcher`, `unrs-resolver`), which covers
   every version. Both are dev-only native builds unreachable from the shipped
-  image, so no future version of either needs a fresh review to stay blocked.
+  image, so no future version of either needs a fresh review to stay blocked. A
+  future version that added a `bin` would lose its `.bin` links along with its
+  script, which is the one change to either that would need a fresh look.
 - **`fsevents` is denied at both installed versions** (`"fsevents@2.3.2 || 2.3.3"`,
-  the two the lockfile carries -- the second nested under `playwright`). It is a
-  `darwin`-only optional dependency whose published `install` script is
-  `node-gyp rebuild`, recompiling the prebuilt `fsevents.node` that the tarball
-  already ships and that its entry point requires, so the denial takes nothing
-  away from a macOS install.
+  the two the lockfile carries -- the second nested under `playwright`). Nothing
+  runs either way: both published tarballs declare `clean`, `build`, `test` and
+  `prepublishOnly` and no install-relevant lifecycle script at all, and ship no
+  `binding.gyp` (the `node-gyp rebuild` sits in `build`, which an install never
+  runs). The lockfile's `hasInstallScript: true` comes from the registry
+  packument's flag, which is why npm reports the sentinel `(install scripts
+  present)` for such a package rather than a script body; the registry's full
+  version metadata (what `npm view fsevents@2.3.3 scripts` reads) does list
+  `install: node-gyp rebuild`, and the tarball npm actually installs contradicts
+  it. The verdict is what makes the map complete against what the lockfile
+  records: a flagged package with no verdict is precisely what
+  `--strict-allow-scripts` refuses, whether or not a script exists to run.
 
 **The map is held in step with the lockfile by a check, not by prose.**
 `scripts/allow-scripts-policy.test.mjs` (run by `npm run test:scripts`, a CI
 static check) reads the committed `package.json` and `package-lock.json` and
-fails on a disagreement in either direction: an entry in a spec form npm would
-drop, an entry matching no package in the lockfile (a dead verdict that still
-reads as policy), or a lockfile package with an install script and no verdict --
-the same set npm's `--strict-allow-scripts` preflight computes, since both walk
-the lockfile rather than the installed tree. Neither of the first two failures
-produces any npm diagnostic at all, which is why they are pinned here: a
-dependency bump that adds, moves, or removes an install script reddens
-`npm run test:scripts` instead of silently widening or hollowing out the policy.
+fails on a disagreement in either direction: an entry in a spec form npm does not
+match, an entry matching no package in the lockfile (a dead verdict that still
+reads as policy), or a lockfile package with an install script and no verdict.
+Neither of the first two failures produces any npm diagnostic at all, which is
+why they are pinned here: a dependency bump that adds, moves, or removes an
+install script reddens `npm run test:scripts` instead of silently widening or
+hollowing out the policy.
+
+**What that check does not cover.** npm gates on a tree, not on the lockfile: the
+`--strict-allow-scripts` preflight walks the ideal tree, the post-install
+advisory walks the actual one, and the script enumeration additionally reads each
+extracted `package.json` from disk. So the two sets are close but not equal.
+
+- A package whose tarball ships a `binding.gyp` and declares no install script
+  gets a synthetic `install: node-gyp rebuild` that npm discovers only after
+  extraction. Its lockfile entry carries no `hasInstallScript` flag, so a
+  lockfile-level check cannot name it -- and neither can npm's own pre-extract
+  preflight, which lets that script run under `--strict-allow-scripts` exactly as
+  without it.
+- A stale `node_modules` holds packages the lockfile no longer installs, and the
+  advisory reports those: in a worktree still carrying a previous branch's
+  dependencies, `npm approve-scripts --allow-scripts-pending` lists packages the
+  check is silent about. A clean install reconciles the two.
+
+**What the dead-key rule costs.** Requiring every entry to match a package the
+lockfile installs means the map cannot carry a standing "never run this package's
+scripts" verdict for a package absent from the tree. That is what dropping
+`protoc-gen-js: false` gives up: with `strict-allow-scripts` unset, a
+reintroduced `protoc-gen-js` would install, warn once, and run its `postinstall`.
+The protection lives in a stronger control instead --
+`scripts/vendored-psi-deps.test.mjs` fails if that package appears in the tree at
+all, which no install-script verdict does.
 
 ## The crossws peer conflict blocks the release SBOM
 
