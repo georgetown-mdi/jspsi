@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -15,19 +16,28 @@ import { describe, expect, it } from "vitest";
 // state is not in force.
 //
 // What the properties below hold is that every verdict in the committed map is
-// in force and that every install script the committed lockfile records has one.
-// They are not npm's own unreviewed set: npm gates on a tree -- the ideal one
-// under `--strict-allow-scripts`, the actual one for the post-install advisory --
-// and reads each extracted package.json from disk, so it also synthesises
-// `node-gyp rebuild` for a package whose tarball carries a `binding.gyp` while
-// its lockfile entry carries no `hasInstallScript` flag. That one is invisible
-// here, and equally invisible to npm's own pre-extract preflight. Reasoning and
-// the posture: docs/spec/DEPENDENCY_PINS.md.
+// in force against the committed lockfile and that every install script that
+// lockfile records has one. That is not npm's own unreviewed set and is not
+// equivalent to it: npm decides from a live tree -- the ideal one under
+// `--strict-allow-scripts`, the actual one for the post-install advisory --
+// reading each package's source from its dependency edges (which the root's
+// `overrides` rewrite) and each extracted package.json from disk (which is how
+// it synthesises `node-gyp rebuild` for a package whose tarball carries a
+// `binding.gyp` while its lockfile entry carries no `hasInstallScript` flag,
+// invisible here and equally invisible to npm's own pre-extract preflight).
+// This one decides from the committed lockfile alone.
+//
+// So where reading the lockfile could grant coverage npm refuses, this check
+// REFUSES the input instead of modelling it: a root manifest declaring
+// `overrides`, a policy key it cannot read the way npm-package-arg does, and a
+// source form it cannot match the way npm does each fail red naming what has to
+// be extended here. Reasoning and the residual: docs/spec/DEPENDENCY_PINS.md.
 //
 // Every property turns on which package a lockfile entry IS, so the identity
-// rules npm matches by (@npmcli/arborist/lib/script-allowed.js) are modeled here
-// and pinned by the fixture cases at the bottom of the file, each of which
-// states behavior measured against npm 11.17 rather than against this model.
+// rules npm matches by (@npmcli/arborist/lib/script-allowed.js) are modeled
+// here, pinned by the fixture cases below -- each of which states behavior
+// measured against npm 11.17 rather than against this model -- and held to the
+// npm actually running by the differential at the end of the file.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -59,11 +69,21 @@ function splitKey(key) {
     : { name: key.slice(0, separator), spec: key.slice(separator + 1) };
 }
 
+// What npm does with a name key whose version spec it cannot honor. A `||`
+// disjunction it runs through semver, so a part semver rejects costs the whole
+// key one warning; any other spec form it either warns about the same way (a
+// range, a dist-tag) or keeps and compares as text against a canonical version,
+// where it can never match and says nothing at all.
+const DISJUNCTION_UNHONORED =
+  'npm drops a "||" disjunction with a part semver does not accept from the policy with one warning -- join canonical exact versions ("1.2.3 || 4.5.6"; a leading "v" and build metadata are accepted there and ignored, a leading "=" and a leading zero are not), or the verdict is not in force';
+const SPELLING_UNHONORED =
+  'npm honors a bare name, name@*, one exact version spelled canonically, or exact versions joined by "||". It drops any other spec form from the policy with one warning (a semver range, a dist-tag) or keeps it and matches it against nothing (a version spelled with a leading "v" or "=", a leading zero, or build metadata, with no diagnostic at all) -- either way the verdict is not in force';
+
 /**
- * How npm reads a name-keyed policy entry, or `null` when it reads it as no
- * verdict at all: a bare name or `*` covers every version, and the only other
- * forms that reach a comparison are one exact version and exact versions joined
- * by `||`.
+ * How npm reads a name-keyed policy entry, or what it costs the entry when npm
+ * reads it as no verdict at all: a bare name or `*` covers every version, and
+ * the only other forms that reach a comparison are one exact version and exact
+ * versions joined by `||`.
  */
 function registryKeyMatcher(key) {
   const { name, spec } = splitKey(key);
@@ -74,7 +94,7 @@ function registryKeyMatcher(key) {
   if (trimmed.includes("||")) {
     const versions = trimmed.split("||").map((part) => part.trim());
     if (!versions.every((version) => SEMVER_VERSION.test(version))) {
-      return null;
+      return { name: null, unhonored: DISJUNCTION_UNHONORED };
     }
     const comparable = versions.map(canonical);
     return {
@@ -84,52 +104,39 @@ function registryKeyMatcher(key) {
     };
   }
   if (!CANONICAL_VERSION.test(trimmed)) {
-    return null;
+    return { name: null, unhonored: SPELLING_UNHONORED };
   }
   return { name, matchesVersion: (version) => version === trimmed };
 }
 
 // Key forms npm matches against the source an entry resolves to rather than
-// against any name: a `file:` or bare path, a git URL, a remote tarball URL. A
-// form npm also reads that way but that is not written like one of these -- a
-// bare `owner/repo` git shorthand, a bare tarball filename -- reads as a name
-// key here, which reports it as covering nothing rather than taking it as
-// coverage.
-const RESOLVED_SPEC_KEY =
-  /^(?:file:|git[+:@]|ssh:\/\/|https?:\/\/|~?\/|\.\.?\/)/;
-const GIT_SPEC = /^(?:git[+:@]|ssh:\/\/)/;
+// against any name: a `file:` or bare path, and a remote tarball URL.
+const PATH_KEY = /^(?:file:|~?\/|\.\.?\/)/;
+const REMOTE_KEY = /^https?:\/\//;
 
-/** A git spec's location, split from the committish it pins. */
-function splitCommittish(spec) {
-  const location = spec.replace(/^git\+/, "");
-  const hash = location.indexOf("#");
-  return hash === -1
-    ? { location, committish: "" }
-    : {
-        location: location.slice(0, hash),
-        committish: location.slice(hash + 1),
-      };
-}
+// A git key, in every spelling npm-package-arg reads as one. npm compares it to
+// a source through hosted-git-info, which canonicalizes `github:owner/repo`, a
+// `git+https://` URL and a `git@host:owner/repo` scp address to one ssh URL
+// first, so a textual comparison would call a verdict npm enforces dead. Note
+// `git@1.0.0` is NOT one of these: with no host and path after it, a bare `git@`
+// is the registry package named `git` at a version, which npa reads as a name.
+const GIT_KEY =
+  /^(?:git[+:]|git@[^:@\s]+:|(?:github|gitlab|bitbucket|gist):|ssh:\/\/)/i;
 
-/**
- * A git key covers a git source at the same location whose resolved committish
- * starts with the key's -- npm compares a short SHA against the lockfile's
- * 40-character one in that direction only. The location comparison is textual:
- * npm canonicalizes a hosted shorthand through hosted-git-info first, which this
- * does not, so only a key written as the lockfile records the URL reads as
- * coverage.
- */
-function gitKeyMatcher(key) {
-  const wanted = splitCommittish(key);
-  return (spec) => {
-    if (!GIT_SPEC.test(spec)) return false;
-    const found = splitCommittish(spec);
-    return (
-      found.location === wanted.location &&
-      found.committish.startsWith(wanted.committish)
-    );
-  };
-}
+// A key npa reads as a registry name. Anything else with no scheme and no path
+// shape is a form npa reads some other way -- a bare `owner/repo` is a GitHub
+// shorthand, `owner/repo@1.0.0` a directory, a leading `.` a path -- so it must
+// not be read as a name.
+const PACKAGE_NAME_KEY = /^(?:@[^/@\s]+\/)?[^./@\s][^/@\s]*$/;
+
+const UNMODELED_GIT_KEY =
+  "npm reads a git key through hosted-git-info, which canonicalizes every spelling of a repository (github:owner/repo, git+https://..., git@host:owner/repo) to one ssh URL before comparing it to a source. This check does not canonicalize, so it can neither confirm the verdict covers a source nor report it dead -- model git keys here before recording one";
+const UNMODELED_KEY_SHAPE =
+  'npm reads a key npm-package-arg does not parse as a package name as something else entirely (a bare "owner/repo" is a GitHub shorthand, "owner/repo@1.0.0" a directory), so this check cannot tell what the verdict governs -- write it as a package name, a "file:" path, or a tarball URL, or model this form here';
+const UNMODELED_SOURCE =
+  "this check matches a source by the registry URL, `file:` path or remote tarball URL the lockfile records, and models no other source form -- model this one here before depending on it";
+const UNMODELED_OVERRIDES =
+  '"overrides" in package.json: npm reads each package\'s source from its dependency edges, whose specs an override REWRITES, and refuses every name-keyed verdict for a package an override points at a git, file or remote source. The lockfile records the unrewritten specs, so this check would report such a verdict as in force while npm runs the script -- model overrides here before introducing one';
 
 /**
  * The two strings npm compares a path key against: npa's `saveSpec` (the path as
@@ -146,22 +153,29 @@ function pathKeyMatcher(key) {
   return (spec) => forms.includes(spec);
 }
 
-/** How npm matches a key against the source an entry resolves to. */
-function resolvedSpecKeyMatcher(key) {
-  if (GIT_SPEC.test(key)) return gitKeyMatcher(key);
-  // A remote tarball URL is npa's own saveSpec and fetchSpec both, so npm
-  // compares it to the entry's resolved URL as written.
-  if (/^https?:\/\//.test(key)) return (spec) => spec === key;
-  return pathKeyMatcher(key);
-}
-
-/** The name and version predicate, or spec predicate, npm reads out of a key. */
+/**
+ * What each policy key states: a spec predicate for a key npm matches against
+ * the source an entry resolves to, a name and version predicate for one it
+ * matches against a registry identity, or the reason this check refuses to read
+ * the key at all.
+ */
 function policyEntries(allowScripts) {
-  return Object.entries(allowScripts ?? {}).map(([key, verdict]) =>
-    RESOLVED_SPEC_KEY.test(key)
-      ? { key, verdict, matchesSpec: resolvedSpecKeyMatcher(key) }
-      : { key, verdict, ...(registryKeyMatcher(key) ?? { name: null }) },
-  );
+  return Object.entries(allowScripts ?? {}).map(([key, verdict]) => {
+    if (GIT_KEY.test(key))
+      return { key, verdict, unmodeled: UNMODELED_GIT_KEY };
+    // A remote tarball URL is npa's own saveSpec and fetchSpec both, so npm
+    // compares it to the entry's resolved URL as written.
+    if (REMOTE_KEY.test(key)) {
+      return { key, verdict, matchesSpec: (spec) => spec === key };
+    }
+    if (PATH_KEY.test(key)) {
+      return { key, verdict, matchesSpec: pathKeyMatcher(key) };
+    }
+    if (!PACKAGE_NAME_KEY.test(splitKey(key).name)) {
+      return { key, verdict, unmodeled: UNMODELED_KEY_SHAPE };
+    }
+    return { key, verdict, ...registryKeyMatcher(key) };
+  });
 }
 
 const NM = "node_modules/";
@@ -181,9 +195,17 @@ const NM = "node_modules/";
  * delimiter, prefixed with the segment ahead of it when that one is an `@scope`.
  * Requiring a segment before the delimiter at all is what stops a hostile URL of
  * the form https://host/-/trusted-1.0.0.tgz from claiming a registered name.
+ *
+ * npm takes the filename off the RAW url with `basename` and requires the path's
+ * own last segment to equal it, so a URL carrying a query string or a fragment
+ * -- which private registries do emit -- yields npm no identity at all rather
+ * than one read out of the path. Deriving one here where npm derives none would
+ * report an exact-version key as covering a package npm leaves unreviewed.
  */
 function registryTarballIdentity(url) {
   if (!/^https?:\/\//.test(url)) return null;
+  const filename = basename(url);
+  if (!filename.endsWith(".tgz")) return null;
   let pathname;
   try {
     ({ pathname } = new URL(url));
@@ -191,14 +213,11 @@ function registryTarballIdentity(url) {
     return null;
   }
   const segments = pathname.slice(1).split("/-/");
-  const filename = segments.pop();
-  const owner = segments.pop();
-  if (owner === undefined) return null;
-  if (filename.includes("/") || !filename.endsWith(".tgz")) return null;
-  const ownerSegments = owner.split(/\/|%2f/i);
+  if (segments.length < 2 || segments.pop() !== filename) return null;
+  const ownerSegments = segments.pop().split(/\/|%2f/i);
   const project = ownerSegments.pop();
   const scope = ownerSegments.pop();
-  if (!filename.startsWith(`${project}-`)) return null;
+  if (project === "" || !filename.startsWith(`${project}-`)) return null;
   const version = filename.slice(project.length + 1, -".tgz".length);
   if (!SEMVER_VERSION.test(version)) return null;
   return {
@@ -373,6 +392,9 @@ function installedPackages(lock) {
 /** Whether npm reads a key against a source's spec rather than against a name. */
 const bySpec = (entry) => entry.matchesSpec !== undefined;
 
+/** Whether this check refuses to read the key at all. */
+const isUnmodeled = (entry) => entry.unmodeled !== undefined;
+
 const matches = (entry, pkg) =>
   bySpec(entry)
     ? pkg.resolvedSpecs.some((spec) => entry.matchesSpec(spec))
@@ -391,11 +413,32 @@ function verdictFor(policy, pkg) {
 /** Policy keys npm reads as no verdict at all, stated but not enforced. */
 function unhonoredPolicyKeys(policy) {
   return policy
-    .filter((entry) => !bySpec(entry) && entry.name === null)
-    .map(
-      (entry) =>
-        `"${entry.key}": npm honors a bare name, name@*, one exact version, or exact versions joined by "||". It drops any other spec form from the policy with one warning (a semver range, a dist-tag) or keeps it and matches it against nothing (a v-prefixed, =-prefixed, leading-zero or build-metadata version, with no diagnostic at all) -- either way the verdict is not in force`,
-    );
+    .filter((entry) => entry.unhonored !== undefined)
+    .map((entry) => `"${entry.key}": ${entry.unhonored}`);
+}
+
+/**
+ * Forms the committed manifest, policy and lockfile use that this check does not
+ * model, each of which it refuses rather than reporting a verdict for: reading
+ * the lockfile where npm reads a live tree, it would otherwise report a verdict
+ * npm refuses as in force, or one npm enforces as dead.
+ */
+function unmodeledForms(manifest, policy, installed) {
+  return [
+    ...(manifest.overrides === undefined ? [] : [UNMODELED_OVERRIDES]),
+    ...policy
+      .filter(isUnmodeled)
+      .map((entry) => `"${entry.key}": ${entry.unmodeled}`),
+    ...installed
+      .filter(
+        (pkg) =>
+          pkg.resolved !== null && !/^(?:https?|file):/.test(pkg.resolved),
+      )
+      .map(
+        (pkg) =>
+          `${pkg.path} resolves to "${pkg.resolved}": ${UNMODELED_SOURCE}`,
+      ),
+  ];
 }
 
 /** Policy keys matching no installed package: verdicts governing nothing. */
@@ -403,7 +446,8 @@ function deadPolicyKeys(policy, installed) {
   return policy
     .filter(
       (entry) =>
-        !(!bySpec(entry) && entry.name === null) &&
+        entry.unhonored === undefined &&
+        !isUnmodeled(entry) &&
         !installed.some((pkg) => matches(entry, pkg)),
     )
     .map((entry) =>
@@ -425,12 +469,17 @@ function unreviewedInstallScripts(policy, installed) {
 }
 
 const lock = readRootJson("package-lock.json");
-const policy = policyEntries(readRootJson("package.json").allowScripts);
+const manifest = readRootJson("package.json");
+const policy = policyEntries(manifest.allowScripts);
 const installed = installedPackages(lock);
 
 describe("allowScripts install-script policy", () => {
   it("states every verdict in a spec form npm honors", () => {
     expect(unhonoredPolicyKeys(policy)).toEqual([]);
+  });
+
+  it("uses no manifest, key or source form this check does not model", () => {
+    expect(unmodeledForms(manifest, policy, installed)).toEqual([]);
   });
 
   it("names only packages the committed lockfile installs", () => {
@@ -448,8 +497,8 @@ describe("allowScripts install-script policy", () => {
     // fallback is one this check could name wrongly and could not pin a version
     // for. None does while every entry resolves to a URL carrying both; an entry
     // that stopped (a lockfile written with omit-lockfile-registry-resolved, a
-    // registry whose tarball filenames disagree with their paths) has to be
-    // identified some other way.
+    // registry whose tarball URLs carry a query string or whose filenames
+    // disagree with their paths) has to be identified some other way.
     const namedByFallback = installed
       .filter((pkg) => pkg.identitySource === "dependencySpec")
       .map((pkg) => pkg.path);
@@ -491,6 +540,7 @@ describe("the spec form npm reads a policy key in", () => {
     const entries = policyEntries(allowScripts);
     return {
       unhonored: unhonoredPolicyKeys(entries),
+      unmodeled: unmodeledForms({}, entries, installedPackages(localdep)),
       unreviewed: unreviewedInstallScripts(
         entries,
         installedPackages(localdep),
@@ -517,12 +567,15 @@ describe("the spec form npm reads a policy key in", () => {
   });
 
   it("keeps an =-prefixed or leading-zero version and matches neither", () => {
-    const { unhonored } = under({
+    // Measured: the script ran under each, and npm printed no line naming the
+    // key -- only the advisory for the package it left unreviewed. So the
+    // remediation must not promise a warning.
+    const { unhonored, unreviewed } = under({
       "localdep@=1.0.0": false,
       "localdep@1.0.01": false,
     });
     expect(unhonored).toHaveLength(2);
-    // npm warns about neither, so the remediation must not promise a warning.
+    expect(unreviewed).toHaveLength(1);
     expect(unhonored[0]).toContain("with no diagnostic at all");
   });
 
@@ -532,9 +585,53 @@ describe("the spec form npm reads a policy key in", () => {
     ).toHaveLength(2);
   });
 
+  it("drops a disjunction semver rejects a part of, with that warning", () => {
+    // Measured: `=1.0.0 || 9.9.9` and `1.0.01 || 9.9.9` each drew
+    // `npm warn allow-scripts package.json: ignoring "..."` and ran the script,
+    // where the same spellings alone are kept and silently match nothing. npm
+    // parses a lone version loosely and every disjunction part strictly.
+    const { unhonored, unreviewed } = under({
+      "localdep@=1.0.0 || 9.9.9": false,
+      "localdep@1.0.01 || 9.9.9": false,
+    });
+    expect(unhonored).toHaveLength(2);
+    expect(unhonored[0]).toContain("with one warning");
+    expect(unreviewed).toHaveLength(1);
+  });
+
   it("covers every installed version from a bare name or name@*", () => {
     expect(under({ localdep: false }).unreviewed).toEqual([]);
     expect(under({ "localdep@*": false }).unreviewed).toEqual([]);
+  });
+
+  it("reads git@1.0.0 as the registry package git, not as a git source", () => {
+    // npm-package-arg parses it as name `git` at version 1.0.0, so it is a name
+    // key like any other -- dead here only because no `git` is installed.
+    const entries = policyEntries({ "git@1.0.0": false });
+    expect(unmodeledForms({}, entries, installedPackages(localdep))).toEqual(
+      [],
+    );
+    expect(deadPolicyKeys(entries, installedPackages(localdep))).toHaveLength(
+      1,
+    );
+  });
+
+  it("refuses a git key rather than comparing its location as text", () => {
+    // npm honors every spelling of a hosted repository through hosted-git-info,
+    // which canonicalizes `github:example/tool#0123456` and
+    // `git+https://github.com/example/tool.git#0123456` to the one ssh URL it
+    // compares against the source. Without that canonicalization this check
+    // would report a verdict npm enforces as a dead key to delete, so it refuses
+    // the form instead.
+    const { unmodeled, unhonored } = under({
+      "github:example/tool#0123456": false,
+      "git+https://github.com/example/tool.git#0123456": false,
+      "example/tool": false,
+    });
+    expect(unmodeled).toHaveLength(3);
+    expect(unhonored).toEqual([]);
+    expect(unmodeled.join("\n")).toContain("model git keys here");
+    expect(unmodeled.join("\n")).toContain("GitHub shorthand");
   });
 });
 
@@ -588,6 +685,42 @@ describe("the identity npm matches a lockfile entry by", () => {
       name: "@scope/pkg",
       version: "1.0.0",
     });
+  });
+
+  it("reads no version from a URL carrying a query string or a fragment", () => {
+    // Measured against a local registry serving its tarball URL with
+    // `?token=abc123`: npm ran the script under "localdep@1.0.0" and reported
+    // the package unreviewed, and blocked it only under the bare name. npm takes
+    // the tarball filename off the raw URL, which the query string is part of,
+    // so the URL yields it no identity and it falls back to the consumer's spec
+    // for the name and to no version at all. Private registries emit such URLs.
+    const tokenized = lockfileWith(
+      { localdep: "^1.0.0" },
+      {
+        "node_modules/localdep": {
+          version: "1.0.0",
+          resolved: `${registryTarball("localdep", "1.0.0")}?token=abc123`,
+          hasInstallScript: true,
+        },
+      },
+    );
+    expect(identityOf(tokenized, "node_modules/localdep")).toMatchObject({
+      name: "localdep",
+      version: null,
+      identitySource: "dependencySpec",
+    });
+    expect(
+      unreviewedInstallScripts(
+        policyEntries({ "localdep@1.0.0": false }),
+        installedPackages(tokenized),
+      ),
+    ).toHaveLength(1);
+    expect(
+      unreviewedInstallScripts(
+        policyEntries({ localdep: false }),
+        installedPackages(tokenized),
+      ),
+    ).toEqual([]);
   });
 
   it("refuses the name a URL with no package path before its /-/ claims", () => {
@@ -959,7 +1092,12 @@ describe("the verdict npm reaches for a lockfile entry", () => {
     ).toHaveLength(1);
   });
 
-  it("covers a git source from a committish its resolved SHA starts with", () => {
+  it("refuses a git source rather than deciding a verdict for it", () => {
+    // npm matches a git source by the ssh URL hosted-git-info canonicalizes both
+    // sides to, plus a prefix comparison of the key's committish against the
+    // resolved 40-character SHA. This check implements neither, so a git source
+    // is a lockfile form it refuses -- the entry cannot be reported covered, and
+    // no key can be reported dead against it.
     const git = lockfileWith(
       { tool: "github:example/tool#0123456" },
       {
@@ -972,21 +1110,220 @@ describe("the verdict npm reaches for a lockfile entry", () => {
       },
     );
     expect(identityOf(git, "node_modules/tool")).toMatchObject({ name: null });
-    expect(
-      unreviewedInstallScripts(
-        policyEntries({
-          "git+ssh://git@github.com/example/tool.git#0123456": false,
-        }),
-        installedPackages(git),
-      ),
-    ).toEqual([]);
-    expect(
-      deadPolicyKeys(
-        policyEntries({
-          "git+ssh://git@github.com/example/tool.git#fedcba9": false,
-        }),
-        installedPackages(git),
-      ),
-    ).toHaveLength(1);
+    const unmodeled = unmodeledForms({}, [], installedPackages(git));
+    expect(unmodeled).toHaveLength(1);
+    expect(unmodeled[0]).toContain("node_modules/tool resolves to");
+  });
+});
+
+describe("the manifest fields this check reads a verdict against", () => {
+  it("refuses a manifest declaring overrides, which rewrite an edge's spec", () => {
+    // Measured: with a root `overrides` pointing a transitive `localdep: ^1.0.0`
+    // at a remote tarball URL, npm ran the install script and reported the
+    // package unreviewed despite `"localdep@1.0.0": false` -- the override makes
+    // the node a non-registry dependency, which refuses every name key. The
+    // lockfile records neither the override nor a rewritten spec (npm 11.17
+    // wrote the root entry with its dependencies alone), so nothing in it
+    // distinguishes that tree from one where the verdict is in force.
+    const overridden = lockfileWith(
+      { wrapper: "^1.0.0" },
+      {
+        "node_modules/localdep": {
+          version: "1.0.0",
+          resolved: registryTarball("localdep", "1.0.0"),
+          hasInstallScript: true,
+        },
+        "node_modules/wrapper": {
+          version: "1.0.0",
+          resolved: registryTarball("wrapper", "1.0.0"),
+          dependencies: { localdep: "^1.0.0" },
+        },
+      },
+    );
+    const entries = policyEntries({ "localdep@1.0.0": false });
+    const installed = installedPackages(overridden);
+    expect(unreviewedInstallScripts(entries, installed)).toEqual([]);
+    const unmodeled = unmodeledForms(
+      { overrides: { localdep: "https://host/localdep/-/localdep-1.0.0.tgz" } },
+      entries,
+      installed,
+    );
+    expect(unmodeled).toHaveLength(1);
+    expect(unmodeled[0]).toContain('"overrides" in package.json');
+  });
+});
+
+// The cases above state behavior measured against npm 11.17. Nothing in the repo
+// pins that version -- `engines.node` asks only for Node 26 and CI installs
+// whatever npm ships with it -- so the model is held to the npm ACTUALLY RUNNING
+// instead: its own matcher, driven over the committed lockfile, has to reach
+// this check's verdicts. A runtime with no npm internals beside it skips the
+// comparison rather than passing it.
+const npmMatcher = () => {
+  const execpath = process.env.npm_execpath;
+  const roots = [
+    ...(typeof execpath === "string" && execpath !== ""
+      ? [resolve(dirname(execpath), "..")]
+      : []),
+    resolve(dirname(process.execPath), "../lib/node_modules/npm"),
+    resolve(dirname(process.execPath), "node_modules/npm"),
+  ];
+  for (const root of roots) {
+    try {
+      const require = createRequire(resolve(root, "package.json"));
+      return {
+        npa: require("npm-package-arg"),
+        Arborist: require("@npmcli/arborist"),
+        isScriptAllowed: require("@npmcli/arborist/lib/script-allowed.js"),
+      };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+};
+
+const NO_NPM_INTERNALS =
+  "npm's @npmcli/arborist internals are not resolvable from this runtime, so its own matcher cannot be driven over the lockfile";
+
+describe("npm's own matcher over the committed lockfile", () => {
+  const npm = npmMatcher();
+
+  it("reaches this check's verdict for every package in the tree", async (context) => {
+    if (npm === null) return context.skip(NO_NPM_INTERNALS);
+    const tree = await new npm.Arborist({ path: repoRoot }).loadVirtual();
+    const nodes = new Map();
+    for (const node of tree.inventory.values()) {
+      if (
+        node.isProjectRoot ||
+        node.isWorkspace ||
+        node.isLink ||
+        node.inBundle
+      )
+        continue;
+      nodes.set(node.location, node);
+    }
+    // Each probe isolates one rule the identity model turns on: the committed
+    // policy, then single-key policies built from what this check believes each
+    // entry IS. npm reaching a different verdict on one of those means it read
+    // the entry's name, version, registry-ness or source differently.
+    const disagreements = [];
+    for (const pkg of installed) {
+      const node = nodes.get(pkg.path);
+      if (node === undefined) {
+        disagreements.push(`${pkg.path}: npm's tree holds no such package`);
+        continue;
+      }
+      const probes = {
+        "the committed policy": manifest.allowScripts,
+        ...(pkg.name === null
+          ? {}
+          : {
+              "its name": { [pkg.name]: true },
+              "another version of its name": {
+                [`${pkg.name}@0.0.0-not-installed`]: true,
+              },
+            }),
+        ...(pkg.name === null || pkg.version === null
+          ? {}
+          : {
+              "its name and version": { [`${pkg.name}@${pkg.version}`]: true },
+            }),
+        ...Object.fromEntries(
+          pkg.resolvedSpecs.map((spec) => [
+            `its source ${spec}`,
+            { [spec]: true },
+          ]),
+        ),
+      };
+      for (const [probe, policy] of Object.entries(probes)) {
+        const ours = verdictFor(policyEntries(policy), pkg);
+        const theirs = npm.isScriptAllowed(node, policy);
+        if (ours !== theirs) {
+          disagreements.push(
+            `${pkg.path} under ${probe}: npm says ${theirs}, this check says ${ours}`,
+          );
+        }
+      }
+    }
+    const considered = new Set(installed.map((pkg) => pkg.path));
+    for (const location of nodes.keys()) {
+      if (!considered.has(location)) {
+        disagreements.push(
+          `${location}: npm's gate considers it, this check does not`,
+        );
+      }
+    }
+    expect(disagreements).toEqual([]);
+  });
+
+  it("reads every key form in the form this check classifies it as", (context) => {
+    if (npm === null) return context.skip(NO_NPM_INTERNALS);
+    // What each classification claims of npm-package-arg, which npm parses every
+    // policy key with: a name key is one npa reads as a registry spec, a spec key
+    // one it reads as a path or a remote tarball, and a refused key one it reads
+    // as neither -- so a form npa takes some other way can never be read here as
+    // a name it is not, nor be called dead while npm enforces it.
+    const forms = [
+      ...Object.keys(manifest.allowScripts),
+      "esbuild",
+      "esbuild@0.28.1",
+      "esbuild@v0.28.1",
+      "esbuild@1.0.0 || 2.0.0",
+      "esbuild@^0.28.0",
+      "esbuild@latest",
+      "@scope/pkg@1.0.0",
+      "git",
+      "git@1.0.0",
+      "github:example/tool#0123456",
+      "git+https://github.com/example/tool.git#0123456",
+      "git+ssh://git@github.com/example/tool.git#0123456",
+      "git@github.com:example/tool.git#0123456",
+      "git://github.com/example/tool.git#0123456",
+      "gist:11081aaa281",
+      "ssh://git@example.test/tool.git#0123456",
+      "example/tool",
+      "example/tool@1.0.0",
+      "file:lib/openmined-psi.js-2.0.6-seclink.3.tgz",
+      `file:${repoRoot}/lib/openmined-psi.js-2.0.6-seclink.3.tgz`,
+      "./lib/openmined-psi.js-2.0.6-seclink.3.tgz",
+      "https://registry.npmjs.org/esbuild/-/esbuild-0.28.1.tgz",
+      "h3-v2@npm:h3@2.0.1-rc.20",
+    ];
+    const misread = [];
+    for (const key of forms) {
+      const [entry] = policyEntries({ [key]: false });
+      let parsed = null;
+      try {
+        parsed = npm.npa(key);
+      } catch {
+        parsed = null;
+      }
+      const read = isUnmodeled(entry)
+        ? "refused"
+        : bySpec(entry)
+          ? "a source spec"
+          : "a package name";
+      const npmRead =
+        parsed === null
+          ? "refused"
+          : parsed.registry === true
+            ? "a package name"
+            : ["file", "directory", "remote"].includes(parsed.type)
+              ? "a source spec"
+              : "refused";
+      // Refusing a form npm reads as a source is the deliberate conservative
+      // choice; refusing one npm reads as a name would be a false red on an
+      // ordinary verdict, and reading either the wrong way round is the failure.
+      const held =
+        read === npmRead ||
+        (read === "refused" && npmRead !== "a package name");
+      if (!held) {
+        misread.push(
+          `"${key}": npm reads ${npmRead}, this check reads ${read}`,
+        );
+      }
+    }
+    expect(misread).toEqual([]);
   });
 });
