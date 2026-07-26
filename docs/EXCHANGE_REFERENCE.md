@@ -667,7 +667,7 @@ This applies in **both session modes**, the default held session and [`connectio
 
 What you see when it happens:
 
-- One informational line at the default log level, naming what left the connection open -- a partner's server that did not close it, or a close that failed -- and stating that this side closed it. It is not an error: the exchange has already completed by then, nothing is lost, and the exit code is unchanged.
+- One informational line at the default log level, naming what left the connection open -- a partner's server that did not close it, or a close that failed -- and stating that this side closed it. It is not an error, and it is no verdict on the run: this close is the last step of teardown, so it changes neither the results nor the exit code. A run that failed for some other reason draws the same line, and it neither caused that failure nor reports it.
 - Nothing at all against a server that closes normally. That close is awaited and returns promptly, with no added wait.
 
 This is distinct from the per-cycle release warning `connection_per_poll` can draw from the same class of server: that one names an idle boundary in the *middle* of an exchange, is paced, and is totalled in the end-of-run summary.

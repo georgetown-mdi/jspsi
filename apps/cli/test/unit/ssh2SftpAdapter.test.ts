@@ -5454,12 +5454,16 @@ describe("terminal close against a partner that withholds its close", () => {
         // what the bound exists for, not merely returning the caller.
         expect(socket.destroy).toHaveBeenCalledOnce();
         expect(socket.destroyed).toBe(true);
-        // Informational, at default verbosity, once -- the exchange already
-        // succeeded, so nothing here reads as a failure.
+        // Informational, at default verbosity, once: teardown's close runs last,
+        // so nothing here reads as a failure.
         expect(log.info).toHaveBeenCalledTimes(1);
         const message = log.info.mock.calls[0][0] as string;
         expect(message).toContain("did not close the connection");
         expect(message).toContain("this side closed it");
+        // end() runs from core's close() on EVERY teardown -- a failed run and a
+        // bare connect/close included -- and the adapter has no notion of which,
+        // so the line may claim nothing about the exchange or what it produced.
+        expect(message).not.toMatch(/exchange|nothing was lost/i);
         expect(log.warn).not.toHaveBeenCalled();
         // Not the connection-per-poll release's boundary, so it is not counted as
         // one, and no session was lost, so it is not a reconnection either.
@@ -5534,6 +5538,9 @@ describe("terminal close against a partner that withholds its close", () => {
     expect(message).toContain("Unexpected close event");
     expect(message).toContain("this side closed");
     expect(message).not.toContain("teardown bound");
+    // This line lands where a failed run's operator reads the verdict, so it may
+    // not claim an outcome the adapter cannot know.
+    expect(message).not.toMatch(/exchange|nothing was lost/i);
     expect(log.warn).not.toHaveBeenCalled();
   });
 
@@ -5750,6 +5757,26 @@ describe("terminal close against a partner that withholds its close", () => {
       }
     },
   );
+
+  test("a terminally closed adapter refuses to connect again", async () => {
+    // The close is memoized for the CONNECTION and never cleared, so a second
+    // session dialed on this adapter would answer a later close() from that
+    // settled memo and never be ended at all -- a live session and a ref'd handle
+    // left behind on a run that believes it closed. Every caller in the tree
+    // builds a fresh adapter per connection, so the refusal is what keeps that
+    // true rather than a note asking a future caller to.
+    const { client, socket } = partnerThatNeverCloses({ closes: true });
+    const { adapter } = loggedAdapter();
+    install(adapter, client);
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    await adapter.end();
+    expect(socket.destroyed).toBe(true);
+
+    await expect(
+      adapter.connect({ host: "h", maxReconnectAttempts: 0 }),
+    ).rejects.toThrow("cannot be reopened");
+    expect(client.connect).toHaveBeenCalledOnce();
+  });
 
   test("a close that rejects is shared by a repeat rather than re-attempted", async () => {
     // The connection has one terminal close and one outcome. The rejection is only

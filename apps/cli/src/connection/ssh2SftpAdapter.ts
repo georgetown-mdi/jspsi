@@ -1163,6 +1163,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   async connect(options: Record<string, unknown>): Promise<void> {
+    // Single-use once end() has run: the connection's terminal close is memoized
+    // and never cleared (see the class `terminalClose` field), so a session dialed
+    // after it would answer a later close() from that settled memo without ever
+    // driving client.end() -- leaving a live session and a ref'd socket behind.
+    // Refusing the dial is the alternative to clearing the memo, which would cost
+    // the once-per-connection guarantees the close rests on.
+    if (this.closing)
+      throw new Error(
+        "this SFTP connection has already been closed; a closed connection " +
+          "cannot be reopened - open a new one instead",
+      );
     this.originalConnectOptions = options;
     const maxReconnects = this.operativeMaxReconnectAttempts();
     // Exclude the psilink-specific key before handing options to ssh2.
@@ -1418,9 +1429,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // handle, would otherwise keep a completed run alive indefinitely).
   //
   // Nothing here throws, and every degraded branch is a warning that names what
-  // broke and where to re-verify it. The exchange has already succeeded by the
-  // time teardown runs, and core treats end() as best-effort and logs a rejection
-  // at debug, so a throw would be invisible and would accomplish nothing.
+  // broke and where to re-verify it: core treats end() as best-effort and logs a
+  // rejection at debug, so a throw would be invisible and would accomplish
+  // nothing.
   private async forceCloseTerminalTransport(
     ending: Promise<unknown>,
     outcome: { status: "failed"; error: unknown } | { status: "expired" },
@@ -1445,12 +1456,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       );
       return;
     }
-    // At default verbosity and informational: the exchange has already completed
-    // and nothing was lost. It is deliberately not rolled into the
-    // connection-per-poll release's forced-release count, whose wording and
-    // end-of-run total are that mode's per-cycle boundary. The two outcomes get
-    // their own sentence: nothing ran out of time on the rejecting one, so the
-    // bound is not what to tell the operator about it.
+    // At default verbosity and informational: teardown's close runs last, so
+    // nothing it reports changes what the run produced -- and this adapter has no
+    // notion of that outcome (end() runs from core's close() on every teardown,
+    // a failed run and a bare connect/close included), so the line claims nothing
+    // about it. It is deliberately not rolled into the connection-per-poll
+    // release's forced-release count, whose wording and end-of-run total are that
+    // mode's per-cycle boundary. The two outcomes get their own sentence: nothing
+    // ran out of time on the rejecting one, so the bound is not what to tell the
+    // operator about it.
     this.log.info(
       (outcome.status === "expired"
         ? `The partner's SFTP server did not close the connection within the ` +
@@ -1460,7 +1474,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         : `Closing the SFTP connection did not complete: ` +
           `${sanitizeErrorForDisplay(outcome.error)}. The connection was left ` +
           `open, so this side closed it. `) +
-        `The exchange had already completed; nothing was lost.`,
+        `This close is the last step of teardown, so it changes neither the ` +
+        `run's results nor its exit code.`,
     );
     try {
       await this.awaitBoundedTeardown(

@@ -2816,6 +2816,35 @@ test("close() ends the client LAST, after the drain and cleanup()", async () => 
   expect(order.indexOf("safeDelete")).toBeGreaterThan(order.indexOf("list"));
 });
 
+test("a failing end() reaches no caller, and the teardown before it still ran", async () => {
+  // The other half of that ordering, and the property the SFTP adapter's
+  // teardown line states to the operator: the connection's close is teardown's
+  // last step, so however it goes it changes neither what the run produced nor
+  // what the run reports. Everything teardown owed the transport -- the drain's
+  // fallback delete and cleanup()'s sweep -- has landed by the time end() is
+  // reached, and end()'s failure is logged at debug rather than surfaced.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs: 500,
+    timeToLiveMs: 60_000,
+  });
+  conn.peerId = "stub-peer";
+  await conn.send({ hello: 1 });
+  const mine = (): string[] =>
+    [...files.keys()].filter((p) => p.startsWith(`/test/${conn.id}-`));
+  expect(mine()).not.toEqual([]);
+  let ended = 0;
+  client.end = async () => {
+    ended += 1;
+    throw new Error("Unexpected close event");
+  };
+
+  await expect(conn.close()).resolves.toBeUndefined();
+
+  expect(ended).toBe(1);
+  expect(mine()).toEqual([]);
+});
+
 test("synchronize() throws when createExclusive throws EEXIST but lock file is already gone (peer abandoned)", async () => {
   // The lock file is only gone after EEXIST if the winner crashed during the
   // narrow window between createExclusive succeeding and responsibleFiles
