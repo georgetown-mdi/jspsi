@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import {
+  CONNECTION_CLOSE_TIMEOUT_MS,
   FileSyncConnection,
   normalizeFiledropPath,
   TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
@@ -2718,6 +2719,150 @@ test("close() does not hang or throw when the server withholds the end() callbac
   // cleared despite the rejection.
   await expect(conn.close()).resolves.toBeUndefined();
   expect(endCalls).toBe(1);
+});
+
+test("close() bounds a withheld end() by the teardown budget, not the peer budget", async () => {
+  // The transport's own close is not a peer round trip the exchange depends on:
+  // the result is already computed and persisted by teardown, so core's wait for
+  // it is the short CONNECTION_CLOSE_TIMEOUT_MS rather than a fresh
+  // peerTimeoutMs. With a peer budget far above it, a transport whose end() never
+  // settles must not park teardown for the peer budget.
+  const peerTimeoutMs = CONNECTION_CLOSE_TIMEOUT_MS * 10;
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs,
+    timeToLiveMs: 60_000,
+  });
+  conn.peerId = "stub-peer";
+  client.end = () => new Promise<void>(() => {});
+  vi.useFakeTimers();
+  try {
+    let closed = false;
+    const closing = conn.close().then(() => {
+      closed = true;
+    });
+    await vi.advanceTimersByTimeAsync(CONNECTION_CLOSE_TIMEOUT_MS - 1);
+    expect(closed).toBe(false);
+    await vi.advanceTimersByTimeAsync(2);
+    await closing;
+    expect(closed).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("close() applies the teardown budget as min(budget, peerTimeoutMs)", async () => {
+  // An operator who configures a peer budget SMALLER than the teardown budget
+  // asked for a shorter wait, not a longer one, so the smaller of the two wins --
+  // the same min() rule the terminal-frame drain follows.
+  const peerTimeoutMs = 100;
+  expect(peerTimeoutMs).toBeLessThan(CONNECTION_CLOSE_TIMEOUT_MS);
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs,
+    timeToLiveMs: 60_000,
+  });
+  conn.peerId = "stub-peer";
+  client.end = () => new Promise<void>(() => {});
+  const started = Date.now();
+  await expect(conn.close()).resolves.toBeUndefined();
+  expect(Date.now() - started).toBeLessThan(CONNECTION_CLOSE_TIMEOUT_MS);
+});
+
+test("close() ends the client LAST, after the drain and cleanup()", async () => {
+  // The ordering the adapter-side forced close rests on: nothing this teardown
+  // still needs the transport for may run after end(), because end() can destroy
+  // the socket beneath it. Pinned as a check rather than asserted in a comment.
+  const order: string[] = [];
+  const { client, files } = makeMockClient();
+  const listed = client.list.bind(client);
+  client.list = async (path: string) => {
+    order.push("list");
+    return listed(path);
+  };
+  const safeDeleted = client.safeDelete.bind(client);
+  client.safeDelete = async (path: string) => {
+    order.push("safeDelete");
+    return safeDeleted(path);
+  };
+  client.end = async () => {
+    order.push("end");
+  };
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs: 500,
+    timeToLiveMs: 60_000,
+  });
+  (conn as unknown as { client: FileTransportClient }).client.beginTeardown =
+    () => {
+      order.push("beginTeardown");
+    };
+  conn.peerId = "stub-peer";
+  // A sent-but-unconsumed terminal frame, so the drain actually lists, and a
+  // responsible file for cleanup() to sweep.
+  await conn.send({ hello: 1 });
+  expect([...files.keys()].some((p) => p.startsWith(`/test/${conn.id}-`))).toBe(
+    true,
+  );
+  // Only teardown's own ordering is under test; send() has already listed.
+  order.length = 0;
+
+  await conn.close();
+
+  expect(order[0]).toBe("beginTeardown");
+  expect(order.at(-1)).toBe("end");
+  expect(order.filter((step) => step === "end")).toHaveLength(1);
+  // The drain listed and cleanup() swept, both strictly before the client ended.
+  expect(order.indexOf("list")).toBeGreaterThan(-1);
+  expect(order.indexOf("safeDelete")).toBeGreaterThan(order.indexOf("list"));
+});
+
+test("a failing end() reaches no caller, and the teardown before it still ran", async () => {
+  // The other half of that ordering, and the property the SFTP adapter's
+  // teardown line states to the operator: the connection's close is teardown's
+  // last step, so however it goes it changes neither what the run produced nor
+  // what the run reports. Everything teardown owed the transport -- the drain's
+  // fallback delete and cleanup()'s sweep -- has landed by the time end() is
+  // reached, and end()'s failure is logged at debug rather than surfaced.
+  const order: string[] = [];
+  const { client, files } = makeMockClient();
+  const listed = client.list.bind(client);
+  client.list = async (path: string) => {
+    order.push("list");
+    return listed(path);
+  };
+  const safeDeleted = client.safeDelete.bind(client);
+  client.safeDelete = async (path: string) => {
+    order.push("safeDelete");
+    return safeDeleted(path);
+  };
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs: 500,
+    timeToLiveMs: 60_000,
+  });
+  conn.peerId = "stub-peer";
+  await conn.send({ hello: 1 });
+  const mine = (): string[] =>
+    [...files.keys()].filter((p) => p.startsWith(`/test/${conn.id}-`));
+  expect(mine()).not.toEqual([]);
+  let ended = 0;
+  client.end = async () => {
+    order.push("end");
+    ended += 1;
+    throw new Error("Unexpected close event");
+  };
+  // Only teardown's own ordering is under test; send() has already listed.
+  order.length = 0;
+
+  await expect(conn.close()).resolves.toBeUndefined();
+
+  expect(ended).toBe(1);
+  expect(mine()).toEqual([]);
+  // Recorded rather than inferred from the swept files: their absence once
+  // close() returns says nothing about whether the sweep preceded the throwing
+  // end(), and the sibling test above pins that order only for one that resolves.
+  expect(order.at(-1)).toBe("end");
+  expect(order.indexOf("list")).toBeGreaterThan(-1);
+  expect(order.indexOf("safeDelete")).toBeGreaterThan(order.indexOf("list"));
 });
 
 test("synchronize() throws when createExclusive throws EEXIST but lock file is already gone (peer abandoned)", async () => {

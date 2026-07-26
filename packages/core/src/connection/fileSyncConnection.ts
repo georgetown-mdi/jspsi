@@ -182,6 +182,24 @@ export const DEFAULT_PEER_TIMEOUT_MS = 1000 * 60 * 60;
 // resolves well inside it.
 /** @internal */
 export const TERMINAL_FRAME_DRAIN_TIMEOUT_MS = 1000 * 60;
+// Teardown-only bound on the wait for the transport's own `end()`, a sibling of
+// TERMINAL_FRAME_DRAIN_TIMEOUT_MS and applied the same way: `min(this,
+// peerTimeoutMs)`, so an operator who configures a tiny peer budget still never
+// gets a LONGER teardown than they asked for. Closing a connection is nominally a
+// two-party act, and a peer or server that accepts the disconnect and then goes
+// quiet never completes it; unlike the live exchange's peer-inactivity budget
+// this wait protects nothing durable -- the exchange result is already computed
+// and persisted -- so a transport that cannot finish its close fails teardown in
+// tens of seconds instead of parking for up to the hour. It bounds core's WAIT
+// for a transport it does not own, NOT the transport's socket: a session-holding
+// transport bounds its own close and closes from its own side (see
+// FileTransportClient.end), and this sits comfortably above such a transport's own
+// bound so it does not ordinarily pre-empt it. Internal-only (not a config knob)
+// for the same reason as TERMINAL_FRAME_DRAIN_TIMEOUT_MS: the value only matters
+// against a partner that will not finish a close, which a correct one resolves in
+// milliseconds.
+/** @internal */
+export const CONNECTION_CLOSE_TIMEOUT_MS = 1000 * 30;
 /**
  * Default interval, in milliseconds, between polls for a partner's file when the
  * connection options do not set `pollIntervalMs`. Exported so the CLI's
@@ -334,6 +352,20 @@ export interface FileTransportClient {
    * names and types.
    */
   connect: (options: Record<string, unknown>) => Promise<void>;
+  /**
+   * Ends the connection. Implementations MUST return in teardown-scale time
+   * (seconds) and MAY return without a clean close: closing is nominally a
+   * two-party act, and a peer or server that accepts the disconnect and then goes
+   * quiet never completes it, so a session-holding transport bounds that wait
+   * itself and closes from its own side rather than leaving the process holding a
+   * half-open connection. Core bounds its own wait as a backstop
+   * ({@link CONNECTION_CLOSE_TIMEOUT_MS}), but a bound there only abandons the
+   * call -- it cannot close anything the transport owns.
+   *
+   * Best-effort by contract: {@link FileSyncConnection.close} logs a rejection at
+   * debug and proceeds, so an implementation reports a close it could not complete
+   * by returning or rejecting, never by waiting.
+   */
   end: () => Promise<void>;
   list: (path: string) => Promise<Array<FileInfo>>;
   get: (path: string, options?: GetOptions) => Promise<Buffer<ArrayBufferLike>>;
@@ -756,11 +788,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // duration cap. It is the same single coarse knob the operator already tunes
   // (peerTimeoutMs / DEFAULT_PEER_TIMEOUT_MS), deliberately coarse rather than a
   // tight per-op timeout that would risk false-failing a legitimately large/slow
-  // transfer. close()'s ops get the same fresh per-await budget here; its
-  // terminal-frame drain is the one site that does NOT use a fresh peerTimeoutMs
-  // deadline -- it bounds itself by the short TERMINAL_FRAME_DRAIN_TIMEOUT_MS and
-  // races each list() against the time remaining to that drain deadline rather
-  // than this (now potentially far larger) per-await budget (see close()).
+  // transfer. close()'s ops get the same fresh per-await budget here, with two
+  // teardown exceptions: the terminal-frame drain bounds itself by the short
+  // TERMINAL_FRAME_DRAIN_TIMEOUT_MS and races each list() against the time
+  // remaining to that drain deadline rather than this (now potentially far larger)
+  // per-await budget (see close()), and end() is bounded by
+  // CONNECTION_CLOSE_TIMEOUT_MS below.
   //
   // The bound reads the budget lazily per call (config is populated by open()), so
   // the wrap is installed once in the constructor. On a SFTP read the adapter's
@@ -781,7 +814,23 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // its own per-attempt deadline (ssh2 readyTimeout; LocalFSClient's
       // withTimeout), so it passes through unwrapped.
       connect: (options) => raw.connect(options),
-      end: () => bound(raw.end(), "connection close"),
+      // The one operation bounded by something other than a fresh peer budget:
+      // teardown is not a peer round trip the exchange depends on, so it gets the
+      // short CONNECTION_CLOSE_TIMEOUT_MS (min'd with peerTimeoutMs) instead of
+      // riding the full peer-inactivity budget.
+      end: () => {
+        const ms = Math.min(CONNECTION_CLOSE_TIMEOUT_MS, budgetMs());
+        return withTransportBudget(
+          raw.end(),
+          ms,
+          () =>
+            new TransportOperationStalledError(
+              `transport connection close did not complete within the ${ms} ms ` +
+                `teardown budget; the transport has not finished closing, so ` +
+                `teardown is proceeding without waiting on it further`,
+            ),
+        );
+      },
       list: (path) => bound(raw.list(path), `directory listing of ${path}`),
       get: (path, options) =>
         bound(raw.get(path, options), `file read of ${path}`),
@@ -1143,6 +1192,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    * parking for up to an hour. An unresponsive peer causes the drain to time
    * out and cleanup() to delete the file as a fallback. Idempotent: safe to
    * call repeatedly and on a connection that was never opened.
+   *
+   * The client's own `end()` is bounded on the same footing, by the short
+   * {@link CONNECTION_CLOSE_TIMEOUT_MS} (capped at `peerTimeoutMs`), so a
+   * transport whose close the partner never completes cannot park teardown on the
+   * peer-inactivity budget. That bound abandons core's WAIT only; closing the
+   * connection itself is the transport's own responsibility (see
+   * {@link FileTransportClient.end}).
    */
   async close() {
     // Signal teardown to the transport FIRST, before the abort-marker gate below,
