@@ -102,7 +102,8 @@ npm run lint`, and run the tests covering what you changed. Then sweep your own
 diff (`git diff`): delete every comment that restates the code, narrates the
 change, or cites a board id, and move any "this cannot happen" claim into a
 check. Report what you ran and the result; do not commit on red without saying
-so.
+so. When the issue carries an Open Questions section, the report also names
+each question and the route it took -- settled as obvious, paneled, or asked.
 
 Commit to the new branch following CONTRIBUTING.md's commit conventions (no
 markdown, no top-level lists, no self-attribution). Never commit to staging or
@@ -120,13 +121,19 @@ Process and the PR template's security-review comment) -- and end your report
 with a one-line review-tier recommendation:
 
 - Docs-only or trivial mechanical change -> no cold review of any kind, lens or
-  role; the gates suffice.
+  role; the gates suffice. Expected subagent spend: under ~400k tokens as the
+  task notifications report them.
 - Under ~150 changed lines and no security surface -> one /light-review +
-  /assess-review round.
+  /assess-review round. Expected: ~1M.
 - Security surface, protocol or wire format, structural restructure, or a large
   diff -> the full pipeline: /light-review + /assess-review (at most two
   rounds, honoring the step-back triggers), then a role-specialized security
-  panel before merge.
+  panel before merge. Expected: ~2.5M.
+
+The spend figures are advisory tripwires read by the orchestration loop, never
+depth caps: crossing one is a stop-and-report, and a band never shortens a
+round, skips a role round the tier names, or enters a reviewer's or panelist's
+prompt.
 
 An instruction-file diff -- `CLAUDE.md` or anything under `.claude/` -- is not
 docs-only for this ladder: those files steer every future session, and an
@@ -152,12 +159,26 @@ steps above. When the instruction is to orchestrate:
   clearly-right fixes you apply directly -- a fix worth a brief of its own goes
   to a fresh spawn instead. Outside that pass, the orchestrating session edits
   nothing on the branch itself.
+- **Delegate the reading.** Exploration of the issue's surface goes to a spawn
+  that returns a compact digest; your own context holds diff stats,
+  `fetch-issues.mjs` output, and agent reports, nothing more -- the same reason
+  light-review keeps the full diff out of the main thread. Context you load
+  never unloads, and the orchestrator's own accumulation is the measured top
+  cost of a run.
 - **Run the tier yourself.** Size Step 5's bucket from the diff and run exactly
   what it names without pausing for permission -- asking to run a tier you
   already determined is deferral, not caution. The ceiling still binds; only
-  the owner raises it.
-- **Proceed to an open PR.** The terminal state is a pushed branch, an open PR
-  against staging with its checklist resolved, and a final report -- or a
-  stated blocker. Raise concerns in prose as you go and keep moving; stop only
-  for Step 4's STOP-and-ask cases or a fired step-back trigger (assess-review,
-  Step 2), batched into one message.
+  the owner raises it. Keep a running sum of the subagent spend each task
+  notification reports; crossing the bucket's expected band is a step-back --
+  stop, report the sum and what consumed it, and ask.
+- **Proceed to an open PR, and stop there.** The terminal state is a pushed
+  branch, an open PR against staging with its checklist resolved, and a final
+  report -- or a stated blocker. Raise concerns in prose as you go and keep
+  moving; stop early only for Step 4's STOP-and-ask cases or a fired step-back
+  trigger (assess-review, Step 2), batched into one message. The open PR ends
+  the session: post-CI fixes, the merge, and board work belong to a fresh
+  session started from the final report, which doubles as the continuation
+  note. Beyond the PR body it carries the rounds-ledger path and row count,
+  assess-review's left-unaddressed table, and the Security review line's basis
+  -- the sha, the review kind, and for an n/a the enumeration that produced it
+  -- so the next session can tell a re-scan from a re-review.

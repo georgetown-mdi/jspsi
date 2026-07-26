@@ -46,6 +46,12 @@ goes stale and silently widens the round with work that already merged. Every ag
 below uses the same ref and the same three-dot form. Only this `--stat` runs in the main
 thread, so the full diff never enters this conversation's context.
 
+Also read the rounds ledger (`scratch/review-rounds/<branch>.jsonl`) if it exists:
+its first row's `cap` is the branch's round budget (a first row without `cap`
+predates the field -- treat the budget as unset). When the ledger already holds
+`cap` rows, stop and say the bucket's round budget is spent -- only the owner
+raises it.
+
 ## Step 2 -- Run the review Workflow
 
 Invoke the Workflow tool with `args` set to
@@ -270,7 +276,10 @@ Common to both:
 1. `BRANCH=$(git branch --show-current)`; the rounds ledger is
    `scratch/review-rounds/<BRANCH>.jsonl` (`mkdir -p scratch/review-rounds`; scratch/ is
    gitignored). Read it if it exists; this round's number is its line count + 1, counting
-   rounds of every kind.
+   rounds of every kind. The first row written for a branch also carries `"cap"`: the
+   Step 5 bucket's total round allowance for this diff (1 for the second bucket or the
+   instruction-file floor, 3 for the full pipeline; a cap the owner raises is edited in
+   place with a note).
 2. Every ledger row carries `"kind"`: the role name in role mode, `"light"` in lens mode.
    Trajectory comparisons -- REPEAT files, hotspots, whether the contested list grew --
    run against prior rounds of the SAME kind only. A role round's claims and a lens
