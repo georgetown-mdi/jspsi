@@ -252,15 +252,14 @@ release is still this side's own deliberate boundary, so the re-dial that follow
 is neither counted as a reconnection nor reported as a dropped session.
 
 The same partner silence at TEARDOWN is a defect of the SFTP transport itself,
-which this mode neither causes nor escapes, and it is out of scope here.
-`close()` ends the connection for good through ssh2-sftp-client's own `end()`,
-which waits for a close this partner does not send: measured with the mode both
-on and off, that `end()` is still pending 20 s later either way, and what returns
-the process is the peer-inactivity budget above it -- 17.2 s against a 12 s
-`peer_timeout_ms`, which at the production default is an hour of apparent silence
-after a successful exchange, logged only at debug. What the boundary release
-above buys is that the mode's own per-cycle releases never end in that state;
-giving the terminal `end()` a bound of its own is its own change.
+which this mode neither causes nor escapes, so it is bounded where it lives
+rather than here. `close()` ends the connection for good through
+ssh2-sftp-client's own `end()`, which settles only from a close this partner does
+not send; that wait carries its own short bound, and past it the adapter closes
+the connection from this side, so a completed exchange finishes teardown and the
+process exits. The bound is mode-independent -- it holds in the default
+held-session mode exactly as it does here -- and the mode's contribution is only
+that its own per-cycle releases never END in that state.
 
 **Rendezvous handshake -- test-hardening, given two placement rules.** The hello,
 the zero-length ack, the lock-path joining sentinel, and the lock are committed
@@ -317,6 +316,71 @@ across a reconnect. No foreign-file false positive arises, because a reconnect
 re-lists the same on-disk contents the held model already re-lists every poll. The
 verification is a test that a mid-loop reconnect neither re-enters the entry
 snapshot nor resets the sequence shadow.
+
+## Whether a dial can still be deferred
+
+ssh2 defers a `Client.connect()` issued on a socket that is still WRITABLE: the
+attempt is registered behind `once('close', ...)`, and no `readyTimeout` is armed
+for it, so nothing on psilink's side bounds it. That state is UNREACHABLE from
+every dial path this mode drives. The verdict comes from DRIVING each path
+against the real stack -- the in-process ssh2 1.17.0 server, ssh2-sftp-client
+12.1.1, and the production `SSH2SFTPClientAdapter`, with the partner's close
+withheld -- not from reading the library:
+
+- **Cycle-start re-dial** (`ensureConnected`): every dial is issued on a socket
+  already `destroyed: true, closed: true`, settling in 219-232 ms. A full driven
+  exchange across three forced idle boundaries made four dials, all on destroyed
+  sockets, none on a writable one.
+- **Teardown pre-drain reconnect** (`close()` reaching `ensureConnected`): one
+  dial, on a destroyed socket, 221 ms.
+- **Recovery re-dial** (`withSessionRecovery` reaching `redialForRecovery`):
+  never fires at all against a withheld-close partner, because
+  ssh2-sftp-client's session property never clears. Against a normally-closing
+  partner it does fire, on a destroyed socket, in 219 ms -- the control that
+  proves the driving works.
+
+Two independent barriers hold it there, and the load-bearing one is not the
+forced close:
+
+1. **No dial gate fires while the session is set.** `ensureConnected` returns
+   early on a set session (measured returning true in 0 ms with the transport
+   live) and `shouldRecoverFromSessionLoss` refuses recovery on one; on the
+   pinned versions the session is set exactly while the transport is live.
+   ssh2-sftp-client's own "An existing SFTP connection is already defined" guard
+   is a third, redundant backstop.
+2. **Neither state a withheld close can leave defers.** A withheld close leaves
+   an ENDED transport, which the forced closes destroy -- and a dial on
+   `writableEnded: true, destroyed: false` completes in ~220 ms, as does one on a
+   destroyed socket. "Ended but still writable" is not a deferring state.
+
+The library mechanism itself still exists, which is the part to carry forward
+rather than discard. A raw `ssh2.Client` second `connect()` on a LIVE socket
+(`writable: true`) with `readyTimeout: 5000` was unsettled at 45016 ms -- no
+`ready`, no `error`, the `readyTimeout` never fired -- and the same at the
+ssh2-sftp-client layer (44998 ms) with the session force-cleared. The
+precondition is therefore `writable === true` (a transport not yet ended)
+TOGETHER WITH a cleared session, narrower than "an open connection". The
+re-verification method for a pin bump is in
+[DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md).
+
+What the verdict does not cover:
+
+- **Scope.** Three named paths plus one real-exchange census were driven. "No
+  path can" is not proven in general.
+- **The session-lifetime premise.** The dial gates rest on ssh2-sftp-client never
+  clearing its session property while the transport is live. The evidence is
+  positive (the property stayed set on a half-open transport for 20 s) but is not
+  a proof, and it is what the re-verification method targets.
+- **A true half-close server.** A server that sends its FIN and then never
+  completes the close is not reproducible with this harness: the withheld-close
+  control silences both `end` and `destroy` on the server socket, so it cannot
+  produce a server FIN without a close. That is the one shape in which the
+  session might clear while the socket is briefly still writable. Not observed,
+  not ruled out.
+- **The pre-forced-close baseline.** The original measurement (a connect started
+  at 7021 ms and still unsettled 39 s later) predates the forced close and was
+  not reproduced; that revision was not rebuilt.
+- **The native-sshd backend.** The withheld-close control is in-process only.
 
 ## The work that follows
 

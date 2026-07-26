@@ -5318,3 +5318,308 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(events).not.toContain("dial:start");
   });
 });
+
+// --- terminal close bound (a partner that never closes) ----------------------
+//
+// Closing an SFTP connection is a two-party act: this side disconnects and the
+// server closes the connection. ssh2-sftp-client's end() settles only from the
+// ssh2 Client's 'close', so a partner that accepts the disconnect and then goes
+// quiet leaves it pending forever on a transport this side has already ended --
+// and the half-open socket, a ref'd handle, keeps a completed run alive. The
+// adapter bounds that wait and closes the connection from its own side. Common to
+// BOTH session modes: nothing on the path is gated on connection-per-poll.
+
+describe("terminal close against a partner that withholds its close", () => {
+  const wrapper = () => ({
+    open: vi.fn(),
+    close: vi.fn(),
+    opendir: vi.fn(),
+    readdir: vi.fn(),
+    on: vi.fn(),
+  });
+
+  interface TerminalCloseSocket {
+    setKeepAlive: () => void;
+    writableEnded: boolean;
+    destroyed: boolean;
+    destroy?: () => void;
+  }
+
+  // An ssh2-sftp-client stand-in modeling the pinned library against such a
+  // partner: client.end() ends the transport and then stays PENDING, because the
+  // ssh2 Client's 'close' it settles from never arrives. Destroying the socket
+  // beneath it settles that same pending end() rather than rejecting it -- the
+  // sequence measured against a real ssh2 server -- so the stand-in resolves it
+  // from destroy(), the way the library does.
+  function partnerThatNeverCloses(options: { closes?: boolean } = {}) {
+    const state = { live: true };
+    const rawClient = new EventEmitter() as EventEmitter &
+      Record<string, unknown>;
+    const socket: TerminalCloseSocket = {
+      setKeepAlive: () => {},
+      writableEnded: false,
+      destroyed: false,
+    };
+    let settleEnd: (() => void) | undefined;
+    socket.destroy = vi.fn(() => {
+      socket.destroyed = true;
+      state.live = false;
+      rawClient.emit("close");
+      settleEnd?.();
+      settleEnd = undefined;
+    });
+    Object.assign(rawClient, {
+      setNoDelay: vi.fn(),
+      _sock: socket,
+      end: vi.fn(() => {
+        socket.writableEnded = true;
+      }),
+    });
+    const session = wrapper();
+    const client = {
+      get sftp() {
+        return state.live ? session : null;
+      },
+      connect: vi.fn().mockResolvedValue(undefined),
+      client: rawClient,
+      end: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            socket.writableEnded = true;
+            if (options.closes === true) {
+              socket.destroyed = true;
+              state.live = false;
+              resolve();
+              return;
+            }
+            settleEnd = resolve;
+          }),
+      ),
+      realPath: vi.fn().mockResolvedValue("/"),
+    };
+    return { client, rawClient, socket, state };
+  }
+
+  function loggedAdapter(options: { ephemeralSessions?: boolean } = {}) {
+    const adapter = new SSH2SFTPClientAdapter(options);
+    const log = {
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+      trace: vi.fn(),
+      error: vi.fn(),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = log;
+    return { adapter, log };
+  }
+
+  const install = (adapter: SSH2SFTPClientAdapter, client: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = client;
+  };
+
+  // The adapter's own bounds (not exported; liveness backstops, not tunables).
+  const TERMINAL_CLOSE_BOUND_MS = 5_000;
+  const FORCED_CLOSE_BOUND_MS = 1_000;
+
+  test.each([
+    { mode: "connection-per-poll", ephemeralSessions: true },
+    { mode: "the default held session", ephemeralSessions: false },
+  ])(
+    "a teardown whose close never arrives settles within the bound in $mode",
+    async ({ ephemeralSessions }) => {
+      vi.useFakeTimers();
+      try {
+        const { client, socket } = partnerThatNeverCloses();
+        const { adapter, log } = loggedAdapter({ ephemeralSessions });
+        install(adapter, client);
+        await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+        let settled = false;
+        const closing = adapter.end().then(() => {
+          settled = true;
+        });
+        await vi.advanceTimersByTimeAsync(TERMINAL_CLOSE_BOUND_MS - 1);
+        // Still inside the bound: nothing has been forced and the close is the
+        // partner's to complete.
+        expect(settled).toBe(false);
+        expect(socket.destroy).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(FORCED_CLOSE_BOUND_MS + 2);
+        await closing;
+
+        expect(settled).toBe(true);
+        // The socket is gone, so the process holds no half-open handle: this is
+        // what the bound exists for, not merely returning the caller.
+        expect(socket.destroy).toHaveBeenCalledOnce();
+        expect(socket.destroyed).toBe(true);
+        // Informational, at default verbosity, once -- the exchange already
+        // succeeded, so nothing here reads as a failure.
+        expect(log.info).toHaveBeenCalledTimes(1);
+        const message = log.info.mock.calls[0][0] as string;
+        expect(message).toContain("did not close the connection");
+        expect(message).toContain("this side closed it");
+        expect(log.warn).not.toHaveBeenCalled();
+        // Not the connection-per-poll release's boundary, so it is not counted as
+        // one, and no session was lost, so it is not a reconnection either.
+        expect(adapter.forcedReleaseCount).toBe(0);
+        expect(adapter.reconnectCount).toBe(0);
+        expect(adapter.midExchangeReconnectCount).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  test("a teardown against a partner that closes settles on that close, with no added wait", async () => {
+    // The healthy path must be untouched: end() resolves on the partner's own
+    // close, the bound never expires, and nothing is destroyed or logged. Under
+    // fake timers a resolution that needed the bound could not land at all, so
+    // completing here IS the no-added-wait assertion.
+    vi.useFakeTimers();
+    try {
+      const { client, socket } = partnerThatNeverCloses({ closes: true });
+      const { adapter, log } = loggedAdapter();
+      install(adapter, client);
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+      await adapter.end();
+
+      expect(client.end).toHaveBeenCalledOnce();
+      expect(socket.destroy).not.toHaveBeenCalled();
+      expect(log.info).not.toHaveBeenCalled();
+      expect(log.warn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("end() surfaces a rejection from a partner that closes, as an unbounded await did", async () => {
+    const { client } = partnerThatNeverCloses({ closes: true });
+    const { adapter } = loggedAdapter();
+    install(adapter, client);
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    client.end = vi.fn().mockRejectedValue(new Error("Unexpected close event"));
+
+    await expect(adapter.end()).rejects.toThrow("Unexpected close event");
+  });
+
+  test("a teardown whose forced close has no mechanism takes its safe branch", async () => {
+    // The seams are verified at connect only in connection-per-poll mode, so the
+    // default mode meets an ssh2 upgrade that relocated one here, at teardown.
+    // Failing a dial over a teardown-only mechanism would ground every
+    // default-mode exchange on an upgrade that costs it nothing, so the branch
+    // warns and returns bounded instead.
+    vi.useFakeTimers();
+    try {
+      const { client, socket } = partnerThatNeverCloses();
+      delete socket.destroy;
+      const { adapter, log } = loggedAdapter();
+      install(adapter, client);
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+      let settled = false;
+      const closing = adapter.end().then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(TERMINAL_CLOSE_BOUND_MS + 2);
+      await closing;
+
+      expect(settled).toBe(true);
+      expect(log.warn).toHaveBeenCalledTimes(1);
+      const message = log.warn.mock.calls[0][0] as string;
+      expect(message).toContain("client._sock.destroy()");
+      // Named alongside the checklist that re-verifies it.
+      expect(message).toContain("DEPENDENCY_PINS.md");
+      expect(log.info).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a teardown whose destroyed socket does not close warns rather than throwing", async () => {
+    // The one premise connect() cannot check, because nothing at connect time
+    // destroys the socket: it is read back where it is driven. Nothing here may
+    // throw -- core logs an end() rejection at debug, so a throw would be
+    // invisible and would accomplish nothing.
+    vi.useFakeTimers();
+    try {
+      const { client, socket } = partnerThatNeverCloses();
+      socket.destroy = vi.fn();
+      const { adapter, log } = loggedAdapter();
+      install(adapter, client);
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+      const closing = adapter.end();
+      await vi.advanceTimersByTimeAsync(
+        TERMINAL_CLOSE_BOUND_MS + FORCED_CLOSE_BOUND_MS + 2,
+      );
+      await expect(closing).resolves.toBeUndefined();
+
+      expect(socket.destroyed).toBe(false);
+      expect(log.warn).toHaveBeenCalledTimes(1);
+      const message = log.warn.mock.calls[0][0] as string;
+      expect(message).toContain("did not close after this side destroyed it");
+      expect(message).toContain("DEPENDENCY_PINS.md");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a teardown whose forced close throws warns rather than rejecting", async () => {
+    // A throw out of net.Socket's destroy() must not become an end() rejection:
+    // core logs one at debug, so it would tell the operator nothing while
+    // suppressing the branch that does.
+    vi.useFakeTimers();
+    try {
+      const { client, socket } = partnerThatNeverCloses();
+      socket.destroy = vi.fn(() => {
+        throw new Error("socket already destroyed");
+      });
+      const { adapter, log } = loggedAdapter();
+      install(adapter, client);
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+      const closing = adapter.end();
+      await vi.advanceTimersByTimeAsync(TERMINAL_CLOSE_BOUND_MS + 2);
+      await expect(closing).resolves.toBeUndefined();
+
+      expect(log.warn).toHaveBeenCalledTimes(1);
+      expect(log.warn.mock.calls[0][0] as string).toContain(
+        "socket already destroyed",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a repeat close after a bounded teardown is a clean no-op", async () => {
+    // The client was abandoned mid-end() and its socket destroyed under it, so a
+    // second close must not re-enter it, re-destroy, or tell the operator twice.
+    vi.useFakeTimers();
+    try {
+      const { client, socket } = partnerThatNeverCloses();
+      const { adapter, log } = loggedAdapter();
+      install(adapter, client);
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+      const closing = adapter.end();
+      await vi.advanceTimersByTimeAsync(
+        TERMINAL_CLOSE_BOUND_MS + FORCED_CLOSE_BOUND_MS + 2,
+      );
+      await closing;
+
+      // No timer advance: a repeat that re-entered the client would sit out the
+      // whole bound again rather than returning here.
+      await expect(adapter.end()).resolves.toBeUndefined();
+
+      expect(client.end).toHaveBeenCalledOnce();
+      expect(socket.destroy).toHaveBeenCalledOnce();
+      expect(log.info).toHaveBeenCalledTimes(1);
+      expect(log.warn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
