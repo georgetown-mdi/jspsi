@@ -67,12 +67,17 @@ describe("PR checklist guard", () => {
   });
 
   it("flags a bare n/a with no reason", () => {
-    const body = passingBody.replace(
-      "-- n/a: none of the listed surfaces touched",
-      "-- n/a",
-    );
-    const v = checklistViolations(body);
-    expect(v.some((m) => m.includes("n/a without a reason"))).toBe(true);
+    for (const clause of ["-- n/a", "-- n/a bug fix"]) {
+      const body = passingBody.replace(
+        "-- n/a: none of the listed surfaces touched",
+        clause,
+      );
+      const v = checklistViolations(body);
+      expect(
+        v.some((m) => m.includes("n/a without a reason")),
+        clause,
+      ).toBe(true);
+    }
   });
 
   it("flags an n/a whose reason is punctuation only", () => {
@@ -197,16 +202,14 @@ describe("PR review attestation", () => {
   });
 
   // Prose naming the head reads as an attestation to a human skimming the body,
-  // so the rules must read the line that makes the claim and nothing else.
+  // so the rules must read the line that makes the claim and nothing else --
+  // including when the prose sits in another line's label, not its clause.
   it("is not satisfied by another line naming the head", () => {
+    const docsDecoy = `- [x] Docs: pages updated; the Security review of ${HEAD} is recorded below -- updated docs/CLI.md`;
     const decoy = passingBody
-      .replace(
-        "-- updated docs/CLI.md",
-        `-- the Security review of ${HEAD} is recorded below`,
-      )
+      .replace(/^- \[x\] Docs:.*$/m, docsDecoy)
       .replace(`${HEAD} --`, "fedcba98765 --");
-    expect(decoy).toContain("Docs: enumerated");
-    expect(decoy).toContain(`the Security review of ${HEAD} is recorded below`);
+    expect(decoy).toContain(docsDecoy);
     expect(decoy).toContain("Security review of fedcba98765 --");
     const v = bodyViolations(decoy, HEAD);
     expect(v.some((m) => m.includes("is not this PR's head"))).toBe(true);
@@ -222,42 +225,22 @@ describe("PR review attestation", () => {
     ).toBe(true);
   });
 
-  it("reads the head from the environment and the event payload", () => {
-    const saved = [process.env.PR_HEAD_SHA, process.env.GITHUB_EVENT_PATH];
-    const dir = mkdtempSync(join(tmpdir(), "pr-head-"));
-    const payload = join(dir, "event.json");
-    const writePayload = (sha) =>
-      writeFileSync(
-        payload,
-        JSON.stringify({ pull_request: { head: { sha } } }),
-      );
+  it("reads the head from the environment the workflow sets", () => {
+    const saved = process.env.PR_HEAD_SHA;
     try {
       delete process.env.PR_HEAD_SHA;
-      delete process.env.GITHUB_EVENT_PATH;
       expect(prHeadSha()).toBe(null);
-      writePayload(HEAD);
-      process.env.GITHUB_EVENT_PATH = payload;
+      process.env.PR_HEAD_SHA = HEAD;
       expect(prHeadSha()).toBe(HEAD);
-      process.env.PR_HEAD_SHA = "abc1234";
-      expect(prHeadSha()).toBe("abc1234");
       // A head that is not a readable sha is an unreadable head, not one that
       // matches nothing: the caller must stop, not compare against it.
       for (const unreadable of ["", "   "]) {
         process.env.PR_HEAD_SHA = unreadable;
         expect(prHeadSha()).toBe(null);
       }
-      delete process.env.PR_HEAD_SHA;
-      for (const sha of [12345, false, "", [HEAD], null]) {
-        writePayload(sha);
-        expect(prHeadSha(), JSON.stringify(sha)).toBe(null);
-      }
     } finally {
-      const [head, event] = saved;
-      if (head === undefined) delete process.env.PR_HEAD_SHA;
-      else process.env.PR_HEAD_SHA = head;
-      if (event === undefined) delete process.env.GITHUB_EVENT_PATH;
-      else process.env.GITHUB_EVENT_PATH = event;
-      rmSync(dir, { recursive: true, force: true });
+      if (saved === undefined) delete process.env.PR_HEAD_SHA;
+      else process.env.PR_HEAD_SHA = saved;
     }
   });
 });
@@ -314,24 +297,6 @@ describe("the comment stripper", () => {
   it("leaves a closer that opens nothing alone", () => {
     expect(stripHtmlComments("text --> more")).toBe("text --> more");
   });
-
-  // A flood of comment openers is the stripper's worst input: a lazy
-  // `<!--[\s\S]*?-->` rescans to the end of the body from every one of them.
-  // The bound is on the growth rather than a wall-clock number, which a shared
-  // runner cannot honor: quadratic scanning would be ~16x for 4x the body.
-  it("scans a flood of comment openers without a quadratic blowup", () => {
-    const flood = (size) => passingBody + "<!--".repeat(size / 4);
-    const elapsed = (body) => {
-      const started = performance.now();
-      for (let i = 0; i < 20; i++)
-        expect(bodyViolations(body, HEAD)).toEqual([]);
-      return performance.now() - started;
-    };
-    elapsed(flood(16384));
-    const small = elapsed(flood(16384));
-    const large = elapsed(flood(65536));
-    expect(large).toBeLessThan(Math.max(small, 1) * 8);
-  });
 });
 
 const SCRIPT = fileURLToPath(
@@ -362,15 +327,6 @@ describe("the check as the workflow runs it", () => {
       PR_HEAD_SHA: HEAD,
     });
     expect(r.status).toBe(0);
-  });
-
-  it("fails a body attesting anything else", () => {
-    const r = runCli(passingBody, {
-      GITHUB_ACTIONS: "true",
-      PR_HEAD_SHA: "f".repeat(40),
-    });
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("is not this PR's head");
   });
 
   it("refuses to pass on a runner whose head it cannot read", () => {

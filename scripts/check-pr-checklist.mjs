@@ -18,9 +18,9 @@
 // checklist was left unresolved or resolved dishonestly by shape; whether a
 // stated reason is true stays a review call, the same philosophy as
 // check-contributing-scope.mjs, and an author who edits the sha without
-// re-reading the diff passes rule 6, which reads a string and not a review. The
-// check is advisory -- no ruleset lists it among the required status checks --
-// and its limits are priced on that.
+// re-reading the diff passes rule 6, which reads a string and not a review.
+// Only the first `## Checklist` section is read, so a line in a second one is
+// not.
 //
 // The template's guidance comments contain example checklist lines, so HTML
 // comments are stripped before parsing -- an example can never satisfy or trip
@@ -65,11 +65,10 @@ function newlinesOf(text) {
 /**
  * Blank out HTML comments while preserving line numbers, so the template's
  * example checklist lines inside guidance comments are never parsed as content.
- * An unterminated `<!--` comments out the rest of the body, matching GitHub's
- * rendering. Scanned opener to closer rather than matched with a lazy
- * `<!--[\s\S]*?-->`, which rescans to the end of the body from every opener and
- * so is quadratic in a run of them: a PR body may be 65536 characters of
- * anything an author likes.
+ * An unterminated `<!--` comments out the rest of the body. Scanned opener to
+ * closer rather than matched with a lazy `<!--[\s\S]*?-->`, which rescans to the
+ * end of the body from every opener and so is quadratic in a run of them: a PR
+ * body may be 65536 characters of anything an author likes.
  */
 export function stripHtmlComments(text) {
   const parts = [];
@@ -96,7 +95,9 @@ export function stripHtmlComments(text) {
  * split at the first `--` separator: the label is the template's own line text,
  * the clause is the author's resolution. The required-line and attestation rules
  * read labels only, so free text in a reason clause can never satisfy a deleted
- * line's presence requirement or attest a commit.
+ * line's presence requirement or attest a commit. A label's backticks are
+ * dropped: the template code-spans parts of its line text, and an author's copy
+ * need not span the same parts.
  */
 function parseChecklist(body) {
   const lines = stripHtmlComments(normalizeLineEndings(body)).split("\n");
@@ -120,7 +121,9 @@ function parseChecklist(body) {
     items.push({
       line: i + 1,
       checked: m[1] !== " ",
-      label: (separator ? text.slice(0, separator.index) : text).trim(),
+      label: (separator ? text.slice(0, separator.index) : text)
+        .replace(/`/g, "")
+        .trim(),
       clause: separator
         ? text.slice(separator.index + separator[0].length).trim()
         : "",
@@ -181,9 +184,9 @@ export function checklistViolations(text) {
 // The attested sha, abbreviated or full, read only from the slot the template
 // gives it -- `Security review of <sha>` at the head of the label. A hex string
 // anywhere else, in a parenthetical or a resolution clause, is prose a reader
-// weighs, not the commit this line attests. Backticks are tolerated because a
-// code span around a sha is this template's habit.
-const ATTESTED_SHA = /^Security review of\s+`?([0-9a-f]{7,40})`?\b/i;
+// weighs, not the commit this line attests. A sha written as a code span
+// matches: the label reaches here with its backticks already dropped.
+const ATTESTED_SHA = /^Security review of\s+([0-9a-f]{7,40})\b/i;
 
 function attestationFindings(items, headSha) {
   const reviews = (items ?? []).filter((item) =>
@@ -192,7 +195,7 @@ function attestationFindings(items, headSha) {
   if (reviews.length === 0) return []; // a deleted line is the checklist's finding
   if (reviews.length > 1) {
     return [
-      `line ${reviews[1].line}: more than one Security review line -- keep the template's single line, so the sha the check reads is the sha a reader reads`,
+      `line ${reviews[1].line}: more than one Security review line -- keep the section's single line, so there is one sha to read`,
     ];
   }
   const [review] = reviews;
@@ -223,30 +226,14 @@ export function attestationViolations(text, headSha) {
 }
 
 /**
- * A head sha only when it is one: a non-string or blank `head.sha` in the event
- * payload is a head this script could not read, not a head that happens to match
- * nothing, which would leave the comparison silently skipped and the run green.
- */
-function readableSha(value) {
-  return typeof value === "string" && value.trim() !== "" ? value : null;
-}
-
-/**
- * The PR head sha this run checks against, from the event payload the workflow
- * already receives, or null when there is none (a local run).
+ * The PR head sha this run checks against, from the `PR_HEAD_SHA` the workflow
+ * sets, or null when there is none (a local run). An unset or blank value is a
+ * head this script could not read, not a head that happens to match nothing,
+ * which would leave the comparison silently skipped and the run green.
  */
 export function prHeadSha() {
-  if (process.env.PR_HEAD_SHA !== undefined) {
-    return readableSha(process.env.PR_HEAD_SHA);
-  }
-  const eventPath = process.env.GITHUB_EVENT_PATH;
-  if (eventPath === undefined) return null;
-  try {
-    const event = JSON.parse(readFileSync(eventPath, "utf8"));
-    return readableSha(event?.pull_request?.head?.sha);
-  } catch {
-    return null;
-  }
+  const value = process.env.PR_HEAD_SHA;
+  return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 
 /** Every PR-body violation this guard checks for (empty = clean). */
@@ -281,7 +268,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const headSha = prHeadSha();
   if (headSha === null && process.env.GITHUB_ACTIONS === "true") {
     console.error(
-      "PR checklist check could not read the head sha from the workflow event payload, so the Security review line's attestation cannot be verified.",
+      "PR checklist check could not read the head sha the workflow passes in PR_HEAD_SHA, so the Security review line's attestation cannot be verified.",
     );
     process.exit(2);
   }

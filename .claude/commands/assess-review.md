@@ -27,11 +27,10 @@ Start with the whole, not the parts:
   `review_findings.md`, and the rounds ledger at
   `scratch/review-rounds/<branch>.jsonl` for the rounds before it (fall back to
   reconstructing rounds from `git log staging..HEAD` review-fix commits if
-  either is missing). Converging is confirmed-new falling with repeats near
-  zero; churn is fixes spawning findings. Known limit: a review lens carried
-  by a `general-purpose` spawn is indistinguishable from any other spawn by
-  `subagent_type`, so accounting keyed on review roles undercounts the rounds
-  a branch actually ran.
+  either is missing; a review lens carried by a `general-purpose` spawn is
+  invisible to accounting keyed on `subagent_type`, which undercounts the
+  rounds a branch ran). Converging is confirmed-new falling with repeats near
+  zero; churn is fixes spawning findings.
 
 Then check the **step-back triggers**. If ANY fires, do NOT proceed to
 fix-and-rerun: stop, and recommend a structural pivot instead -- a focused
