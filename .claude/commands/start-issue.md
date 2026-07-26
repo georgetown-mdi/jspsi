@@ -75,9 +75,10 @@ questions**. When recent merges touched the issue's surface, reconcile its
 premise against the merged code first: an obviated or reduced premise is a scope
 finding to raise, not a stale design to build. Explore with the Read and Grep tools, not shell `sed`/`cat`/`grep`:
 they read and search without a permission prompt and keep large file dumps out of
-context. A design-level open question -- one that changes the public surface,
-the protocol, or the architecture -- is a stop-and-ask; a purely local one you
-settle yourself and note your choice.
+context. Settle a purely local open question yourself and note your choice.
+Routing a question the issue itself left open belongs to `CLAUDE.md`'s Agent
+conventions, not to this command; the split below covers the decisions the
+implementation itself raises.
 
 Know when to decide and when to ask:
 
@@ -85,13 +86,14 @@ Know when to decide and when to ask:
   layout, which existing pattern to follow, test structure, behavior-preserving
   local refactors, branch name, commit granularity. Make the call, keep moving,
   and record anything non-obvious.
-- **STOP and ask** the owner or PM when a decision reaches beyond this change:
-  public API / CLI flags / config-schema changes, protocol or wire-format
-  changes, security-relevant behavior, adding or dropping a dependency, departing
-  from a shared convention, changing the issue's scope, or discovering the task
-  as written is wrong, infeasible, or conflicts with the codebase. Ask in your
-  reply, in prose: state the decision, list the options with their tradeoffs, and
-  recommend one. Do NOT use the question tool.
+- **STOP and ask** the owner or PM when a decision the implementation raises
+  reaches beyond this change: public API / CLI flags / config-schema changes,
+  protocol, wire-format, or architecture changes, security-relevant behavior,
+  adding or dropping a dependency, departing from a shared convention, changing
+  the issue's scope, or discovering the task as written is wrong, infeasible, or
+  conflicts with the codebase. Ask in your reply, in prose: state the decision,
+  list the options with their tradeoffs, and recommend one. Do NOT use the
+  question tool.
 
 Implement on the branch, following CONTRIBUTING.md. Verify before you commit:
 rebuild core (`npm run build -w packages/core`) if you touched it -- it was built
