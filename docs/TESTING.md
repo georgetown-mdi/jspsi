@@ -99,6 +99,11 @@ Web (dev server managed automatically -- same pattern as the CLI integration tes
 npm run test:integration -w apps/web    # auto-starts, waits for, and stops the dev server
 ```
 
+The web integration specs are additionally gated on a built server
+(`apps/web/.output/server/index.mjs`): run `npm run build -w apps/web` first, or
+they skip silently and the project reports green without exercising the server.
+Neither root `npm run test` nor `test:browser` runs this project.
+
 For a faster inner loop you can keep a warm server running across many runs:
 `test:integration` detects an already-running server, reuses it, and leaves it
 up rather than stopping it.
@@ -125,6 +130,12 @@ It runs in CI as part of the web build-and-test gate (`eb_build_and_test.yaml`),
 which provisions Chromium on the runner; run it locally too when changing the web
 PSI exchange, the cross-implementation vectors, or a web UI component it covers
 (such as the accept consent gate).
+
+A change to the web `optimizeDeps` or a worker dependency is verified only
+against a cold optimizer cache: remove `apps/web/node_modules/.vite` first -- a
+warm cache passes even when the configuration is wrong. Inline vitest projects
+do not inherit the root `optimizeDeps`/`resolve` configuration; each project
+that needs it carries its own.
 
 ## Coverage
 

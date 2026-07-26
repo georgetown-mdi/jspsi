@@ -15,6 +15,13 @@
 # here; this file scopes paths only. The suspicion that moving queries into this
 # config is what dropped those alerts was a confound: the drop is the path
 # scoping above, independent of where the query suite is declared.
+#
+# Code scanning does not honor inline "// codeql[...]" or "// lgtm[...]"
+# suppression comments; dismiss a false positive from the Security tab or the
+# code-scanning alerts API, not by annotating the source. Validating a change to
+# this scoping needs a full-tree scan (a push to a protected branch or a manual
+# dispatch); a pull-request scan is diff-informed and reports nothing for a
+# config-only change.
 paths-ignore:
   - "**/test/**"
   - "**/*.test.ts"
