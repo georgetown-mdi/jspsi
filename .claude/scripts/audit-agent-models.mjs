@@ -21,7 +21,16 @@
 //     script spawned through its own agent() call: { agentType, spawnDepth, model }
 //     with no toolUseId, so there is no transcript pairing and no resolvedModel.
 //     The meta's own `model` stands in for it, and the only intent to compare it
-//     against is the agentType's frontmatter pin.
+//     against is the agentType's frontmatter pin. Three caveats on that field:
+//     it is harness-version dependent (every meta written before 2026-07-18 in
+//     this project carries no `model` at all, so an audit of an older session
+//     reads its workflow agents as session-inherited); what it records when the
+//     agent() call omits `model:` is unmeasured -- no such spawn has been
+//     observed, so whether the field goes missing or records the inherited tier
+//     is unknown; and every value observed since the field appeared reads
+//     "sonnet", including calls that pinned another tier, which is either a real
+//     off-tier spawn or a field that does not carry the resolved model. Confirm a
+//     workflow mismatch this reports against the run itself before believing it.
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -250,11 +259,14 @@ export function classifySpawn(meta, spawnInput, resolvedModel, frontmatter) {
 
 /**
  * Classify one workflow-spawned agent's meta. There is no transcript pairing and
- * no resolvedModel here, so the recorded `model` IS the resolved tier and the only
- * statement of intent available is the agentType's frontmatter pin -- a role
- * spawned off its pinned tier is exactly the leak an omitted `model:` produces.
- * A meta with no model at all is reported as session-inherited; one with no pinned
- * agentType has no intent to compare against and passes.
+ * no resolvedModel here, so the recorded `model` is the only tier to read (with
+ * the caveats on that field in this module's header), and the agentType's
+ * frontmatter pin is the only statement of intent to read it against: a role that
+ * ran off its pinned tier is what an omitted or wrong `model:` in the script
+ * leaves behind. A meta with no model at all is reported as session-inherited; one
+ * whose agentType carries no frontmatter pin (`workflow-subagent`, the type of a
+ * spawn that named none) has no intent to compare against and is counted apart
+ * from the passing spawns rather than among them.
  */
 export function classifyWorkflowAgent(meta, frontmatter) {
   const agentType = meta.agentType;
@@ -279,8 +291,8 @@ export function classifyWorkflowAgent(meta, frontmatter) {
   if (!pinned) {
     return {
       category: "audited",
-      kind: "ok",
-      row: { ...row, intended: model },
+      kind: "unpinned",
+      row: { ...row, intended: "(no pinned agentType)" },
     };
   }
   row.intended = pinned;
@@ -306,6 +318,7 @@ function main() {
 
   const mismatches = [];
   const inherited = [];
+  const unpinned = [];
   let audited = 0;
 
   const record = (result) => {
@@ -313,6 +326,7 @@ function main() {
     audited++;
     if (result.kind === "inherited") inherited.push(result.row);
     else if (result.kind === "mismatch") mismatches.push(result.row);
+    else if (result.kind === "unpinned") unpinned.push(result.row);
   };
 
   for (const meta of readMetas(subagentsDir)) {
@@ -322,23 +336,20 @@ function main() {
     record(classifyWorkflowAgent(meta, frontmatter));
   }
 
-  report({ transcript, audited, mismatches, inherited });
+  report({ transcript, audited, mismatches, inherited, unpinned });
   process.exit(mismatches.length > 0 || inherited.length > 0 ? 1 : 0);
 }
 
-// How a row identifies its spawn: an Agent-tool spawn by the tool_use it came
-// from, a workflow-spawned agent by the run and meta file that recorded it.
 function rowRef(row) {
   return row.toolUseId ? row.toolUseId : `workflow ${row.workflow}`;
 }
 
-function report({ transcript, audited, mismatches, inherited }) {
+function report({ transcript, audited, mismatches, inherited, unpinned }) {
   process.stdout.write(`Auditing ${transcript}\n`);
   process.stdout.write(`Spawns audited: ${audited}\n\n`);
 
   if (mismatches.length === 0 && inherited.length === 0) {
-    process.stdout.write("OK: every spawn resolved to its intended tier.\n");
-    return;
+    process.stdout.write("OK: every spawn resolved to its intended tier.\n\n");
   }
 
   if (mismatches.length > 0) {
@@ -361,6 +372,22 @@ function report({ transcript, audited, mismatches, inherited }) {
         `  ${s.agentType} [${rowRef(s)}]: no explicit or pinned model; ` +
           `resolved ${s.resolved} (${s.resolvedTier})` +
           (s.description ? ` -- ${s.description}` : "") +
+          "\n",
+      );
+    }
+    process.stdout.write("\n");
+  }
+
+  if (unpinned.length > 0) {
+    process.stdout.write(
+      `Workflow agents with no pinned agentType (${unpinned.length}, ` +
+        `informational -- no intended tier to compare against):\n`,
+    );
+    for (const u of unpinned) {
+      process.stdout.write(
+        `  ${u.agentType} [${rowRef(u)}]: ran on ${u.resolved} ` +
+          `(${u.resolvedTier})` +
+          (u.description ? ` -- ${u.description}` : "") +
           "\n",
       );
     }

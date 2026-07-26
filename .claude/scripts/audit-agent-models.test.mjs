@@ -164,14 +164,15 @@ describe("classifyWorkflowAgent", () => {
     expect(result.row.resolved).toBe("(unrecorded)");
   });
 
-  it("passes an unpinned agent, which has no intent to compare against", () => {
+  it("counts an agentType with no frontmatter pin apart from the passes", () => {
     const result = classifyWorkflowAgent(
-      meta({ model: "claude-sonnet-5" }),
+      meta({ agentType: "workflow-subagent", model: "claude-sonnet-5" }),
       frontmatter,
     );
-    expect(result.kind).toBe("ok");
-    expect(result.row.agentType).toBe("(none)");
-    expect(result.row.intended).toBe("claude-sonnet-5");
+    expect(result.category).toBe("audited");
+    expect(result.kind).toBe("unpinned");
+    expect(result.row.agentType).toBe("workflow-subagent");
+    expect(result.row.resolvedTier).toBe("sonnet");
   });
 
   it("audits without a toolUseId, which a workflow meta never carries", () => {
