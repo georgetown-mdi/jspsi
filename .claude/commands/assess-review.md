@@ -31,6 +31,12 @@ Start with the whole, not the parts:
   invisible to accounting keyed on `subagent_type`, which undercounts the
   rounds a branch ran). Converging is confirmed-new falling with repeats near
   zero; churn is fixes spawning findings.
+- **Kind.** Each ledger row carries a `kind`: `light` for a lens round, or the
+  name of the role that ran it (`security-reviewer`, `adversarial-verifier`).
+  Compare a round only against prior rounds of the same kind -- a role round's
+  claims and a lens round's clusters count different things. In a role row, a
+  claim whose verdict is `REFUTED` or `COULD-NOT-VERIFY` is a confirmed finding
+  on its file.
 
 Then check the **step-back triggers**. If ANY fires, do NOT proceed to
 fix-and-rerun: stop, and recommend a structural pivot instead -- a focused
@@ -45,7 +51,9 @@ blind whole-branch round.
    or more.
 3. Reviewers propose contradictory remedies for the same hunk, or the contested
    list (high-severity, single-reviewer findings) grew from the previous round.
-4. Two or more reviewers voted that a materially simpler shape exists.
+   A role round has one reviewer, so this trigger reads light rounds only.
+4. Two or more reviewers voted that a materially simpler shape exists. Only a
+   light round carries that vote.
 5. A fix you are about to make would grow the branch's diff by roughly a third
    or more.
 6. The driving board issue's **Affected areas** is in context and the diff has

@@ -1,6 +1,6 @@
 ---
 name: light-review
-description: Multi-reviewer code review of the current branch (HEAD) against staging. Runs three independent schema-forced Sonnet reviewers and a Sonnet consolidator through one Workflow, computes the round's trajectory against prior rounds, and writes review_findings.md in the working directory. Takes an optional list of documentation files the reviewers and consolidator should consult for design justification. Pure orchestration -- it does not review the code itself.
+description: Code review of the current branch (HEAD) against staging, through one Workflow. Default lens mode runs three independent schema-forced Sonnet reviewers and a Sonnet consolidator. Role mode (--role security-reviewer|adversarial-verifier --claims <file>) runs one schema-forced Opus role reviewer against a named list of claims to refute. Either mode computes the round's trajectory against prior rounds of its kind and writes review_findings.md in the working directory. Takes an optional list of documentation files the reviewers should consult for design justification. Pure orchestration -- it does not review the code itself.
 ---
 
 You are ORCHESTRATING a code review. You do not review the code yourself and you
@@ -9,11 +9,25 @@ trajectory, and write a file.
 
 ## Input
 
-    /light-review [doc-file ...]
+    /light-review [--role <name> --claims <path>] [doc-file ...]
 
+- `--role <name>`: optional. `security-reviewer` or `adversarial-verifier`, and nothing
+  else -- stop if the name is anything else. Selects ROLE mode; without it you are in
+  LENS mode.
+- `--claims <path>`: the refutation contract for role mode, one claim per line.
 - `[doc-file ...]`: optional paths to documentation relevant to these changes (e.g.
-  `docs/spec/FILE_SYNC.md`). These are every token in `$ARGUMENTS`; call this list DOCS.
-  There may be none.
+  `docs/spec/FILE_SYNC.md`). These are the remaining tokens in `$ARGUMENTS` after the
+  flags above; call this list DOCS. There may be none.
+
+Role mode requires the contract. If `--role` is given and `--claims` is missing, its
+file is unreadable, or it yields no claims, stop and say the round belongs to the plain
+`/light-review` lens form or a lens-scoped `general-purpose` reviewer. Quote the
+refutation-contract bullet in CLAUDE.md's Agent conventions as the reason -- these two
+roles run only under a named list of claims to refute -- and do not restate it as a rule
+of your own.
+
+In role mode, read the claims file in the main thread: every non-empty line is one
+claim, with a leading `- ` list marker stripped. Call this list CLAIMS.
 
 ## Step 1 -- Empty guard (cheap)
 
@@ -27,16 +41,21 @@ main thread, so the full diff never enters this conversation's context.
 
 ## Step 2 -- Run the review Workflow
 
-Invoke the Workflow tool with `args` set to `{"docs": [<the DOCS list, possibly empty>]}`
-and the script below VERBATIM -- do not paraphrase it, and do not spawn the reviewers
-with the Agent tool instead: plain agents cannot have their output format enforced, and
-the schema is the point (prompt-side "return only JSON" instructions have a long failure
-record here).
+Invoke the Workflow tool with `args` set to
+`{"docs": [<the DOCS list, possibly empty>], "role": <the role name or null>, "claims": [<CLAIMS, or an empty list in lens mode>]}`
+and the script below VERBATIM -- do not paraphrase it, do not edit it to pick a branch
+(the script branches on `args.role` itself), and do not spawn the reviewers with the
+Agent tool instead: plain agents cannot have their output format enforced, and the schema
+is the point (prompt-side "return only JSON" instructions have a long failure record
+here).
+
+Commit before you invoke it: the clean-tree hook inspects the tree you are launching
+from, so even a by-ref round over another branch is blocked while this tree is dirty.
 
 ```js
 export const meta = {
   name: 'light-review',
-  description: 'Three schema-forced reviewers over the branch diff, then a consolidator that clusters and verifies',
+  description: 'One review round over the branch diff: three schema-forced lens reviewers plus a consolidator, or one schema-forced role reviewer under a refutation contract',
   phases: [{ title: 'Review' }, { title: 'Consolidate' }],
 }
 
@@ -84,15 +103,94 @@ const CONSOLIDATOR_SCHEMA = {
     },
   },
 }
+const ROLE_SCHEMA = {
+  type: 'object',
+  required: ['claims', 'findings', 'summary'],
+  properties: {
+    claims: {
+      type: 'array',
+      description: 'One entry per claim you were given, no more and no fewer. Populate every property; empty array when none.',
+      items: {
+        type: 'object',
+        required: ['claim', 'verdict', 'evidence', 'file', 'lines'],
+        properties: {
+          claim: { type: 'string', description: 'The claim exactly as it was given to you, copied verbatim.' },
+          verdict: { type: 'string', enum: ['HOLDS', 'REFUTED', 'COULD-NOT-VERIFY'] },
+          evidence: { type: 'string', description: 'What you read or ran and what it showed. Compact prose, a sentence or two.' },
+          file: { type: 'string', description: 'Path the evidence sits in; empty string when the verdict rests on no single file.' },
+          lines: { type: 'string', description: 'Line or range in that file, e.g. 42 or 42-58; empty string when none applies.' },
+        },
+      },
+    },
+    findings: {
+      type: 'array',
+      description: 'Problems you found outside the claims. Populate every property; empty array when none.',
+      items: {
+        type: 'object',
+        required: ['name', 'description', 'severity', 'file', 'lines'],
+        properties: {
+          name: { type: 'string', description: 'Short label for the problem.' },
+          description: { type: 'string', description: 'What is wrong and why it matters. Compact prose.' },
+          severity: { type: 'string', enum: ['critical', 'major', 'minor', 'nit'] },
+          file: { type: 'string' },
+          lines: { type: 'string', description: 'Line or range in that file; empty string when none applies.' },
+        },
+      },
+    },
+    summary: { type: 'string', description: 'The round in a few compact sentences.' },
+  },
+}
 
 const docsClause = args.docs && args.docs.length
   ? 'First read these docs for design context: ' + args.docs.join(', ') + '. When an issue could be a deliberate design decision, check whether these docs justify it before flagging it.\n\n'
   : ''
 
-const reviewerPrompt = `You are a senior software engineer reviewing the current branch (HEAD) of this repository.
-Generate the diff yourself with git diff "staging...HEAD" -- the three-dot form is deliberate and non-negotiable: it shows ONLY what this branch added since it forked from staging, and it excludes every commit staging gained after the fork. That diff is the complete and exclusive scope of your review. Never widen it: do not run a two-dot git diff staging HEAD, do not diff against HEAD~N, the tip of staging, or any other base.
+const diffScope = `Generate the diff yourself with git diff "staging...HEAD" -- the three-dot form is deliberate and non-negotiable: it shows ONLY what this branch added since it forked from staging, and it excludes every commit staging gained after the fork. That diff is the complete and exclusive scope of your review. Never widen it: do not run a two-dot git diff staging HEAD, do not diff against HEAD~N, the tip of staging, or any other base.
 
-Review the branch's own changes and nothing else. Anything attributable to staging advancing since the branch forked -- the branch's base or starting point moving, the "root" of the branch changing, upstream commits the branch has not yet absorbed -- is OUT OF SCOPE and not this branch's responsibility. Do not flag it, describe it, or even mention that the base moved; treat such material as invisible. If a hunk merely re-states upstream staging work rather than introducing new behavior authored on this branch, ignore it. Open another file only if a hunk cannot be judged without it.
+Review the branch's own changes and nothing else. Anything attributable to staging advancing since the branch forked -- the branch's base or starting point moving, the "root" of the branch changing, upstream commits the branch has not yet absorbed -- is OUT OF SCOPE and not this branch's responsibility. Do not flag it, describe it, or even mention that the base moved; treat such material as invisible. If a hunk merely re-states upstream staging work rather than introducing new behavior authored on this branch, ignore it. Open another file only if a hunk cannot be judged without it.`
+
+const salvage = (who) => `${who} returned no structured result -- the structured-output retries were exhausted. The analysis usually survives in the rejected attempts: read subagents/workflows/<runId>/agent-<id>.jsonl for this run and salvage it before re-running the round.`
+
+if (args.role) {
+  const rolePrompt = `You are reviewing the current branch (HEAD) of this repository under a refutation contract.
+${diffScope}
+
+${docsClause}Your contract is the named list of claims below. Take each one as something to REFUTE, not to confirm, and run the evidence yourself rather than taking the claim's own justification on faith. Return exactly one entry per claim, with the claim text copied verbatim so the caller can pair it back up, and a verdict of HOLDS, REFUTED, or COULD-NOT-VERIFY. COULD-NOT-VERIFY is not a pass: an unverifiable claim gates the round exactly as a refuted one does, and uncertainty defaults to refuted.
+
+The claims:
+${args.claims.map((claim, i) => `${i + 1}. ${claim}`).join('\n')}
+
+Anything else you find in this diff that is worth the caller knowing goes in findings, separate from the claims -- do not stretch a claim to cover it, and do not invent a claim you were not given.`
+
+  const result = await agent(rolePrompt, {
+    label: args.role, phase: 'Review', agentType: args.role, schema: ROLE_SCHEMA, model: 'opus',
+  })
+  if (!result) throw new Error(salvage(args.role))
+
+  const asked = args.claims.map((claim) => claim.trim())
+  const answered = result.claims.map((entry) => entry.claim.trim())
+  for (const claim of asked) {
+    const verdicts = answered.filter((a) => a === claim).length
+    if (verdicts !== 1) {
+      throw new Error(`${args.role} returned ${verdicts} verdicts for the claim "${claim}"; the contract needs exactly one per claim.`)
+    }
+  }
+  for (const claim of answered) {
+    if (!asked.includes(claim)) {
+      throw new Error(`${args.role} returned a verdict for "${claim}", which is not one of the claims it was given.`)
+    }
+  }
+
+  return {
+    claims: result.claims,
+    findings: result.findings,
+    gate: result.claims.some((entry) => entry.verdict !== 'HOLDS'),
+    summary: result.summary,
+  }
+}
+
+const reviewerPrompt = `You are a senior software engineer reviewing the current branch (HEAD) of this repository.
+${diffScope}
 
 ${docsClause}Review for: correctness bugs, logic errors, security issues, missing error handling at system boundaries, type-safety issues, API-contract violations, documentation-tier placement (spec-level detail -- a constant value, byte/wire layout, an HKDF info string or other algorithm step, or "would only need revisiting if..." rationale -- written into a docs/ overview doc rather than docs/spec/), excess prose (a comment that restates the adjacent code, narrates change history -- "now", "previously", "was moved" -- duplicates a JSDoc, or cites a board item id; name such findings "excess prose: ..."), and anything else that looks wrong.
 
@@ -103,6 +201,7 @@ Separately from the findings, answer the shape question: is there a materially s
 const reviews = (await parallel([1, 2, 3].map((n) => () =>
   agent(reviewerPrompt, { label: `reviewer-${n}`, phase: 'Review', schema: REVIEWER_SCHEMA, model: 'sonnet' }),
 ))).filter(Boolean)
+if (reviews.length === 0) throw new Error(salvage('Every lens reviewer'))
 
 const consolidatorPrompt = `You are consolidating a code review of the current branch. ${reviews.length} independent reviewers examined git diff "staging...HEAD" (three-dot; the branch's own changes only -- never widen the diff). Their findings:
 ${JSON.stringify(reviews.map((r, i) => ({ reviewer: i + 1, findings: r.findings })), null, 1)}
@@ -125,32 +224,64 @@ return {
 
 ## Step 3 -- Trajectory, ledger, write
 
-The Workflow returns `{reviewerCount, simplerShapeVotes, clusters}`. Compute this round's
-trajectory in the main thread:
+Both modes end the same way: one line appended to the rounds ledger, and
+`review_findings.md` written (overwrite if present) in the working directory. That exact
+filename is what assess-review looks for; it hard-stops without it. Report the path you
+wrote, and never delete the ledger.
+
+Common to both:
 
 1. `BRANCH=$(git branch --show-current)`; the rounds ledger is
    `scratch/review-rounds/<BRANCH>.jsonl` (`mkdir -p scratch/review-rounds`; scratch/ is
-   gitignored). Read it if it exists; this round's number is its line count + 1.
-2. CONFIRMED = clusters with verification `confirmed`. A confirmed file that also carried
-   a confirmed cluster in the PREVIOUS round is a REPEAT; repeat files are the round's
-   hotspots.
-3. CONTESTED = clusters with `flaggedBy` 1, severity critical or major, and verification
-   not `refuted`.
-4. Append one JSON line to the ledger:
-   `{"round": N, "date": "<date -I>", "clusters": [{"name", "file", "severity", "verification"}], "simplerShapeVotes": <count of simpler=true>}`.
-5. Write `review_findings.md` (overwrite if present): a header line (branch, round N,
-   reviewer count), then the clusters sorted by severity (critical first) then flaggedBy
-   (descending) -- one row each with issue number, name, description, severity, file,
-   "flagged by N of 3", and the verification outcome with its note -- then a
-   `## Trajectory` section with: the round number; confirmed-new vs confirmed-repeat
-   counts; the hotspot files; the contested list; and the simpler-shape vote ("N of 3
-   reviewers see a materially simpler shape", each reason on its own line when N > 0).
+   gitignored). Read it if it exists; this round's number is its line count + 1, counting
+   rounds of every kind.
+2. Every ledger row carries `"kind"`: the role name in role mode, `"light"` in lens mode.
+   Trajectory comparisons -- REPEAT files, hotspots, whether the contested list grew --
+   run against prior rounds of the SAME kind only. A role round's claims and a lens
+   round's clusters are not comparable evidence.
 
-Report the path you wrote. assess-review consumes the Trajectory section; never delete
-the ledger.
+### Lens mode -- the Workflow returned `{reviewerCount, simplerShapeVotes, clusters}`
+
+3. CONFIRMED = clusters with verification `confirmed`. A confirmed file that also carried
+   a confirmed cluster in the PREVIOUS light round is a REPEAT; repeat files are the
+   round's hotspots.
+4. CONTESTED = clusters with `flaggedBy` 1, severity critical or major, and verification
+   not `refuted`.
+5. Append one JSON line to the ledger:
+   `{"round": N, "kind": "light", "date": "<date -I>", "reviewerCount": <reviewerCount>, "clusters": [{"name", "file", "severity", "verification"}], "simplerShapeVotes": <count of simpler=true>}`.
+6. Write `review_findings.md`: a header line (branch, round N, kind `light`,
+   `reviewerCount` reviewers), then the clusters sorted by severity (critical first) then
+   flaggedBy (descending) -- one row each with issue number, name, description, severity,
+   file, "flagged by N of `<reviewerCount>`", and the verification outcome with its note
+   -- then a `## Trajectory` section with: the round number; confirmed-new vs
+   confirmed-repeat counts; the hotspot files; the contested list; and the simpler-shape
+   vote ("N of `<reviewerCount>` reviewers see a materially simpler shape", each reason on
+   its own line when N > 0).
+
+`reviewerCount` is the number of reviewers that actually returned, which is 3 only when
+none was lost to schema exhaustion. Write the number the Workflow returned, never the
+number you asked for.
+
+### Role mode -- the Workflow returned `{claims, findings, gate, summary}`
+
+3. GATING = claims whose verdict is `REFUTED` or `COULD-NOT-VERIFY`. A gating claim's
+   file that also carried a gating claim in the PREVIOUS round of this same role is a
+   REPEAT; repeat files are the round's hotspots.
+4. Append one JSON line to the ledger:
+   `{"round": N, "kind": "<role>", "date": "<date -I>", "gate": <gate>, "claims": [{"claim", "verdict", "file"}], "findings": [{"name", "file", "severity"}]}`.
+5. Write `review_findings.md`: a header block naming the role, the number of claims it
+   was contracted to refute, and the gate outcome (`gate` true is GATED, false is CLEAR),
+   then a verdict table -- one row per claim with the claim, its verdict, the evidence,
+   and `file:lines` -- then a `## Findings outside the claims` section (the findings, one
+   row each with name, description, severity, `file:lines`; say "none" when the list is
+   empty), then a `## Trajectory` section with: the round number and kind; the gate
+   outcome; the gating claims split into new vs repeat; the hotspot files; and the role's
+   summary.
 
 ## What you do NOT do
 
 - Do not review the diff yourself or add your own findings.
-- Do not edit, drop, or reorder the consolidator's clusters.
+- Do not edit, drop, or reorder the consolidator's clusters, or a role's verdicts.
+- Do not soften a verdict, and do not re-verdict a role's claims yourself -- the role's
+  own output is the artifact.
 - Do not fix anything -- that is assess-review's job.
