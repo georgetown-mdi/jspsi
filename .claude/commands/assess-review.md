@@ -43,6 +43,10 @@ Start with the whole, not the parts:
   and so is an out-of-claim `finding` of severity critical or major -- the role
   round's gate ignores those by design, the trajectory does not.
 
+On a branch whose ledger holds no prior row, skip the trajectory read:
+triggers 1-3 each compare against a previous round, so with nothing before
+this round check only triggers 4-6.
+
 Then check the **step-back triggers**. If ANY fires, do NOT proceed to
 fix-and-rerun: stop, and recommend a structural pivot instead -- a focused
 independent assessment of the churning area (fresh agents, cold) or a judge

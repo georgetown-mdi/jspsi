@@ -46,6 +46,12 @@ goes stale and silently widens the round with work that already merged. Every ag
 below uses the same ref and the same three-dot form. Only this `--stat` runs in the main
 thread, so the full diff never enters this conversation's context.
 
+Also read the rounds ledger (`scratch/review-rounds/<branch>.jsonl`) if it exists:
+its first row's `cap` is the branch's round budget (a first row without `cap`
+predates the field -- treat the budget as unset). When the ledger already holds
+`cap` rows, stop and say the bucket's round budget is spent -- only the owner
+raises it.
+
 ## Step 2 -- Run the review Workflow
 
 Invoke the Workflow tool with `args` set to
@@ -270,7 +276,10 @@ Common to both:
 1. `BRANCH=$(git branch --show-current)`; the rounds ledger is
    `scratch/review-rounds/<BRANCH>.jsonl` (`mkdir -p scratch/review-rounds`; scratch/ is
    gitignored). Read it if it exists; this round's number is its line count + 1, counting
-   rounds of every kind.
+   rounds of every kind. The first row written for a branch also carries `"cap"`: the
+   Step 5 bucket's total round allowance for this diff (1 for the second bucket or the
+   instruction-file floor, 3 for the full pipeline; a cap the owner raises is edited in
+   place with a note).
 2. Every ledger row carries `"kind"`: the role name in role mode, `"light"` in lens mode.
    Trajectory comparisons -- REPEAT files, hotspots, whether the contested list grew --
    run against prior rounds of the SAME kind only. A role round's claims and a lens
@@ -289,6 +298,7 @@ Common to both:
    not `refuted`.
 6. Append one JSON line to the ledger:
    `{"round": N, "kind": "light", "date": "<date -I>", "reviewerCount": <reviewerCount>, "clusters": [{"name", "file", "severity", "verification"}], "simplerShapeVotes": <count of simpler=true>}`.
+   A branch's first row also carries `"cap": <the round budget>` (Common item 1).
 7. Write `review_findings.md`: a header line (branch, round N, kind `light`,
    `reviewerCount` reviewers), then the clusters sorted by severity (critical first) then
    flaggedBy (descending) -- one row each with issue number, name, description, severity,
@@ -312,6 +322,7 @@ number you asked for.
    for assess-review, which reads them off the artifact.
 6. Append one JSON line to the ledger:
    `{"round": N, "kind": "<role>", "date": "<date -I>", "gate": <gate>, "claims": [{"claim", "verdict", "file"}], "findings": [{"name", "file", "severity"}]}`.
+   A branch's first row also carries `"cap": <the round budget>` (Common item 1).
 7. Write `review_findings.md`: a header block naming the role, the number of claims it
    was contracted to refute, and the gate outcome (`gate` true is GATED, false is CLEAR),
    then a verdict table -- one row per claim with the claim, its verdict, the evidence,
