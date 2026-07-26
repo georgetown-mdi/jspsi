@@ -4,25 +4,38 @@
 // gates the Agent tool; a Workflow script reaches the same tier through its own
 // agent() options, where no top-level tool input carries the model.
 //
-// Detection is textual and literal: a `model:` assigned a quoted Fable spelling,
-// or a quoted canonical Fable id anywhere in the script. That is the whole of what
-// a text scan can see, and the limits follow from it -- all of them fail OPEN:
-//   - a computed or spread model value (`model: tier`, `...options`) resolves only
-//     at run time and is invisible here;
-//   - a `scriptPath` invocation passes a file, not script text;
-//   - a resume of an earlier run replays a script this hook never sees.
-// The load-bearing half for committed scripts is the static check
-// (`npm run check:workflow-agent-models`), which fails any agent() call in
-// .claude/commands/ that does not pin a literal non-Fable tier. This hook covers
-// the ad-hoc inline script, which no committed-file check can reach.
+// Detection is textual and literal, over both halves of the call the model can
+// arrive in: the inline `script` and the serialized `args` it reads (a script can
+// pass `model: args.model` and carry the spelling in the args object of the same
+// event). A `model:` key, quoted or bare, assigned a Fable spelling, or a quoted
+// string that is itself a Fable spelling, asks.
+//
+// That is the whole of what a text scan can see, and the limits follow from it --
+// all of them fail OPEN: a model value computed at run time (`model: tier` with
+// the tier derived, `...options`) is invisible here; a `scriptPath` invocation
+// passes a file, not script text; and a resume of an earlier run replays a script
+// this hook never sees. The load-bearing half for committed scripts is the static
+// check (`npm run check:workflow-agent-models`), which fails any agent() call in a
+// fenced js block under .claude/commands/, .claude/agents/, or .claude/skills/
+// that does not pin a literal non-Fable tier -- within its own stated limits, a
+// computed model value and a call reached through an alias. This hook covers the
+// ad-hoc inline script, which no committed-file check can reach.
+//
+// Every path but a positive match exits 0 and allows the call: an unreadable or
+// unparseable event, a tool other than Workflow, a call carrying neither script
+// nor args, a script and args with no Fable spelling in them, and any unexpected
+// throw (the outer catch). Fable's real gate for the Agent tool is
+// require-fable-approval.mjs; a false negative here costs an unprompted Workflow
+// spawn, while a hook that wedged every Workflow call would cost far more.
 
 import { readFileSync } from "node:fs";
 
-// `model: 'fable'` / `model: "claude-fable-5"` in any quote style, plus a bare
-// quoted canonical Fable id that reaches the option by another name.
+// `model: 'fable'` / `"model": "claude-fable-5"` in any quote style (the key is
+// quoted when the option rides in a JSON args object), plus a quoted string that
+// is nothing but a Fable spelling, which reaches the option by another name.
 const FABLE_PATTERNS = [
-  /\bmodel\s*:\s*(['"`])\s*(?:claude-)?fable[a-z0-9-]*\s*\1/i,
-  /(['"`])\s*claude-fable[a-z0-9-]*\s*\1/i,
+  /(?<![\w$])(?:model|(['"`])model\1)\s*:\s*(['"`])\s*(?:claude-)?fable[a-z0-9-]*\s*\2/i,
+  /(['"`])\s*(?:claude-)?fable[a-z0-9-]*\s*\1/i,
 ];
 
 const ASK_REASON =
@@ -55,8 +68,16 @@ function main() {
   if (event.tool_name !== "Workflow") process.exit(0);
 
   const script = event?.tool_input?.script;
-  if (typeof script !== "string" || script.length === 0) process.exit(0);
-  if (FABLE_PATTERNS.some((pattern) => pattern.test(script))) ask(ASK_REASON);
+  const args = event?.tool_input?.args;
+  const texts = [];
+  if (typeof script === "string" && script.length > 0) texts.push(script);
+  if (args !== undefined && args !== null) {
+    texts.push(typeof args === "string" ? args : JSON.stringify(args));
+  }
+  const namesFable = (text) =>
+    typeof text === "string" &&
+    FABLE_PATTERNS.some((pattern) => pattern.test(text));
+  if (texts.some(namesFable)) ask(ASK_REASON);
   process.exit(0);
 }
 

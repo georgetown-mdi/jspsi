@@ -30,11 +30,32 @@ describe("require-workflow-fable-approval hook", () => {
       "await agent(p, { model: 'fable' })",
       'await agent(p, { model: "claude-fable-5" })',
       "await agent(p, { model: `fable` })",
+      "await agent(p, { \"model\": 'fable' })",
+      "await agent(p, { 'model': 'claude-fable-5' })",
       "const tier = 'claude-fable-5'\nawait agent(p, { model: tier })",
     ];
     for (const script of scripts) {
       assertAsks(
         runHook({ tool_name: "Workflow", tool_input: { script, args: {} } }),
+      );
+    }
+  });
+
+  it("asks when the script reads the tier out of Fable-naming args", () => {
+    const argsObjects = [
+      { model: "fable" },
+      { model: "claude-fable-5" },
+      { tier: "fable" },
+    ];
+    for (const args of argsObjects) {
+      assertAsks(
+        runHook({
+          tool_name: "Workflow",
+          tool_input: {
+            script: "await agent(p, { model: args.model ?? args.tier })",
+            args,
+          },
+        }),
       );
     }
   });
@@ -46,6 +67,17 @@ describe("require-workflow-fable-approval hook", () => {
         script:
           "await agent(p, { model: 'opus' })\nawait agent(q, { model: 'sonnet' })",
         args: {},
+      },
+    });
+    expect(out).toBe("");
+  });
+
+  it("passes through args that merely discuss Fable in prose", () => {
+    const out = runHook({
+      tool_name: "Workflow",
+      tool_input: {
+        script: "await agent(p, { model: 'opus' })",
+        args: { claims: ["The hook asks before a Workflow runs on Fable"] },
       },
     });
     expect(out).toBe("");
