@@ -7,8 +7,8 @@
 # Why this is needed: `isolation:"worktree"` (and `git worktree add`) create a
 # worktree with NO node_modules -- deps are gitignored, not copied -- so an isolated
 # agent otherwise cannot build or run the suite. A full `npm install` per worktree
-# is slow and can hit the protoc-gen-js download flake, so instead we mirror the
-# primary tree's already-installed deps by symlink.
+# is slow, so instead we mirror the primary tree's already-installed deps by
+# symlink.
 #
 # The trick: external deps are shared from the primary by absolute symlink, but a
 # workspace package's own RELATIVE symlink (e.g. @psilink/core -> ../../packages/core)
