@@ -27,7 +27,9 @@ Start with the whole, not the parts:
   `review_findings.md`, and the rounds ledger at
   `scratch/review-rounds/<branch>.jsonl` for the rounds before it (fall back to
   reconstructing rounds from `git log staging..HEAD` review-fix commits if
-  either is missing). Converging is confirmed-new falling with repeats near
+  either is missing; a review lens carried by a `general-purpose` spawn is
+  invisible to accounting keyed on `subagent_type`, which undercounts the
+  rounds a branch ran). Converging is confirmed-new falling with repeats near
   zero; churn is fixes spawning findings.
 
 Then check the **step-back triggers**. If ANY fires, do NOT proceed to
@@ -58,8 +60,7 @@ hunks/files it names, not the whole diff), then decide.
   permission to fix something small and clearly right.
 - **A fix that adds behavior gets a test.** When a fix introduces new branching
   or a new code path (error handling, a guard, a fallback), pin its guarantees
-  with a test in the same pass. No later round re-reviews a fix: another round
-  exists only for the step-back triggers.
+  with a test in the same pass.
 - **A pattern in the findings gets a class sweep.** When several findings share
   one mechanism (a port dropping behavior its original carried, a rename
   missing sites, a repeated idiom misused), run one focused pass over that

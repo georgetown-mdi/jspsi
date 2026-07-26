@@ -2,20 +2,25 @@
 // PR-body checklist guard, run by pr_checklist.yaml on every PR (including a
 // body edit, so fixing the description re-runs the check without a new commit).
 //
-// The PR template's Checklist section is a set of pre-merge obligations CI does
-// not verify; the template requires every line resolved -- checked when done, or
-// checked with an `n/a: <reason>`. This is a mechanical BACKSTOP for the tells
-// that a checklist was left unresolved or resolved dishonestly by shape; whether
-// a stated reason is true stays a review call, the same philosophy as
-// check-contributing-scope.mjs.
-//
 //   1. The `## Checklist` section must exist (the template ships one).
 //   2. No box may be left unchecked: `- [ ]` means unresolved.
 //   3. The three required lines (Docs, CHANGELOG.md, Security review) must each
-//      be present -- the template says "Do not delete lines here".
+//      open a line of their own -- the template says "Do not delete lines here"
+//      -- so prose naming one inside another line cannot stand in for it.
 //   4. Every checked line must carry a `-- <resolution>` clause with real text.
 //   5. An n/a resolution must be `n/a: <reason>` with a non-empty reason; a bare
 //      "n/a" (or "n/a" plus punctuation only) earns nothing.
+//   6. The Security review line must name the sha it reviewed, and that sha must
+//      be the PR head: a commit pushed after a review turns the PR red until the
+//      new head is reviewed and the line updated.
+//
+// The limits are deliberate. This is a mechanical BACKSTOP for the tells that a
+// checklist was left unresolved or resolved dishonestly by shape; whether a
+// stated reason is true stays a review call, the same philosophy as
+// check-contributing-scope.mjs, and an author who edits the sha without
+// re-reading the diff passes rule 6, which reads a string and not a review.
+// Only the first `## Checklist` section is read, so a line in a second one is
+// not.
 //
 // The template's guidance comments contain example checklist lines, so HTML
 // comments are stripped before parsing -- an example can never satisfy or trip
@@ -24,46 +29,81 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-/** The checklist lines the template requires, matched by a stable substring. */
+/** The template's Security review line, whose sha the attestation rule reads. */
+const REVIEW_PREFIX = "Security review";
+
+/**
+ * The checklist lines the template requires, each matched by the literal text
+ * its label opens with: a mention inside another line -- "the Security review is
+ * recorded below" -- is prose, and can never stand in for the line itself.
+ */
 export const REQUIRED_LINES = [
-  { name: "Docs", substring: "Docs:" },
-  { name: "Changelog", substring: "CHANGELOG.md" },
-  { name: "Security review", substring: "Security review" },
+  { name: "Docs", prefix: "Docs:" },
+  { name: "Changelog", prefix: "CHANGELOG.md" },
+  { name: "Security review", prefix: REVIEW_PREFIX },
 ];
 
 // The `-- <resolution>` separator: `--` bounded by whitespace (or line end), so
 // a flag mention like `--event-stream` inside an item is never mistaken for it.
 const RESOLUTION_SEPARATOR = /\s--(?:\s|$)/;
 
+// GitHub stores a body edited in the browser with CRLF endings, and a carriage
+// return is a line terminator the item pattern cannot match: unnormalized, every
+// checklist line parses as no item at all, so a fully resolved body fails.
+function normalizeLineEndings(text) {
+  return text.replace(/\r\n?/g, "\n");
+}
+
+const COMMENT_OPEN = "<!--";
+const COMMENT_CLOSE = "-->";
+
+/** A run's newlines alone, so blanking it leaves every later line number intact. */
+function newlinesOf(text) {
+  return text.replace(/[^\n]/g, "");
+}
+
 /**
  * Blank out HTML comments while preserving line numbers, so the template's
  * example checklist lines inside guidance comments are never parsed as content.
- * An unterminated `<!--` comments out the rest of the body, matching GitHub's
- * rendering.
+ * An unterminated `<!--` comments out the rest of the body. Scanned opener to
+ * closer rather than matched with a lazy `<!--[\s\S]*?-->`, which rescans to the
+ * end of the body from every opener and so is quadratic in a run of them: a PR
+ * body may be 65536 characters of anything an author likes.
  */
 export function stripHtmlComments(text) {
-  let result = text.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ""));
-  const unterminated = result.indexOf("<!--");
-  if (unterminated !== -1) {
-    result =
-      result.slice(0, unterminated) +
-      result.slice(unterminated).replace(/[^\n]/g, "");
+  const parts = [];
+  let cursor = 0;
+  for (;;) {
+    const open = text.indexOf(COMMENT_OPEN, cursor);
+    if (open === -1) {
+      parts.push(text.slice(cursor));
+      return parts.join("");
+    }
+    parts.push(text.slice(cursor, open));
+    const close = text.indexOf(COMMENT_CLOSE, open + COMMENT_OPEN.length);
+    if (close === -1) {
+      parts.push(newlinesOf(text.slice(open)));
+      return parts.join("");
+    }
+    parts.push(newlinesOf(text.slice(open, close + COMMENT_CLOSE.length)));
+    cursor = close + COMMENT_CLOSE.length;
   }
-  return result;
 }
 
-/** Return the list of checklist violations in PR body `text` (empty = clean). */
-export function checklistViolations(text) {
-  const violations = [];
-  const lines = stripHtmlComments(text).split("\n");
+/**
+ * The Checklist section's items, or null when the section is absent. Each is
+ * split at the first `--` separator: the label is the template's own line text,
+ * the clause is the author's resolution. The required-line and attestation rules
+ * read labels only, so free text in a reason clause can never satisfy a deleted
+ * line's presence requirement or attest a commit. A label's backticks are
+ * dropped: the template code-spans parts of its line text, and an author's copy
+ * need not span the same parts.
+ */
+function parseChecklist(body) {
+  const lines = stripHtmlComments(normalizeLineEndings(body)).split("\n");
 
   const start = lines.findIndex((line) => /^##\s+Checklist\s*$/.test(line));
-  if (start === -1) {
-    violations.push(
-      'no "## Checklist" section -- restore the template\'s Checklist with every line resolved',
-    );
-    return violations;
-  }
+  if (start === -1) return null;
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
     if (/^##\s/.test(lines[i])) {
@@ -72,10 +112,6 @@ export function checklistViolations(text) {
     }
   }
 
-  // Split each item at the first `--` separator: the label is the template's
-  // own line text, the clause is the author's resolution. The required-line
-  // check matches labels only, so free text in a reason clause can never
-  // satisfy a deleted line's presence requirement.
   const items = [];
   for (let i = start + 1; i < end; i++) {
     const m = /^\s*-\s*\[([ xX])\]\s*(.*)$/.exec(lines[i]);
@@ -85,17 +121,30 @@ export function checklistViolations(text) {
     items.push({
       line: i + 1,
       checked: m[1] !== " ",
-      label: separator ? text.slice(0, separator.index) : text,
+      label: (separator ? text.slice(0, separator.index) : text)
+        .replace(/`/g, "")
+        .trim(),
       clause: separator
         ? text.slice(separator.index + separator[0].length).trim()
         : "",
     });
   }
+  return items;
+}
 
-  for (const { name, substring } of REQUIRED_LINES) {
-    if (!items.some((item) => item.label.includes(substring))) {
+function checklistFindings(items) {
+  const violations = [];
+  if (items === null) {
+    violations.push(
+      'no "## Checklist" section -- restore the template\'s Checklist with every line resolved',
+    );
+    return violations;
+  }
+
+  for (const { name, prefix } of REQUIRED_LINES) {
+    if (!items.some((item) => item.label.startsWith(prefix))) {
       violations.push(
-        `required ${name} checklist line (matching "${substring}") is missing -- the template says "Do not delete lines here"`,
+        `required ${name} checklist line (opening "${prefix}") is missing -- the template says "Do not delete lines here"`,
       );
     }
   }
@@ -127,6 +176,72 @@ export function checklistViolations(text) {
   return violations;
 }
 
+/** Return the list of checklist violations in PR body `text` (empty = clean). */
+export function checklistViolations(text) {
+  return checklistFindings(parseChecklist(text));
+}
+
+// The attested sha, abbreviated or full, read only from the slot the template
+// gives it -- `Security review of <sha>` at the head of the label. A hex string
+// anywhere else, in a parenthetical or a resolution clause, is prose a reader
+// weighs, not the commit this line attests. A sha written as a code span
+// matches: the label reaches here with its backticks already dropped.
+const ATTESTED_SHA = /^Security review of\s+([0-9a-f]{7,40})\b/i;
+
+function attestationFindings(items, headSha) {
+  const reviews = (items ?? []).filter((item) =>
+    item.label.startsWith(REVIEW_PREFIX),
+  );
+  if (reviews.length === 0) return []; // a deleted line is the checklist's finding
+  if (reviews.length > 1) {
+    return [
+      `line ${reviews[1].line}: more than one Security review line -- keep the section's single line, so there is one sha to read`,
+    ];
+  }
+  const [review] = reviews;
+  const attested = ATTESTED_SHA.exec(review.label)?.[1];
+  if (attested === undefined) {
+    return [
+      `line ${review.line}: the Security review line names no sha -- write "Security review of <sha>" with the commit the review read`,
+    ];
+  }
+  if (
+    typeof headSha === "string" &&
+    !headSha.toLowerCase().startsWith(attested.toLowerCase())
+  ) {
+    return [
+      `line ${review.line}: the Security review line attests ${attested}, which is not this PR's head (${headSha.slice(0, 12)}) -- review the head and update the sha`,
+    ];
+  }
+  return [];
+}
+
+/**
+ * Return the list of review-attestation violations in PR body `text`, given the
+ * PR's head sha -- null when it cannot be determined, as in a local run, which
+ * checks only that the line names a sha.
+ */
+export function attestationViolations(text, headSha) {
+  return attestationFindings(parseChecklist(text), headSha);
+}
+
+/**
+ * The PR head sha this run checks against, from the `PR_HEAD_SHA` the workflow
+ * sets, or null when there is none (a local run). An unset or blank value is a
+ * head this script could not read, not a head that happens to match nothing,
+ * which would leave the comparison silently skipped and the run green.
+ */
+export function prHeadSha() {
+  const value = process.env.PR_HEAD_SHA;
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+/** Every PR-body violation this guard checks for (empty = clean). */
+export function bodyViolations(text, headSha) {
+  const items = parseChecklist(text);
+  return [...checklistFindings(items), ...attestationFindings(items, headSha)];
+}
+
 // CLI entry: only runs when invoked directly, so the test can import the pure
 // functions without the process.exit. The body comes from the PR_BODY
 // environment variable (how pr_checklist.yaml passes the attacker-influenceable
@@ -147,14 +262,24 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     );
     process.exit(2);
   }
-  const violations = checklistViolations(body);
+  // On the runner the head must be readable, or the attestation degrades to a
+  // presence check and a green result would mean nothing: say so and stop
+  // instead of passing quietly.
+  const headSha = prHeadSha();
+  if (headSha === null && process.env.GITHUB_ACTIONS === "true") {
+    console.error(
+      "PR checklist check could not read the head sha the workflow passes in PR_HEAD_SHA, so the Security review line's attestation cannot be verified.",
+    );
+    process.exit(2);
+  }
+  const violations = bodyViolations(body, headSha);
   if (violations.length > 0) {
     console.error(
       `PR checklist check failed (${violations.length} issue${violations.length === 1 ? "" : "s"}):\n`,
     );
     for (const v of violations) console.error("  " + source + ": " + v);
     console.error(
-      "\nSee .github/PULL_REQUEST_TEMPLATE.md, Checklist: every line resolved, and every n/a earned with a reason.",
+      "\nSee .github/PULL_REQUEST_TEMPLATE.md, Checklist: every line resolved, every n/a earned with a reason, and the Security review line naming the head it reviewed.",
     );
     process.exit(1);
   }

@@ -48,4 +48,5 @@ jobs:
         # shell commands into the runner.
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: npm run check:pr-checklist
