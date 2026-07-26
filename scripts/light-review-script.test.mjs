@@ -190,12 +190,14 @@ describe("light-review lens mode", () => {
 
   it("refuses claims handed to it without a role to run them under", async () => {
     for (const role of [null, undefined]) {
-      await expect(
-        run({ docs: [], role, claims: ["a claim"] }, () => {
-          throw new Error("must not spawn");
-        }),
-        String(role),
-      ).rejects.toThrow(/claims were passed without a role/);
+      for (const claims of [["a claim"], "a claim", {}]) {
+        await expect(
+          run({ docs: [], role, claims }, () => {
+            throw new Error("must not spawn");
+          }),
+          `${String(role)} ${JSON.stringify(claims)}`,
+        ).rejects.toThrow(/claims were passed without a role/);
+      }
     }
   });
 

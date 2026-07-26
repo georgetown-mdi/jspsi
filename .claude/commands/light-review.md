@@ -216,7 +216,7 @@ Anything else you find in this diff that is worth the caller knowing goes in fin
   }
 }
 
-if (Array.isArray(args.claims) && args.claims.length > 0) {
+if (args.claims !== undefined && args.claims !== null && !(Array.isArray(args.claims) && args.claims.length === 0)) {
   throw new Error('claims were passed without a role: a lens round has no refutation contract to run them under, so it would drop them and review nothing they name. Pass --role security-reviewer or --role adversarial-verifier, or drop the claims.')
 }
 
