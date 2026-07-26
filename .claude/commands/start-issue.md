@@ -75,9 +75,10 @@ questions**. When recent merges touched the issue's surface, reconcile its
 premise against the merged code first: an obviated or reduced premise is a scope
 finding to raise, not a stale design to build. Explore with the Read and Grep tools, not shell `sed`/`cat`/`grep`:
 they read and search without a permission prompt and keep large file dumps out of
-context. A design-level open question -- one that changes the public surface,
-the protocol, or the architecture -- is a stop-and-ask; a purely local one you
-settle yourself and note your choice.
+context. Settle a purely local open question yourself and note your choice.
+Routing a question the issue itself left open belongs to `CLAUDE.md`'s Agent
+conventions, not to this command; the split below covers the decisions the
+implementation itself raises.
 
 Know when to decide and when to ask:
 
@@ -85,13 +86,14 @@ Know when to decide and when to ask:
   layout, which existing pattern to follow, test structure, behavior-preserving
   local refactors, branch name, commit granularity. Make the call, keep moving,
   and record anything non-obvious.
-- **STOP and ask** the owner or PM when a decision reaches beyond this change:
-  public API / CLI flags / config-schema changes, protocol or wire-format
-  changes, security-relevant behavior, adding or dropping a dependency, departing
-  from a shared convention, changing the issue's scope, or discovering the task
-  as written is wrong, infeasible, or conflicts with the codebase. Ask in your
-  reply, in prose: state the decision, list the options with their tradeoffs, and
-  recommend one. Do NOT use the question tool.
+- **STOP and ask** the owner or PM when a decision the implementation raises
+  reaches beyond this change: public API / CLI flags / config-schema changes,
+  protocol, wire-format, or architecture changes, security-relevant behavior,
+  adding or dropping a dependency, departing from a shared convention, changing
+  the issue's scope, or discovering the task as written is wrong, infeasible, or
+  conflicts with the codebase. Ask in your reply, in prose: state the decision,
+  list the options with their tradeoffs, and recommend one. Do NOT use the
+  question tool.
 
 Implement on the branch, following CONTRIBUTING.md. Verify before you commit:
 rebuild core (`npm run build -w packages/core`) if you touched it -- it was built
@@ -106,7 +108,7 @@ Commit to the new branch following CONTRIBUTING.md's commit conventions (no
 markdown, no top-level lists, no self-attribution). Never commit to staging or
 main. Each substantial set of changes should receive its own commit; small
 patches can be amendments. Stop at the commit -- do not push or open a PR unless
-asked.
+asked; an instruction to orchestrate is that ask (see Orchestrating, below).
 
 ## Step 5 -- Recommend the review tier
 
@@ -117,7 +119,8 @@ security-review scope (the enumeration in CONTRIBUTING.md's Pull Request
 Process and the PR template's security-review comment) -- and end your report
 with a one-line review-tier recommendation:
 
-- Docs-only or trivial mechanical change -> no cold review; the gates suffice.
+- Docs-only or trivial mechanical change -> no cold review of any kind, lens or
+  role; the gates suffice.
 - Under ~150 changed lines and no security surface -> one /light-review +
   /assess-review round.
 - Security surface, protocol or wire format, structural restructure, or a large
@@ -125,5 +128,36 @@ with a one-line review-tier recommendation:
   rounds, honoring the step-back triggers), then a role-specialized security
   panel before merge.
 
+An instruction-file diff -- `CLAUDE.md` or anything under `.claude/` -- is not
+docs-only for this ladder: those files steer every future session, and an
+unreviewed edit can silently drop a working constraint. It draws exactly one
+lens round; a role round runs only on the owner's word. This lifts such a diff
+out of the first bucket only -- one that lands in a higher bucket by size or
+security surface keeps that bucket's treatment.
+
 State the bucket, the numbers behind it, and any file that forces the third
-bucket. The owner decides; this is a recommendation.
+bucket. Whether to run the tier is the owner's call in the plain flow (stop at
+the commit and recommend); when orchestrating, determining the bucket and
+running it are the same act. Either way the bucket binds as a ceiling: rounds
+of every kind count against it, and only the owner raises it.
+
+## Orchestrating
+
+"Orchestrate this issue" changes who writes and where the work ends, not the
+steps above. When the instruction is to orchestrate:
+
+- **Delegate the writing.** Implementation goes to an `implementer` spawn with a
+  self-contained brief; fix rounds are fresh `implementer` spawns. The one
+  exception is /assess-review's own triage pass, which you run and whose small,
+  clearly-right fixes you apply directly -- a fix worth a brief of its own goes
+  to a fresh spawn instead. Outside that pass, the orchestrating session edits
+  nothing on the branch itself.
+- **Run the tier yourself.** Size Step 5's bucket from the diff and run exactly
+  what it names without pausing for permission -- asking to run a tier you
+  already determined is deferral, not caution. The ceiling still binds; only
+  the owner raises it.
+- **Proceed to an open PR.** The terminal state is a pushed branch, an open PR
+  against staging with its checklist resolved, and a final report -- or a
+  stated blocker. Raise concerns in prose as you go and keep moving; stop only
+  for Step 4's STOP-and-ask cases or a fired step-back trigger (assess-review,
+  Step 2), batched into one message.

@@ -274,7 +274,8 @@ Common to both:
 2. Every ledger row carries `"kind"`: the role name in role mode, `"light"` in lens mode.
    Trajectory comparisons -- REPEAT files, hotspots, whether the contested list grew --
    run against prior rounds of the SAME kind only. A role round's claims and a lens
-   round's clusters are not comparable evidence.
+   round's clusters are not comparable evidence. Kind scopes trajectory only:
+   the round number and the branch's round budget count rounds of every kind.
 3. REPEATs and hotspots are computed on file paths. An entry whose `file` is empty names
    no file, so it is never a repeat and never a hotspot -- skip it rather than letting
    every fileless entry collide into one.

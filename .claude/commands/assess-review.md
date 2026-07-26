@@ -35,7 +35,10 @@ Start with the whole, not the parts:
   name of the role that ran it (`security-reviewer`, `adversarial-verifier`).
   A row with no `kind` predates the field and is a `light` round. Compare a
   round only against prior rounds of the same kind -- a role round's claims and
-  a lens round's clusters count different things. In a role row, a claim whose
+  a lens round's clusters count different things. Same-kind scoping governs
+  trajectory only: the branch's round budget is the ledger's full line count,
+  every kind included, capped by the review-tier bucket (start-issue.md, Step
+  5) -- a round of a new kind is not a fresh budget. In a role row, a claim whose
   verdict is `REFUTED` or `COULD-NOT-VERIFY` is a confirmed finding on its file,
   and so is an out-of-claim `finding` of severity critical or major -- the role
   round's gate ignores those by design, the trajectory does not.
@@ -70,7 +73,8 @@ hunks/files it names, not the whole diff), then decide.
   permission to fix something small and clearly right.
 - **A fix that adds behavior gets a test.** When a fix introduces new branching
   or a new code path (error handling, a guard, a fallback), pin its guarantees
-  with a test in the same pass.
+  with a test in the same pass. No later round re-reviews a fix: another round
+  exists only for the step-back triggers.
 - **A pattern in the findings gets a class sweep.** When several findings share
   one mechanism (a port dropping behavior its original carried, a rename
   missing sites, a repeated idiom misused), run one focused pass over that
