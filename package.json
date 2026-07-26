@@ -18,6 +18,7 @@
     "check:pr-checklist": "node scripts/check-pr-checklist.mjs",
     "check:command-inventory": "node scripts/check-command-inventory.mjs",
     "check:enforcement-claims": "node scripts/check-enforcement-claims.mjs",
+    "check:workflow-agent-models": "node scripts/check-workflow-agent-models.mjs",
     "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p apps/cli/tsconfig.test.json && tsc -p apps/web/tsconfig.json",
     "test": "npm run test -w packages/core -w apps/cli -w apps/web",
     "test:scripts": "vitest run --project scripts --project repo-scripts --project hooks",

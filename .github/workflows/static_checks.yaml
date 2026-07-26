@@ -69,6 +69,16 @@ jobs:
       # a rule is gated stops holding it itself.
       - name: Enforcement claims
         run: npm run check:enforcement-claims
+      # Encodes the model-tiering rule where the hooks cannot reach it: a
+      # Workflow script's agent() call that omits `model` inherits the session
+      # model rather than the agent definition's pinned tier, and the model sits
+      # inside the script rather than a top-level tool input. Every agent() call
+      # in .claude/commands/, .claude/agents/, and .claude/skills/ must pin a
+      # literal opus/sonnet/haiku, so a committed review or panel script cannot
+      # silently run off-tier -- or on Fable, which requires the owner's per-spawn
+      # approval.
+      - name: Workflow agent models
+        run: npm run check:workflow-agent-models
       # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
       # .mjs with no server or Docker dependency, so a stock runner suffices. This
       # is the repo-wide non-path-filtered gate that guarantees the suite is always

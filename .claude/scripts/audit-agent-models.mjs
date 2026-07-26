@@ -17,6 +17,20 @@
 //     frontmatter model of subagent_type's .claude/agents/ definition, else
 //     "session-inherited".
 //   - a canonical id's tier is the token after "claude-" (opus/sonnet/haiku/fable).
+//   - subagents/workflows/<runId>/agent-<id>.meta.json covers agents a Workflow
+//     script spawned through its own agent() call: { agentType, spawnDepth, model }
+//     with no toolUseId, so there is no transcript pairing and no resolvedModel.
+//     The meta's own `model` stands in for it, and the only intent to compare it
+//     against is the agentType's frontmatter pin. Three caveats on that field:
+//     it is harness-version dependent (every meta written before 2026-07-18 in
+//     this project carries no `model` at all, so an audit of an older session
+//     reads its workflow agents as session-inherited); what it records when the
+//     agent() call omits `model:` is unmeasured -- no such spawn has been
+//     observed, so whether the field goes missing or records the inherited tier
+//     is unknown; and every value observed since the field appeared reads
+//     "sonnet", including calls that pinned another tier, which is either a real
+//     off-tier spawn or a field that does not carry the resolved model. Confirm a
+//     workflow mismatch this reports against the run itself before believing it.
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -165,6 +179,35 @@ function readMetas(subagentsDir) {
   return metas;
 }
 
+// Agent metas one level down, under subagents/workflows/<runId>/. Each carries a
+// `workflow` reference in place of the toolUseId the top-level metas key on.
+function readWorkflowMetas(workflowsDir) {
+  const metas = [];
+  if (!existsSync(workflowsDir)) return metas;
+  for (const runId of readdirSync(workflowsDir)) {
+    const runDir = join(workflowsDir, runId);
+    let entries;
+    try {
+      if (!statSync(runDir).isDirectory()) continue;
+      entries = readdirSync(runDir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.startsWith("agent-") || !entry.endsWith(".meta.json"))
+        continue;
+      let meta;
+      try {
+        meta = JSON.parse(readFileSync(join(runDir, entry), "utf8"));
+      } catch {
+        continue;
+      }
+      metas.push({ workflow: `${runId}/${entry}`, ...meta });
+    }
+  }
+  return metas;
+}
+
 // Classify one spawn's meta against the indexed transcript. Pure: takes the meta,
 // the two transcript indexes, and the frontmatter model map, and returns
 //   { category: "skip" | "audited", ... }
@@ -214,6 +257,56 @@ export function classifySpawn(meta, spawnInput, resolvedModel, frontmatter) {
   return { category: "audited", kind: "ok", row };
 }
 
+/**
+ * Classify one workflow-spawned agent's meta. There is no transcript pairing and
+ * no resolvedModel here, so the recorded `model` is the only tier to read (with
+ * the caveats on that field in this module's header), and the agentType's
+ * frontmatter pin is the only statement of intent to read it against: a role that
+ * ran off its pinned tier is what an omitted or wrong `model:` in the script
+ * leaves behind. A meta with no model at all is reported as session-inherited; one
+ * whose agentType carries no frontmatter pin (`workflow-subagent`, the type of a
+ * spawn that named none) has no intent to compare against and is counted apart
+ * from the passing spawns rather than among them.
+ */
+export function classifyWorkflowAgent(meta, frontmatter) {
+  const agentType = meta.agentType;
+  const model = meta.model;
+  const row = {
+    agentType: agentType || "(none)",
+    workflow: meta.workflow,
+    description: meta.description,
+    intended: "session-inherited",
+    resolved:
+      typeof model === "string" && model.length > 0 ? model : "(unrecorded)",
+    resolvedTier: "(unknown)",
+  };
+
+  if (typeof model !== "string" || model.length === 0) {
+    return { category: "audited", kind: "inherited", row };
+  }
+  const resolvedTier = TIER_ALIASES.has(model) ? model : tierOf(model);
+  row.resolvedTier = resolvedTier ?? "(unknown)";
+
+  const pinned = agentType ? frontmatter.get(agentType) : undefined;
+  if (!pinned) {
+    return {
+      category: "audited",
+      kind: "unpinned",
+      row: { ...row, intended: "(no pinned agentType)" },
+    };
+  }
+  row.intended = pinned;
+  const intendedTier = TIER_ALIASES.has(pinned) ? pinned : tierOf(pinned);
+  if (intendedTier !== resolvedTier) {
+    return {
+      category: "audited",
+      kind: "mismatch",
+      row: { ...row, intendedTier },
+    };
+  }
+  return { category: "audited", kind: "ok", row };
+}
+
 function main() {
   const arg = process.argv[2];
   const { transcript, dir } = resolveSession(arg);
@@ -222,38 +315,48 @@ function main() {
 
   const frontmatter = frontmatterModels(agentsDir);
   const { spawnInput, resolvedModel } = indexTranscript(transcript);
-  const metas = readMetas(subagentsDir);
 
   const mismatches = [];
   const inherited = [];
+  const unpinned = [];
   let audited = 0;
 
-  for (const meta of metas) {
-    const result = classifySpawn(meta, spawnInput, resolvedModel, frontmatter);
-    if (result.category === "skip") continue;
+  const record = (result) => {
+    if (result.category === "skip") return;
     audited++;
     if (result.kind === "inherited") inherited.push(result.row);
     else if (result.kind === "mismatch") mismatches.push(result.row);
+    else if (result.kind === "unpinned") unpinned.push(result.row);
+  };
+
+  for (const meta of readMetas(subagentsDir)) {
+    record(classifySpawn(meta, spawnInput, resolvedModel, frontmatter));
+  }
+  for (const meta of readWorkflowMetas(join(subagentsDir, "workflows"))) {
+    record(classifyWorkflowAgent(meta, frontmatter));
   }
 
-  report({ transcript, audited, mismatches, inherited });
+  report({ transcript, audited, mismatches, inherited, unpinned });
   process.exit(mismatches.length > 0 || inherited.length > 0 ? 1 : 0);
 }
 
-function report({ transcript, audited, mismatches, inherited }) {
+function rowRef(row) {
+  return row.toolUseId ? row.toolUseId : `workflow ${row.workflow}`;
+}
+
+function report({ transcript, audited, mismatches, inherited, unpinned }) {
   process.stdout.write(`Auditing ${transcript}\n`);
   process.stdout.write(`Spawns audited: ${audited}\n\n`);
 
   if (mismatches.length === 0 && inherited.length === 0) {
-    process.stdout.write("OK: every spawn resolved to its intended tier.\n");
-    return;
+    process.stdout.write("OK: every spawn resolved to its intended tier.\n\n");
   }
 
   if (mismatches.length > 0) {
     process.stdout.write(`Tier mismatches (${mismatches.length}):\n`);
     for (const m of mismatches) {
       process.stdout.write(
-        `  ${m.agentType} [${m.toolUseId}]: intended ${m.intended} ` +
+        `  ${m.agentType} [${rowRef(m)}]: intended ${m.intended} ` +
           `(${m.intendedTier}) but resolved ${m.resolved} (${m.resolvedTier})` +
           (m.description ? ` -- ${m.description}` : "") +
           "\n",
@@ -266,9 +369,25 @@ function report({ transcript, audited, mismatches, inherited }) {
     process.stdout.write(`Session-inherited spawns (${inherited.length}):\n`);
     for (const s of inherited) {
       process.stdout.write(
-        `  ${s.agentType} [${s.toolUseId}]: no explicit or pinned model; ` +
+        `  ${s.agentType} [${rowRef(s)}]: no explicit or pinned model; ` +
           `resolved ${s.resolved} (${s.resolvedTier})` +
           (s.description ? ` -- ${s.description}` : "") +
+          "\n",
+      );
+    }
+    process.stdout.write("\n");
+  }
+
+  if (unpinned.length > 0) {
+    process.stdout.write(
+      `Workflow agents with no pinned agentType (${unpinned.length}, ` +
+        `informational -- no intended tier to compare against):\n`,
+    );
+    for (const u of unpinned) {
+      process.stdout.write(
+        `  ${u.agentType} [${rowRef(u)}]: ran on ${u.resolved} ` +
+          `(${u.resolvedTier})` +
+          (u.description ? ` -- ${u.description}` : "") +
           "\n",
       );
     }
