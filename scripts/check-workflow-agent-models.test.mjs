@@ -1,51 +1,78 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   agentCallCount,
   agentCalls,
+  agentUses,
   jsBlocks,
   modelViolations,
   pinnedModels,
+  sourceFiles,
 } from "./check-workflow-agent-models.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
-const COMMANDS_DIR = ".claude/commands";
 
-const readCommands = () =>
-  readdirSync(resolve(root, COMMANDS_DIR))
-    .filter((entry) => entry.endsWith(".md"))
-    .map((entry) => ({
-      file: `${COMMANDS_DIR}/${entry}`,
-      source: readFileSync(resolve(root, COMMANDS_DIR, entry), "utf8"),
-    }));
+const readSources = () =>
+  sourceFiles(root).map((file) => ({
+    file,
+    source: readFileSync(resolve(root, file), "utf8"),
+  }));
 
-// A code fence written as a value so the fixture strings below can hold one
-// without terminating this file's own Markdown-free source awkwardly.
 const FENCE = "```";
-const block = (code, language = "js") =>
-  `text before\n${FENCE}${language}\n${code}\n${FENCE}\ntext after\n`;
+const block = (code, fence = `${FENCE}js`, close = FENCE) =>
+  `text before\n${fence}\n${code}\n${close}\ntext after\n`;
 
 describe("workflow agent model check", () => {
-  it("passes on the real .claude/commands scripts", () => {
-    for (const { file, source } of readCommands()) {
+  it("passes on the real scanned command, agent, and skill files", () => {
+    for (const { file, source } of readSources()) {
       expect(modelViolations(file, source)).toEqual([]);
     }
   });
 
   it("finds the real agent() calls, so the pattern has not rotted", () => {
-    const total = readCommands().reduce(
+    const total = readSources().reduce(
       (sum, { source }) => sum + agentCallCount(source),
       0,
     );
     expect(total).toBeGreaterThanOrEqual(3);
   });
 
+  it("scans commands, agent definitions, and skills", () => {
+    const files = sourceFiles(root);
+    expect(files).toContain(".claude/commands/light-review.md");
+    expect(files.some((f) => f.startsWith(".claude/agents/"))).toBe(true);
+    expect(files.some((f) => f.startsWith(".claude/skills/"))).toBe(true);
+  });
+
   it("reads only js fences, and reports their line numbers", () => {
     const source = `intro\n${FENCE}sh\nnpm test\n${FENCE}\nmid\n${FENCE}js\nconst a = 1\n${FENCE}\n`;
     expect(jsBlocks(source)).toEqual([{ code: "const a = 1", startLine: 7 }]);
+  });
+
+  it("reads the CommonMark fence forms a plain ```js pattern misses", () => {
+    const forms = [
+      [`${FENCE}js title="review.js"`, FENCE],
+      [`${FENCE}\`js`, `${FENCE}\``],
+      ["~~~js", "~~~"],
+      [`   ${FENCE}javascript`, `   ${FENCE}`],
+    ];
+    for (const [fence, close] of forms) {
+      const violations = modelViolations(
+        "cmd.md",
+        block("agent(prompt, { label: 'x' })", fence, close),
+      );
+      expect(violations, fence).toHaveLength(1);
+      expect(violations[0].problem).toContain("no literal `model:`");
+    }
+  });
+
+  it("reads an unclosed js fence to the end of the file", () => {
+    const source = `${FENCE}js\nagent(prompt, { label: 'x' })\n`;
+    expect(agentCallCount(source)).toBe(1);
+    expect(modelViolations("cmd.md", source)).toHaveLength(1);
   });
 
   it("spans a call across lines to its balancing parenthesis", () => {
@@ -59,13 +86,14 @@ describe("workflow agent model check", () => {
   });
 
   it("ignores an identifier that merely ends in agent", () => {
-    expect(agentCalls("subagent(x, {model: 'opus'})")).toEqual([]);
-    expect(agentCalls("runner.agent(x, {model: 'opus'})")).toEqual([]);
+    expect(agentUses("subagent(x, {model: 'opus'})")).toEqual([]);
+    expect(agentUses("runner.agent(x, {model: 'opus'})")).toEqual([]);
   });
 
   it("reads every quoted model literal in a call", () => {
     expect(pinnedModels("agent(p, { model: 'sonnet' })")).toEqual(["sonnet"]);
     expect(pinnedModels('agent(p, { model: "haiku" })')).toEqual(["haiku"]);
+    expect(pinnedModels("agent(p, { 'model': 'haiku' })")).toEqual(["haiku"]);
     expect(pinnedModels("agent(p, { model: someTier })")).toEqual([]);
   });
 
@@ -85,6 +113,15 @@ describe("workflow agent model check", () => {
     const violations = modelViolations(
       "cmd.md",
       block("agent(prompt, { model: args.model })"),
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0].problem).toContain("no literal `model:`");
+  });
+
+  it("flags a hoisted options object, which carries no inline pin", () => {
+    const violations = modelViolations(
+      "cmd.md",
+      block("const options = { model: 'opus' }\nagent(prompt, options)"),
     );
     expect(violations).toHaveLength(1);
     expect(violations[0].problem).toContain("no literal `model:`");
@@ -126,5 +163,60 @@ describe("workflow agent model check", () => {
     const source = `${FENCE}sh\nagent(prompt, {})\n${FENCE}\n`;
     expect(modelViolations("cmd.md", source)).toEqual([]);
     expect(agentCallCount(source)).toBe(0);
+  });
+
+  it("does not read a pin out of a string, template, or comment", () => {
+    const phantoms = [
+      "agent('spawn it with model: \\'opus\\'', { label: 'x' })",
+      "agent(`the prompt says model: 'opus'`, { label: 'x' })",
+      "agent(prompt, { label: 'x' }) // model: 'opus'",
+      "/* model: 'opus' */ agent(prompt, { label: 'x' })",
+    ];
+    for (const code of phantoms) {
+      const violations = modelViolations("cmd.md", block(code));
+      expect(violations, code).toHaveLength(1);
+      expect(violations[0].problem).toContain("no literal `model:`");
+    }
+  });
+
+  it("does not let an unbalanced parenthesis in a template absorb the next call", () => {
+    const violations = modelViolations(
+      "cmd.md",
+      block(
+        "agent(`a stray ( in prose`, { label: 'x' })\nagent(b, {model: 'opus'})",
+      ),
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0].line).toBe(3);
+    expect(violations[0].problem).toContain("no literal `model:`");
+  });
+
+  it("is not desynchronized by a quote inside a regex literal", () => {
+    const violations = modelViolations(
+      "cmd.md",
+      block("const q = /'[a-z]'/\nagent(p, { model: 'opus' })"),
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it("does not accept a nested call's pin for the outer call", () => {
+    const violations = modelViolations(
+      "cmd.md",
+      block("agent(await agent(inner, { model: 'sonnet' }), { label: 'x' })"),
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0].problem).toContain("no literal `model:`");
+    expect(violations[0].problem).toContain("agent(await agent(inner");
+  });
+
+  it("flags every use of agent as a value, which the scan cannot follow", () => {
+    for (const code of [
+      "const spawn = agent\nawait spawn(p, { model: 'opus' })",
+      "await parallel([() => (agent)(p, { model: 'opus' })])",
+    ]) {
+      const violations = modelViolations("cmd.md", block(code));
+      expect(violations, code).toHaveLength(1);
+      expect(violations[0].problem).toContain("aliasing defeats this check");
+    }
   });
 });
