@@ -14,7 +14,7 @@ Three applications make up psilink's surface:
 - **Command line application** (`apps/cli`, containerized): conducts SFTP and synced-folder (filedrop) exchanges only. Connecting it to the web application awaits a Node.js WebRTC implementation and a WebSocket-to-TCP proxy, both out of scope.
 - **Console**: a local, single-owner PROTOTYPING GUI for the containerized CLI, repurposing the web application's machinery. It lowers the friction of the CLI -- writing a config and setting the right arguments -- so an operator authors and runs one exchange, conducted either by invoking the CLI or by the Node server running it directly. Its workflow is author-and-run once (test data, then maybe real data), then GRADUATE to the plain CLI plus cron/scheduler for the recurring production version. It runs on the same machine, used by the same person, that authors the connection and conducts the exchange: a web server, but not shared beyond the host. It operates on one mounted working directory holding a single exchange's config, secret, input, and results; only one exchange's resources are mounted at a time.
 
-The console is NOT a store of named connections, a recurring-exchange or scheduling interface (that lives in the public web app; the CLI schedules from the command line), a multi-exchange job manager, or a network-shared management service with an access-control perimeter over the operator. There is NO deploy-time provisioner: the operator authors the SFTP connection in-console -- do not add or assume deploy-time provisioning of it. The operator is the machine's own user; the only untrusted input is the remote partner's invitation content, which the exchange protocol already protects. Because the operator is trusted, the console must not hard-block them for a defense-in-depth posture (e.g. a credential file in the single mount) -- it warns and guides toward the better practice instead.
+The console is NOT a store of named connections, a recurring-exchange or scheduling interface (that lives in the public web app; the CLI schedules from the command line), a multi-exchange job manager, or a network-shared management service with an access-control perimeter over the operator. There is NO deploy-time provisioner: the operator authors the SFTP connection in-console -- do not add or assume deploy-time provisioning of it. The operator is the machine's own user; the only untrusted input is the remote partner's invitation content, which the exchange protocol already protects. Because the operator is trusted, the console must not hard-block them for a defense-in-depth posture (e.g. a credential file in the single mount) -- it warns and guides toward the better practice instead. Warn-and-guide governs the operator's own choices; a control constraining only remote or browser-delivered content the operator cannot inspect is correctly a hard refusal.
 
 ## Commands
 
@@ -22,7 +22,7 @@ Non-obvious ones (full reference in `CONTRIBUTING.md`):
 
 ```sh
 npm run build -w packages/core # required after any core change
-npm run test # unit tests only (root fans out to each workspace; cli/web run their unit project)
+npm run test # unit tests only (root fans out to each workspace; cli/web run their unit project); run before pushing a packages/core change -- the apps mock core
 npx vitest run path/to/file.test.ts # single test file, from workspace root
 ```
 
@@ -37,6 +37,8 @@ Read and edit drafts by numeric ID (the `?itemId=N` URL value) or a `PVTI_` node
 
 Create a draft (the one board op still on `gh`): `gh project item-create <project> --owner georgetown-mdi --title "..." --body "..."`.
 
+An item's board is not encoded in its id, and versions or paths quoted in its body are as-of-filing -- verify both before acting on them.
+
 ## Project manager
 
 The PM ruleset lives once at `.claude/pm/ruleset.md`; two front doors load it:
@@ -50,13 +52,13 @@ Driving the consult: the main thread owns the loop. Spawn it with a self-contain
 
 Beyond the conventions in `CONTRIBUTING.md`:
 
-- Prefer ASCII: `-` not an en-dash or em-dash, `->` not an arrow character.
-- Never commit to staging or main by yourself; don't attribute yourself on commits or pull requests.
+- Prefer ASCII: `-` not an en-dash or em-dash, `->` not an arrow character; no emoji anywhere, including as severity or status markers in reviews and reports.
+- Branches are cut from `staging` and pull requests target `staging` -- the harness's default `main` base does not apply. Never commit to staging or main by yourself; don't attribute yourself on commits or pull requests.
 - Commit messages use no markdown and no top-level lists (other format rules in `CONTRIBUTING.md`, Commit Messages).
 - After a chain of edits, run `npm run typecheck && npm run lint && npm run format`; the LSP server often has a stale cache.
 - Typecheck, lint, and format are CI checks.
 - A change that adds a top-level directory under a guarded root (`apps/web`, `packages/core`) or edits CI/deploy config must also run `npm run test:scripts`; the workspace suites skip the CI/deploy drift guards (e.g. the deploy path-filter check), so a new unclassified dir passes locally and reddens only in CI.
-- Project state belongs in the GitHub project and docs/, not agent memory.
+- Project state belongs in the GitHub project and docs/, not agent memory; durable conventions belong in this file or the repo docs. Session memory is unshared and outside the repo, so nothing durable lives there.
 - Encode a "does not happen at runtime" claim (a line that never fires, an unreachable branch) as a check, never a comment or doc note -- prose asserting a runtime fact rots silently; a check cannot lie. Full rule and the Global-listener cautionary example: `CONTRIBUTING.md`, Code Conventions.
 - Settle a question about `ssh2` / `ssh2-sftp-client` behavior on the SFTP adapter surface by measuring it, never by reading the library source: drive the real server in `apps/cli/test/sftpServer/`, injecting cuts and stalls through `sessionControls.ts`, and let the run decide. Source readings of that stack have reached opposite conclusions on the same question.
 - Before committing, sweep your own diff: delete every comment that restates the code, narrates change history ("now", "previously", "moved here"), or cites a board item id. Thoroughness is demonstrated in tests and checks, not prose.
@@ -68,7 +70,7 @@ Beyond the conventions in `CONTRIBUTING.md`:
 - Rebase and merge in a detached /tmp worktree (`git worktree add --detach`), never in /workspace: the IDE formatter/LSP races the working tree. Afterwards `git reset --hard` the branch in /workspace and remove the worktree.
 - The Bash tool runs zsh: unquoted `$var` does not word-split, bare `grep` is ugrep, and an unmatched glob is an error -- quote globs, and use arrays or `xargs` for multi-file commands.
 - `vitest -w` is watch mode and hangs a non-interactive session; use `npx vitest run` or `npm test -w <workspace>`.
-- Dev containers are firewall-blocked: never give subagents web-search or web-fetch tasks.
+- Dev containers are firewall-blocked: never give subagents web-search or web-fetch tasks. CI run-log bodies are blocked too -- read failure detail via `gh api repos/<owner>/<repo>/check-runs/<id>/annotations`.
 - Workflow `schema` for long-form agents (reviewers, panelists): put the required list property first and instruct "populate every property; empty array when none". Do not tight-cap free-text fields with `maxLength` -- the validator counts characters and the model cannot, so retries never converge; ask for brevity in the property description instead (a generous runaway backstop is fine). An agent that exhausts the structured-output retries: its analysis is usually intact in the rejected attempts in its transcript -- salvage it before re-running; otherwise re-run as a plain agent with a fixed-format text contract.
 - Don't use chip to raise issues -- ask directly.
 - When you document a change, route the detail by tier: spec-level detail (constant values, byte/wire layout, HKDF info strings, algorithm steps) belongs in `docs/spec/`; overview docs (`docs/`) stay conceptual and operational -- regardless of which doc you currently have open. Full rule: `CONTRIBUTING.md`, Documentation.
@@ -80,7 +82,12 @@ Beyond the conventions in `CONTRIBUTING.md`:
 - Commit before any review round: reviewers diff by ref and see only commits, so an uncommitted edit reads as absent. Enforced by `require-clean-tree-for-review.mjs` on `Workflow` calls only -- an `Agent`-spawned review is not gated, so hold the rule yourself there.
 - A review attests the commit it read: the checklist's Security review line carries that sha, and CI (`npm run check:pr-checklist`) fails while the sha is not the PR head -- a push after a review reddens the PR until the new head is reviewed and the line updated. Re-attesting means reviewing that head; editing the sha alone is the dishonest form, which the check cannot see.
 - Parallel writing spawns run in their own worktree: pass `isolation:"worktree"` on the Agent call itself (prose telling the agent it is in a worktree is inert), and have the agent run `.claude/scripts/worktree-init.sh` to provision node_modules in the fresh tree (a git worktree has none). Enforced by `require-declared-worktree-isolation.mjs`, which blocks a spawn whose prompt claims isolation the call did not request. Read-only reviewers may share `/workspace` -- diff `origin/staging...<branch>` by ref, never checkout.
-- A brief asserts a repo convention only by citing the repo file that carries it; practice you are carrying from memory is labeled advisory, never written as policy. An agent cannot tell an unsourced convention from a real one, and applies both.
-- An issue's own deferred design decisions -- its Open Questions, or a direction it leaves to the maintainer -- are not the implementer's to settle silently in the brief. Proceed when the answer is obvious; convene a panel of independent expert models and proceed on its conclusion when it is a settle-able question of technical judgment (the default for a real design question); surface to the owner only for a genuine product, scope, or priority call, or when the panel cannot converge. Err toward asking.
+- A brief asserts a repo convention or a fact only by citing the repo file that carries it; anything carried from memory is labeled advisory or unverified -- an agent cannot tell an unsourced claim from a real one, and applies both.
+- Every agent-written artifact -- a commit, a plan, an earlier session's conclusion -- is a proposal until the maintainer ratifies it in PR review or direct word; attribute that provenance when reporting state.
+- Put a decision that is the maintainer's to make in prose -- options, tradeoffs, and a recommendation -- never opened with the question tool (whose place is relaying a PM consult's NEEDS INPUT round); let in-flight agents land first and batch open questions into one message.
+- Weight the concrete driving scenario over general applicability -- an unattended failure needs a remedy, not a log line -- and rank efficiency work by token spend, not wall-clock time: scheduling and parallelism are the maintainer's own lever.
+- A rebuild brief permits cherry-picking surviving code with edits; forced re-derivation of code that survived review is a defect in the brief.
+- The repository is public and the project boards are not: an unfixed vulnerability's mechanism -- and any private incident detail -- stays in the board item, out of PR bodies, docs, and spec, until the fix lands.
+- An issue's own deferred design decisions -- its Open Questions, or a direction it leaves to the maintainer -- are not the implementer's to settle silently in the brief. Proceed when the answer is obvious; convene a panel of independent expert models and proceed on its conclusion when it is a settle-able question of technical judgment (the default for a real design question); surface to the owner only for a genuine product, scope, or priority call, or when the panel cannot converge. Err toward asking. A panel gets neutral context and no candidate answers; reframe a reflexively-converging panel rather than nudging it.
 - Never self-review a security- or partner-reachable surface: spawn an independent reviewer even for a small rework. A review is an independent session that sees only the diff and the issue; the orchestrator's own read of its own change is not a substitute.
 - Spawn `security-reviewer` and `adversarial-verifier` under a refutation contract: a named list of claims to refute, one per claim. A round with no such list is a lens-scoped `general-purpose` reviewer or `/light-review` -- those roles earn their cost only when they are given something to break. Run the contracted round as `/light-review --role <name> --claims <file>`, which is what puts it behind the clean-tree gate and into the branch's rounds ledger.

@@ -61,11 +61,19 @@ its local `staging` falls behind `origin/staging`. Sync it before branching:
 5. Cut the per-issue branch off the synced `staging`: `git checkout -b <branch>`,
    then confirm with `git branch --show-current`.
 
+Pull requests land as squash merges, so `git branch --merged`, `git cherry`, and
+subject greps cannot tell whether a prior branch already landed -- decide from
+tree content or `git range-diff staging...<branch>`. A stacked branch rebases
+onto `origin/staging` as soon as its base PR merges; a byte-identical tree
+afterwards means the prior gate runs still stand.
+
 ## Step 4 -- Plan, implement, verify
 
 Before editing, read CONTRIBUTING.md and the files the issue's **Affected areas**
 and **Implementation notes** point to, then resolve the issue's **Open
-questions**. Explore with the Read and Grep tools, not shell `sed`/`cat`/`grep`:
+questions**. When recent merges touched the issue's surface, reconcile its
+premise against the merged code first: an obviated or reduced premise is a scope
+finding to raise, not a stale design to build. Explore with the Read and Grep tools, not shell `sed`/`cat`/`grep`:
 they read and search without a permission prompt and keep large file dumps out of
 context. A design-level open question -- one that changes the public surface,
 the protocol, or the architecture -- is a stop-and-ask; a purely local one you
