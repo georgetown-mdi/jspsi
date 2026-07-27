@@ -1,5 +1,7 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -84,8 +86,13 @@ const installSites = [];
     if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
     if (inst === "COPY") {
       for (const { source, dest } of copyTargets(cwd, rest).copies) {
-        if (ROOT_NPMRC_SOURCE.test(source) && posix.basename(dest) === ".npmrc")
-          npmrcDirs.add(posix.dirname(dest));
+        if (posix.basename(dest) !== ".npmrc") continue;
+        // Whatever lands on the name last is the configuration the install
+        // reads, so a later COPY of some other file over it takes the directory
+        // back out of the set rather than leaving the earlier copy standing for
+        // it.
+        if (ROOT_NPMRC_SOURCE.test(source)) npmrcDirs.add(posix.dirname(dest));
+        else npmrcDirs.delete(posix.dirname(dest));
       }
     }
     if (inst === "RUN" && /\bnpm ci\b/.test(rest)) {
@@ -107,6 +114,36 @@ const firstInstall = builder.findIndex(
 // inert with no diagnostic -- and the base image's digest, not this repo, is
 // what decides which npm the builder gets.
 const NPM_POLICY_FLOOR = "11.17";
+
+const floorGuard = builder.findIndex(
+  ({ inst, rest }) =>
+    inst === "RUN" &&
+    /\bnpm\s+(?:--version|-v)\b/.test(rest) &&
+    rest.includes(NPM_POLICY_FLOOR),
+);
+
+// Run the guard's own shell body against a stub `npm` reporting `version`, or
+// against no npm at all for a null one. The image's shell is busybox ash and
+// this is whatever /bin/sh is here, but the body uses only POSIX parameter
+// expansion and `test`, and the two ways a shell can answer a non-numeric
+// operand -- a non-zero `test`, or aborting outright -- both land on the
+// refusing side.
+const runFloorGuard = (version) => {
+  const bin = mkdtempSync(join(tmpdir(), "npm-floor-"));
+  try {
+    if (version !== null) {
+      writeFileSync(join(bin, "npm"), `#!/bin/sh\necho '${version}'\n`, {
+        mode: 0o755,
+      });
+    }
+    return spawnSync("/bin/sh", ["-c", builder[floorGuard].rest], {
+      env: { PATH: bin },
+      encoding: "utf8",
+    });
+  } finally {
+    rmSync(bin, { recursive: true, force: true });
+  }
+};
 
 describe("Dockerfile dependency freeze", () => {
   it("installs only with npm ci, never npm install", () => {
@@ -136,12 +173,6 @@ describe("Dockerfile dependency freeze", () => {
     // The map and the flag are silently inert below it, so a base digest re-pin
     // onto an older node would install everything unreviewed while every check
     // and this document still read as enforcement.
-    const floorGuard = builder.findIndex(
-      ({ inst, rest }) =>
-        inst === "RUN" &&
-        /\bnpm\s+(?:--version|-v)\b/.test(rest) &&
-        rest.includes(NPM_POLICY_FLOOR),
-    );
     expect(floorGuard).toBeGreaterThanOrEqual(0);
     expect(firstInstall).toBeGreaterThan(floorGuard);
   });
@@ -176,6 +207,43 @@ describe("Dockerfile dependency freeze", () => {
   });
 });
 
+describe("what the builder's npm floor guard decides", () => {
+  // The test above finds the guard by its text and pins where it sits; these
+  // run it. Text alone would accept a guard neutered to `RUN npm --version #
+  // floor is 11.17` or weakened to a comparison nothing fails, either of which
+  // leaves the image installing under an npm the policy is inert on while every
+  // check and the spec still read as enforcement.
+
+  it.each([
+    "11.17",
+    "11.17.0",
+    "11.17.1",
+    "11.17.0-pre.1",
+    "11.170.0",
+    "12.0.0",
+  ])("installs under npm %s", (version) => {
+    expect(runFloorGuard(version).status).toBe(0);
+  });
+
+  it.each(["11.16.9", "11.9.0", "10.9.4", "11"])(
+    "refuses npm %s and says why",
+    (version) => {
+      const { status, stderr } = runFloorGuard(version);
+      expect(status).toBe(1);
+      expect(stderr).toContain(NPM_POLICY_FLOOR);
+    },
+  );
+
+  it.each([
+    ["reports no version at all", ""],
+    ["reports a non-numeric version", "abc"],
+    ["reports a version npm never prints", "v11.17.0"],
+    ["is not on PATH", null],
+  ])("fails closed when npm %s", (_case, version) => {
+    expect(runFloorGuard(version).status).not.toBe(0);
+  });
+});
+
 describe("the root .npmrc the builder installs under", () => {
   // The file is committed and public, and the builder copies it into a layer the
   // release workflow exports to a shared build cache, so it may state
@@ -196,19 +264,30 @@ describe("the root .npmrc the builder installs under", () => {
           };
     });
 
-  // npm's credential keys, bare or under a `//host/:` registry scope.
-  const CREDENTIAL_KEY =
-    /^(?:\/\/\S+:)?(?:_auth|_authToken|_password|username)$/i;
+  // The keys this file exists to state. An allowlist rather than an enumeration
+  // of credential-named keys, because npm authenticates from more of its config
+  // surface than its `_auth`-shaped keys: an inline `cert`/`key` PEM pair is
+  // presented to the registry as an mTLS client credential, and
+  // `certfile`/`keyfile` name a file holding one -- none of them named like a
+  // secret, and the surface grows with npm rather than with this repo. Widening
+  // what the file may carry means widening this set in the same diff.
+  const PERMITTED_KEYS = new Set(["engine-strict", "strict-allow-scripts"]);
+
   // Userinfo in a URL value -- `registry=https://user:secret@host/` and its
   // `@scope:registry` form -- which npm sends as an Authorization: Basic header
-  // for that registry, no credential-named key involved.
+  // for that registry, no credential-named key involved. Neither permitted key
+  // takes a URL, so this is what stands between a URL-valued key that later
+  // joins them and a credential riding in on its value.
   const URL_USERINFO = /[a-z][a-z0-9+.-]*:\/\/[^/?#\s@]*@/i;
 
-  it("states no credential, by key or by URL userinfo", () => {
-    const credentials = settings.filter(
-      ({ key, value }) => CREDENTIAL_KEY.test(key) || URL_USERINFO.test(value),
-    );
-    expect(credentials.map(({ line }) => line)).toEqual([]);
+  it("states no key beyond the policies it is here for", () => {
+    const unpermitted = settings.filter(({ key }) => !PERMITTED_KEYS.has(key));
+    expect(unpermitted.map(({ line }) => line)).toEqual([]);
+  });
+
+  it("carries no URL userinfo in a permitted key's value", () => {
+    const userinfo = settings.filter(({ value }) => URL_USERINFO.test(value));
+    expect(userinfo.map(({ line }) => line)).toEqual([]);
   });
 
   it("states the two policies its readers rest on", () => {
