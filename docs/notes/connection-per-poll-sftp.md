@@ -247,7 +247,7 @@ session that handshake has not restored yet and returns having ended nothing.
 
 The adapter therefore owns a single FIFO lock over those transitions, and holds
 it across the whole of each: a release holds it through its forced close, a dial
-through its entire retry budget. Three properties follow, and they are what the
+through its entire retry budget. Four properties follow, and they are what the
 adapter's tests assert rather than what its prose claims:
 
 - **Request order decides, not promise-reaction order.** A transition takes its
@@ -258,12 +258,35 @@ adapter's tests assert rather than what its prose claims:
   transition -- so anything queued behind teardown is skipped, and anything
   already running is waited out by teardown's own position in the queue.
   Teardown has no privileged entry and pre-empts nothing.
-- **The acquire is deliberately unbounded.** Each transition's ceiling is its
-  caller's: core wraps a data-plane operation in the peer-inactivity budget and
-  `close()` in its own shorter teardown budget, and forwards the two
-  cycle-boundary signals unwrapped. Bounding the acquire would need a defined
-  behavior for the loser of an expired wait, and the only such behaviors are the
-  overlapping ones the lock exists to prevent.
+- **The acquire is bounded by one fixed adapter-owned ceiling.** One number for
+  all five kinds, and it bounds the WAIT rather than the transition being waited
+  on -- so it owes nothing to the sibling's settings, nor to any premise about
+  when ssh2 arms a connect deadline. A ceiling on the dial instead would put a
+  teardown's wait at the dial's whole budget, around two minutes at the defaults
+  and without a practical limit as the operator raises the connect timeout:
+  neither teardown-scale nor a bound the wait owns. The transition being waited
+  on stays unbounded here, because its ceiling is its caller's: core wraps a
+  data-plane operation in the peer-inactivity budget and `close()` in its own
+  shorter teardown budget, and forwards the two cycle-boundary signals unwrapped.
+- **A waiter whose bound expires never proceeds into its own session action.** Not
+  the dial, not the ssh2 client's `end()`, not the socket destroy: the transition
+  it gave up on still holds the client, so proceeding would trade a bounded park
+  for the overlap the lock exists to prevent. It abandons its OWN transition
+  instead, through the transient-failure path it already owns -- the cycle-start
+  dial reports a cycle to skip, the idle release that it released nothing, the
+  recovery re-dial that no session is live for the re-issue, and the first dial,
+  which has no value that could mean "no session was established", rejects. The
+  waiter also leaves the queue chain intact: it gives up its turn without
+  resolving its own slot, so its successor is admitted when the transition
+  actually holding the client settles and not when the waiter walks away.
+  Teardown is the single exception, and only in the narrow form: it may give up
+  ssh2-sftp-client's `end()` -- which a live handshake beneath it resolves having
+  closed nothing -- and close the transport from this side, which needs nothing
+  from the peer and settles the very dial being waited on. That destroy is the one
+  mechanism the adapter drives from outside the transition holding the client, and
+  what makes it safe is the teardown latch rather than the destroy's own
+  harmlessness: every transition behind the teardown skips its body, so the holder
+  ahead of it is the only one that can be running.
 
 Uniformity has three consequences worth stating rather than leaving to be
 discovered.
@@ -271,18 +294,18 @@ discovered.
 **A cycle-boundary signal issued after teardown is latched waits the teardown out
 before returning its "nothing to do" value.** It does not short-circuit on the
 latch, because a second reading of that latch outside the lock is exactly the
-distributed re-read the single in-lock read exists to avoid. The wait cannot be
-indefinite, but it is not the teardown's own close alone: a signal queued behind
-teardown waits out whatever transition is running AHEAD of it as well, which for
-a dial is that dial's whole connect budget (`max_reconnect_attempts` attempts,
-each up to the connect timeout), and then the teardown's close, which carries the
-`CLIENT_CLOSE_TIMEOUT_MS` and `FORCED_CLOSE_TIMEOUT_MS` bounds. Every one of
-those is a bound that already governed the transition carrying it. Neither signal
-is awaited by the teardown, so no cycle can form -- core stops the poll loop
-before it closes the transport, and its `close()` never joins the loop. The
-integration suite drives the close half against the partner that spends those
-bounds in full -- one that accepts the disconnect and never closes the connection
--- and pins the wait as bounded: about five seconds, once, at the end of a run.
+distributed re-read the single in-lock read exists to avoid. Against a partner that
+withholds its close, that wait is the teardown's own close bounds
+(`CLIENT_CLOSE_TIMEOUT_MS` then `FORCED_CLOSE_TIMEOUT_MS`), which land inside the
+acquire ceiling, so the signal waits the teardown out rather than giving up on it.
+Past the ceiling the signal abandons instead, which is what keeps a transition
+running AHEAD of the teardown -- a dial spending its whole connect budget -- from
+reaching the signal at all. Neither signal is awaited by the teardown, so no cycle
+can form: core stops the poll loop before it closes the transport, and its
+`close()` never joins the loop. The integration suite drives the close half against
+the partner that spends those bounds in full -- one that accepts the disconnect and
+never closes the connection -- and pins the wait as bounded: about five seconds,
+once, at the end of a run.
 
 **Whether a same-tick release and `close()` run the release or skip it turns on
 whether the queue was idle.** A release requested on an idle queue starts
@@ -463,6 +486,54 @@ What the verdict, and the check that carries it, do not cover:
   at 7021 ms and still unsettled 39 s later) predates the forced close and was
   not reproduced; that revision was not rebuilt.
 - **The native-sshd backend.** The withheld-close control is in-process only.
+
+## What a forced close does across a mid-handshake dial
+
+The teardown that gives up its wait closes the transport with a handshake live
+beneath it, which is exactly the shape reviewers have read out of the library's
+source and got wrong. So it was DRIVEN, against the same real stack: a server that
+accepts the TCP connection and then never writes a byte -- not even its SSH
+identification string -- so the client's dial hangs, established but never ready
+(`stallHandshakeOnConnect` in `apps/cli/test/sftpServer/sessionControls.ts`).
+
+What the run shows, at the moment the forced close lands:
+
+- **The socket is fully live and the session is not yet set.** Mid-handshake it
+  reads `destroyed: false, writable: true, readable: true, writableEnded: false`,
+  with ssh2-sftp-client's session property still falsy.
+- **The destroy settles the pending attempt, promptly.** `destroy()` returns with
+  `destroyed` already `true` in the same tick, and the parked `connect()` rejects
+  about 3 ms later -- a plain `Error`, `code: "ERR_GENERIC_CLIENT"`, message
+  `getConnection: Unexpected close event`. That rejection is indistinguishable from
+  a genuine peer close, so anything that must tell "I destroyed this" from "the
+  partner dropped us" needs its own flag rather than error matching.
+- **With no retry budget left the process exits at once.** The `TCPSocketWrap`
+  handle is gone one tick after the destroy and a child process that does nothing
+  further exits, code 0, about 50 ms later.
+- **With budget left the retry loop re-dials on a FRESH socket** about a second
+  after the destroy, and the child stays alive for the rest of the dial budget. So
+  the destroy alone does not end the run: the loop has to read the teardown latch
+  between attempts, which is why it does.
+- **ssh2-sftp-client's `end()` is a no-op closer here.** Driven mid-handshake it
+  RESOLVED in 1 ms and left the socket untouched (`destroyed: false, writable:
+  true`) with the dial still pending -- it short-circuits on the session the
+  handshake has not restored. This is why the abandoning teardown reaches the
+  destroy and never `end()`: the destroy is the only thing that closes anything.
+- **The destroy is silent.** At default verbosity it draws no WARN and no ERROR of
+  its own -- in particular not the "ssh2 client error outside an operation" line --
+  so the operator-facing line on that path is a deliberate one.
+
+The bound itself rests on none of this: it is a fixed ceiling on the wait, so
+whether ssh2 arms its connect deadline per attempt changes when the sibling gives
+up, never when the waiter does. What the measurements above are load-bearing for is
+the teardown branch -- that the destroy settles the dial rather than abandoning it,
+and that the retry loop must be stopped as well.
+
+Its limits, on the same terms as the section above. The control suppresses server
+writes at accept time, so what was driven is a server that never answers the
+identification string; one that answers it and then stalls mid-key-exchange is a
+different, unmeasured shape. And it is in-process only -- a native sshd cannot be
+told to stall its handshake.
 
 ## The work that follows
 

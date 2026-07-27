@@ -12,12 +12,14 @@ import { serverAuth } from "../sftpServer/testContext";
 // release) issued once teardown has been latched takes the session-transition
 // queue like any other transition: it waits the teardown out and then returns its
 // "nothing to do" value, rather than returning before the close it queued behind
-// has run. Core forwards both signals unwrapped, so nothing above the adapter
-// bounds that wait -- what bounds it is the teardown's own close bounds, and this
-// exercises the case that spends them in full: a partner that accepts the
-// disconnect and never closes the connection. Only the in-process backend can be
-// made to withhold its close, so this runs there and stands up its own server to
-// reach the session controls.
+// has run. Core forwards both signals unwrapped, so what bounds that wait is the
+// adapter's own -- the teardown's close bounds first, and past them the acquire
+// ceiling, at which a signal abandons instead of waiting. This exercises the case
+// that spends the close bounds in full and still lands inside the ceiling, so the
+// signals wait the teardown out rather than giving up on it: a partner that
+// accepts the disconnect and never closes the connection. Only the in-process
+// backend can be made to withhold its close, so this runs there and stands up its
+// own server to reach the session controls.
 const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 // The teardown's close spends CLIENT_CLOSE_TIMEOUT_MS (5 s) against this partner

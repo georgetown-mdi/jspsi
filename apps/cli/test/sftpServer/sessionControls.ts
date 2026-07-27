@@ -22,6 +22,16 @@ export interface ClosableSocket {
 }
 
 /**
+ * A connection's transport socket as the accept-time controls reach it: the two
+ * closers the withheld-close control replaces, plus the one write the
+ * stalled-handshake control replaces (every server-side byte of the SSH
+ * identification exchange and key exchange goes through it).
+ */
+export interface ControlledSocket extends ClosableSocket {
+  write(...args: unknown[]): unknown;
+}
+
+/**
  * SFTP request opcodes the in-process backend serves. Each arriving request of
  * one of these types counts as a single session operation for the op-count cap
  * and the one-shot op drop; the backend registers a counting listener per opcode
@@ -59,11 +69,11 @@ interface TrackedSession {
  */
 export interface SftpSessionControlHub extends SftpSessionControls {
   /**
-   * Apply the withheld-close control to a newly accepted connection's socket,
-   * before any SSH traffic runs on it. A no-op while the control is off, and
-   * when the backend cannot reach the socket.
+   * Apply the withheld-close and stalled-handshake controls to a newly accepted
+   * connection's socket, before any SSH traffic runs on it. A no-op while both
+   * controls are off, and when the backend cannot reach the socket.
    */
-  onConnectionAccepted(socket: ClosableSocket | undefined): void;
+  onConnectionAccepted(socket: ControlledSocket | undefined): void;
   /** Record a completed SSH handshake and begin tracking the connection. */
   onConnectionReady(conn: DroppableConnection): void;
   /** Count one SFTP operation on a tracked connection, applying the op caps. */
@@ -86,6 +96,12 @@ export function createSftpSessionControls(): SftpSessionControlHub {
   const withheldSockets = new Map<
     ClosableSocket,
     { end: ClosableSocket["end"]; destroy: ClosableSocket["destroy"] }
+  >();
+  // The same, for the sockets the stalled-handshake control has muted, so
+  // stopStallingHandshakes can hand their write back.
+  const stalledSockets = new Map<
+    ControlledSocket,
+    { write: ControlledSocket["write"] }
   >();
   let handshakes = 0;
   let activeConnection: DroppableConnection | undefined;
@@ -150,6 +166,7 @@ export function createSftpSessionControls(): SftpSessionControlHub {
     maxOps: 0,
     maxIdleMs: 0,
     withholdCloseOnDisconnect: false,
+    stallHandshakeOnConnect: false,
 
     dropActiveAfterOps(ops: number): void {
       oneShotOpsRemaining = ops > 0 ? ops : 0;
@@ -180,19 +197,30 @@ export function createSftpSessionControls(): SftpSessionControlHub {
       handshakes = 0;
     },
 
-    onConnectionAccepted(socket: ClosableSocket | undefined): void {
-      if (!hub.withholdCloseOnDisconnect || socket === undefined) return;
-      if (withheldSockets.has(socket)) return;
-      withheldSockets.set(socket, {
-        end: socket.end.bind(socket),
-        destroy: socket.destroy.bind(socket),
-      });
-      // ssh2's server ends this socket itself when the client's DISCONNECT
-      // arrives, so half-open alone does not keep it quiet: both closers have to
-      // go. Reads still drain, so the connection serves traffic normally right up
-      // to the disconnect it then ignores.
-      socket.end = () => socket;
-      socket.destroy = () => socket;
+    onConnectionAccepted(socket: ControlledSocket | undefined): void {
+      if (socket === undefined) return;
+      if (hub.withholdCloseOnDisconnect && !withheldSockets.has(socket)) {
+        withheldSockets.set(socket, {
+          end: socket.end.bind(socket),
+          destroy: socket.destroy.bind(socket),
+        });
+        // ssh2's server ends this socket itself when the client's DISCONNECT
+        // arrives, so half-open alone does not keep it quiet: both closers have to
+        // go. Reads still drain, so the connection serves traffic normally right up
+        // to the disconnect it then ignores.
+        socket.end = () => socket;
+        socket.destroy = () => socket;
+      }
+      if (hub.stallHandshakeOnConnect && !stalledSockets.has(socket)) {
+        stalledSockets.set(socket, { write: socket.write.bind(socket) });
+        // Nothing the server produces reaches the wire, starting with its SSH
+        // identification string, so the client's handshake cannot advance past
+        // waiting for it. Reads still drain, so the TCP connection is genuinely
+        // established and stays open -- what the client waits out is its own
+        // connect deadline. `true` is write()'s "buffered, keep writing" answer,
+        // so the server's own protocol code sees a healthy socket.
+        socket.write = () => true;
+      }
     },
 
     stopWithholdingCloses(): void {
@@ -202,6 +230,12 @@ export function createSftpSessionControls(): SftpSessionControlHub {
         socket.destroy = real.destroy;
       }
       withheldSockets.clear();
+    },
+
+    stopStallingHandshakes(): void {
+      hub.stallHandshakeOnConnect = false;
+      for (const [socket, real] of stalledSockets) socket.write = real.write;
+      stalledSockets.clear();
     },
 
     onConnectionReady(conn: DroppableConnection): void {

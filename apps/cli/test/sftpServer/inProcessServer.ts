@@ -9,7 +9,7 @@ import type { Attributes, Connection, SFTPWrapper } from "ssh2";
 import { computeHostKeyFingerprint } from "@psilink/core";
 
 import { COUNTED_SFTP_OPS, createSftpSessionControls } from "./sessionControls";
-import type { ClosableSocket } from "./sessionControls";
+import type { ControlledSocket } from "./sessionControls";
 import type {
   InProcessSftpServer,
   SftpFaultInjection,
@@ -52,10 +52,11 @@ interface NoDelayConnection {
 }
 
 // ssh2 holds each connection's transport socket on the Connection's `_sock`,
-// server-side as well as client-side. The withheld-close control reaches it to
-// stop the server closing the connection on a client's disconnect.
+// server-side as well as client-side. The accept-time session controls reach it
+// to stop the server closing the connection on a client's disconnect, and to stop
+// it answering the client's handshake at all.
 interface SocketBearingConnection {
-  _sock?: ClosableSocket;
+  _sock?: ControlledSocket;
 }
 
 // @types/ssh2 types sftp.on() with a per-opcode overload, so one counting
@@ -174,7 +175,9 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     clients.add(client);
     // Before any SSH traffic: a connection accepted while the withheld-close
     // control is armed keeps its socket for the whole exchange, so the control
-    // has to reach it here rather than at the disconnect it is meant to ignore.
+    // has to reach it here rather than at the disconnect it is meant to ignore --
+    // and the stalled-handshake control has to reach it before the server writes
+    // the identification string it is meant to withhold.
     sessionControls.onConnectionAccepted(
       (client as unknown as SocketBearingConnection)._sock,
     );
@@ -307,8 +310,11 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     async stop() {
       // Disarm the withheld-close control and hand the real closers back to the
       // sockets it silenced: end() below reaches those sockets, and a silenced one
-      // would leave server.close() waiting on a connection that can never end.
+      // would leave server.close() waiting on a connection that can never end. A
+      // socket muted by the stalled-handshake control cannot answer that end()
+      // either, so it is handed its write back on the same terms.
       sessionControls.stopWithholdingCloses();
+      sessionControls.stopStallingHandshakes();
       // Force any still-open connection closed so server.close()'s callback can
       // fire, then bound the wait so a connection that refuses to end cannot hang
       // teardown forever.

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   createSftpSessionControls,
-  type ClosableSocket,
+  type ControlledSocket,
   type DroppableConnection,
 } from "../sftpServer/sessionControls";
 
@@ -124,17 +124,19 @@ describe("SFTP session controls: wall-clock caps and forced drops", () => {
   });
 });
 
-describe("SFTP session controls: withheld close", () => {
-  function stubSocket(): {
-    socket: ClosableSocket;
-    end: ReturnType<typeof vi.fn>;
-    destroy: ReturnType<typeof vi.fn>;
-  } {
-    const end = vi.fn();
-    const destroy = vi.fn();
-    return { socket: { end, destroy }, end, destroy };
-  }
+function stubSocket(): {
+  socket: ControlledSocket;
+  end: ReturnType<typeof vi.fn>;
+  destroy: ReturnType<typeof vi.fn>;
+  write: ReturnType<typeof vi.fn>;
+} {
+  const end = vi.fn();
+  const destroy = vi.fn();
+  const write = vi.fn(() => true);
+  return { socket: { end, destroy, write }, end, destroy, write };
+}
 
+describe("SFTP session controls: withheld close", () => {
   test("an accepted socket keeps its real closers while the control is off", () => {
     const controls = createSftpSessionControls();
     const { socket, end, destroy } = stubSocket();
@@ -219,6 +221,64 @@ describe("SFTP session controls: withheld close", () => {
   test("an unreachable socket is tolerated rather than throwing", () => {
     const controls = createSftpSessionControls();
     controls.withholdCloseOnDisconnect = true;
+    expect(() => controls.onConnectionAccepted(undefined)).not.toThrow();
+  });
+});
+
+describe("SFTP session controls: stalled handshake", () => {
+  test("an accepted socket keeps its real write while the control is off", () => {
+    const controls = createSftpSessionControls();
+    const { socket, write } = stubSocket();
+    controls.onConnectionAccepted(socket);
+    socket.write("SSH-2.0-x\r\n");
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  test("an armed control leaves an accepted connection unable to answer at all", () => {
+    const controls = createSftpSessionControls();
+    const { socket, write } = stubSocket();
+    controls.stallHandshakeOnConnect = true;
+    controls.onConnectionAccepted(socket);
+    // Not one server byte reaches the wire, so the client's handshake cannot
+    // advance past waiting for the identification string.
+    expect(socket.write("SSH-2.0-x\r\n")).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  test("the control governs connections accepted while it is set, not earlier ones", () => {
+    const controls = createSftpSessionControls();
+    const earlier = stubSocket();
+    controls.onConnectionAccepted(earlier.socket);
+    controls.stallHandshakeOnConnect = true;
+    const later = stubSocket();
+    controls.onConnectionAccepted(later.socket);
+
+    earlier.socket.write("x");
+    later.socket.write("x");
+    expect(earlier.write).toHaveBeenCalledTimes(1);
+    expect(later.write).not.toHaveBeenCalled();
+  });
+
+  test("stopping hands the real write back and disarms the control", () => {
+    const controls = createSftpSessionControls();
+    const { socket, write } = stubSocket();
+    controls.stallHandshakeOnConnect = true;
+    controls.onConnectionAccepted(socket);
+    controls.onConnectionAccepted(socket);
+    controls.stopStallingHandshakes();
+
+    socket.write("x");
+    const later = stubSocket();
+    controls.onConnectionAccepted(later.socket);
+    later.socket.write("x");
+    expect(controls.stallHandshakeOnConnect).toBe(false);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(later.write).toHaveBeenCalledTimes(1);
+  });
+
+  test("an unreachable socket is tolerated rather than throwing", () => {
+    const controls = createSftpSessionControls();
+    controls.stallHandshakeOnConnect = true;
     expect(() => controls.onConnectionAccepted(undefined)).not.toThrow();
   });
 });
