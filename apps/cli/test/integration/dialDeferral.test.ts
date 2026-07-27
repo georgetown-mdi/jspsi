@@ -13,10 +13,10 @@ import { serverAuth } from "../sftpServer/testContext";
 // the attempt is registered behind once('close', ...) and no readyTimeout is armed
 // for it, so nothing on psilink's side bounds it (measured unsettled at 45 s on
 // the pinned versions). Nothing in this repo may dial into that state, and what
-// keeps it out of reach is psilink's own dial gates plus the two forced closes,
-// which leave an ended transport DESTROYED rather than writable -- a property of
-// this code, not of the library, and one that a dependency bump or a change to
-// those gates can silently take away.
+// keeps it out of reach is psilink's own dial gates plus the forced closes, which
+// leave an ended transport DESTROYED rather than writable -- a property of this
+// code, not of the library, and one that a dependency bump or a change to those
+// gates can silently take away.
 //
 // So the census below is the claim as a check: every dial the adapter's three
 // dial paths issue is recorded with the state of the socket beneath it at entry,
@@ -185,10 +185,11 @@ inProcessOnly(
   "a mid-exchange recovery re-dial is issued on a socket ssh2 would not defer " +
     "behind",
   async () => {
-    // The third dial path, and the control that shows the census above can see a
-    // recovery at all: against a withholding partner it never fires, because
-    // ssh2-sftp-client's session property never clears, so it is driven here
-    // against a server that closes and drops the session under an operation.
+    // The third dial path, driven here against a server that closes and drops the
+    // session under an operation: ssh2-sftp-client clears its session property
+    // itself, so the re-dial follows with no forced close of the adapter's own.
+    // The withholding partner, whose close leaves that property set, is the case
+    // below.
     const srv = await startInProcessSftpServer();
     const dir = await fsp.mkdtemp(path.join(srv.handle.backingDir, "redial-"));
     const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
@@ -226,6 +227,72 @@ inProcessOnly(
       expectNoDeferrableDial(dials, 2);
       expect(dials[1].writable).toBe(false);
     } finally {
+      await conn.close().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "a mid-exchange recovery re-dial against a partner that withholds its close " +
+    "is issued on a destroyed socket",
+  async () => {
+    // The same dial path in the state this census exists for. The partner drops
+    // the session and withholds its close, so ssh2-sftp-client's session property
+    // stays SET over a transport ssh2 has already ended -- the state a dial would
+    // be deferred behind if the socket were still writable. The recovery forces
+    // that transport closed before it dials, so what it dials over is a DESTROYED
+    // socket; this is that property as a check.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "withheld-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    // The torn operation is never answered, so the adapter's own per-operation
+    // deadline is what ends it; lowered through the @internal seam so this case
+    // does not spend the production minute waiting for a rejection it only needs
+    // to have happened.
+    const adapter = new SSH2SFTPClientAdapter({ stallDeadlineMs: 3_000 });
+    const dials = recordDials(adapter);
+    const conn = new FileSyncConnection(adapter, {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    conn.on("error", () => {});
+    try {
+      // Armed before the first dial: every connection this case makes is to a
+      // partner that will not close.
+      srv.sessionControls.withholdCloseOnDisconnect = true;
+      await conn.open({
+        channel: "sftp",
+        server: {
+          host: srv.handle.host,
+          port: srv.handle.port,
+          ...serverAuth(srv.handle.usera),
+          path: remote,
+        },
+      });
+      await withCapturedLogs(
+        async () => {
+          await expect(adapter.list(remote)).resolves.toEqual([]);
+          srv.sessionControls.dropActiveAfterOps(1);
+          await expect(adapter.list(remote)).resolves.toEqual([]);
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      expect(adapter.midExchangeReconnectCount).toBe(1);
+      expectNoDeferrableDial(dials, 2);
+      // Not merely ended: the forced close destroyed it, which is what takes the
+      // library's session property with it and leaves the dial nothing to defer
+      // behind.
+      expect(dials[1].destroyed).toBe(true);
+    } finally {
+      // Ahead of any further close: a client's end() awaits a close a silenced
+      // server never sends.
+      srv.sessionControls.stopWithholdingCloses();
       await conn.close().catch(() => {});
       await fsp.rm(dir, { recursive: true, force: true });
       await srv.stop();
