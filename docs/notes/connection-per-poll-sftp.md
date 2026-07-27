@@ -328,9 +328,9 @@ refusing the re-open, rather than refusing at once: the refusal is identical
 either way, and shortening it with a pre-acquire reading of the latch would buy
 back the second, out-of-lock reading this design replaced, in exchange for a
 faster failure on a path nothing in the tree takes -- core's `open()` and
-`close()` are not concurrent. A `connect()` after a teardown has SETTLED does not park at
-all: the queue is drained, so it enters its critical section in the same tick
-and the refusal is immediate.
+`close()` are not concurrent. A `connect()` after a teardown has SETTLED does
+not park at all: the queue is drained, so it enters its critical section in the
+same tick and the refusal is immediate.
 
 **The boundary itself: the release owns the end state, not the partner.** Closing
 a connection is nominally a two-party act -- this side disconnects, the server

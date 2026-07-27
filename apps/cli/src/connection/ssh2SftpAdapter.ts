@@ -760,10 +760,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // forced close's ref (see awaitBoundedTeardown, measured both ways) nothing
   // measures a process-exit difference behind it: in every state driven so far the
   // transition being waited on is itself parked on a ref'd socket handle, so the
-  // process could not have exited ahead of the abandon either way. Clearing the
-  // timer where the race settles is the half with a driven consequence -- one left
-  // behind would hold an otherwise drained process for the rest of the bound, at
-  // every acquire.
+  // process could not have exited ahead of the abandon either way. The timer is
+  // cleared where the race settles, which a second unit case pins.
   private waitForPrecedingTransition(
     predecessor: Promise<void>,
   ): Promise<boolean> {
