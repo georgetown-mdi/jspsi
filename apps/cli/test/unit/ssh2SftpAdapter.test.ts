@@ -3731,10 +3731,47 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
     expect(connect).toHaveBeenCalledTimes(1);
     expect(del).toHaveBeenCalledOnce();
     expect(log.warn).toHaveBeenCalledOnce();
-    expect(log.warn.mock.calls[0][0] as string).toContain(
-      "socket already destroyed",
-    );
+    const message = log.warn.mock.calls[0][0] as string;
+    expect(message).toContain("socket already destroyed");
+    // A destroy that raises is the shape a change in ssh2's teardown semantics
+    // reaches the operator as, so this warning routes them to the same
+    // re-verification checklist its two sibling failures do.
+    expect(message).toContain("Upgrading the SFTP Stack");
+    expect(message).toContain("docs/spec/DEPENDENCY_PINS.md");
     expect(adapter.midExchangeReconnectCount).toBe(0);
+  });
+
+  test("propagates a transition-chokepoint violation rather than warning it as the partner's", async () => {
+    // The catch that absorbs a raising destroy must not also absorb the
+    // held-transition check inside the forced close: that check fires only on two
+    // transitions overlapping on the one shared client, and degrading it to this
+    // path's warning would report it to the operator as the partner's server
+    // misbehaving, on the drop warning's own pacing.
+    const { client, destroy } = withholdingPartner();
+    const { adapter, log } = loggedAdapter();
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+
+    // A transition token nothing is holding, which is what a refactor that lost
+    // the held identity on this path would present at the chokepoint.
+    const unheld = { kind: "redialForRecovery", recordBoundary: () => {} };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const clearing = (adapter as any).clearSessionOverEndedTransport(
+      unheld,
+      client,
+    ) as Promise<boolean>;
+    const violation = await clearing.catch((error: unknown) => error);
+
+    expect(violation).toBeInstanceOf(Error);
+    expect((violation as Error).message).toContain(
+      "outside the SFTP session transition that owns it",
+    );
+    // The check runs ahead of the mechanism it guards, so nothing was driven on
+    // the shared client and nothing reached the operator as an operational
+    // failure.
+    expect(destroy).not.toHaveBeenCalled();
+    expect(log.warn).not.toHaveBeenCalled();
   });
 
   test("warns and leaves the operation terminal when the forced close does not clear the session", async () => {
