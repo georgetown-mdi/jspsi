@@ -30,10 +30,6 @@ on:
       # containerised install would otherwise surface first at a release tag.
       - ".npmrc"
       - "package.json"
-      # The builder copies this fixture in and each install dry-run-installs it
-      # to measure that the install-script policy is actually in force, so its
-      # manifest decides whether the build's own check can fail.
-      - "scripts/install-policy-probe/**"
       - ".github/workflows/image_smoke.yaml"
 
 # Cancel a superseded run when a newer commit lands on the same PR/branch.

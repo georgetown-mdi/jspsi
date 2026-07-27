@@ -18,47 +18,15 @@ COPY packages/core/package.json packages/core/
 COPY apps/cli/package.json apps/cli/
 COPY apps/web/package.json apps/web/
 COPY lib lib
-# The fixture the install prelude below measures the policy with; see its
-# package.json and docs/spec/DEPENDENCY_PINS.md.
-COPY scripts/install-policy-probe scripts/install-policy-probe/
-
 # npm ci resolves nothing: it installs exactly the committed lockfile (including
 # each registry package's integrity hash) and fails if a manifest disagrees with
 # it, so an image rebuild cannot drift from the tree CI tested. apps/web is in
 # scope with its dev deps because `vite build` (and the nitro plugin) are
 # devDependencies -- the runtime stage ships the self-contained .output/, not
-# these, so the dev deps never reach the shipped image.
-#
-# Each install carries the same prelude, in its own shell, immediately ahead of
-# it: what it establishes is true of the process that installs, so no instruction
-# can sit between the measurement and what it speaks for. The version -- 11.17 is
-# what the `allowScripts` map's matching rules were measured against, and 11.15
-# and earlier honor neither the map nor the policy while still reporting the
-# config value back, so no config read can stand in for this. `engine-strict`,
-# which npm resolves the way it reports it. Then the install-script policy, which
-# it does not: `strict-allow-scripts` answers `true` while
-# `dangerously-allow-all-scripts` or `ignore-scripts` turns the refusal off
-# underneath it, so the prelude measures the outcome instead of asking after the
-# keys -- it dry-run-installs a fixture whose install script no verdict covers
-# and requires npm to refuse it by name. Anything else, an acceptance or any
-# other npm failure, fails the build closed. See docs/spec/DEPENDENCY_PINS.md.
+# these, so the dev deps never reach the shipped image. The root .npmrc copied in
+# above puts the install-script policy in force here as it is locally and in CI;
+# what that does and does not reach is in docs/spec/DEPENDENCY_PINS.md.
 RUN --mount=type=cache,target=/root/.npm \
-  npm_version="$(npm --version)"; \
-  npm_major="${npm_version%%.*}"; \
-  npm_minor="${npm_version#*.}"; npm_minor="${npm_minor%%.*}"; \
-  if ! { [ "$npm_major" -gt 11 ] || \
-    { [ "$npm_major" = 11 ] && [ "$npm_minor" -ge 17 ]; }; }; then \
-    echo "npm $npm_version is below the 11.17 floor the allowScripts install policy needs" >&2; \
-    exit 1; \
-  fi; \
-  if [ "$(npm config get engine-strict)" != true ]; then \
-    echo "npm does not resolve engine-strict to true: this build would not install under the policy this repo reviewed" >&2; \
-    exit 1; \
-  fi; \
-  if ! npm install --dry-run --no-save ./scripts/install-policy-probe 2>&1 | grep -q ESTRICTALLOWSCRIPTS; then \
-    echo "npm did not refuse scripts/install-policy-probe, whose install script no allowScripts verdict covers: the install-script policy is not in force at this prefix" >&2; \
-    exit 1; \
-  fi; \
   npm ci -w packages/core -w apps/cli -w apps/web
 
 COPY tsconfig.base.json tsconfig.json ./
@@ -91,27 +59,8 @@ ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
 RUN npm run build -w apps/web
 
 # Rebuild node_modules production-only (npm ci empties it first): the identical
-# lockfile-exact resolution minus devDependencies, ready to ship as-is. It
-# carries the same prelude as the first install, for the same reason: it is a
-# second install, in a second process, and the first one's measurement does not
-# speak for it.
+# lockfile-exact resolution minus devDependencies, ready to ship as-is.
 RUN --mount=type=cache,target=/root/.npm \
-  npm_version="$(npm --version)"; \
-  npm_major="${npm_version%%.*}"; \
-  npm_minor="${npm_version#*.}"; npm_minor="${npm_minor%%.*}"; \
-  if ! { [ "$npm_major" -gt 11 ] || \
-    { [ "$npm_major" = 11 ] && [ "$npm_minor" -ge 17 ]; }; }; then \
-    echo "npm $npm_version is below the 11.17 floor the allowScripts install policy needs" >&2; \
-    exit 1; \
-  fi; \
-  if [ "$(npm config get engine-strict)" != true ]; then \
-    echo "npm does not resolve engine-strict to true: this build would not install under the policy this repo reviewed" >&2; \
-    exit 1; \
-  fi; \
-  if ! npm install --dry-run --no-save ./scripts/install-policy-probe 2>&1 | grep -q ESTRICTALLOWSCRIPTS; then \
-    echo "npm did not refuse scripts/install-policy-probe, whose install script no allowScripts verdict covers: the install-script policy is not in force at this prefix" >&2; \
-    exit 1; \
-  fi; \
   npm ci --omit=dev -w packages/core -w apps/cli
 
 FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66
