@@ -101,7 +101,9 @@ scope here.
 - Docker on the host (Docker Desktop on macOS).
 - Git identity: VS Code's Dev Containers feature shares the host `~/.gitconfig`
   into the container automatically. With the bare `devcontainer` CLI, set it once
-  inside (`git config --global user.name/.email`) if you need to commit.
+  inside (`git config --global user.name/.email`) if you need to commit. Run it
+  yourself rather than asking a session to: agents are blocked from setting a git
+  identity, so that a commit's author is always the one git resolves from config.
 - Push/PR credentials (optional): to let a session push and open PRs from inside,
   copy `.env.example` to `.env` at the repository root and set `GH_TOKEN` to a
   GitHub PAT. The container loads `.env` via docker `--env-file` (`devcontainer.json`
