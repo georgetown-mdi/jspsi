@@ -482,6 +482,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // metric that tells the operator the mode is working. Paces this path's warning
   // and nothing else -- it is deliberately not surfaced as a metric of its own.
   private declinedReleases = 0;
+  // Cycle-start re-dials that dialed NOTHING because they gave up their wait for the
+  // transition ahead of them (see warnCycleRedialDeclined). Paces that path's
+  // warning and nothing else; kept apart from the release counter above because a
+  // single stuck transition declines both signals of the same cycle, and one counter
+  // would then pace each line on the other's occurrences.
+  private declinedCycleRedials = 0;
   private transportRetries = 0;
   // The per-operation liveness bound (ms) every server-driven op is held to. See
   // the constructor's stallDeadlineMs doc for the test-seam and
@@ -2323,8 +2329,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * transition lock -- which is what keeps two handshakes, or a handshake and a
    * close, off the one shared Ssh2SftpClient -- is bounded by that lock's own
    * {@link TRANSITION_ACQUIRE_TIMEOUT_MS} and nothing else. Past it the re-dial
-   * reports the same `false` a transient dial failure reports, so the loop skips
-   * this cycle and retries on the next tick.
+   * reports the same `false` a transient dial failure reports, under a paced
+   * warning, so the loop skips this cycle and retries on the next tick.
    */
   ensureConnected(): Promise<boolean> {
     if (!this.ephemeralSessions) return Promise.resolve(true);
@@ -2332,13 +2338,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       kind: "ensureConnected",
       skipped: () => true,
       abandoned: () => {
-        this.log.warn(
-          `ephemeral SFTP re-dial declined: another session transition on this ` +
-            `connection did not complete within the re-dial's ` +
-            `${TRANSITION_ACQUIRE_TIMEOUT_MS} ms wait, and dialing alongside it ` +
-            `would corrupt the one shared client; skipping this poll cycle and ` +
-            `retrying on the next tick`,
-        );
+        this.warnCycleRedialDeclined();
         return false;
       },
       run: async (held) => {
@@ -2371,6 +2371,27 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         }
       },
     });
+  }
+
+  // The cycle-start re-dial gave up its wait for the transition ahead of it: it
+  // dialed nothing, so this cycle carries no session and the poll loop skips it.
+  // Paced exactly like the idle release's decline (warnIdleReleaseDeclined) and for
+  // the same reason: core drives both signals once per poll cycle, and whatever
+  // holds a transition long enough to decline one tends to hold it every cycle, so
+  // an unpaced line would fill an hours-long exchange's log.
+  private warnCycleRedialDeclined(): void {
+    this.declinedCycleRedials += 1;
+    const count = this.declinedCycleRedials;
+    if (count !== 1 && count % SFTP_REDIAL_WARN_INTERVAL !== 0) return;
+    this.log.warn(
+      `ephemeral SFTP re-dial declined: another session transition on this ` +
+        `connection did not complete within the re-dial's ` +
+        `${TRANSITION_ACQUIRE_TIMEOUT_MS} ms wait, and dialing alongside it ` +
+        `would corrupt the one shared client; skipping this poll cycle and ` +
+        `retrying on the next tick (${count} ` +
+        `${count === 1 ? "cycle" : "cycles"} skipped this way so far this ` +
+        `exchange)`,
+    );
   }
 
   // A dial failure that must terminate the exchange rather than be retried on the

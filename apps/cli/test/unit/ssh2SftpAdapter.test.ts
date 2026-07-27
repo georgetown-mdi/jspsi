@@ -6342,6 +6342,57 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     }
   });
 
+  test("both cycle-boundary signals pace their declined-wait warning, on their own counts", async () => {
+    // Core drives ensureConnected and releaseForIdle once each per poll cycle, and
+    // one stuck transition declines both of them every cycle for as long as it
+    // holds, so each line follows the cadence a chronic condition already gets
+    // here: the first, then every SFTP_REDIAL_WARN_INTERVAL-th. The two are paced
+    // on separate counts -- a shared one would escalate each line on the other
+    // path's occurrences and misstate both numbers.
+    vi.useFakeTimers();
+    try {
+      const { client, connect, state } = ephemeralClient(wrapperMethods());
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      stub(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      neverSettlingHolder(adapter, connect, state);
+
+      const cycles = SFTP_REDIAL_WARN_INTERVAL + 2;
+      for (let cycle = 0; cycle < cycles; cycle += 1) {
+        const ready = adapter.ensureConnected();
+        const released = adapter.releaseForIdle();
+        await vi.advanceTimersByTimeAsync(ACQUIRE_BOUND_MS + 1_000);
+        await expect(ready).resolves.toBe(false);
+        await expect(released).resolves.toBeUndefined();
+      }
+
+      const warned = adapterLog(adapter).warn.mock.calls.flat() as string[];
+      const declinedRedials = warned.filter((line) =>
+        line.includes("ephemeral SFTP re-dial declined:"),
+      );
+      const declinedReleases = warned.filter((line) =>
+        line.includes(
+          "The connection-per-poll idle release did not close the SFTP session:",
+        ),
+      );
+      expect(declinedRedials).toHaveLength(2);
+      expect(declinedReleases).toHaveLength(2);
+      expect(warned).toHaveLength(4);
+      // The number in each escalated line is that path's own total, which is what
+      // tells the operator how many cycles the condition has now cost.
+      expect(declinedRedials[1]).toContain(
+        `${SFTP_REDIAL_WARN_INTERVAL} cycles skipped this way`,
+      );
+      expect(declinedReleases[1]).toContain(
+        `${SFTP_REDIAL_WARN_INTERVAL} idle boundaries released nothing this way`,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("an abandoning waiter drives no connect, no client end(), and no destroy", async () => {
     // Asserted through the chokepoint rather than by counting calls alone: every
     // dial and every close presents the transition it runs inside, and the only

@@ -15,8 +15,8 @@ import { serverAuth } from "../sftpServer/testContext";
 // each enqueued behind a re-dial that will not settle. The partner is a server that
 // accepts the TCP connection and never completes the SSH handshake, so the dial
 // ahead of them spends its whole budget -- four attempts at the 30 s connect
-// deadline plus the inter-attempt delays, about two minutes at the defaults, which
-// is what each of these waits used to ride.
+// deadline plus the inter-attempt delays, about two minutes at the defaults, more
+// than an order of magnitude past the bound each of these waits is held to.
 //
 // Only the in-process backend can be made to stall its handshake (a native sshd
 // cannot), so this runs there and stands up its own server to reach the session
@@ -337,8 +337,9 @@ inProcessOnly(
       expect(
         logs.filter((entry) => entry.message.includes("dropped mid-exchange")),
       ).toEqual([]);
-      // The release's warning is paced like the forced release's, so a cause that
-      // recurs every cycle does not fill an hours-long exchange's log.
+      // Both cycle-boundary signals decline for as long as the parked dial holds,
+      // and each line is paced like the forced release's, so a cause that recurs
+      // every cycle does not fill an hours-long exchange's log.
       const declined = logs.filter((entry) =>
         entry.message.includes(
           "The connection-per-poll idle release did not close the SFTP session:",
@@ -346,6 +347,11 @@ inProcessOnly(
       );
       expect(declined).toHaveLength(1);
       expect(declined[0].level).toBe("WARN");
+      const declinedRedials = logs.filter((entry) =>
+        entry.message.includes("ephemeral SFTP re-dial declined:"),
+      );
+      expect(declinedRedials).toHaveLength(1);
+      expect(declinedRedials[0].level).toBe("WARN");
     } finally {
       await fsp.rm(dir, { recursive: true, force: true });
       await srv.stop();
