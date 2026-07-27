@@ -1150,9 +1150,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // cumulative and never resets on progress, because a session-capping server makes
   // progress every cycle and a reset-on-progress budget would never bound it. The
   // escape hatches are raising max_reconnect_attempts (a flaky link) and
-  // connection-per-poll mode (a server that caps session lifetime), whose
-  // within-cycle recovery is left uncapped by this count -- it holds no session
-  // across the idle gap, so it is bounded instead by the peer-inactivity ceiling.
+  // connection-per-poll mode (a server that caps session lifetime), whose recovery
+  // re-dials are left uncapped by this count in every phase -- the poll loop holds
+  // no session across the idle gap, and the rendezvous that precedes it holds one
+  // across its waits and needs the uncapped re-dial to survive a cap that cuts it.
+  // Both are bounded instead by the peer-inactivity ceiling.
   // A teardown re-dial (abort marker / drain) is exempt so the fast-fail marker
   // still lands when the budget is spent. The op+re-dial is enclosed by
   // boundTransport's per-op peerTimeoutMs budget in core (a Promise.race), which is
@@ -1348,10 +1350,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   //   continues" is not read as open-ended (exhausting it is terminal, see
   //   midExchangeReconnectBudgetExhaustedError).
   //   Connection-per-poll: the mode's own idle release never reaches this warning
-  //   (withSessionRecovery exempts it), so a re-dial that does is a genuine drop
-  //   WITHIN a cycle -- stated plainly, and placed inside the cycle so the operator
-  //   reads it as the link or the server rather than as the mode's own boundary.
-  //   It quotes no budget (the cap does not charge this mode) and names the
+  //   (withSessionRecovery exempts it), but the two remaining causes are not
+  //   distinguishable from inside the adapter -- the per-cycle session lifetime is
+  //   a property of the POLL LOOP, and the rendezvous that precedes it holds one
+  //   session across its waits, so a cap can cut either. Both are named with the
+  //   remedy for each, and the rendezvous case is called out as the mode working
+  //   so an operator who chose it for a capping server is not sent after their
+  //   link. It quotes no budget (the cap does not charge this mode) and names the
   //   per-operation peer-inactivity ceiling that does bound it.
   // Nothing beyond that is disclosed.
   private warnSessionRecovered(): void {
@@ -1361,13 +1366,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       this.log.warn(
         `The SFTP session dropped mid-exchange and was transparently re-dialed ` +
           `(${count} so far this exchange); the exchange continues. ` +
-          "Connection-per-poll already dials a fresh session per poll cycle and " +
-          "releases it between cycles, so this drop happened within a cycle " +
-          "rather than in the idle gap this mode exists to shed: the link or " +
-          "the partner's server. These re-dials are not charged " +
-          "against max_reconnect_attempts; each operation remains bounded by the " +
-          "peer-inactivity timeout (peer_timeout_ms), which ends the exchange if " +
-          "they stop it from making progress.",
+          "Connection-per-poll dials a fresh session per poll cycle, so this is " +
+          "either a drop within a poll cycle -- the link or the partner's server " +
+          "faulting mid-cycle, which is what to investigate -- or a rendezvous " +
+          "wait, which runs before the poll loop starts cycling and holds one " +
+          "session throughout, so the partner's session-lifetime, idle, or " +
+          "operation cap cut it. The rendezvous case needs nothing from you: the " +
+          "re-dial is this mode working and the exchange survives the cap. These " +
+          "re-dials are not charged against max_reconnect_attempts; each " +
+          "operation remains bounded by the peer-inactivity timeout " +
+          "(peer_timeout_ms), which ends the exchange if they stop it from " +
+          "making progress.",
       );
       return;
     }
@@ -1710,9 +1719,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // stretch (a PSI round on the computing side) does not let the server's idle
     // timeout drop it. start() resets the idle clock, so a reconnect re-arms
     // cleanly. It is torn down by end() and by the fatal-'error' guard. Skipped in
-    // ephemeral-session mode, where each cycle's session lives only for its op
-    // batch (seconds) and is released before the idle gap, so there is no held
-    // session to keep warm -- an armed heartbeat would be moot.
+    // ephemeral-session mode: in the POLL LOOP each cycle's session lives only for
+    // its op batch (seconds) and is released before the idle gap, so there is no
+    // held session to keep warm. The rendezvous that precedes the loop does hold one
+    // session across its waits, un-heartbeated, and that is accepted rather than
+    // fixed -- a keepalive defeats only an idle timer and is powerless against the
+    // maximum-session-lifetime caps this mode exists for, while the mode's uncapped
+    // recovery re-dials carry the rendezvous across a cap-forced drop (the
+    // uncapped-recovery unit case in test/unit/ssh2SftpAdapter.test.ts, driven end
+    // to end in test/integration/ephemeralSessionExchange.test.ts).
     if (!this.ephemeralSessions) this.heartbeat.start();
     // Discharge the idle-boundary release (see the `sessionBoundary` field): LAST
     // and on success only, so a dial that threw above leaves the release standing

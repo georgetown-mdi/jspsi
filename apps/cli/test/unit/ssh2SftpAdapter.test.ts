@@ -3702,12 +3702,14 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(connect).toHaveBeenCalledTimes(3);
   });
 
-  test("within-cycle recovery is NOT bounded by the mid-exchange reconnection cap", async () => {
-    // The cumulative cap applies only to the default held-session mode.
-    // Connection-per-poll holds no session across the idle gap, so its within-cycle
-    // recovery floor is uncapped by the count (bounded instead by the
-    // peer-inactivity ceiling): more within-cycle drops than max_reconnect_attempts
-    // still recover, where the default mode would have failed terminally.
+  test("recovery re-dials are NOT bounded by the mid-exchange reconnection cap", async () => {
+    // The cumulative cap applies only to the default held-session mode. In
+    // connection-per-poll it is gated off in EVERY phase, so recovery re-dials are
+    // unbounded by the count (bounded instead by the peer-inactivity ceiling): more
+    // drops than max_reconnect_attempts still recover, where the default mode would
+    // have failed terminally. This is what carries the rendezvous phase -- which
+    // holds one session across its waits, unlike the poll loop -- through a server
+    // cap that cuts it repeatedly.
     const wrapper = wrapperMethods({
       opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
         cb(null, Buffer.from("h")),
@@ -3728,7 +3730,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       state.live = false;
       await adapter.list("/remote/dir");
     }
-    // All three within-cycle drops recovered past the default cap.
+    // All three drops recovered past the default cap, none refused.
     expect(connect).toHaveBeenCalledTimes(4); // initial + 3 recoveries
     // They still count as mid-exchange recoveries -- only the CAP is off in this mode.
     expect(adapter.midExchangeReconnectCount).toBe(3);
@@ -3740,9 +3742,10 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // default-mode line recommends is already in force, so quoting a remaining
     // budget would state a bound that does not apply and naming the flag would
     // advise a mode already on. The mode's own idle release never reaches this
-    // warning, so what does reach it is a real drop within a cycle -- reported as
-    // one, placed inside the cycle so the operator reads it as the link or the
-    // server and not as the release.
+    // warning, and the adapter cannot tell the two causes that do reach it apart --
+    // a fault within a poll cycle, or a rendezvous wait cut by the server's cap --
+    // so the line names both with the remedy for each, and says plainly that the
+    // rendezvous case is the mode working rather than something to chase.
     const wrapper = wrapperMethods({
       opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
         cb(null, Buffer.from("h")),
@@ -3765,10 +3768,13 @@ describe("ephemeral session mode (connection-per-poll)", () => {
 
     expect(warn).toHaveBeenCalledTimes(1);
     const message = warn.mock.calls[0][0] as string;
-    // A real drop, stated plainly, and located within the cycle.
+    // A real drop, stated plainly, with both of the causes it can have.
     expect(message).toContain("dropped mid-exchange");
     expect(message).toContain("the exchange continues");
-    expect(message).toContain("within a cycle");
+    expect(message).toContain("within a poll cycle");
+    expect(message).toContain("rendezvous");
+    // The rendezvous cause is not sent after the link: it is the mode working.
+    expect(message).toContain("needs nothing from you");
     // No budget quoted, and no advice to enable the mode already running.
     expect(message).not.toContain("max_reconnect_attempts=2");
     expect(message).not.toContain("further mid-exchange re-dial");
