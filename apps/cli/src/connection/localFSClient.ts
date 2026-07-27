@@ -121,6 +121,16 @@ export class LocalFSClient implements FileTransportClient {
   }
 
   /**
+   * Idle boundaries at which a release closed nothing. Always 0 for the filedrop
+   * transport: it opens no connection, so it releases none at a poll boundary and
+   * has no session transition to give up waiting on. Present so both
+   * file-transport clients expose the same metrics surface.
+   */
+  get declinedReleaseCount(): number {
+    return 0;
+  }
+
+  /**
    * Verifies read/write access to the directory specified by `options.path`.
    * Enforces `options.connectTimeoutMs` (default: 30s) per attempt. A fast
    * transient failure (e.g. the share or its permissions still settling) is

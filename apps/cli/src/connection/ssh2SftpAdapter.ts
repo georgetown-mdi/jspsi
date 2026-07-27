@@ -496,7 +496,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // forcedReleases, which counts a boundary this adapter did close: rolling the two
   // together would report a closed boundary the adapter never reached, in the one
   // metric that tells the operator the mode is working. Paces this path's warning
-  // and nothing else -- it is deliberately not surfaced as a metric of its own.
+  // and carries its own end-of-run total (declinedReleaseCount), the two being
+  // separate statements about the mode: how often it closed a boundary itself, and
+  // how often it could not close one at all.
   private declinedReleases = 0;
   // Cycle-start re-dials that dialed NOTHING because they gave up their wait for the
   // transition ahead of them (see warnCycleRedialDeclined). Paces that path's
@@ -642,6 +644,21 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    */
   get forcedReleaseCount(): number {
     return this.forcedReleases;
+  }
+
+  /**
+   * Idle boundaries at which the connection-per-poll release closed NOTHING,
+   * having given up its bounded wait for the session transition ahead of it (see
+   * {@link releaseForIdle}). The session may still be live and held across the
+   * idle gap the mode exists to release, which is the opposite of what
+   * {@link forcedReleaseCount} records -- a boundary this adapter did end -- so
+   * the two are never summed. NOT a reconnection and not a lost session: nothing
+   * was closed, so it is absent from {@link reconnectCount} too. 0 in every other
+   * mode and whenever no transition ran long enough to be given up on. A plain
+   * operational counter, never a partner-controlled value.
+   */
+  get declinedReleaseCount(): number {
+    return this.declinedReleases;
   }
 
   // Acquire this adapter's one session-transition lock and run `transition` under
