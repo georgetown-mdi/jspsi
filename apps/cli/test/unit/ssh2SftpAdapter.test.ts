@@ -6434,6 +6434,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
         await expect(ready).resolves.toBe(false);
         await expect(released).resolves.toBeUndefined();
       }
+      // One release declined with no cycle-start dial beside it, so the two counts
+      // are no longer the same number and the end-of-run total below can only be
+      // the release's own.
+      const lastRelease = adapter.releaseForIdle();
+      await vi.advanceTimersByTimeAsync(ACQUIRE_BOUND_MS + 1_000);
+      await expect(lastRelease).resolves.toBeUndefined();
 
       const warned = adapterLog(adapter).warn.mock.calls.flat() as string[];
       const declinedRedials = warned.filter((line) =>
@@ -6455,6 +6461,11 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       expect(declinedReleases[1]).toContain(
         `${SFTP_REDIAL_WARN_INTERVAL} idle boundaries released nothing this way`,
       );
+      // What the end-of-run summary reports is every occurrence, not the paced
+      // subset the log carries. A decline closed nothing, so it is not a forced
+      // release and the two totals never share a tally.
+      expect(adapter.declinedReleaseCount).toBe(cycles + 1);
+      expect(adapter.forcedReleaseCount).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -7117,8 +7128,10 @@ describe("terminal close against a partner that withholds its close", () => {
         expect(message).not.toMatch(/exchange|nothing was lost/i);
         expect(log.warn).not.toHaveBeenCalled();
         // Not the connection-per-poll release's boundary, so it is not counted as
-        // one, and no session was lost, so it is not a reconnection either.
+        // one -- under either mode, and by neither of that boundary's two counts --
+        // and no session was lost, so it is not a reconnection either.
         expect(adapter.forcedReleaseCount).toBe(0);
+        expect(adapter.declinedReleaseCount).toBe(0);
         expect(adapter.reconnectCount).toBe(0);
         expect(adapter.midExchangeReconnectCount).toBe(0);
       } finally {

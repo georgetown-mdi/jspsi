@@ -3593,7 +3593,129 @@ test("summarizes the forced idle-boundary releases apart from the reconnects", a
   );
 });
 
-test("logs no reconnect or forced-release summary on a clean run", async () => {
+test("summarizes the declined idle releases as a line apart from the forced ones", async () => {
+  // The mode's other per-cycle outcome: the release gave up its wait for another
+  // session transition and closed nothing, so the session it exists to release was
+  // held across the idle gap. Its WARN is paced exactly like the forced release's
+  // and states its true total nowhere else, so the teardown summary carries it --
+  // as its own line, because the two report opposite outcomes and a reader who saw
+  // them merged could not tell a boundary this side ended from one it never
+  // reached. Both forced on the (real) file-drop client via its metric getters,
+  // with distinct totals so neither line can be reporting the other's count.
+  const forcedSpy = vi
+    .spyOn(LocalFSClient.prototype, "forcedReleaseCount", "get")
+    .mockReturnValue(3);
+  const declinedSpy = vi
+    .spyOn(LocalFSClient.prototype, "declinedReleaseCount", "get")
+    .mockReturnValue(5);
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    forcedSpy.mockRestore();
+    declinedSpy.mockRestore();
+  }
+
+  const declined = mockState.infos.find((line) =>
+    line.includes("did not close the session at 5 idle boundaries"),
+  );
+  expect(declined).toBeDefined();
+  expect(declined).toContain("not a dropped session");
+  expect(declined).toContain("the session stayed live across those idle gaps");
+  // The forced line is still its own, on its own count: nothing was summed, and
+  // the decline does not borrow the forced release's "this side closed it".
+  expect(declined).not.toContain("closed from this side");
+  expect(
+    mockState.infos.some(
+      (line) =>
+        line.includes("did not close when released at 3 idle boundaries") &&
+        line.includes("so it was closed from this side"),
+    ),
+  ).toBe(true);
+  expect(mockState.infos.some((line) => line.includes("8 idle"))).toBe(false);
+  // Neither outcome is a reconnection, so nothing about them may reach the
+  // reconnect summary.
+  expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
+    false,
+  );
+});
+
+test("a declined release with no session drop leaves the reconnect total and the metrics event untouched", async () => {
+  // A run can decline releases without ever losing a session: nothing was closed,
+  // so nothing was lost. The reconnect total therefore stays what it would have
+  // been -- here zero, so the line does not appear at all -- and the machine
+  // metrics event carries its own three counters and nothing else. The declined
+  // count reaches neither: it is an operator-facing line only.
+  const declinedSpy = vi
+    .spyOn(LocalFSClient.prototype, "declinedReleaseCount", "get")
+    .mockReturnValue(4);
+  mockFd3Open();
+  try {
+    // Party A runs flag-on; party B flag-off, so every captured fd-3 line is A's.
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    declinedSpy.mockRestore();
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  expect(
+    mockState.infos.some((line) => line.includes("did not close the session")),
+  ).toBe(true);
+  expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
+    false,
+  );
+
+  const lines = takeFd3Lines();
+  const metrics = lines.find((l) => l.type === "metrics")!;
+  expect(Object.keys(metrics).sort()).toEqual([
+    "reconnects",
+    "recordsProcessed",
+    "transportRetries",
+    "type",
+    "v",
+  ]);
+  expect(metrics.reconnects).toBe(0);
+  expect(metrics.transportRetries).toBe(0);
+});
+
+test("logs no reconnect, forced-release, or declined-release summary on a clean run", async () => {
   // The teardown summary is guarded on a non-zero count, so a normal exchange
   // stays quiet.
   await Promise.all([
@@ -3621,6 +3743,9 @@ test("logs no reconnect or forced-release summary on a clean run", async () => {
   expect(mockState.infos.some((line) => line.includes("idle boundar"))).toBe(
     false,
   );
+  expect(
+    mockState.infos.some((line) => line.includes("did not close the session")),
+  ).toBe(false);
 });
 
 test("an aborted run under --event-stream reports metrics then the classified reason", async () => {

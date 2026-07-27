@@ -614,6 +614,25 @@ export async function runProtocol(
           `${forcedReleases === 1 ? "boundary" : "boundaries"} during this ` +
           `exchange (not a dropped session), so it was closed from this side`,
       );
+    // The mode's other per-cycle count, paced inline for the same reason and
+    // totalled here on the same terms. It states the opposite outcome to the line
+    // above -- that boundary ended, this one closed nothing -- so the two are
+    // separate lines and neither is summed into the other. Like the forced total it
+    // stays out of the reconnect line and the metrics event: a session that was
+    // never closed is not a drop, and folding it in would report losses the
+    // exchange never had. Zero in every other mode, so the guard keeps a normal
+    // exchange quiet.
+    const declinedReleases = client?.declinedReleaseCount ?? 0;
+    if (declinedReleases > 0)
+      log.info(
+        `the connection-per-poll release did not close the session at ` +
+          `${declinedReleases} idle ` +
+          `${declinedReleases === 1 ? "boundary" : "boundaries"} during this ` +
+          `exchange (not a dropped session): another session transition on this ` +
+          `connection did not complete within the release's wait, so the session ` +
+          `stayed live across ` +
+          `${declinedReleases === 1 ? "that idle gap" : "those idle gaps"}`,
+      );
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
     // Undo our own contribution to the max-listeners threshold rather than
