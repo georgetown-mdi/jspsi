@@ -6736,9 +6736,9 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // What this bound owes the budget end()'s CALLER holds: nothing. Core races
     // end() against one of its own that a low peer_timeout_ms can put under this
     // bound, and abandoning that wait closes nothing -- the destroy is what closes
-    // the transport, and it runs off the abandon's own ref'd timer whether or not
-    // anything is still waiting on it, which is what leaves that caller an exited
-    // process rather than a half-open socket.
+    // the transport, and the abandon drives it whether or not anything is still
+    // waiting on it, which is what leaves that caller an exited process rather
+    // than a half-open socket.
     vi.useFakeTimers();
     try {
       const { client, connect, state, rawClient, socket } =
@@ -6812,6 +6812,109 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       ]);
       expect(rawClient.end).toHaveBeenCalledOnce();
       expect(adapterLog(adapter).warn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("the acquire bound's timer is ref'd", async () => {
+    // A liveness bound the process can exit out from under is not a bound, and the
+    // abandon this one arms is what closes a transport nothing else will. Nothing
+    // measures a process-exit difference behind the ref -- the transition being
+    // waited on is itself parked on a ref'd socket handle -- so it is the safe
+    // default rather than a driven consequence, and dropping it would otherwise be
+    // a silent change.
+    vi.useFakeTimers();
+    const armed: { delayMs: number; handle: { hasRef(): boolean } }[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const setTimeoutSpy = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation(((
+        callback: (...args: unknown[]) => void,
+        delayMs?: number,
+        ...rest: unknown[]
+      ) => {
+        const handle = realSetTimeout(callback, delayMs, ...rest);
+        armed.push({
+          delayMs: delayMs ?? 0,
+          handle: handle as unknown as { hasRef(): boolean },
+        });
+        return handle;
+      }) as unknown as typeof setTimeout);
+    try {
+      const { client, connect, state, rawClient } =
+        ephemeralClient(wrapperMethods());
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      stub(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      neverSettlingHolder(adapter, connect, state, rawClient);
+      const released = adapter.releaseForIdle();
+
+      // Identified by its (unexported, liveness-backstop) delay, read before the
+      // wait settles and clears it.
+      const acquireBound = armed.filter(
+        (timer) => timer.delayMs === ACQUIRE_BOUND_MS,
+      );
+      expect(acquireBound).toHaveLength(1);
+      expect(acquireBound[0].handle.hasRef()).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(ACQUIRE_BOUND_MS + 1);
+      await expect(released).resolves.toBeUndefined();
+    } finally {
+      setTimeoutSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  test("a wait that is won leaves no timer behind it", async () => {
+    // The bound's timer is ref'd, so one still pending after its wait was won
+    // would hold an otherwise drained process for the remainder of the bound --
+    // on the ORDINARY path, at every queued acquire, with nothing having gone
+    // wrong. What a leak looks like is growth, one timer per acquire, so the
+    // steady state across cycles is the reading rather than any fixed count; the
+    // cycles stay well inside the bound, past which a leaked timer would have
+    // fired and read the same as one that was cleared.
+    vi.useFakeTimers();
+    try {
+      const { client, connect, state, rawClient, socket } =
+        ephemeralClient(wrapperMethods());
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      stub(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+      const dialMs = 1_000;
+      connect.mockImplementation(async () => {
+        await new Promise((settle) => setTimeout(settle, dialMs));
+        state.live = true;
+        socket.writableEnded = false;
+        socket.destroyed = false;
+      });
+
+      const timersAfterCycle: number[] = [];
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        state.live = false;
+        const dialed = adapter.ensureConnected();
+        // Queued behind that dial, so its acquire arms the bound and then wins it
+        // well inside it.
+        const released = adapter.releaseForIdle();
+        await vi.advanceTimersByTimeAsync(dialMs + 1);
+        await expect(dialed).resolves.toBe(true);
+        await expect(released).resolves.toBeUndefined();
+        timersAfterCycle.push(vi.getTimerCount());
+      }
+
+      // Each release ran its BODY rather than abandoning, which is what makes
+      // these waits won ones.
+      expect(rawClient.end).toHaveBeenCalledTimes(3);
+      expect(timersAfterCycle).toEqual([
+        timersAfterCycle[0],
+        timersAfterCycle[0],
+        timersAfterCycle[0],
+      ]);
     } finally {
       vi.useRealTimers();
     }

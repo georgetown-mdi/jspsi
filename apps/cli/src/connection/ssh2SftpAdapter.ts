@@ -106,10 +106,10 @@ const FORCED_CLOSE_TIMEOUT_MS = 1_000;
 // ride. It owes nothing to the budget end()'s CALLER holds, which can be smaller
 // (core races end() against one a low peer_timeout_ms puts under this bound):
 // abandoning that wait closes nothing, while the abandon here runs on its own
-// ref'd timer, so a caller that gave up waiting is still left an exited process
-// rather than a half-open socket -- also driven, by the unit test whose caller
-// gives up first. Deliberately not operator-configurable, like every other SFTP
-// liveness bound.
+// timer and drives the destroy either way, so a caller that gave up waiting is
+// still left an exited process rather than a half-open socket -- also driven, by
+// the unit test whose caller gives up first. Deliberately not
+// operator-configurable, like every other SFTP liveness bound.
 const TRANSITION_ACQUIRE_TIMEOUT_MS = 10_000;
 
 // The ssh2 Client's underlying net.Socket, which the adapter reaches directly for
@@ -754,12 +754,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   // Wait out the transition ahead of this one under the single acquire bound,
-  // reporting whether the wait was won. The bound's timer is REF'D, on the same
-  // reasoning as the forced close's (see awaitBoundedTeardown): the abandon it
-  // arms is what closes a transport nothing else will, so an unref'd timer would
-  // let the process exit -- silently, code 0, mid-teardown -- before that abandon
-  // ran. It is cleared the instant the wait is won, so the ordinary path holds no
-  // timer past its turn.
+  // reporting whether the wait was won. The bound's timer is left REF'D as the
+  // safe default for one whose abandon closes a transport nothing else will, and a
+  // unit case pins that so the ref cannot be dropped silently -- but unlike the
+  // forced close's ref (see awaitBoundedTeardown, measured both ways) nothing
+  // measures a process-exit difference behind it: in every state driven so far the
+  // transition being waited on is itself parked on a ref'd socket handle, so the
+  // process could not have exited ahead of the abandon either way. Clearing the
+  // timer where the race settles is the half with a driven consequence -- one left
+  // behind would hold an otherwise drained process for the rest of the bound, at
+  // every acquire.
   private waitForPrecedingTransition(
     predecessor: Promise<void>,
   ): Promise<boolean> {

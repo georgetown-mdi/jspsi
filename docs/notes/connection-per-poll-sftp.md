@@ -319,15 +319,16 @@ teardown closes the session either way.
 mode turn on it.** The two cycle-boundary signals return before enqueuing when
 the mode is off, so the default mode reaches no transition of theirs -- but its
 `connect()` and its `close()` take the lock exactly as they do here. A teardown
-concurrent with the FIRST dial waits that handshake out instead of running
-ssh2-sftp-client's `end()` under it, which is the overlap the lock exists to
-stop and the reason it covers both modes. A `connect()` issued while a teardown
-is IN FLIGHT parks for that teardown's own bounds before refusing the re-open,
-rather than refusing at once: the refusal is identical either way, and
-shortening it with a pre-acquire reading of the latch would buy back the
-second, out-of-lock reading this design replaced, in exchange for a faster
-failure on a path nothing in the tree takes -- core's `open()` and `close()`
-are not concurrent. A `connect()` after a teardown has SETTLED does not park at
+concurrent with the FIRST dial never runs ssh2-sftp-client's `end()` under that
+handshake, which is the overlap the lock exists to stop and the reason it covers
+both modes; it waits the handshake out only as far as the acquire ceiling, past
+which it destroys the transport and cuts the handshake short. A `connect()`
+issued while a teardown is IN FLIGHT parks for that teardown's own bounds before
+refusing the re-open, rather than refusing at once: the refusal is identical
+either way, and shortening it with a pre-acquire reading of the latch would buy
+back the second, out-of-lock reading this design replaced, in exchange for a
+faster failure on a path nothing in the tree takes -- core's `open()` and
+`close()` are not concurrent. A `connect()` after a teardown has SETTLED does not park at
 all: the queue is drained, so it enters its critical section in the same tick
 and the refusal is immediate.
 
@@ -519,6 +520,10 @@ What the run shows, at the moment the forced close lands:
   true`) with the dial still pending -- it short-circuits on the session the
   handshake has not restored. This is why the abandoning teardown reaches the
   destroy and never `end()`: the destroy is the only thing that closes anything.
+  Driving it AHEAD of the destroy is worse than useless -- the parked dial was
+  still unsettled 3 s later, where the destroy on its own settles it about a
+  millisecond after it runs -- so this teardown must not create an `end()` to wait
+  on, rather than merely having none to wait on.
 - **The destroy is silent.** At default verbosity it draws no WARN and no ERROR of
   its own -- in particular not the "ssh2 client error outside an operation" line.
   What it does produce is the settled sibling's rejection, and whether that reaches
