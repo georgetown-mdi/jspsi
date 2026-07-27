@@ -265,6 +265,29 @@ adapter's tests assert rather than what its prose claims:
   behavior for the loser of an expired wait, and the only such behaviors are the
   overlapping ones the lock exists to prevent.
 
+Uniformity has two consequences worth stating rather than leaving to be
+discovered.
+
+**A cycle-boundary signal issued after teardown is latched waits the teardown out
+before returning its "nothing to do" value.** It does not short-circuit on the
+latch, because a second reading of that latch outside the lock is exactly the
+distributed re-read the single in-lock read exists to avoid. The wait cannot be
+indefinite: what it waits for is teardown's own close, which carries the
+`CLIENT_CLOSE_TIMEOUT_MS` and `FORCED_CLOSE_TIMEOUT_MS` bounds, and neither
+signal is awaited by the teardown, so no cycle can form -- core stops the poll
+loop before it closes the transport, and its `close()` never joins the loop. The
+integration suite drives it against the partner that spends those bounds in full
+-- one that accepts the disconnect and never closes the connection -- and pins
+the wait as bounded: about five seconds, once, at the end of a run.
+
+**Whether a same-tick release and `close()` run the release or skip it turns on
+whether the queue was idle.** A release requested on an idle queue starts
+immediately and is waited out by the teardown behind it; one requested while a
+dial is in flight is still queued when `close()` latches, so it is skipped
+entirely. This is the ordering rule above rather than a special case -- the latch
+is read where a transition reaches the front -- and both outcomes are safe, since
+teardown closes the session either way.
+
 **The boundary itself: the release owns the end state, not the partner.** Closing
 a connection is nominally a two-party act -- this side disconnects, the server
 closes the connection -- and a server that accepts the disconnect and then goes
