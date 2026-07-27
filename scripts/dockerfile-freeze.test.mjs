@@ -70,20 +70,51 @@ const allRuntimeDests = runtimeCopies.flatMap(({ dests }) => dests);
 // carries the policy the tests below and DEPENDENCY_PINS.md speak for.
 const ROOT_NPMRC_SOURCE = /^(?:\.\/)?\.npmrc$/;
 
-// Every `npm ci` in the file, paired with whether the root .npmrc had already
-// been copied into the directory that install runs in. npm reads its project
-// config from the install prefix, so an install running anywhere else is one the
-// repo's npm policy does not reach.
+// The version the policy's behavior in docs/spec/DEPENDENCY_PINS.md was measured
+// against. npm reads `allowScripts` and honors `strict-allow-scripts` from
+// 11.16.0 -- 11.15.0 and earlier have neither the config key nor the preflight,
+// so both are inert with no diagnostic -- and 11.17 adds the same preflight to
+// `npm exec`. Which npm the builder gets is a property of the base image's
+// digest rather than of anything in this repo.
+const NPM_POLICY_FLOOR = "11.17";
+
+const isFloorGuard = ({ inst, rest }) =>
+  inst === "RUN" &&
+  /\bnpm\s+(?:--version|-v)\b/.test(rest) &&
+  rest.includes(NPM_POLICY_FLOOR);
+
+// npm resolves the command line and the environment ahead of the project
+// .npmrc, so either can turn off a policy the file states without touching it.
+const POLICY_OVERRIDE =
+  /--dangerously-allow-all-scripts|--no-strict-allow-scripts|--no-engine-strict|npm_config_strict_allow_scripts|npm_config_engine_strict/i;
+
+// An install prefix moved inside the RUN, which decides which .npmrc npm reads
+// independently of the WORKDIR the COPY tracking below follows.
+const PREFIX_REDIRECT = /(?:^|[\s;&|(])(?:cd|pushd)\s|--prefix\b|\s-C\s/;
+
+// Every `npm ci` in the file, paired with the conditions that decide whether the
+// repo's own npm configuration is the one in force for it: the root .npmrc
+// copied into the directory it runs in, the npm floor guard already run in the
+// same stage, and no override of either on its command line or in the stage's
+// environment.
 const installSites = [];
 {
   let cwd = "/";
   let npmrcDirs = new Set();
-  for (const { inst, rest } of instructions) {
+  let guarded = false;
+  let envOverride = false;
+  for (const instruction of instructions) {
+    const { inst, rest } = instruction;
     if (inst === "FROM") {
       cwd = "/";
       npmrcDirs = new Set();
+      guarded = false;
+      envOverride = false;
     }
     if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
+    if ((inst === "ENV" || inst === "ARG") && POLICY_OVERRIDE.test(rest))
+      envOverride = true;
+    if (isFloorGuard(instruction)) guarded = true;
     if (inst === "COPY") {
       for (const { source, dest } of copyTargets(cwd, rest).copies) {
         if (posix.basename(dest) !== ".npmrc") continue;
@@ -96,10 +127,22 @@ const installSites = [];
       }
     }
     if (inst === "RUN" && /\bnpm ci\b/.test(rest)) {
-      installSites.push({ run: rest, cwd, underRootNpmrc: npmrcDirs.has(cwd) });
+      installSites.push({
+        run: rest,
+        cwd,
+        underRootNpmrc: npmrcDirs.has(cwd) && !PREFIX_REDIRECT.test(rest),
+        behindFloorGuard: guarded,
+        policyOverridden: envOverride || POLICY_OVERRIDE.test(rest),
+      });
     }
   }
 }
+
+// A RUN that writes the file out from inside the image replaces the
+// configuration the checks here read off the build context.
+const npmrcRewrites = instructions.filter(
+  ({ inst, rest }) => inst === "RUN" && /\.npmrc/.test(rest),
+);
 
 const builderRuns = builder
   .filter(({ inst }) => inst === "RUN")
@@ -109,18 +152,7 @@ const firstInstall = builder.findIndex(
   ({ inst, rest }) => inst === "RUN" && /\bnpm ci\b/.test(rest),
 );
 
-// `allowScripts` and `strict-allow-scripts` are npm 11.17 features. An older npm
-// does not know the config key and reads no policy from the map, so both are
-// inert with no diagnostic -- and the base image's digest, not this repo, is
-// what decides which npm the builder gets.
-const NPM_POLICY_FLOOR = "11.17";
-
-const floorGuard = builder.findIndex(
-  ({ inst, rest }) =>
-    inst === "RUN" &&
-    /\bnpm\s+(?:--version|-v)\b/.test(rest) &&
-    rest.includes(NPM_POLICY_FLOOR),
-);
+const floorGuard = builder.findIndex(isFloorGuard);
 
 // Run the guard's own shell body against a stub `npm` reporting `version`, or
 // against no npm at all for a null one. The image's shell is busybox ash and
@@ -169,12 +201,25 @@ describe("Dockerfile dependency freeze", () => {
     ).toEqual([]);
   });
 
-  it("holds the builder's npm to the install policy's floor before installing", () => {
-    // The map and the flag are silently inert below it, so a base digest re-pin
-    // onto an older node would install everything unreviewed while every check
-    // and this document still read as enforcement.
-    expect(floorGuard).toBeGreaterThanOrEqual(0);
-    expect(firstInstall).toBeGreaterThan(floorGuard);
+  it("holds every install to the npm the policy was measured against", () => {
+    // Below 11.16 the map and the flag are silently inert, so a base digest
+    // re-pin onto an older node would install everything unreviewed while every
+    // check and the spec still read as enforcement. Per install site rather than
+    // by position, so a second stage cannot install ahead of its own guard.
+    expect(installSites.length).toBeGreaterThan(0);
+    expect(
+      installSites.filter(({ behindFloorGuard }) => !behindFloorGuard),
+    ).toEqual([]);
+  });
+
+  it("lets nothing override the policy the root .npmrc states", () => {
+    // The COPY tracking above says which file npm would read; these are the ways
+    // that file stops being the answer -- a flag or an npm_config_ variable npm
+    // resolves ahead of it, and the file rewritten from inside the image.
+    expect(
+      installSites.filter(({ policyOverridden }) => policyOverridden),
+    ).toEqual([]);
+    expect(npmrcRewrites).toEqual([]);
   });
 
   it("ships a production-only tree: the builder's last npm command is npm ci --omit=dev", () => {
@@ -208,11 +253,12 @@ describe("Dockerfile dependency freeze", () => {
 });
 
 describe("what the builder's npm floor guard decides", () => {
-  // The test above finds the guard by its text and pins where it sits; these
-  // run it. Text alone would accept a guard neutered to `RUN npm --version #
-  // floor is 11.17` or weakened to a comparison nothing fails, either of which
-  // leaves the image installing under an npm the policy is inert on while every
-  // check and the spec still read as enforcement.
+  // The test above finds the guard by its text and holds every install behind
+  // one; these run it. Text alone would accept a guard neutered to `RUN npm
+  // --version # floor is 11.17` or weakened to a comparison nothing fails,
+  // either of which leaves the image installing under an unmeasured npm while
+  // every check and the spec still read as enforcement. The tables are about
+  // what the guard decides, not about which npm releases exist.
 
   it.each([
     "11.17",
@@ -244,13 +290,13 @@ describe("what the builder's npm floor guard decides", () => {
   });
 });
 
-describe("the root .npmrc the builder installs under", () => {
-  // The file is committed and public, and the builder copies it into a layer the
-  // release workflow exports to a shared build cache, so it may state
-  // configuration and nothing else: registry credentials belong in the
-  // user-level ~/.npmrc, which no build reads.
-  const settings = readFileSync(resolve(here, "..", ".npmrc"), "utf8")
-    .split("\n")
+// The settings npm would read out of an .npmrc source. The line split is npm's
+// own: it parses with the `ini` package, which breaks on /[\r\n]+/, so a lone CR
+// ends a line there. Splitting on "\n" alone reads `# note<CR>//host/:_authToken=x`
+// as a single comment while npm reads a live credential out of its second half.
+const npmrcSettings = (source) =>
+  source
+    .split(/[\r\n]+/)
     .map((line) => line.trim())
     .filter((line) => line !== "" && !/^[#;]/.test(line))
     .map((line) => {
@@ -263,6 +309,15 @@ describe("the root .npmrc the builder installs under", () => {
             value: line.slice(separator + 1).trim(),
           };
     });
+
+describe("the root .npmrc the builder installs under", () => {
+  // The file is committed and public, and the builder copies it into a layer the
+  // release workflow exports to a shared build cache, so it may state
+  // configuration and nothing else: registry credentials belong in the
+  // user-level ~/.npmrc, which no build reads.
+  const settings = npmrcSettings(
+    readFileSync(resolve(here, "..", ".npmrc"), "utf8"),
+  );
 
   // The keys this file exists to state. An allowlist rather than an enumeration
   // of credential-named keys, because npm authenticates from more of its config
@@ -288,6 +343,19 @@ describe("the root .npmrc the builder installs under", () => {
   it("carries no URL userinfo in a permitted key's value", () => {
     const userinfo = settings.filter(({ value }) => URL_USERINFO.test(value));
     expect(userinfo.map(({ line }) => line)).toEqual([]);
+  });
+
+  it("cannot hide a key from the allowlist behind a lone CR", () => {
+    // Measured against npm 11.17.0 driven at a local registry: a token on the
+    // far side of a CR inside a comment line is one npm sends as
+    // `Authorization: Bearer`, so a reader that splits on "\n" alone reports a
+    // credential-free file that is not one.
+    const smuggled = npmrcSettings(
+      "# note\r//registry.npmjs.org/:_authToken=SECRET\n",
+    );
+    expect(smuggled.filter(({ key }) => !PERMITTED_KEYS.has(key))).not.toEqual(
+      [],
+    );
   });
 
   it("states the two policies its readers rest on", () => {

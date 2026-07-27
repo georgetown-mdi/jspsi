@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // The root package.json's `allowScripts` map is npm's own install-script policy
-// field (npm 11.17 and later, maintained with `npm approve-scripts`): a `false`
+// field (npm 11.16 and later, maintained with `npm approve-scripts`): a `false`
 // verdict blocks that package's install script, and under the root .npmrc's
 // `strict-allow-scripts` a package with no verdict fails the install outright,
 // so the map's completeness is what keeps every install from grounding. Two ways
