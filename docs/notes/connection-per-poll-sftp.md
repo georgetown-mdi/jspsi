@@ -265,7 +265,7 @@ adapter's tests assert rather than what its prose claims:
   behavior for the loser of an expired wait, and the only such behaviors are the
   overlapping ones the lock exists to prevent.
 
-Uniformity has two consequences worth stating rather than leaving to be
+Uniformity has three consequences worth stating rather than leaving to be
 discovered.
 
 **A cycle-boundary signal issued after teardown is latched waits the teardown out
@@ -287,6 +287,22 @@ dial is in flight is still queued when `close()` latches, so it is skipped
 entirely. This is the ordering rule above rather than a special case -- the latch
 is read where a transition reaches the front -- and both outcomes are safe, since
 teardown closes the session either way.
+
+**The lock is not mode-gated, and two orderings in the default held-session
+mode turn on it.** The two cycle-boundary signals return before enqueuing when
+the mode is off, so the default mode reaches no transition of theirs -- but its
+`connect()` and its `close()` take the lock exactly as they do here. A teardown
+concurrent with the FIRST dial waits that handshake out instead of running
+ssh2-sftp-client's `end()` under it, which is the overlap the lock exists to
+stop and the reason it covers both modes. A `connect()` issued while a teardown
+is IN FLIGHT parks for that teardown's own bounds before refusing the re-open,
+rather than refusing at once: the refusal is identical either way, and
+shortening it with a pre-acquire reading of the latch would buy back the
+second, out-of-lock reading this design replaced, in exchange for a faster
+failure on a path nothing in the tree takes -- core's `open()` and `close()`
+are not concurrent. A `connect()` after a teardown has SETTLED does not park at
+all: the queue is drained, so it enters its critical section in the same tick
+and the refusal is immediate.
 
 **The boundary itself: the release owns the end state, not the partner.** Closing
 a connection is nominally a two-party act -- this side disconnects, the server

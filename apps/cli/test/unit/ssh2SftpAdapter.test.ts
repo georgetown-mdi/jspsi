@@ -4856,10 +4856,14 @@ describe("ephemeral session mode (connection-per-poll)", () => {
 
   test("the default held-session mode is untouched: drops still counted, warned, and capped", async () => {
     // The release path is mode-gated at every point it touches, so the default
-    // whole-exchange model must behave exactly as before: calling the boundary
-    // methods changes nothing, and a genuine drop is still counted, warned, and
-    // charged against the cumulative max_reconnect_attempts budget whose
-    // exhaustion is terminal.
+    // whole-exchange model behaves as though the mode did not exist: calling the
+    // boundary methods changes nothing, and a genuine drop is still counted,
+    // warned, and charged against the cumulative max_reconnect_attempts budget
+    // whose exhaustion is terminal. What the default mode does share is the
+    // transition lock -- its connect() and its end() take it too -- and the two
+    // orderings that follow from that are pinned separately (the first dial
+    // acquiring, so teardown cannot run the client down under it; and a connect
+    // issued during an in-flight teardown parking before it refuses the re-open).
     const wrapper = wrapperMethods({
       opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
         cb(null, Buffer.from("h")),
@@ -6623,6 +6627,49 @@ describe("terminal close against a partner that withholds its close", () => {
       adapter.connect({ host: "h", maxReconnectAttempts: 0 }),
     ).rejects.toThrow("cannot be reopened");
     expect(client.connect).toHaveBeenCalledOnce();
+  });
+
+  test("a connect issued during an in-flight teardown parks, then refuses", async () => {
+    // connect() takes the transition queue like every other transition, in both
+    // session modes, so one issued while a teardown is still closing waits that
+    // teardown out and refuses on the far side of it rather than refusing at once.
+    // The alternative -- reading the teardown latch before the acquire -- would be
+    // a second reading of it outside the lock, for a faster failure with the same
+    // wording on a path nothing in the tree takes. A dial issued once the teardown
+    // has settled does not park at all: the queue is drained by then.
+    vi.useFakeTimers();
+    try {
+      const { client, socket } = partnerThatNeverCloses();
+      const { adapter } = loggedAdapter();
+      install(adapter, client);
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+      const closing = adapter.end();
+      const reopen = adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      const refused = expect(reopen).rejects.toThrow("cannot be reopened");
+      let reopenSettled = false;
+      void reopen.catch(() => {
+        reopenSettled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(TERMINAL_CLOSE_BOUND_MS - 1);
+      expect(reopenSettled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(FORCED_CLOSE_BOUND_MS + 2);
+      await Promise.all([closing, refused]);
+      expect(socket.destroyed).toBe(true);
+      // The parked dial refused rather than reaching the client.
+      expect(client.connect).toHaveBeenCalledOnce();
+
+      // No timer stands between this caller and its refusal: under fake timers a
+      // refusal that needed one could not land at all.
+      await expect(
+        adapter.connect({ host: "h", maxReconnectAttempts: 0 }),
+      ).rejects.toThrow("cannot be reopened");
+      expect(client.connect).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("a close that rejects is shared by a repeat rather than re-attempted", async () => {
