@@ -5640,6 +5640,89 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     }
   });
 
+  test("a dial that raises over the session it established drops the boundary", async () => {
+    // The cycle-start dial establishes its session and then raises in its own
+    // post-connect verification, so it never reaches the discharge at the end of
+    // that dial -- and the mode reports the raise as a cycle to skip rather than a
+    // failure, leaving the run over a LIVE session with the previous release's
+    // boundary behind it. That boundary may not stand there: the session is the
+    // server's to drop, and a drop it exempted would reach neither the reconnect
+    // counters nor the operator.
+    const { client, state, rawClient } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.releaseForIdle();
+    expect(releaseBoundaryStands(adapter)).toBe(true);
+
+    // The seam the release is verified against is gone by the next dial, which
+    // checks it after the handshake has established the session.
+    delete (rawClient._sock as Record<string, unknown>).writableEnded;
+    await expect(adapter.ensureConnected()).resolves.toBe(false);
+    expect(state.live).toBe(true);
+    expect(releaseBoundaryStands(adapter)).toBe(false);
+
+    // The release that follows drives nothing either: the same absent seam refuses
+    // it before it reaches the transport, so it too ends nothing.
+    await expect(adapter.releaseForIdle()).rejects.toThrow(
+      "client._sock.writableEnded",
+    );
+    expect(state.live).toBe(true);
+
+    // The absent seam is not what is under test past this point: put it back so the
+    // drop below has a re-dial to recover on.
+    (rawClient._sock as Record<string, unknown>).writableEnded = false;
+    state.live = false;
+    await expect(adapter.exists("/remote/out.json")).resolves.toBe(true);
+
+    expect(adapter.reconnectCount).toBe(1);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("dropped mid-exchange"),
+    );
+  });
+
+  test("a release that ends nothing exempts no drop, whatever it entered with", async () => {
+    // The rule is over the state rather than the transition: the boundary stands
+    // only where no session does. A release entering with one already standing is
+    // what that rule makes unreachable, so it is set here directly -- what this
+    // pins is that a release which ended nothing cannot hand the reading on,
+    // however it came to be standing.
+    const { client, state, rawClient } = ephemeralClient(wrapperMethods());
+    rawClient.end = vi.fn(() => {
+      throw new Error("socket already destroyed");
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).sessionBoundary = "deliberatelyReleased";
+
+    await expect(adapter.releaseForIdle()).rejects.toThrow(
+      "socket already destroyed",
+    );
+    expect(state.live).toBe(true);
+    expect(releaseBoundaryStands(adapter)).toBe(false);
+
+    // The server drops the session the release could not close.
+    state.live = false;
+    await expect(adapter.exists("/remote/out.json")).resolves.toBe(true);
+
+    expect(adapter.reconnectCount).toBe(1);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("dropped mid-exchange"),
+    );
+  });
+
   test("teardown never runs the client down under a cycle-start dial", async () => {
     // The mirror of the recovery case above, on the dial the poll loop itself
     // starts. close() can reach end() while a cycle-start handshake is still

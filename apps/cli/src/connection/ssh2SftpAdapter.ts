@@ -384,15 +384,18 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // check that every dial and every close runs inside a transition.
   private transitionInProgress: SessionTransitionKind | undefined;
   // How the session's last completed boundary was reached, written ONLY by
-  // runTransition -- through the recorder it hands each transition, and by
-  // restoring the previous reading when a transition rejects. Read by
-  // withSessionRecovery's gate (re-establish before the first attempt) and by its
-  // classification: a re-dial following a deliberate lifecycle transition is exempt
-  // from the reconnect counters and the operator warning, exactly as a teardown
-  // re-dial is. Discharged by the dial that re-establishes the session -- the
-  // single path every re-establishment goes through -- so a failed dial leaves it
-  // standing and a genuine drop after a completed re-establishment is counted and
-  // warned as one.
+  // runTransition -- through the recorder it hands each transition, by restoring
+  // the previous reading when a transition rejects, and by taking a
+  // deliberate-release reading back from a transition that leaves a session live.
+  // Read by withSessionRecovery's gate (re-establish before the first attempt) and
+  // by its classification: a re-dial following a deliberate lifecycle transition is
+  // exempt from the reconnect counters and the operator warning, exactly as a
+  // teardown re-dial is. Discharged by the dial that re-establishes the session --
+  // the single path every re-establishment goes through -- so a failed dial leaves
+  // it standing and a genuine drop after a completed re-establishment is counted
+  // and warned as one. Outside the release's own close window, `deliberatelyReleased`
+  // stands only where no session is live: over a live one it would exempt that
+  // session's next real drop, the misreport it exists to prevent.
   private sessionBoundary: SessionBoundary = "notReleased";
   private log: ReturnType<typeof getLoggerForVerbosity>;
   // The raw SFTPWrapper this adapter has already attached its fatal-'error'
@@ -617,6 +620,23 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         this.sessionBoundary = boundaryOnEntry;
         throw error;
       } finally {
+        // No transition leaves a deliberate-release boundary standing over a live
+        // session: the reading exempts the next drop from the reconnect counters
+        // and the operator warning, and over a session the server can still drop,
+        // that exemption hides a partner-caused failure. Two routes reach that
+        // state -- a release that ended nothing (its own raise takes the reading
+        // back only as far as the one it entered with), and a dial that
+        // established a session and then failed its post-connect verification,
+        // never reaching its own discharge, whose failure the cycle-start
+        // reconnect reports as a cycle to skip rather than a raise. The release's
+        // own close window is no exception: it records the boundary while its
+        // transition still holds, and by the time that transition leaves, the
+        // session it deliberately ended is gone.
+        if (
+          this.sessionBoundary === "deliberatelyReleased" &&
+          this.hasLiveSession()
+        )
+          this.sessionBoundary = "notReleased";
         this.transitionInProgress = undefined;
       }
     };
@@ -624,6 +644,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       this.pendingTransitions -= 1;
       leaveQueue();
     });
+  }
+
+  // Whether ssh2-sftp-client is holding an SFTP session. It clears the property on
+  // a clean close and on a server-side drop, so a truthy reading is a session an
+  // operation can still be admitted onto -- and one the server can still drop.
+  private hasLiveSession(): boolean {
+    return Boolean((this.client as unknown as Ssh2SftpClientInternals).sftp);
   }
 
   // The chokepoint: every call this adapter makes into ssh2-sftp-client's
@@ -1694,9 +1721,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // Recorded BEFORE the close is driven: an operation already on the wire is torn
     // by that close and reaches session recovery while this release is still
     // running, and the boundary is what tells that recovery the loss was
-    // deliberate. runTransition restores the previous reading if anything below
-    // raises, so a release that ended nothing leaves the next drop classifiable as
-    // the drop it is.
+    // deliberate. A release that raises below has ended nothing and leaves the
+    // session reading live, which runTransition takes the boundary back over on
+    // the way out, so the next drop stays classifiable as the drop it is.
     if (!peerEndedTransport) recordBoundary("deliberatelyReleased");
     await this.awaitClientClose(
       once,
@@ -1919,9 +1946,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       true,
     );
     if (internals.sftp) {
-      // Raising takes the release's boundary back with it (runTransition restores
-      // the reading it entered with): the boundary may only stand over a session
-      // something deliberately ended, and this one did not end.
+      // Raising takes the release's boundary back with it (the session still reads
+      // live, so runTransition drops the reading on the way out): the boundary may
+      // only stand where something deliberately ended a session, and this one did
+      // not end.
       throw new Error(
         `the connection-per-poll idle release destroyed the SFTP session's ` +
           `transport and the session did not clear within ` +
