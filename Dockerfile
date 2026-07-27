@@ -20,16 +20,19 @@ COPY apps/web/package.json apps/web/
 COPY lib lib
 
 # Ask npm what it will actually do, rather than asserting it from outside. Two
-# answers have to be right before anything installs, and neither implies the
-# other. The version: 11.17 is what the `allowScripts` map's matching rules were
+# kinds of answer have to be right before anything installs, and neither implies
+# the other. The version: 11.17 is what the `allowScripts` map's matching rules were
 # measured against, and 11.15 and earlier honor neither the map nor
 # `strict-allow-scripts` -- they warn that the key is unknown, never that a
 # script ran -- while still reporting the value back, so the config check below
 # cannot stand in for this one. The effective policy: npm resolves its command
 # line and environment ahead of the .npmrc copied above, and a base image or a
 # build argument can carry either, so what the file states is not yet what npm
-# will do. Which npm this stage gets is a property of the base digest rather than
-# of anything in this repo, so both are read here instead of letting a base
+# will do. Reading `strict-allow-scripts` alone does not settle it:
+# `dangerously-allow-all-scripts` bypasses the preflight outright while
+# `strict-allow-scripts` still answers true, so it is asked for too and has to
+# answer false. Which npm this stage gets is a property of the base digest rather
+# than of anything in this repo, so both are read here instead of letting a base
 # re-pin quietly un-enforce the policy. See docs/spec/DEPENDENCY_PINS.md.
 RUN --mount=type=cache,target=/root/.npm \
   npm_version="$(npm --version)"; \
@@ -40,10 +43,11 @@ RUN --mount=type=cache,target=/root/.npm \
     echo "npm $npm_version is below the 11.17 floor the allowScripts install policy needs" >&2; \
     exit 1; \
   fi; \
-  for policy in strict-allow-scripts engine-strict; do \
-    value="$(npm config get "$policy")"; \
-    if [ "$value" != "true" ]; then \
-      echo "npm resolves $policy to '$value', not true: this build would not run under the repo's install policy" >&2; \
+  for policy in strict-allow-scripts=true engine-strict=true dangerously-allow-all-scripts=false; do \
+    key="${policy%=*}"; want="${policy#*=}"; \
+    value="$(npm config get "$key")"; \
+    if [ "$value" != "$want" ]; then \
+      echo "npm resolves $key to '$value', not $want: this build would not install under the policy this repo reviewed" >&2; \
       exit 1; \
     fi; \
   done
