@@ -54,6 +54,7 @@ Beyond the conventions in `CONTRIBUTING.md`:
 
 - Prefer ASCII: `-` not an en-dash or em-dash, `->` not an arrow character; no emoji anywhere, including as severity or status markers in reviews and reports.
 - Branches are cut from `staging` and pull requests target `staging` -- the harness's default `main` base does not apply. Never commit to staging or main by yourself; don't attribute yourself on commits or pull requests.
+- Never set the commit identity yourself -- no `-c user.name=`/`-c user.email=`, `--config-env`, `git commit --author=`, `GIT_AUTHOR_*`/`GIT_COMMITTER_*` variable, or `git config` write to `user.*`: git resolves the identity from `.git/config`, and the harness context block's address is not it. A wrong configured identity is reported to the maintainer, not overridden on the command line. Enforced by `block-git-identity-override.mjs` on Bash.
 - Commit messages use no markdown and no top-level lists (other format rules in `CONTRIBUTING.md`, Commit Messages).
 - After a chain of edits, run `npm run typecheck && npm run lint && npm run format`; the LSP server often has a stale cache.
 - Typecheck, lint, and format are CI checks.
