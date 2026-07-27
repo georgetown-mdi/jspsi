@@ -78,12 +78,19 @@ const ROOT_NPMRC_SOURCE = /^(?:\.\/)?\.npmrc$/;
 // a property of the base image's digest rather than of anything in this repo.
 const NPM_POLICY_FLOOR = "11.17";
 
-// The npm invocations inside a RUN body: each shell-separated segment's command
-// word, reached past the RUN's own flags (`--mount=...`) and any leading
-// VAR=value assignment, paired with the arguments that follow it. Reading the
-// command word rather than matching `npm ci` as text is what makes an install
-// spelled `npm  ci`, folded across a line continuation, or written `npm i` an
-// install site rather than invisible to every check below.
+// The npm invocations inside a RUN body: for each shell-separated segment, the
+// arguments following an `npm` command word reached past the RUN's own flags
+// (`--mount=...`) and any leading VAR=value assignment. Reading the command word
+// rather than matching `npm ci` as text is what makes an install spelled
+// `npm  ci`, folded across a line continuation, or written `npm i` an install
+// site rather than invisible to every check below.
+//
+// A segment naming npm somewhere other than that position -- behind a wrapper
+// command word (`env`, `time`), or built out of tokens this does not read --
+// yields null: an invocation whose arguments cannot be vouched for, which the
+// install-site rule below holds to every condition rather than skipping. npm
+// inside a quoted string is not a bare token, so the guard's own `echo "npm
+// $npm_version ..."` does not read as one.
 const npmInvocations = (rest) =>
   rest
     .split(/[;&|()`]+/)
@@ -96,18 +103,26 @@ const npmInvocations = (rest) =>
           /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i]))
       )
         i += 1;
-      return tokens[i] === "npm" ? tokens.slice(i + 1) : null;
+      if (tokens[i] === "npm") return tokens.slice(i + 1);
+      // npx is npm exec under another name -- it resolves and fetches, and its
+      // argv carries no command word to read -- so it is unvouchable rather than
+      // modeled.
+      return tokens.includes("npm") || tokens.includes("npx")
+        ? null
+        : undefined;
     })
-    .filter((args) => args !== null);
+    .filter((args) => args !== undefined);
 
-// npm's command word, or "" for an invocation that leads with a flag -- which
-// the install-site rule below treats as an install it cannot vouch for rather
-// than as something to skip.
+// npm's command word, or "" for an invocation that leads with a flag or that the
+// reader above could not resolve -- which the install-site rule below treats as
+// an install it cannot vouch for rather than as something to skip.
 const npmCommand = (args) =>
-  args[0] !== undefined && !args[0].startsWith("-") ? args[0] : "";
+  args !== null && args[0] !== undefined && !args[0].startsWith("-")
+    ? args[0]
+    : "";
 
 const isVersionQuery = (args) =>
-  args.length === 1 && /^(?:--version|-v)$/.test(args[0]);
+  args !== null && args.length === 1 && /^(?:--version|-v)$/.test(args[0]);
 
 // The npm commands that resolve no dependency tree. Anything else is held to
 // the install-site conditions, so a command this file does not use cannot
@@ -129,9 +144,13 @@ const isFloorGuard = ({ inst, rest }) =>
 const PERMITTED_INSTALL_FLAGS = new Set(["--omit=dev", "-w"]);
 
 // npm reads any npm_config_-prefixed variable ahead of the project .npmrc too,
-// so a stage that sets one installs under something other than the file every
-// check here reads. None is permitted, for the reason the flags are an
-// allowlist.
+// so setting one installs under something other than the file every check here
+// reads: measured on npm 11.17.0, `npm_config_strict_allow_scripts=false`
+// resolves the policy to false and lets an uncovered install script run. None is
+// permitted, for the reason the flags are an allowlist. Read off the whole RUN
+// body as well as the ENV and ARG instructions, since a variable reaches the
+// install as an assignment prefixing it, an `export` ahead of it, or an `env`
+// wrapping it -- none of which is part of npm's own argv.
 const NPM_CONFIG_ENV = /(?:^|\s)npm_config_[a-z0-9_]+/i;
 
 // A working directory moved inside the RUN, which decides which .npmrc npm
@@ -152,10 +171,14 @@ const installSites = [];
   for (const [index, instruction] of instructions.entries()) {
     const { inst, rest } = instruction;
     if (inst === "FROM") {
+      // A stage starts with none of the working directory, the copied .npmrc, or
+      // the guard its predecessor had, and forgetting each of those refuses an
+      // install rather than admitting one. An ENV is the exception: a stage
+      // built `FROM builder` inherits it, so `envOverride` is deliberately not
+      // reset here -- clearing it is the one direction that would admit one.
       cwd = "/";
       npmrcDirs = new Set();
       guarded = false;
-      envOverride = false;
     }
     if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
     if ((inst === "ENV" || inst === "ARG") && NPM_CONFIG_ENV.test(rest))
@@ -184,7 +207,8 @@ const installSites = [];
         behindFloorGuard: guarded,
         policyOverridden:
           envOverride ||
-          args.some(
+          NPM_CONFIG_ENV.test(rest) ||
+          (args ?? []).some(
             (token) =>
               token.startsWith("-") && !PERMITTED_INSTALL_FLAGS.has(token),
           ),
