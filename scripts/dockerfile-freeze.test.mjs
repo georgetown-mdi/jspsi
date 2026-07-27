@@ -68,11 +68,6 @@ const runtimeCopies = [];
 }
 const allRuntimeDests = runtimeCopies.flatMap(({ dests }) => dests);
 
-// The build context's own root .npmrc as a COPY source. A different file copied
-// to the same name states whatever its author put in it, so only this one
-// carries the policy the tests below and DEPENDENCY_PINS.md speak for.
-const ROOT_NPMRC_SOURCE = /^(?:\.\/)?\.npmrc$/;
-
 // The version the policy's behavior in docs/spec/DEPENDENCY_PINS.md was measured
 // against. npm reads `allowScripts` and honors `strict-allow-scripts` from
 // 11.16.0 -- 11.15.0 and earlier have neither the config key nor the preflight,
@@ -87,6 +82,41 @@ const NPM_POLICY_FLOOR = "11.17";
 // separate on, so a command carrying one would compare equal to this text while
 // running as something else.
 const normalize = (rest) => rest.trim().replace(/[ \t]+/g, " ");
+
+// What each install establishes about itself before it installs, in its own
+// shell. Two of the three are read out of npm, because what the .npmrc states is
+// not yet what npm will do -- npm resolves its command line and environment
+// ahead of the file. The third is measured rather than read: `strict-allow-
+// scripts` answers `true` while `dangerously-allow-all-scripts` or
+// `ignore-scripts` turns the refusal off underneath it (both measured on npm
+// 11.17.0), so asking after the keys is an enumeration that grows with npm,
+// while dry-run-installing a package whose install script no verdict covers
+// measures the outcome those keys exist to change. npm must refuse it by name;
+// an acceptance, or any other npm failure, leaves the marker absent and fails
+// the build closed.
+const POLICY_PRELUDE =
+  'npm_version="$(npm --version)"; npm_major="${npm_version%%.*}"; ' +
+  'npm_minor="${npm_version#*.}"; npm_minor="${npm_minor%%.*}"; ' +
+  'if ! { [ "$npm_major" -gt 11 ] || ' +
+  '{ [ "$npm_major" = 11 ] && [ "$npm_minor" -ge 17 ]; }; }; then ' +
+  'echo "npm $npm_version is below the 11.17 floor the allowScripts install policy needs" >&2; ' +
+  "exit 1; " +
+  "fi; " +
+  'if [ "$(npm config get engine-strict)" != true ]; then ' +
+  'echo "npm does not resolve engine-strict to true: this build would not install under the policy this repo reviewed" >&2; ' +
+  "exit 1; " +
+  "fi; " +
+  "if ! npm install --dry-run --no-save ./scripts/install-policy-probe 2>&1 | grep -q ESTRICTALLOWSCRIPTS; then " +
+  'echo "npm did not refuse scripts/install-policy-probe, whose install script no allowScripts verdict covers: the install-script policy is not in force at this prefix" >&2; ' +
+  "exit 1; " +
+  "fi; ";
+
+const CACHE_MOUNT = "--mount=type=cache,target=/root/.npm ";
+
+// The path the prelude dry-run-installs, relative to the directory the install
+// runs in. Naming it here is what lets the checks below hold the fixture to the
+// two properties the measurement rests on.
+const PROBE_PACKAGE = "scripts/install-policy-probe";
 
 // Every RUN in the Dockerfile, frozen to its exact text. This is what stands
 // between the image and an install running under something other than the policy
@@ -103,37 +133,24 @@ const normalize = (rest) => rest.trim().replace(/[ \t]+/g, " ");
 // npm exec, or another package manager the base image happens to ship. Every one
 // of them changes this text. Changing a command in the Dockerfile therefore
 // means changing the literal here in the same diff, where the review reads the
-// command rather than a verdict about it.
+// command rather than a verdict about it. Spelling both installs as the same
+// PRELUDE constant is what holds them to the identical measurement.
 const EXPECTED_RUNS = [
-  "--mount=type=cache,target=/root/.npm " +
-    'npm_version="$(npm --version)"; npm_major="${npm_version%%.*}"; ' +
-    'npm_minor="${npm_version#*.}"; npm_minor="${npm_minor%%.*}"; ' +
-    'if ! { [ "$npm_major" -gt 11 ] || ' +
-    '{ [ "$npm_major" = 11 ] && [ "$npm_minor" -ge 17 ]; }; }; then ' +
-    'echo "npm $npm_version is below the 11.17 floor the allowScripts install policy needs" >&2; ' +
-    "exit 1; " +
-    "fi; " +
-    "for policy in strict-allow-scripts=true engine-strict=true dangerously-allow-all-scripts=false; do " +
-    'key="${policy%=*}"; want="${policy#*=}"; ' +
-    'value="$(npm config get "$key")"; ' +
-    'if [ "$value" != "$want" ]; then ' +
-    "echo \"npm resolves $key to '$value', not $want: this build would not install under the policy this repo reviewed\" >&2; " +
-    "exit 1; " +
-    "fi; " +
-    "done",
-  "--mount=type=cache,target=/root/.npm npm ci -w packages/core -w apps/cli -w apps/web",
+  CACHE_MOUNT +
+    POLICY_PRELUDE +
+    "npm ci -w packages/core -w apps/cli -w apps/web",
   "npm run build -w packages/core -w apps/cli",
   "npm run build -w apps/web",
-  "--mount=type=cache,target=/root/.npm npm ci --omit=dev -w packages/core -w apps/cli",
+  CACHE_MOUNT +
+    POLICY_PRELUDE +
+    "npm ci --omit=dev -w packages/core -w apps/cli",
   "chmod +x /app/docker-entrypoint.sh",
 ];
 
-// The guard is the one that asks npm what it will do; the installs are the two
-// that do it. Naming them by index into the frozen list is a statement about
-// known text rather than a parse of unknown text -- the freeze is what keeps it
-// known.
-const POLICY_GUARD = EXPECTED_RUNS[0];
-const INSTALL_RUNS = [EXPECTED_RUNS[1], EXPECTED_RUNS[4]];
+// The two that install. Naming them by index into the frozen list is a statement
+// about known text rather than a parse of unknown text -- the freeze is what
+// keeps it known.
+const INSTALL_RUNS = [EXPECTED_RUNS[0], EXPECTED_RUNS[3]];
 
 const runs = instructions
   .filter(({ inst }) => inst === "RUN")
@@ -145,18 +162,35 @@ const npmrcRewrites = instructions.filter(
   ({ inst, rest }) => inst === "RUN" && /\.npmrc/.test(rest),
 );
 
-// ADD is a second way to land a file on the .npmrc the guard read, and the one
-// the COPY scan below cannot follow: BuildKit's ADD fetches a remote URL or a git
-// ref, and it unpacks a tarball in place, so the path it writes need not appear
-// in the instruction at all. The file has no occasion to use one.
+// COPY is the only way a file gets into the image. ADD is refused as a class:
+// BuildKit's ADD fetches a remote URL or a git ref and unpacks a tarball in
+// place, so the path it writes need not appear in the instruction at all, and a
+// file that arrives unreviewed is not a shape this Dockerfile has any occasion
+// for. It is hygiene rather than a seam closure -- what keeps a replaced .npmrc
+// from mattering is that each install measures the policy in its own shell.
 const addInstructions = instructions.filter(({ inst }) => inst === "ADD");
 
+// Every instruction that names the .npmrc, frozen. The committed file's bytes
+// are held below; this is what holds which file the builder copies, so a second
+// one cannot land on the name and state whatever its author put in it. It is a
+// text refusal rather than a model of where a COPY's sources land: Docker copies
+// a directory source's contents, so the file a COPY writes need not be named in
+// it either, and the prelude's measurement is what speaks for that case.
+const EXPECTED_NPMRC_COPY = "COPY .npmrc package.json package-lock.json ./";
+const npmrcCopies = instructions
+  .filter(
+    ({ inst, rest }) =>
+      (inst === "COPY" || inst === "ADD") && /\.npmrc/.test(rest),
+  )
+  .map(({ inst, rest }) => `${inst} ${normalize(rest)}`);
+
 // npm resolves an npm_config_-prefixed variable ahead of the project .npmrc, and
-// the guard below reads npm's answer once, in its own process: a variable set
-// after it runs is one it cannot see and the frozen command text does not carry.
-// Measured on npm 11.17.0, `npm_config_strict_allow_scripts=false` resolves the
-// policy to false. This is a whole class of instruction the file has no occasion
-// to use, so none is permitted rather than a list of the harmful names.
+// each prelude reads npm's answer in its own process: a variable set between the
+// two installs is one the first one's measurement does not speak for, and the
+// frozen command text does not carry. Measured on npm 11.17.0,
+// `npm_config_strict_allow_scripts=false` resolves the policy to false. This is a
+// whole class of instruction the file has no occasion to use, so none is
+// permitted rather than a list of the harmful names.
 const npmConfigEnv = instructions.filter(
   ({ inst, rest }) =>
     (inst === "ENV" || inst === "ARG") && /\bnpm_config_/i.test(rest),
@@ -169,38 +203,6 @@ const npmConfigEnv = instructions.filter(
 const heredocRuns = instructions.filter(
   ({ inst, rest }) => inst === "RUN" && rest.includes("<<"),
 );
-
-// A FROM naming a stage defined above it. Docker gives such a stage its base
-// stage's working directory, while the tracking below starts every stage at the
-// base image's own -- so a `FROM builder` would run in /build where the model
-// read "/", and the .npmrc check would compare two directories neither install
-// is in. Refusing the whole form is what makes the reset sound, rather than a
-// second model to keep in step with Docker.
-const derivedStages = [];
-{
-  const named = new Set();
-  for (const { inst, rest } of instructions) {
-    if (inst !== "FROM") continue;
-    const tokens = rest.split(/\s+/).filter((token) => !token.startsWith("--"));
-    const as = tokens.findIndex((token) => token.toUpperCase() === "AS");
-    if (named.has(tokens[0].toLowerCase())) derivedStages.push(rest);
-    if (as !== -1 && tokens[as + 1]) named.add(tokens[as + 1].toLowerCase());
-  }
-}
-
-// The directory each instruction runs in, tracked through WORKDIR. The guard
-// reads npm's configuration at its own prefix, so an install that has since
-// moved to another directory is one the guard did not speak for -- npm resolves
-// the .npmrc at the prefix, and there is none in a subdirectory.
-const cwdAt = [];
-{
-  let cwd = "/";
-  for (const { inst, rest } of instructions) {
-    if (inst === "FROM") cwd = "/";
-    if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
-    cwdAt.push(cwd);
-  }
-}
 
 const builderRuns = builder
   .filter(({ inst }) => inst === "RUN")
@@ -216,50 +218,44 @@ const builderIndexOf = (body) =>
 const firstInstall = Math.min(
   ...INSTALL_RUNS.map(builderIndexOf).map((i) => (i === -1 ? Infinity : i)),
 );
-const policyGuard = builderIndexOf(POLICY_GUARD);
-
-// A RUN's own flags (`--mount=...`) precede the command Docker hands the shell,
-// so they come off before the body is run as one.
-const shellBody = (body) => body.replace(/^(?:--\S+\s+)*/, "");
-
-// The answer each policy has to give before anything installs. Two must read
-// true and one must read false: measured on npm 11.17.0,
-// `dangerously-allow-all-scripts` bypasses the install-script preflight outright
-// -- an uncovered postinstall runs -- while `strict-allow-scripts` still answers
-// true, so the first two cannot stand in for the third.
-const POLICY_ANSWERS = {
-  "strict-allow-scripts": "true",
-  "engine-strict": "true",
-  "dangerously-allow-all-scripts": "false",
+// How the stub npm answers the prelude's dry-run install. `refuses` is npm with
+// the policy in force -- the real one exits non-zero naming the code, measured on
+// 11.17.0. `accepts` is every way the policy can be off at once: the flag
+// unresolved, `dangerously-allow-all-scripts`, `ignore-scripts`, a key npm has
+// not shipped yet. `errors` is npm failing for a reason that is not the policy,
+// which must not read as the policy holding.
+const PROBE_ANSWERS = {
+  refuses: "echo 'npm error code ESTRICTALLOWSCRIPTS' >&2; exit 1",
+  accepts: "echo 'added 1 package'; exit 0",
+  errors: "echo 'npm error code ENOENT' >&2; exit 1",
 };
 
-// Run the guard's own shell body against a stub `npm` that answers `--version`
-// with `version` and each `config get` with the answer `answers` overrides it to,
-// or against no npm at all for a null version. Each key is answered on its own,
-// so a guard that stopped asking one reddens here rather than needing an
-// assertion about its text; a key the stub does not know draws no answer at all,
-// which the guard reads as an empty value and refuses. The image's shell is
-// busybox ash and this is whatever /bin/sh is here, but the body uses only POSIX
-// parameter expansion, `test`, and a `for` loop, and the two ways a shell can
-// answer a non-numeric operand -- a non-zero `test`, or aborting outright -- both
-// land on the refusing side.
-const runPolicyGuard = (version, answers = {}) => {
-  const bin = mkdtempSync(join(tmpdir(), "npm-floor-"));
-  const cases = Object.entries({ ...POLICY_ANSWERS, ...answers })
-    .map(([key, value]) => `    ${key}) echo '${value}' ;;`)
-    .join("\n");
+// Run the prelude's own shell body against a stub `npm`, or against no npm at all
+// for a null version. The prelude is driven rather than asserted about, so a
+// check it stopped making reddens here rather than needing an assertion about its
+// text. The image's shell is busybox ash and this is whatever /bin/sh is here,
+// but the body uses only POSIX parameter expansion, `test`, a pipeline and `if`,
+// and the two ways a shell can answer a non-numeric operand -- a non-zero `test`,
+// or aborting outright -- both land on the refusing side.
+const runInstallPrelude = (
+  version,
+  { engineStrict = "true", probe = "refuses" } = {},
+) => {
+  const bin = mkdtempSync(join(tmpdir(), "npm-prelude-"));
   try {
     if (version !== null) {
       writeFileSync(
         join(bin, "npm"),
-        `#!/bin/sh\ncase "$1" in\n  --version) echo '${version}' ;;\n  config) case "$3" in\n${cases}\n  esac ;;\nesac\n`,
-        {
-          mode: 0o755,
-        },
+        `#!/bin/sh\ncase "$1" in\n` +
+          `  --version) echo '${version}' ;;\n` +
+          `  config) echo '${engineStrict}' ;;\n` +
+          `  install) ${PROBE_ANSWERS[probe]} ;;\n` +
+          `esac\n`,
+        { mode: 0o755 },
       );
     }
-    return spawnSync("/bin/sh", ["-c", shellBody(POLICY_GUARD)], {
-      env: { PATH: bin },
+    return spawnSync("/bin/sh", ["-c", POLICY_PRELUDE], {
+      env: { PATH: `${bin}:/usr/bin:/bin` },
       encoding: "utf8",
     });
   } finally {
@@ -280,10 +276,6 @@ describe("Dockerfile dependency freeze", () => {
     expect(addInstructions).toEqual([]);
   });
 
-  it("derives no stage from another, so each starts at its base image's cwd", () => {
-    expect(derivedStages).toEqual([]);
-  });
-
   it("copies the committed lockfile into the builder before the first npm ci", () => {
     const lockCopy = builder.findIndex(
       ({ inst, rest }) => inst === "COPY" && rest.includes("package-lock.json"),
@@ -292,44 +284,42 @@ describe("Dockerfile dependency freeze", () => {
     expect(firstInstall).toBeGreaterThan(lockCopy);
   });
 
-  it("copies the root .npmrc into the builder before the first npm ci", () => {
+  it("copies the root .npmrc into the builder, and copies no other", () => {
     // Without it the image builds under npm's defaults: strict-allow-scripts is
-    // off, and a package that gains an install script runs it here. A different
-    // file copied to the same name states whatever its author put in it, and
-    // whatever lands on the name last is what the install reads.
-    const npmrcCopies = builder.flatMap(({ inst, rest }, index) =>
-      inst === "COPY"
-        ? copyTargets(cwdAt[index], rest)
-            .copies.filter(({ dest }) => posix.basename(dest) === ".npmrc")
-            .map(({ source, dest }) => ({ index, source, dest }))
-        : [],
+    // off, and a package that gains an install script installs unreviewed. A
+    // different file copied to the same name states whatever its author put in
+    // it, so the instruction is frozen rather than merely required to exist.
+    expect(npmrcCopies).toEqual([EXPECTED_NPMRC_COPY]);
+    const copyIndex = builder.findIndex(
+      ({ inst, rest }) => inst === "COPY" && /\.npmrc/.test(rest),
     );
-    expect(npmrcCopies.length).toBeGreaterThan(0);
-    const last = npmrcCopies[npmrcCopies.length - 1];
-    expect(last.source).toMatch(ROOT_NPMRC_SOURCE);
-    expect(firstInstall).toBeGreaterThan(last.index);
-    // npm reads the .npmrc at the prefix it runs in, so the guard and both
-    // installs have to run in the directory it landed in -- a WORKDIR moved
-    // between them puts the install somewhere holding no .npmrc at all.
-    const npmrcDir = posix.dirname(last.dest);
-    expect(cwdAt[policyGuard]).toBe(npmrcDir);
-    for (const body of INSTALL_RUNS)
-      expect(cwdAt[builderIndexOf(body)]).toBe(npmrcDir);
+    expect(copyIndex).toBeGreaterThanOrEqual(0);
+    expect(firstInstall).toBeGreaterThan(copyIndex);
   });
 
-  it("asks npm what it will do before installing anything", () => {
-    // What the .npmrc states is not yet what npm will do: npm resolves its
-    // command line and environment ahead of the file, and a base image or a
-    // build argument can carry either. The guard reads the answer out of npm
-    // itself, which is the one reading no static model of this file can give.
-    expect(policyGuard).toBeGreaterThanOrEqual(0);
-    expect(firstInstall).toBeGreaterThan(policyGuard);
+  it("measures the policy in the same RUN as every install", () => {
+    // What the .npmrc states is not yet what npm will do, and an answer read in
+    // an earlier RUN speaks only for that process: npm resolves its command line
+    // and environment ahead of the file, and an instruction between the two
+    // could move either. Fusing the measurement into each install's own shell is
+    // what removes the seam rather than enumerating the instructions that fit
+    // through it.
+    expect(INSTALL_RUNS.length).toBeGreaterThan(0);
+    for (const body of INSTALL_RUNS) {
+      expect(body.startsWith(CACHE_MOUNT + POLICY_PRELUDE)).toBe(true);
+      expect(builderIndexOf(body)).toBeGreaterThanOrEqual(0);
+    }
+    // Every builder RUN that installs carries it, so a third install cannot be
+    // added without one.
+    for (const run of builderRuns.map(normalize))
+      if (/\bnpm (ci|i|install|add)\b/.test(run))
+        expect(run.startsWith(CACHE_MOUNT + POLICY_PRELUDE)).toBe(true);
   });
 
-  it("sets no npm_config_ variable the guard would not have seen", () => {
-    // The guard answers for the environment as it stood when it ran; npm
-    // resolves one of these ahead of the .npmrc, so one set afterwards installs
-    // under something the guard never measured and no frozen command carries.
+  it("sets no npm_config_ variable an install's own measurement would miss", () => {
+    // Each prelude answers for the environment of its own process; npm resolves
+    // one of these ahead of the .npmrc, so one set between the two installs runs
+    // the second under something the first never measured.
     expect(npmConfigEnv).toEqual([]);
   });
 
@@ -337,8 +327,32 @@ describe("Dockerfile dependency freeze", () => {
     expect(heredocRuns).toEqual([]);
   });
 
-  it("lets no RUN rewrite the .npmrc the guard read", () => {
+  it("lets no RUN rewrite the .npmrc the installs read", () => {
     expect(npmrcRewrites).toEqual([]);
+  });
+
+  it("keeps the probe fixture uncovered, which is what makes it measure", () => {
+    // The prelude requires npm to refuse this package. Both halves of that are
+    // properties of the fixture rather than of the Dockerfile: it has to declare
+    // an install script, and no allowScripts verdict may cover it. Recording a
+    // verdict for it -- which `npm approve-scripts` would do unprompted -- turns
+    // the measurement into one that always passes.
+    const probe = JSON.parse(
+      readFileSync(resolve(here, "..", PROBE_PACKAGE, "package.json"), "utf8"),
+    );
+    const installScripts = ["preinstall", "install", "postinstall"].filter(
+      (name) => probe.scripts?.[name],
+    );
+    expect(installScripts.length).toBeGreaterThan(0);
+    const { allowScripts = {} } = JSON.parse(
+      readFileSync(resolve(here, "..", "package.json"), "utf8"),
+    );
+    // npm's keys are a bare name or `name@version`.
+    expect(
+      Object.keys(allowScripts).filter(
+        (key) => key === probe.name || key.startsWith(`${probe.name}@`),
+      ),
+    ).toEqual([]);
   });
 
   it("ships a production-only tree: the builder's last npm command is npm ci --omit=dev", () => {
@@ -373,13 +387,13 @@ describe("Dockerfile dependency freeze", () => {
   });
 });
 
-describe("what the builder's policy guard decides", () => {
-  // The freeze above holds the guard's text; this runs it. Text alone would
-  // accept one neutered to `RUN npm --version # floor is 11.17` or weakened to a
+describe("what each install's policy prelude decides", () => {
+  // The freeze above holds the prelude's text; this runs it. Text alone would
+  // accept one neutered to `npm --version # floor is 11.17` or weakened to a
   // comparison nothing fails, either of which leaves the image installing under
   // an unmeasured npm or an unenforced policy while the freeze and the spec
-  // still read as enforcement. The tables are about what the guard decides, not
-  // about which npm releases exist.
+  // still read as enforcement. The tables are about what the prelude decides,
+  // not about which npm releases exist.
 
   it.each([
     "11.17",
@@ -388,14 +402,14 @@ describe("what the builder's policy guard decides", () => {
     "11.17.0-pre.1",
     "11.170.0",
     "12.0.0",
-  ])("installs under npm %s reporting the policy on", (version) => {
-    expect(runPolicyGuard(version).status).toBe(0);
+  ])("installs under npm %s with the policy refusing the probe", (version) => {
+    expect(runInstallPrelude(version).status).toBe(0);
   });
 
   it.each(["11.16.9", "11.9.0", "10.9.4", "11"])(
     "refuses npm %s and says why",
     (version) => {
-      const { status, stderr } = runPolicyGuard(version);
+      const { status, stderr } = runInstallPrelude(version);
       expect(status).toBe(1);
       expect(stderr).toContain(NPM_POLICY_FLOOR);
     },
@@ -407,45 +421,45 @@ describe("what the builder's policy guard decides", () => {
     ["reports a version npm never prints", "v11.17.0"],
     ["is not on PATH", null],
   ])("fails closed when npm %s", (_case, version) => {
-    expect(runPolicyGuard(version).status).not.toBe(0);
+    expect(runInstallPrelude(version).status).not.toBe(0);
   });
 
   it.each(["false", "", "undefined", "null"])(
-    "refuses an npm that resolves the install policy to %s, and says which",
-    (value) => {
-      // The version being high enough does not mean the policy is in force: the
-      // .npmrc may not have been copied, or a base image or build argument may
-      // carry a flag or an npm_config_ variable npm resolves ahead of it.
-      const { status, stderr } = runPolicyGuard("11.17.0", {
-        "strict-allow-scripts": value,
-      });
+    "refuses an npm that resolves engine-strict to %s, and says which",
+    (engineStrict) => {
+      // The version being high enough does not mean the engine policy is in
+      // force: the .npmrc may not have been copied, or a base image or build
+      // argument may carry a flag npm resolves ahead of it.
+      const { status, stderr } = runInstallPrelude("11.17.0", { engineStrict });
       expect(status).toBe(1);
-      expect(stderr).toContain("strict-allow-scripts");
+      expect(stderr).toContain("engine-strict");
     },
   );
 
-  it.each(["true", "1", "", "undefined"])(
-    "refuses an npm that resolves dangerously-allow-all-scripts to %s, and says which",
-    (value) => {
-      const { status, stderr } = runPolicyGuard("11.17.0", {
-        "dangerously-allow-all-scripts": value,
-      });
-      expect(status).toBe(1);
-      expect(stderr).toContain("dangerously-allow-all-scripts");
-    },
-  );
+  it("refuses when npm installs the uncovered probe instead of rejecting it", () => {
+    // The one row that stands for the whole install-script policy, however it
+    // came to be off -- the flag unresolved, `dangerously-allow-all-scripts`,
+    // `ignore-scripts`, or a key npm ships next. Measured on npm 11.17.0, the
+    // first three each let this install succeed while `npm config get
+    // strict-allow-scripts` still answers `true`, which is why the outcome is
+    // what the prelude reads.
+    const { status, stderr } = runInstallPrelude("11.17.0", {
+      probe: "accepts",
+    });
+    expect(status).toBe(1);
+    expect(stderr).toContain(PROBE_PACKAGE);
+  });
 
-  it.each(Object.keys(POLICY_ANSWERS))(
-    "asks about %s rather than assuming it",
-    (policy) => {
-      // Each policy driven to its own refusing answer while the others keep
-      // theirs, so a guard that stopped asking one reddens on that row alone.
-      const wrong = POLICY_ANSWERS[policy] === "true" ? "false" : "true";
-      const { status, stderr } = runPolicyGuard("11.17.0", { [policy]: wrong });
-      expect(status).toBe(1);
-      expect(stderr).toContain(policy);
-    },
-  );
+  it("fails closed when npm fails for a reason that is not the policy", () => {
+    // A missing probe directory, a network error, a broken cache: npm exits
+    // non-zero without the code, and a prelude reading only the exit status
+    // would take that for the policy holding.
+    const { status, stderr } = runInstallPrelude("11.17.0", {
+      probe: "errors",
+    });
+    expect(status).toBe(1);
+    expect(stderr).toContain(PROBE_PACKAGE);
+  });
 });
 
 // The committed root .npmrc, byte for byte. Equality with this literal is what

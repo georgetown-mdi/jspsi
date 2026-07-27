@@ -1,0 +1,9 @@
+{
+  "name": "psilink-install-policy-probe",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fixture the Dockerfile's install prelude dry-run-installs to measure whether the allowScripts install policy is actually in force. It declares an install script that no allowScripts verdict covers, so npm must refuse it with ESTRICTALLOWSCRIPTS; if npm accepts it, the policy is off and the build fails. The dry run never executes the script. Recording a verdict for this package would defeat the probe, which scripts/dockerfile-freeze.test.mjs refuses.",
+  "scripts": {
+    "postinstall": "echo 'psilink install-policy probe: this script must never run' >&2; exit 1"
+  }
+}
