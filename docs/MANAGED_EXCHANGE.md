@@ -696,6 +696,67 @@ partner-side failure rather than rubber-stamp the benign reading. This trade --
 cheap recovery against repeated secret-in-transit exposure -- is accepted
 deliberately.
 
+## What the setup consent carries across runs
+
+A managed exchange runs again on an agreement made once. The linkage terms and
+the columns each side discloses are settled at setup and then **fixed for the
+partnership** -- they are not edited in place, and changing them means setting
+up a new exchange rather than altering this one (see [Where the schedule is
+agreed, and where it lives](#where-the-schedule-is-agreed-and-where-it-lives)).
+A scheduled or unattended run therefore presents nothing new to review, because
+nothing about what is disclosed has changed: the same document, run against
+whatever the standing input file holds this period (see [The input file each
+run](#the-input-file-each-run)). The consent given at setup is what authorizes
+every later run, and it keeps authorizing them because the terms it named
+cannot be widened without a new exchange. What would need a fresh agreement --
+different linkage columns, a different disclosed payload set, a different
+partner -- is exactly what a managed exchange cannot be edited into. Agreeing
+or changing a cadence is not in that class (a schedule is neither a term nor a
+credential), and neither are this party's own local acts: pausing, deleting,
+migrating the exchange to another device, or dropping the next extract at the
+agreed path.
+
+A re-invite reopens **the secret, not the agreement**. On the inviter's side
+nothing is re-authored: the fresh invitation is composed from the stored
+document alone, carrying its linkage terms and its committed set of disclosed
+columns over verbatim, and the setup secret is the only part newly minted --
+alongside a rendezvous locator rebuilt from where the app is running and the
+invitation's own fresh setup lifetime (see [Recovery: fast
+re-invite](#recovery-fast-re-invite)). The accepting side is not a no-op,
+though. Only the inviter can re-mint from a stored document, so the partner's
+route is to accept a fresh invitation: it walks the accept flow again and
+re-enters its own local fields -- its name, its metadata, its standardization
+-- none of which are terms the two parties agreed. Its receive commitment lands
+on the same set it originally agreed to because the re-invite carried that set
+over, not because anything checks the new invitation against the old; no such
+comparison exists, so an acceptor reviews a fresh invitation on its own merits,
+exactly as at setup.
+
+What a re-run is authenticated against is **continuity of the shared secret**,
+and nothing else. Each side proves it holds the current rotated secret, the
+handshake fails closed if either does not, and the rendezvous the two runners
+meet at is itself derived from that secret -- so a run's whole claim to be the
+agreed partnership is that the secret has descended unbroken from the one
+exchanged at setup (see [Key-agreement
+design](SECURITY_DESIGN.md#key-agreement-design)). What that does not include
+is a verified counterparty identity: the exchange authenticates
+possession of the secret, never who holds it, and no partner certificate or
+fingerprint is checked on this path. A leaked or copied secret therefore
+permits impersonation until the partnership rotates past it (see the
+[compromise response](SECURITY_DESIGN.md#compromise-response)), and a handshake
+that fails cannot by itself say whether the two sides drifted apart or someone
+is attacking the exchange (see [Telling a desync from an
+attack](#telling-a-desync-from-an-attack)).
+
+What each run disclosed is accounted for **run by run**. Every successful run
+produces the same self-attested exchange record a one-shot exchange does -- this
+party's own local, unsigned account of what it disclosed on that run, carrying
+no protected value (see [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md)) -- so a
+recurring partnership's disclosures are evidenced by the set of those records
+the operator retains, one per run. Where an accounting of disclosures applies,
+they are the per-exchange source it draws on (see
+[COMPLIANCE.md](COMPLIANCE.md#hipaa-considerations)).
+
 ## Surviving storage eviction
 
 Browser storage is not durable the way a file on disk is. The design must survive
@@ -825,5 +886,7 @@ backbone](#the-durability-backbone-exportimport)).
 - [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md) - the record's shape (the exchange-file document plus local fields), the persist-before-success step sequence, and the export artifact's custody model
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges) - the browser at-rest threat model, the discard-secret reversal, the rollback and metadata-at-rest analyses, and the egress-hardening limits
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-exchange-authentication) - the shared-secret rotation, `token_max_age_days`, and re-invite recovery the managed lifecycle reuses
+- [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md) - the self-attested per-run record of what this party disclosed, produced by every successful run
+- [COMPLIANCE.md](COMPLIANCE.md#hipaa-considerations) - how those per-run records serve an accounting of disclosures
 - [DEPLOYMENT.md](DEPLOYMENT.md) - the hosted web app deployment posture and the reverse-proxy responsibilities
 </content>
