@@ -13,7 +13,7 @@ FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951
 
 WORKDIR /build
 
-COPY package.json package-lock.json ./
+COPY .npmrc package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
 COPY apps/cli/package.json apps/cli/
 COPY apps/web/package.json apps/web/
@@ -23,7 +23,9 @@ COPY lib lib
 # it, so an image rebuild cannot drift from the tree CI tested. apps/web is in
 # scope with its dev deps because `vite build` (and the nitro plugin) are
 # devDependencies -- the runtime stage ships the self-contained .output/, not
-# these, so the dev deps never reach the shipped image.
+# these, so the dev deps never reach the shipped image. The root .npmrc copied in
+# above puts the install-script policy in force here as it is locally and in CI;
+# what that does and does not reach is in docs/spec/DEPENDENCY_PINS.md.
 RUN --mount=type=cache,target=/root/.npm \
   npm ci -w packages/core -w apps/cli -w apps/web
 

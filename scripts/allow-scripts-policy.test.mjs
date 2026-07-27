@@ -4,9 +4,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // The root package.json's `allowScripts` map is npm's own install-script policy
-// field (npm 11.17 and later, maintained with `npm approve-scripts`): a `false`
-// verdict blocks that package's install script, and a package with no verdict
-// draws a warning npm says a future release will turn into a refusal. Two ways
+// field (npm 11.16 and later, maintained with `npm approve-scripts`): a `false`
+// verdict blocks that package's install script, and under the root .npmrc's
+// `strict-allow-scripts` a package with no verdict fails the install outright,
+// so the map's completeness is what keeps every install from grounding. Two ways
 // the map rots with no diagnostic at all. An entry naming a package the tree no
 // longer installs matches nothing, so it reads as a live verdict while governing
 // nothing. An entry spelled in a form npm cannot honor is either dropped from

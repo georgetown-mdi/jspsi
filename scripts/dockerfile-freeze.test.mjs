@@ -14,9 +14,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const dockerfile = readFileSync(resolve(here, "..", "Dockerfile"), "utf8");
 
 // Fold "\"-continued lines into one logical instruction, then drop blanks and
-// comments.
+// comments. The fold removes the backslash and the newline and inserts nothing,
+// which is what Docker's own parser does: a continuation with no space before
+// the backslash joins two tokens into one, and reading it as two would let a
+// command below match as something the build does not run.
 const instructions = dockerfile
-  .replace(/\\\r?\n/g, " ")
+  .replace(/\\\r?\n/g, "")
   .split("\n")
   .map((line) => line.trim())
   .filter((line) => line !== "" && !line.startsWith("#"))
@@ -60,6 +63,24 @@ const builderRuns = builder
   .filter(({ inst }) => inst === "RUN")
   .map(({ rest }) => rest);
 
+// Collapsed on the ASCII blanks a shell treats as separators, since indenting a
+// "\"-continued line changes the run of spaces between two tokens and nothing
+// else. Deliberately not /\s+/: that also eats U+00A0, which the shell does not
+// separate on.
+const normalize = (rest) => rest.trim().replace(/[ \t]+/g, " ");
+
+// The instruction that puts the root .npmrc in the builder, frozen. The
+// committed file's bytes are held below; this holds which file the builder
+// copies, so a second one cannot land on the name and state whatever its author
+// put in it. It is a text comparison rather than a model of where a COPY's
+// sources land -- Docker copies a directory source's contents, so a file can
+// arrive without being named in the instruction at all, which this does not
+// reach and docs/spec/DEPENDENCY_PINS.md records as a limit.
+const EXPECTED_NPMRC_COPY = "COPY .npmrc package.json package-lock.json ./";
+const npmrcCopies = instructions
+  .filter(({ inst, rest }) => inst === "COPY" && /\.npmrc/.test(rest))
+  .map(({ rest }) => `COPY ${normalize(rest)}`);
+
 describe("Dockerfile dependency freeze", () => {
   it("installs only with npm ci, never npm install", () => {
     expect(dockerfile).not.toMatch(/\bnpm\s+install\b/);
@@ -75,6 +96,20 @@ describe("Dockerfile dependency freeze", () => {
     );
     expect(lockCopy).toBeGreaterThanOrEqual(0);
     expect(firstCi).toBeGreaterThan(lockCopy);
+  });
+
+  it("copies the root .npmrc into the builder before the first npm ci, and copies no other", () => {
+    // Without it the image builds under npm's defaults: strict-allow-scripts is
+    // off, and a package that gains an install script installs unreviewed.
+    expect(npmrcCopies).toEqual([EXPECTED_NPMRC_COPY]);
+    const firstCi = builder.findIndex(
+      ({ inst, rest }) => inst === "RUN" && /\bnpm ci\b/.test(rest),
+    );
+    const npmrcCopy = builder.findIndex(
+      ({ inst, rest }) => inst === "COPY" && /\.npmrc/.test(rest),
+    );
+    expect(npmrcCopy).toBeGreaterThanOrEqual(0);
+    expect(firstCi).toBeGreaterThan(npmrcCopy);
   });
 
   it("ships a production-only tree: the builder's last npm command is npm ci --omit=dev", () => {
@@ -104,6 +139,94 @@ describe("Dockerfile dependency freeze", () => {
     // node_modules/psilink -> ../apps/cli must not dangle.
     expect(allRuntimeDests).toContain("/app/packages/core/package.json");
     expect(allRuntimeDests).toContain("/app/apps/cli/package.json");
+  });
+});
+
+// The committed root .npmrc, byte for byte. Equality with this literal is what
+// holds the file to configuration and nothing else, in place of a reader that
+// decides which of its lines are credentials. Such a reader has two gaps this
+// has neither of: npm authenticates from more of its config surface than its
+// `_auth`-shaped keys -- an inline `cert`/`key` PEM pair is presented to the
+// registry as an mTLS client credential, `certfile`/`keyfile` name a file
+// holding one -- and that surface grows with npm rather than with this repo; and
+// the reader must agree with npm's own parser about which bytes are a line at
+// all, which the next test is about. The cost is that changing the file
+// legitimately means changing this literal in the same diff, where the review
+// reads the bytes rather than a verdict about them.
+const EXPECTED_NPMRC = `# Make the root engines.node constraint a hard install failure rather than npm's
+# default advisory warning, so CI, the docs, and a local install cannot diverge
+# on the Node version.
+engine-strict=true
+
+# Make a package with no \`allowScripts\` verdict a hard install failure rather
+# than npm's advisory warning, so a DECLARED install script cannot run first and
+# be noticed after -- npm's refusal is a pre-extraction preflight, so the
+# synthetic \`node-gyp rebuild\` a shipped binding.gyp earns is outside it (see
+# docs/spec/DEPENDENCY_PINS.md). Safe to set because the map covers every install
+# script the committed lockfile records -- completeness that
+# scripts/allow-scripts-policy.test.mjs holds as a check rather than prose.
+strict-allow-scripts=true
+
+# npm's own defaults, stated so a user-level ~/.npmrc cannot turn the refusal
+# above off underneath the project. Either key defeats it there:
+# \`dangerously-allow-all-scripts\` lets the uncovered script run, and
+# \`ignore-scripts\` skips the preflight so the package installs unreviewed. The
+# project file outranks the user file, so stating them here closes that route
+# (measured on npm 11.17.0). The environment outranks both and this file cannot
+# reach it; see docs/spec/DEPENDENCY_PINS.md.
+ignore-scripts=false
+dangerously-allow-all-scripts=false
+`;
+
+describe("the root .npmrc the builder installs under", () => {
+  // The file is committed and public, and the builder copies it into a layer the
+  // release workflow exports to a shared build cache, so it may state
+  // configuration and nothing else: registry credentials belong in the
+  // user-level ~/.npmrc, which no build reads.
+  const committed = readFileSync(resolve(here, "..", ".npmrc"));
+
+  it("is the file this literal was reviewed as, byte for byte", () => {
+    // The string compare is the one that prints a diff; the byte compare is the
+    // claim, since what ships in the layer is bytes and a decode of them is not.
+    expect(committed.toString("utf8")).toBe(EXPECTED_NPMRC);
+    expect(committed.equals(Buffer.from(EXPECTED_NPMRC, "utf8"))).toBe(true);
+  });
+
+  it("carries no CR, so npm's line split and the one below cannot disagree", () => {
+    // npm parses with the `ini` package, which breaks lines on /[\r\n]+/, so a
+    // lone CR ends a line there while a split on "\n" alone reads
+    // `# note<CR>//host/:_authToken=x` as one comment. Measured against npm
+    // 11.17.0 driven at a local registry, a token smuggled that way is one npm
+    // sends as `Authorization: Bearer`. No CR in the file is what makes the
+    // enumeration below the same set of lines npm reads.
+    expect(EXPECTED_NPMRC).not.toMatch(/\r/);
+  });
+
+  it("states the four policies its readers rest on, and states nothing else", () => {
+    // Drop either of the first two and npm reverts to an advisory warning it
+    // prints after the fact: an uncovered install script runs, and an engines
+    // mismatch installs. Drop either of the last two and a user-level ~/.npmrc
+    // decides them instead. Anything beyond them is configuration nobody
+    // reviewed as safe to bake into a cached image layer.
+    const stated = EXPECTED_NPMRC.split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "" && !/^[#;]/.test(line));
+    expect(stated).toEqual([
+      "engine-strict=true",
+      "strict-allow-scripts=true",
+      "ignore-scripts=false",
+      "dangerously-allow-all-scripts=false",
+    ]);
+  });
+
+  it("carries no URL userinfo anywhere in it", () => {
+    // A credential rides in on a value rather than on a key name:
+    // `registry=https://user:secret@host/`, including under an `@scope:registry`
+    // key, is one npm turns into an Authorization: Basic header for that
+    // registry. No policy above takes a URL, so this is what stands over a
+    // URL-valued key that later joins them in the literal -- the one path a
+    // legitimate widening could carry a credential in on.
+    expect(EXPECTED_NPMRC).not.toMatch(/[a-z][a-z0-9+.-]*:\/\/[^/?#\s@]*@/i);
   });
 });
 
