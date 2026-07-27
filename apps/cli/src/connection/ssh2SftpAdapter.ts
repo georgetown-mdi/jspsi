@@ -85,6 +85,33 @@ const CLIENT_CLOSE_TIMEOUT_MS = 5_000;
 // operator-configurable, like every other SFTP liveness bound.
 const FORCED_CLOSE_TIMEOUT_MS = 1_000;
 
+// Upper bound (ms) on how long one session transition waits for the transition
+// ahead of it before giving up its own turn (see
+// {@link SSH2SFTPClientAdapter.runTransition}). ONE number for all five kinds,
+// and it bounds the WAIT rather than the transition being waited on: a ceiling on
+// the dial instead would put a teardown's wait at
+// `(max_reconnect_attempts + 1) * server_connect_timeout_ms` plus the
+// inter-attempt delays -- around two minutes at the defaults, and unbounded above
+// as the operator raises the connect timeout, which is neither teardown-scale nor
+// a number the wait owns.
+//
+// The value: above the 6 s a legitimate release can spend
+// (CLIENT_CLOSE_TIMEOUT_MS then FORCED_CLOSE_TIMEOUT_MS), so a teardown queued
+// behind a normal release does not give up on it prematurely. That is a
+// relationship between three independent constants, so it is DRIVEN -- by the unit
+// test whose release "spends its whole close budget" with a teardown queued behind
+// it -- rather than left to the arithmetic here. And teardown-scale in the sense
+// FileTransportClient.end's contract requires: this bound plus the forced close it
+// ends in is an order of magnitude below the dial budget an unbounded wait would
+// ride. It owes nothing to the budget end()'s CALLER holds, which can be smaller
+// (core races end() against one a low peer_timeout_ms puts under this bound):
+// abandoning that wait closes nothing, while the abandon here runs on its own
+// timer and drives the destroy either way, so a caller that gave up waiting is
+// still left an exited process rather than a half-open socket -- also driven, by
+// the unit test whose caller gives up first. Deliberately not
+// operator-configurable, like every other SFTP liveness bound.
+const TRANSITION_ACQUIRE_TIMEOUT_MS = 10_000;
+
 // The ssh2 Client's underlying net.Socket, which the adapter reaches directly for
 // what ssh2 does not expose. Every member is optional so a relocated or
 // non-net.Socket transport reads undefined at each site; what that site does with
@@ -248,19 +275,80 @@ type SessionBoundary = "deliberatelyReleased" | "notReleased";
 // only assignment to the field behind it.
 type SessionBoundaryRecorder = (boundary: SessionBoundary) => void;
 
-// One session transition, as runTransition takes it. Teardown carries no
+// The transition runTransition is currently running, as it hands it to that
+// transition's body: the boundary recorder, and the identity every dial and every
+// close inside the body presents at the chokepoint
+// (SSH2SFTPClientAdapter.assertTransitionHeld). Identity rather than the kind, and
+// rather than a boolean, because a teardown that gave up its wait drives its
+// forced close while ANOTHER transition holds the client: against a boolean the
+// chokepoint would report its property holding at exactly the moment it was being
+// violated.
+interface HeldSessionTransition {
+  readonly kind: SessionTransitionKind;
+  readonly recordBoundary: SessionBoundaryRecorder;
+}
+
+// What a transition does when its bounded wait for the transition ahead of it
+// expires (TRANSITION_ACQUIRE_TIMEOUT_MS). runTransition acts on this reading
+// rather than on the kind, and every value is behavior observable on the adapter
+// itself -- what the caller gets back, and what the abandon drives on the shared
+// client.
+type AbandonedTransitionDisposition =
+  // Give up this transition, drive NOTHING on the client, and hand the caller the
+  // kind's own nothing-happened value (`abandoned` on the transition).
+  | "declinesAndReturns"
+  // The same, except the kind has no value that could mean "no session was
+  // established", so it rejects with an error naming the bound.
+  | "rejects"
+  // Teardown alone, and only in this narrow form: it gives up ssh2-sftp-client's
+  // end() -- which a live handshake beneath it resolves in a millisecond having
+  // closed nothing (measured; see docs/spec/DEPENDENCY_PINS.md) -- and closes the
+  // transport from this side instead. The destroy needs nothing from the peer and
+  // settles the very dial being waited on.
+  | "forcesTheTransportClosed";
+
+// Exhaustive over the transition kinds, so a sixth kind cannot be added without
+// stating what happens when its wait expires. Every value is this package's own
+// behavior, which this package's tests drive -- nothing here asserts how
+// packages/core forwards a call, which apps/cli cannot observe.
+const ABANDONED_TRANSITION_DISPOSITION: Record<
+  SessionTransitionKind,
+  AbandonedTransitionDisposition
+> = {
+  connect: "rejects",
+  ensureConnected: "declinesAndReturns",
+  redialForRecovery: "declinesAndReturns",
+  releaseForIdle: "declinesAndReturns",
+  teardown: "forcesTheTransportClosed",
+};
+
+// One session transition, as runTransition takes it. The three arms are the three
+// abandon dispositions above, so the value each kind reports is stated where the
+// disposition record says it is needed and nowhere else. Teardown carries no
 // `skipped` because it is the transition the teardown latch is set FOR: every
 // other kind states what it returns when it reaches the front of the queue with
 // that latch already set.
 type SessionTransition<T> =
   | {
       kind: "teardown";
-      run: (recordBoundary: SessionBoundaryRecorder) => Promise<T>;
+      run: (held: HeldSessionTransition) => Promise<T>;
+      abandoned: () => T;
     }
   | {
-      kind: Exclude<SessionTransitionKind, "teardown">;
-      run: (recordBoundary: SessionBoundaryRecorder) => Promise<T>;
+      kind: "connect";
+      run: (held: HeldSessionTransition) => Promise<T>;
       skipped: () => T;
+    }
+  | {
+      kind: Exclude<SessionTransitionKind, "teardown" | "connect">;
+      run: (held: HeldSessionTransition) => Promise<T>;
+      skipped: () => T;
+      // What this transition's caller reads when it gives up its wait for the one
+      // ahead of it. Distinct from `skipped`, which answers a transition that
+      // reached the front with teardown already latched: that connection is
+      // closing on purpose, whereas this one is still open and the transition
+      // simply did not get its turn.
+      abandoned: () => T;
     };
 
 // list() and createExclusive() both run only after connect() has already
@@ -306,6 +394,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // (shouldRecoverFromSessionLoss) -- a re-dial's readyTimeout would slow a clean
   // close, and a freshly-dialed session would outlive the teardown.
   private closing = false;
+  // Latched true when an abandoning teardown closed the transport itself (see
+  // forceCloseAbandonedTeardown), which cuts short whatever dial the transition it
+  // gave up on was running. That dial rejects with the same error a genuine peer
+  // close produces (measured; see docs/spec/DEPENDENCY_PINS.md), so telling "this
+  // adapter closed it" from "the partner dropped us" takes this reading rather than
+  // a match on the error text. Read by session recovery, which then surfaces the
+  // loss it was recovering from instead of an error of this adapter's own making.
+  // Never cleared: it is only ever set on a connection already closing.
+  private abandonedTeardownClosedTransport = false;
   // The connection's one terminal close, memoized by end() on its first call: a
   // repeat or concurrent close awaits this one instead of driving a second on the
   // same client. Driving a second is not merely wasteful -- this close does not
@@ -341,8 +438,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // The session transition currently holding the queue, or undefined when none is.
   // Read by the connection-per-poll operation gate (an operation issued during a
   // release must re-establish rather than race the close) and by the chokepoint
-  // check that every dial and every close runs inside a transition.
-  private transitionInProgress: SessionTransitionKind | undefined;
+  // check that every dial and every close runs inside the transition that owns it,
+  // which is why this is the transition's identity rather than merely its kind.
+  private transitionInProgress: HeldSessionTransition | undefined;
   // How the session's last completed boundary was reached, written ONLY by
   // runTransition -- through the recorder it hands each transition, by restoring
   // the previous reading when a transition rejects, and by taking a
@@ -393,6 +491,19 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // would fill an hours-long exchange's log. A plain operational counter, never a
   // partner-controlled value.
   private forcedReleases = 0;
+  // Idle-boundary releases that closed NOTHING because they gave up their wait for
+  // the transition ahead of them (see warnIdleReleaseDeclined). Kept apart from
+  // forcedReleases, which counts a boundary this adapter did close: rolling the two
+  // together would report a closed boundary the adapter never reached, in the one
+  // metric that tells the operator the mode is working. Paces this path's warning
+  // and nothing else -- it is deliberately not surfaced as a metric of its own.
+  private declinedReleases = 0;
+  // Cycle-start re-dials that dialed NOTHING because they gave up their wait for the
+  // transition ahead of them (see warnCycleRedialDeclined). Paces that path's
+  // warning and nothing else; kept apart from the release counter above because a
+  // single stuck transition declines both signals of the same cycle, and one counter
+  // would then pace each line on the other's occurrences.
+  private declinedCycleRedials = 0;
   private transportRetries = 0;
   // The per-operation liveness bound (ms) every server-driven op is held to. See
   // the constructor's stallDeadlineMs doc for the test-seam and
@@ -553,8 +664,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // The queue is released in a `finally`, so a transition that rejects frees it
   // rather than pinning every later one.
   //
-  // The acquire is deliberately unbounded for every kind, so what stands above a
-  // transition is whatever its caller in core carries. The first dial passes
+  // The acquire is bounded, once, by TRANSITION_ACQUIRE_TIMEOUT_MS, and a waiter
+  // whose bound expires NEVER proceeds into its own session action: it abandons its
+  // own transition through the disposition its kind states
+  // (ABANDONED_TRANSITION_DISPOSITION). Proceeding would trade a bounded park for
+  // two handshakes -- or a handshake alongside a close -- on the one shared client,
+  // the state this lock exists to prevent. Above that bound, what stands over a
+  // transition is whatever its caller in core carries: the first dial passes
   // through unwrapped (it carries its own per-attempt connect deadline), as do the
   // two cycle-boundary signals (neither is a peer round trip); end() is wrapped in
   // core's own short teardown budget; and a recovery re-dial rides the operation
@@ -573,15 +689,19 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     });
     const queued = this.pendingTransitions > 0;
     this.pendingTransitions += 1;
+    const held: HeldSessionTransition = {
+      kind: transition.kind,
+      recordBoundary: (boundary) => {
+        this.sessionBoundary = boundary;
+      },
+    };
     const enter = async (): Promise<T> => {
       if (transition.kind !== "teardown" && this.closing)
         return transition.skipped();
       const boundaryOnEntry = this.sessionBoundary;
-      this.transitionInProgress = transition.kind;
+      this.transitionInProgress = held;
       try {
-        return await transition.run((boundary) => {
-          this.sessionBoundary = boundary;
-        });
+        return await transition.run(held);
       } catch (error: unknown) {
         // A transition that raised vouches for no boundary: a release that failed
         // part-way through leaves the session the server's to drop, and a failed
@@ -610,10 +730,99 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         this.transitionInProgress = undefined;
       }
     };
-    return (queued ? predecessor.then(enter) : enter()).finally(() => {
+    const ranItsTurn = (result: Promise<T>): Promise<T> =>
+      result.finally(() => {
+        this.pendingTransitions -= 1;
+        leaveQueue();
+      });
+    // An idle queue is entered in THIS tick, not a microtask later, and that is
+    // load-bearing rather than an optimization (see the `pendingTransitions`
+    // field): the bound is armed only where there is something to wait for.
+    if (!queued) return ranItsTurn(enter());
+    return this.waitForPrecedingTransition(predecessor).then((won) => {
+      if (won) return ranItsTurn(enter());
+      // The chain is left intact: this waiter's own queue slot is resolved when
+      // the transition ACTUALLY holding the client settles, never when this
+      // waiter gives up. Resolving it here would admit this waiter's successor
+      // into its critical section alongside a holder that has not settled -- two
+      // overlapping transitions on the one shared client, which is the corruption
+      // the lock exists to prevent and which no bound may buy.
       this.pendingTransitions -= 1;
-      leaveQueue();
+      void predecessor.then(leaveQueue);
+      return this.abandonTransition(transition);
     });
+  }
+
+  // Wait out the transition ahead of this one under the single acquire bound,
+  // reporting whether the wait was won. The bound's timer is left REF'D as the
+  // safe default for one whose abandon closes a transport nothing else will, and a
+  // unit case pins that so the ref cannot be dropped silently -- but unlike the
+  // forced close's ref (see awaitBoundedTeardown, measured both ways) nothing
+  // measures a process-exit difference behind it: in every state driven so far the
+  // transition being waited on is itself parked on a ref'd socket handle, so the
+  // process could not have exited ahead of the abandon either way. The timer is
+  // cleared where the race settles, which a second unit case pins.
+  private waitForPrecedingTransition(
+    predecessor: Promise<void>,
+  ): Promise<boolean> {
+    let expire!: () => void;
+    const bound = new Promise<boolean>((resolve) => {
+      expire = () => resolve(false);
+    });
+    const timer = setTimeout(expire, TRANSITION_ACQUIRE_TIMEOUT_MS);
+    return Promise.race([predecessor.then(() => true), bound]).finally(() => {
+      clearTimeout(timer);
+    });
+  }
+
+  // Give up a transition whose wait for the transition ahead of it expired, on the
+  // terms its kind states. The teardown branch is the only one that drives
+  // anything at all, and the only mechanism it drives is the forced transport
+  // close.
+  private abandonTransition<T>(transition: SessionTransition<T>): T {
+    const disposition = ABANDONED_TRANSITION_DISPOSITION[transition.kind];
+    switch (disposition) {
+      case "rejects":
+        throw this.transitionWaitExpiredError(transition.kind);
+      case "forcesTheTransportClosed":
+        this.forceCloseAbandonedTeardown();
+        return this.abandonedTransitionValue(transition);
+      case "declinesAndReturns":
+        return this.abandonedTransitionValue(transition);
+      default: {
+        const unhandled: never = disposition;
+        throw new Error(
+          `unhandled abandoned-transition disposition ${String(unhandled)}`,
+        );
+      }
+    }
+  }
+
+  // The nothing-happened value a kind whose disposition returns one carries. The
+  // disposition record and the transition union have to agree about which kinds
+  // carry it; disagreement is a mistake in this file rather than a runtime state,
+  // so it is checked here instead of asserted in the record's comment.
+  private abandonedTransitionValue<T>(transition: SessionTransition<T>): T {
+    if (!("abandoned" in transition))
+      throw new Error(
+        `the ${transition.kind} session transition's stated abandon disposition ` +
+          `returns its own value, but the transition carries none`,
+      );
+    return transition.abandoned();
+  }
+
+  // The abandon of a wait that has no benign value to report: a dial cannot report
+  // a session it did not establish. Names the bound, and is deliberately distinct
+  // from the teardown latch's "already been closed" refusal -- that connection was
+  // closed on purpose, whereas this one was never opened.
+  private transitionWaitExpiredError(kind: SessionTransitionKind): Error {
+    return new Error(
+      `this SFTP connection's ${kind} waited ` +
+        `${TRANSITION_ACQUIRE_TIMEOUT_MS} ms for the session transition ahead ` +
+        `of it and gave up: a dial cannot run alongside another transition on ` +
+        `the one shared client, so nothing was dialed. Open a new connection ` +
+        `to retry.`,
+    );
   }
 
   // Whether ssh2-sftp-client is holding an SFTP session. It clears the property on
@@ -625,15 +834,43 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
 
   // The chokepoint: every call this adapter makes into ssh2-sftp-client's
   // connect() or end(), and every teardown it drives on the ssh2 Client or the
-  // socket beneath it, runs inside a held session transition. Three call sites,
-  // one per mechanism, so the property is confirmable by grepping for the
+  // socket beneath it, runs inside the session transition that OWNS it. Three call
+  // sites, one per mechanism, so the property is confirmable by grepping for the
   // mechanisms themselves.
-  private assertTransitionHeld(mechanism: string): void {
-    if (this.transitionInProgress !== undefined) return;
+  //
+  // It takes the transition it is called from and compares identity, not "some
+  // transition is running": the one mechanism that runs while another transition
+  // holds the client is the abandoned teardown's forced close, which carries its
+  // own narrow exemption below, and against a mere presence check that mechanism
+  // would pass here while violating the very property being checked.
+  private assertTransitionHeld(
+    mechanism: string,
+    held: HeldSessionTransition,
+  ): void {
+    if (this.transitionInProgress === held) return;
     throw new Error(
-      `${mechanism} was driven outside a held SFTP session transition; every ` +
-        `dial and every close of this adapter's session runs inside ` +
-        `runTransition, so that two can never overlap on the one shared client`,
+      `${mechanism} was driven outside the SFTP session transition that owns ` +
+        `it; every dial and every close of this adapter's session runs inside ` +
+        `the runTransition call that acquired for it, so that two can never ` +
+        `overlap on the one shared client`,
+    );
+  }
+
+  // The single exemption from the check above, in its narrowest form. A teardown
+  // that gave up its wait drives the forced transport close while the transition it
+  // was waiting for still holds the client -- deliberately, because that destroy
+  // needs nothing from the peer and settles the very dial being waited on. What
+  // makes it safe is the teardown latch, not the destroy's own harmlessness: end()
+  // latches before it enqueues, so every transition BEHIND this teardown skips its
+  // body and the holder ahead of it is the only one that can be running. That
+  // premise is the check.
+  private assertAbandonedTeardownMayForceClose(): void {
+    if (this.closing) return;
+    throw new Error(
+      `an abandoned teardown's forced transport close was driven with no ` +
+        `teardown latched; it is exempt from the held-transition check only ` +
+        `because end() latches before it enqueues, which is what keeps every ` +
+        `transition behind it from running a body alongside this close`,
     );
   }
 
@@ -942,7 +1179,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         this.midExchangeRedials >= this.operativeMaxReconnectAttempts()
       )
         throw this.midExchangeReconnectBudgetExhaustedError();
-      await this.redialForRecovery();
+      const sessionLive = await this.redialForRecovery().catch(
+        (redialError: unknown) => {
+          // This re-dial can be the very dial an abandoning teardown destroyed the
+          // transport beneath, and its rejection then reports a close of this
+          // adapter's own as a partner-side one. Fall through to the closing branch
+          // below, which surfaces the loss this recovery was for, rather than
+          // replacing it with that error.
+          if (this.abandonedTeardownClosedTransport) return false;
+          throw redialError;
+        },
+      );
       // end() may have latched `closing` while the re-dial held the transition
       // lock: join the teardown that will close the freshly-dialed session, so no
       // session outlives it, and surface the original loss rather than re-issuing
@@ -951,7 +1198,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         await this.end().catch(() => {});
         throw error;
       }
-      if (!teardown && !deliberateRelease) {
+      // A re-dial that DECLINED -- it gave up its wait for the transition ahead of
+      // it -- established nothing, so counting it would report a drop this adapter
+      // recovered from when it recovered from nothing, and warn the operator about
+      // a re-dial that never ran. The re-issue below still runs and rejects with
+      // the real session-loss cause.
+      if (sessionLive && !teardown && !deliberateRelease) {
         // The re-dial re-established the dropped session: count it as a
         // reconnection so the operator's metrics show the exchange survived a
         // server-side drop. connect()'s own counter only bumps on an internal
@@ -1010,7 +1262,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // boundary); the second covers the gap after a release completed, sparing the
     // one attempt that would be guaranteed to fail on the session it closed.
     if (
-      this.transitionInProgress !== "releaseForIdle" &&
+      this.transitionInProgress?.kind !== "releaseForIdle" &&
       this.sessionBoundary !== "deliberatelyReleased"
     )
       return undefined;
@@ -1209,16 +1461,26 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // requested re-dial would then be refused before it ever took a queue slot. The
   // acquire itself stays synchronous (runTransition takes the slot with no
   // preceding await), so request order is unchanged.
-  private redialForRecovery(): Promise<void> {
+  //
+  // Resolves whether a session is live for the re-issue to run on, which is what
+  // keeps a re-dial that established nothing out of the reconnect counters and the
+  // operator warning (see withSessionRecovery): both the declined forms -- a
+  // teardown latched ahead of it, and a wait it gave up -- report false.
+  private redialForRecovery(): Promise<boolean> {
     return this.runTransition({
       kind: "redialForRecovery",
-      skipped: () => undefined,
-      run: async (recordBoundary) => {
+      skipped: () => false,
+      // Silently, and that is the point: the operation this was recovering then
+      // rejects with the real session-loss cause rather than with a timeout of
+      // this transition's that would hide it.
+      abandoned: () => false,
+      run: async (held) => {
         // A session can be live by the time this reaches the front of the queue --
         // a cycle-start or concurrent dial landed, or the release's close backstop
         // expired with the session still set -- and the dial rejects outright when
         // one is set, so leave the re-issue to run on it.
-        if ((this.client as unknown as Ssh2SftpClientInternals).sftp) return;
+        if ((this.client as unknown as Ssh2SftpClientInternals).sftp)
+          return true;
         const options = this.originalConnectOptions;
         if (options === undefined)
           throw new Error(
@@ -1238,7 +1500,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         // its own body. The dial re-arms a fresh one via start() at the end of
         // its sequence.
         this.heartbeat.stop();
-        await this.connectLocked(options, recordBoundary);
+        await this.connectLocked(options, held);
+        return true;
       },
     });
   }
@@ -1269,7 +1532,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
             "cannot be reopened - open a new one instead",
         );
       },
-      run: (recordBoundary) => this.connectLocked(options, recordBoundary),
+      run: (held) => this.connectLocked(options, held),
     });
   }
 
@@ -1279,9 +1542,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // through connect()).
   private async connectLocked(
     options: Record<string, unknown>,
-    recordBoundary: SessionBoundaryRecorder,
+    held: HeldSessionTransition,
   ): Promise<void> {
-    this.assertTransitionHeld("ssh2-sftp-client's connect()");
+    this.assertTransitionHeld("ssh2-sftp-client's connect()", held);
     this.originalConnectOptions = options;
     const maxReconnects = this.operativeMaxReconnectAttempts();
     // Exclude the psilink-specific key before handing options to ssh2.
@@ -1314,14 +1577,26 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       },
       maxReconnects,
       1_000,
-      // Host-key verification failure is terminal: the server is actively
-      // presenting a different or unknown key, so retrying the key exchange
-      // against the same server changes nothing. ssh2's "Host denied
-      // (verification failed)" is wrapped by ssh2-sftp-client as a new Error
-      // with the same message (prefixed with the listener context); match on the
-      // stable message fragment from kex.js rather than a code that is not set
-      // on the error object.
-      (err) => !(err instanceof Error && err.message.includes("Host denied")),
+      (err) => {
+        // The teardown latch, read BETWEEN attempts for the same reason
+        // runTransition reads it before a transition's body: once end() has
+        // latched, nothing may establish a session the teardown will not close. It
+        // is what stops the abandoning teardown's forced destroy from being undone
+        // by this loop -- the destroy cuts the attempt short with an unexpected
+        // close, and a re-attempt mints a FRESH socket, keeping a torn-down
+        // connection and a process that exits by drain alive for the remainder of
+        // the dial budget (measured: a re-dial 1 s after the destroy, on a socket
+        // reading writable again).
+        if (this.closing) return false;
+        // Host-key verification failure is terminal: the server is actively
+        // presenting a different or unknown key, so retrying the key exchange
+        // against the same server changes nothing. ssh2's "Host denied
+        // (verification failed)" is wrapped by ssh2-sftp-client as a new Error
+        // with the same message (prefixed with the listener context); match on the
+        // stable message fragment from kex.js rather than a code that is not set
+        // on the error object.
+        return !(err instanceof Error && err.message.includes("Host denied"));
+      },
     );
 
     const internals = this.client as unknown as Ssh2SftpClientInternals;
@@ -1425,7 +1700,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // Discharge the idle-boundary release (see the `sessionBoundary` field): LAST
     // and on success only, so a dial that threw above leaves the release standing
     // for the next op to re-establish on rather than reporting it as a drop.
-    recordBoundary("notReleased");
+    held.recordBoundary("notReleased");
   }
 
   /**
@@ -1464,7 +1739,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    *
    * Teardown takes the session-transition queue like every other transition (see
    * {@link runTransition}), so it neither pre-empts a dial or an idle release that
-   * is already running nor lets one begin behind it.
+   * is already running nor lets one begin behind it. That wait is bounded like
+   * every other, and teardown is the one kind whose expiry still closes something:
+   * it gives up ssh2-sftp-client's `end()` and closes the transport from this side
+   * (see {@link forceCloseAbandonedTeardown}).
    */
   async end(): Promise<void> {
     // Latch teardown and memoize the close in one synchronous step, before the
@@ -1476,18 +1754,22 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     this.closing = true;
     this.terminalClose ??= this.runTransition({
       kind: "teardown",
-      run: () => this.closeTerminally(),
+      run: (held) => this.closeTerminally(held),
+      // A teardown that gave up its wait has closed the transport from this side
+      // all the same, so it reports the same nothing a completed close does:
+      // rejecting would tell a caller that a run which already succeeded failed.
+      abandoned: () => undefined,
     });
     await this.terminalClose;
   }
 
-  private async closeTerminally(): Promise<void> {
+  private async closeTerminally(held: HeldSessionTransition): Promise<void> {
     // Getting this wrong is expensive twice over: client.end() runs against a live
     // handshake, and ssh2-sftp-client's end() short-circuits on the session that
     // handshake has not restored yet, so this resolves without ending the ssh2
     // Client at all and close() returns over a ref'd socket. The transition queue
     // is what keeps a dial or an idle release from overlapping it.
-    this.assertTransitionHeld("ssh2-sftp-client's end()");
+    this.assertTransitionHeld("ssh2-sftp-client's end()", held);
     // Stop the keepalive before tearing the client down so no beat races the
     // teardown, and so the unref'd timer never lingers past the session.
     this.heartbeat.stop();
@@ -1495,6 +1777,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // issuing a second one on the abandoned client.
     const ending = this.client.end();
     const outcome = await this.awaitBoundedTeardown(
+      held,
       ending,
       CLIENT_CLOSE_TIMEOUT_MS,
       undefined,
@@ -1507,7 +1790,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // ref'd handle that keeps the process alive. It is a reason to force the close,
     // not a reason to skip it.
     if (outcome.status === "settled") return;
-    await this.forceCloseTerminalTransport(ending, outcome);
+    await this.forceCloseTerminalTransport(held, ending, outcome);
     // Forced FIRST, then surfaced: no caller can observe this rejection over a
     // socket still alive, including the ones sharing the memo, since the memoized
     // promise does not settle until the destroy above has run. What the rejection
@@ -1530,6 +1813,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // rejection at debug, so a throw would be invisible and would accomplish
   // nothing.
   private async forceCloseTerminalTransport(
+    held: HeldSessionTransition,
     ending: Promise<unknown>,
     outcome: { status: "failed"; error: unknown } | { status: "expired" },
   ): Promise<void> {
@@ -1555,6 +1839,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     }
     try {
       await this.awaitBoundedTeardown(
+        held,
         ending,
         FORCED_CLOSE_TIMEOUT_MS,
         seam.destroy,
@@ -1611,6 +1896,85 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     );
   }
 
+  // Teardown gave up its wait for the transition ahead of it
+  // (TRANSITION_ACQUIRE_TIMEOUT_MS) and closes the transport from this side
+  // instead. It cannot reuse the terminal close above, which waits out the
+  // ssh2-sftp-client end() that close captured: this teardown never ran a body, so
+  // it has no such end() -- and it must not create one, because driven beneath a
+  // live handshake ssh2-sftp-client's end() short-circuits on the session that
+  // handshake has not restored yet, resolving in a millisecond with the socket
+  // untouched (measured; docs/spec/DEPENDENCY_PINS.md). What the destroy needs is
+  // nothing from the peer, and it settles the very dial being waited on, so there
+  // is nothing left to wait for after it: `destroyed` reads back in the same tick.
+  //
+  // Nothing here throws, and every degraded branch is a warning naming what broke,
+  // on exactly the terms the terminal close's forced branch states: core treats
+  // end() as best-effort and logs a rejection at debug.
+  private forceCloseAbandonedTeardown(): void {
+    this.assertAbandonedTeardownMayForceClose();
+    // Nothing may keep pinging a transport this is about to destroy, and the
+    // degraded branch below reports this teardown DONE over a transport it could
+    // not close, so the stop precedes both -- as it does in closeTerminally. Local
+    // timer state only, so unlike every other teardown action it drives nothing on
+    // the client the transition ahead of this one still holds.
+    this.heartbeat.stop();
+    const internals = this.client as unknown as Ssh2SftpClientInternals;
+    const seam = this.resolveTerminalCloseSeam(internals);
+    if ("missing" in seam) {
+      this.log.warn(
+        `An SFTP session transition did not complete within the ` +
+          `${TRANSITION_ACQUIRE_TIMEOUT_MS} ms teardown wait, and closing the ` +
+          `connection from this side drives ssh2's ${seam.missing}, which is ` +
+          `not available after connect(): the connection is left to the ` +
+          `operating system, may stay half-open, and a half-open connection can ` +
+          `keep this process from exiting. The installed ssh2 / ` +
+          `ssh2-sftp-client version may have renamed, relocated, or removed it ` +
+          `- re-verify the internal premises per the "Upgrading the SFTP Stack" ` +
+          `checklist in docs/spec/DEPENDENCY_PINS.md`,
+      );
+      return;
+    }
+    try {
+      seam.destroy();
+      // Set where the destroy is driven rather than after the read-back below: it
+      // is the destroy that settles the dial this teardown gave up on, whatever the
+      // socket then reports about itself.
+      this.abandonedTeardownClosedTransport = true;
+    } catch (error: unknown) {
+      this.log.warn(
+        `Closing the SFTP connection from this side failed at teardown: ` +
+          `${sanitizeErrorForDisplay(error)}. The connection is left to the ` +
+          `operating system, may stay half-open, and a half-open connection ` +
+          `can keep this process from exiting.`,
+      );
+      return;
+    }
+    if (seam.socket.destroyed !== true) {
+      this.log.warn(
+        `The SFTP connection's transport did not close after this side ` +
+          `destroyed it at teardown, so the connection may stay half-open, and ` +
+          `a half-open connection can keep this process from exiting; the ` +
+          `installed ssh2 may no longer expose the socket beneath its client. ` +
+          `Re-verify the internal premises per the "Upgrading the SFTP Stack" ` +
+          `checklist in docs/spec/DEPENDENCY_PINS.md`,
+      );
+      return;
+    }
+    // The cause is what distinguishes this line from the terminal close's: there
+    // the partner's server was slow to answer, here a session transition of this
+    // adapter's own was, and the operator can act on the two differently. Same
+    // severity and same closing sentence, for the same reason -- teardown's close
+    // runs last, so nothing it reports changes what the run produced.
+    this.log.info(
+      `A session transition on this SFTP connection did not complete within the ` +
+        `${TRANSITION_ACQUIRE_TIMEOUT_MS} ms teardown wait -- typically a dial ` +
+        `against an unresponsive server -- so this side closed the connection ` +
+        `itself rather than closing it alongside that transition. This close is ` +
+        `the last step of teardown, so it changes neither the run's results nor ` +
+        `its exit code.`,
+    );
+  }
+
   /**
    * Connection-per-poll idle-boundary RELEASE (see the class `ephemeralSessions`
    * field and {@link FileTransportClient.releaseForIdle}). Closes the SFTP
@@ -1635,14 +1999,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * {@link forceCloseEndedTransport}).
    *
    * The poll loop AWAITS this call and core forwards it unwrapped (see
-   * {@link runTransition}), so nothing above bounds it: its own
-   * duration is the loop's liveness bound. The close carries the
-   * {@link CLIENT_CLOSE_TIMEOUT_MS} ceiling and the forced close that may follow it
-   * the {@link FORCED_CLOSE_TIMEOUT_MS} one; the acquire that precedes both is
-   * deliberately unbounded, so it carries only whatever bounds the transition it
-   * queues behind (for a dial, that dial's whole connect budget:
-   * `max_reconnect_attempts` attempts each up to the connect timeout, around a
-   * minute at the defaults and longer if the operator raises that setting).
+   * {@link runTransition}), so nothing above bounds it: its own duration is the
+   * loop's liveness bound, and the whole of that duration is bounded here. The
+   * close carries the {@link CLIENT_CLOSE_TIMEOUT_MS} ceiling, the forced close
+   * that may follow it the {@link FORCED_CLOSE_TIMEOUT_MS} one, and the acquire
+   * that precedes both the {@link TRANSITION_ACQUIRE_TIMEOUT_MS} one -- past which
+   * the release declines, having closed nothing, under a paced warning, and the
+   * loop cycles on rather than stalling to the peer-inactivity ceiling.
    *
    * The whole body, forced close included, holds the transition lock, so an
    * operation ISSUED while it runs re-establishes the session through
@@ -1659,8 +2022,34 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return this.runTransition({
       kind: "releaseForIdle",
       skipped: () => undefined,
-      run: (recordBoundary) => this.releaseSessionForIdle(recordBoundary),
+      abandoned: () => this.warnIdleReleaseDeclined(),
+      run: (held) => this.releaseSessionForIdle(held),
     });
+  }
+
+  // The idle release gave up its wait for the transition ahead of it: it released
+  // nothing, so a session that is live is held across this idle gap -- the one
+  // thing the mode exists to prevent -- while the alternative, parking the poll
+  // loop until the hour-scale peer-inactivity ceiling misreports it as peer
+  // silence, is worse. Paced exactly like the forced release's warning
+  // (SFTP_REDIAL_WARN_INTERVAL) and for the same reason: whatever holds a
+  // transition long enough to do this once tends to do it every cycle, and an
+  // unpaced line would fill an hours-long exchange's log.
+  private warnIdleReleaseDeclined(): void {
+    this.declinedReleases += 1;
+    const count = this.declinedReleases;
+    if (count !== 1 && count % SFTP_REDIAL_WARN_INTERVAL !== 0) return;
+    this.log.warn(
+      `The connection-per-poll idle release did not close the SFTP session: ` +
+        `another session transition on this connection -- typically a dial ` +
+        `against an unresponsive server -- did not complete within the ` +
+        `release's ${TRANSITION_ACQUIRE_TIMEOUT_MS} ms wait, and closing the ` +
+        `session alongside it would corrupt the one shared client. The session ` +
+        `may still be live and held across this idle gap; the next poll cycle ` +
+        `releases again and the exchange continues (${count} idle ` +
+        `${count === 1 ? "boundary" : "boundaries"} released nothing this way ` +
+        `so far this exchange).`,
+    );
   }
 
   // The locked body of releaseForIdle. Taking the transition lock for the whole of
@@ -1672,7 +2061,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // not-yet-established session as "nothing to release" and the mode would silently
   // keep the very session it exists to shed.
   private async releaseSessionForIdle(
-    recordBoundary: SessionBoundaryRecorder,
+    held: HeldSessionTransition,
   ): Promise<void> {
     // No held session to keep warm across the idle gap.
     this.heartbeat.stop();
@@ -1694,8 +2083,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // deliberate. A release that raises below has ended nothing and leaves the
     // session reading live, which runTransition takes the boundary back over on
     // the way out, so the next drop stays classifiable as the drop it is.
-    if (!peerEndedTransport) recordBoundary("deliberatelyReleased");
+    if (!peerEndedTransport) held.recordBoundary("deliberatelyReleased");
     await this.awaitClientClose(
+      held,
       once,
       removeListener,
       CLIENT_CLOSE_TIMEOUT_MS,
@@ -1714,7 +2104,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // session something deliberately ended, and exempting a live session's next
       // drop from the counters and the operator warning is the misreport it exists
       // to prevent.
-      recordBoundary("notReleased");
+      held.recordBoundary("notReleased");
       this.log.warn(
         "The connection-per-poll idle release did not close the SFTP session " +
           "and its transport is still writable, which the ssh2 client's end() " +
@@ -1725,6 +2115,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       return;
     }
     await this.forceCloseEndedTransport(
+      held,
       internals,
       destroy,
       once,
@@ -1743,6 +2134,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // reconnects) until Node reports a listener leak. A throw out of `drive`
   // propagates with the wait already dismantled, so nothing is left pending.
   private async awaitClientClose(
+    held: HeldSessionTransition,
     once: (event: "close", listener: () => void) => void,
     removeListener: (event: "close", listener: () => void) => void,
     timeoutMs: number,
@@ -1757,6 +2149,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     once("close", onClose);
     try {
       await this.awaitBoundedTeardown(
+        held,
         closed,
         timeoutMs,
         drive,
@@ -1789,16 +2182,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // exit -- silently, code 0 -- before the caller's read-back runs, in exactly the
   // case the bound exists for (measured both ways).
   private async awaitBoundedTeardown(
+    held: HeldSessionTransition,
     settled: Promise<unknown>,
     timeoutMs: number,
     drive: (() => void) | undefined,
     holdProcessAlive: boolean,
   ): Promise<BoundedTeardownOutcome> {
-    // The one funnel for every teardown this adapter drives past the public API --
-    // the ssh2 Client's end() and both forced socket destroys reach the transport
-    // as this method's `drive` -- so holding the transition here holds it for all
-    // of them.
-    this.assertTransitionHeld("an ssh2 transport teardown");
+    // The funnel for every teardown this adapter drives past the public API that
+    // has something to wait for -- the ssh2 Client's end() and both forced socket
+    // destroys reach the transport as this method's `drive` -- so holding the
+    // transition here holds it for all of them. The abandoned teardown's forced
+    // close is the one destroy that does not come through here: it has nothing to
+    // wait for, and it runs under its own exemption from that check
+    // ({@link forceCloseAbandonedTeardown}).
+    this.assertTransitionHeld("an ssh2 transport teardown", held);
     let expire!: () => void;
     const bound = new Promise<BoundedTeardownOutcome>((resolve) => {
       expire = () => resolve({ status: "expired" });
@@ -1903,12 +2300,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // is read back and raised where it is driven, and the boundary is counted only
   // when it holds.
   private async forceCloseEndedTransport(
+    held: HeldSessionTransition,
     internals: Ssh2SftpClientInternals,
     destroy: () => void,
     once: (event: "close", listener: () => void) => void,
     removeListener: (event: "close", listener: () => void) => void,
   ): Promise<void> {
     await this.awaitClientClose(
+      held,
       once,
       removeListener,
       FORCED_CLOSE_TIMEOUT_MS,
@@ -1958,19 +2357,28 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * transient dial failure (the caller skips this cycle and retries next tick),
    * and rejects only on a fatal condition (a host-key rejection) that terminates
    * the exchange. A no-op returning `true` when the mode is off, during teardown,
-   * or when a session is already live.
+   * or when a session is already live. A dial that fails once teardown has been
+   * latched reports the same `false` and reports nothing to the operator: this run
+   * has no next tick, and the failure may be the teardown's own destroy settling
+   * this very dial.
    *
    * Core forwards it unwrapped (see {@link runTransition}), so its acquire of the
    * transition lock -- which is what keeps two handshakes, or a handshake and a
-   * close, off the one shared Ssh2SftpClient -- carries only whatever bounds the
-   * transition it queues behind.
+   * close, off the one shared Ssh2SftpClient -- is bounded by that lock's own
+   * {@link TRANSITION_ACQUIRE_TIMEOUT_MS} and nothing else. Past it the re-dial
+   * reports the same `false` a transient dial failure reports, under a paced
+   * warning, so the loop skips this cycle and retries on the next tick.
    */
   ensureConnected(): Promise<boolean> {
     if (!this.ephemeralSessions) return Promise.resolve(true);
     return this.runTransition({
       kind: "ensureConnected",
       skipped: () => true,
-      run: async (recordBoundary) => {
+      abandoned: () => {
+        this.warnCycleRedialDeclined();
+        return false;
+      },
+      run: async (held) => {
         const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
         // A concurrent recovery re-dial or ensureConnected (e.g. the close()
         // abort-marker write) already reconnected; nothing to do.
@@ -1982,10 +2390,21 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
               "a poll cycle ran before connect()",
           );
         try {
-          await this.connectLocked(options, recordBoundary);
+          await this.connectLocked(options, held);
           return true;
         } catch (error: unknown) {
           if (this.isFatalDialError(error)) throw error;
+          // This run is closing, so there is no next tick to retry on -- and the
+          // dial may have failed BECAUSE of the teardown: an abandoning teardown
+          // destroys the transport beneath a dial in flight, and that rejection
+          // carries the same error a genuine peer close does. Warning about a
+          // transient partner failure and promising a retry that cannot happen
+          // would report this adapter's own close as the partner's. What closed the
+          // connection is reported by the teardown that closed it. Read in the
+          // catch and not before the dial: a dial during teardown but ahead of
+          // end()'s latch -- the abort-marker write's re-establish -- still needs
+          // this warning.
+          if (this.closing) return false;
           // A transient dial failure (server briefly unreachable, connection
           // refused, auth exhaustion) is not fatal in this mode: report it and let
           // the poll loop skip this cycle and retry on the next tick. The
@@ -2000,6 +2419,27 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         }
       },
     });
+  }
+
+  // The cycle-start re-dial gave up its wait for the transition ahead of it: it
+  // dialed nothing, so this cycle carries no session and the poll loop skips it.
+  // Paced exactly like the idle release's decline (warnIdleReleaseDeclined) and for
+  // the same reason: core drives both signals once per poll cycle, and whatever
+  // holds a transition long enough to decline one tends to hold it every cycle, so
+  // an unpaced line would fill an hours-long exchange's log.
+  private warnCycleRedialDeclined(): void {
+    this.declinedCycleRedials += 1;
+    const count = this.declinedCycleRedials;
+    if (count !== 1 && count % SFTP_REDIAL_WARN_INTERVAL !== 0) return;
+    this.log.warn(
+      `ephemeral SFTP re-dial declined: another session transition on this ` +
+        `connection did not complete within the re-dial's ` +
+        `${TRANSITION_ACQUIRE_TIMEOUT_MS} ms wait, and dialing alongside it ` +
+        `would corrupt the one shared client; skipping this poll cycle and ` +
+        `retrying on the next tick (${count} ` +
+        `${count === 1 ? "cycle" : "cycles"} skipped this way so far this ` +
+        `exchange)`,
+    );
   }
 
   // A dial failure that must terminate the exchange rather than be retried on the

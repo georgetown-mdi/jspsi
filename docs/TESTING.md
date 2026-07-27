@@ -68,10 +68,12 @@ paths. The in-process backend adds two surfaces a real `sshd` cannot offer:
 
 - Fault injection -- a malformed NAME or DATA packet, a request accepted and
   never answered, transient RENAME failures, capped READDIR batches.
-- `sessionControls.ts`, the session-teardown hub -- lifetime, op-count, and idle
-  caps that drop a live session, one-shot drops armed on the Nth further
-  operation or on a wall clock, and a withheld-close mode that consumes the
-  client's FIN and sends nothing back, leaving it in half-close.
+- `sessionControls.ts`, the session-lifecycle hub -- lifetime, op-count, and
+  idle caps that drop a live session, one-shot drops armed on the Nth further
+  operation or on a wall clock, a withheld-close mode that consumes the client's
+  FIN and sends nothing back, leaving it in half-close, and a handshake stall
+  that accepts the TCP connection and never writes a byte, so a dial hangs
+  established but never ready.
 
 Adapter behavior against a partner that cuts, stalls, or never closes is
 asserted through those controls. A probe that settles a dependency fact belongs

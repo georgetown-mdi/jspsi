@@ -307,6 +307,51 @@ test("close is idempotent and safe on a connection that was never opened", async
   await expect(conn.close()).resolves.toBeUndefined();
 });
 
+test("close() ends no client while the first dial is still in flight", async () => {
+  // `connected` is set only once connect() has resolved, and close() drives end()
+  // only under it, so a close that lands over an unfinished first dial ends
+  // nothing. A transport can lean on that ordering: the SFTP transport bounds its
+  // own wait for whatever session transition is ahead of it, and a teardown whose
+  // wait expires destroys the socket beneath that transition -- over a first dial
+  // that would surface the destroy's rejection to open()'s caller as a partner-side
+  // connect failure. Nothing there can check this gate for itself, so it is pinned
+  // here rather than left to hold by call order.
+  const { client } = makeMockClient();
+  let endCalls = 0;
+  client.end = async () => {
+    endCalls += 1;
+  };
+  let dialing!: () => void;
+  const dialStarted = new Promise<void>((resolve) => {
+    dialing = resolve;
+  });
+  let settleDial!: () => void;
+  client.connect = () =>
+    new Promise<void>((resolve) => {
+      settleDial = resolve;
+      dialing();
+    });
+
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  const opening = conn.open({
+    channel: "sftp",
+    server: { host: "sftp.example.org", path: "/exchanges" },
+  });
+  await dialStarted;
+  expect(conn.connected).toBe(false);
+
+  await expect(conn.close()).resolves.toBeUndefined();
+  expect(endCalls).toBe(0);
+
+  // Once that dial lands the same close does end the client, so the case above is
+  // the gate rather than a client this close could never have ended.
+  settleDial();
+  await opening;
+  expect(conn.connected).toBe(true);
+  await expect(conn.close()).resolves.toBeUndefined();
+  expect(endCalls).toBe(1);
+});
+
 test("close() sweeps responsible files and ends the client, idempotently", async () => {
   const { client, files } = makeMockClient();
   let ended = false;
