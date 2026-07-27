@@ -16,9 +16,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const dockerfile = readFileSync(resolve(here, "..", "Dockerfile"), "utf8");
 
 // Fold "\"-continued lines into one logical instruction, then drop blanks and
-// comments.
+// comments. The fold removes the backslash and the newline and inserts nothing,
+// which is what Docker's own parser does: a continuation with no space before
+// the backslash joins two tokens into one, and reading it as two would let the
+// frozen text below match a command the build does not run.
 const instructions = dockerfile
-  .replace(/\\\r?\n/g, " ")
+  .replace(/\\\r?\n/g, "")
   .split("\n")
   .map((line) => line.trim())
   .filter((line) => line !== "" && !line.startsWith("#"))
@@ -78,9 +81,12 @@ const ROOT_NPMRC_SOURCE = /^(?:\.\/)?\.npmrc$/;
 // a property of the base image's digest rather than of anything in this repo.
 const NPM_POLICY_FLOOR = "11.17";
 
-// Whitespace-collapsed, since folding a "\"-continued line changes the run of
-// spaces between two tokens and nothing else.
-const normalize = (rest) => rest.trim().replace(/\s+/g, " ");
+// Collapsed on the ASCII blanks a shell treats as separators, since indenting a
+// "\"-continued line changes the run of spaces between two tokens and nothing
+// else. Deliberately not /\s+/: that also eats U+00A0, which the shell does not
+// separate on, so a command carrying one would compare equal to this text while
+// running as something else.
+const normalize = (rest) => rest.trim().replace(/[ \t]+/g, " ");
 
 // Every RUN in the Dockerfile that names npm, frozen to its exact text. This is
 // what stands between the image and an install running under something other
@@ -96,7 +102,8 @@ const normalize = (rest) => rest.trim().replace(/\s+/g, " ");
 // therefore means changing the literal here in the same diff, where the review
 // reads the command rather than a verdict about it.
 const EXPECTED_NPM_RUNS = [
-  'npm_version="$(npm --version)"; npm_major="${npm_version%%.*}"; ' +
+  "--mount=type=cache,target=/root/.npm " +
+    'npm_version="$(npm --version)"; npm_major="${npm_version%%.*}"; ' +
     'npm_minor="${npm_version#*.}"; npm_minor="${npm_minor%%.*}"; ' +
     'if ! { [ "$npm_major" -gt 11 ] || ' +
     '{ [ "$npm_major" = 11 ] && [ "$npm_minor" -ge 17 ]; }; }; then ' +
@@ -123,8 +130,10 @@ const EXPECTED_NPM_RUNS = [
 const POLICY_GUARD = EXPECTED_NPM_RUNS[0];
 const INSTALL_RUNS = [EXPECTED_NPM_RUNS[1], EXPECTED_NPM_RUNS[4]];
 
+// npx as well as npm: npx is npm exec, which fetches and runs a package from the
+// registry into a layer the release build exports to a shared cache.
 const npmRuns = instructions
-  .filter(({ inst, rest }) => inst === "RUN" && /\bnpm\b/.test(rest))
+  .filter(({ inst, rest }) => inst === "RUN" && /\bnp[mx]\b/.test(rest))
   .map(({ rest }) => normalize(rest));
 
 // A RUN that writes the file out from inside the image replaces the
@@ -132,6 +141,39 @@ const npmRuns = instructions
 const npmrcRewrites = instructions.filter(
   ({ inst, rest }) => inst === "RUN" && /\.npmrc/.test(rest),
 );
+
+// npm resolves an npm_config_-prefixed variable ahead of the project .npmrc, and
+// the guard below reads npm's answer once, in its own process: a variable set
+// after it runs is one it cannot see and the frozen command text does not carry.
+// Measured on npm 11.17.0, `npm_config_strict_allow_scripts=false` resolves the
+// policy to false. This is a whole class of instruction the file has no occasion
+// to use, so none is permitted rather than a list of the harmful names.
+const npmConfigEnv = instructions.filter(
+  ({ inst, rest }) =>
+    (inst === "ENV" || inst === "ARG") && /\bnpm_config_/i.test(rest),
+);
+
+// A heredoc RUN body is not one logical line, so the line-based read above would
+// take `RUN <<EOF` as a RUN naming no npm and the lines inside it as their own
+// instructions. The file has no occasion to use one, and refusing is what keeps
+// the freeze speaking for every command the builder runs.
+const heredocRuns = instructions.filter(
+  ({ inst, rest }) => inst === "RUN" && rest.includes("<<"),
+);
+
+// The directory each instruction runs in, tracked through WORKDIR. The guard
+// reads npm's configuration at its own prefix, so an install that has since
+// moved to another directory is one the guard did not speak for -- npm resolves
+// the .npmrc at the prefix, and there is none in a subdirectory.
+const cwdAt = [];
+{
+  let cwd = "/";
+  for (const { inst, rest } of instructions) {
+    if (inst === "FROM") cwd = "/";
+    if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
+    cwdAt.push(cwd);
+  }
+}
 
 const builderRuns = builder
   .filter(({ inst }) => inst === "RUN")
@@ -148,6 +190,10 @@ const firstInstall = Math.min(
   ...INSTALL_RUNS.map(builderIndexOf).map((i) => (i === -1 ? Infinity : i)),
 );
 const policyGuard = builderIndexOf(POLICY_GUARD);
+
+// A RUN's own flags (`--mount=...`) precede the command Docker hands the shell,
+// so they come off before the body is run as one.
+const shellBody = (body) => body.replace(/^(?:--\S+\s+)*/, "");
 
 // Run the guard's own shell body against a stub `npm` that answers `--version`
 // with `version` and `config get` with `config`, or against no npm at all for a
@@ -167,7 +213,7 @@ const runPolicyGuard = (version, config = "true") => {
         },
       );
     }
-    return spawnSync("/bin/sh", ["-c", POLICY_GUARD], {
+    return spawnSync("/bin/sh", ["-c", shellBody(POLICY_GUARD)], {
       env: { PATH: bin },
       encoding: "utf8",
     });
@@ -199,15 +245,22 @@ describe("Dockerfile dependency freeze", () => {
     // whatever lands on the name last is what the install reads.
     const npmrcCopies = builder.flatMap(({ inst, rest }, index) =>
       inst === "COPY"
-        ? copyTargets("/build", rest)
+        ? copyTargets(cwdAt[index], rest)
             .copies.filter(({ dest }) => posix.basename(dest) === ".npmrc")
-            .map(({ source }) => ({ index, source }))
+            .map(({ source, dest }) => ({ index, source, dest }))
         : [],
     );
     expect(npmrcCopies.length).toBeGreaterThan(0);
     const last = npmrcCopies[npmrcCopies.length - 1];
     expect(last.source).toMatch(ROOT_NPMRC_SOURCE);
     expect(firstInstall).toBeGreaterThan(last.index);
+    // npm reads the .npmrc at the prefix it runs in, so the guard and both
+    // installs have to run in the directory it landed in -- a WORKDIR moved
+    // between them puts the install somewhere holding no .npmrc at all.
+    const npmrcDir = posix.dirname(last.dest);
+    expect(cwdAt[policyGuard]).toBe(npmrcDir);
+    for (const body of INSTALL_RUNS)
+      expect(cwdAt[builderIndexOf(body)]).toBe(npmrcDir);
   });
 
   it("asks npm what it will do before installing anything", () => {
@@ -217,6 +270,17 @@ describe("Dockerfile dependency freeze", () => {
     // itself, which is the one reading no static model of this file can give.
     expect(policyGuard).toBeGreaterThanOrEqual(0);
     expect(firstInstall).toBeGreaterThan(policyGuard);
+  });
+
+  it("sets no npm_config_ variable the guard would not have seen", () => {
+    // The guard answers for the environment as it stood when it ran; npm
+    // resolves one of these ahead of the .npmrc, so one set afterwards installs
+    // under something the guard never measured and no frozen command carries.
+    expect(npmConfigEnv).toEqual([]);
+  });
+
+  it("spells every RUN on one logical line, so the freeze reads them all", () => {
+    expect(heredocRuns).toEqual([]);
   });
 
   it("lets no RUN rewrite the .npmrc the guard read", () => {

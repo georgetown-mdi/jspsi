@@ -31,7 +31,8 @@ COPY lib lib
 # will do. Which npm this stage gets is a property of the base digest rather than
 # of anything in this repo, so both are read here instead of letting a base
 # re-pin quietly un-enforce the policy. See docs/spec/DEPENDENCY_PINS.md.
-RUN npm_version="$(npm --version)"; \
+RUN --mount=type=cache,target=/root/.npm \
+  npm_version="$(npm --version)"; \
   npm_major="${npm_version%%.*}"; \
   npm_minor="${npm_version#*.}"; npm_minor="${npm_minor%%.*}"; \
   if ! { [ "$npm_major" -gt 11 ] || \

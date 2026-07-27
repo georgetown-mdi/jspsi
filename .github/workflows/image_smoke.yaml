@@ -23,11 +23,13 @@ on:
       - "packages/**"
       - "lib/**"
       - "package-lock.json"
-      # The builder copies the root .npmrc in beside the lockfile, so the
-      # install policy it states is an image build input on the same footing:
-      # a flag interaction or an added registry that only breaks the
+      # The builder copies the root .npmrc and package.json in beside the
+      # lockfile, so the install policy the one states and the allowScripts map
+      # the other carries are image build inputs on the same footing: a flag
+      # interaction, an added registry, or a verdict change that only breaks the
       # containerised install would otherwise surface first at a release tag.
       - ".npmrc"
+      - "package.json"
       - ".github/workflows/image_smoke.yaml"
 
 # Cancel a superseded run when a newer commit lands on the same PR/branch.
