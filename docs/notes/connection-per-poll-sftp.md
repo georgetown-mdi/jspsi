@@ -272,13 +272,17 @@ discovered.
 before returning its "nothing to do" value.** It does not short-circuit on the
 latch, because a second reading of that latch outside the lock is exactly the
 distributed re-read the single in-lock read exists to avoid. The wait cannot be
-indefinite: what it waits for is teardown's own close, which carries the
-`CLIENT_CLOSE_TIMEOUT_MS` and `FORCED_CLOSE_TIMEOUT_MS` bounds, and neither
-signal is awaited by the teardown, so no cycle can form -- core stops the poll
-loop before it closes the transport, and its `close()` never joins the loop. The
-integration suite drives it against the partner that spends those bounds in full
--- one that accepts the disconnect and never closes the connection -- and pins
-the wait as bounded: about five seconds, once, at the end of a run.
+indefinite, but it is not the teardown's own close alone: a signal queued behind
+teardown waits out whatever transition is running AHEAD of it as well, which for
+a dial is that dial's whole connect budget (`max_reconnect_attempts` attempts,
+each up to the connect timeout), and then the teardown's close, which carries the
+`CLIENT_CLOSE_TIMEOUT_MS` and `FORCED_CLOSE_TIMEOUT_MS` bounds. Every one of
+those is a bound that already governed the transition carrying it. Neither signal
+is awaited by the teardown, so no cycle can form -- core stops the poll loop
+before it closes the transport, and its `close()` never joins the loop. The
+integration suite drives the close half against the partner that spends those
+bounds in full -- one that accepts the disconnect and never closes the connection
+-- and pins the wait as bounded: about five seconds, once, at the end of a run.
 
 **Whether a same-tick release and `close()` run the release or skip it turns on
 whether the queue was idle.** A release requested on an idle queue starts
