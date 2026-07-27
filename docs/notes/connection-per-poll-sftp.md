@@ -520,8 +520,14 @@ What the run shows, at the moment the forced close lands:
   handshake has not restored. This is why the abandoning teardown reaches the
   destroy and never `end()`: the destroy is the only thing that closes anything.
 - **The destroy is silent.** At default verbosity it draws no WARN and no ERROR of
-  its own -- in particular not the "ssh2 client error outside an operation" line --
-  so the operator-facing line on that path is a deliberate one.
+  its own -- in particular not the "ssh2 client error outside an operation" line.
+  What it does produce is the settled sibling's rejection, and whether that reaches
+  the operator is the adapter's own doing: the cycle-start re-dial riding it reads
+  the teardown latch before it warns, and a recovery re-dial's caller surfaces the
+  loss it was recovering from instead of that rejection, so the only operator-facing
+  line on this path is the deliberate one. The cycle-start half is asserted against
+  the real stack at the CLI's default log level, because a mocked dial that stays
+  parked through the destroy never reaches the line at all.
 
 The bound itself rests on none of this: it is a fixed ceiling on the wait, so
 whether ssh2 arms its connect deadline per attempt changes when the sibling gives

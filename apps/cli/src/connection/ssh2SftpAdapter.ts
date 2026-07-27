@@ -97,12 +97,19 @@ const FORCED_CLOSE_TIMEOUT_MS = 1_000;
 //
 // The value: above the 6 s a legitimate release can spend
 // (CLIENT_CLOSE_TIMEOUT_MS then FORCED_CLOSE_TIMEOUT_MS), so a teardown queued
-// behind a normal release never gives up on it prematurely; and small enough that
-// this bound plus the forced close it ends in stays inside core's own teardown
-// backstop, so the destroy runs before core abandons its wait and a completed run
-// still exits by drain. That is what makes an abandoned wait teardown-scale in the
-// sense FileTransportClient.end's contract requires. Deliberately not
-// operator-configurable, like every other SFTP liveness bound.
+// behind a normal release does not give up on it prematurely. That is a
+// relationship between three independent constants, so it is DRIVEN -- by the unit
+// test whose release "spends its whole close budget" with a teardown queued behind
+// it -- rather than left to the arithmetic here. And teardown-scale in the sense
+// FileTransportClient.end's contract requires: this bound plus the forced close it
+// ends in is an order of magnitude below the dial budget an unbounded wait would
+// ride. It owes nothing to the budget end()'s CALLER holds, which can be smaller
+// (core races end() against one a low peer_timeout_ms puts under this bound):
+// abandoning that wait closes nothing, while the abandon here runs on its own
+// ref'd timer, so a caller that gave up waiting is still left an exited process
+// rather than a half-open socket -- also driven, by the unit test whose caller
+// gives up first. Deliberately not operator-configurable, like every other SFTP
+// liveness bound.
 const TRANSITION_ACQUIRE_TIMEOUT_MS = 10_000;
 
 // The ssh2 Client's underlying net.Socket, which the adapter reaches directly for
@@ -387,6 +394,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // (shouldRecoverFromSessionLoss) -- a re-dial's readyTimeout would slow a clean
   // close, and a freshly-dialed session would outlive the teardown.
   private closing = false;
+  // Latched true when an abandoning teardown closed the transport itself (see
+  // forceCloseAbandonedTeardown), which cuts short whatever dial the transition it
+  // gave up on was running. That dial rejects with the same error a genuine peer
+  // close produces (measured; see docs/spec/DEPENDENCY_PINS.md), so telling "this
+  // adapter closed it" from "the partner dropped us" takes this reading rather than
+  // a match on the error text. Read by session recovery, which then surfaces the
+  // loss it was recovering from instead of an error of this adapter's own making.
+  // Never cleared: it is only ever set on a connection already closing.
+  private abandonedTeardownClosedTransport = false;
   // The connection's one terminal close, memoized by end() on its first call: a
   // repeat or concurrent close awaits this one instead of driving a second on the
   // same client. Driving a second is not merely wasteful -- this close does not
@@ -1161,7 +1177,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         this.midExchangeRedials >= this.operativeMaxReconnectAttempts()
       )
         throw this.midExchangeReconnectBudgetExhaustedError();
-      const sessionLive = await this.redialForRecovery();
+      const sessionLive = await this.redialForRecovery().catch(
+        (redialError: unknown) => {
+          // This re-dial can be the very dial an abandoning teardown destroyed the
+          // transport beneath, and its rejection then reports a close of this
+          // adapter's own as a partner-side one. Fall through to the closing branch
+          // below, which surfaces the loss this recovery was for, rather than
+          // replacing it with that error.
+          if (this.abandonedTeardownClosedTransport) return false;
+          throw redialError;
+        },
+      );
       // end() may have latched `closing` while the re-dial held the transition
       // lock: join the teardown that will close the freshly-dialed session, so no
       // session outlives it, and surface the original loss rather than re-issuing
@@ -1884,6 +1910,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // end() as best-effort and logs a rejection at debug.
   private forceCloseAbandonedTeardown(): void {
     this.assertAbandonedTeardownMayForceClose();
+    // Nothing may keep pinging a transport this is about to destroy, and the
+    // degraded branch below reports this teardown DONE over a transport it could
+    // not close, so the stop precedes both -- as it does in closeTerminally. Local
+    // timer state only, so unlike every other teardown action it drives nothing on
+    // the client the transition ahead of this one still holds.
+    this.heartbeat.stop();
     const internals = this.client as unknown as Ssh2SftpClientInternals;
     const seam = this.resolveTerminalCloseSeam(internals);
     if ("missing" in seam) {
@@ -1900,12 +1932,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       );
       return;
     }
-    // Nothing may keep pinging a transport this is about to destroy. Local timer
-    // state only, so unlike every other teardown action it drives nothing on the
-    // client the transition ahead of this one still holds.
-    this.heartbeat.stop();
     try {
       seam.destroy();
+      // Set where the destroy is driven rather than after the read-back below: it
+      // is the destroy that settles the dial this teardown gave up on, whatever the
+      // socket then reports about itself.
+      this.abandonedTeardownClosedTransport = true;
     } catch (error: unknown) {
       this.log.warn(
         `Closing the SFTP connection from this side failed at teardown: ` +
@@ -2323,7 +2355,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * transient dial failure (the caller skips this cycle and retries next tick),
    * and rejects only on a fatal condition (a host-key rejection) that terminates
    * the exchange. A no-op returning `true` when the mode is off, during teardown,
-   * or when a session is already live.
+   * or when a session is already live. A dial that fails once teardown has been
+   * latched reports the same `false` and reports nothing to the operator: this run
+   * has no next tick, and the failure may be the teardown's own destroy settling
+   * this very dial.
    *
    * Core forwards it unwrapped (see {@link runTransition}), so its acquire of the
    * transition lock -- which is what keeps two handshakes, or a handshake and a
@@ -2357,6 +2392,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           return true;
         } catch (error: unknown) {
           if (this.isFatalDialError(error)) throw error;
+          // This run is closing, so there is no next tick to retry on -- and the
+          // dial may have failed BECAUSE of the teardown: an abandoning teardown
+          // destroys the transport beneath a dial in flight, and that rejection
+          // carries the same error a genuine peer close does. Warning about a
+          // transient partner failure and promising a retry that cannot happen
+          // would report this adapter's own close as the partner's. What closed the
+          // connection is reported by the teardown that closed it. Read in the
+          // catch and not before the dial: a dial during teardown but ahead of
+          // end()'s latch -- the abort-marker write's re-establish -- still needs
+          // this warning.
+          if (this.closing) return false;
           // A transient dial failure (server briefly unreachable, connection
           // refused, auth exhaustion) is not fatal in this mode: report it and let
           // the poll loop skip this cycle and retry on the next tick. The

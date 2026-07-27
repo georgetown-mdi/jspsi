@@ -6135,6 +6135,36 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(socket.destroy).toHaveBeenCalledOnce();
   });
 
+  test("an abandoned teardown that cannot close the transport still stops the keepalive", async () => {
+    // The degraded branch reports this teardown DONE over a transport it could not
+    // close, so the keepalive must not go on beating against that connection --
+    // which is why the stop precedes the seam, exactly as it does in the terminal
+    // close. Driven in the default held-session mode, the one that arms a heartbeat.
+    vi.useFakeTimers();
+    try {
+      const { client, rawClient } = ephemeralClient(wrapperMethods());
+      const adapter = new SSH2SFTPClientAdapter();
+      stub(adapter);
+      install(adapter, client);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internals = adapter as any;
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      // An ssh2 that relocated the socket's destroy, the one seam this path drives.
+      delete (rawClient._sock as { destroy?: unknown }).destroy;
+      internals.closing = true;
+      internals.forceCloseAbandonedTeardown();
+
+      expect(adapterLog(adapter).warn).toHaveBeenCalledWith(
+        expect.stringContaining("client._sock.destroy()"),
+      );
+      await vi.advanceTimersByTimeAsync(SFTP_HEARTBEAT_INTERVAL_MS * 3);
+      expect(client.realPath).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("an operation on a live session takes no session transition at all", async () => {
     // The gate's fast path: with no release outstanding and none standing
     // unreconciled, an operation is issued with no acquire and not even a
@@ -6204,16 +6234,51 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   // not a seam), so the cases below can sit either side of it.
   const ACQUIRE_BOUND_MS = 10_000;
 
-  // A cycle-start dial whose handshake never settles, entered on an idle queue so
-  // it HOLDS the transition while everything requested behind it waits. Its own
-  // ceiling is its caller's, which is exactly what the lock does not bound.
+  // The two bounds a release spends in its worst case, duplicated from the adapter
+  // for the same reason, so the case that drives their sum against the bound above
+  // can sit either side of each.
+  const CLIENT_CLOSE_BOUND_MS = 5_000;
+  const FORCED_CLOSE_BOUND_MS = 1_000;
+
+  // A dial that never settles on its own but DOES settle when something destroys the
+  // transport beneath it, because that is what the real stack does: a destroy
+  // mid-handshake cuts the parked attempt short and it rejects with an
+  // unexpected-close error indistinguishable from a peer's (measured; see
+  // docs/spec/DEPENDENCY_PINS.md). A dial that stayed parked through the destroy
+  // would hide what this adapter reports about that rejection, which is the
+  // operator-facing half of what an abandoning teardown does.
+  function parkDialUntilTransportDestroyed(
+    connect: ReturnType<typeof vi.fn>,
+    rawClient: EventEmitter,
+  ): void {
+    connect.mockImplementation(
+      () =>
+        new Promise<void>((_settle, reject) => {
+          rawClient.once("close", () => {
+            reject(
+              Object.assign(
+                new Error("getConnection: Unexpected close event"),
+                {
+                  code: "ERR_GENERIC_CLIENT",
+                },
+              ),
+            );
+          });
+        }),
+    );
+  }
+
+  // A cycle-start dial parked that way, entered on an idle queue so it HOLDS the
+  // transition while everything requested behind it waits. Its own ceiling is its
+  // caller's, which is exactly what the lock does not bound.
   function neverSettlingHolder(
     adapter: SSH2SFTPClientAdapter,
     connect: ReturnType<typeof vi.fn>,
     state: { live: boolean },
+    rawClient: EventEmitter,
   ): Promise<boolean> {
     state.live = false;
-    connect.mockImplementation(() => new Promise<void>(() => {}));
+    parkDialUntilTransportDestroyed(connect, rawClient);
     const holder = adapter.ensureConnected();
     void holder.catch(() => {});
     return holder;
@@ -6256,7 +6321,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
 
       let holderSettled = false;
-      const holder = neverSettlingHolder(adapter, connect, state);
+      const holder = neverSettlingHolder(adapter, connect, state, rawClient);
       void holder.then(
         () => {
           holderSettled = true;
@@ -6285,13 +6350,14 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   test("each transition kind enqueued behind a never-settling sibling abandons at the bound", async () => {
     vi.useFakeTimers();
     try {
-      const { client, connect, state } = ephemeralClient(wrapperMethods());
+      const { client, connect, state, rawClient } =
+        ephemeralClient(wrapperMethods());
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       stub(adapter);
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
-      neverSettlingHolder(adapter, connect, state);
+      neverSettlingHolder(adapter, connect, state, rawClient);
 
       const settled: Record<string, string> = {};
       const record = (name: string, promise: Promise<unknown>): Promise<void> =>
@@ -6351,13 +6417,14 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // path's occurrences and misstate both numbers.
     vi.useFakeTimers();
     try {
-      const { client, connect, state } = ephemeralClient(wrapperMethods());
+      const { client, connect, state, rawClient } =
+        ephemeralClient(wrapperMethods());
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       stub(adapter);
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
-      neverSettlingHolder(adapter, connect, state);
+      neverSettlingHolder(adapter, connect, state, rawClient);
 
       const cycles = SFTP_REDIAL_WARN_INTERVAL + 2;
       for (let cycle = 0; cycle < cycles; cycle += 1) {
@@ -6422,7 +6489,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
         assertHeld(mechanism, held);
       };
 
-      neverSettlingHolder(adapter, connect, state);
+      neverSettlingHolder(adapter, connect, state, rawClient);
       const waiters = Promise.all([
         adapter.connect({ host: "h" }).catch(() => "rejected"),
         adapter.ensureConnected(),
@@ -6516,7 +6583,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
-      neverSettlingHolder(adapter, connect, state);
+      const holder = neverSettlingHolder(adapter, connect, state, rawClient);
 
       const closed = adapter.end();
       await vi.advanceTimersByTimeAsync(ACQUIRE_BOUND_MS + 1_000);
@@ -6530,6 +6597,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       expect(socket.destroyed).toBe(true);
       expect(client.end).not.toHaveBeenCalled();
       expect(rawClient.end).not.toHaveBeenCalled();
+      // The dial the destroy cut short reports the cycle it could not carry, and
+      // reports it SILENTLY: its rejection is the one a peer close produces, so
+      // warning about a transient dial failure -- and promising a retry on a next
+      // tick this closing run does not have -- would tell the operator the partner
+      // dropped a connection this adapter closed itself.
+      await expect(holder).resolves.toBe(false);
       // Reported to the operator at default verbosity, naming the cause: a slow
       // transition of this adapter's own rather than a slow partner. Neither a
       // warning nor an error, so a run that already succeeded still reads as one.
@@ -6544,6 +6617,158 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       expect(adapter.reconnectCount).toBe(0);
       expect(adapter.midExchangeReconnectCount).toBe(0);
       expect(adapter.forcedReleaseCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("an operation whose recovery re-dial the teardown cut short surfaces the loss it was recovering from", async () => {
+    // The other half of the same misattribution. A recovery re-dial can be the dial
+    // an abandoning teardown destroys the transport beneath, and that rejection is
+    // the one a peer close produces -- so the operation would surface this adapter's
+    // own close in place of the session loss it was recovering from. Told apart by
+    // the adapter's own reading of what it did, never by matching the error. Driven
+    // in the default held-session mode, the one mid-exchange recovery was built for.
+    vi.useFakeTimers();
+    try {
+      const { client, connect, state, rawClient, socket } =
+        ephemeralClient(wrapperMethods());
+      const adapter = new SSH2SFTPClientAdapter();
+      stub(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+      // The session drops mid-operation, and the re-dial that follows parks on a
+      // handshake that never settles.
+      state.live = false;
+      parkDialUntilTransportDestroyed(connect, rawClient);
+      const listed = adapter.exists("/remote/out.json").then(
+        () => "listed",
+        (error: unknown) => (error as Error).message,
+      );
+      // The operation's own rejection and the recovery round after it are several
+      // microtasks deep, so the re-dial is awaited into place: the teardown has to
+      // queue BEHIND it rather than enter an idle queue ahead of it.
+      await vi.advanceTimersByTimeAsync(10);
+      expect(connect).toHaveBeenCalledTimes(2);
+      // Now the re-dial holds the transition, so the teardown behind it gives up its
+      // wait and destroys the transport beneath that dial.
+      const closed = adapter.end();
+      await vi.advanceTimersByTimeAsync(ACQUIRE_BOUND_MS + 1_000);
+
+      await expect(closed).resolves.toBeUndefined();
+      expect(socket.destroy).toHaveBeenCalledOnce();
+      // The loss it was recovering from, not the unexpected-close error the destroy
+      // produced on the dial.
+      await expect(listed).resolves.toBe(
+        "exists: No SFTP connection available",
+      );
+      expect(adapterLog(adapter).warn).not.toHaveBeenCalled();
+      expect(adapter.reconnectCount).toBe(0);
+      expect(adapter.midExchangeReconnectCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a teardown queued behind a release that spends its whole close budget waits it out", async () => {
+    // The relationship the acquire bound's value rests on, driven rather than
+    // derived: a release's worst case is CLIENT_CLOSE_TIMEOUT_MS and then
+    // FORCED_CLOSE_TIMEOUT_MS, and a teardown queued behind one of those must wait
+    // it out rather than destroy the transport from under it. Three independent
+    // constants with no arithmetic in the source tying them together, so nothing but
+    // a driven case can hold the relationship.
+    vi.useFakeTimers();
+    try {
+      const { client, rawClient, socket } = ephemeralClient(wrapperMethods());
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      stub(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      const log = recordTransitions(adapter);
+
+      // A partner that answers neither the ssh2 Client's end() nor the destroy
+      // beneath it, which is what makes the release spend both bounds in full: its
+      // end() leaves the transport ended with the session still set, and the forced
+      // close's own wait for the 'close' that would clear it expires too.
+      rawClient.end = vi.fn(() => {
+        socket.writableEnded = true;
+      });
+      socket.destroy = vi.fn(() => {
+        socket.destroyed = true;
+      });
+
+      const settled: string[] = [];
+      const released = adapter.releaseForIdle().then(
+        () => settled.push("released"),
+        () => settled.push("release raised"),
+      );
+      const closed = adapter.end().then(() => settled.push("closed"));
+
+      // Past the release's first bound and into its second, the teardown behind it
+      // is still waiting rather than giving up.
+      await vi.advanceTimersByTimeAsync(
+        CLIENT_CLOSE_BOUND_MS + FORCED_CLOSE_BOUND_MS - 1,
+      );
+      expect(settled).toEqual([]);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(settled).toEqual(["release raised", "closed"]);
+      await Promise.all([released, closed]);
+      // The teardown ran its BODY: it drove ssh2-sftp-client's end(), which the
+      // abandon path never does, and the only destroy is the release's own -- a
+      // second one would be the abandon's.
+      expect(log).toEqual([
+        "start:releaseForIdle",
+        "end:releaseForIdle",
+        "start:teardown",
+        "end:teardown",
+      ]);
+      expect(client.end).toHaveBeenCalledOnce();
+      expect(socket.destroy).toHaveBeenCalledOnce();
+      expect(adapterLog(adapter).info).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a caller that gives up waiting for end() still gets the forced destroy", async () => {
+    // What this bound owes the budget end()'s CALLER holds: nothing. Core races
+    // end() against one of its own that a low peer_timeout_ms can put under this
+    // bound, and abandoning that wait closes nothing -- the destroy is what closes
+    // the transport, and it runs off the abandon's own ref'd timer whether or not
+    // anything is still waiting on it, which is what leaves that caller an exited
+    // process rather than a half-open socket.
+    vi.useFakeTimers();
+    try {
+      const { client, connect, state, rawClient, socket } =
+        ephemeralClient(wrapperMethods());
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      stub(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      neverSettlingHolder(adapter, connect, state, rawClient);
+
+      const callerBudgetMs = 3_000;
+      const closed = adapter.end();
+      const callerWait = Promise.race([
+        closed.then(() => "closed"),
+        new Promise<string>((resolve) => {
+          setTimeout(() => resolve("gave up"), callerBudgetMs);
+        }),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(callerBudgetMs);
+      await expect(callerWait).resolves.toBe("gave up");
+      expect(socket.destroy).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(
+        ACQUIRE_BOUND_MS - callerBudgetMs + 1_000,
+      );
+      expect(socket.destroy).toHaveBeenCalledOnce();
+      expect(socket.destroyed).toBe(true);
+      await expect(closed).resolves.toBeUndefined();
     } finally {
       vi.useRealTimers();
     }

@@ -127,6 +127,17 @@ inProcessOnly(
       expect(
         logs.filter((entry) => entry.message.includes("dropped mid-exchange")),
       ).toEqual([]);
+      // Nor as a partner-side dial failure. The destroy settles the parked dial with
+      // the same error a genuine peer close produces, so the re-dial riding it must
+      // not report a transient failure of the partner's and promise a retry on a
+      // next tick this closing run does not have. Only the real stack can carry this
+      // one: a mock dial that stayed parked through the destroy never reaches the
+      // line at all.
+      expect(
+        logs.filter((entry) =>
+          entry.message.includes("ephemeral SFTP re-dial failed"),
+        ),
+      ).toEqual([]);
     } finally {
       srv.sessionControls.stopStallingHandshakes();
       await conn.close().catch(() => {});
@@ -212,6 +223,11 @@ inProcessOnly(
         "did not complete within the 10000 ms teardown wait",
       );
       expect(out).not.toContain("[ERROR]");
+      // And hears nothing that attributes this adapter's own close to the partner:
+      // the destroy settles the parked dial with the error a peer close produces, so
+      // the re-dial riding it reports no transient dial failure and promises no
+      // next-tick retry on a run that is closing.
+      expect(out).not.toContain("ephemeral SFTP re-dial failed");
     } finally {
       srv.sessionControls.stopStallingHandshakes();
       await fsp.rm(goFile, { force: true });
@@ -352,6 +368,14 @@ inProcessOnly(
       );
       expect(declinedRedials).toHaveLength(1);
       expect(declinedRedials[0].level).toBe("WARN");
+      // The teardown's destroy settles the dial that held the transition all along,
+      // with the error a genuine peer close produces: the re-dial riding it reports
+      // no partner-side dial failure and promises no retry on a closing run.
+      expect(
+        logs.filter((entry) =>
+          entry.message.includes("ephemeral SFTP re-dial failed"),
+        ),
+      ).toEqual([]);
     } finally {
       await fsp.rm(dir, { recursive: true, force: true });
       await srv.stop();
