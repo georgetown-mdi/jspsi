@@ -111,8 +111,7 @@ describe("block-git-identity-override hook", () => {
       "git config --file /tmp/other user.email agent@example.com",
       "git config --add user.email agent@example.com",
       "git config --replace-all user.name Agent",
-      "git config --unset user.email",
-      "git config --remove-section user",
+      "git config --rename-section user agent",
       "git config set user.email agent@example.com",
     ]);
   });
@@ -135,6 +134,18 @@ describe("block-git-identity-override hook", () => {
       "git config --show-origin --get user.email",
       "git config --global --get user.name",
       "git config get user.email",
+    ]);
+  });
+
+  it("allows clearing the configured identity", () => {
+    expectAllowed([
+      "git config --unset user.email",
+      "git config --unset user.email agent@example.com",
+      "git config --unset-all user.name",
+      "git config --global --unset user.email",
+      "git config --remove-section user",
+      "git config unset user.email",
+      "git config remove-section user",
     ]);
   });
 

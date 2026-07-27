@@ -144,8 +144,8 @@ function configKey(setting) {
   return (equals >= 0 ? setting.slice(0, equals) : setting).toLowerCase();
 }
 
-// `user` itself counts: a section-level rename or removal takes the identity with
-// it, leaving git nothing to resolve.
+// `user` itself counts: renaming the section renames the identity out from under
+// the keys git resolves.
 function isIdentityKey(key) {
   return key === "user.name" || key === "user.email" || key === "user";
 }
@@ -163,10 +163,16 @@ const CONFIG_READ_FLAGS = new Set([
 
 const CONFIG_WRITE_FLAGS = new Set([
   "--add",
-  "--unset",
-  "--unset-all",
   "--replace-all",
   "--rename-section",
+]);
+
+// Flags that clear a key rather than record a value under it. Naming the mode
+// keeps `git config --unset user.email <value-pattern>` -- key plus value, the
+// shape a bare write has -- from reading as a write.
+const CONFIG_CLEAR_FLAGS = new Set([
+  "--unset",
+  "--unset-all",
   "--remove-section",
 ]);
 
@@ -184,14 +190,16 @@ const CONFIG_ACTION_MODES = new Map([
   ["get", "read"],
   ["list", "read"],
   ["set", "write"],
-  ["unset", "write"],
+  ["unset", "clear"],
   ["rename-section", "write"],
-  ["remove-section", "write"],
+  ["remove-section", "clear"],
 ]);
 
-// The identity key a `git config` invocation writes, or null when it only reads.
-// Scope flags (--global, --local, --system, --file) do not enter into it: a write
-// at any scope changes what git would resolve.
+// The identity key a `git config` invocation records a value under, or null when
+// it only reads or clears one. Clearing is left alone: it takes an identity out
+// of resolution rather than substituting another, which leaves git resolving from
+// the config it would have used anyway. Scope flags (--global, --local, --system,
+// --file) do not enter into it: a write at any scope changes what git resolves.
 function configWriteTarget(args) {
   let mode = null;
   const positionals = [];
@@ -208,6 +216,7 @@ function configWriteTarget(args) {
       }
       if (mode === null && CONFIG_READ_FLAGS.has(option)) mode = "read";
       if (mode === null && CONFIG_WRITE_FLAGS.has(option)) mode = "write";
+      if (mode === null && CONFIG_CLEAR_FLAGS.has(option)) mode = "clear";
       continue;
     }
     positionals.push(arg);
