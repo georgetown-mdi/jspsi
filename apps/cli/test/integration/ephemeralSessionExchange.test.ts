@@ -2,7 +2,11 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test } from "vitest";
-import { FileSyncConnection } from "@psilink/core";
+import {
+  DEFAULT_MAX_RECONNECT_ATTEMPTS,
+  FileSyncConnection,
+  UsageError,
+} from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
@@ -194,6 +198,113 @@ inProcessOnly(
 // rendezvous to get its opening writes onto the wire, short enough that the
 // waiting party's rendezvous outlives several of them.
 const RENDEZVOUS_SESSION_LIFETIME_MS = 3_000;
+
+inProcessOnly(
+  "the default held-session mode fails terminally when its rendezvous " +
+    "outlives the server's maximum session lifetime",
+  async () => {
+    // The contrast that sends an operator whose partner caps session lifetime to
+    // connection-per-poll, measured beside the mode's own proof below rather than
+    // asserted about it. The scenario is identical; the only difference is that
+    // this waiting party holds one session, so its recovery re-dials ARE charged
+    // against max_reconnect_attempts. The cap cuts the rendezvous just as often,
+    // the budget runs out, and the exchange fails terminally where the mode below
+    // completes.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "held-session-rendezvous-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const joiner = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    const waiterAdapter = new SSH2SFTPClientAdapter();
+    const waiter = new FileSyncConnection(waiterAdapter, {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    const failures: unknown[] = [];
+    joiner.on("error", (err: unknown) => failures.push(err));
+    waiter.on("error", (err: unknown) => failures.push(err));
+
+    try {
+      // Same ordering as the test below, for the same reason: the joiner connects
+      // BEFORE the cap is armed, so the standing cap governs only the sessions of
+      // the party whose rendezvous this measures.
+      await joiner.open({
+        channel: "sftp",
+        server: {
+          host: srv.handle.host,
+          port: srv.handle.port,
+          ...serverAuth(srv.handle.usera),
+          path: remote,
+        },
+      });
+      srv.sessionControls.maxLifetimeMs = RENDEZVOUS_SESSION_LIFETIME_MS;
+      await waiter.open({
+        channel: "sftp",
+        server: {
+          host: srv.handle.host,
+          port: srv.handle.port,
+          ...serverAuth(srv.handle.userb),
+          path: remote,
+        },
+      });
+      // From here every handshake is a re-dial recovering a cap-forced drop.
+      srv.sessionControls.resetHandshakeCount();
+
+      const [rejection, logs] = await withCapturedLogs(
+        async () =>
+          // The joiner never reaches its own rendezvous, so this one waits it out
+          // while the cap cuts session after session beneath it.
+          waiter.synchronize().then(
+            () => undefined,
+            (error: unknown) => error,
+          ),
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      expect(rejection).toBeInstanceOf(UsageError);
+      expect((rejection as Error).message).toContain(
+        `re-dialed the maximum ${DEFAULT_MAX_RECONNECT_ATTEMPTS} times ` +
+          `allowed by max_reconnect_attempts=${DEFAULT_MAX_RECONNECT_ATTEMPTS}`,
+      );
+      expect((rejection as Error).message).toContain(
+        "the mid-exchange reconnection budget is exhausted",
+      );
+      // What ended the exchange was the budget rather than a rendezvous the server
+      // never cut: every re-dial the budget permits was spent first, and the drop
+      // after them is the one that raised.
+      expect(waiterAdapter.midExchangeReconnectCount).toBe(
+        DEFAULT_MAX_RECONNECT_ATTEMPTS,
+      );
+      expect(srv.sessionControls.handshakeCount()).toBeGreaterThanOrEqual(
+        DEFAULT_MAX_RECONNECT_ATTEMPTS,
+      );
+      // The failure reached the caller as the rendezvous rejection and nothing
+      // else; a party that also surfaced it as a connection error would report the
+      // same drop twice.
+      expect(failures).toEqual([]);
+      // The operator is warned that the budget is spent before the drop that ends
+      // the exchange, so the terminal error is not the first they hear of it.
+      const lastRedialWarnings = logs.filter((entry) =>
+        entry.message.includes("That was the last re-dial allowed by"),
+      );
+      expect(lastRedialWarnings).toHaveLength(1);
+      expect(lastRedialWarnings[0].level).toBe("WARN");
+    } finally {
+      // Disarm before either party disconnects: a rejected rendezvous still leaves
+      // a connection to close, and teardown re-dials.
+      srv.sessionControls.maxLifetimeMs = 0;
+      await waiter.close().catch(() => {});
+      await joiner.close().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
 
 inProcessOnly(
   "connection-per-poll completes an exchange whose rendezvous outlives the " +
