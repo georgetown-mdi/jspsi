@@ -172,8 +172,9 @@ the smaller change and the safer one:
   would force core to re-supply and re-verify SFTP connect options it deliberately
   discards after `open()`.
 - **Invariant ownership stays put.** The single-party appliance issues one op at a
-  time; the adapter's serialization of `end()` against an in-flight re-dial is
-  sound only because of that serial issuance. Keeping the lifecycle with the
+  time; the adapter's serialization of `end()` against an in-flight re-dial
+  covers the session transitions themselves, not the operations riding on them,
+  and is sound only because of that serial issuance. Keeping the lifecycle with the
   adapter keeps that invariant with its owner. The correctness concern that the
   invariants live in core is met regardless: the teardown *ordering* guarantee
   stays in `close()` (below); what moves into the adapter is only the mechanism.
@@ -235,6 +236,78 @@ socket cycles -- the process stays alive. On-disk state is authoritative by desi
 ("the directory is the state machine"). Against that backdrop the three
 lifetime-sensitive subsystems divide cleanly.
 
+**One transition at a time, in request order.** The mode multiplies the points at
+which the adapter dials a session or closes one: the first dial, the cycle-start
+reconnect, the mid-exchange recovery re-dial, the idle-boundary release, and
+teardown. ssh2-sftp-client keeps one connection-level listener set on one client,
+so two of those running at once is unsafe in every combination -- two handshakes
+kill each other, a handshake alongside a close hands the close's event to the
+handshake's listeners, and a close alongside a handshake short-circuits on the
+session that handshake has not restored yet and returns having ended nothing.
+
+The adapter therefore owns a single FIFO lock over those transitions, and holds
+it across the whole of each: a release holds it through its forced close, a dial
+through its entire retry budget. Three properties follow, and they are what the
+adapter's tests assert rather than what its prose claims:
+
+- **Request order decides, not promise-reaction order.** A transition takes its
+  queue slot synchronously when its method is called, so inserting an `await`
+  anywhere on a transition path cannot change which transition wins.
+- **No transition begins after teardown is latched.** `close()` latches before it
+  enqueues, and the latch is read at one place -- inside the lock, once per
+  transition -- so anything queued behind teardown is skipped, and anything
+  already running is waited out by teardown's own position in the queue.
+  Teardown has no privileged entry and pre-empts nothing.
+- **The acquire is deliberately unbounded.** Each transition's ceiling is its
+  caller's: core wraps a data-plane operation in the peer-inactivity budget and
+  `close()` in its own shorter teardown budget, and forwards the two
+  cycle-boundary signals unwrapped. Bounding the acquire would need a defined
+  behavior for the loser of an expired wait, and the only such behaviors are the
+  overlapping ones the lock exists to prevent.
+
+Uniformity has three consequences worth stating rather than leaving to be
+discovered.
+
+**A cycle-boundary signal issued after teardown is latched waits the teardown out
+before returning its "nothing to do" value.** It does not short-circuit on the
+latch, because a second reading of that latch outside the lock is exactly the
+distributed re-read the single in-lock read exists to avoid. The wait cannot be
+indefinite, but it is not the teardown's own close alone: a signal queued behind
+teardown waits out whatever transition is running AHEAD of it as well, which for
+a dial is that dial's whole connect budget (`max_reconnect_attempts` attempts,
+each up to the connect timeout), and then the teardown's close, which carries the
+`CLIENT_CLOSE_TIMEOUT_MS` and `FORCED_CLOSE_TIMEOUT_MS` bounds. Every one of
+those is a bound that already governed the transition carrying it. Neither signal
+is awaited by the teardown, so no cycle can form -- core stops the poll loop
+before it closes the transport, and its `close()` never joins the loop. The
+integration suite drives the close half against the partner that spends those
+bounds in full -- one that accepts the disconnect and never closes the connection
+-- and pins the wait as bounded: about five seconds, once, at the end of a run.
+
+**Whether a same-tick release and `close()` run the release or skip it turns on
+whether the queue was idle.** A release requested on an idle queue starts
+immediately and is waited out by the teardown behind it; one requested while a
+dial is in flight is still queued when `close()` latches, so it is skipped
+entirely. This is the ordering rule above rather than a special case -- the latch
+is read where a transition reaches the front -- and both outcomes are safe, since
+teardown closes the session either way.
+
+**The lock is not mode-gated, and two orderings in the default held-session
+mode turn on it.** The two cycle-boundary signals return before enqueuing when
+the mode is off, so the default mode reaches no transition of theirs -- but its
+`connect()` and its `close()` take the lock exactly as they do here. A teardown
+concurrent with the FIRST dial waits that handshake out instead of running
+ssh2-sftp-client's `end()` under it, which is the overlap the lock exists to
+stop and the reason it covers both modes. A `connect()` issued while a teardown
+is IN FLIGHT parks for that teardown's own bounds before refusing the re-open,
+rather than refusing at once: the refusal is identical either way, and
+shortening it with a pre-acquire reading of the latch would buy back the
+second, out-of-lock reading this design replaced, in exchange for a faster
+failure on a path nothing in the tree takes -- core's `open()` and `close()`
+are not concurrent. A `connect()` after a teardown has SETTLED does not park at
+all: the queue is drained, so it enters its critical section in the same tick
+and the refusal is immediate.
+
 **The boundary itself: the release owns the end state, not the partner.** Closing
 a connection is nominally a two-party act -- this side disconnects, the server
 closes the connection -- and a server that accepts the disconnect and then goes
@@ -282,9 +355,11 @@ straddles an idle wait, so a publish the POLL LOOP itself performs cannot be tor
 by the boundary that follows it. The boundary is not a global idle point, though:
 `send()` has no mutual exclusion with `poll()`, so a release can fall while a
 send's publish is in flight. An op that reaches the transport at or after the
-release is serialized against it at the adapter's recovery chokepoint, which waits
-the close out and re-establishes the session before the op's first attempt. An op
-already on the wire when the release begins is torn with the session instead: at
+release is serialized against it at the adapter's recovery chokepoint, which
+re-establishes the session before the op's first attempt -- queued behind the
+release on the transition lock, so it runs on the far side of the close rather
+than racing it. An op already on the wire when the release begins is torn with the
+session instead: at
 the pinned ssh2 and ssh2-sftp-client versions that tear clears the session in the
 same tick it rejects the op, so it reads as the clean loss it is and the retained
 recovery resolvers cover the re-issue. Closing the case outright -- rather than

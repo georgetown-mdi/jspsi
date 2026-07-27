@@ -2826,14 +2826,18 @@ describe("session recovery", () => {
   test("does not re-dial once teardown has begun", async () => {
     // end() latches `closing`, so an op racing a clean close fails terminally
     // rather than launching a re-dial whose readyTimeout would slow the close and
-    // whose fresh session would outlive teardown.
+    // whose fresh session would outlive teardown. The refusal is at the
+    // classifier, before the recovery path is entered at all: with no
+    // reconnection budget left, an op admitted to that path would surface the
+    // budget-exhausted error instead of the session diagnostic, so the diagnostic
+    // is what says recovery was refused rather than merely thwarted.
     const wrapper = sessionWrapper();
     const { client, connect, state } = droppable(wrapper);
     const adapter = new SSH2SFTPClientAdapter();
     stub(adapter);
     install(adapter, client);
 
-    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
     await adapter.end();
     state.live = false;
 
@@ -3430,13 +3434,14 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const adapterLog = (adapter: SSH2SFTPClientAdapter) => (adapter as any).log;
-  // Whether the idle-boundary release latch is set. Private state with no public
-  // surface, read directly by the tests below whose case -- a release that
-  // released nothing, or one during teardown -- leaves no behavior to read it
-  // through; each of those also asserts the behavior wherever one exists.
-  const releaseLatched = (adapter: SSH2SFTPClientAdapter) =>
+  // Whether the adapter's recorded session boundary stands as its own deliberate
+  // idle release. Private state with no public surface, read directly by the tests
+  // below whose case -- a release that released nothing, or one during teardown --
+  // leaves no behavior to read it through; each of those also asserts the behavior
+  // wherever one exists.
+  const releaseBoundaryStands = (adapter: SSH2SFTPClientAdapter) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).idleReleased as boolean;
+    ((adapter as any).sessionBoundary as string) === "deliberatelyReleased";
 
   // The error ssh2-sftp-client's haveConnection() raises once its `sftp` property
   // has been cleared -- what every high-level op below rejects with on a released
@@ -3863,7 +3868,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
 
   test("releaseForIdle and ensureConnected are no-ops when the mode is off", async () => {
     const wrapper = wrapperMethods();
-    const { client, connect, rawClient } = ephemeralClient(wrapper);
+    const { client, connect, state, rawClient } = ephemeralClient(wrapper);
     // Default construction: ephemeral mode off.
     const adapter = new SSH2SFTPClientAdapter();
     stub(adapter);
@@ -3876,6 +3881,13 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // model.
     await adapter.releaseForIdle();
     expect(rawClient.end).not.toHaveBeenCalled();
+    await expect(adapter.ensureConnected()).resolves.toBe(true);
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    // And neither dials on a session that is GONE either: in the default mode
+    // session recovery owns re-establishment, so a cycle-boundary reconnect that
+    // dialed here would open a session the mode never asked for.
+    state.live = false;
     await expect(adapter.ensureConnected()).resolves.toBe(true);
     expect(connect).toHaveBeenCalledTimes(1);
 
@@ -4002,6 +4014,36 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  test("an op after the idle release issues no attempt against the released session", async () => {
+    // What the standing release boundary buys, stated as the only thing that
+    // distinguishes it from letting the recovery path absorb the gap: the op is
+    // spared the one attempt that is guaranteed to fail. The counters, the dial
+    // count and the warnings are identical either way -- the re-dial that follows
+    // a deliberate release is exempt from all three -- so the attempt itself is
+    // what has to be asserted.
+    const { client, state } = ephemeralClient(wrapperMethods());
+    const attempts: boolean[] = [];
+    client.exists = vi.fn(async () => {
+      attempts.push(state.live);
+      if (!state.live) throw notConnected("exists");
+      return true;
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.releaseForIdle();
+    expect(state.live).toBe(false);
+
+    await expect(adapter.exists("/remote/file.json")).resolves.toBe(true);
+
+    // One attempt, and the session was live when it was made: without the gate
+    // the first attempt lands on the released session, rejects, and only the
+    // re-issue behind the recovery re-dial succeeds.
+    expect(attempts).toEqual([true]);
+  });
+
   test("an op issued while the release is in flight completes instead of failing terminally", async () => {
     // The release drives the ssh2 Client's end() and then awaits its 'close'.
     // ssh2-sftp-client clears `this.sftp` from that 'close', not from end(), so
@@ -4033,6 +4075,50 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(adapter.midExchangeReconnectCount).toBe(0);
     expect(warn).not.toHaveBeenCalled();
     // The initial dial plus the one re-establishment the op waited for.
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("an op issued during a release that records no boundary still waits the close window out", async () => {
+    // The release in flight is the reading that covers the close window, and it
+    // is the ONLY one that covers this release: the PEER began this teardown, so
+    // no deliberate-release boundary is recorded and the boundary reading never
+    // becomes true. An op issued into the window must still be held off -- it
+    // would otherwise reject against a session that still reads live, which the
+    // clean-loss classifier calls terminal.
+    const { client, connect, rawClient, state } =
+      slowClosingClient(wrapperMethods());
+    const socket = rawClient._sock as Record<string, unknown>;
+    // The peer's FIN has been consumed: ssh2 has emitted 'end' and the 'close' is
+    // on its way, which is what makes this boundary the server's rather than this
+    // adapter's.
+    socket.readableEnded = true;
+    // Each attempt records whether it was made inside the close window (the ssh2
+    // Client's end() driven, its 'close' not yet landed, the session still
+    // reading live).
+    const attempts: boolean[] = [];
+    client.exists = vi.fn(async () => {
+      attempts.push(state.ending);
+      if (state.ending)
+        throw new Error("Channel closed while the connection was ending");
+      if (!state.live) throw notConnected("exists");
+      return true;
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+
+    const release = adapter.releaseForIdle();
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    expect(client.sftp).not.toBeNull();
+    expect(releaseBoundaryStands(adapter)).toBe(false);
+
+    await expect(adapter.exists("/remote/file.json")).resolves.toBe(true);
+    await release;
+
+    // One attempt, made on the far side of the close rather than inside it.
+    expect(attempts).toEqual([false]);
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
@@ -4129,7 +4215,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await adapter.releaseForIdle();
 
     expect(rawClient.end).not.toHaveBeenCalled();
-    expect(releaseLatched(adapter)).toBe(false);
+    expect(releaseBoundaryStands(adapter)).toBe(false);
   });
 
   // Every seam the idle release drives past the public API, and where it lives.
@@ -4506,7 +4592,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("ssh2 changelog"),
       );
-      expect(releaseLatched(adapter)).toBe(false);
+      expect(releaseBoundaryStands(adapter)).toBe(false);
       expect(state.live).toBe(true);
 
       // The server drops the session the release could not close: a real loss.
@@ -4545,7 +4631,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
     await adapter.releaseForIdle();
 
-    expect(releaseLatched(adapter)).toBe(false);
+    expect(releaseBoundaryStands(adapter)).toBe(false);
     expect(state.live).toBe(false);
 
     // The next operation observes the cleared session, and it is reported as the
@@ -4560,13 +4646,13 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     );
   });
 
-  test("a throwing ssh2 end() rejects the release, leaving no latch and no pending release", async () => {
-    // The release publishes itself, arms its close wait, and latches before it
-    // drives the close, so a throw out of the ssh2 Client's end() must undo all
-    // three: the published release would otherwise never settle and the next
-    // operation's gate would wait it out for the whole close bound, the wait would
-    // sit on the shared client for a close that is never coming, and the latch
-    // would exempt a later genuine drop from the count and the warning.
+  test("a throwing ssh2 end() rejects the release, leaving no boundary and no held transition", async () => {
+    // The release takes the transition lock, arms its close wait, and records its
+    // boundary before it drives the close, so a throw out of the ssh2 Client's
+    // end() must undo all three: a lock never released would hold the next
+    // operation's gate forever, the wait would sit on the shared client for a
+    // close that is never coming, and the boundary would exempt a later genuine
+    // drop from the count and the warning.
     const { client, state, rawClient } = ephemeralClient(wrapperMethods());
     rawClient.end = vi.fn(() => {
       throw new Error("socket already destroyed");
@@ -4588,7 +4674,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       new Promise((resolve) => setTimeout(() => resolve("stalled"), 250)),
     ]);
     expect(outcome).toBe("ran");
-    expect(releaseLatched(adapter)).toBe(false);
+    expect(releaseBoundaryStands(adapter)).toBe(false);
     expect(rawClient.listenerCount("close")).toBe(0);
   });
 
@@ -4770,10 +4856,14 @@ describe("ephemeral session mode (connection-per-poll)", () => {
 
   test("the default held-session mode is untouched: drops still counted, warned, and capped", async () => {
     // The release path is mode-gated at every point it touches, so the default
-    // whole-exchange model must behave exactly as before: calling the boundary
-    // methods changes nothing, and a genuine drop is still counted, warned, and
-    // charged against the cumulative max_reconnect_attempts budget whose
-    // exhaustion is terminal.
+    // whole-exchange model behaves as though the mode did not exist: calling the
+    // boundary methods changes nothing, and a genuine drop is still counted,
+    // warned, and charged against the cumulative max_reconnect_attempts budget
+    // whose exhaustion is terminal. What the default mode does share is the
+    // transition lock -- its connect() and its end() take it too -- and the two
+    // orderings that follow from that are pinned separately (the first dial
+    // acquiring, so teardown cannot run the client down under it; and a connect
+    // issued during an in-flight teardown parking before it refuses the re-open).
     const wrapper = wrapperMethods({
       opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
         cb(null, Buffer.from("h")),
@@ -4823,8 +4913,8 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // poll()'s cycle-start ensureConnected and close()'s pre-drain ensureConnected
     // can fire concurrently; both must not open a parallel connect() on the one
     // shared Ssh2SftpClient (it shares connection-level listeners, so two handshakes
-    // at once is unsafe). The second call must serialize behind the first's
-    // published re-dial and observe the now-live session rather than dialing again.
+    // at once is unsafe). The second call must queue behind the first's re-dial
+    // and observe the now-live session rather than dialing again.
     const wrapper = wrapperMethods();
     const state = { live: true };
     // A realistic handshake: the session becomes live only AFTER an async tick, not
@@ -4970,7 +5060,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // session is held across the idle gap.
     expect(rawClient.end).toHaveBeenCalledOnce();
     expect(state.live).toBe(false);
-    expect(releaseLatched(adapter)).toBe(true);
+    expect(releaseBoundaryStands(adapter)).toBe(true);
   });
 
   test("an idle release that was waiting when teardown began releases nothing", async () => {
@@ -5039,7 +5129,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // The release drove no ssh2 Client end() of its own: close() owns the final
     // teardown, and nothing was classified as a deliberate idle release.
     expect(rawClient.end).not.toHaveBeenCalled();
-    expect(releaseLatched(adapter)).toBe(false);
+    expect(releaseBoundaryStands(adapter)).toBe(false);
     expect(client.end).toHaveBeenCalledOnce();
   });
 
@@ -5217,10 +5307,9 @@ describe("ephemeral session mode (connection-per-poll)", () => {
 
   test("teardown never runs the client down under a recovery re-dial", async () => {
     // The recovery of the operation the release tore off the wire and the
-    // teardown both park on that release, and the recovery parks FIRST, so it
-    // wakes first -- and what it does on waking is publish a re-dial, one
-    // microtask after end() read the re-dial handle and found it empty. Both
-    // halves of the outcome are wrong: a handshake runs against the teardown's
+    // teardown both queue behind that release, and the recovery queues FIRST, so
+    // it reaches the front first -- with the teardown latch set behind it. Dialing
+    // there is wrong twice over: a handshake runs against the teardown's
     // client.end() on the one shared Ssh2SftpClient, and ssh2-sftp-client's own
     // end() short-circuits on the cleared session, resolving WITHOUT ending the
     // ssh2 Client -- so close() returns while an SSH handshake still holds a
@@ -5316,6 +5405,763 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // turned back rather than establishing a session for close() to reclaim.
     expect(connect).toHaveBeenCalledTimes(1);
     expect(events).not.toContain("dial:start");
+  });
+
+  // --- session-transition behavior, read through observable outcomes ---------
+  //
+  // The cases below pin what the adapter DOES across a session transition --
+  // which boundary is a deliberate release and which is a server-side drop, and
+  // what a teardown may overlap -- through the reconnect counters, the operator
+  // warning, and the seams the adapter drives. None of them reads the adapter's
+  // internal bookkeeping, so each holds whatever machinery serializes the
+  // transitions underneath.
+
+  // The SSH_FX_NO_SUCH_FILE status ssh2-sftp-client surfaces as the raw numeric
+  // SFTP code, which the delete and rename recovery resolvers read to tell a
+  // pre-drop attempt that already LANDED from a genuine absence.
+  const noSuchFile = (name: string) =>
+    Object.assign(new Error(`${name}: No such file`), { code: 2 });
+
+  // A client whose data-plane ops are outstanding for one macrotask -- the server
+  // round trip a release can fall in the middle of -- and whose ssh2 Client end()
+  // tears whichever is on the wire, exactly as ssh2-sftp-client's per-operation
+  // listeners do. An op torn that way ALREADY LANDED on the server (the request
+  // reached it; only the reply was lost), so its re-issue sees the post-op state:
+  // the deleted source absent, the renamed source absent with the destination
+  // present. That is the state the recovery resolvers exist to read.
+  function landedOnTearClient(wrapper: ReturnType<typeof wrapperMethods>) {
+    const state = { live: true, ending: false };
+    const landed = new Set<string>();
+    let failInFlight: ((error: unknown) => void) | undefined;
+    const rawClient = new EventEmitter() as EventEmitter &
+      Record<string, unknown>;
+    Object.assign(rawClient, {
+      setNoDelay: vi.fn(),
+      _sock: { setKeepAlive: vi.fn(), writableEnded: false, destroy: vi.fn() },
+      end: vi.fn(() => {
+        state.ending = true;
+        state.live = false;
+        failInFlight?.(notConnected("operation"));
+        failInFlight = undefined;
+        setTimeout(() => {
+          state.ending = false;
+          rawClient.emit("close");
+        }, 0);
+      }),
+    });
+    const connect = vi.fn().mockImplementation(async () => {
+      if (state.ending)
+        throw new Error("getConnection: Unexpected close event");
+      state.live = true;
+    });
+    // One server round trip: it lands on the far side unless the transport is
+    // already gone, and a tear rejects the caller AFTER the server applied it.
+    const roundTrip = (name: string, path: string, apply: () => void) =>
+      new Promise<void>((resolve, reject) => {
+        if (!state.live) {
+          reject(notConnected(name));
+          return;
+        }
+        if (landed.has(path)) {
+          reject(noSuchFile(name));
+          return;
+        }
+        const answer = setTimeout(() => {
+          apply();
+          resolve();
+        }, 0);
+        failInFlight = (error: unknown) => {
+          clearTimeout(answer);
+          apply();
+          reject(error);
+        };
+      });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: rawClient,
+      end: vi.fn().mockResolvedValue(true),
+      realPath: vi.fn().mockResolvedValue("/"),
+      delete: vi.fn((path: string) =>
+        roundTrip("delete", path, () => landed.add(path)),
+      ),
+      rename: vi.fn((fromPath: string, toPath: string) =>
+        roundTrip("rename", fromPath, () => {
+          landed.add(fromPath);
+          landed.add(toPath);
+        }),
+      ),
+      exists: vi.fn(async (path: string) => {
+        if (!state.live) throw notConnected("exists");
+        return landed.has(path);
+      }),
+    };
+    return { client, connect, state, rawClient, landed };
+  }
+
+  test("a delete torn off the wire by the boundary resolves through its recovery resolver, uncounted and unwarned", async () => {
+    // The one operation no entry gate can cover: it is already on the wire when
+    // the idle boundary falls, so the release's own end() tears it. It must come
+    // back through the recovery path -- re-dial, re-issue, and the delete
+    // resolver reading the now-absent source as the landed attempt it was -- and
+    // the boundary that tore it is this adapter's own, so nothing about it may
+    // reach the reconnect counters or the operator warning.
+    const { client, connect, rawClient, landed } =
+      landedOnTearClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    // No reconnection budget at all, so a re-dial charged to the exchange would
+    // fail the operation outright rather than being quietly absorbed.
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+    const removal = adapter.delete("/remote/out.json");
+    const release = adapter.releaseForIdle();
+    expect(rawClient.end).toHaveBeenCalledOnce();
+
+    await expect(removal).resolves.toBeUndefined();
+    await release;
+
+    expect(landed.has("/remote/out.json")).toBe(true);
+    // The initial dial plus the one re-establishment the recovery took after the
+    // close, not across it.
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(adapter.reconnectCount).toBe(0);
+    expect(adapter.midExchangeReconnectCount).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("a rename torn off the wire by the boundary resolves through its recovery resolver, uncounted and unwarned", async () => {
+    // The same tear on the publish that matters most: a temp-file rename to its
+    // final name. The re-issue sees the source gone, confirms the self-prefixed
+    // destination present, and reports the landed publish as the success it was.
+    const { client, connect, rawClient, landed } =
+      landedOnTearClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+    const publish = adapter.rename(
+      "/remote/temp-send.tmp",
+      "/remote/id-0-12.json",
+    );
+    const release = adapter.releaseForIdle();
+    expect(rawClient.end).toHaveBeenCalledOnce();
+
+    await expect(publish).resolves.toBeUndefined();
+    await release;
+
+    expect(landed.has("/remote/id-0-12.json")).toBe(true);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(adapter.reconnectCount).toBe(0);
+    expect(adapter.midExchangeReconnectCount).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("a release whose ssh2 end() throws leaves the next drop counted and warned", async () => {
+    // The release drove nothing: its end() raised before the transport was
+    // touched, so the session it failed to close is still the server's to drop.
+    // A boundary that classified itself as deliberate anyway would hand that
+    // drop the release's exemption and the operator would never hear about it.
+    const { client, connect, state, rawClient } =
+      ephemeralClient(wrapperMethods());
+    rawClient.end = vi.fn(() => {
+      throw new Error("socket already destroyed");
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await expect(adapter.releaseForIdle()).rejects.toThrow(
+      "socket already destroyed",
+    );
+    expect(state.live).toBe(true);
+
+    // The server drops the session the release could not close.
+    state.live = false;
+    await expect(adapter.exists("/remote/out.json")).resolves.toBe(true);
+
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(adapter.reconnectCount).toBe(1);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("dropped mid-exchange"),
+    );
+  });
+
+  test("a forced release that cannot clear the session leaves the next drop counted and warned", async () => {
+    // The partner withheld its close, the release destroyed the transport itself,
+    // and the session STILL did not clear -- so the release ends having released
+    // nothing it can vouch for. The drop that follows is the server's, and is
+    // counted and warned as one.
+    vi.useFakeTimers();
+    try {
+      const { client, connect, state, sock } =
+        withheldCloseClient(wrapperMethods());
+      // A destroy that tears the socket down without the ssh2 Client 'close' that
+      // clears the session: the premise the release reads back and raises on.
+      sock.destroy = vi.fn();
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      const warn = vi.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+      // The rejection handler is attached before the clock advances, so the
+      // release's failure is never momentarily unhandled.
+      const release = expect(adapter.releaseForIdle()).rejects.toThrow(
+        "did not clear",
+      );
+      await vi.advanceTimersByTimeAsync(6_000);
+      await release;
+      expect(state.live).toBe(true);
+
+      // The server drops the session the release could not clear.
+      state.live = false;
+      await expect(adapter.exists("/remote/out.json")).resolves.toBe(true);
+
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(adapter.reconnectCount).toBe(1);
+      expect(adapter.midExchangeReconnectCount).toBe(1);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("dropped mid-exchange"),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a dial that raises over the session it established drops the boundary", async () => {
+    // The cycle-start dial establishes its session and then raises in its own
+    // post-connect verification, so it never reaches the discharge at the end of
+    // that dial -- and the mode reports the raise as a cycle to skip rather than a
+    // failure, leaving the run over a LIVE session with the previous release's
+    // boundary behind it. That boundary may not stand there: the session is the
+    // server's to drop, and a drop it exempted would reach neither the reconnect
+    // counters nor the operator.
+    const { client, state, rawClient } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.releaseForIdle();
+    expect(releaseBoundaryStands(adapter)).toBe(true);
+
+    // The seam the release is verified against is gone by the next dial, which
+    // checks it after the handshake has established the session.
+    delete (rawClient._sock as Record<string, unknown>).writableEnded;
+    await expect(adapter.ensureConnected()).resolves.toBe(false);
+    expect(state.live).toBe(true);
+    expect(releaseBoundaryStands(adapter)).toBe(false);
+
+    // The release that follows drives nothing either: the same absent seam refuses
+    // it before it reaches the transport, so it too ends nothing.
+    await expect(adapter.releaseForIdle()).rejects.toThrow(
+      "client._sock.writableEnded",
+    );
+    expect(state.live).toBe(true);
+
+    // The absent seam is not what is under test past this point: put it back so the
+    // drop below has a re-dial to recover on.
+    (rawClient._sock as Record<string, unknown>).writableEnded = false;
+    state.live = false;
+    await expect(adapter.exists("/remote/out.json")).resolves.toBe(true);
+
+    expect(adapter.reconnectCount).toBe(1);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("dropped mid-exchange"),
+    );
+  });
+
+  test("a release that ends nothing exempts no drop, whatever it entered with", async () => {
+    // The rule is over the state rather than the transition: the boundary stands
+    // only where no session does. A release entering with one already standing is
+    // what that rule makes unreachable, so it is set here directly -- what this
+    // pins is that a release which ended nothing cannot hand the reading on,
+    // however it came to be standing.
+    const { client, state, rawClient } = ephemeralClient(wrapperMethods());
+    rawClient.end = vi.fn(() => {
+      throw new Error("socket already destroyed");
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).sessionBoundary = "deliberatelyReleased";
+
+    await expect(adapter.releaseForIdle()).rejects.toThrow(
+      "socket already destroyed",
+    );
+    expect(state.live).toBe(true);
+    expect(releaseBoundaryStands(adapter)).toBe(false);
+
+    // The server drops the session the release could not close.
+    state.live = false;
+    await expect(adapter.exists("/remote/out.json")).resolves.toBe(true);
+
+    expect(adapter.reconnectCount).toBe(1);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("dropped mid-exchange"),
+    );
+  });
+
+  test("teardown never runs the client down under a cycle-start dial", async () => {
+    // The mirror of the recovery case above, on the dial the poll loop itself
+    // starts. close() can reach end() while a cycle-start handshake is still
+    // running on the one shared Ssh2SftpClient: ssh2-sftp-client's own end() would
+    // short-circuit on the session that handshake has not restored yet, resolving
+    // WITHOUT ending the ssh2 Client -- so close() would return while an SSH dial
+    // still holds a ref'd socket.
+    const wrapper = wrapperMethods();
+    const state = { live: true };
+    let dialReached!: () => void;
+    const dialing = new Promise<void>((resolve) => {
+      dialReached = resolve;
+    });
+    let dialsInFlight = 0;
+    let dials = 0;
+    const events: string[] = [];
+    const connect = vi.fn().mockImplementation(async () => {
+      dials += 1;
+      if (dials === 1) {
+        state.live = true;
+        return;
+      }
+      dialsInFlight += 1;
+      events.push("dial:start");
+      try {
+        dialReached();
+        await new Promise((settle) => setTimeout(settle, 20));
+        state.live = true;
+      } finally {
+        dialsInFlight -= 1;
+        events.push("dial:end");
+      }
+    });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: releasableClient(),
+      end: vi.fn(async () => {
+        events.push(`teardown:client.end (dialsInFlight=${dialsInFlight})`);
+        return true;
+      }),
+      realPath: vi.fn().mockResolvedValue("/"),
+    };
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    // The previous cycle released; this cycle's dial is in flight.
+    state.live = false;
+    const ready = adapter.ensureConnected();
+    await dialing;
+    const closed = adapter.end();
+    await Promise.all([ready, closed]);
+
+    expect(events).not.toContainEqual(
+      expect.stringMatching(/^teardown:.*dialsInFlight=[1-9]/),
+    );
+    expect(events).toEqual([
+      "dial:start",
+      "dial:end",
+      "teardown:client.end (dialsInFlight=0)",
+    ]);
+  });
+
+  // --- the session-transition lock ------------------------------------------
+  //
+  // Every point at which the adapter dials a session or closes one runs under one
+  // FIFO lock. These cases exercise the lock itself: the order transitions run
+  // in, that none overlaps another, that teardown takes the queue like the rest,
+  // and that a failing transition frees it.
+
+  // Records each transition's body entering and leaving, through the adapter's own
+  // acquire. Built test-side so the adapter carries no log of its own; an exact
+  // start/end sequence is what proves both the order and the non-overlap.
+  function recordTransitions(adapter: SSH2SFTPClientAdapter): string[] {
+    const log: string[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const internals = adapter as any;
+    const acquire = internals.runTransition.bind(adapter);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    internals.runTransition = (transition: any) =>
+      acquire({
+        ...transition,
+        run: async (recordBoundary: unknown) => {
+          log.push(`start:${transition.kind}`);
+          try {
+            return await transition.run(recordBoundary);
+          } finally {
+            log.push(`end:${transition.kind}`);
+          }
+        },
+      });
+    return log;
+  }
+
+  test("all four non-teardown transitions started at once run one at a time in request order", async () => {
+    // Teardown is not a fifth participant here by construction: it latches before
+    // it enqueues, so anything already queued behind it is skipped rather than run
+    // (the two cases below). These four can coexist, and each must have the client
+    // to itself -- ssh2-sftp-client shares connection-level listeners, so two
+    // handshakes, or a handshake and a close, at once is unsafe.
+    const { client, connect, state, rawClient } =
+      ephemeralClient(wrapperMethods());
+    // A handshake that takes a real macrotask, so an overlap would be recorded
+    // rather than merely possible.
+    connect.mockImplementation(async () => {
+      await new Promise((settle) => setTimeout(settle, 5));
+      state.live = true;
+      const dialed = rawClient._sock as { writableEnded?: boolean } | undefined;
+      if (dialed?.writableEnded !== undefined) dialed.writableEnded = false;
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+    const log = recordTransitions(adapter);
+
+    // Fired in one synchronous run, with no await between them: the first dial,
+    // an idle release, a cycle-start reconnect, and a recovery re-dial. The
+    // public connect takes its queue slot synchronously, so the three behind it
+    // queue rather than racing it.
+    const dial = adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const release = adapter.releaseForIdle();
+    const ready = adapter.ensureConnected();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const redial = (adapter as any).redialForRecovery() as Promise<void>;
+    await Promise.all([dial, release, ready, redial]);
+
+    expect(log).toEqual([
+      "start:connect",
+      "end:connect",
+      "start:releaseForIdle",
+      "end:releaseForIdle",
+      "start:ensureConnected",
+      "end:ensureConnected",
+      "start:redialForRecovery",
+      "end:redialForRecovery",
+    ]);
+    // The release closed what the first dial established and the cycle-start
+    // reconnect dialed a fresh session; the recovery re-dial found that session
+    // live and dialed nothing.
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(state.live).toBe(true);
+  });
+
+  test("a transition attempted after teardown is latched does not run", async () => {
+    const { client, connect, rawClient } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.end();
+    const log = recordTransitions(adapter);
+
+    // Every kind that can be requested after the latch, each returning what its
+    // caller reads as "nothing to do" -- except a re-open, which is refused.
+    await expect(adapter.ensureConnected()).resolves.toBe(true);
+    await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).redialForRecovery() as Promise<void>,
+    ).resolves.toBeUndefined();
+    await expect(adapter.connect({ host: "h" })).rejects.toThrow(
+      "cannot be reopened",
+    );
+
+    // None of them ran a body at all: no dial, and no second close.
+    expect(log).toEqual([]);
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(rawClient.end).not.toHaveBeenCalled();
+    expect(client.end).toHaveBeenCalledOnce();
+  });
+
+  test("a transition already in flight when teardown is latched is awaited by teardown before it returns", async () => {
+    // The release is between the ssh2 Client's end() and its 'close' when close()
+    // reaches end(). Teardown holds no privileged entry: it takes the queue behind
+    // the release and runs ssh2-sftp-client's end() only once that release is done.
+    const { client, rawClient } = slowClosingClient(wrapperMethods());
+    const events: string[] = [];
+    rawClient.on("close", () => events.push("release:closed"));
+    const drivenEnd = rawClient.end as () => void;
+    rawClient.end = vi.fn(() => {
+      events.push("release:ssh2-end");
+      drivenEnd();
+    });
+    client.end = vi.fn(async () => {
+      events.push("teardown:client.end");
+      return true;
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+    const release = adapter.releaseForIdle();
+    const closed = adapter.end();
+    await Promise.all([release, closed]);
+
+    expect(events).toEqual([
+      "release:ssh2-end",
+      "release:closed",
+      "teardown:client.end",
+    ]);
+  });
+
+  test("the first dial acquires, so teardown cannot run the client down under it", async () => {
+    // core's open() dials and its close() tears down; nothing above the adapter
+    // orders them. A teardown that ran ssh2-sftp-client's end() under a live
+    // handshake would short-circuit on the session that handshake has not
+    // established yet, resolving WITHOUT ending the ssh2 Client -- so close()
+    // would return while an SSH dial still holds a ref'd socket.
+    const wrapper = wrapperMethods();
+    const state = { live: false };
+    const events: string[] = [];
+    let dialsInFlight = 0;
+    const connect = vi.fn().mockImplementation(async () => {
+      dialsInFlight += 1;
+      events.push("dial:start");
+      try {
+        await new Promise((settle) => setTimeout(settle, 20));
+        state.live = true;
+      } finally {
+        dialsInFlight -= 1;
+        events.push("dial:end");
+      }
+    });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: releasableClient(),
+      end: vi.fn(async () => {
+        events.push(`teardown:client.end (dialsInFlight=${dialsInFlight})`);
+        return true;
+      }),
+      realPath: vi.fn().mockResolvedValue("/"),
+    };
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    const dial = adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const closed = adapter.end();
+    await Promise.all([dial, closed]);
+
+    expect(events).toEqual([
+      "dial:start",
+      "dial:end",
+      "teardown:client.end (dialsInFlight=0)",
+    ]);
+  });
+
+  test("a transition that rejects releases the serialization rather than pinning every later one", async () => {
+    const { client, rawClient } = ephemeralClient(wrapperMethods());
+    rawClient.end = vi.fn(() => {
+      throw new Error("socket already destroyed");
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+
+    // Two transitions queued behind a release that raises out of its body. The
+    // rejection handler is attached in the same synchronous run, so the failure is
+    // never momentarily unhandled.
+    const failing = adapter.releaseForIdle();
+    const rejected = expect(failing).rejects.toThrow(
+      "socket already destroyed",
+    );
+    const queued = Promise.allSettled([
+      adapter.ensureConnected(),
+      adapter.releaseForIdle(),
+    ]);
+    await rejected;
+
+    // Both reached the front and ran: the reconnect found the session the failed
+    // release never closed, and the second release raised out of the same end().
+    const outcome = await Promise.race([
+      queued.then((results) => results.map((result) => result.status).join()),
+      new Promise((resolve) => setTimeout(() => resolve("pinned"), 250)),
+    ]);
+    expect(outcome).toBe("fulfilled,rejected");
+    // And the queue is still usable for the transition after them.
+    await expect(adapter.end()).resolves.toBeUndefined();
+    expect(client.end).toHaveBeenCalledOnce();
+  });
+
+  test("a dial or a close driven outside a held transition fails loudly", async () => {
+    // The chokepoint: ssh2-sftp-client's connect() and end(), the ssh2 Client's
+    // own end(), and the forced socket destroys all reach the transport through
+    // one of these three, so each refusing to run unlocked is what makes "every
+    // dial and every close is serialized" a check rather than a reading of the
+    // call graph. Driven AFTER a completed transition, so a record of the
+    // transition in progress that outlived its transition would be caught here
+    // too rather than reading as one still held.
+    const { client, connect } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const internals = adapter as any;
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+    await expect(
+      internals.connectLocked({ host: "h" }, () => {}) as Promise<void>,
+    ).rejects.toThrow("outside a held SFTP session transition");
+    await expect(internals.closeTerminally() as Promise<void>).rejects.toThrow(
+      "outside a held SFTP session transition",
+    );
+    await expect(
+      internals.awaitBoundedTeardown(
+        Promise.resolve(),
+        10,
+        undefined,
+        false,
+      ) as Promise<unknown>,
+    ).rejects.toThrow("outside a held SFTP session transition");
+    // Each refused BEFORE it drove anything: no second dial, and no close on a
+    // connection the adapter is not tearing down.
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(client.end).not.toHaveBeenCalled();
+  });
+
+  test("an operation on a live session takes no session transition at all", async () => {
+    // The gate's fast path: with no release outstanding and none standing
+    // unreconciled, an operation is issued with no acquire and not even a
+    // microtask of delay, so the steady state inside a cycle costs exactly what
+    // it did before the mode existed.
+    const { client } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const log = recordTransitions(adapter);
+
+    await expect(adapter.exists("/remote/out.json")).resolves.toBe(true);
+
+    expect(log).toEqual([]);
+  });
+
+  test("a release whose ssh2 seams went away after the dial fails loudly", async () => {
+    // The release resolves the seams again where it drives them, not only at the
+    // dial: an ssh2 that relocated one between the two would otherwise reach a
+    // TypeError at the idle boundary instead of the actionable error the dial-time
+    // check gives.
+    const { client, rawClient } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    delete rawClient.end;
+
+    const release = adapter.releaseForIdle();
+    await expect(release).rejects.toThrow("client.end()");
+    await expect(release).rejects.toThrow("DEPENDENCY_PINS.md");
+  });
+
+  test("a transition that needs the retained connect options and has none fails loudly", async () => {
+    // Neither re-dial is reachable before the first connect -- the recovery
+    // classifier refuses with no retained options, and core dials before it polls
+    // -- so each states that as a check rather than dialing with undefined.
+    const { client, state } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+    // No session either, so each reaches its dial rather than returning on a live
+    // one.
+    state.live = false;
+
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).redialForRecovery() as Promise<void>,
+    ).rejects.toThrow("a server-driven operation ran before connect()");
+    await expect(adapter.ensureConnected()).rejects.toThrow(
+      "a poll cycle ran before connect()",
+    );
+  });
+
+  test("the acquire itself is unbounded: a queued transition waits out the one ahead of it", async () => {
+    // The waits this lock replaces were unbounded at the adapter for these kinds,
+    // and it adds no bound of its own: the ceiling on each is its caller's. A
+    // bound here would need loser behavior for an expired acquire -- a second
+    // handshake or a second close on the one client, which is the state the lock
+    // exists to prevent.
+    vi.useFakeTimers();
+    try {
+      const { client, connect, state, rawClient } =
+        ephemeralClient(wrapperMethods());
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      stub(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+      // A handshake that never settles, with an idle release and a teardown queued
+      // behind it.
+      state.live = false;
+      connect.mockImplementation(() => new Promise<void>(() => {}));
+      let readySettled = false;
+      void adapter.ensureConnected().then(
+        () => {
+          readySettled = true;
+        },
+        () => {
+          readySettled = true;
+        },
+      );
+      let releaseSettled = false;
+      void adapter.releaseForIdle().then(
+        () => {
+          releaseSettled = true;
+        },
+        () => {
+          releaseSettled = true;
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(readySettled).toBe(false);
+      expect(releaseSettled).toBe(false);
+      expect(rawClient.end).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -5781,6 +6627,49 @@ describe("terminal close against a partner that withholds its close", () => {
       adapter.connect({ host: "h", maxReconnectAttempts: 0 }),
     ).rejects.toThrow("cannot be reopened");
     expect(client.connect).toHaveBeenCalledOnce();
+  });
+
+  test("a connect issued during an in-flight teardown parks, then refuses", async () => {
+    // connect() takes the transition queue like every other transition, in both
+    // session modes, so one issued while a teardown is still closing waits that
+    // teardown out and refuses on the far side of it rather than refusing at once.
+    // The alternative -- reading the teardown latch before the acquire -- would be
+    // a second reading of it outside the lock, for a faster failure with the same
+    // wording on a path nothing in the tree takes. A dial issued once the teardown
+    // has settled does not park at all: the queue is drained by then.
+    vi.useFakeTimers();
+    try {
+      const { client, socket } = partnerThatNeverCloses();
+      const { adapter } = loggedAdapter();
+      install(adapter, client);
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+      const closing = adapter.end();
+      const reopen = adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      const refused = expect(reopen).rejects.toThrow("cannot be reopened");
+      let reopenSettled = false;
+      void reopen.catch(() => {
+        reopenSettled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(TERMINAL_CLOSE_BOUND_MS - 1);
+      expect(reopenSettled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(FORCED_CLOSE_BOUND_MS + 2);
+      await Promise.all([closing, refused]);
+      expect(socket.destroyed).toBe(true);
+      // The parked dial refused rather than reaching the client.
+      expect(client.connect).toHaveBeenCalledOnce();
+
+      // No timer stands between this caller and its refusal: under fake timers a
+      // refusal that needed one could not land at all.
+      await expect(
+        adapter.connect({ host: "h", maxReconnectAttempts: 0 }),
+      ).rejects.toThrow("cannot be reopened");
+      expect(client.connect).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("a close that rejects is shared by a repeat rather than re-attempted", async () => {

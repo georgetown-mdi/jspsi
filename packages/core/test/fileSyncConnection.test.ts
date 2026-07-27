@@ -2769,6 +2769,58 @@ test("close() applies the teardown budget as min(budget, peerTimeoutMs)", async 
   expect(Date.now() - started).toBeLessThan(CONNECTION_CLOSE_TIMEOUT_MS);
 });
 
+test("the cycle-boundary signals are forwarded unwrapped, unlike end()", async () => {
+  // releaseForIdle and ensureConnected are local session-lifecycle calls, not
+  // peer round trips, so neither is raced against a fresh peer-inactivity budget
+  // the way every data-plane op is, and neither gets end()'s teardown budget
+  // either: whatever bounds them is the transport's own. A connection-per-poll
+  // transport builds on that -- its idle release bounds its close itself, and a
+  // budget imposed here would abandon core's wait mid-close on a session only
+  // that release can finish tearing down. Pinned by driving both against a
+  // transport that never settles either one: a wrap would settle them at the
+  // budget.
+  const peerTimeoutMs = 100;
+  const { client } = makeMockClient();
+  // Installed BEFORE the connection is constructed: the forwarding binds each
+  // optional signal once, at construction, so a transport that gains one later
+  // is not reached (the connectionless transports never implement them at all).
+  client.releaseForIdle = () => new Promise<void>(() => {});
+  client.ensureConnected = () => new Promise<boolean>(() => {});
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs,
+    timeToLiveMs: 60_000,
+  });
+  const forwarded = (conn as unknown as { client: FileTransportClient }).client;
+  vi.useFakeTimers();
+  try {
+    let releaseSettled = false;
+    let readySettled = false;
+    void forwarded.releaseForIdle?.().then(
+      () => {
+        releaseSettled = true;
+      },
+      () => {
+        releaseSettled = true;
+      },
+    );
+    void forwarded.ensureConnected?.().then(
+      () => {
+        readySettled = true;
+      },
+      () => {
+        readySettled = true;
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(peerTimeoutMs * 100);
+
+    expect(releaseSettled).toBe(false);
+    expect(readySettled).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("close() ends the client LAST, after the drain and cleanup()", async () => {
   // The ordering the adapter-side forced close rests on: nothing this teardown
   // still needs the transport for may run after end(), because end() can destroy
