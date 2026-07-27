@@ -252,10 +252,16 @@ type SessionTransitionCeiling =
  * so the bound on a transition -- or the deliberate absence of one -- is
  * identifiable at the adapter rather than only by reading core's call sites, and
  * typed by transition kind so a new transition cannot be added without stating
- * it. The acquire of the transition lock itself is deliberately unbounded for
- * every kind, so these are the whole picture; the closes a transition drives
- * carry their own bounds ({@link CLIENT_CLOSE_TIMEOUT_MS},
- * {@link FORCED_CLOSE_TIMEOUT_MS}) and a dial carries its connect budget.
+ * it: that completeness is what the compiler checks. The acquire of the
+ * transition lock itself is deliberately unbounded for every kind, so these are
+ * the whole picture; the closes a transition drives carry their own bounds
+ * ({@link CLIENT_CLOSE_TIMEOUT_MS}, {@link FORCED_CLOSE_TIMEOUT_MS}) and a dial
+ * carries its connect budget.
+ *
+ * The VALUES here restate what core's forwarding does, and this package cannot
+ * see that forwarding; core's own suite is where it is pinned, by the tests that
+ * drive a never-settling `end()` against the teardown budget and a never-settling
+ * `releaseForIdle`/`ensureConnected` past many peer budgets.
  *
  * @internal
  */

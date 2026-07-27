@@ -12,7 +12,6 @@ import {
 
 import {
   SSH2SFTPClientAdapter,
-  SESSION_TRANSITION_CEILINGS,
   SFTP_REDIAL_WARN_INTERVAL,
 } from "../../src/connection/ssh2SftpAdapter";
 import {
@@ -6027,19 +6026,6 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await expect(adapter.ensureConnected()).rejects.toThrow(
       "a poll cycle ran before connect()",
     );
-  });
-
-  test("the adapter states the ceiling each transition's caller rides", () => {
-    // The bound above a transition -- or the deliberate absence of one -- is
-    // identifiable here rather than only by reading core's forwarding, where the
-    // two cycle-boundary signals go through unwrapped.
-    expect(SESSION_TRANSITION_CEILINGS).toEqual({
-      connect: "unwrapped",
-      ensureConnected: "unwrapped",
-      redialForRecovery: "peerTimeoutMs",
-      releaseForIdle: "unwrapped",
-      teardown: "teardownBudget",
-    });
   });
 
   test("the acquire itself is unbounded: a queued transition waits out the one ahead of it", async () => {
