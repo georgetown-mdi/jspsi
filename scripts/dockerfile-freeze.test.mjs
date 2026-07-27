@@ -290,82 +290,75 @@ describe("what the builder's npm floor guard decides", () => {
   });
 });
 
-// The settings npm would read out of an .npmrc source. The line split is npm's
-// own: it parses with the `ini` package, which breaks on /[\r\n]+/, so a lone CR
-// ends a line there. Splitting on "\n" alone reads `# note<CR>//host/:_authToken=x`
-// as a single comment while npm reads a live credential out of its second half.
-const npmrcSettings = (source) =>
-  source
-    .split(/[\r\n]+/)
-    .map((line) => line.trim())
-    .filter((line) => line !== "" && !/^[#;]/.test(line))
-    .map((line) => {
-      const separator = line.indexOf("=");
-      return separator === -1
-        ? { line, key: line, value: "" }
-        : {
-            line,
-            key: line.slice(0, separator).trim(),
-            value: line.slice(separator + 1).trim(),
-          };
-    });
+// The committed root .npmrc, byte for byte. Equality with this literal is what
+// holds the file to configuration and nothing else, in place of a reader that
+// decides which of its lines are credentials. Such a reader has two gaps this
+// has neither of: npm authenticates from more of its config surface than its
+// `_auth`-shaped keys -- an inline `cert`/`key` PEM pair is presented to the
+// registry as an mTLS client credential, `certfile`/`keyfile` name a file
+// holding one -- and that surface grows with npm rather than with this repo; and
+// the reader must agree with npm's own parser about which bytes are a line at
+// all, which the next test is about. The cost is that changing the file
+// legitimately means changing this literal in the same diff, where the review
+// reads the bytes rather than a verdict about them.
+const EXPECTED_NPMRC = `# Make the root engines.node constraint a hard install failure rather than npm's
+# default advisory warning, so CI, the docs, and a local install cannot diverge
+# on the Node version.
+engine-strict=true
+
+# Make a package with no \`allowScripts\` verdict a hard install failure rather
+# than npm's advisory warning, so a DECLARED install script cannot run first and
+# be noticed after -- npm's refusal is a pre-extraction preflight, so the
+# synthetic \`node-gyp rebuild\` a shipped binding.gyp earns is outside it (see
+# docs/spec/DEPENDENCY_PINS.md). Safe to set because the map covers every install
+# script the committed lockfile records -- completeness that
+# scripts/allow-scripts-policy.test.mjs holds as a check rather than prose.
+strict-allow-scripts=true
+`;
 
 describe("the root .npmrc the builder installs under", () => {
   // The file is committed and public, and the builder copies it into a layer the
   // release workflow exports to a shared build cache, so it may state
   // configuration and nothing else: registry credentials belong in the
   // user-level ~/.npmrc, which no build reads.
-  const settings = npmrcSettings(
-    readFileSync(resolve(here, "..", ".npmrc"), "utf8"),
-  );
+  const committed = readFileSync(resolve(here, "..", ".npmrc"));
 
-  // The keys this file exists to state. An allowlist rather than an enumeration
-  // of credential-named keys, because npm authenticates from more of its config
-  // surface than its `_auth`-shaped keys: an inline `cert`/`key` PEM pair is
-  // presented to the registry as an mTLS client credential, and
-  // `certfile`/`keyfile` name a file holding one -- none of them named like a
-  // secret, and the surface grows with npm rather than with this repo. Widening
-  // what the file may carry means widening this set in the same diff.
-  const PERMITTED_KEYS = new Set(["engine-strict", "strict-allow-scripts"]);
-
-  // Userinfo in a URL value -- `registry=https://user:secret@host/` and its
-  // `@scope:registry` form -- which npm sends as an Authorization: Basic header
-  // for that registry, no credential-named key involved. Neither permitted key
-  // takes a URL, so this is what stands between a URL-valued key that later
-  // joins them and a credential riding in on its value.
-  const URL_USERINFO = /[a-z][a-z0-9+.-]*:\/\/[^/?#\s@]*@/i;
-
-  it("states no key beyond the policies it is here for", () => {
-    const unpermitted = settings.filter(({ key }) => !PERMITTED_KEYS.has(key));
-    expect(unpermitted.map(({ line }) => line)).toEqual([]);
+  it("is the file this literal was reviewed as, byte for byte", () => {
+    // The string compare is the one that prints a diff; the byte compare is the
+    // claim, since what ships in the layer is bytes and a decode of them is not.
+    expect(committed.toString("utf8")).toBe(EXPECTED_NPMRC);
+    expect(committed.equals(Buffer.from(EXPECTED_NPMRC, "utf8"))).toBe(true);
   });
 
-  it("carries no URL userinfo in a permitted key's value", () => {
-    const userinfo = settings.filter(({ value }) => URL_USERINFO.test(value));
-    expect(userinfo.map(({ line }) => line)).toEqual([]);
+  it("carries no CR, so npm's line split and the one below cannot disagree", () => {
+    // npm parses with the `ini` package, which breaks lines on /[\r\n]+/, so a
+    // lone CR ends a line there while a split on "\n" alone reads
+    // `# note<CR>//host/:_authToken=x` as one comment. Measured against npm
+    // 11.17.0 driven at a local registry, a token smuggled that way is one npm
+    // sends as `Authorization: Bearer`. No CR in the file is what makes the
+    // enumeration below the same set of lines npm reads.
+    expect(EXPECTED_NPMRC).not.toMatch(/\r/);
   });
 
-  it("cannot hide a key from the allowlist behind a lone CR", () => {
-    // Measured against npm 11.17.0 driven at a local registry: a token on the
-    // far side of a CR inside a comment line is one npm sends as
-    // `Authorization: Bearer`, so a reader that splits on "\n" alone reports a
-    // credential-free file that is not one.
-    const smuggled = npmrcSettings(
-      "# note\r//registry.npmjs.org/:_authToken=SECRET\n",
-    );
-    expect(smuggled.filter(({ key }) => !PERMITTED_KEYS.has(key))).not.toEqual(
-      [],
-    );
-  });
-
-  it("states the two policies its readers rest on", () => {
+  it("states the two policies its readers rest on, and states nothing else", () => {
     // Drop either and npm reverts to an advisory warning it prints after the
     // fact: an uncovered install script runs, and an engines mismatch installs.
-    const stated = Object.fromEntries(
-      settings.map(({ key, value }) => [key, value]),
-    );
-    expect(stated["strict-allow-scripts"]).toBe("true");
-    expect(stated["engine-strict"]).toBe("true");
+    // Anything beyond them is configuration nobody reviewed as safe to bake into
+    // a cached image layer.
+    const stated = EXPECTED_NPMRC.split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "" && !/^[#;]/.test(line));
+    expect(stated).toEqual(["engine-strict=true", "strict-allow-scripts=true"]);
+  });
+
+  it("carries no URL userinfo anywhere in it", () => {
+    // A credential rides in on a value rather than on a key name:
+    // `registry=https://user:secret@host/`, including under an `@scope:registry`
+    // key, is one npm turns into an Authorization: Basic header for that
+    // registry. Neither policy above takes a URL, so this is what stands over a
+    // URL-valued key that later joins them in the literal -- the one path a
+    // legitimate widening could carry a credential in on.
+    expect(EXPECTED_NPMRC).not.toMatch(/[a-z][a-z0-9+.-]*:\/\/[^/?#\s@]*@/i);
   });
 });
 
