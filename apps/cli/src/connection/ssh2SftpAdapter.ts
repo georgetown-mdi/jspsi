@@ -315,7 +315,14 @@ interface HeldSessionTransition {
 // cannot quietly absorb the chokepoint check reached through it: the check exists
 // to make two overlapping transitions LOUD, and reporting one as an operational
 // failure of the thing it guards is the one outcome that would defeat it.
-class SessionTransitionViolationError extends Error {}
+//
+// A UsageError because that is the class the file-sync poll loop's terminal rule
+// keys on. A plain Error reaching the loop through an operation is a transient
+// transport hiccup to it: the consume-delete swallows it, retries, and delivers
+// the message anyway -- which would leave a breach of the chokepoint quieter at
+// the loop layer than an ordinary stall, defeating the same LOUDNESS the class
+// exists for.
+class SessionTransitionViolationError extends UsageError {}
 
 // What a transition does when its bounded wait for the transition ahead of it
 // expires (TRANSITION_ACQUIRE_TIMEOUT_MS). runTransition acts on this reading

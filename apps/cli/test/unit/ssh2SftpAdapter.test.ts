@@ -3763,7 +3763,11 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
     ) as Promise<boolean>;
     const violation = await clearing.catch((error: unknown) => error);
 
-    expect(violation).toBeInstanceOf(Error);
+    // A UsageError, which is what the file-sync poll loop's terminal rule keys
+    // on: propagating as a plain Error would make the consume-delete swallow the
+    // breach, retry, and deliver the message regardless -- quieter at the loop
+    // layer than an ordinary stall, which is a UsageError and stops it.
+    expect(violation).toBeInstanceOf(UsageError);
     expect((violation as Error).message).toContain(
       "outside the SFTP session transition that owns it",
     );
