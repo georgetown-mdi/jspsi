@@ -3705,6 +3705,38 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
     expect(adapter.midExchangeReconnectCount).toBe(0);
   });
 
+  test("warns and leaves the operation terminal when the forced close's destroy raises", async () => {
+    // net.Socket's destroy() is driven synchronously, so it can raise INTO the
+    // recovery rather than rejecting a wait it can absorb. The recovery catches
+    // that where the connection-per-poll release deliberately does not: the
+    // operation already carries the loss the poll loop stops on, and an error of
+    // the mechanism's own would replace it with one the loop reads differently.
+    const { client, connect, destroy, dropWithholdingClose } =
+      withholdingPartner();
+    destroy.mockImplementation(() => {
+      throw new Error("socket already destroyed");
+    });
+    const del = stallingThenSucceedingDelete(client);
+    const { adapter, log } = loggedAdapter();
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    dropWithholdingClose();
+
+    await expect(adapter.delete("/remote/x.json")).rejects.toBeInstanceOf(
+      TransportOperationStalledError,
+    );
+    expect(destroy).toHaveBeenCalledOnce();
+    // The session never cleared, so there is nothing to re-dial or re-issue onto.
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(del).toHaveBeenCalledOnce();
+    expect(log.warn).toHaveBeenCalledOnce();
+    expect(log.warn.mock.calls[0][0] as string).toContain(
+      "socket already destroyed",
+    );
+    expect(adapter.midExchangeReconnectCount).toBe(0);
+  });
+
   test("warns and leaves the operation terminal when the forced close does not clear the session", async () => {
     // The one premise no dial can check -- that destroying the transport takes the
     // session with it -- is read back where it is driven, on the mid-exchange
@@ -6742,6 +6774,49 @@ describe("ephemeral session mode (connection-per-poll)", () => {
         releaseForIdle: "resolved undefined",
         teardown: "resolved undefined",
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a recovery re-dial that abandons over a held dead session fails the operation rather than re-issuing it", async () => {
+    // The other arm of the abandoned re-dial's reading. Giving up the wait clears
+    // nothing, so a session the partner dropped while withholding its close is
+    // still held over a transport that can carry nothing: a re-issue there would
+    // ride the per-operation deadline a second time to reach the loss the
+    // operation already has.
+    vi.useFakeTimers();
+    try {
+      const { client, connect, state, rawClient, socket } =
+        ephemeralClient(wrapperMethods());
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      stub(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      neverSettlingHolder(adapter, connect, state, rawClient);
+      // The partner dropped this cycle's session and withheld its close while the
+      // dial above still holds the transition.
+      state.live = true;
+      socket.writableEnded = true;
+      client.delete.mockRejectedValueOnce(
+        new TransportOperationStalledError(
+          "SFTP file delete of /remote/x.json stalled: no response from the " +
+            "server; refusing to wait on the server further",
+        ),
+      );
+
+      const failing = adapter.delete("/remote/x.json").catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(ACQUIRE_BOUND_MS + 1_000);
+
+      expect(await failing).toBeInstanceOf(TransportOperationStalledError);
+      expect(client.delete).toHaveBeenCalledOnce();
+      // The abandon drove nothing on the client the dial ahead of it holds, and
+      // established nothing to count or report as a survived drop.
+      expect(socket.destroy).not.toHaveBeenCalled();
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(adapter.midExchangeReconnectCount).toBe(0);
+      expect(adapterLog(adapter).warn).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
