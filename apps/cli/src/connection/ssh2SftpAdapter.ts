@@ -1190,21 +1190,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // permanently disabling the global 'close' listener that clears this.sftp --
   // which would stop a LATER idle drop from being detected and defeat recovery of
   // the repeated drops this targets.
+  //
+  // The whole precondition runs INSIDE the transition, not at the acquire: the
+  // retained connect options are written by connectLocked, which is another
+  // transition's body, so reading them from outside the lock reads state a
+  // transition owns and can be stale by the time this one runs -- a concurrently
+  // requested re-dial would then be refused before it ever took a queue slot. The
+  // acquire itself stays synchronous (runTransition takes the slot with no
+  // preceding await), so request order is unchanged.
   private redialForRecovery(): Promise<void> {
-    const options = this.originalConnectOptions;
-    if (options === undefined)
-      return Promise.reject(
-        new Error(
-          "SFTP session recovery reached the re-dial with no retained connect " +
-            "options; a server-driven operation ran before connect()",
-        ),
-      );
-    // Stop the heartbeat left armed by the dropped session before queueing the
-    // re-dial: a clean drop (unlike a fatal error) does not stop it, so its old
-    // timer could otherwise tick mid-handshake and post a realPath keepalive on the
-    // client while the dial re-establishes it -- a concurrent op. The dial re-arms a
-    // fresh heartbeat via start() at the end of its sequence.
-    this.heartbeat.stop();
     return this.runTransition({
       kind: "redialForRecovery",
       skipped: () => undefined,
@@ -1214,6 +1208,25 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         // expired with the session still set -- and the dial rejects outright when
         // one is set, so leave the re-issue to run on it.
         if ((this.client as unknown as Ssh2SftpClientInternals).sftp) return;
+        const options = this.originalConnectOptions;
+        if (options === undefined)
+          throw new Error(
+            "SFTP session recovery reached the re-dial with no retained connect " +
+              "options; a server-driven operation ran before connect()",
+          );
+        // Stop the heartbeat left armed by the dropped session before dialing: a
+        // clean drop (unlike a fatal error) does not stop it, so its old timer
+        // could otherwise tick mid-handshake and post a realPath keepalive on the
+        // client while the dial re-establishes it -- a concurrent op. Under the
+        // lock and immediately ahead of the dial it protects, rather than at the
+        // acquire: the heartbeat is another transition's to arm, and stopping it
+        // from outside would leave a queued re-dial silencing a session a
+        // transition ahead of it had just re-established. That transition is a
+        // teardown or another re-dial (the mode that arms a heartbeat at all runs
+        // no cycle-boundary transitions), each of which stops the heartbeat in
+        // its own body. The dial re-arms a fresh one via start() at the end of
+        // its sequence.
+        this.heartbeat.stop();
         await this.connectLocked(options, recordBoundary);
       },
     });
