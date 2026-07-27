@@ -999,7 +999,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private reestablishAfterIdleRelease(): Promise<void> | undefined {
     // Both readings are the release's to set, and the release returns before
     // enqueuing when the mode is off, so the default held-session mode takes this
-    // return every time without a mode check of its own.
+    // return every time without a mode check of its own. The first covers the
+    // close window itself, including a release the PEER began (which records no
+    // boundary); the second covers the gap after a release completed, sparing the
+    // one attempt that would be guaranteed to fail on the session it closed.
     if (
       this.transitionInProgress !== "releaseForIdle" &&
       this.sessionBoundary !== "deliberatelyReleased"

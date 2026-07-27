@@ -4015,6 +4015,36 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  test("an op after the idle release issues no attempt against the released session", async () => {
+    // What the standing release boundary buys, stated as the only thing that
+    // distinguishes it from letting the recovery path absorb the gap: the op is
+    // spared the one attempt that is guaranteed to fail. The counters, the dial
+    // count and the warnings are identical either way -- the re-dial that follows
+    // a deliberate release is exempt from all three -- so the attempt itself is
+    // what has to be asserted.
+    const { client, state } = ephemeralClient(wrapperMethods());
+    const attempts: boolean[] = [];
+    client.exists = vi.fn(async () => {
+      attempts.push(state.live);
+      if (!state.live) throw notConnected("exists");
+      return true;
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.releaseForIdle();
+    expect(state.live).toBe(false);
+
+    await expect(adapter.exists("/remote/file.json")).resolves.toBe(true);
+
+    // One attempt, and the session was live when it was made: without the gate
+    // the first attempt lands on the released session, rejects, and only the
+    // re-issue behind the recovery re-dial succeeds.
+    expect(attempts).toEqual([true]);
+  });
+
   test("an op issued while the release is in flight completes instead of failing terminally", async () => {
     // The release drives the ssh2 Client's end() and then awaits its 'close'.
     // ssh2-sftp-client clears `this.sftp` from that 'close', not from end(), so
@@ -4046,6 +4076,50 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(adapter.midExchangeReconnectCount).toBe(0);
     expect(warn).not.toHaveBeenCalled();
     // The initial dial plus the one re-establishment the op waited for.
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("an op issued during a release that records no boundary still waits the close window out", async () => {
+    // The release in flight is the reading that covers the close window, and it
+    // is the ONLY one that covers this release: the PEER began this teardown, so
+    // no deliberate-release boundary is recorded and the boundary reading never
+    // becomes true. An op issued into the window must still be held off -- it
+    // would otherwise reject against a session that still reads live, which the
+    // clean-loss classifier calls terminal.
+    const { client, connect, rawClient, state } =
+      slowClosingClient(wrapperMethods());
+    const socket = rawClient._sock as Record<string, unknown>;
+    // The peer's FIN has been consumed: ssh2 has emitted 'end' and the 'close' is
+    // on its way, which is what makes this boundary the server's rather than this
+    // adapter's.
+    socket.readableEnded = true;
+    // Each attempt records whether it was made inside the close window (the ssh2
+    // Client's end() driven, its 'close' not yet landed, the session still
+    // reading live).
+    const attempts: boolean[] = [];
+    client.exists = vi.fn(async () => {
+      attempts.push(state.ending);
+      if (state.ending)
+        throw new Error("Channel closed while the connection was ending");
+      if (!state.live) throw notConnected("exists");
+      return true;
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+
+    const release = adapter.releaseForIdle();
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    expect(client.sftp).not.toBeNull();
+    expect(releaseBoundaryStands(adapter)).toBe(false);
+
+    await expect(adapter.exists("/remote/file.json")).resolves.toBe(true);
+    await release;
+
+    // One attempt, made on the far side of the close rather than inside it.
+    expect(attempts).toEqual([false]);
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
