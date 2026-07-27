@@ -15,11 +15,12 @@ WORKDIR /build
 
 # 11.17 is the npm the `allowScripts` map's matching rules were measured against.
 # The install-side policy is live from 11.16; 11.15 and earlier know neither the
-# `strict-allow-scripts` key nor the map, and install every script unreviewed
-# with no diagnostic at all. Which npm this stage gets is a property of the base
-# digest above rather than of anything in this repo, so check it here instead of
-# letting a base re-pin quietly un-enforce the policy or move it off the version
-# the spec describes. See docs/spec/DEPENDENCY_PINS.md.
+# `strict-allow-scripts` key nor the map, and install every script unreviewed --
+# warning that the key is unknown, never that a script ran. Which npm this stage
+# gets is a property of the base digest above rather than of anything in this
+# repo, so check it here instead of letting a base re-pin quietly un-enforce the
+# policy or move it off the version the spec describes. See
+# docs/spec/DEPENDENCY_PINS.md.
 RUN npm_version="$(npm --version)"; \
   npm_major="${npm_version%%.*}"; \
   npm_minor="${npm_version#*.}"; npm_minor="${npm_minor%%.*}"; \
