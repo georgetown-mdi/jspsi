@@ -30,6 +30,14 @@ In role mode, read the claims file in the main thread: every non-empty line is o
 claim, trimmed, with a leading list marker (`- `, `* `, `1. `) stripped. Call this list
 CLAIMS.
 
+Hold each claim to the contract-language rules in CLAUDE.md's refutation-contract
+bullet before running the round. A claim asserting totality ("cannot be bypassed",
+"no way to", "genuinely binds") rather than a measured bound, or a post-narrowing
+no-regression claim scoped to prior heads' union coverage rather than to what the
+kept checks are for, is a defective contract: stop and rewrite it first. A round run
+on a totality claim can only gate, because the reviewer's job is to find the
+counterexample the claim's own wording promises does not exist.
+
 A plan-stage contract -- claims about a design rather than the code -- must include
 the premise claim, that the plan solves the right problem, among CLAIMS; commit the
 design document on the branch first, so the diff the round reviews is non-empty.

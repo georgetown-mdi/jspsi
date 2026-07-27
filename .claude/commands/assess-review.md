@@ -44,15 +44,16 @@ Start with the whole, not the parts:
   round's gate ignores those by design, the trajectory does not.
 
 On a branch whose ledger holds no prior row, skip the trajectory read:
-triggers 1-3 each compare against a previous round, so with nothing before
-this round check only triggers 4-6.
+triggers 1-3 and 7 each compare against a previous round, so with nothing
+before this round check only triggers 4-6.
 
 Then check the **step-back triggers**. If ANY fires, do NOT proceed to
 fix-and-rerun: stop, and recommend a structural pivot instead -- a focused
-independent assessment of the churning area (fresh agents, cold) or a judge
-panel of alternative shapes -- presented to the owner in prose with options and
-a recommendation. Churn escalates to a different activity, never to another
-blind whole-branch round.
+independent assessment of the churning area (fresh agents, cold), a judge
+panel of alternative shapes, or a narrowing (delete or defer the churning
+surface, its limit stated in the spec) -- presented to the owner in prose with
+options and a recommendation. Churn escalates to a different activity, never to
+another blind whole-branch round.
 
 1. The same file or area carries confirmed findings in three consecutive rounds
    (two, for a diff under ~150 lines).
@@ -67,6 +68,9 @@ blind whole-branch round.
    or more.
 6. The driving board issue's **Affected areas** is in context and the diff has
    spread well beyond it.
+7. A confirmed finding or gating claim lands on code a previous fix round added,
+   rather than on the branch's original change, in two consecutive rounds -- the
+   guard is churning, not the change, and the pivot to weigh first is narrowing.
 
 ## Step 3 -- Triage and fix
 
@@ -75,6 +79,17 @@ hunks/files it names, not the whole diff), then decide.
 
 - **Default to fixing.** Drive-by corrections are welcome -- you do not need
   permission to fix something small and clearly right.
+- **Contest by measurement before fixing for it.** A finding or refuted claim
+  about an external tool's behavior that rests on reading rather than running
+  is still open: reproduce the claimed behavior against the real tool first.
+  A first-hand run that contradicts the finding closes it -- record the command
+  and outcome in Step 4 -- and one that confirms it makes the fix a measured
+  one.
+- **A gated role round's disposition can take a consult.** Choosing among fix,
+  contest, and documented limit on a gated `security-reviewer` or
+  `adversarial-verifier` round is the adjudication CLAUDE.md's model-tier rule
+  reserves Fable for -- a one-shot, owner-approved consult on the choice, never
+  a Fable fix round.
 - **A fix that adds behavior gets a test.** When a fix introduces new branching
   or a new code path (error handling, a guard, a fallback), pin its guarantees
   with a test in the same pass. No later round re-reviews a fix: another round
@@ -97,9 +112,13 @@ hunks/files it names, not the whole diff), then decide.
   config-schema, protocol or wire format, security-relevant behavior, a
   dependency, a shared convention, or the branch's scope. Ask in prose with the
   options and a recommendation; do NOT use the question tool.
-- **Leave it** only when it is truly out of scope for this branch, or genuinely
-  not worth the change. Do NOT file a board issue for anything -- no automated
-  filings; an unaddressed finding is recorded in Step 4, not on the board.
+- **Leave it** only when it is truly out of scope for this branch, genuinely
+  not worth the change, or best taken as a documented limit per CLAUDE.md's
+  three-disposition rule -- for that last, state the limit in the matching spec
+  section in the same pass and propose the remedy as a follow-on in Step 4's
+  table. Do NOT file a board issue for anything -- no automated filings; an
+  unaddressed finding is recorded in Step 4, not on the board, and a follow-on
+  is filed only on the owner's word.
 
 Apply the fixes. If you changed anything, verify before committing: build core
 if you touched it (`npm run build -w packages/core`), then `npm run typecheck &&
@@ -120,9 +139,10 @@ is latent and likely to come back to bite.
 
 **Security-review readiness.** One line: ready, or not yet and what is gating it.
 The branch is ready when the diff has stabilized (trajectory converging, not
-churning), no unaddressed finding touches a security-relevant surface, brittle
-areas are shored up or independently assessed, and typecheck/lint/tests are
-green. When it is ready, say so.
+churning), no unaddressed finding touches a security-relevant surface (one taken
+as a documented limit stops gating readiness once the owner ratifies that
+disposition), brittle areas are shored up or independently assessed, and
+typecheck/lint/tests are green. When it is ready, say so.
 
 ## Step 5 -- Clean up
 
