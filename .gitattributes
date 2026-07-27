@@ -1,0 +1,5 @@
+# The freeze test asserts the root .npmrc byte for byte
+# (scripts/dockerfile-freeze.test.mjs), so a checkout that rewrote its line
+# endings -- Git for Windows' core.autocrlf=true default does -- would redden
+# that check over the checkout rather than over the file.
+/.npmrc -text
