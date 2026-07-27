@@ -976,13 +976,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // discipline, and every site that forgets it (a send resuming from the protocol
   // continuation, a retain-mode ack write) reopens this hole.
   //
-  // It runs at operation ENTRY, so it covers an operation ISSUED at or after a
-  // release takes the transition lock. Two operations do not reach it at all --
-  // safeDelete, whose never-reject contract puts it outside recovery, and a put
-  // whose source cannot be re-issued (a one-shot stream, or flags:"a") -- and no
-  // gate at entry can cover an operation already on the wire when the release
-  // begins: that one is torn with the session, and can fail terminally (see
-  // shouldRecoverFromSessionLoss).
+  // It runs at operation ENTRY, so it covers an operation ISSUED once a release
+  // is RUNNING. Both readings below are written from inside the release's own
+  // transition, so an operation issued while that release is still QUEUED behind
+  // another transition reads neither and is issued against the still-live
+  // session: it is in the on-the-wire class, not the covered one. Two operations
+  // do not reach this gate at all -- safeDelete, whose never-reject contract puts
+  // it outside recovery, and a put whose source cannot be re-issued (a one-shot
+  // stream, or flags:"a") -- and no gate at entry can cover an operation already
+  // on the wire when the release begins: that one is torn with the session, and
+  // can fail terminally (see shouldRecoverFromSessionLoss).
   //
   // Returns undefined -- no gate, not even a microtask -- whenever the mode is off
   // or no release has intervened, so the default held-session mode runs exactly as
@@ -1147,11 +1150,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // get/put/delete/rename/exists. Terminal (never re-dialed), in order:
   //   - no connect has succeeded yet (nothing to re-dial with);
   //   - the session is still live (a stall or app-level failure, not a loss). An op
-  //     ISSUED at or after a connection-per-poll release cannot reach this reading:
-  //     withSessionRecovery's gate waits the release out and re-establishes before
-  //     the first attempt. An op ALREADY ON THE WIRE when that release begins is
-  //     torn with the session -- no entry gate covers it -- and at the pinned
-  //     versions that tear reads as the loss it is, for a narrower reason than the
+  //     ISSUED once a connection-per-poll release is RUNNING cannot reach this
+  //     reading: withSessionRecovery's gate waits the release out and
+  //     re-establishes before the first attempt. An op ALREADY ON THE WIRE when
+  //     that release begins is torn with the session -- no entry gate covers it,
+  //     and neither does one issued while the release is still queued, which is
+  //     the same class -- and at the pinned versions that tear reads as the loss
+  //     it is, for a narrower reason than the
   //     transport event alone: ssh2 fails outstanding channel requests ONLY from the
   //     socket's 'close' handler (the socket's 'end' emits and cleans the protocol
   //     up but leaves them outstanding), and it does so after its own emit('close')
@@ -1642,8 +1647,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * `max_reconnect_attempts` attempts each up to the connect timeout, around a
    * minute at the defaults and longer if the operator raises that setting).
    *
-   * The whole call, forced close included, holds the transition lock, so an
-   * operation ISSUED at or after it re-establishes the session through
+   * The whole body, forced close included, holds the transition lock, so an
+   * operation ISSUED while it runs re-establishes the session through
    * {@link withSessionRecovery}'s gate instead of racing the close or reporting the
    * deliberate absence as a server drop. An operation already ON THE WIRE when the
    * release begins is torn with the session instead, and at the pinned versions
