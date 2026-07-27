@@ -2,7 +2,11 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test } from "vitest";
-import { FileSyncConnection } from "@psilink/core";
+import {
+  DEFAULT_MAX_RECONNECT_ATTEMPTS,
+  FileSyncConnection,
+  UsageError,
+} from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
@@ -10,11 +14,13 @@ import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 
 // End-to-end proof for connection-per-poll (ephemeral-session) SFTP mode against
-// the partner server the mode is hardest on: one that accepts the client's
-// disconnect and then goes quiet, never closing the connection. Only the
-// in-process backend can be made to withhold its close (a native sshd cannot), so
-// this runs there and stands up its own server to reach the session controls --
-// the shared globalSetup server hands the workers only its connection details.
+// the two partner servers it is hardest on: one that accepts the client's
+// disconnect and then goes quiet, never closing the connection, and one that
+// enforces a maximum session duration short enough to cut the rendezvous. Only the
+// in-process backend can be driven that way (a native sshd cannot be told to
+// withhold a close or to cap a session), so this runs there and stands up its own
+// server to reach the session controls -- the shared globalSetup server hands the
+// workers only its connection details.
 const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 // Each idle boundary costs the release's own close bound (5 s) before the forced
@@ -188,10 +194,236 @@ inProcessOnly(
   BOUNDARY_TEST_TIMEOUT_MS,
 );
 
-// PENDING, still: the max-session/idle-cap half of the connection-per-poll
-// end-to-end proof. The harness now has the session caps and the forced drops
-// (test/sftpServer/sessionControls.ts), so what remains is the exchange that
-// drives them, asserting:
+// How long a session established under the cap survives. Long enough for the
+// rendezvous to get its opening writes onto the wire, short enough that the
+// waiting party's rendezvous outlives several of them.
+const RENDEZVOUS_SESSION_LIFETIME_MS = 3_000;
+
+inProcessOnly(
+  "the default held-session mode fails terminally when its rendezvous " +
+    "outlives the server's maximum session lifetime",
+  async () => {
+    // The contrast that sends an operator whose partner caps session lifetime to
+    // connection-per-poll, measured beside the mode's own proof below rather than
+    // asserted about it. The scenario is identical; the only difference is that
+    // this waiting party holds one session, so its recovery re-dials ARE charged
+    // against max_reconnect_attempts. The cap cuts the rendezvous just as often,
+    // the budget runs out, and the exchange fails terminally where the mode below
+    // completes.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "held-session-rendezvous-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const joiner = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    const waiterAdapter = new SSH2SFTPClientAdapter();
+    const waiter = new FileSyncConnection(waiterAdapter, {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    const failures: unknown[] = [];
+    joiner.on("error", (err: unknown) => failures.push(err));
+    waiter.on("error", (err: unknown) => failures.push(err));
+
+    try {
+      // Same ordering as the test below, for the same reason: the joiner connects
+      // BEFORE the cap is armed, so the standing cap governs only the sessions of
+      // the party whose rendezvous this measures.
+      await joiner.open({
+        channel: "sftp",
+        server: {
+          host: srv.handle.host,
+          port: srv.handle.port,
+          ...serverAuth(srv.handle.usera),
+          path: remote,
+        },
+      });
+      srv.sessionControls.maxLifetimeMs = RENDEZVOUS_SESSION_LIFETIME_MS;
+      await waiter.open({
+        channel: "sftp",
+        server: {
+          host: srv.handle.host,
+          port: srv.handle.port,
+          ...serverAuth(srv.handle.userb),
+          path: remote,
+        },
+      });
+      // From here every handshake is a re-dial recovering a cap-forced drop.
+      srv.sessionControls.resetHandshakeCount();
+
+      const [rejection, logs] = await withCapturedLogs(
+        async () =>
+          // The joiner never reaches its own rendezvous, so this one waits it out
+          // while the cap cuts session after session beneath it.
+          waiter.synchronize().then(
+            () => undefined,
+            (error: unknown) => error,
+          ),
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      expect(rejection).toBeInstanceOf(UsageError);
+      expect((rejection as Error).message).toContain(
+        `re-dialed the maximum ${DEFAULT_MAX_RECONNECT_ATTEMPTS} times ` +
+          `allowed by max_reconnect_attempts=${DEFAULT_MAX_RECONNECT_ATTEMPTS}`,
+      );
+      expect((rejection as Error).message).toContain(
+        "the mid-exchange reconnection budget is exhausted",
+      );
+      // What ended the exchange was the budget rather than a rendezvous the server
+      // never cut: every re-dial the budget permits was spent first, and the drop
+      // after them is the one that raised.
+      expect(waiterAdapter.midExchangeReconnectCount).toBe(
+        DEFAULT_MAX_RECONNECT_ATTEMPTS,
+      );
+      expect(srv.sessionControls.handshakeCount()).toBeGreaterThanOrEqual(
+        DEFAULT_MAX_RECONNECT_ATTEMPTS,
+      );
+      // The failure reached the caller as the rendezvous rejection and nothing
+      // else; a party that also surfaced it as a connection error would report the
+      // same drop twice.
+      expect(failures).toEqual([]);
+      // The operator is warned that the budget is spent before the drop that ends
+      // the exchange, so the terminal error is not the first they hear of it.
+      const lastRedialWarnings = logs.filter((entry) =>
+        entry.message.includes("That was the last re-dial allowed by"),
+      );
+      expect(lastRedialWarnings).toHaveLength(1);
+      expect(lastRedialWarnings[0].level).toBe("WARN");
+    } finally {
+      // Disarm before either party disconnects: a rejected rendezvous still leaves
+      // a connection to close, and teardown re-dials.
+      srv.sessionControls.maxLifetimeMs = 0;
+      await waiter.close().catch(() => {});
+      await joiner.close().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "connection-per-poll completes an exchange whose rendezvous outlives the " +
+    "server's maximum session lifetime",
+  async () => {
+    // The mode's per-cycle session lifetime is a property of the POLL LOOP. The
+    // rendezvous that precedes it -- FileSyncConnection.synchronize() -- holds one
+    // session across its waits, so a party that waits for a late peer against a
+    // server enforcing a maximum session duration is dropped mid-rendezvous. What
+    // carries the exchange through is the mode's uncapped recovery re-dial (the
+    // cumulative max_reconnect_attempts budget is gated off here), so the exchange
+    // completes rather than failing terminally.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "per-poll-rendezvous-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const joinerAdapter = new SSH2SFTPClientAdapter();
+    const joiner = new FileSyncConnection(joinerAdapter, {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    const waiterAdapter = new SSH2SFTPClientAdapter({
+      ephemeralSessions: true,
+    });
+    const waiter = new FileSyncConnection(waiterAdapter, {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    const failures: unknown[] = [];
+    joiner.on("error", (err: unknown) => failures.push(err));
+    waiter.on("error", (err: unknown) => failures.push(err));
+
+    try {
+      // The joiner holds one session for the whole exchange, so it connects BEFORE
+      // the cap is armed: the standing cap governs every session established while
+      // it is set, and a held session under it would thrash a reconnect of its own
+      // and confound what this measures.
+      await joiner.open({
+        channel: "sftp",
+        server: {
+          host: srv.handle.host,
+          port: srv.handle.port,
+          ...serverAuth(srv.handle.usera),
+          path: remote,
+        },
+      });
+      srv.sessionControls.maxLifetimeMs = RENDEZVOUS_SESSION_LIFETIME_MS;
+      await waiter.open({
+        channel: "sftp",
+        server: {
+          host: srv.handle.host,
+          port: srv.handle.port,
+          ...serverAuth(srv.handle.userb),
+          path: remote,
+        },
+      });
+      // From here every handshake is a re-dial recovering a cap-forced drop.
+      srv.sessionControls.resetHandshakeCount();
+
+      const [received, logs] = await withCapturedLogs(
+        async () => {
+          const waiting = waiter.synchronize();
+          // Hold the joiner back until the cap has cut the waiting party's
+          // rendezvous session twice, so what the exchange survives is
+          // unmistakably a drop DURING synchronize() rather than one in the poll
+          // loop that follows it. Two cuts land in about seven seconds; the bound
+          // here is generous headroom over that, not a timing assertion.
+          await waitFor(() => srv.sessionControls.handshakeCount() >= 2, {
+            timeoutMs: 60_000,
+          });
+          await Promise.all([waiting, joiner.synchronize()]);
+          const message = new Promise((resolve) =>
+            waiter.once("data", resolve),
+          );
+          waiter.start();
+          await joiner.send({ message: "across the rendezvous cap" });
+          const delivered = await message;
+          waiter.stop();
+          return delivered;
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      // The exchange completed: both rendezvous resolved, the message crossed, and
+      // nothing surfaced as an error.
+      expect(failures).toEqual([]);
+      expect(received).toEqual({ message: "across the rendezvous cap" });
+      // The cap actually bit. Without this the test could pass on a rendezvous the
+      // server never cut, which proves nothing.
+      expect(srv.sessionControls.handshakeCount()).toBeGreaterThanOrEqual(2);
+      expect(waiterAdapter.midExchangeReconnectCount).toBeGreaterThanOrEqual(2);
+      // The operator is told the drop may be a rendezvous wait outliving the
+      // server's cap, not only a fault within a poll cycle.
+      const redialWarnings = logs.filter((entry) =>
+        entry.message.includes("transparently re-dialed"),
+      );
+      expect(redialWarnings).toHaveLength(1);
+      expect(redialWarnings[0].level).toBe("WARN");
+      expect(redialWarnings[0].message).toContain("within a poll cycle");
+      expect(redialWarnings[0].message).toContain("rendezvous");
+    } finally {
+      waiter.stop();
+      // Disarm before either party disconnects: teardown re-dials and the
+      // terminal-frame drain must not be cut by a cap this test is done with.
+      srv.sessionControls.maxLifetimeMs = 0;
+      await waiter.close().catch(() => {});
+      await joiner.close().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
+
+// PENDING, still: the POLL-LOOP half of the connection-per-poll max-session/idle
+// cap proof. The rendezvous half is the test above; the harness has the session
+// caps and the forced drops (test/sftpServer/sessionControls.ts), so what remains
+// is the poll-loop exchange that drives them, asserting:
 //   - a full exchange completes across repeated cap-forced drops with a fresh
 //     session per poll cycle, where a single held session would thrash a
 //     reconnect every cycle;
@@ -200,9 +432,9 @@ inProcessOnly(
 //   - close() still writes the authenticated abort marker and drains the terminal
 //     frame when the prior cycle's connection was already released, and a waiting
 //     peer still fast-fails on the marker (see docs/spec/CHANNEL_SECURITY.md).
-// The test above covers the re-dial's reuse of the pinned host key and stored
+// The tests above cover the re-dial's reuse of the pinned host key and stored
 // credentials for free: every cycle re-dials through the same pinned, fail-closed
 // verifier with no re-prompt, and a cycle that did not would fail it.
-test.skip("connection-per-poll SFTP survives a server-forced max-session drop", () => {
+test.skip("connection-per-poll SFTP poll loop survives server-forced max-session drops", () => {
   // Intentionally unimplemented; see the note above for what it must assert.
 });

@@ -119,9 +119,10 @@ observable. Three properties define the default:
 - **Give the capping-server case its own escape.** A server that structurally caps
   session lifetime would exhaust any held-session budget, so raising
   `max_reconnect_attempts` is the answer only for a transiently flaky link. The
-  structural fix is connection-per-poll (below): it holds no session across the
-  idle gap, so it never reaches the cap and its within-cycle recovery is bounded
-  instead by the peer-inactivity ceiling.
+  structural fix is connection-per-poll (below): its poll loop holds no session
+  across the idle gap, so the loop never reaches the cap, and its recovery re-dials
+  are uncapped in every phase -- bounded instead by the peer-inactivity ceiling --
+  which is what carries a rendezvous the cap does cut.
 
 The recoverable-versus-terminal taxonomy stays exactly as it is: it keys on the
 session's post-drop state, not on message matching, and it is sound. This posture
@@ -134,21 +135,33 @@ first.
 For the slow-asymmetric-peer case, the structural fix is to stop holding a session
 across the idle gap at all. In the mode, each poll cycle dials a fresh SFTP
 connection, runs that cycle's batch of ops, and releases the connection before the
-loop goes idle again. A session then need only survive one cycle's seconds, so it
-never reaches the server's duration or idle cap; there is no held-but-secretly-dead
-window and no heartbeat to churn keepalives against a corpse. The failure it does
-have -- a dial that fails -- fails loudly at one well-understood seam and is handled
-by the ordinary connect-error path, rather than silently on the next op against a
-cleared session.
+loop goes idle again. A cycle's session then need only survive that cycle's seconds,
+so the poll loop never reaches the server's duration or idle cap; there is no
+held-but-secretly-dead window and no heartbeat to churn keepalives against a corpse.
+The failure it does have -- a dial that fails -- fails loudly at one well-understood
+seam and is handled by the ordinary connect-error path, rather than silently on the
+next op against a cleared session.
+
+The per-cycle lifetime is the **poll loop's** property, not the mode's as a whole.
+The rendezvous that runs before the loop -- this party waiting for the partner to
+join the exchange -- holds a single un-heartbeated session across its wait, so a
+server cap cuts it there on a wait long enough to outlive the cap. What carries the
+exchange through is the mode's uncapped recovery re-dial: the cumulative
+`max_reconnect_attempts` budget is exempted in this mode, so a rendezvous that
+outlives the cap re-dials as often as the cap cuts it and the exchange completes,
+where the held-session default in the same scenario exhausts that budget and fails
+terminally. Arming the heartbeat for the rendezvous would not close the gap -- a
+keepalive defeats only an idle timer and is powerless against the
+maximum-session-lifetime cap this mode exists for.
 
 The mode is a **hybrid**, not a replacement. The held-session default (with the
 bounded, observable recovery above) stays right for fast and symmetric exchanges: a
 full SSH handshake per cycle is negligible at a minutes-scale poll interval and
 wasteful at the five-second default, so per-cycle dialing is only sane paired with a
-long interval. Transparent recovery is retained underneath the mode as the
-within-cycle safety net -- a drop *inside* a batch is still re-dialed -- but it is
-demoted from the primary mechanism to a bounded floor, because per-poll has already
-removed the between-cycles drop it was carrying.
+long interval. Transparent recovery is retained underneath the mode as its safety
+net -- a drop *inside* a batch, and one that cuts the rendezvous, are both still
+re-dialed -- but it is demoted from the primary mechanism to a floor, because
+per-poll has already removed the between-cycles drop it was carrying.
 
 ## The seam: an adapter-owned ephemeral session
 
