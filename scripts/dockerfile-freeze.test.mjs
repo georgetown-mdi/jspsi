@@ -32,21 +32,25 @@ const lastFromIndex = instructions.reduce(
 const builder = instructions.slice(0, lastFromIndex);
 const runtime = instructions.slice(lastFromIndex);
 
-// One COPY's sources and its absolute in-image destinations, resolved against
-// the WORKDIR in effect at that instruction.
+// One COPY's sources paired with the absolute in-image path each lands at,
+// resolved against the WORKDIR in effect at that instruction.
 const copyTargets = (cwd, rest) => {
   const tokens = rest.split(/\s+/);
   const flags = tokens.filter((t) => t.startsWith("--"));
   const paths = tokens.filter((t) => !t.startsWith("--"));
   const sources = paths.slice(0, -1);
   const rawDest = paths[paths.length - 1];
-  // A directory destination (trailing "/" or ".") receives the source's
-  // basename; a file destination is the path itself.
-  const dests =
+  // A directory destination (trailing "/" or ".") receives each source's
+  // basename; a file destination is the path itself, which Docker permits only
+  // for a single source.
+  const copies =
     rawDest.endsWith("/") || rawDest === "."
-      ? sources.map((s) => posix.resolve(cwd, rawDest, posix.basename(s)))
-      : [posix.resolve(cwd, rawDest)];
-  return { flags, sources, dests };
+      ? sources.map((source) => ({
+          source,
+          dest: posix.resolve(cwd, rawDest, posix.basename(source)),
+        }))
+      : [{ source: sources[0], dest: posix.resolve(cwd, rawDest) }];
+  return { flags, sources, copies, dests: copies.map(({ dest }) => dest) };
 };
 
 const runtimeCopies = [];
@@ -58,6 +62,11 @@ const runtimeCopies = [];
   }
 }
 const allRuntimeDests = runtimeCopies.flatMap(({ dests }) => dests);
+
+// The build context's own root .npmrc as a COPY source. A different file copied
+// to the same name states whatever its author put in it, so only this one
+// carries the policy the tests below and DEPENDENCY_PINS.md speak for.
+const ROOT_NPMRC_SOURCE = /^(?:\.\/)?\.npmrc$/;
 
 // Every `npm ci` in the file, paired with whether the root .npmrc had already
 // been copied into the directory that install runs in. npm reads its project
@@ -74,8 +83,8 @@ const installSites = [];
     }
     if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
     if (inst === "COPY") {
-      for (const dest of copyTargets(cwd, rest).dests) {
-        if (posix.basename(dest) === ".npmrc")
+      for (const { source, dest } of copyTargets(cwd, rest).copies) {
+        if (ROOT_NPMRC_SOURCE.test(source) && posix.basename(dest) === ".npmrc")
           npmrcDirs.add(posix.dirname(dest));
       }
     }
@@ -89,6 +98,16 @@ const builderRuns = builder
   .filter(({ inst }) => inst === "RUN")
   .map(({ rest }) => rest);
 
+const firstInstall = builder.findIndex(
+  ({ inst, rest }) => inst === "RUN" && /\bnpm ci\b/.test(rest),
+);
+
+// `allowScripts` and `strict-allow-scripts` are npm 11.17 features. An older npm
+// does not know the config key and reads no policy from the map, so both are
+// inert with no diagnostic -- and the base image's digest, not this repo, is
+// what decides which npm the builder gets.
+const NPM_POLICY_FLOOR = "11.17";
+
 describe("Dockerfile dependency freeze", () => {
   it("installs only with npm ci, never npm install", () => {
     expect(dockerfile).not.toMatch(/\bnpm\s+install\b/);
@@ -96,24 +115,35 @@ describe("Dockerfile dependency freeze", () => {
   });
 
   it("copies the committed lockfile into the builder before the first npm ci", () => {
-    const firstCi = builder.findIndex(
-      ({ inst, rest }) => inst === "RUN" && /\bnpm ci\b/.test(rest),
-    );
     const lockCopy = builder.findIndex(
       ({ inst, rest }) => inst === "COPY" && rest.includes("package-lock.json"),
     );
     expect(lockCopy).toBeGreaterThanOrEqual(0);
-    expect(firstCi).toBeGreaterThan(lockCopy);
+    expect(firstInstall).toBeGreaterThan(lockCopy);
   });
 
   it("runs every npm ci under the root .npmrc, so its install policy binds", () => {
-    // Without the .npmrc in the install directory the image builds under npm's
-    // defaults: strict-allow-scripts is off, and a package that gains an
+    // Without the root .npmrc in the install directory the image builds under
+    // npm's defaults: strict-allow-scripts is off, and a package that gains an
     // install script runs it here while grounding every other install.
     expect(installSites.length).toBeGreaterThan(0);
     expect(
       installSites.filter(({ underRootNpmrc }) => !underRootNpmrc),
     ).toEqual([]);
+  });
+
+  it("holds the builder's npm to the install policy's floor before installing", () => {
+    // The map and the flag are silently inert below it, so a base digest re-pin
+    // onto an older node would install everything unreviewed while every check
+    // and this document still read as enforcement.
+    const floorGuard = builder.findIndex(
+      ({ inst, rest }) =>
+        inst === "RUN" &&
+        /\bnpm\s+(?:--version|-v)\b/.test(rest) &&
+        rest.includes(NPM_POLICY_FLOOR),
+    );
+    expect(floorGuard).toBeGreaterThanOrEqual(0);
+    expect(firstInstall).toBeGreaterThan(floorGuard);
   });
 
   it("ships a production-only tree: the builder's last npm command is npm ci --omit=dev", () => {
@@ -147,19 +177,48 @@ describe("Dockerfile dependency freeze", () => {
 });
 
 describe("the root .npmrc the builder installs under", () => {
-  // The file is committed and public, and the builder copies it into the build
-  // context, so it may state configuration and nothing else: registry
-  // credentials belong in the user-level ~/.npmrc, which no build reads.
+  // The file is committed and public, and the builder copies it into a layer the
+  // release workflow exports to a shared build cache, so it may state
+  // configuration and nothing else: registry credentials belong in the
+  // user-level ~/.npmrc, which no build reads.
   const settings = readFileSync(resolve(here, "..", ".npmrc"), "utf8")
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line !== "" && !/^[#;]/.test(line));
+    .filter((line) => line !== "" && !/^[#;]/.test(line))
+    .map((line) => {
+      const separator = line.indexOf("=");
+      return separator === -1
+        ? { line, key: line, value: "" }
+        : {
+            line,
+            key: line.slice(0, separator).trim(),
+            value: line.slice(separator + 1).trim(),
+          };
+    });
 
-  it("states no credential-bearing key", () => {
-    const credentials = settings.filter((line) =>
-      /^(?:\/\/\S+:)?(?:_auth|_authToken|_password|username)\s*=/i.test(line),
+  // npm's credential keys, bare or under a `//host/:` registry scope.
+  const CREDENTIAL_KEY =
+    /^(?:\/\/\S+:)?(?:_auth|_authToken|_password|username)$/i;
+  // Userinfo in a URL value -- `registry=https://user:secret@host/` and its
+  // `@scope:registry` form -- which npm sends as an Authorization: Basic header
+  // for that registry, no credential-named key involved.
+  const URL_USERINFO = /[a-z][a-z0-9+.-]*:\/\/[^/?#\s@]*@/i;
+
+  it("states no credential, by key or by URL userinfo", () => {
+    const credentials = settings.filter(
+      ({ key, value }) => CREDENTIAL_KEY.test(key) || URL_USERINFO.test(value),
     );
-    expect(credentials).toEqual([]);
+    expect(credentials.map(({ line }) => line)).toEqual([]);
+  });
+
+  it("states the two policies its readers rest on", () => {
+    // Drop either and npm reverts to an advisory warning it prints after the
+    // fact: an uncovered install script runs, and an engines mismatch installs.
+    const stated = Object.fromEntries(
+      settings.map(({ key, value }) => [key, value]),
+    );
+    expect(stated["strict-allow-scripts"]).toBe("true");
+    expect(stated["engine-strict"]).toBe("true");
   });
 });
 

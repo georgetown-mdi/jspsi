@@ -13,6 +13,21 @@ FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951
 
 WORKDIR /build
 
+# The `allowScripts` map and the `.npmrc`'s strict-allow-scripts refusal are npm
+# 11.17 features; an older npm does not know the config key, reads no policy from
+# the map, and installs every script unreviewed with no diagnostic at all. Which
+# npm this stage gets is a property of the base digest above rather than of
+# anything in this repo, so check it here instead of letting a base re-pin
+# quietly un-enforce the policy. See docs/spec/DEPENDENCY_PINS.md.
+RUN npm_version="$(npm --version)"; \
+  npm_major="${npm_version%%.*}"; \
+  npm_minor="${npm_version#*.}"; npm_minor="${npm_minor%%.*}"; \
+  if ! { [ "$npm_major" -gt 11 ] || \
+    { [ "$npm_major" = 11 ] && [ "$npm_minor" -ge 17 ]; }; }; then \
+    echo "npm $npm_version is below the 11.17 floor the allowScripts install policy needs" >&2; \
+    exit 1; \
+  fi
+
 COPY .npmrc package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
 COPY apps/cli/package.json apps/cli/
