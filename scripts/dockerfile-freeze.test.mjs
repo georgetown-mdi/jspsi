@@ -78,144 +78,54 @@ const ROOT_NPMRC_SOURCE = /^(?:\.\/)?\.npmrc$/;
 // a property of the base image's digest rather than of anything in this repo.
 const NPM_POLICY_FLOOR = "11.17";
 
-// The npm invocations inside a RUN body: for each shell-separated segment, the
-// arguments following an `npm` command word reached past the RUN's own flags
-// (`--mount=...`) and any leading VAR=value assignment. Reading the command word
-// rather than matching `npm ci` as text is what makes an install spelled
-// `npm  ci`, folded across a line continuation, or written `npm i` an install
-// site rather than invisible to every check below.
-//
-// A segment naming npm somewhere other than that position -- behind a wrapper
-// command word (`env`, `time`), or built out of tokens this does not read --
-// yields null: an invocation whose arguments cannot be vouched for, which the
-// install-site rule below holds to every condition rather than skipping. npm
-// inside a quoted string is not a bare token, so the guard's own `echo "npm
-// $npm_version ..."` does not read as one.
-const npmInvocations = (rest) =>
-  rest
-    .split(/[;&|()`]+/)
-    .map((segment) => segment.trim().split(/\s+/).filter(Boolean))
-    .map((tokens) => {
-      let i = 0;
-      while (
-        i < tokens.length &&
-        (tokens[i].startsWith("--") ||
-          /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i]))
-      )
-        i += 1;
-      if (tokens[i] === "npm") return tokens.slice(i + 1);
-      // npx is npm exec under another name -- it resolves and fetches, and its
-      // argv carries no command word to read -- so it is unvouchable rather than
-      // modeled.
-      return tokens.includes("npm") || tokens.includes("npx")
-        ? null
-        : undefined;
-    })
-    .filter((args) => args !== undefined);
+// Whitespace-collapsed, since folding a "\"-continued line changes the run of
+// spaces between two tokens and nothing else.
+const normalize = (rest) => rest.trim().replace(/\s+/g, " ");
 
-// npm's command word, or "" for an invocation that leads with a flag or that the
-// reader above could not resolve -- which the install-site rule below treats as
-// an install it cannot vouch for rather than as something to skip.
-const npmCommand = (args) =>
-  args !== null && args[0] !== undefined && !args[0].startsWith("-")
-    ? args[0]
-    : "";
+// Every RUN in the Dockerfile that names npm, frozen to its exact text. This is
+// what stands between the image and an install running under something other
+// than the policy the root .npmrc states, and it is a frozen list rather than a
+// model of npm's command line because that command line is npm's to change: the
+// spellings that turn a policy off (`--no-strict-allow-scripts`,
+// `--strict-allow-scripts=false`, the space-separated form), the ones that move
+// which config npm reads (`--prefix`, `--userconfig`), an `npm_config_` variable
+// assigned ahead of the command, a wrapper in front of it, an install spelled
+// `npm i` -- each is a set that grows with npm rather than with this repo, and a
+// reader that enumerates them is only ever as complete as its last revision.
+// Every one of them changes this text. Changing an npm command in the Dockerfile
+// therefore means changing the literal here in the same diff, where the review
+// reads the command rather than a verdict about it.
+const EXPECTED_NPM_RUNS = [
+  'npm_version="$(npm --version)"; npm_major="${npm_version%%.*}"; ' +
+    'npm_minor="${npm_version#*.}"; npm_minor="${npm_minor%%.*}"; ' +
+    'if ! { [ "$npm_major" -gt 11 ] || ' +
+    '{ [ "$npm_major" = 11 ] && [ "$npm_minor" -ge 17 ]; }; }; then ' +
+    'echo "npm $npm_version is below the 11.17 floor the allowScripts install policy needs" >&2; ' +
+    "exit 1; " +
+    "fi; " +
+    "for policy in strict-allow-scripts engine-strict; do " +
+    'value="$(npm config get "$policy")"; ' +
+    'if [ "$value" != "true" ]; then ' +
+    "echo \"npm resolves $policy to '$value', not true: this build would not run under the repo's install policy\" >&2; " +
+    "exit 1; " +
+    "fi; " +
+    "done",
+  "--mount=type=cache,target=/root/.npm npm ci -w packages/core -w apps/cli -w apps/web",
+  "npm run build -w packages/core -w apps/cli",
+  "npm run build -w apps/web",
+  "--mount=type=cache,target=/root/.npm npm ci --omit=dev -w packages/core -w apps/cli",
+];
 
-const isVersionQuery = (args) =>
-  args !== null && args.length === 1 && /^(?:--version|-v)$/.test(args[0]);
+// The guard is the one that asks npm what it will do; the installs are the two
+// that do it. Naming them by index into the frozen list is a statement about
+// known text rather than a parse of unknown text -- the freeze is what keeps it
+// known.
+const POLICY_GUARD = EXPECTED_NPM_RUNS[0];
+const INSTALL_RUNS = [EXPECTED_NPM_RUNS[1], EXPECTED_NPM_RUNS[4]];
 
-// The npm commands that resolve no dependency tree. Anything else is held to
-// the install-site conditions, so a command this file does not use cannot
-// arrive as neither an install nor a build step.
-const NON_RESOLVING = new Set(["run", "run-script"]);
-
-const isFloorGuard = ({ inst, rest }) =>
-  inst === "RUN" &&
-  npmInvocations(rest).some(isVersionQuery) &&
-  rest.includes(NPM_POLICY_FLOOR);
-
-// The flags this file's installs carry. An allowlist, because npm resolves its
-// command line ahead of the project .npmrc: `--strict-allow-scripts=false` and
-// `--strict-allow-scripts false` each turn the policy off (measured on npm
-// 11.17.0), as does `--no-strict-allow-scripts`, `--prefix`, and whatever npm
-// gains next. Enumerating the ways to spell "off" is the shape this file has
-// already lost to; widening what an install may carry means widening this set
-// in the same diff.
-const PERMITTED_INSTALL_FLAGS = new Set(["--omit=dev", "-w"]);
-
-// npm reads any npm_config_-prefixed variable ahead of the project .npmrc too,
-// so setting one installs under something other than the file every check here
-// reads: measured on npm 11.17.0, `npm_config_strict_allow_scripts=false`
-// resolves the policy to false and lets an uncovered install script run. None is
-// permitted, for the reason the flags are an allowlist. Read off the whole RUN
-// body as well as the ENV and ARG instructions, since a variable reaches the
-// install as an assignment prefixing it, an `export` ahead of it, or an `env`
-// wrapping it -- none of which is part of npm's own argv.
-const NPM_CONFIG_ENV = /(?:^|\s)npm_config_[a-z0-9_]+/i;
-
-// A working directory moved inside the RUN, which decides which .npmrc npm
-// reads independently of the WORKDIR the COPY tracking below follows.
-const CWD_REDIRECT = /(?:^|[\s;&|(])(?:cd|pushd)\s/;
-
-// Every dependency-resolving npm invocation in the file, paired with the
-// conditions that decide whether the repo's own npm configuration is the one in
-// force for it: the root .npmrc copied into the directory it runs in, the npm
-// floor guard already run in the same stage, and no override of either on its
-// command line or in the stage's environment.
-const installSites = [];
-{
-  let cwd = "/";
-  let npmrcDirs = new Set();
-  let guarded = false;
-  let envOverride = false;
-  for (const [index, instruction] of instructions.entries()) {
-    const { inst, rest } = instruction;
-    if (inst === "FROM") {
-      // A stage starts with none of the working directory, the copied .npmrc, or
-      // the guard its predecessor had, and forgetting each of those refuses an
-      // install rather than admitting one. An ENV is the exception: a stage
-      // built `FROM builder` inherits it, so `envOverride` is deliberately not
-      // reset here -- clearing it is the one direction that would admit one.
-      cwd = "/";
-      npmrcDirs = new Set();
-      guarded = false;
-    }
-    if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
-    if ((inst === "ENV" || inst === "ARG") && NPM_CONFIG_ENV.test(rest))
-      envOverride = true;
-    if (isFloorGuard(instruction)) guarded = true;
-    if (inst === "COPY") {
-      for (const { source, dest } of copyTargets(cwd, rest).copies) {
-        if (posix.basename(dest) !== ".npmrc") continue;
-        // Whatever lands on the name last is the configuration the install
-        // reads, so a later COPY of some other file over it takes the directory
-        // back out of the set rather than leaving the earlier copy standing for
-        // it.
-        if (ROOT_NPMRC_SOURCE.test(source)) npmrcDirs.add(posix.dirname(dest));
-        else npmrcDirs.delete(posix.dirname(dest));
-      }
-    }
-    if (inst !== "RUN") continue;
-    for (const args of npmInvocations(rest)) {
-      if (isVersionQuery(args) || NON_RESOLVING.has(npmCommand(args))) continue;
-      installSites.push({
-        run: rest,
-        cwd,
-        index,
-        command: npmCommand(args),
-        underRootNpmrc: npmrcDirs.has(cwd) && !CWD_REDIRECT.test(rest),
-        behindFloorGuard: guarded,
-        policyOverridden:
-          envOverride ||
-          NPM_CONFIG_ENV.test(rest) ||
-          (args ?? []).some(
-            (token) =>
-              token.startsWith("-") && !PERMITTED_INSTALL_FLAGS.has(token),
-          ),
-      });
-    }
-  }
-}
+const npmRuns = instructions
+  .filter(({ inst, rest }) => inst === "RUN" && /\bnpm\b/.test(rest))
+  .map(({ rest }) => normalize(rest));
 
 // A RUN that writes the file out from inside the image replaces the
 // configuration the checks here read off the build context.
@@ -227,33 +137,37 @@ const builderRuns = builder
   .filter(({ inst }) => inst === "RUN")
   .map(({ rest }) => rest);
 
-// -1 for a builder that installs nothing, which reddens the ordering test below
-// rather than passing it on a comparison against no install at all.
-const builderInstalls = installSites.filter(
-  ({ index }) => index < lastFromIndex,
+const builderIndexOf = (body) =>
+  builder.findIndex(
+    ({ inst, rest }) => inst === "RUN" && normalize(rest) === body,
+  );
+
+// -1 when the builder does not carry it, which reddens the ordering tests below
+// rather than passing them on a comparison against an instruction that is absent.
+const firstInstall = Math.min(
+  ...INSTALL_RUNS.map(builderIndexOf).map((i) => (i === -1 ? Infinity : i)),
 );
-const firstInstall = builderInstalls.length ? builderInstalls[0].index : -1;
+const policyGuard = builderIndexOf(POLICY_GUARD);
 
-// Every guard in the file, not the first one: the install-site rule above is
-// satisfied by whichever guard precedes an install in its own stage, so a
-// second stage's guard decides that stage's installs and has to be run too.
-const floorGuards = instructions.filter(isFloorGuard).map(({ rest }) => rest);
-
-// Run a guard's own shell body against a stub `npm` reporting `version`, or
-// against no npm at all for a null one. The image's shell is busybox ash and
-// this is whatever /bin/sh is here, but the body uses only POSIX parameter
-// expansion and `test`, and the two ways a shell can answer a non-numeric
-// operand -- a non-zero `test`, or aborting outright -- both land on the
-// refusing side.
-const runFloorGuard = (body, version) => {
+// Run the guard's own shell body against a stub `npm` that answers `--version`
+// with `version` and `config get` with `config`, or against no npm at all for a
+// null version. The image's shell is busybox ash and this is whatever /bin/sh is
+// here, but the body uses only POSIX parameter expansion, `test`, and a `for`
+// loop, and the two ways a shell can answer a non-numeric operand -- a non-zero
+// `test`, or aborting outright -- both land on the refusing side.
+const runPolicyGuard = (version, config = "true") => {
   const bin = mkdtempSync(join(tmpdir(), "npm-floor-"));
   try {
     if (version !== null) {
-      writeFileSync(join(bin, "npm"), `#!/bin/sh\necho '${version}'\n`, {
-        mode: 0o755,
-      });
+      writeFileSync(
+        join(bin, "npm"),
+        `#!/bin/sh\ncase "$1" in\n  --version) echo '${version}' ;;\n  config) echo '${config}' ;;\nesac\n`,
+        {
+          mode: 0o755,
+        },
+      );
     }
-    return spawnSync("/bin/sh", ["-c", body], {
+    return spawnSync("/bin/sh", ["-c", POLICY_GUARD], {
       env: { PATH: bin },
       encoding: "utf8",
     });
@@ -262,17 +176,12 @@ const runFloorGuard = (body, version) => {
   }
 };
 
-const eachFloorGuard = (assert) => {
-  expect(floorGuards.length).toBeGreaterThan(0);
-  for (const body of floorGuards) assert(body);
-};
-
 describe("Dockerfile dependency freeze", () => {
-  it("installs only with npm ci, never another install spelling", () => {
-    // npm ci is what installs exactly the committed lockfile; `npm install`,
-    // its `i` alias, and `npm add` all re-resolve and may rewrite the file.
-    expect(installSites.length).toBeGreaterThan(0);
-    expect(installSites.filter(({ command }) => command !== "ci")).toEqual([]);
+  it("runs the npm commands this repo reviewed, and no others", () => {
+    // Every way an install can end up under something other than the root
+    // .npmrc's policy -- a flag, an assigned npm_config_ variable, a wrapper, an
+    // `npm i`, an added stage that installs -- changes this text.
+    expect(npmRuns).toEqual(EXPECTED_NPM_RUNS);
   });
 
   it("copies the committed lockfile into the builder before the first npm ci", () => {
@@ -283,42 +192,43 @@ describe("Dockerfile dependency freeze", () => {
     expect(firstInstall).toBeGreaterThan(lockCopy);
   });
 
-  it("runs every npm ci under the root .npmrc, so its install policy binds", () => {
-    // Without the root .npmrc in the install directory the image builds under
-    // npm's defaults: strict-allow-scripts is off, and a package that gains an
-    // install script runs it here while grounding every other install.
-    expect(installSites.length).toBeGreaterThan(0);
-    expect(
-      installSites.filter(({ underRootNpmrc }) => !underRootNpmrc),
-    ).toEqual([]);
+  it("copies the root .npmrc into the builder before the first npm ci", () => {
+    // Without it the image builds under npm's defaults: strict-allow-scripts is
+    // off, and a package that gains an install script runs it here. A different
+    // file copied to the same name states whatever its author put in it, and
+    // whatever lands on the name last is what the install reads.
+    const npmrcCopies = builder.flatMap(({ inst, rest }, index) =>
+      inst === "COPY"
+        ? copyTargets("/build", rest)
+            .copies.filter(({ dest }) => posix.basename(dest) === ".npmrc")
+            .map(({ source }) => ({ index, source }))
+        : [],
+    );
+    expect(npmrcCopies.length).toBeGreaterThan(0);
+    const last = npmrcCopies[npmrcCopies.length - 1];
+    expect(last.source).toMatch(ROOT_NPMRC_SOURCE);
+    expect(firstInstall).toBeGreaterThan(last.index);
   });
 
-  it("holds every install to the npm the policy was measured against", () => {
-    // Below 11.16 the map goes unread and the flag draws only an unknown-config
-    // warning, so a base digest re-pin onto an older node would install
-    // everything unreviewed while every check and the spec still read as
-    // enforcement. Per install site rather than by position, so a second stage
-    // cannot install ahead of its own guard.
-    expect(installSites.length).toBeGreaterThan(0);
-    expect(
-      installSites.filter(({ behindFloorGuard }) => !behindFloorGuard),
-    ).toEqual([]);
+  it("asks npm what it will do before installing anything", () => {
+    // What the .npmrc states is not yet what npm will do: npm resolves its
+    // command line and environment ahead of the file, and a base image or a
+    // build argument can carry either. The guard reads the answer out of npm
+    // itself, which is the one reading no static model of this file can give.
+    expect(policyGuard).toBeGreaterThanOrEqual(0);
+    expect(firstInstall).toBeGreaterThan(policyGuard);
   });
 
-  it("lets nothing override the policy the root .npmrc states", () => {
-    // The COPY tracking above says which file npm would read; these are the ways
-    // that file stops being the answer -- a flag or an npm_config_ variable npm
-    // resolves ahead of it, and the file rewritten from inside the image.
-    expect(
-      installSites.filter(({ policyOverridden }) => policyOverridden),
-    ).toEqual([]);
+  it("lets no RUN rewrite the .npmrc the guard read", () => {
     expect(npmrcRewrites).toEqual([]);
   });
 
   it("ships a production-only tree: the builder's last npm command is npm ci --omit=dev", () => {
-    const npmRuns = builderRuns.filter((run) => /\bnpm\b/.test(run));
-    expect(npmRuns.length).toBeGreaterThan(0);
-    expect(npmRuns[npmRuns.length - 1]).toMatch(/\bnpm ci\b.*--omit=dev/);
+    const builderNpmRuns = builderRuns.filter((run) => /\bnpm\b/.test(run));
+    expect(builderNpmRuns.length).toBeGreaterThan(0);
+    expect(builderNpmRuns[builderNpmRuns.length - 1]).toMatch(
+      /\bnpm ci\b.*--omit=dev/,
+    );
   });
 
   it("performs no dependency resolution in the runtime stage", () => {
@@ -345,14 +255,13 @@ describe("Dockerfile dependency freeze", () => {
   });
 });
 
-describe("what the npm floor guards decide", () => {
-  // The test above finds a guard by its text and holds every install behind one
-  // in its own stage; these run every guard the file carries. Text alone would
-  // accept a guard neutered to `RUN npm --version # floor is 11.17` or weakened
-  // to a comparison nothing fails, either of which leaves the image installing
-  // under an unmeasured npm while every check and the spec still read as
-  // enforcement. The tables are about what a guard decides, not about which npm
-  // releases exist.
+describe("what the builder's policy guard decides", () => {
+  // The freeze above holds the guard's text; this runs it. Text alone would
+  // accept one neutered to `RUN npm --version # floor is 11.17` or weakened to a
+  // comparison nothing fails, either of which leaves the image installing under
+  // an unmeasured npm or an unenforced policy while the freeze and the spec
+  // still read as enforcement. The tables are about what the guard decides, not
+  // about which npm releases exist.
 
   it.each([
     "11.17",
@@ -361,20 +270,16 @@ describe("what the npm floor guards decide", () => {
     "11.17.0-pre.1",
     "11.170.0",
     "12.0.0",
-  ])("install under npm %s", (version) => {
-    eachFloorGuard((body) =>
-      expect(runFloorGuard(body, version).status).toBe(0),
-    );
+  ])("installs under npm %s reporting the policy on", (version) => {
+    expect(runPolicyGuard(version).status).toBe(0);
   });
 
   it.each(["11.16.9", "11.9.0", "10.9.4", "11"])(
-    "refuse npm %s and say why",
+    "refuses npm %s and says why",
     (version) => {
-      eachFloorGuard((body) => {
-        const { status, stderr } = runFloorGuard(body, version);
-        expect(status).toBe(1);
-        expect(stderr).toContain(NPM_POLICY_FLOOR);
-      });
+      const { status, stderr } = runPolicyGuard(version);
+      expect(status).toBe(1);
+      expect(stderr).toContain(NPM_POLICY_FLOOR);
     },
   );
 
@@ -383,10 +288,28 @@ describe("what the npm floor guards decide", () => {
     ["reports a non-numeric version", "abc"],
     ["reports a version npm never prints", "v11.17.0"],
     ["is not on PATH", null],
-  ])("fail closed when npm %s", (_case, version) => {
-    eachFloorGuard((body) =>
-      expect(runFloorGuard(body, version).status).not.toBe(0),
-    );
+  ])("fails closed when npm %s", (_case, version) => {
+    expect(runPolicyGuard(version).status).not.toBe(0);
+  });
+
+  it.each(["false", "", "undefined", "null"])(
+    "refuses an npm that resolves the policy to %s, and says which",
+    (config) => {
+      // The version being high enough does not mean the policy is in force: the
+      // .npmrc may not have been copied, or a base image or build argument may
+      // carry a flag or an npm_config_ variable npm resolves ahead of it.
+      const { status, stderr } = runPolicyGuard("11.17.0", config);
+      expect(status).toBe(1);
+      expect(stderr).toContain("strict-allow-scripts");
+    },
+  );
+
+  it("checks engine-strict too, not only the install policy", () => {
+    // A stub answering `true` for everything passes; the loop is what makes the
+    // second policy checked rather than assumed, so a guard that dropped it
+    // would still pass the table above.
+    expect(POLICY_GUARD).toContain("engine-strict");
+    expect(runPolicyGuard("11.17.0", "true").status).toBe(0);
   });
 });
 

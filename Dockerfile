@@ -13,14 +13,24 @@ FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951
 
 WORKDIR /build
 
-# 11.17 is the npm the `allowScripts` map's matching rules were measured against.
-# The install-side policy is live from 11.16; 11.15 and earlier know neither the
-# `strict-allow-scripts` key nor the map, and install every script unreviewed --
-# warning that the key is unknown, never that a script ran. Which npm this stage
-# gets is a property of the base digest above rather than of anything in this
-# repo, so check it here instead of letting a base re-pin quietly un-enforce the
-# policy or move it off the version the spec describes. See
-# docs/spec/DEPENDENCY_PINS.md.
+COPY .npmrc package.json package-lock.json ./
+COPY packages/core/package.json packages/core/
+COPY apps/cli/package.json apps/cli/
+COPY apps/web/package.json apps/web/
+COPY lib lib
+
+# Ask npm what it will actually do, rather than asserting it from outside. Two
+# answers have to be right before anything installs, and neither implies the
+# other. The version: 11.17 is what the `allowScripts` map's matching rules were
+# measured against, and 11.15 and earlier honor neither the map nor
+# `strict-allow-scripts` -- they warn that the key is unknown, never that a
+# script ran -- while still reporting the value back, so the config check below
+# cannot stand in for this one. The effective policy: npm resolves its command
+# line and environment ahead of the .npmrc copied above, and a base image or a
+# build argument can carry either, so what the file states is not yet what npm
+# will do. Which npm this stage gets is a property of the base digest rather than
+# of anything in this repo, so both are read here instead of letting a base
+# re-pin quietly un-enforce the policy. See docs/spec/DEPENDENCY_PINS.md.
 RUN npm_version="$(npm --version)"; \
   npm_major="${npm_version%%.*}"; \
   npm_minor="${npm_version#*.}"; npm_minor="${npm_minor%%.*}"; \
@@ -28,13 +38,15 @@ RUN npm_version="$(npm --version)"; \
     { [ "$npm_major" = 11 ] && [ "$npm_minor" -ge 17 ]; }; }; then \
     echo "npm $npm_version is below the 11.17 floor the allowScripts install policy needs" >&2; \
     exit 1; \
-  fi
+  fi; \
+  for policy in strict-allow-scripts engine-strict; do \
+    value="$(npm config get "$policy")"; \
+    if [ "$value" != "true" ]; then \
+      echo "npm resolves $policy to '$value', not true: this build would not run under the repo's install policy" >&2; \
+      exit 1; \
+    fi; \
+  done
 
-COPY .npmrc package.json package-lock.json ./
-COPY packages/core/package.json packages/core/
-COPY apps/cli/package.json apps/cli/
-COPY apps/web/package.json apps/web/
-COPY lib lib
 # npm ci resolves nothing: it installs exactly the committed lockfile (including
 # each registry package's integrity hash) and fails if a manifest disagrees with
 # it, so an image rebuild cannot drift from the tree CI tested. apps/web is in
