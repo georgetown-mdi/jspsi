@@ -85,6 +85,11 @@ hunks/files it names, not the whole diff), then decide.
   A first-hand run that contradicts the finding closes it -- record the command
   and outcome in Step 4 -- and one that confirms it makes the fix a measured
   one.
+- **A gated role round's disposition can take a consult.** Choosing among fix,
+  contest, and documented limit on a gated `security-reviewer` or
+  `adversarial-verifier` round is the adjudication CLAUDE.md's model-tier rule
+  reserves Fable for -- a one-shot, owner-approved consult on the choice, never
+  a Fable fix round.
 - **A fix that adds behavior gets a test.** When a fix introduces new branching
   or a new code path (error handling, a guard, a fallback), pin its guarantees
   with a test in the same pass. No later round re-reviews a fix: another round
