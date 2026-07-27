@@ -236,46 +236,6 @@ type SessionTransitionKind =
   | "releaseForIdle"
   | "teardown";
 
-// What bounds a session transition ABOVE this adapter, at the caller in core.
-type SessionTransitionCeiling =
-  // core wraps the call in the per-operation peer-inactivity budget
-  // (peer_timeout_ms), the terminal ceiling on a data-plane operation.
-  | "peerTimeoutMs"
-  // core wraps the call in its own, much shorter, teardown budget.
-  | "teardownBudget"
-  // core forwards the call UNWRAPPED (deliberately -- neither is a peer round
-  // trip), so nothing above this adapter bounds it.
-  | "unwrapped";
-
-/**
- * The ceiling each session transition carries above this adapter. Recorded here
- * so the bound on a transition -- or the deliberate absence of one -- is
- * identifiable at the adapter rather than only by reading core's call sites, and
- * typed by transition kind so a new transition cannot be added without stating
- * it: that completeness is what the compiler checks. The acquire of the
- * transition lock itself is deliberately unbounded for every kind, so these are
- * the whole picture; the closes a transition drives carry their own bounds
- * ({@link CLIENT_CLOSE_TIMEOUT_MS}, {@link FORCED_CLOSE_TIMEOUT_MS}) and a dial
- * carries its connect budget.
- *
- * The VALUES here restate what core's forwarding does, and this package cannot
- * see that forwarding; core's own suite is where it is pinned, by the tests that
- * drive a never-settling `end()` against the teardown budget and a never-settling
- * `releaseForIdle`/`ensureConnected` past many peer budgets.
- *
- * @internal
- */
-export const SESSION_TRANSITION_CEILINGS: Record<
-  SessionTransitionKind,
-  SessionTransitionCeiling
-> = {
-  connect: "unwrapped",
-  ensureConnected: "unwrapped",
-  redialForRecovery: "peerTimeoutMs",
-  releaseForIdle: "unwrapped",
-  teardown: "teardownBudget",
-};
-
 // How the session's last completed boundary was reached. `deliberatelyReleased`
 // is the connection-per-poll release having ended the session on purpose;
 // everything else -- including a release that raised, one that walked into the
@@ -593,8 +553,18 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // The queue is released in a `finally`, so a transition that rejects frees it
   // rather than pinning every later one.
   //
-  // The acquire is deliberately unbounded for every kind; what stands above it is
-  // {@link SESSION_TRANSITION_CEILINGS}.
+  // The acquire is deliberately unbounded for every kind, so what stands above a
+  // transition is whatever its caller in core carries. The first dial passes
+  // through unwrapped (it carries its own per-attempt connect deadline), as do the
+  // two cycle-boundary signals (neither is a peer round trip); end() is wrapped in
+  // core's own short teardown budget; and a recovery re-dial rides the operation
+  // that drove it -- the per-operation peer-inactivity budget, or at teardown the
+  // smaller abort-marker write budget or the terminal-frame drain's remaining
+  // window (docs/spec/CHANNEL_SECURITY.md enumerates the three). Those are core's
+  // behavior, not this package's, and restating them here as data would be a copy
+  // nothing executes: packages/core/test/fileSyncConnection.test.ts is where they
+  // are pinned, by driving a never-settling end() against the teardown budget and
+  // never-settling cycle-boundary signals past many peer budgets.
   private runTransition<T>(transition: SessionTransition<T>): Promise<T> {
     const predecessor = this.transitionTail;
     let leaveQueue!: () => void;
@@ -1664,8 +1634,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * socket closed itself, so the session clears and the cycle re-dials (see
    * {@link forceCloseEndedTransport}).
    *
-   * The poll loop AWAITS this call and core forwards it unwrapped
-   * ({@link SESSION_TRANSITION_CEILINGS}), so nothing above bounds it: its own
+   * The poll loop AWAITS this call and core forwards it unwrapped (see
+   * {@link runTransition}), so nothing above bounds it: its own
    * duration is the loop's liveness bound. The close carries the
    * {@link CLIENT_CLOSE_TIMEOUT_MS} ceiling and the forced close that may follow it
    * the {@link FORCED_CLOSE_TIMEOUT_MS} one; the acquire that precedes both is
@@ -1990,10 +1960,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * the exchange. A no-op returning `true` when the mode is off, during teardown,
    * or when a session is already live.
    *
-   * Core forwards it unwrapped ({@link SESSION_TRANSITION_CEILINGS}), so its
-   * acquire of the transition lock -- which is what keeps two handshakes, or a
-   * handshake and a close, off the one shared Ssh2SftpClient -- carries only
-   * whatever bounds the transition it queues behind.
+   * Core forwards it unwrapped (see {@link runTransition}), so its acquire of the
+   * transition lock -- which is what keeps two handshakes, or a handshake and a
+   * close, off the one shared Ssh2SftpClient -- carries only whatever bounds the
+   * transition it queues behind.
    */
   ensureConnected(): Promise<boolean> {
     if (!this.ephemeralSessions) return Promise.resolve(true);
