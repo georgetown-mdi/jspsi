@@ -40,7 +40,9 @@ credentials with no re-prompt -- and re-issues the op before the loss is treated
 failed. Per-op idempotency resolvers make the re-issue safe (a landed delete maps
 to success, a rename confirms its self-owned destination, a `createExclusive`
 resolves its own `EEXIST`). Only a clean loss re-dials; a fatal protocol error, a
-liveness stall, a memory bound, and a host-key mismatch stay terminal.
+memory bound, and a host-key mismatch stay terminal, as does a liveness stall
+except against a session the transport has already ended under (see
+[CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md)).
 
 For the scenario above this means the exchange **survives** each drop rather than
 aborting on it: the session dies in each idle gap, and the next poll's first op
