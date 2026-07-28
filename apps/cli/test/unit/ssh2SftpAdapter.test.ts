@@ -6272,6 +6272,126 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await expect(removal).resolves.toBeUndefined();
   });
 
+  // The precondition's own reading: operations issued and not yet settled. Private
+  // state with no public surface, and the three tests below are about the reading
+  // itself -- what it counts, and what it therefore leaves unbounded -- so they
+  // assert it directly alongside the behavior it produces.
+  const outstandingOperations = (adapter: SSH2SFTPClientAdapter) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).outstandingOperations as number;
+
+  test("an operation the adapter never settles holds every later boundary", async () => {
+    // The stated limit of the hold, not a desired behavior. The reading is of
+    // operations ISSUED and unsettled, and nothing on this side settles an
+    // operation the server never answers -- core's whole-exchange budget races and
+    // abandons rather than cancelling -- so the hold lasts as long as the operation
+    // does. A put from a string source is the shape with no adapter-side deadline
+    // at all (no flat bound, no idle window), so its hold has no end short of the
+    // exchange's.
+    const { client, rawClient, state } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).put = vi.fn(() => new Promise<string>(() => {}));
+
+    void adapter.put("/local/out.bin", "/remote/out.bin");
+    expect(outstandingOperations(adapter)).toBe(1);
+
+    for (let boundary = 0; boundary < 3; boundary += 1)
+      await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+
+    expect(rawClient.end).not.toHaveBeenCalled();
+    expect(state.live).toBe(true);
+    expect(outstandingOperations(adapter)).toBe(1);
+  });
+
+  test("a trickling upload holds every later boundary too: its progress window is re-armed, never tripped", async () => {
+    // The other shape carrying no bound the hold can rely on: an operation whose
+    // deadline is a progress-reset window (the chunked put's idle window here, the
+    // capped get's sink likewise). A server acknowledging a chunk at a time re-arms
+    // that window instead of tripping it, so the upload stays unsettled and every
+    // boundary it spans is held.
+    const { client, rawClient, state } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({
+      ephemeralSessions: true,
+      stallDeadlineMs: 50,
+    });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    // One chunk acknowledged every 10 ms -- well inside the window -- against a
+    // payload of 64 chunks, so the transfer is still trickling at the boundaries
+    // below and the put itself is never answered.
+    let chunksAcknowledged = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).put = vi.fn((source: Readable) => {
+      source.pipe(
+        new Writable({
+          write(_chunk, _encoding, done) {
+            chunksAcknowledged += 1;
+            setTimeout(done, 10).unref();
+          },
+        }),
+      );
+      return new Promise<string>(() => {});
+    });
+
+    // The transfer is deliberately left unfinished, so its window trips whenever
+    // the trickle stops after this test; swallow that so it cannot surface as an
+    // unhandled rejection.
+    void adapter
+      .put(Buffer.alloc(64 * SFTP_PUT_PROGRESS_CHUNK_BYTES), "/remote/out.bin")
+      .catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(chunksAcknowledged).toBeGreaterThan(4);
+
+    await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+    await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+
+    expect(rawClient.end).not.toHaveBeenCalled();
+    expect(state.live).toBe(true);
+    expect(outstandingOperations(adapter)).toBe(1);
+  });
+
+  test("an expired per-operation deadline settles the count while the request is still outstanding, and the next boundary closes over it", async () => {
+    // The direction the count departs from the wire the other way. Every adapter
+    // bound is a race that abandons rather than a cancellation, so an expired one
+    // settles the operation on this side with the library request still outstanding
+    // at the server. What the precondition holds a boundary for is an UNSETTLED
+    // operation, which this one no longer is.
+    const { client, rawClient, state } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({
+      ephemeralSessions: true,
+      stallDeadlineMs: 50,
+    });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    let libraryRequestSettled = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).exists = vi.fn(() =>
+      new Promise<boolean>(() => {}).finally(() => {
+        libraryRequestSettled = true;
+      }),
+    );
+
+    const probe = adapter.exists("/remote/in.json");
+    expect(outstandingOperations(adapter)).toBe(1);
+    await expect(probe).rejects.toBeInstanceOf(TransportOperationStalledError);
+    expect(outstandingOperations(adapter)).toBe(0);
+    expect(libraryRequestSettled).toBe(false);
+
+    const released = adapter.releaseForIdle();
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    await expect(released).resolves.toBeUndefined();
+    expect(state.live).toBe(false);
+  });
+
   test("a release whose ssh2 end() throws leaves the next drop counted and warned", async () => {
     // The release drove nothing: its end() raised before the transport was
     // touched, so the session it failed to close is still the server's to drop.

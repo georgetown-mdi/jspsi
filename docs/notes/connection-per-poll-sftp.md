@@ -400,12 +400,13 @@ release on the transition lock, so it runs on the far side of the close rather
 than racing it. An op already on the wire is covered by the release's own
 precondition rather than by any gate at op entry: a boundary reached with a counted
 operation outstanding closes nothing, so the op completes on the session it was
-issued against and the next boundary releases as usual (what the count covers, and
-the few best-effort round trips outside it, are in
-[CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md)). A held boundary costs the
-mode one idle gap, is neither counted nor warned -- a concurrent send straddling a
-boundary is ordinary -- and adds no wait anywhere: the release returns rather than
-draining the operation.
+issued against and the first boundary past its settlement releases as usual. Each
+boundary a held op straddles costs the mode one idle gap, is neither counted nor
+warned -- a concurrent send straddling a boundary is ordinary -- and adds no wait
+anywhere: the release returns rather than draining the operation. What the count
+covers, how that set differs from what is on the wire, what bounds the hold, and
+the ops for which nothing does, are in
+[CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md).
 
 **Close, drain, and the authenticated abort marker -- real code, the one genuine
 gap.** At teardown the last cycle's connection is already released, but `close()`
