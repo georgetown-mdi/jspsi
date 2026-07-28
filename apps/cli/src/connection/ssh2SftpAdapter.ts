@@ -579,10 +579,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private readonly heartbeat: SftpHeartbeat;
   // Connection-per-poll (ephemeral-session) mode. When true, the adapter releases
   // its SFTP session at each poll-loop idle boundary (releaseForIdle) and re-dials
-  // at the start of the next cycle (ensureConnected), so no session is held across
-  // an idle gap a server's max-session/idle cap would drop. Off by default (the
-  // whole-exchange single-session model). Internal-only; the CLI/config surface
-  // and the flag name are a separate item. See docs/notes/connection-per-poll-sftp.md.
+  // at the start of the next cycle (ensureConnected), so a session a server's
+  // max-session/idle cap would drop is not held across an idle gap -- save a
+  // boundary kept for an operation still outstanding (see runTransition). Off by
+  // default (the whole-exchange single-session model). Internal-only; the
+  // CLI/config surface and the flag name are a separate item. See
+  // docs/notes/connection-per-poll-sftp.md.
   private readonly ephemeralSessions: boolean;
 
   /**
@@ -598,8 +600,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    *
    * `options.ephemeralSessions` turns on connection-per-poll (ephemeral-session)
    * mode: the adapter releases its SFTP session at each poll-loop idle boundary
-   * and re-dials at the start of the next cycle, so no session is held across an
-   * idle gap a server's max-session/idle cap would drop. Off by default.
+   * and re-dials at the start of the next cycle, so a session a server's
+   * max-session/idle cap would drop is not held across an idle gap -- save a
+   * boundary kept for an operation still outstanding (see {@link runTransition}).
+   * Off by default.
    * Internal-only -- the CLI/config surface and the flag name are a separate item.
    */
   constructor(
@@ -1248,18 +1252,28 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // progress every cycle and a reset-on-progress budget would never bound it. The
   // escape hatches are raising max_reconnect_attempts (a flaky link) and
   // connection-per-poll mode (a server that caps session lifetime), whose recovery
-  // re-dials are left uncapped by this count in every phase -- the poll loop holds
-  // no session across the idle gap, and the rendezvous that precedes it holds one
-  // across its waits and needs the uncapped re-dial to survive a cap that cuts it.
-  // Both are bounded instead by the peer-inactivity ceiling.
+  // re-dials are left uncapped by this count in every phase -- the poll loop's
+  // ordinary cycle session is not held across the idle gap, while the rendezvous
+  // that precedes it holds one across its waits and a held boundary keeps one for
+  // the operation outstanding on it, each needing the uncapped re-dial to survive a
+  // cap that cuts it. All are bounded instead by the peer-inactivity ceiling.
   // A teardown re-dial (abort marker / drain) is exempt so the fast-fail marker
   // still lands when the budget is spent. The op+re-dial is enclosed by
   // boundTransport's per-op peerTimeoutMs budget in core (a Promise.race), which is
   // the terminal ceiling against a pathological instant-drop server, so no bespoke
-  // total-time timer is added here. Serial op issuance (single-party appliance)
-  // guarantees no other tracked() op is in flight when the re-dial runs: the first
-  // attempt's promise has already settled by the time this catch fires, so
-  // connect()'s heartbeat re-arm never races a live op.
+  // total-time timer is added here. What the re-dial rests on is narrower than op
+  // seriality, which core does not offer: a send resuming from the protocol
+  // continuation issues its operations alongside the poll cycle's own, so another
+  // tracked() op can be unsettled while this re-dial runs. The re-dial neither
+  // waits for one nor is made unsound by one. THIS operation's first attempt has
+  // settled -- this catch is where it settled -- and what the re-dial replaces is
+  // the SESSION, so an operation unsettled at that moment was issued against the
+  // session being torn down: connect()'s heartbeat re-arm is synchronous with the
+  // dial that establishes the replacement and advances the heartbeat epoch, which
+  // is what keeps such a straggler's late settlement off the fresh session's
+  // in-flight count (see tracked() and ./sftpHeartbeat's epoch field). The unit
+  // case pinning that this re-dial does not drain an outstanding operation is where
+  // the concurrent state is constructed.
   //
   // `reissue` is applied ONLY on the re-issue, never the first attempt, so a
   // per-op idempotency relaxation (delete-absent, rename-dest-exists,
@@ -1932,15 +1946,23 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // stretch (a PSI round on the computing side) does not let the server's idle
     // timeout drop it. start() resets the idle clock, so a reconnect re-arms
     // cleanly. It is torn down by end() and by the fatal-'error' guard. Skipped in
-    // ephemeral-session mode: in the POLL LOOP each cycle's session lives only for
-    // its op batch (seconds) and is released before the idle gap, so there is no
-    // held session to keep warm. The rendezvous that precedes the loop does hold one
-    // session across its waits, un-heartbeated, and that is accepted rather than
-    // fixed -- a keepalive defeats only an idle timer and is powerless against the
-    // maximum-session-lifetime caps this mode exists for, while the mode's uncapped
-    // recovery re-dials carry the rendezvous across a cap-forced drop (the
-    // uncapped-recovery unit case in test/unit/ssh2SftpAdapter.test.ts, driven end
-    // to end in test/integration/ephemeralSessionExchange.test.ts).
+    // ephemeral-session mode, where NO session is heartbeated. The poll loop's
+    // ordinary cycle session lives only for its op batch (seconds) and is released
+    // at the idle boundary, so there is none to keep warm; the two that DO span an
+    // idle stretch are accepted un-heartbeated rather than fixed here -- the
+    // rendezvous that precedes the loop, holding one across its waits, and a
+    // boundary the release keeps because an operation is still outstanding (see
+    // runTransition). A keepalive would buy either little: it defeats only an idle
+    // timer and is powerless against the maximum-session-lifetime caps this mode
+    // exists for, and it cannot be issued alongside the very operation a held
+    // boundary is waiting on, ssh2-sftp-client permitting no second concurrent
+    // operation (which is why the heartbeat suppresses a beat while one is in
+    // flight). What carries either session across a cap-forced drop is the mode's
+    // uncapped recovery re-dial (the uncapped-recovery unit case in
+    // test/unit/ssh2SftpAdapter.test.ts, driven end to end in
+    // test/integration/ephemeralSessionExchange.test.ts). It is not free: an
+    // operation outstanding on the cut session fails and recovers through that
+    // re-dial, which counts and warns the drop as the server-side loss it is.
     if (!this.ephemeralSessions) this.heartbeat.start();
     // Discharge the idle-boundary release (see the `sessionBoundary` field): LAST
     // and on success only, so a dial that threw above leaves the release standing
