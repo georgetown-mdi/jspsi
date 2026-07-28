@@ -4006,7 +4006,17 @@ describe("ephemeral session mode (connection-per-poll)", () => {
           }),
       ),
     };
-    return { client, connect, state, rawClient };
+    // The PARTNER dropping the session with an operation on the wire: ssh2-sftp-
+    // client's per-operation listener clears the session and rejects the operation,
+    // with no end() of this side's. The idle release no longer produces this state
+    // -- it keeps a boundary reached with an operation outstanding -- so a
+    // partner-side drop is what still reaches it.
+    const tearFromServer = () => {
+      state.live = false;
+      failInFlight?.(notConnected("exists"));
+      failInFlight = undefined;
+    };
+    return { client, connect, state, rawClient, tearFromServer };
   }
 
   test("connect-then-release-then-reconnect brackets a single cycle's ops", async () => {
@@ -5347,15 +5357,15 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   });
 
   test("a recovery re-dial waits the in-flight release out before dialing", async () => {
-    // An operation already on the wire when the boundary falls is torn by the
-    // release's own end(): ssh2-sftp-client clears the session and rejects it, so
-    // it reaches the recovery path -- the one re-establishment that does not enter
-    // through the gate. Dialing there, between the ssh2 Client's end() and its
-    // 'close', hands the release's stale 'close' to the temp listeners connect()
-    // installs and fails the handshake, charging a healthy exchange a re-dial
-    // retry (or, at max_reconnect_attempts=0, failing the operation outright) for
-    // a session the adapter closed on purpose.
-    const { client, connect, state, rawClient } =
+    // A recovery re-dial can be queued behind a release that has not entered yet:
+    // the partner drops a concurrent operation while the cycle's own dial holds the
+    // queue and the boundary's release is waiting behind it. Dialing once that
+    // release runs, between the ssh2 Client's end() and its 'close', hands the
+    // release's stale 'close' to the temp listeners connect() installs and fails
+    // the handshake, charging a healthy exchange a re-dial retry (or, at
+    // max_reconnect_attempts=0, failing the operation outright) for a session the
+    // adapter closed on purpose.
+    const { client, connect, state, rawClient, tearFromServer } =
       midWireTearClient(wrapperMethods());
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
@@ -5367,21 +5377,57 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // is terminal rather than quietly retried a second later.
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
 
-    const op = adapter.exists("/remote/out.json");
-    // The boundary falls with that operation outstanding.
-    const release = adapter.releaseForIdle();
-    expect(rawClient.end).toHaveBeenCalledOnce();
+    // Every dial and the release's close in the order they happened: the sequence
+    // is the assertion, since a dial recorded before the close is one taken inside
+    // the release's window.
+    const events: string[] = [];
+    const driveClose = rawClient.end as () => void;
+    rawClient.end = vi.fn(() => {
+      events.push("release:end");
+      driveClose();
+    });
+    connect.mockImplementation(async () => {
+      events.push("dial");
+      if (state.ending)
+        throw new Error("getConnection: Unexpected close event");
+      state.live = true;
+    });
 
+    const op = adapter.exists("/remote/out.json");
+    tearFromServer();
+    // The cycle's own dial, parked so the release below takes a queue slot behind
+    // it: the release has to be QUEUED when the recovery arrives, or the recovery
+    // reaches the front first and there is no window to dial into.
+    let finishCycleDial!: () => void;
+    connect.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          events.push("dial");
+          finishCycleDial = () => {
+            state.live = true;
+            resolve();
+          };
+        }),
+    );
+    const cycleDial = adapter.ensureConnected();
+    const release = adapter.releaseForIdle();
+    // Let the torn operation's rejection travel its promise chain into the
+    // recovery path, so the re-dial takes its queue slot behind that release.
+    for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+
+    finishCycleDial();
+    await expect(cycleDial).resolves.toBe(true);
     await expect(op).resolves.toBe(true);
     await release;
 
-    // The initial dial plus the re-dial that re-issued the torn operation, taken
-    // after the close rather than across it.
-    expect(connect).toHaveBeenCalledTimes(2);
+    // The cycle dial, then the release's close, then the re-dial that re-issued
+    // the torn operation -- taken after that close rather than across it.
+    expect(events).toEqual(["dial", "release:end", "dial"]);
     expect(state.live).toBe(true);
-    expect(adapter.reconnectCount).toBe(0);
-    expect(adapter.midExchangeReconnectCount).toBe(0);
-    expect(warn).not.toHaveBeenCalled();
+    // The loss was the partner's, not a boundary of this adapter's, so it is
+    // counted and warned as the survived drop it is.
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    expect(warn).toHaveBeenCalled();
   });
 
   test("the idle release waits an in-flight re-dial out instead of leaving its session held", async () => {
@@ -5577,12 +5623,11 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   });
 
   test("a recovery re-dial waits a concurrent dial out and re-issues on its session", async () => {
-    // Two re-establishment paths can be parked on one release: the recovery re-dial
-    // of the operation the release tore off the wire, and the gate of an operation
-    // issued during the release, which re-establishes before its first attempt.
+    // A partner-side drop tears a concurrent operation just as the cycle's own dial
+    // re-establishes the session, so two re-establishment paths are live at once.
     // ssh2's Client.connect() on a still-writable socket ends the socket and
     // re-connects from its 'close', which kills the first handshake and rejects the
-    // SECOND dial -- so a recovery that dialed alongside the other path would fail
+    // SECOND dial -- so a recovery that dialed alongside the cycle dial would fail
     // the very operation it exists to save. It waits that dial out, finds the
     // session it established, and re-issues on it rather than dialing at all.
     const wrapper = wrapperMethods();
@@ -5612,11 +5657,14 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       _sock: { setKeepAlive: vi.fn(), writableEnded: false, destroy: vi.fn() },
       end: vi.fn(() => {
         state.live = false;
-        failInFlight?.(notConnected("exists"));
-        failInFlight = undefined;
         setTimeout(() => rawClient.emit("close"), 0);
       }),
     });
+    const tearFromServer = () => {
+      state.live = false;
+      failInFlight?.(notConnected("exists"));
+      failInFlight = undefined;
+    };
     const client = {
       get sftp() {
         return state.live ? wrapper : null;
@@ -5651,23 +5699,21 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
 
     const torn = adapter.exists("/remote/out.json");
-    // The boundary falls with that operation outstanding, and a second operation
-    // is issued into the release window: one reaches the recovery path, the other
-    // the gate, and both are parked on the same release.
-    const release = adapter.releaseForIdle();
-    const queued = adapter.exists("/remote/in.json");
-    await Promise.all([release, torn, queued]);
+    // The partner drops the session with that operation on the wire, and the cycle
+    // takes its own dial before the rejection has finished travelling: the recovery
+    // wakes one microtask behind that dial.
+    tearFromServer();
+    const cycleDial = adapter.ensureConnected();
 
+    await expect(cycleDial).resolves.toBe(true);
     await expect(torn).resolves.toBe(true);
-    await expect(queued).resolves.toBe(true);
 
     // One dial at a time, and only one re-establishment in total: the recovery
-    // re-issued the torn operation on the session the gate had already dialed.
+    // re-issued the torn operation on the session the cycle dial had established.
     expect(peakDialsInFlight).toBe(1);
     expect(connect).toHaveBeenCalledTimes(2);
-    expect(adapter.reconnectCount).toBe(0);
-    expect(adapter.midExchangeReconnectCount).toBe(0);
-    expect(warn).not.toHaveBeenCalled();
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    expect(warn).toHaveBeenCalled();
   });
 
   test("a cycle-start reconnect that was waiting when teardown began does not dial", async () => {
@@ -5697,14 +5743,15 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   });
 
   test("teardown never runs the client down under a recovery re-dial", async () => {
-    // The recovery of the operation the release tore off the wire and the
-    // teardown both queue behind that release, and the recovery queues FIRST, so
-    // it reaches the front first -- with the teardown latch set behind it. Dialing
-    // there is wrong twice over: a handshake runs against the teardown's
-    // client.end() on the one shared Ssh2SftpClient, and ssh2-sftp-client's own
-    // end() short-circuits on the cleared session, resolving WITHOUT ending the
-    // ssh2 Client -- so close() returns while an SSH handshake still holds a
-    // ref'd socket, and the CLI's clean close lingers for the dial's budget.
+    // The recovery of an operation a partner-side drop tore off the wire and the
+    // teardown both queue behind the cycle's own dial, and the recovery queues
+    // FIRST, so it reaches the front first -- with the teardown latch set behind
+    // it. Dialing there is wrong twice over: a handshake runs against the
+    // teardown's client.end() on the one shared Ssh2SftpClient, and
+    // ssh2-sftp-client's own end() short-circuits on the cleared session, resolving
+    // WITHOUT ending the ssh2 Client -- so close() returns while an SSH handshake
+    // still holds a ref'd socket, and the CLI's clean close lingers for the dial's
+    // budget.
     const wrapper = wrapperMethods();
     const state = { live: true };
     let failInFlight: ((error: unknown) => void) | undefined;
@@ -5739,11 +5786,14 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       _sock: { setKeepAlive: vi.fn(), writableEnded: false, destroy: vi.fn() },
       end: vi.fn(() => {
         state.live = false;
-        failInFlight?.(notConnected("exists"));
-        failInFlight = undefined;
         setTimeout(() => rawClient.emit("close"), 0);
       }),
     });
+    const tearFromServer = () => {
+      state.live = false;
+      failInFlight?.(notConnected("exists"));
+      failInFlight = undefined;
+    };
     const client = {
       get sftp() {
         return state.live ? wrapper : null;
@@ -5777,25 +5827,26 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
 
     const torn = adapter.exists("/remote/out.json");
-    // The boundary falls with that operation on the wire: the release publishes
-    // itself, tears the operation, and owes a 'close' a macrotask later.
-    const release = adapter.releaseForIdle();
-    expect(rawClient.end).toHaveBeenCalledOnce();
+    // The partner drops the session with that operation on the wire, and the cycle
+    // takes its own dial: the recovery parks on that dial.
+    tearFromServer();
+    const cycleDial = adapter.ensureConnected();
     // Let the torn operation's rejection travel its promise chain into the
-    // recovery path, so the recovery is parked on the release before the
-    // teardown parks behind it. Draining microtasks cannot advance the release's
-    // 'close', which lands on a macrotask, so the wait is still in flight here.
+    // recovery path, so the recovery is parked on the cycle dial before the
+    // teardown parks behind it. Draining microtasks cannot advance that dial,
+    // which settles on a macrotask, so it is still in flight here.
     for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
     const closed = adapter.end();
-    await Promise.allSettled([release, torn, closed]);
+    await Promise.allSettled([cycleDial, torn, closed]);
 
-    expect(events).not.toContainEqual(
-      expect.stringMatching(/^teardown:.*dialsInFlight=[1-9]/),
-    );
-    // Nothing was dialed at all: the recovery woke into a begun teardown and
-    // turned back rather than establishing a session for close() to reclaim.
-    expect(connect).toHaveBeenCalledTimes(1);
-    expect(events).not.toContain("dial:start");
+    // The cycle dial ran to completion, the recovery behind it dialed nothing, and
+    // the teardown's client.end() ran with no handshake live.
+    expect(events).toEqual([
+      "dial:start",
+      "dial:end",
+      "teardown:client.end (dialsInFlight=0)",
+    ]);
+    expect(connect).toHaveBeenCalledTimes(2);
   });
 
   // --- session-transition behavior, read through observable outcomes ---------
@@ -5889,17 +5940,94 @@ describe("ephemeral session mode (connection-per-poll)", () => {
         return landed.has(path);
       }),
     };
-    return { client, connect, state, rawClient, landed };
+    // The PARTNER dropping a session with an operation on the wire: it fails that
+    // operation and clears the session exactly as the ssh2 'close' handler does,
+    // with no end() of this side's. The tear the recovery resolvers are for, driven
+    // by the only thing that still produces it.
+    const dropFromServer = () => {
+      state.live = false;
+      failInFlight?.(notConnected("operation"));
+      failInFlight = undefined;
+      rawClient.emit("close");
+    };
+    return { client, connect, state, rawClient, landed, dropFromServer };
   }
 
-  test("a delete torn off the wire by the boundary resolves through its recovery resolver, uncounted and unwarned", async () => {
+  // Replaces a client's delete with one the test settles by hand, so an operation
+  // can be left OUTSTANDING across a transition. What the boundary precondition
+  // reads is the wire, so every case below has to put something on it and leave it
+  // there.
+  function pendingDelete(client: object) {
+    let resolveOperation!: () => void;
+    let rejectOperation!: (error: unknown) => void;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).delete = vi.fn(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          resolveOperation = () => resolve();
+          rejectOperation = reject;
+        }),
+    );
+    return {
+      settle: () => resolveOperation(),
+      fail: (error: unknown) => rejectOperation(error),
+    };
+  }
+
+  test("a delete torn off the wire by a server drop resolves through its recovery resolver", async () => {
+    // The tear that survives the boundary precondition: the PARTNER drops the
+    // session with the delete on the wire. The default held-session mode is where
+    // this lands -- it runs no idle release at all -- and the resolver is what
+    // carries it: re-dial, re-issue, and the now-absent source read as the landed
+    // attempt it was. The drop is the server's, so it is counted and warned.
+    const { client, connect, landed, dropFromServer } =
+      landedOnTearClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+
+    const removal = adapter.delete("/remote/out.json");
+    dropFromServer();
+
+    await expect(removal).resolves.toBeUndefined();
+    expect(landed.has("/remote/out.json")).toBe(true);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+  });
+
+  test("a rename torn off the wire by a server drop resolves through its recovery resolver", async () => {
+    // The same tear on the publish that matters most: a temp-file rename to its
+    // final name. The re-issue sees the source gone, confirms the self-prefixed
+    // destination present, and reports the landed publish as the success it was.
+    const { client, connect, landed, dropFromServer } =
+      landedOnTearClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+
+    const publish = adapter.rename(
+      "/remote/temp-send.tmp",
+      "/remote/id-0-12.json",
+    );
+    dropFromServer();
+
+    await expect(publish).resolves.toBeUndefined();
+    expect(landed.has("/remote/id-0-12.json")).toBe(true);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+  });
+
+  test("an idle boundary reached with an operation outstanding does not close the session, and the operation completes on the session it was issued against", async () => {
     // The one operation no entry gate can cover: it is already on the wire when
-    // the idle boundary falls, so the release's own end() tears it. It must come
-    // back through the recovery path -- re-dial, re-issue, and the delete
-    // resolver reading the now-absent source as the landed attempt it was -- and
-    // the boundary that tore it is this adapter's own, so nothing about it may
-    // reach the reconnect counters or the operator warning.
-    const { client, connect, rawClient, landed } =
+    // the idle boundary falls. The release reads that off the adapter's own
+    // outstanding-operation count and keeps the session, so the delete answers on
+    // the very session it was issued against -- no tear, no recovery round, and
+    // nothing for the reconnect counters or the operator warning.
+    const { client, connect, rawClient, state, landed } =
       landedOnTearClient(wrapperMethods());
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
@@ -5913,24 +6041,27 @@ describe("ephemeral session mode (connection-per-poll)", () => {
 
     const removal = adapter.delete("/remote/out.json");
     const release = adapter.releaseForIdle();
-    expect(rawClient.end).toHaveBeenCalledOnce();
+    // Read with no await between it and the call above: the release drove nothing.
+    expect(rawClient.end).not.toHaveBeenCalled();
+    expect(state.live).toBe(true);
 
+    await expect(release).resolves.toBeUndefined();
     await expect(removal).resolves.toBeUndefined();
-    await release;
 
     expect(landed.has("/remote/out.json")).toBe(true);
-    // The initial dial plus the one re-establishment the recovery took after the
-    // close, not across it.
-    expect(connect).toHaveBeenCalledTimes(2);
+    // The initial dial and nothing more: the operation neither lost a session nor
+    // recovered one.
+    expect(connect).toHaveBeenCalledTimes(1);
     expect(adapter.reconnectCount).toBe(0);
     expect(adapter.midExchangeReconnectCount).toBe(0);
     expect(warn).not.toHaveBeenCalled();
   });
 
-  test("a rename torn off the wire by the boundary resolves through its recovery resolver, uncounted and unwarned", async () => {
-    // The same tear on the publish that matters most: a temp-file rename to its
-    // final name. The re-issue sees the source gone, confirms the self-prefixed
-    // destination present, and reports the landed publish as the success it was.
+  test("an operation outstanding at the boundary never reaches the stall-deadline or the session-still-live terminal reading", async () => {
+    // The publish that matters most -- a temp-file rename to its final name --
+    // outstanding when the boundary falls. Held rather than torn, it reaches the
+    // recovery path not at all, so neither of that path's terminal readings is on
+    // its account: no re-dial is issued for it, and it does not reject.
     const { client, connect, rawClient, landed } =
       landedOnTearClient(wrapperMethods());
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
@@ -5946,16 +6077,199 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       "/remote/id-0-12.json",
     );
     const release = adapter.releaseForIdle();
-    expect(rawClient.end).toHaveBeenCalledOnce();
+    expect(rawClient.end).not.toHaveBeenCalled();
 
+    await expect(release).resolves.toBeUndefined();
     await expect(publish).resolves.toBeUndefined();
-    await release;
 
     expect(landed.has("/remote/id-0-12.json")).toBe(true);
-    expect(connect).toHaveBeenCalledTimes(2);
+    expect(connect).toHaveBeenCalledTimes(1);
     expect(adapter.reconnectCount).toBe(0);
     expect(adapter.midExchangeReconnectCount).toBe(0);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("an operation issued while the release was still QUEUED behind another transition is likewise not torn", async () => {
+    // Both of the entry gate's readings are written from INSIDE the release's own
+    // transition, so an operation issued while that release is still queued reads
+    // neither and goes straight onto the session that is still live. It is on the
+    // wire by the time the release enters, and the precondition is read there --
+    // after the acquire -- which is what covers this class for free.
+    const { client, connect, rawClient, state } =
+      ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const operation = pendingDelete(client);
+
+    // A dial parked on the queue, so the release below takes a real queue slot
+    // behind it rather than entering in the same tick.
+    let finishDial!: () => void;
+    connect.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDial = () => resolve();
+        }),
+    );
+    const dial = adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const release = adapter.releaseForIdle();
+    // Issued AFTER the release was requested, and reaching the transport in the
+    // same tick: the gate deferred nothing, because neither of its readings is
+    // written until that release enters.
+    const removal = adapter.delete("/remote/out.json");
+    expect(client.delete).toHaveBeenCalledOnce();
+
+    finishDial();
+    await dial;
+    await expect(release).resolves.toBeUndefined();
+    expect(rawClient.end).not.toHaveBeenCalled();
+    expect(state.live).toBe(true);
+
+    operation.settle();
+    await expect(removal).resolves.toBeUndefined();
+  });
+
+  test("the release happens at the next boundary once that operation has settled", async () => {
+    // The hold costs the mode one idle gap and no more: it is not a latch, just a
+    // reading of the wire, so the boundary after the operation settles ends the
+    // session exactly as an undisturbed one does.
+    const { client, rawClient, state } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const operation = pendingDelete(client);
+
+    const removal = adapter.delete("/remote/out.json");
+    await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+    expect(rawClient.end).not.toHaveBeenCalled();
+
+    operation.settle();
+    await expect(removal).resolves.toBeUndefined();
+
+    const released = adapter.releaseForIdle();
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    await expect(released).resolves.toBeUndefined();
+    expect(state.live).toBe(false);
+  });
+
+  test("an idle boundary with nothing outstanding still releases as today, synchronously with the call", async () => {
+    // The precondition buys the ordinary path nothing to pay: a cycle whose
+    // operations have settled leaves the wire empty, and the boundary has still
+    // driven the ssh2 Client's end() by the time releaseForIdle() returns to its
+    // caller -- no await was introduced ahead of the transition body.
+    const { client, rawClient, state } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    await expect(adapter.delete("/remote/out.json")).resolves.toBeUndefined();
+
+    const released = adapter.releaseForIdle();
+    // Read with no await between it and the call above.
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    await expect(released).resolves.toBeUndefined();
+    expect(state.live).toBe(false);
+  });
+
+  test("a teardown with an operation outstanding does NOT wait for it to drain", async () => {
+    // The precondition is the release's alone. A teardown that waited for the wire
+    // to clear would park the close behind an operation whose own ceiling is the
+    // exchange's, and would be waiting on the very operation the close ends.
+    const { client, rawClient } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const operation = pendingDelete(client);
+
+    const removal = adapter.delete("/remote/out.json");
+    await expect(adapter.end()).resolves.toBeUndefined();
+    expect(client.end).toHaveBeenCalledOnce();
+    expect(rawClient.end).not.toHaveBeenCalled();
+
+    operation.settle();
+    await expect(removal).resolves.toBeUndefined();
+  });
+
+  test("a recovery re-dial with an operation outstanding does NOT wait for it to drain", async () => {
+    // A re-dial that held for the wire would park behind the very class of
+    // operation that drove it: the concurrent send whose own loss is being
+    // recovered from is exactly what would be outstanding.
+    const { client, connect, state } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const operation = pendingDelete(client);
+    const removal = adapter.delete("/remote/out.json");
+
+    // The session drops under a second operation, which recovers through the
+    // re-dial while the first is still on the wire.
+    state.live = false;
+    await expect(adapter.exists("/remote/in.json")).resolves.toBe(true);
+    expect(connect).toHaveBeenCalledTimes(2);
+
+    operation.settle();
+    await expect(removal).resolves.toBeUndefined();
+  });
+
+  test("a rejecting operation balances the count as well as a resolving one", async () => {
+    // A failure that left the count up would pin the session open for the rest of
+    // the exchange: every later boundary would read an operation on a wire that had
+    // been empty since. The boundary this one straddles is held, and the boundary
+    // after it rejects is not.
+    const { client, rawClient } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const operation = pendingDelete(client);
+
+    const removal = adapter.delete("/remote/out.json");
+    await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+    expect(rawClient.end).not.toHaveBeenCalled();
+
+    operation.fail(new Error("the server refused the delete"));
+    await expect(removal).rejects.toThrow("the server refused the delete");
+
+    const released = adapter.releaseForIdle();
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    await expect(released).resolves.toBeUndefined();
+  });
+
+  test("a held boundary does not increment declinedReleaseCount", async () => {
+    // That count states a cause -- another session transition that did not complete
+    // within the release's wait -- which is false of a hold, and the end-of-run line
+    // it feeds would report an anomaly where a concurrent send straddling a boundary
+    // is ordinary. Nor is a held boundary a closed one, so the forced-release total
+    // stays where it is too.
+    const { client, rawClient } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const operation = pendingDelete(client);
+
+    const removal = adapter.delete("/remote/out.json");
+    await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+    await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+
+    expect(rawClient.end).not.toHaveBeenCalled();
+    expect(adapter.declinedReleaseCount).toBe(0);
+    expect(adapter.forcedReleaseCount).toBe(0);
+    expect(adapterLog(adapter).warn).not.toHaveBeenCalled();
+
+    operation.settle();
+    await expect(removal).resolves.toBeUndefined();
   });
 
   test("a release whose ssh2 end() throws leaves the next drop counted and warned", async () => {

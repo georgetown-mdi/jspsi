@@ -395,13 +395,13 @@ send's publish is in flight. An op that reaches the transport at or after the
 release is serialized against it at the adapter's recovery chokepoint, which
 re-establishes the session before the op's first attempt -- queued behind the
 release on the transition lock, so it runs on the far side of the close rather
-than racing it. An op already on the wire when the release begins is torn with the
-session instead: at
-the pinned ssh2 and ssh2-sftp-client versions that tear clears the session in the
-same tick it rejects the op, so it reads as the clean loss it is and the retained
-recovery resolvers cover the re-issue. Closing the case outright -- rather than
-resting on that ordering -- means holding the release while an operation is
-outstanding.
+than racing it. An op already on the wire is covered by the release's own
+precondition rather than by any gate at op entry: a boundary reached with an
+operation outstanding closes nothing, so the op completes on the session it was
+issued against and the next boundary releases as usual. A held boundary costs the
+mode one idle gap, is neither counted nor warned -- a concurrent send straddling a
+boundary is ordinary -- and adds no wait anywhere: the release returns rather than
+draining the operation.
 
 **Close, drain, and the authenticated abort marker -- real code, the one genuine
 gap.** At teardown the last cycle's connection is already released, but `close()`
