@@ -160,6 +160,82 @@ The other candidates fail outright: `overrides` scoped to the parent or to the a
 
 **Resolution path.** This clears upstream, without action here, once `h3` v2 ships stable (so `@tanstack/start-server-core` stops depending on a prerelease) or `nitropack` / `h3@1.x` move to the 0.4 line -- at which point the ranges are mutually satisfiable, npm hoists one version that satisfies everyone, and both commands work again. Until then, treat step 9 as blocked and re-check after any `@tanstack/*` or `nitropack` bump. A local workaround should be reconsidered only if a release becomes due before upstream converges, and then only alongside a fix for the `custom-entry.ts` type seam.
 
+## The brace-expansion advisory is accepted rather than fixed
+
+`npm audit --package-lock-only` reports 9 high-severity findings against the
+committed lockfile. They are one advisory, GHSA-mh99-v99m-4gvg
+(`brace-expansion`: denial of service via unbounded expansion length driving an
+out-of-memory process crash), rolled up through the nine packages that depend on
+it; npm answers it `No fix available`. The advisory affects every version at or
+below 5.0.7 and names 5.0.8 as its first patch, with no patched 2.x, 3.x or 4.x
+line, so no within-major bump clears it. The tree carries two copies at 2.1.2,
+nested under `archiver-utils` and `readdir-glob`, beside a root
+`brace-expansion@5.0.8` that is already out of range.
+
+That reconstruction is what is available here rather than the authoritative
+list: the repository's Dependabot alerts cannot be read from an agent token
+(`gh api repos/<owner>/<repo>/dependabot/alerts` answers HTTP 403, `Resource not
+accessible by personal access token`), so the finding set above comes from
+`npm audit` against the lockfile. `npm audit` reports vulnerable packages where
+Dependabot reports advisories, so a correspondence between the two counts is an
+inference, not a per-alert read of the Security tab.
+
+**Why it does not reach the shipped tree.** Both copies are development-only.
+`npm ls --omit=dev brace-expansion` prints `(empty)`, which is npm's no-match
+answer -- it exits nonzero on a filtered query that matches nothing, while the
+unfiltered `npm ls --omit=dev` runs clean, so the nonzero exit reports the
+absence rather than a broken tree. The path is the web build toolchain:
+`@tanstack/nitro-v2-vite-plugin` -> `nitropack` -> `archiver` ->
+`archiver-utils` / `readdir-glob` -> `minimatch` -> `brace-expansion`, which is
+nitropack archiving its own build output. The brace patterns expanded there come
+from this repository's build configuration, not from partner, operator, or
+network input, so nothing an attacker controls reaches the expansion the
+advisory describes. The shipped CLI image installs `--omit=dev` (see [The Docker
+image's dependency freeze](#the-docker-images-dependency-freeze)), so none of it
+is in the image.
+
+**Why no upstream fix exists.** `nitropack@2.13.4` is the current release and
+declares `archiver: ^7.0.1`. Under archiver 7, `archiver-utils` reaches
+`minimatch@9.0.9` through `glob@^10` and `readdir-glob` reaches
+`minimatch@5.1.9`; those two declare `brace-expansion` at `^2.0.2` and `^2.0.1`.
+Both ranges cap below the 5.0.8 line, so no bump of any package on that path
+delivers the fix. It requires minimatch to widen the range on one of those
+lines, or archiver and nitropack to move off them.
+
+**The override that would clear it, and the guard that gates it.** A root
+`overrides` entry of `"brace-expansion": "^5.0.8"` takes `npm audit` to zero
+vulnerabilities, builds and typechecks all three workspaces, and passes every
+unit suite. An otherwise identical resolve without it still reports the same 9
+high, which isolates the clearing to the override rather than to version drift.
+The resulting change is surgical: it deletes the two nested
+`brace-expansion@2.1.2` lockfile entries and their two nested `balanced-match`
+entries, so the hoisted root `brace-expansion@5.0.8` serves both minimatch
+declarations, and it moves no other version.
+
+Reproducing that is harder than it reads, because npm 11.17 does not apply a
+newly added root `overrides` to a lockfile whose existing resolution already
+satisfies its dependents: `npm install`, `npm install --package-lock-only`, and
+`--force` all return the lockfile byte-identical. The override takes effect on a
+from-scratch resolve, which drifts on the order of 180 unrelated package
+versions, or -- the route that yields the surgical diff -- after pruning exactly
+the pinned nested entries from the lockfile and reinstalling.
+
+What holds the override back is `scripts/allow-scripts-policy.test.mjs`, which
+fails on any root `overrides` key by design (see [The install-script
+policy](#the-install-script-policy-allowscripts)): npm reads each package's
+source from the dependency edges an override rewrites, while the check reads the
+committed lockfile, which records the unrewritten specs, so a name-keyed verdict
+could read as in force while npm runs the script. Introducing the override
+therefore means modeling overrides in that check first -- a change to an
+install-script control, in security-review scope, and larger than the advisory
+it clears.
+
+**Revisit when** `nitropack` or `archiver` moves off `archiver@^7` to a line
+whose `minimatch` accepts `brace-expansion@^5`; when `minimatch` widens the `^2`
+range on its 5.x or 9.x lines; or when `scripts/allow-scripts-policy.test.mjs`
+models `overrides`, at which point the override above is the fix and needs no
+further measurement.
+
 ## Upgrading the SFTP Stack (ssh2 / ssh2-sftp-client)
 
 The channel-security bounds specified in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md) reach past the public `ssh2-sftp-client` API and drive ssh2 internals directly (`apps/cli/src/connection/ssh2SftpAdapter.ts`), so they rest on premises about ssh2's internal behavior that an upgrade can silently break. Re-verify the following on any `ssh2` or `ssh2-sftp-client` version bump, before the bump merges.
