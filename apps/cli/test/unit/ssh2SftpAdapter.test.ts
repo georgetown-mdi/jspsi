@@ -6317,6 +6317,49 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
+  test("the boundary held for the rename probe is bounded by the probe's own deadline, and the next boundary releases", async () => {
+    // The composition the two halves above only prove in pieces: one boundary
+    // falls while the probe is on the wire and is held, and what ends that hold
+    // is the probe's per-operation deadline and nothing weaker. The count returns
+    // to zero with the stat still outstanding at the server, and the next
+    // boundary closes as an undisturbed one does -- so counting the probe buys
+    // the hold no bound the rest of the bracket does not already carry.
+    const { client, rawClient, state, dropFromServer } =
+      landedOnTearClient(wrapperMethods());
+    const probe = pendingExists(client);
+    const adapter = new SSH2SFTPClientAdapter({
+      ephemeralSessions: true,
+      stallDeadlineMs: 200,
+    });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+    const publish = adapter.rename(
+      "/remote/temp-send.tmp",
+      "/remote/id-0-12.json",
+    );
+    dropFromServer();
+    await probe.issued;
+
+    expect(outstandingOperations(adapter)).toBe(1);
+    await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+    expect(rawClient.end).not.toHaveBeenCalled();
+    expect(state.live).toBe(true);
+
+    // The probe is never answered: its deadline is what settles it, and the
+    // ORIGINAL rename error surfaces rather than the probe's own stall.
+    await expect(publish).rejects.toThrow("No such file");
+    expect(probe.exists).toHaveBeenCalledOnce();
+    expect(outstandingOperations(adapter)).toBe(0);
+
+    const released = adapter.releaseForIdle();
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    await expect(released).resolves.toBeUndefined();
+    expect(state.live).toBe(false);
+  });
+
   test("an operation outstanding at the boundary never reaches the stall-deadline or the session-still-live terminal reading", async () => {
     // The publish that matters most -- a temp-file rename to its final name --
     // outstanding when the boundary falls. Held rather than torn, it reaches the

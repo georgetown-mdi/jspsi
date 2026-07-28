@@ -27,13 +27,33 @@ import { describe, expect, it } from "vitest";
 // regex: coverage here is a promise flowing through wrapper calls, callbacks and
 // executors, which no pattern over text can follow.
 //
-// Limits, stated rather than implied. Coverage is computed syntactically and
-// fails CLOSED: a site is bracketed only if this analysis can prove it, so a new
-// promise-plumbing idiom shows up as a failure to be answered (by extending the
-// rules here, or by bracketing the site) rather than passing unseen. An
-// allowance matches by enclosing method and callee name, so a SECOND unbracketed
-// call to the same method in the same method is admitted by the same reason --
-// that is the class the reason names, not an unexamined site.
+// Limits, stated rather than implied. The analysis is syntactic, and it is not
+// a proof in either direction; these are the two places it can be wrong.
+//
+// It can call a site bracketed that is not. Inside a covered promise's executor,
+// a call is marked bracketed when one of its argument functions MENTIONS a
+// settler binding, not when the settlement is shown to lie on the path that
+// answers. A best-effort close written as `sftp.close(handle, (err) => { if
+// (err) reject(err); })` and fired after the operation has already settled would
+// therefore read as bracketed and never reach the allowance list. The mention
+// test is deliberate: it is what carries coverage through listOnce's
+// opendir/readdir callback chain and createExclusiveOnce's open ->
+// code-4-exists -> close handshake, which a reachability test would reclassify.
+//
+// It can miss a site altogether. A receiver is followed only from `this.client`,
+// from a raw SFTPWrapper binding, and through locals initialized from either
+// (`const client = this.client`, `const { sftp } = internals`), chains included.
+// A receiver arriving any other way is not followed -- a parameter, an object or
+// array property, a binding assigned after its declaration, one returned from a
+// helper -- and a round trip issued on one of those is invisible here.
+//
+// Everywhere else the coverage propagation fails CLOSED: a site it cannot reach
+// is reported unbracketed, so a new promise-plumbing idiom shows up as a failure
+// to be answered (by extending the rules here, or by bracketing the site) rather
+// than passing unseen. An allowance matches by enclosing method and callee name,
+// so a SECOND unbracketed call to the same method in the same method is admitted
+// by the same reason -- that is the class the reason names, not an unexamined
+// site.
 
 const ADAPTER = "apps/cli/src/connection/ssh2SftpAdapter.ts";
 const SELF = "scripts/sftp-tracked-round-trips.test.mjs";
@@ -191,11 +211,43 @@ function declarationOf(name, from) {
   return undefined;
 }
 
+/** The `this.client` property: the client every high-level operation runs on. */
+function isTheClient(node) {
+  const target = unwrap(node);
+  return (
+    !!target &&
+    ts.isPropertyAccessExpression(target) &&
+    target.expression.kind === ts.SyntaxKind.ThisKeyword &&
+    target.name.text === "client"
+  );
+}
+
 /**
- * Identifiers bound to the raw ssh2 SFTPWrapper: the `const { sftp } =
- * <internals cast>` idiom, and a parameter declared as the wrapper's type.
- * Calls on these are server round trips exactly as calls on the high-level
- * client are.
+ * Whether `identifier` is bound to something requests are issued on: a raw
+ * SFTPWrapper binding, `this.client`, or a local initialized from either,
+ * followed through a chain of such locals (`const client = this.client`). Only
+ * declaration initializers are followed; the header states what is not.
+ */
+function bindsARequestReceiver(identifier, wrappers = new Set()) {
+  const seen = new Set();
+  for (let current = identifier; ;) {
+    if (wrappers.has(current.text)) return true;
+    const declaration = declarationOf(current.text, current);
+    if (!declaration || !declaration.initializer || seen.has(declaration))
+      return false;
+    seen.add(declaration);
+    const initializer = unwrap(declaration.initializer);
+    if (isTheClient(initializer)) return true;
+    if (!ts.isIdentifier(initializer)) return false;
+    current = initializer;
+  }
+}
+
+/**
+ * Identifiers bound to the raw ssh2 SFTPWrapper: the `const { sftp } = ...`
+ * idiom over the internals cast or over a local holding it, and a parameter
+ * declared as the wrapper's type. Calls on these are server round trips exactly
+ * as calls on the high-level client are.
  */
 export function wrapperBindings(sourceFile) {
   const names = new Set();
@@ -204,7 +256,9 @@ export function wrapperBindings(sourceFile) {
       ts.isVariableDeclaration(node) &&
       node.initializer &&
       ts.isObjectBindingPattern(node.name) &&
-      node.initializer.getText().includes("Ssh2SftpClientInternals")
+      (node.initializer.getText().includes("Ssh2SftpClientInternals") ||
+        (ts.isIdentifier(unwrap(node.initializer)) &&
+          bindsARequestReceiver(unwrap(node.initializer))))
     ) {
       for (const element of node.name.elements)
         if (ts.isIdentifier(element.name)) names.add(element.name.text);
@@ -221,9 +275,9 @@ export function wrapperBindings(sourceFile) {
 }
 
 /**
- * Every call expression that issues a server request: a call on `this.client`
- * or on a raw SFTPWrapper binding whose member is not session lifecycle or
- * EventEmitter plumbing.
+ * Every call expression that issues a server request: a call on `this.client`,
+ * on a raw SFTPWrapper binding, or on a local aliasing either, whose member is
+ * not session lifecycle or EventEmitter plumbing.
  */
 export function requestIssuingSites(sourceFile) {
   const wrappers = wrapperBindings(sourceFile);
@@ -233,11 +287,9 @@ export function requestIssuingSites(sourceFile) {
     const callee = unwrap(node.expression);
     if (!ts.isPropertyAccessExpression(callee)) continue;
     const receiver = unwrap(callee.expression);
-    const onClient =
-      ts.isPropertyAccessExpression(receiver) &&
-      receiver.expression.kind === ts.SyntaxKind.ThisKeyword &&
-      receiver.name.text === "client";
-    const onWrapper = ts.isIdentifier(receiver) && wrappers.has(receiver.text);
+    const onClient = isTheClient(receiver);
+    const onWrapper =
+      ts.isIdentifier(receiver) && bindsARequestReceiver(receiver, wrappers);
     if (!onClient && !onWrapper) continue;
     const member = callee.name.text;
     if (NON_REQUEST_MEMBERS.has(member)) continue;
@@ -256,8 +308,8 @@ export function requestIssuingSites(sourceFile) {
 /**
  * The set of nodes the tracked() bracket covers, computed by marking each
  * `this.tracked(...)` argument and propagating along the ways this adapter
- * carries a pending promise. Fails closed: a site is covered only if the
- * propagation reaches it.
+ * carries a pending promise. A site is covered only where the propagation
+ * reaches it, save the settler-mention rule below; see the header.
  */
 export function trackedCoverage(sourceFile) {
   const covered = new Set();
@@ -277,9 +329,10 @@ export function trackedCoverage(sourceFile) {
     queue.push(target);
   };
 
-  // A request issued inside a covered promise's executor, whose own callback can
-  // settle that promise, is inside the bracket: the promise stays pending until
-  // it answers.
+  // A request issued inside a covered promise's executor, one of whose argument
+  // functions names a settler, is taken to be inside the bracket: the promise
+  // stays pending until it answers. Naming is the whole test -- what that admits
+  // is in the header.
   const markSettlingCallsIn = (executor) => {
     const settlers = new Set(
       executor.parameters
@@ -455,5 +508,30 @@ describe("SFTP adapter round trips are bracketed by tracked()", () => {
     );
     expect(fallback).toBeDefined();
     expect(covered.has(fallback.node)).toBe(true);
+  });
+
+  it("finds a round trip issued on a local aliasing the client or the wrapper", () => {
+    // The adapter issues every round trip on `this.client` or on a `{ sftp }`
+    // destructured from the internals cast, so nothing above exercises the alias
+    // rule and a regression in it would fail no assertion here. Pinned against a
+    // source of its own instead: without the rule these two sites are simply not
+    // seen, and an uncounted round trip written this way passes the check.
+    const aliasing = parseSource(
+      "aliasing.ts",
+      `class A {
+         private issue(path: string) {
+           const client = this.client;
+           const relayed = client;
+           void relayed.stat(path);
+           const internals = this.client as unknown as Ssh2SftpClientInternals;
+           const { sftp } = internals;
+           sftp.readdir(path, () => {});
+         }
+       }`,
+    );
+    expect(requestIssuingSites(aliasing).map((site) => site.callee)).toEqual([
+      "relayed.stat",
+      "sftp.readdir",
+    ]);
   });
 });
