@@ -236,6 +236,75 @@ inProcessOnly(
 );
 
 inProcessOnly(
+  "a mid-exchange recovery re-dial for a HIGH-LEVEL operation torn in flight " +
+    "is issued on a socket ssh2 would not defer behind",
+  async () => {
+    // The same dial path as the case above, reached from the other side of the
+    // library's own asymmetry. A raw-wrapper operation is torn by the transport's
+    // 'close', so recovery runs after the whole lifecycle sequence; a high-level
+    // one (get, the put family, delete, rename, exists) is torn by the 'end' that
+    // precedes it, so recovery runs while the dead transport still owes its
+    // 'close' and its socket has not yet been retired. That is the state this
+    // census exists for: a dial issued there is failed by the library and the
+    // handshake it started is abandoned, and the next dial finds the abandoned
+    // socket WRITABLE -- the deferring state. The recovery retires the transport
+    // before it dials, and this is that property as a check.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "inflight-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    // Large enough that the cut lands inside the READ run rather than at the
+    // operation's first opcode.
+    await fsp.writeFile(
+      path.join(dir, "transfer.bin"),
+      Buffer.alloc(4 * 1024 * 1024, 7),
+    );
+    const adapter = new SSH2SFTPClientAdapter();
+    const dials = recordDials(adapter);
+    const conn = new FileSyncConnection(adapter, {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    conn.on("error", () => {});
+    try {
+      await conn.open({
+        channel: "sftp",
+        server: {
+          host: srv.handle.host,
+          port: srv.handle.port,
+          ...serverAuth(srv.handle.usera),
+          path: remote,
+        },
+      });
+      await withCapturedLogs(
+        async () => {
+          // The drop lands on the third opcode of the read, well inside it.
+          srv.sessionControls.dropActiveAfterOps(3);
+          await expect(
+            adapter.get(`${remote}/transfer.bin`, {
+              maxBytes: 16 * 1024 * 1024,
+            }),
+          ).resolves.toHaveLength(4 * 1024 * 1024);
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      expect(adapter.midExchangeReconnectCount).toBe(1);
+      expectNoDeferrableDial(dials, 2);
+      // Not merely not-writable: the retirement destroyed it and waited out the
+      // client 'close', which is what leaves the dial nothing to be failed by.
+      expect(dials[1].destroyed).toBe(true);
+    } finally {
+      await conn.close().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
   "a mid-exchange recovery re-dial against a partner that withholds its close " +
     "is issued on a destroyed socket",
   async () => {

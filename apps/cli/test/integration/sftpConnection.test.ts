@@ -886,6 +886,18 @@ inProcessOnly(
     const baseline = counts(clientOf(new SSH2SFTPClientAdapter()));
     expect(baseline).toEqual({ error: 1, end: 1, close: 1 });
 
+    // What a dial adds and keeps: the adapter's own persistent
+    // transport-lifecycle watch, one 'end' and one 'close', attached once per
+    // adapter and living as long as the Client does (see
+    // ssh2SftpAdapter.watchTransportLifecycle). It is not a temp listener, so
+    // every path below is held to this rather than to the fresh-construction
+    // baseline -- and to it EXACTLY, so the tripwire keeps its force.
+    const dialed = {
+      error: baseline.error,
+      end: baseline.end + 1,
+      close: baseline.close + 1,
+    };
+
     const auth = serverAuth(srv.usera);
 
     // Path 1 -- the first-use probe: connect far enough to read the host key, refuse
@@ -901,7 +913,7 @@ inProcessOnly(
       channel: "sftp",
       server: { host: srv.host, port: srv.port, ...auth },
     });
-    expect(counts(clientOf(probeAdapter))).toEqual(baseline);
+    expect(counts(clientOf(probeAdapter))).toEqual(dialed);
 
     // Path 2 -- the pinned-mismatch enforce path: a wrong pin makes the enforce
     // verifier refuse, so open() rejects before reaching a session and -- unlike the
@@ -925,7 +937,7 @@ inProcessOnly(
         options: { maxReconnectAttempts: 0 },
       }),
     ).rejects.toThrow(/SFTP host-key verification failed/);
-    expect(counts(clientOf(openAdapter))).toEqual(baseline);
+    expect(counts(clientOf(openAdapter))).toEqual(dialed);
     await openConn.close().catch(() => {});
 
     // Path 3 -- the no-pin fail-closed path: the DEFAULT posture for an unpinned
@@ -957,7 +969,7 @@ inProcessOnly(
         options: { maxReconnectAttempts: 0 },
       }),
     ).rejects.toThrow(/no host_key_fingerprint is pinned/);
-    expect(counts(clientOf(noPinAdapter))).toEqual(baseline);
+    expect(counts(clientOf(noPinAdapter))).toEqual(dialed);
     await noPinConn.close().catch(() => {});
   },
 );
