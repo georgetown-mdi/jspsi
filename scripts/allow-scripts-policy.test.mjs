@@ -105,12 +105,16 @@ function policyEntries(allowScripts) {
 // each package's source from, and the lockfile records neither the override nor
 // the rewritten spec -- every dependent entry keeps the range it declared.
 //
-// A registry version or range leaves the identity model below untouched, because
-// the lockfile records the tarball npm resolved the override to and npm decides
-// the verdict at that version: measured on npm 11.17, an override moving a
-// transitive @parcel/watcher from 2.5.4 to 2.5.6 leaves a verdict keyed at 2.5.4
-// covering nothing (the install fails ESTRICTALLOWSCRIPTS naming 2.5.6) and one
-// keyed at 2.5.6 in force.
+// A comparator-set semver range -- comparators optionally joined by `||` --
+// leaves the identity model below untouched, because the lockfile records the
+// tarball npm resolved the override to and npm decides the verdict at that
+// version: measured on npm 11.17, an override moving a transitive
+// @parcel/watcher from 2.5.4 to 2.5.6 leaves a verdict keyed at 2.5.4 covering
+// nothing (the install fails ESTRICTALLOWSCRIPTS naming 2.5.6) and one keyed at
+// 2.5.6 in force. That grammar is narrower than what npm resolves from the
+// registry -- a hyphen range (`1.0.0 - 2.0.0`) and a `v`-prefixed version
+// (`v2.0.1`) are spellings npm honors and this refuses -- which costs a red
+// check naming the form to model, never a verdict read off an unmodeled spec.
 //
 // A source spec takes every name-keyed verdict out of force. Measured on npm
 // 11.17, a transitive dependency overridden to a `file:` tarball or to a remote

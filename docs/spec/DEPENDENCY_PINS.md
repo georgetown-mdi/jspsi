@@ -135,7 +135,7 @@ Where the lockfile cannot answer, the check refuses the input rather than guessi
 
 **What the check models about a root `overrides` entry.** An override rewrites the dependency edges npm reads each package's source from, and the lockfile records neither the override nor the rewritten spec -- every dependent entry keeps the range it declared. The source class a verdict is read against therefore comes from the override's own spec, over the flat `"<name>": "<spec>"` form only:
 
-- **A registry version or range** leaves the identity model untouched: the lockfile records the tarball npm resolved the override to, and npm decides the verdict at that version. Measured on npm 11.17, an override moving a transitive `@parcel/watcher` from 2.5.4 to 2.5.6 fails the install under a verdict keyed at 2.5.4 (`ESTRICTALLOWSCRIPTS`, naming 2.5.6) and installs clean under one keyed at 2.5.6, so a verdict naming the version the dependent declared is a dead key.
+- **A comparator-set semver range** -- comparators (`5.0.8`, `^5.0.8`, `>=5.0.8 <6.0.0`, `1.x`, `*`) optionally joined by `||` -- leaves the identity model untouched: the lockfile records the tarball npm resolved the override to, and npm decides the verdict at that version. Measured on npm 11.17, an override moving a transitive `@parcel/watcher` from 2.5.4 to 2.5.6 fails the install under a verdict keyed at 2.5.4 (`ESTRICTALLOWSCRIPTS`, naming 2.5.6) and installs clean under one keyed at 2.5.6, so a verdict naming the version the dependent declared is a dead key. That grammar is narrower than the specs npm resolves from the registry, and the gap costs a refusal rather than a verdict: a hyphen range (`"1.0.0 - 2.0.0"`) and a `v`-prefixed version (`"v2.0.1"`) are ordinary registry spellings npm honors -- measured on npm 11.17, each resolves `brace-expansion`, to 2.0.0 and 2.0.1 respectively -- and each reddens the check as an unmodeled spec, whose message names modeling the form here as the way through. Refusing is the idiom rather than a gap to widen away: an unmodeled spelling costs a red check, never a verdict reported as in force.
 - **A source spec** -- a scheme, a path shape, or the bare `owner/repo` shorthand npm reads as a git host or a directory -- takes every name-keyed verdict for that name out of force. The check names such a package as unreviewed when the lockfile records an install script for it and passes it when it does not. Measured on npm 11.17, a transitive dependency overridden to a `file:` tarball, or to a remote tarball URL spelled in the registry's own `<name>/-/<name>-<version>.tgz` shape, is reported uncovered under a name-keyed `true` and a name-keyed `false` alike, exactly as with no verdict at all -- while the lockfile entry npm writes carries that URL in `resolved`, which the identity model would otherwise read a name and version out of.
 - **Every other form is refused** in the register of the key-shape refusal above: a nested per-parent object, a `"."` self key and a `"name@range"` key each rewrite some edges on a name and not others, which the lockfile cannot answer; a dist-tag, an `npm:` alias and a `$name` reference to a root dependency each name a source this does not model.
 
@@ -143,7 +143,7 @@ Three residuals sit under that model, all of which cost a refusal rather than a 
 
 - A git source is grouped with `file:` and remote unmeasured, for want of a reachable git host to measure it against.
 - The check keys an override both to the name a package is installed under and to the name its resolved URL carries, since either can be the name the rewritten edge names. Whether npm's own matcher follows an aliased edge (`"h3-v2": "npm:h3@2"`) to an override keyed on either name is unmeasured, so the check can refuse a verdict npm holds.
-- Nothing verifies that the committed lockfile is the one npm resolves with the overrides in force: npm 11.17 leaves a lockfile whose existing resolution already satisfies its dependents byte-identical when an override is added ([the brace-expansion fix](#the-brace-expansion-advisory-is-fixed-by-a-root-override) records the route around that). An override that has not been applied reads as covered -- and `npm ci` installs that same lockfile, so what runs is what the check read.
+- Nothing verifies that the committed lockfile is the one npm resolves with the overrides in force: npm 11.17 leaves a lockfile whose existing resolution already satisfies its dependents byte-identical when an override is added ([the brace-expansion fix](#the-brace-expansion-advisory-is-fixed-by-a-root-override) records the route around that). An override that has not been applied reads as covered. Where the lockfile already carries what that override resolves to, `npm ci` installs that same lockfile and what runs is what the check read -- measured on npm 11.17, a `brace-expansion` override standing over a lockfile whose resolution predates it installs clean, and `npm audit --package-lock-only` against that tree reports the 9 highs the override answers. Where the lockfile lacks a package the unapplied override needs, `npm ci` refuses rather than resolving one: an override of `"brace-expansion": "^1.1.11"` over a lockfile resolved to 5.0.8 fails `EUSAGE` (`Missing: brace-expansion@1.1.16 from lock file`), so nothing installs and no unreviewed script runs.
 
 The rest are limits rather than refusals:
 
@@ -248,6 +248,31 @@ exits 0, `npm ls --all --omit=dev` names only the
 [crossws peer](#the-crossws-peer-conflict-blocks-the-release-sbom), and the
 release-scoped `npm sbom --omit=dev -w packages/core -w apps/cli -w apps/web`
 (step 9 in [RELEASES.md](../RELEASES.md)) names only that same peer.
+
+**What that invalid edge is underneath: an API-incompatible major.** The npm
+reporting artifact is not the whole cost. `brace-expansion@5.0.8` exports a
+named `expand` and no callable default:
+`Object.keys(require("brace-expansion"))` is
+`["EXPANSION_MAX", "EXPANSION_MAX_LENGTH", "expand"]`, and `.default` is
+`undefined`. Both dependents the hoisted copy serves call the 2.x callable
+shape, so each breaks on any brace pattern -- measured against the committed
+tree, `braceExpand("a{b,c}d")` throws from `minimatch@5.1.9` (under
+`readdir-glob`, declaring `^2.0.1`) with `TypeError: expand is not a function`,
+and from `minimatch@9.0.9` (under `archiver-utils`, declaring `^2.0.2`) with
+`TypeError: (0 , brace_expansion_1.default) is not a function`. Non-brace
+patterns still match.
+
+That break is latent and development-only. `npm run build -w apps/web` exits 0
+against the committed tree, because nothing built here reaches archiver's brace
+path: archiver arrives through nitropack's azure preset, which this repo does
+not build. Every `brace-expansion` copy is development-only besides, so none of
+it is in the shipped image. What is left is a forward risk -- a dependent
+arriving on `brace-expansion@^1` or `^2` is forced onto the 5.x line by the
+same override and hits the same `TypeError`. Nothing at install time reports
+that: npm resolves and installs the tree either way, and
+`npm audit --package-lock-only` answers `found 0 vulnerabilities` with the two
+invalid edges already in the tree. It surfaces when that dependent's brace path
+runs, or as one more `invalid` edge in the dev-inclusive walks above.
 
 **Revisit when** `nitropack` or `archiver` moves off `archiver@^7` to a line
 whose `minimatch` accepts `brace-expansion@^5`, or `minimatch` widens the `^2`
