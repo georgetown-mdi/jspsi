@@ -47,10 +47,27 @@ exercises it as written, but it does leave SMB-specific mapping behavior
 untouched.
 
 One Windows behavior remains unverified: `Resolve-RealServer` against a
-genuine DFS namespace. The premise that `Get-SmbConnection` reports the real
-target server rather than the namespace name is still an assumption. Its
-handling of the readable-but-no-match and unreadable cases is covered by
-driving the function with stubbed connection sets.
+genuine DFS namespace. Its handling of the readable-but-no-match and
+unreadable cases is covered by driving the function with stubbed connection
+sets, and `Get-SmbConnection` is confirmed to return cleanly when elevated and
+to fail with "Access is denied" when not. What is not confirmed is the premise
+the function rests on: that `Get-SmbConnection` names the real target server.
+
+There is reason to doubt it. The script parses `\\namespace\dfs\link` into
+share `dfs`, and the function then matches connections on that share name.
+Following a referral, Windows holds a connection to the namespace root, whose
+share name is `dfs`, as well as one to the target, whose share name is the
+target's own. Matching on `dfs` should therefore return the namespace server
+itself, leave `Server` equal to the name already in hand, and apply no
+correction -- making the function a no-op on the very case it exists for. That
+is read off the DFS protocol, not measured, so treat it as the first thing to
+test rather than as a finding.
+
+If it holds, the repair is not a better heuristic over the connection list.
+The client-side question "which server backs this DFS path" is answered by
+`NetDfsGetClientInfo` (what `dfsutil /pktinfo` reports), and the honest
+alternative to calling it is to drop the automatic resolution and send every
+DFS user to the manual route the runbook documents.
 
 `Get-SmbConnection` requires Administrator rights, so an ordinary run cannot
 resolve a DFS path at all. The script says so and points at the runbook's
@@ -64,6 +81,16 @@ unrelated to their file drop with no sign anything went wrong.
 Settling `Resolve-RealServer` needs a domain-joined machine with a DFS
 namespace and an elevated PowerShell session, since `Get-SmbConnection` is
 readable only to an Administrator.
+
+Mocking the namespace locally does not work, and the obstacle is worth knowing
+before someone spends an afternoon on it. Samba serves DFS referrals happily
+(`host msdfs` plus an `msdfs:server\share` symlink), so the server side is
+easy. The Windows client is the problem: its SMB redirector uses port 445 and
+no other, and stopping the Server service does not free that port -- the
+listener belongs to the kernel SMB drivers and survives the service stop, so
+Docker cannot publish a container there. Freeing 445 means unbinding File and
+Printer Sharing from an interface, which is a heavier change than the test is
+worth.
 
 Everything else runs on one machine with Docker and no special rights:
 
