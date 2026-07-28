@@ -317,6 +317,16 @@ describe("keyboard-interactive", () => {
     };
   }
 
+  // Keyboard-interactive attaches only. connect() also registers the adapter's
+  // persistent transport-lifecycle listeners on this same Client (see
+  // watchTransportLifecycle), so a bare call count would answer a different
+  // question than the one these cases ask.
+  function keyboardAttaches(client: { on: ReturnType<typeof vi.fn> }): number {
+    return client.on.mock.calls.filter(
+      (call) => call[0] === "keyboard-interactive",
+    ).length;
+  }
+
   // Install a mock ssh2-sftp-client on the adapter whose underlying ssh2 Client
   // is `ssh2Client`, so connect() drives the real keyboard-interactive attach.
   function installClient(
@@ -382,9 +392,9 @@ describe("keyboard-interactive", () => {
       maxReconnectAttempts: 0,
     });
 
-    // connect() registers nothing on the ssh2 Client itself unless keyboard-
-    // interactive is enabled (the fatal-error listener goes on the SFTPWrapper).
-    expect(client.on).not.toHaveBeenCalled();
+    // connect() registers no keyboard-interactive answer handler unless the method
+    // is enabled (the fatal-error listener goes on the SFTPWrapper).
+    expect(keyboardAttaches(client)).toBe(0);
   });
 
   test("does not attach a handler when tryKeyboard is set but no password is present", async () => {
@@ -401,7 +411,7 @@ describe("keyboard-interactive", () => {
       maxReconnectAttempts: 0,
     });
 
-    expect(client.on).not.toHaveBeenCalled();
+    expect(keyboardAttaches(client)).toBe(0);
   });
 
   test("attaches the handler exactly once across repeated connects", async () => {
@@ -420,7 +430,7 @@ describe("keyboard-interactive", () => {
     await adapter.connect({ ...opts });
     await adapter.connect({ ...opts });
 
-    expect(client.on).toHaveBeenCalledTimes(1);
+    expect(keyboardAttaches(client)).toBe(1);
   });
 
   test("answers with the current password after a reconnect, not a stale captured one", async () => {
@@ -446,7 +456,7 @@ describe("keyboard-interactive", () => {
     });
 
     // Still attached exactly once, but answering with the latest password.
-    expect(client.on).toHaveBeenCalledTimes(1);
+    expect(keyboardAttaches(client)).toBe(1);
     const handler = listeners["keyboard-interactive"]?.[0];
     const finish = vi.fn();
     handler!("n", "i", "en", [{ prompt: "Password:", echo: false }], finish);
@@ -4950,6 +4960,10 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+      // The listeners the adapter holds on the Client across a dial: its
+      // persistent transport-lifecycle watch, and nothing else. Anything above
+      // this afterwards is a close wait that outlived the release that armed it.
+      const dialedCloseListeners = rawClient.listenerCount("close");
       const release = adapter.releaseForIdle();
       // The adapter's own close bound (not exported; a liveness backstop, not a
       // tunable). Past it the partner's close is still outstanding.
@@ -4963,7 +4977,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       expect(state.live).toBe(false);
       // Nothing was left waiting on the ssh2 Client for a close that never came;
       // the next cycle's release installs its own.
-      expect(rawClient.listenerCount("close")).toBe(0);
+      expect(rawClient.listenerCount("close")).toBe(dialedCloseListeners);
 
       // The next cycle: the session is RE-ESTABLISHED before any operation is
       // issued, rather than an operation being issued against the ended transport.
@@ -5057,6 +5071,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+      const dialedCloseListeners = rawClient.listenerCount("close");
       const cycles = SFTP_REDIAL_WARN_INTERVAL + 2;
       for (let cycle = 0; cycle < cycles; cycle += 1) {
         const release = adapter.releaseForIdle();
@@ -5075,8 +5090,9 @@ describe("ephemeral session mode (connection-per-poll)", () => {
         `${SFTP_REDIAL_WARN_INTERVAL} idle boundaries closed this way so far`,
       );
       // Each cycle's release installs and consumes its own close wait, so nothing
-      // accumulates on the ssh2 Client the library keeps across reconnects.
-      expect(rawClient.listenerCount("close")).toBe(0);
+      // accumulates on the ssh2 Client the library keeps across reconnects: the
+      // count is back to the one persistent watch a dial leaves behind.
+      expect(rawClient.listenerCount("close")).toBe(dialedCloseListeners);
     } finally {
       vi.useRealTimers();
     }
@@ -5282,6 +5298,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    const dialedCloseListeners = rawClient.listenerCount("close");
     await expect(adapter.releaseForIdle()).rejects.toThrow(
       "socket already destroyed",
     );
@@ -5295,7 +5312,9 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     ]);
     expect(outcome).toBe("ran");
     expect(releaseBoundaryStands(adapter)).toBe(false);
-    expect(rawClient.listenerCount("close")).toBe(0);
+    // Back to the one persistent transport-lifecycle watch a dial leaves behind:
+    // the release's own close wait was dismantled on its way out.
+    expect(rawClient.listenerCount("close")).toBe(dialedCloseListeners);
   });
 
   // Every data-plane operation on the transport contract reaches the server
@@ -6237,6 +6256,228 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await expect(publish).resolves.toBeUndefined();
     expect(landed.has("/remote/id-0-12.json")).toBe(true);
     expect(connect).toHaveBeenCalledTimes(2);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+  });
+
+  // A client modeling what a partner-side drop does to a HIGH-LEVEL operation in
+  // flight, which is a different sequence from the raw-wrapper tear above.
+  // ssh2-sftp-client's per-operation listeners clear the session and reject the
+  // operation from the ssh2 Client's 'end', a full event ahead of the 'close' the
+  // transport still owes -- so recovery is entered with the session already gone
+  // and a lifecycle event of the dead transport still to come. The library's own
+  // connect-time listeners fail any dial that stale event reaches, which is what
+  // `connect` refuses here, and the handshake such a dial started runs on unowned
+  // at the server. The 'close' lands when this side destroys the socket: the state
+  // under test is a transport that still owes it when recovery runs, so the mock
+  // holds that state until the adapter acts on it.
+  function tornOnEndClient(wrapper: ReturnType<typeof wrapperMethods>) {
+    const state = { live: true, closeOwed: false };
+    let failInFlight: ((error: unknown) => void) | undefined;
+    const rawClient = new EventEmitter() as EventEmitter &
+      Record<string, unknown>;
+    const socket = {
+      setKeepAlive: vi.fn(),
+      writableEnded: false,
+      readableEnded: false,
+      destroyed: false,
+      destroy: vi.fn(() => {
+        socket.destroyed = true;
+        if (!state.closeOwed) return;
+        state.closeOwed = false;
+        rawClient.emit("close");
+      }),
+    };
+    Object.assign(rawClient, {
+      setNoDelay: vi.fn(),
+      _sock: socket,
+      end: vi.fn(),
+    });
+    const connect = vi.fn().mockImplementation(async () => {
+      if (state.closeOwed)
+        throw new Error("getConnection: Unexpected close event");
+      // ssh2 mints a fresh socket per dial, so neither half is ended on it.
+      state.live = true;
+      socket.writableEnded = false;
+      socket.readableEnded = false;
+      socket.destroyed = false;
+    });
+    // One server round trip, outstanding for a macrotask, which the drop tears.
+    const roundTrip = <T>(name: string, value: T) =>
+      new Promise<T>((resolve, reject) => {
+        if (!state.live) {
+          reject(notConnected(name));
+          return;
+        }
+        const answer = setTimeout(() => resolve(value), 0);
+        failInFlight = (error: unknown) => {
+          clearTimeout(answer);
+          reject(error);
+        };
+      });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: rawClient,
+      end: vi.fn().mockResolvedValue(true),
+      realPath: vi.fn().mockResolvedValue("/"),
+      get: vi.fn(() => roundTrip("get", Buffer.from("payload"))),
+      put: vi.fn(() => roundTrip("put", "ok")),
+      exists: vi.fn(() => roundTrip("exists", true)),
+    };
+    // The partner's clean cut, as the pinned library delivers it to a high-level
+    // operation: the session property is cleared and the operation rejected from
+    // the 'end', with the 'close' still owed.
+    const dropFromServer = () => {
+      state.live = false;
+      state.closeOwed = true;
+      socket.writableEnded = true;
+      socket.readableEnded = true;
+      failInFlight?.(notConnected("operation"));
+      failInFlight = undefined;
+      rawClient.emit("end");
+    };
+    return { client, connect, state, rawClient, socket, dropFromServer };
+  }
+
+  test.each([
+    {
+      op: "get" as const,
+      run: (a: SSH2SFTPClientAdapter) => a.get("/r/x.json"),
+    },
+    {
+      op: "put" as const,
+      run: (a: SSH2SFTPClientAdapter) =>
+        a.put(Buffer.from("payload"), "/r/x.json"),
+    },
+    {
+      op: "exists" as const,
+      run: (a: SSH2SFTPClientAdapter) => a.exists("/r/x.json"),
+    },
+  ])(
+    "a $op torn in flight by a server drop recovers on ONE re-dial, with no dial issued into the owed close",
+    async ({ run }) => {
+      // The high-level ops reject on the 'end', so recovery runs while the dead
+      // transport still owes its 'close'. Dialing there fails the dial and leaves
+      // the session it opened abandoned at the server, and that session's own
+      // later events fail the next dial in turn -- so the whole budget burns out
+      // and the operation surfaces a connect error instead of its session loss.
+      // The recovery retires the transport first, so the one dial it makes lands.
+      const { client, connect, socket, dropFromServer } =
+        tornOnEndClient(wrapperMethods());
+      const adapter = new SSH2SFTPClientAdapter();
+      stub(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 3 });
+
+      const operation = run(adapter);
+      dropFromServer();
+
+      await expect(operation).resolves.not.toBeUndefined();
+      // Exactly one re-dial: no attempt was spent on a dial the owed close would
+      // have failed, so none left an abandoned session behind either.
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(socket.destroy).toHaveBeenCalledOnce();
+      expect(adapter.reconnectCount).toBe(1);
+      expect(adapter.midExchangeReconnectCount).toBe(1);
+    },
+  );
+
+  test("warns and leaves the operation terminal when the owed close never lands", async () => {
+    // The premise the retirement rests on -- that destroying the transport draws
+    // the client 'close' -- is read back where it is driven, like its two siblings
+    // on this path: a warning naming the checklist, no dial, and the operation's
+    // own session loss rather than an error of the mechanism's making.
+    vi.useFakeTimers();
+    try {
+      const { client, connect, socket, dropFromServer } =
+        tornOnEndClient(wrapperMethods());
+      socket.destroy = vi.fn(() => {
+        socket.destroyed = true;
+      });
+      const warn = vi.fn();
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = {
+        warn,
+        info: vi.fn(),
+        trace: vi.fn(),
+        error: vi.fn(),
+      };
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 3 });
+      const failing = adapter.exists("/r/x.json").catch((e: unknown) => e);
+      dropFromServer();
+      // Past the retirement's own bound for a 'close' that never lands, and past
+      // the whole dialing-retry budget besides, so the case settles on what the
+      // recovery decided rather than on a wait still outstanding.
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const error = await failing;
+      expect((error as { code?: unknown }).code).toBe("ERR_NOT_CONNECTED");
+      expect(connect).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledOnce();
+      const message = warn.mock.calls[0][0] as string;
+      expect(message).toContain("did not close within");
+      expect(message).toContain("Upgrading the SFTP Stack");
+      expect(message).toContain("docs/spec/DEPENDENCY_PINS.md");
+      // Nothing was recovered, so nothing is counted or reported as recovered.
+      expect(adapter.midExchangeReconnectCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a Client that exposes no on() leaves the re-dial free to dial", async () => {
+    // The transport-lifecycle watch is best-effort: an ssh2 upgrade that relocates
+    // the Client's EventEmitter surface must cost the reading, not the recovery.
+    // With nothing to watch, the re-dial cannot see the window and dials anyway --
+    // which is what it does without the reading, not a refusal.
+    vi.useFakeTimers();
+    try {
+      const { client, connect, rawClient, dropFromServer } =
+        tornOnEndClient(wrapperMethods());
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (rawClient as any).on = undefined;
+      const adapter = new SSH2SFTPClientAdapter();
+      stub(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 1 });
+      const operation = adapter.exists("/r/x.json").catch(() => "failed");
+      dropFromServer();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await operation;
+
+      expect(connect.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a drop that lands BEFORE the operation is issued still recovers on one re-dial", async () => {
+    // The neighbouring class, kept apart from the in-flight tear above: the whole
+    // lifecycle sequence has run by the time the operation is issued, so there is
+    // nothing owed and the retirement drives nothing at all. The re-dial is the
+    // one it has always been.
+    const { client, connect, socket, dropFromServer } =
+      tornOnEndClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 3 });
+    dropFromServer();
+    // The partner's close arrives before anything else is issued.
+    socket.destroy();
+    socket.destroy.mockClear();
+
+    await expect(adapter.exists("/r/x.json")).resolves.toBe(true);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(socket.destroy).not.toHaveBeenCalled();
     expect(adapter.midExchangeReconnectCount).toBe(1);
   });
 
