@@ -4201,10 +4201,17 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     let failInFlight: ((error: unknown) => void) | undefined;
     const rawClient = new EventEmitter() as EventEmitter &
       Record<string, unknown>;
+    // destroy() needs nothing from the peer, and the ssh2 Client's 'close' that
+    // follows is what fires ssh2-sftp-client's global listener to clear the
+    // session. A stand-in that drove neither leaves a retirement of a session
+    // still held over an ended transport failing for want of a mock.
     const socket = {
       setKeepAlive: vi.fn(),
       writableEnded: false,
-      destroy: vi.fn(),
+      destroy: vi.fn(() => {
+        state.live = false;
+        rawClient.emit("close");
+      }),
     };
     Object.assign(rawClient, {
       setNoDelay: vi.fn(),
@@ -5687,10 +5694,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // everything it runs before asking for a dial is synchronous, so a dial that
     // has not been taken here is one parked on the transition queue behind the
     // release. This is the meeting the case is for, and asserting it is what stops
-    // the case from passing on an arm that never arrived.
+    // the case from passing on an arm that never arrived. The span shows as a RISE
+    // off the zero the loop above waited for, read the way the release's own
+    // precondition reads the count -- non-zero rather than a depth.
     for (let tick = 0; tick < 50; tick += 1) await Promise.resolve();
     expect(events).toEqual(["release:end"]);
-    expect(outstandingOperations(adapter)).toBe(1);
+    expect(outstandingOperations(adapter)).toBeGreaterThan(0);
 
     await expect(op).resolves.toBe(true);
     await release;
@@ -6162,10 +6171,17 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     let failInFlight: ((error: unknown) => void) | undefined;
     const rawClient = new EventEmitter() as EventEmitter &
       Record<string, unknown>;
+    // destroy() needs nothing from the peer, and the ssh2 Client's 'close' that
+    // follows is what fires ssh2-sftp-client's global listener to clear the
+    // session. A stand-in that drove neither leaves a retirement of a session
+    // still held over an ended transport failing for want of a mock.
     const socket = {
       setKeepAlive: vi.fn(),
       writableEnded: false,
-      destroy: vi.fn(),
+      destroy: vi.fn(() => {
+        state.live = false;
+        rawClient.emit("close");
+      }),
     };
     Object.assign(rawClient, {
       setNoDelay: vi.fn(),
@@ -6262,6 +6278,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       connect,
       state,
       rawClient,
+      socket,
       landed,
       dropFromServer,
       tearChannelWithholdingClose,
@@ -6332,6 +6349,44 @@ describe("ephemeral session mode (connection-per-poll)", () => {
 
     await expect(publish).resolves.toBeUndefined();
     expect(landed.has("/remote/id-0-12.json")).toBe(true);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+  });
+
+  test("a rename torn by a partner that withholds its connection close recovers on a transport the re-dial retires itself", async () => {
+    // The same landed publish, torn by a partner that drops only the SFTP
+    // channel: the session property is left set over a transport ssh2 has ended,
+    // which the library's connect() will not dial past. Nothing else clears it
+    // here -- no release runs -- so the re-dial's own retirement is what has to,
+    // forcing the ended transport closed for the client 'close' that clears the
+    // session, and the re-issue then reads the landed rename exactly as it does
+    // after a drop that closed.
+    const {
+      client,
+      connect,
+      rawClient,
+      socket,
+      landed,
+      tearChannelWithholdingClose,
+    } = landedOnTearClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+
+    const publish = adapter.rename(
+      "/remote/temp-send.tmp",
+      "/remote/id-0-12.json",
+    );
+    tearChannelWithholdingClose();
+
+    await expect(publish).resolves.toBeUndefined();
+    expect(landed.has("/remote/id-0-12.json")).toBe(true);
+    // The forced close is the retirement's own: the ssh2 Client's end() is driven
+    // by a release in this mock and by nothing else, and no release runs here.
+    expect(socket.destroy).toHaveBeenCalledOnce();
+    expect(rawClient.end).not.toHaveBeenCalled();
     expect(connect).toHaveBeenCalledTimes(2);
     expect(adapter.midExchangeReconnectCount).toBe(1);
   });
@@ -6776,18 +6831,19 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     dropFromServer();
     await probe.issued;
 
-    // Two, not one: the recovery arm counts the unsettled rename for the whole of
-    // itself and the probe's own bracket nests inside that span, so the same
-    // operation is counted twice while the probe is on the wire. Nothing reads the
-    // count as a quantity -- the release's precondition is a non-zero test -- so
-    // the nesting is sound, and this reads it directly only to pin which state the
-    // release below is entered against.
-    expect(outstandingOperations(adapter)).toBe(2);
+    // The recovery arm counts the unsettled rename for the whole of itself and the
+    // probe's own bracket nests inside that span, so the same operation is counted
+    // more than once while the probe is on the wire. Read the way the release's
+    // precondition reads it -- non-zero, never a quantity -- so what pins the state
+    // the release is entered against is that reading and not the nesting depth.
+    expect(outstandingOperations(adapter)).toBeGreaterThan(0);
     const release = adapter.releaseForIdle();
     // Read with no await between it and the call above: the release drove nothing.
     expect(rawClient.end).not.toHaveBeenCalled();
     expect(state.live).toBe(true);
     await expect(release).resolves.toBeUndefined();
+    expect(adapter.heldBoundaryCount).toBe(1);
+    expect(adapter.heldBoundaryStretchCount).toBe(1);
 
     // The server applied the rename before the tear, so the probe finds the
     // destination present and the publish is reported as the success it was.
@@ -7019,8 +7075,10 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await probe.issued;
 
     // The arm's span around the unsettled rename, with the probe's own bracket
-    // nested inside it (see the case above).
-    expect(outstandingOperations(adapter)).toBe(2);
+    // nested inside it (see the case above), read as the non-zero the release's
+    // precondition reads. What this case measures is the DROP to zero below, which
+    // the nesting depth is no part of.
+    expect(outstandingOperations(adapter)).toBeGreaterThan(0);
     await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
     expect(rawClient.end).not.toHaveBeenCalled();
     expect(state.live).toBe(true);

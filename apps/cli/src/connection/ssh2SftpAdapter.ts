@@ -616,18 +616,18 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // would then pace each line on the other's occurrences.
   private declinedCycleRedials = 0;
   private transportRetries = 0;
-  // Server-driven operations this adapter has ISSUED and not yet settled, counted
-  // at the bracket they pass through, save the two round trips issued outside it
-  // that tracked() names, and kept open across a recovery arm by the second span
-  // countOutstandingOperation describes -- which nests around the attempts' own
-  // brackets, so one operation inside its recovery reads as more than one. Nothing
-  // reads this as a quantity; the release's precondition is a non-zero test.
-  // Issued-and-unsettled is not the set that is on the wire,
-  // and departs from it in both directions: an adapter bound that expires settles
-  // the operation here while the library request it raced is still outstanding at
-  // the server, and an operation the server never answers is never settled from
-  // this side at all, core's whole-exchange budget being a race that abandons
-  // rather than a cancellation.
+  // Server-driven operations this adapter has ISSUED and not yet settled,
+  // counted at the bracket they pass through, save the two round trips issued
+  // outside it that tracked() names, and kept open across a recovery arm by the
+  // second span countOutstandingOperation describes -- which nests around the
+  // attempts' own brackets, so one operation inside its recovery reads as more
+  // than one. Nothing reads this as a quantity; the release's precondition is a
+  // non-zero test. Issued-and-unsettled is not the set that is on the wire, and
+  // departs from it in both directions: an adapter bound that expires settles
+  // the operation here while the library request it raced is still outstanding
+  // at the server, and an operation the server never answers is never settled
+  // from this side at all, core's whole-exchange budget being a race that
+  // abandons rather than a cancellation.
   // Read by runTransition as the idle-boundary release's precondition: a boundary
   // reached with an operation outstanding closes nothing, because the close would
   // tear that operation off the wire. So what bounds the hold is the operation's
@@ -1493,19 +1493,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     const first = gate === undefined ? op() : gate.then(op);
     return first.catch(async (error: unknown) => {
       if (!this.shouldRecoverFromSessionLoss(error)) throw error;
-      // The operation is unsettled for the whole of this arm -- its first attempt
-      // failed and its re-issue has not run -- so it is counted as outstanding
-      // across the whole of it, and no idle boundary reached here closes a session
-      // the arm is still using. The attempt's own bracket has already settled the
-      // count by the time this catch runs, and each of the two spans that leaves
-      // uncovered costs a landed publish: between the re-issue's
-      // rejection and the destination probe rename() answers it with, a boundary
-      // would tear the probe and the unanswered probe reads as "the rename did not
-      // land"; between the re-dial and the re-issue, a boundary would close the
-      // session just dialed and the re-issue would reject with a dead-session error
-      // no resolver reads at all. Both surface a rename that DID land as a failure.
-      // The span therefore covers the re-dial as well as the re-issue, and its
-      // close is the arm's settlement either way.
+      // The operation is unsettled for the whole of this arm -- its first
+      // attempt failed and its re-issue has not run -- so it is counted as
+      // outstanding across the whole of it, and no idle boundary reached here
+      // closes a session the arm is still using. The attempt's own bracket has
+      // already settled the count by the time this catch runs, and each of the
+      // two spans that leaves uncovered costs a landed publish: between the
+      // re-issue's rejection and the destination probe rename() answers it
+      // with, a boundary would tear the probe and the unanswered probe reads as
+      // "the rename did not land"; between the re-dial and the re-issue, a
+      // boundary would close the session just dialed and the re-issue would
+      // reject with a dead-session error no resolver reads at all. Both surface
+      // a rename that DID land as a failure. The span therefore covers the
+      // re-dial as well as the re-issue, and its close is the arm's settlement
+      // either way.
       const settled = this.countOutstandingOperation();
       try {
         // A teardown re-dial (the abort-marker write or the terminal-frame drain) is
