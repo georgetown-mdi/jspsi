@@ -79,6 +79,13 @@ jobs:
       # approval.
       - name: Workflow agent models
         run: npm run check:workflow-agent-models
+      # Holds every action pin in .github/actions identical to one in
+      # .github/workflows, the path the github-actions Dependabot block is
+      # configured against, so a release or advisory surfacing on the workflow
+      # occurrence covers the composite one and a bump cannot land on the
+      # workflow alone. A composite pin no workflow mirrors fails closed.
+      - name: Action pin drift
+        run: npm run check:action-pin-drift
       # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
       # .mjs with no server or Docker dependency, so a stock runner suffices. This
       # is the repo-wide non-path-filtered gate that guarantees the suite is always

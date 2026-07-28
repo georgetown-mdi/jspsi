@@ -56,7 +56,7 @@ Within this tier, route by topic:
 - **A `ConnectionErrorKind` classification decision** -> [COMMUNICATION.md](COMMUNICATION.md).
 - **The CLI machine-interface event stream (`--event-stream`): fd, NDJSON framing, event fields, or the terminal-error category rules** -> [CLI_EVENTS.md](CLI_EVENTS.md).
 - **The web server's job API (endpoints, the exchange-intent schema, the workdir layout, the SSE relay, the gate/startup rules, the job lifetime)** -> [SERVER_JOB_API.md](SERVER_JOB_API.md).
-- **A pinned-dependency internal premise, its upgrade checklist (`ssh2`, `peerjs`), or the `allowScripts` install-script policy** -> [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
+- **A pinned-dependency internal premise, its upgrade checklist (`ssh2`, `peerjs`), the `allowScripts` install-script policy, or a GitHub Action pin invariant** -> [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
 
 ### Two overlaps to disambiguate
 
