@@ -1,12 +1,12 @@
 # Using a network file drop with psilink on Windows
 
 > **Status: partly verified.** The script runs end to end on Windows 11 under
-> Windows PowerShell 5.1 -- path parsing, the container checks, and creating and
-> mounting the CIFS volume -- against a real SMB server. Two pieces still are
-> not exercised, because both need a domain environment: resolving a mapped
-> drive letter to its UNC root, and identifying the real server behind a DFS
-> namespace. If either goes wrong, use "Finding the real server by hand" below,
-> which is the method known to work. Corrections welcome.
+> Windows PowerShell 5.1 -- path parsing, resolving a mapped drive letter, the
+> container checks, and creating and mounting the CIFS volume -- against a real
+> SMB server. One piece is not exercised, because it needs a domain
+> environment: identifying the real server behind a DFS namespace. If that goes
+> wrong, use "Finding the real server by hand" below, which is the method known
+> to work. Corrections welcome.
 
 Your file-drop folder lives on a network location -- you open it in File
 Explorer as a mapped drive (`Z:\Exchange`) or a network path

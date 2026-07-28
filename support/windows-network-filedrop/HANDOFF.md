@@ -36,14 +36,21 @@ UNC, malformed, and absent-drive paths correctly, and a full run against a
 Samba server on the Docker bridge passes every step, creates the CIFS volume,
 and mounts it -- confirmed by writing through the volume and reading the file
 on the server. A wrong password exits 4 with the right classification.
-Two Windows behaviors resist testing outside a domain and remain unverified:
+`Resolve-MappedDrive` is verified against a real Windows drive mapping: all
+three of its lookup methods (`Get-PSDrive`, `Win32_NetworkConnection`, and
+parsing `net use`) return the UNC root, and `Resolve-DropPath` splits it into
+server, share, and subdirectory through the mapped letter. The mapping was
+served over WebDAV rather than SMB, because Windows' own file-sharing service
+holds port 445 and the SMB redirector will not use any other port. The
+function reads mapping metadata and has no SMB-specific logic, so this
+exercises it as written, but it does leave SMB-specific mapping behavior
+untouched.
 
-- `Resolve-MappedDrive` against a genuine mapped drive. Only its negative
-  cases are covered (a local disk and a letter that does not exist).
-- `Resolve-RealServer` against a genuine DFS namespace. The premise that
-  `Get-SmbConnection` reports the real target server is still an assumption;
-  its handling of the readable-but-no-match and unreadable cases is covered by
-  driving the function with stubbed connection sets.
+One Windows behavior remains unverified: `Resolve-RealServer` against a
+genuine DFS namespace. The premise that `Get-SmbConnection` reports the real
+target server rather than the namespace name is still an assumption. Its
+handling of the readable-but-no-match and unreadable cases is covered by
+driving the function with stubbed connection sets.
 
 `Get-SmbConnection` requires Administrator rights, so an ordinary run cannot
 resolve a DFS path at all. The script says so and points at the runbook's
@@ -54,19 +61,27 @@ unrelated to their file drop with no sign anything went wrong.
 
 ## If you pick this up
 
-Getting a Windows test environment is the open problem. What a run needs, in
-descending order of value: a domain-joined machine with a DFS namespace (the
-only way to settle `Resolve-RealServer`), an elevated PowerShell session (to
-see `Get-SmbConnection` work at all), and any real mapped drive (settles
-`Resolve-MappedDrive`).
+Settling `Resolve-RealServer` needs a domain-joined machine with a DFS
+namespace and an elevated PowerShell session, since `Get-SmbConnection` is
+readable only to an Administrator.
 
-A local rig covers everything else. Run a Samba container on the Docker
-bridge, read its address from `docker inspect`, and pass it with `-Server` and
-`-Share`; the image used here sets `force user`, so the exported directory has
-to be owned by that user or every write returns `ACCESS_DENIED`. `Read-Host`
-reads the console rather than the pipeline, so an unattended run needs a
-`Read-Host` shim defined in the calling scope -- the script has no `-Password`
-or `-Credential` parameter.
+Everything else runs on one machine with Docker and no special rights:
+
+- **The share and the volume.** Run a Samba container on the Docker bridge,
+  read its address from `docker inspect`, and pass it with `-Server` and
+  `-Share`. Container-to-container traffic on the bridge sidesteps the port
+  445 problem entirely. The image used here sets `force user`, so the
+  exported directory has to be owned by that user or every write returns
+  `ACCESS_DENIED` -- which reads exactly like a genuine permissions finding.
+- **A mapped drive letter.** Windows holds port 445 for its own file sharing,
+  so a container cannot serve SMB to the host without stopping that service.
+  WebDAV needs no privileged port: run Apache with `mod_dav` (DAV class 2, so
+  `LOCK` works and Windows will accept it), publish it on any port, and map
+  with `net use Z: \\127.0.0.1@8080\Exchange`. The WebClient service must be
+  running.
+- **Driving the script unattended.** `Read-Host` reads the console rather
+  than the pipeline, so a scripted run needs a `Read-Host` shim defined in the
+  calling scope; the script has no `-Password` or `-Credential` parameter.
 
 ## Before running it
 
