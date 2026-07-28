@@ -547,7 +547,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private declinedCycleRedials = 0;
   private transportRetries = 0;
   // Server-driven operations this adapter has ISSUED and not yet settled, counted
-  // at the bracket they pass through, save the three round trips issued outside it
+  // at the bracket they pass through, save the two round trips issued outside it
   // that tracked() names. Issued-and-unsettled is not the set that is on the wire,
   // and departs from it in both directions: an adapter bound that expires settles
   // the operation here while the library request it raced is still outstanding at
@@ -1041,14 +1041,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // that set differs from the wire, and what it leaves the hold bounded by). The
   // two operations the recovery gate does not reach (the never-reject cleanup
   // delete, and a put whose source cannot be re-issued) do pass through here, so
-  // the precondition covers those as well. Three server round trips do not pass
-  // here at all: the heartbeat's keepalive (see sendKeepalive), the best-effort
-  // handle close a listing fires once it has settled (whose loss the listing
-  // accounts for), and rename()'s re-issue existence probe, issued a layer above
-  // renameOnce's bracket -- a probe torn by a release reports a landed rename as
-  // the failure that drove the probe. finally() is what balances a rejecting
-  // operation against a resolving one; one unbalanced failure would pin the session
-  // open for the rest of the exchange.
+  // the precondition covers those as well. Two server round trips do not pass
+  // here at all: the heartbeat's keepalive (see sendKeepalive), and the
+  // best-effort handle close a listing fires once it has settled (whose loss the
+  // listing accounts for). Which call sites those are is a check rather than this
+  // sentence: scripts/sftp-tracked-round-trips.test.mjs parses this file and fails
+  // on any request-issuing site outside this bracket that is not one of the two.
+  // finally() is what balances a rejecting operation against a resolving one; one
+  // unbalanced failure would pin the session open for the rest of the exchange.
   private tracked<T>(op: Promise<T>): Promise<T> {
     const epoch = this.heartbeat.opStarted();
     this.outstandingOperations += 1;
@@ -3252,24 +3252,30 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return this.withSessionRecovery(
       () => this.renameOnce(fromPath, toPath),
       // On the re-issue only: if the pre-drop rename landed, the re-issue sees the
-      // source gone (SSH_FX_NO_SUCH_FILE) or a code-4 dest-exists. Confirm via a
-      // raw existence check on the destination -- every rename destination in this
-      // app is self-prefixed (<id>-hello.json, the <id>-...json message temp->final,
+      // source gone (SSH_FX_NO_SUCH_FILE) or a code-4 dest-exists. Confirm via an
+      // existence check on the destination -- every rename destination in this app
+      // is self-prefixed (<id>-hello.json, the <id>-...json message temp->final,
       // <myId>-<orig>-ack.json, <id>-abort.json, the joiner <id>-joining.json ->
       // <id>-hello.json), so a present destination is unambiguously our own landed
       // attempt, never a peer file -- and resolve as success. Any other failure, or
-      // an absent destination, propagates. The raw client.exists (not this.exists)
-      // avoids arming a second recovery/warn wrapper for this internal probe.
+      // an absent destination, propagates.
       (run) =>
         run().catch(async (error: unknown) => {
           const code = (error as Ssh2SftpError | null | undefined)?.code;
           if (this.isNoSuchFileError(error) || code === SSH_FX_FAILURE) {
-            // Confirm a landed pre-drop rename via a raw existence check, but if
-            // the probe itself rejects the ambiguity cannot be resolved: fall back
-            // to the ORIGINAL rename error rather than letting the probe's own
-            // failure replace it (mirrors createExclusiveOnce's SFTPv3 fallback,
-            // which keeps the original openErr when its exists() check rejects).
-            const landed = await this.client.exists(toPath).catch(() => false);
+            // The probe is a server round trip like any other, so it goes through
+            // the private once-layer: that is the seam carrying the
+            // outstanding-operation count (a probe outside it would be torn by an
+            // idle-boundary release, and a torn probe reports a LANDED rename as
+            // the failure that drove it), the per-operation deadline, and the
+            // dead-session guard. The public exists() is the wrong seam here: it
+            // would arm a second recovery round from inside this one's catch.
+            // However the probe rejects -- dead session, expired deadline, or a
+            // real I/O error -- the ambiguity is unresolved, so the ORIGINAL rename
+            // error surfaces rather than the probe's own failure (mirrors
+            // createExclusiveOnce's SFTPv3 fallback, which keeps the original
+            // openErr when its exists() check rejects).
+            const landed = await this.existsOnce(toPath).catch(() => false);
             if (landed) return;
           }
           throw error;

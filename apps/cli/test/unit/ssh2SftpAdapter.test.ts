@@ -61,6 +61,28 @@ function stubAdapterLog(adapter: SSH2SFTPClientAdapter): void {
   (adapter as any).log = { warn: vi.fn() };
 }
 
+// Replaces a client's exists() with one the test answers by hand, so the
+// existence probe a rename re-issue fires can be left ON THE WIRE while
+// something else happens to the session. `issued` resolves the moment the probe
+// reaches the client, which is the only signal a caller has that the round trip
+// it wants to interrupt has actually started.
+function pendingExists(client: object) {
+  let answerProbe!: (present: boolean) => void;
+  let markIssued!: () => void;
+  const issued = new Promise<void>((resolve) => {
+    markIssued = resolve;
+  });
+  const exists = vi.fn(() => {
+    markIssued();
+    return new Promise<boolean>((resolve) => {
+      answerProbe = resolve;
+    });
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (client as any).exists = exists;
+  return { exists, issued, answer: (present: boolean) => answerProbe(present) };
+}
+
 // --- connect retry -----------------------------------------------------------
 
 describe("connect retry", () => {
@@ -3242,6 +3264,203 @@ describe("session recovery", () => {
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
+  // The re-issue's existence probe is a server round trip like the rename it
+  // confirms, so it is issued through the private existsOnce: the seam carrying
+  // the outstanding-operation count, the per-operation deadline, and the
+  // dead-session guard. The cases below pin what that seam buys on this path;
+  // what the count itself buys is pinned in the connection-per-poll block, the
+  // one mode where a boundary can fall while the probe is on the wire. Whichever
+  // way the probe fails, the ORIGINAL rename error is what surfaces.
+
+  test("refuses the re-issue's probe on a session already dead rather than hanging on it", async () => {
+    // A fatal protocol error can land on the re-issued rename's own reply: the
+    // wrapper is destroyed, so a stat posted onto it would buffer on a channel
+    // that never answers and ride the whole-exchange budget. The probe's entry
+    // guard rejects instead, and the rename fails with the error it already had.
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).rename = vi.fn().mockImplementation(async () => {
+      if (!state.live) throw notConnected("rename");
+      // The re-issue sees the source gone (a landed pre-drop rename), and the
+      // reply that carries it is malformed: the guarded wrapper 'error' listener
+      // kills the session before the probe is issued.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).fatalSftpError = new Error("Malformed DATA packet");
+      throw Object.assign(new Error("rename: No such file From: a To: b"), {
+        code: 2,
+      });
+    });
+    // A probe that reached this client would never answer, so the assertions
+    // below stand only because none is issued.
+    const probe = pendingExists(client);
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    const err = await adapter
+      .rename("/remote/id-joining.json", "/remote/id-hello.json")
+      .catch((e: unknown) => e);
+    expect((err as NodeJS.ErrnoException).code).toBe(2);
+    expect(probe.exists).not.toHaveBeenCalled();
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("bounds a re-issue probe whose answer the server withholds by the per-operation deadline", async () => {
+    // The other prompt-failure guarantee: no fatal error, so the probe IS issued,
+    // and the server simply never answers the stat. Without the adapter's own
+    // per-operation bound the rename would hang to the whole-exchange budget.
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).rename = vi.fn().mockImplementation(async () => {
+      if (!state.live) throw notConnected("rename");
+      throw Object.assign(new Error("rename: No such file From: a To: b"), {
+        code: 2,
+      });
+    });
+    const probe = pendingExists(client);
+    const adapter = new SSH2SFTPClientAdapter({ stallDeadlineMs: 50 });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    const err = await adapter
+      .rename("/remote/id-joining.json", "/remote/id-hello.json")
+      .catch((e: unknown) => e);
+    // The probe was issued and timed out; the ambiguity it could not resolve
+    // leaves the ORIGINAL rename error, not the stall, as the failure.
+    expect(probe.exists).toHaveBeenCalledOnce();
+    expect(err).not.toBeInstanceOf(TransportOperationStalledError);
+    expect((err as NodeJS.ErrnoException).code).toBe(2);
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("surfaces the original rename error when the destination is genuinely absent", async () => {
+    // The probe answers, and answers false: the pre-drop rename did NOT land, so
+    // there is nothing to report as success and the absence must surface.
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).rename = vi.fn().mockImplementation(async () => {
+      if (!state.live) throw notConnected("rename");
+      throw Object.assign(new Error("rename: No such file From: a To: b"), {
+        code: 2,
+      });
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).exists = vi.fn().mockResolvedValue(false);
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    const err = await adapter
+      .rename("/remote/id-joining.json", "/remote/id-hello.json")
+      .catch((e: unknown) => e);
+    expect((err as NodeJS.ErrnoException).code).toBe(2);
+    expect((err as Error).message).toContain("No such file");
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("leaves a FIRST-attempt rename's absence and dest-exists conflict terminal, with no probe", async () => {
+    // The idempotency relaxation is the RE-ISSUE's alone. On a live session there
+    // is no session loss to recover from, so a genuine absence and a persistent
+    // "operation did not take effect" both surface as themselves -- and neither
+    // consults the destination, which is what would turn a real conflict into a
+    // silent success.
+    const wrapper = sessionWrapper();
+    const { client, connect } = droppable(wrapper);
+    // The raw numeric SFTP status ssh2-sftp-client passes through on `code`.
+    let failure: Error & { code: number } = Object.assign(
+      new Error("rename: No such file From: a To: b"),
+      { code: 2 },
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).rename = vi.fn().mockImplementation(async () => {
+      throw failure;
+    });
+    const probe = pendingExists(client);
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    // retries: 0 holds the status-4 case to a single attempt; the retry budget
+    // itself is pinned by the "rename retry" block.
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2, retries: 0 });
+
+    await expect(
+      adapter.rename("/remote/temp-send.tmp", "/remote/id-0-12.json"),
+    ).rejects.toThrow("No such file");
+
+    failure = Object.assign(new Error("_rename: Failure"), { code: 4 });
+    await expect(
+      adapter.rename("/remote/temp-send.tmp", "/remote/id-0-12.json"),
+    ).rejects.toThrow("_rename: Failure");
+
+    expect(probe.exists).not.toHaveBeenCalled();
+    // The session never dropped, so nothing re-dialed either.
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  test("suppresses the heartbeat's beat while the re-issue probe is on the wire", async () => {
+    // The default held-session mode is the one that arms the heartbeat, and
+    // ssh2-sftp-client permits one operation at a time. The probe passes through
+    // the same bracket that keeps the heartbeat's in-flight count, so a beat
+    // falling while it is outstanding is suppressed rather than posted alongside
+    // it. The control at the end runs the same clock over a settled probe.
+    vi.useFakeTimers();
+    try {
+      const wrapper = sessionWrapper();
+      const { client, state } = droppable(wrapper);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (client as any).rename = vi.fn().mockImplementation(async () => {
+        if (!state.live) throw notConnected("rename");
+        throw Object.assign(new Error("rename: No such file From: a To: b"), {
+          code: 2,
+        });
+      });
+      const probe = pendingExists(client);
+      // A deadline well past the heartbeat interval, so the beat below is what
+      // the probe outlives rather than its own bound.
+      const adapter = new SSH2SFTPClientAdapter({
+        stallDeadlineMs: SFTP_HEARTBEAT_INTERVAL_MS * 10,
+      });
+      stub(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+      state.live = false;
+
+      const publish = adapter.rename(
+        "/remote/id-joining.json",
+        "/remote/id-hello.json",
+      );
+      await probe.issued;
+
+      await vi.advanceTimersByTimeAsync(SFTP_HEARTBEAT_INTERVAL_MS);
+      expect(client.realPath).not.toHaveBeenCalled();
+
+      probe.answer(true);
+      await expect(publish).resolves.toBeUndefined();
+      // Same idle stretch, nothing outstanding: the beat fires, so the
+      // suppression above was the probe's doing and not a stopped heartbeat.
+      await vi.advanceTimersByTimeAsync(SFTP_HEARTBEAT_INTERVAL_MS);
+      expect(client.realPath).toHaveBeenCalledWith(".");
+
+      await adapter.end();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // A raw SFTPWrapper stand-in that serves an empty directory (EOF on the first
   // readdir), so each recovered list() re-dials and returns []. Used by the cap
   // tests to drive a series of clean drops through withSessionRecovery.
@@ -6055,6 +6274,90 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(adapter.reconnectCount).toBe(0);
     expect(adapter.midExchangeReconnectCount).toBe(0);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("an idle boundary reached while a rename re-issue's probe is on the wire holds the session, and the landed rename resolves as landed", async () => {
+    // The probe that confirms a landed pre-drop rename is a server round trip of
+    // this adapter's own, counted at the same bracket as the rename it settles.
+    // A boundary falling while it is outstanding therefore closes nothing: a
+    // release that tore it would leave the probe unable to answer, and an
+    // unanswered probe reports a rename that DID land as the failure that drove
+    // it -- a publish lost to a session this side closed on purpose.
+    const { client, connect, rawClient, state, landed, dropFromServer } =
+      landedOnTearClient(wrapperMethods());
+    const probe = pendingExists(client);
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+    const publish = adapter.rename(
+      "/remote/temp-send.tmp",
+      "/remote/id-0-12.json",
+    );
+    // The partner drops the session with the rename on the wire: it landed on the
+    // server, so the re-issue after the recovery re-dial sees the source gone and
+    // fires the probe.
+    dropFromServer();
+    await probe.issued;
+
+    expect(outstandingOperations(adapter)).toBe(1);
+    const release = adapter.releaseForIdle();
+    // Read with no await between it and the call above: the release drove nothing.
+    expect(rawClient.end).not.toHaveBeenCalled();
+    expect(state.live).toBe(true);
+    await expect(release).resolves.toBeUndefined();
+
+    // The server applied the rename before the tear, so the probe finds the
+    // destination present and the publish is reported as the success it was.
+    expect(landed.has("/remote/id-0-12.json")).toBe(true);
+    probe.answer(true);
+    await expect(publish).resolves.toBeUndefined();
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("the boundary held for the rename probe is bounded by the probe's own deadline, and the next boundary releases", async () => {
+    // The composition the two halves above only prove in pieces: one boundary
+    // falls while the probe is on the wire and is held, and what ends that hold
+    // is the probe's per-operation deadline and nothing weaker. The count returns
+    // to zero with the stat still outstanding at the server, and the next
+    // boundary closes as an undisturbed one does -- so counting the probe buys
+    // the hold no bound the rest of the bracket does not already carry.
+    const { client, rawClient, state, dropFromServer } =
+      landedOnTearClient(wrapperMethods());
+    const probe = pendingExists(client);
+    const adapter = new SSH2SFTPClientAdapter({
+      ephemeralSessions: true,
+      stallDeadlineMs: 200,
+    });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+    const publish = adapter.rename(
+      "/remote/temp-send.tmp",
+      "/remote/id-0-12.json",
+    );
+    dropFromServer();
+    await probe.issued;
+
+    expect(outstandingOperations(adapter)).toBe(1);
+    await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+    expect(rawClient.end).not.toHaveBeenCalled();
+    expect(state.live).toBe(true);
+
+    // The probe is never answered: its deadline is what settles it, and the
+    // ORIGINAL rename error surfaces rather than the probe's own stall.
+    await expect(publish).rejects.toThrow("No such file");
+    expect(probe.exists).toHaveBeenCalledOnce();
+    expect(outstandingOperations(adapter)).toBe(0);
+
+    const released = adapter.releaseForIdle();
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    await expect(released).resolves.toBeUndefined();
+    expect(state.live).toBe(false);
   });
 
   test("an operation outstanding at the boundary never reaches the stall-deadline or the session-still-live terminal reading", async () => {
