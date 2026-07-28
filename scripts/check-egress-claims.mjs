@@ -23,12 +23,14 @@
 //     legitimately of this kind, so a literal scan is the only shape available
 //     here; it is a backstop, not a proof of no egress.
 //   - Egress originating inside a dependency. Only first-party source under
-//     SCANNED_ROOTS is read; what a package does at runtime is the dependency
-//     review's ground (CONTRIBUTING.md, Dependency Policy).
+//     SCANNED_ROOTS and SCANNED_FILES is read; what a package does at runtime is
+//     the dependency review's ground (CONTRIBUTING.md, Dependency Policy).
 //   - A URL spelled so as to evade the matcher: split across concatenated
 //     string fragments, escaped inside a regular expression (`https:\/\/`),
-//     or percent- or entity-encoded. The check is a guard against egress added
-//     inadvertently, not against an author who wants to hide it.
+//     percent- or entity-encoded, or glued to an alphanumeric character
+//     (`xhttps://host`), which the scheme rule requires be preceded by
+//     punctuation or the start of the text. The check is a guard against egress
+//     added inadvertently, not against an author who wants to hide it.
 //   - Schemes outside http, https, stun, stuns, turn, and turns, and a
 //     protocol-relative `//host` reference, which carries no scheme to match.
 //
@@ -43,16 +45,32 @@
 // ignored by default. A new binary format that trips the check is fixed by
 // adding its extension here, a one-line edit a reviewer sees.
 //
+// Comment syntax, by contrast, is modeled by extension and only where it is
+// known (COMMENT_SYNTAX_BY_EXTENSION): the JavaScript family and CSS. Every
+// other text format is scanned raw. Stripping is the one step that can delete
+// text before the matcher sees it, so guessing wrong there would report a file
+// clean rather than loudly; raw leaves a URL written inside an unmodeled
+// comment syntax visible, as the false positive an author resolves.
+//
 // SCANNED_ROOTS is source that ships or runs, not all TypeScript. Beside the
 // app and library trees and the web app's static assets it carries
 // apps/web/server, the Nitro entry point the deployed server boots (named by
-// apps/web/nitro.config.ts). Deliberately outside it: the build and test
-// configuration at each workspace root and the sibling test/ trees, which run
-// on a developer's machine and reach no user; and apps/web/deploy, whose nginx
-// and post-deploy files configure the Elastic Beanstalk host rather than the
-// application, addressing the instance itself (127.0.0.1, the EC2 metadata
-// service) and belonging to deploy review. A tree that starts shipping is added
-// here, so an exclusion reads as the decision it is rather than an oversight.
+// apps/web/nitro.config.ts). SCANNED_FILES carries the two shipped files that
+// sit at the repository root rather than in a tree: docker-entrypoint.sh, which
+// runs inside the container the "no other network connection" claim is about
+// (it is the image ENTRYPOINT), and the Dockerfile, which reaches a different
+// class -- what the image build fetches rather than what the running container
+// connects to -- scanned anyway, because a `RUN curl` or `ADD https://...`
+// pulling a third party into the image is what a reviewer of that claim wants
+// shown.
+//
+// Deliberately outside both: the build and test configuration at each workspace
+// root and the sibling test/ trees, which run on a developer's machine and
+// reach no user; and apps/web/deploy, whose nginx and post-deploy files
+// configure the Elastic Beanstalk host rather than the application, addressing
+// the instance itself (127.0.0.1, the EC2 metadata service) and belonging to
+// deploy review. A tree that starts shipping is added here, so an exclusion
+// reads as the decision it is rather than an oversight.
 //
 // Test files are NOT excluded. The scanned roots are shipped-source trees by
 // construction (the suites live in sibling test/ directories), so a `*.test.*`
@@ -72,6 +90,9 @@ export const SCANNED_ROOTS = [
   "apps/web/public",
   "apps/web/server",
 ];
+
+/** Shipped files that build or run the container, outside any scanned tree. */
+export const SCANNED_FILES = ["Dockerfile", "docker-entrypoint.sh"];
 
 /**
  * Absolute URL literals that do not contradict PRIVACY.md, each with the reason
@@ -194,15 +215,39 @@ export function isScannedFile(path) {
   return !BINARY_EXTENSIONS.has(extname(path).toLowerCase());
 }
 
+// Extensions whose comment syntax the stripper models. CSS earns its own entry
+// because a scanned stylesheet carries URL literals in real content (the SVG
+// namespace inside a data URI), so its block comments have to come off with the
+// two JavaScript states that would misread it turned off: `//` opens no comment
+// in CSS, and a backtick opens no template literal.
+const COMMENT_SYNTAX_BY_EXTENSION = new Map([
+  [".cjs", "javascript"],
+  [".cts", "javascript"],
+  [".js", "javascript"],
+  [".jsx", "javascript"],
+  [".mjs", "javascript"],
+  [".mts", "javascript"],
+  [".ts", "javascript"],
+  [".tsx", "javascript"],
+  [".css", "css"],
+]);
+
+/** Comment syntax modeled for `path`: "javascript", "css", or "none". */
+export function commentSyntaxFor(path) {
+  return COMMENT_SYNTAX_BY_EXTENSION.get(extname(path).toLowerCase()) ?? "none";
+}
+
 /**
- * Blank out `//` line comments and block comments, preserving every other
- * character position so line numbers survive.
+ * Blank out the comments `path`'s modeled syntax defines, preserving every
+ * other character position so line numbers survive. A path whose extension
+ * names no modeled syntax is returned unchanged, so no text is deleted from a
+ * format whose comments the stripper cannot read.
  *
  * String-aware in both directions, which is the whole difficulty: a `//` inside
  * a string or template literal is not a comment start (or the check would be
  * blind to `"https://evil.example"`, exactly what it exists to catch), and a
  * `//` preceded by a scheme is consumed as part of its URL (or an unquoted
- * `url(http://...)` in CSS would be eaten as a comment).
+ * `url(http://...)` would be eaten as a comment).
  *
  * `'` and `"` states are scoped to one line, since neither string form spans a
  * newline unescaped. That bounds the damage when an apostrophe in JSX text or a
@@ -211,7 +256,11 @@ export function isScannedFile(path) {
  * is a comment left unstripped -- a loud false positive -- rather than a string
  * silently swallowed.
  */
-export function stripComments(source) {
+export function stripComments(source, path) {
+  const syntax = commentSyntaxFor(path);
+  if (syntax === "none") return source;
+  const isJavaScript = syntax === "javascript";
+
   let out = "";
   let i = 0;
   const n = source.length;
@@ -301,10 +350,12 @@ export function stripComments(source) {
         }
         continue;
       }
-      state = "line";
-      out += "  ";
-      i += 2;
-      continue;
+      if (isJavaScript) {
+        state = "line";
+        out += "  ";
+        i += 2;
+        continue;
+      }
     }
     if (c === "/" && next === "*") {
       state = "block";
@@ -315,7 +366,7 @@ export function stripComments(source) {
     out += c;
     if (c === "'") state = "single";
     else if (c === '"') state = "double";
-    else if (c === "`") state = "template";
+    else if (c === "`" && isJavaScript) state = "template";
     else if (c === "{" && templates.length > 0) {
       templates[templates.length - 1] += 1;
     } else if (c === "}" && templates.length > 0) {
@@ -365,47 +416,49 @@ function readUrlBody(text, start) {
   return text.slice(start, i);
 }
 
-/** Whether `authority` still spells out a host once interpolations are removed. */
+/**
+ * Whether `authority` still spells out a host of its own, once interpolations
+ * and a trailing port are removed. The port has to come off with them: a
+ * numeric one is literal text that survives an authority naming no host
+ * (`${host}:8443`), and `new URL()` rejects a non-numeric there, so nothing a
+ * host could hide in is being dropped.
+ */
 function namesLiteralHost(authority) {
-  return /[A-Za-z0-9]/.test(authority.replace(INTERPOLATION_SPAN, ""));
+  return /[A-Za-z0-9]/.test(
+    authority.replace(INTERPOLATION_SPAN, "").replace(/:\d*$/, ""),
+  );
 }
 
 /**
  * Absolute URL literals in `source` as `{url, authority, line}`, after comment
- * stripping. Three shapes are excluded here rather than allowlisted, because
- * none of them names a host:
+ * stripping. The authority is whatever follows the scheme colon and any run of
+ * slashes, none of which the matcher can read anything into: `new URL()`
+ * resolves `https:host/x`, `https:/host/x`, `https:///host/x` and
+ * `https:////host/x` alike to that host, and `fetch` dereferences them alike
+ * too. Two shapes are excluded here rather than allowlisted, because neither
+ * names a host:
  *
- *   - `http`/`https` without `://`, which is a protocol comparison
- *     (`location.protocol === "https:"`), not a URL.
- *   - An empty authority, whether written as `https:///path` or, for `stun`
- *     and `turn`, as a colon followed by nothing but slashes. That second form
- *     is what makes the check usable at all: `stun:` and `turn:` are also
- *     object-property syntax in a Zod schema, the head of a `/^turns?:/`
- *     anchor, and the tail of prose like "must begin with turn:".
+ *   - An empty authority -- a scheme followed by nothing but slashes, which is
+ *     what a protocol comparison (`location.protocol === "https:"`) is, and
+ *     what makes the check usable at all for the other schemes: `stun:` and
+ *     `turn:` are also object-property syntax in a Zod schema, the head of a
+ *     `/^turns?:/` anchor, and the tail of prose like "must begin with turn:".
  *   - An authority spelling out no host of its own: fully interpolated, as the
  *     `URL`-parsing helpers over an inbound `Host` header write it
- *     (`http://${host}`), or holding no alphanumeric character at all, as the
- *     elided `https://...#...` of placeholder text does. An interpolation with
- *     a literal host beside it (`https://${tenant}.evil.example`) names one and
- *     is reported.
+ *     (`http://${host}`, `http://${host}:8443`), or holding no alphanumeric
+ *     character at all, as the elided `https://...#...` of placeholder text
+ *     does. An interpolation with a literal host beside it
+ *     (`https://${tenant}.evil.example`) names one and is reported.
  */
-export function urlLiterals(source) {
+export function urlLiterals(source, path) {
   const found = [];
-  const text = stripComments(source);
+  const text = stripComments(source, path);
   let lineStart = 0;
   let line = 1;
   for (const match of text.matchAll(URL_SCHEME)) {
     const { scheme } = match.groups;
     const rest = readUrlBody(text, match.index + match[0].length);
-    const isWeb = /^https?$/i.test(scheme);
-    if (isWeb && !rest.startsWith("//")) continue;
-    // The authority follows `//` for the web schemes, so a slash still leading
-    // it means there is none. stun and turn carry no `//` (RFC 7064, RFC 7065),
-    // and a slash written before their host is stray punctuation around a real
-    // one rather than the same signal.
-    const afterScheme = isWeb ? rest.slice(2) : rest.replace(/^\/+/, "");
-    if (isWeb && afterScheme.startsWith("/")) continue;
-    const authority = afterScheme.split(/[/?#]/, 1)[0];
+    const authority = rest.replace(/^\/+/, "").split(/[/?#]/, 1)[0];
     if (!namesLiteralHost(authority)) continue;
 
     while (lineStart < match.index) {
@@ -431,7 +484,7 @@ export function allowlistEntryFor(url) {
 /** Unallowlisted URL literals in one file, as violation strings (empty = clean). */
 export function fileViolations(path, source) {
   if (!isScannedFile(path)) return [];
-  return urlLiterals(source)
+  return urlLiterals(source, path)
     .filter(({ url }) => allowlistEntryFor(url) === undefined)
     .map(
       ({ url, line }) =>
@@ -439,7 +492,7 @@ export function fileViolations(path, source) {
     );
 }
 
-/** Scan the real trees under `root`, returning the files read and what failed. */
+/** Scan the real paths under `root`, returning the files read and what failed. */
 export function scanRepo(root) {
   const listed = execFileSync(
     "git",
@@ -450,6 +503,7 @@ export function scanRepo(root) {
       "--exclude-standard",
       "--",
       ...SCANNED_ROOTS,
+      ...SCANNED_FILES,
     ],
     { cwd: root, encoding: "utf8" },
   );
@@ -479,6 +533,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   console.log(
-    `Egress claim check passed: ${files.length} files across ${SCANNED_ROOTS.length} shipped-source trees hold no URL literal outside the ${ALLOWLIST.length}-entry allowlist.`,
+    `Egress claim check passed: ${files.length} files across ${SCANNED_ROOTS.length} shipped-source trees and ${SCANNED_FILES.length} container files hold no URL literal outside the ${ALLOWLIST.length}-entry allowlist.`,
   );
 }

@@ -13,8 +13,10 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import {
   ALLOWLIST,
+  SCANNED_FILES,
   SCANNED_ROOTS,
   allowlistEntryFor,
+  commentSyntaxFor,
   fileViolations,
   isScannedFile,
   scanRepo,
@@ -29,7 +31,8 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // rather than an edit to shipped code.
 const FIXTURE = "apps/web/src/fixture.ts";
 
-const urlsIn = (source) => urlLiterals(source).map((hit) => hit.url);
+const urlsIn = (source, path = FIXTURE) =>
+  urlLiterals(source, path).map((hit) => hit.url);
 
 describe("URL literal matcher", () => {
   it("flags an unlisted absolute URL in a scanned root", () => {
@@ -65,7 +68,7 @@ describe("URL literal matcher", () => {
 
   it("reports the line the literal sits on", () => {
     const source = 'const a = 1;\n\nconst b = "https://evil.example/x";\n';
-    expect(urlLiterals(source)).toEqual([
+    expect(urlLiterals(source, FIXTURE)).toEqual([
       { url: "https://evil.example/x", authority: "evil.example", line: 3 },
     ]);
   });
@@ -108,8 +111,7 @@ describe("URL literal matcher", () => {
 
   it("still flags a stun/turn host written behind slashes", () => {
     // stun and turn URIs carry no `//` (RFC 7064, RFC 7065), so a slash before
-    // the host is stray punctuation and not the empty authority the same shape
-    // means under http.
+    // the host is stray punctuation around a real one.
     expect(
       urlsIn(
         'const ice = ["turn://relay.evil.example:3478?transport=udp",\n' +
@@ -122,7 +124,8 @@ describe("URL literal matcher", () => {
       "turns:///relay.evil.example:5349",
     ]);
     expect(
-      urlLiterals('const u = "stun:/relay.evil.example:3478";\n')[0].authority,
+      urlLiterals('const u = "stun:/relay.evil.example:3478";\n', FIXTURE)[0]
+        .authority,
     ).toBe("relay.evil.example:3478");
   });
 
@@ -145,7 +148,10 @@ describe("URL literal matcher", () => {
     // evaluates to. A per-tenant host is not that: the interpolation is a
     // subdomain and the registrable name beside it is the literal host.
     expect(
-      urlLiterals("await fetch(`https://${tenant}.evil.example/report`);\n"),
+      urlLiterals(
+        "await fetch(`https://${tenant}.evil.example/report`);\n",
+        FIXTURE,
+      ),
     ).toEqual([
       {
         url: "https://${tenant}.evil.example/report",
@@ -160,8 +166,23 @@ describe("URL literal matcher", () => {
 
   it("still flags a literal host carrying an interpolated path", () => {
     const source = "await fetch(`https://evil.example/${path}`);\n";
-    expect(urlLiterals(source).map((hit) => hit.authority)).toEqual([
+    expect(urlLiterals(source, FIXTURE).map((hit) => hit.authority)).toEqual([
       "evil.example",
+    ]);
+  });
+
+  it("does not read a literal port as the host an interpolation hides", () => {
+    // A port is the one literal that survives a fully interpolated authority,
+    // and `new URL()` rejects anything but digits there, so nothing a host
+    // could be written into is dropped with it.
+    expect(() => new URL("https://a:evil.example")).toThrow();
+    expect(urlsIn("await fetch(`https://${host}:8443/x`);\n")).toEqual([]);
+    expect(urlsIn("await fetch(`stun:${host}:3478`);\n")).toEqual([]);
+    expect(
+      urlsIn("await fetch(`https://${tenant}.evil.example:8443/x`);\n"),
+    ).toEqual(["https://${tenant}.evil.example:8443/x"]);
+    expect(urlsIn('await fetch("https://evil.example:8443/x");\n')).toEqual([
+      "https://evil.example:8443/x",
     ]);
   });
 
@@ -174,8 +195,13 @@ describe("URL literal matcher", () => {
 
   it("skips an empty web authority but not a short or bracketed one", () => {
     expect(
-      urlsIn('const u = "https:///path";\nconst v = "https://";\n'),
+      urlsIn(
+        'const u = "https:";\nconst v = "https://";\nconst w = "https:////";\n',
+      ),
     ).toEqual([]);
+    for (const empty of ["https:", "https://", "https:///", "https:////"]) {
+      expect(() => new URL(empty)).toThrow();
+    }
     expect(
       urlsIn(
         'const u = "https://a/";\nconst v = "http://[2001:db8::1]:8080/x";\n' +
@@ -186,6 +212,57 @@ describe("URL literal matcher", () => {
       "http://[2001:db8::1]:8080/x",
       "https://evil.example//double",
     ]);
+  });
+
+  it("reads the authority through any slash count, as `new URL()` does", () => {
+    // The slash count carries nothing the matcher may lean on: the real parser
+    // resolves every spelling to the same host, and a real fetch() of the
+    // http: forms against a loopback server reaches it in each one. Reading
+    // any of them as a protocol comparison instead lets a shipped
+    // `fetch("https:analytics.example/collect")` pass the build.
+    for (const slashes of ["", "/", "//", "///", "////"]) {
+      const literal = `https:${slashes}evil.example/x`;
+      expect(new URL(literal).host).toBe("evil.example");
+      expect(urlsIn(`const u = "${literal}";\n`)).toEqual([literal]);
+    }
+    // `https:///path` is a host named `path`, not the empty authority its
+    // shape suggests.
+    expect(new URL("https:///path").host).toBe("path");
+    expect(urlLiterals('const u = "https:///path";\n', FIXTURE)).toEqual([
+      { url: "https:///path", authority: "path", line: 1 },
+    ]);
+  });
+
+  it("reads a slashless authority in every delivery shape", () => {
+    const shapes = [
+      ["const u = 'https:evil.example/t';\n", FIXTURE, "https:evil.example/t"],
+      ['const u = "https:evil.example/t";\n', FIXTURE, "https:evil.example/t"],
+      ["const u = `https:evil.example/t`;\n", FIXTURE, "https:evil.example/t"],
+      [
+        'export const s = <script src="https:evil.example/t" />;\n',
+        "apps/web/src/fixture.tsx",
+        "https:evil.example/t",
+      ],
+      [
+        "@font-face { src: url(https:evil.example/t); }\n",
+        "apps/web/src/fixture.css",
+        "https:evil.example/t",
+      ],
+      ['const u = "HTTPS:evil.example/t";\n', FIXTURE, "HTTPS:evil.example/t"],
+      [
+        "await fetch(`https:${tenant}.evil.example/t`);\n",
+        FIXTURE,
+        "https:${tenant}.evil.example/t",
+      ],
+      [
+        'const u = "http:[2001:db8::1]:8080/t";\n',
+        FIXTURE,
+        "http:[2001:db8::1]:8080/t",
+      ],
+    ];
+    for (const [source, path, expected] of shapes) {
+      expect([source, urlsIn(source, path)]).toEqual([source, [expected]]);
+    }
   });
 
   it("matches a scheme in any case", () => {
@@ -321,9 +398,124 @@ describe("scanned files", () => {
       expect(fileViolations(text, literal)).toHaveLength(1);
     }
   });
+
+  it("reports a URL in a text format whose comment syntax is not modeled", () => {
+    // Running the JavaScript stripper over these would read a `//` or `/*` in
+    // ordinary content as a comment opener, blank the rest of the line, and
+    // report the file clean. They are scanned raw for that reason.
+    const cases = [
+      [
+        "apps/web/public/index.html",
+        '<p>a // b</p><script src="https://evil.example/a.js"></script>\n',
+        "https://evil.example/a.js",
+      ],
+      [
+        "apps/web/public/logo.svg",
+        '<svg><image href="https://evil.example/b.png" /><!-- a // b --></svg>\n',
+        "https://evil.example/b.png",
+      ],
+      [
+        "apps/web/src/README.md",
+        "Files: src/*.ts\n\nSee https://evil.example/c for more.\n",
+        "https://evil.example/c",
+      ],
+      [
+        "apps/web/public/robots.txt",
+        "# a // b\nSitemap: https://evil.example/d.xml\n",
+        "https://evil.example/d.xml",
+      ],
+      [
+        "docker-entrypoint.sh",
+        '# a // b\nexec curl "https://evil.example/e" "$@"\n',
+        "https://evil.example/e",
+      ],
+    ];
+    for (const [path, source, expected] of cases) {
+      expect(commentSyntaxFor(path)).toBe("none");
+      expect([path, stripComments(source, path)]).toEqual([path, source]);
+      expect([path, urlsIn(source, path)]).toEqual([path, [expected]]);
+      expect(fileViolations(path, source)).toHaveLength(1);
+    }
+  });
+
+  it("strips only block comments from a stylesheet", () => {
+    const path = "apps/web/src/bench/tokens.css";
+    expect(commentSyntaxFor(path)).toBe("css");
+    expect(urlsIn("/* see https://commented.example/x */\n", path)).toEqual([]);
+    // CSS has no `//` line comment, so text after one is content.
+    expect(urlsIn("a { b: c } // https://evil.example/y\n", path)).toEqual([
+      "https://evil.example/y",
+    ]);
+    // Nor any template literal, so a lone backtick opens no state that would
+    // swallow the rest of the file.
+    expect(
+      urlsIn(
+        "a { content: '`' }\nb { background: url(https://evil.example/z) }\n",
+        path,
+      ),
+    ).toEqual(["https://evil.example/z"]);
+  });
+
+  it("strips both comment forms from every JavaScript-family extension", () => {
+    for (const ext of [
+      ".cjs",
+      ".cts",
+      ".js",
+      ".jsx",
+      ".mjs",
+      ".mts",
+      ".ts",
+      ".tsx",
+    ]) {
+      const path = `apps/web/src/fixture${ext}`;
+      expect(commentSyntaxFor(path)).toBe("javascript");
+      expect(
+        urlsIn(
+          "// https://a.example/x\n/* https://b.example/y */\n" +
+            'const u = "https://evil.example/z";\n',
+          path,
+        ),
+      ).toEqual(["https://evil.example/z"]);
+    }
+  });
 });
 
 describe("scanned roots", () => {
+  it("covers the entrypoint that runs inside the container", () => {
+    // PRIVACY.md's container claim is about what the running image connects
+    // to, and this script is the image's ENTRYPOINT; the Dockerfile beside it
+    // decides what the build fetches into that image.
+    const dockerfile = readFileSync(resolve(repoRoot, "Dockerfile"), "utf8");
+    expect(/^ENTRYPOINT\s+\["\/app\/(\S+?)"\]/m.exec(dockerfile)[1]).toBe(
+      "docker-entrypoint.sh",
+    );
+    const { files } = scanRepo(repoRoot);
+    expect(files).toContain("docker-entrypoint.sh");
+    expect(files).toContain("Dockerfile");
+  });
+
+  it("scans a named file and not a sibling sharing its name", () => {
+    // Same real-git question the tree test below asks, for the file
+    // pathspecs: whether `Dockerfile` also admits `Dockerfile.dev`.
+    const dir = mkdtempSync(resolve(tmpdir(), "egress-files-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore" });
+      const literal = 'const u = "https://evil.example/x";\n';
+      for (const file of [
+        ...SCANNED_FILES,
+        "Dockerfile.dev",
+        "docker-entrypoint.sh.bak",
+      ]) {
+        writeFileSync(resolve(dir, file), literal);
+      }
+      const { files, violations } = scanRepo(dir);
+      expect(files.sort()).toEqual(["Dockerfile", "docker-entrypoint.sh"]);
+      expect(violations).toHaveLength(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("covers the server entry point the deployed web app boots", () => {
     // Nitro builds the deployed server around this entry, so a URL literal
     // reached during server boot is as shipped as anything under src/.
@@ -402,10 +594,11 @@ describe("comment stripping", () => {
   });
 
   it("keeps a URL inside a quoted CSS data URI", () => {
+    const path = "apps/web/src/bench/tokens.css";
     const source =
       "  --bench-check: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\"/>');\n";
-    expect(urlsIn(source)).toEqual(["http://www.w3.org/2000/svg"]);
-    expect(fileViolations("apps/web/src/bench/tokens.css", source)).toEqual([]);
+    expect(urlsIn(source, path)).toEqual(["http://www.w3.org/2000/svg"]);
+    expect(fileViolations(path, source)).toEqual([]);
   });
 
   it("keeps a URL whose own path carries a comment opener", () => {
@@ -413,7 +606,10 @@ describe("comment stripping", () => {
       "https://evil.example/a/*b*/c",
     ]);
     expect(
-      urlsIn("@font-face { src: url(https://evil.example/a/*b*/c.woff2); }\n"),
+      urlsIn(
+        "@font-face { src: url(https://evil.example/a/*b*/c.woff2); }\n",
+        "apps/web/src/bench/tokens.css",
+      ),
     ).toEqual(["https://evil.example/a/*b*/c.woff2"]);
   });
 
@@ -425,7 +621,7 @@ describe("comment stripping", () => {
 
   it("keeps template text that follows an interpolation", () => {
     const source = "const u = `${base} // not a comment`;\n";
-    expect(stripComments(source)).toBe(source);
+    expect(stripComments(source, FIXTURE)).toBe(source);
   });
 
   it("strips a comment inside a template interpolation, braces and all", () => {
@@ -441,7 +637,7 @@ describe("comment stripping", () => {
 
   it("preserves length and line breaks so line numbers survive", () => {
     const source = "a\n// comment\nb\n/* block\n   comment */\nc\n";
-    const stripped = stripComments(source);
+    const stripped = stripComments(source, FIXTURE);
     expect(stripped).toHaveLength(source.length);
     expect(stripped.split("\n")).toHaveLength(source.split("\n").length);
     expect(stripped.split("\n")[2]).toBe("b");
@@ -483,25 +679,14 @@ describe("the repository as it stands", () => {
     ).toBeGreaterThan(0);
     expect(canonical("const a = 1;\n", "probe.ts").parseErrors).toBe(0);
 
-    const sources = execFileSync(
-      "git",
-      [
-        "ls-files",
-        "--cached",
-        "--others",
-        "--exclude-standard",
-        "--",
-        ...SCANNED_ROOTS,
-      ],
-      { cwd: repoRoot, encoding: "utf8" },
-    )
-      .split("\n")
-      .filter((file) => /\.tsx?$/.test(file));
+    const sources = scanRepo(repoRoot).files.filter((file) =>
+      /\.tsx?$/.test(file),
+    );
     expect(sources.length).toBeGreaterThan(100);
 
     const damaged = sources.filter((file) => {
       const source = readFileSync(resolve(repoRoot, file), "utf8");
-      const stripped = stripComments(source);
+      const stripped = stripComments(source, file);
       if (stripped.length !== source.length) return true;
       const before = canonical(source, file);
       const after = canonical(stripped, file);
@@ -511,5 +696,25 @@ describe("the repository as it stands", () => {
       );
     });
     expect(damaged).toEqual([]);
+  });
+
+  it("deletes nothing from a scanned file whose syntax is unmodeled", () => {
+    // The parser guard above reaches the JavaScript family only. For every
+    // other scanned file the property that stands in for it is that stripping
+    // changes nothing at all, and for a stylesheet that it changes no length.
+    const { files } = scanRepo(repoRoot);
+    const changed = files.filter((file) => {
+      const source = readFileSync(resolve(repoRoot, file), "utf8");
+      const stripped = stripComments(source, file);
+      if (commentSyntaxFor(file) === "none") return stripped !== source;
+      return stripped.length !== source.length;
+    });
+    expect(changed).toEqual([]);
+    expect(
+      files.filter((file) => commentSyntaxFor(file) === "none").length,
+    ).toBeGreaterThan(0);
+    expect(
+      files.filter((file) => commentSyntaxFor(file) === "css").length,
+    ).toBeGreaterThan(0);
   });
 });
