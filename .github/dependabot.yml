@@ -83,8 +83,15 @@ updates:
       default-days: 7
 
   # GitHub Actions used by the workflows in .github/workflows. Every action is
-  # tag-pinned (e.g. actions/checkout@v7), so this tracks those tags for new
-  # releases and security advisories.
+  # tag-pinned (e.g. actions/checkout@v7), and this block is configured against
+  # that path.
+  #
+  # A pin that also appears in a composite action under .github/actions is not
+  # relied upon to be tracked there. Coverage reaches it through the workflow
+  # occurrence instead: scripts/check-action-pin-drift.mjs holds every composite
+  # pin identical to a workflow pin, so a release or advisory surfacing on the
+  # workflow pin covers the composite occurrence too, and the bump answering it
+  # cannot land on the workflow and leave the composite stale.
   - package-ecosystem: github-actions
     directory: "/"
     target-branch: "staging"

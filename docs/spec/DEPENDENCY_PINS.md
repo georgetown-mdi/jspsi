@@ -155,6 +155,44 @@ The rest are limits rather than refusals:
 
 **What the dead-key rule costs.** Requiring every entry to match a package the lockfile installs means the map cannot carry a standing "never run this package's scripts" verdict for a package absent from the tree. That is what dropping `protoc-gen-js: false` gives up, and `strict-allow-scripts` recovers most of it: a reintroduced `protoc-gen-js` arrives with no verdict, so the install fails and its `postinstall` does not run, where an unset flag would have let it install, warn once, and run. What the standing denial would have added beyond that is a verdict already recorded -- under the flag the install stops and waits for a review rather than carrying the earlier answer. The protection lives in a stronger control regardless -- `scripts/vendored-psi-deps.test.mjs` fails if that package appears anywhere in the committed lockfile at all, which no install-script verdict does.
 
+## GitHub Action pins and the composite mirror
+
+Every action a workflow uses is tag-pinned (`actions/checkout@v7`,
+`docker/build-push-action@v7`, `sigstore/cosign-installer@v4.1.2`). The
+`github-actions` block in `.github/dependabot.yml` is configured against
+`.github/workflows`, and its `ignore` entries hold the floating-major orgs
+(`actions/`, `docker/`, `aws-actions/`, `github/`) to major bumps only, so a
+within-major re-pin does not open a pull request while `cosign-installer`, which
+publishes no floating major, surfaces its patch bumps.
+
+The shared CI prologue composite (`.github/actions/setup/action.yml`) pins an
+action of its own, on a path this repo does not rely on being scanned. The
+invariant that covers it is a mirror rather than a second ecosystem block:
+
+**Every action pin under `.github/actions` is identical to a pin under
+`.github/workflows`.** A release or advisory then surfaces on the workflow
+occurrence, and the bump answering it cannot land there and leave the composite
+stale -- which makes the composite occurrence transitively tracked.
+
+`scripts/check-action-pin-drift.mjs` (`npm run check:action-pin-drift`, a CI
+static check in `static_checks.yaml`) holds it rather than prose. It parses every
+workflow and every `action.yml` with the `yaml` package, walks each document for
+`uses:` values (skipping `./` local and `docker://` references), and fails on two
+conditions: an action named in both trees carrying differing refs anywhere it
+appears, and a composite pin naming an action no workflow uses. The second is
+what keeps the mirror from being satisfied vacuously -- a composite-only action
+has no occurrence on the configured path at all, so it fails closed and the
+decision (mirror the pin into a workflow, or extend Dependabot coverage to
+`.github/actions` deliberately) is made explicitly rather than by omission.
+
+The comparison is textual. `@v7` agreeing with `@v7` says nothing about what
+either tag resolves to, so a floating major moving under both occurrences is
+outside the check, as is anything about which paths Dependabot in fact scans --
+it enforces this repo's mirror invariant and confirms no tool's coverage. It
+reads `uses:` references only, so an action reached another way, or a reference
+carrying no `@ref`, is invisible to it, and its ref-agreement rule binds only
+actions appearing in both trees.
+
 ## The crossws peer conflict blocks the release SBOM
 
 `npm sbom` refuses to run, so release step 9 in [RELEASES.md](../RELEASES.md) cannot currently produce the CycloneDX BOM that records the release's dependency and license set. This is a known upstream-driven breakage with no local fix worth taking; it is recorded here so the dead ends below are not re-walked.
