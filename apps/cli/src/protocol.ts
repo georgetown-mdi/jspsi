@@ -633,6 +633,34 @@ export async function runProtocol(
           `stayed live across ` +
           `${declinedReleases === 1 ? "that idle gap" : "those idle gaps"}`,
       );
+    // The mode's third per-cycle outcome, and the only one with no inline line at
+    // all: a boundary held for an operation this side had issued is ordinary, so
+    // warning per occurrence would report an anomaly where there is none. The run
+    // total still matters, because the case that is NOT ordinary looks the same
+    // from here -- an operation with no bound of its own holds every remaining
+    // boundary, and the mode has then stopped delivering the per-cycle sessions it
+    // exists for with nothing else saying so. The stretch sub-count is what tells
+    // the two apart, and is stated only when it says something the boundary count
+    // does not. Like both lines above it stays out of the reconnect line and the
+    // metrics event: nothing was closed, so nothing was lost. Zero in every other
+    // mode, so the guard keeps a normal exchange quiet.
+    const heldBoundaries = client?.heldBoundaryCount ?? 0;
+    const heldStretches = client?.heldBoundaryStretchCount ?? 0;
+    if (heldBoundaries > 0) {
+      const summary =
+        `the connection-per-poll release held the SFTP session at ` +
+        `${heldBoundaries} idle ` +
+        `${heldBoundaries === 1 ? "boundary" : "boundaries"} during this ` +
+        `exchange (not a dropped session): an operation this side had issued was ` +
+        `still unsettled, so the session stayed live across ` +
+        `${heldBoundaries === 1 ? "that idle gap" : "those idle gaps"}`;
+      log.info(
+        heldStretches < heldBoundaries
+          ? `${summary}, in ${heldStretches} unbroken ` +
+              `${heldStretches === 1 ? "stretch" : "stretches"}`
+          : summary,
+      );
+    }
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
     // Undo our own contribution to the max-listeners threshold rather than

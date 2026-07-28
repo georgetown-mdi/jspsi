@@ -3715,7 +3715,236 @@ test("a declined release with no session drop leaves the reconnect total and the
   expect(metrics.transportRetries).toBe(0);
 });
 
-test("logs no reconnect, forced-release, or declined-release summary on a clean run", async () => {
+test("summarizes the held idle boundaries as a line apart from the forced and declined ones", async () => {
+  // The mode's third per-cycle outcome, and the only one with no inline line at
+  // all: a boundary held for an operation this side had issued is ordinary, so it
+  // is never warned per occurrence. The run total is still the operator's only
+  // signal that the mode stopped delivering per-cycle sessions -- an operation with
+  // no bound of its own holds every remaining boundary -- so the teardown summary
+  // carries it, as its own line naming its own cause: neither a session this side
+  // closed nor a release that gave up its wait. Three distinct totals, so no line
+  // can be reporting another's count.
+  const forcedSpy = vi
+    .spyOn(LocalFSClient.prototype, "forcedReleaseCount", "get")
+    .mockReturnValue(3);
+  const declinedSpy = vi
+    .spyOn(LocalFSClient.prototype, "declinedReleaseCount", "get")
+    .mockReturnValue(5);
+  const heldSpy = vi
+    .spyOn(LocalFSClient.prototype, "heldBoundaryCount", "get")
+    .mockReturnValue(9);
+  const stretchSpy = vi
+    .spyOn(LocalFSClient.prototype, "heldBoundaryStretchCount", "get")
+    .mockReturnValue(9);
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    forcedSpy.mockRestore();
+    declinedSpy.mockRestore();
+    heldSpy.mockRestore();
+    stretchSpy.mockRestore();
+  }
+
+  const held = mockState.infos.find((line) =>
+    line.includes("held the SFTP session at 9 idle boundaries"),
+  );
+  expect(held).toBeDefined();
+  expect(held).toContain("not a dropped session");
+  expect(held).toContain(
+    "an operation this side had issued was still unsettled",
+  );
+  expect(held).toContain("the session stayed live across those idle gaps");
+  // It borrows neither sibling's cause: the forced line's socket this side closed,
+  // or the decline's transition that did not complete within the release's wait.
+  expect(held).not.toContain("closed from this side");
+  expect(held).not.toContain("release's wait");
+  // Both siblings still report their own counts, on their own lines.
+  expect(
+    mockState.infos.some(
+      (line) =>
+        line.includes("did not close when released at 3 idle boundaries") &&
+        line.includes("so it was closed from this side"),
+    ),
+  ).toBe(true);
+  expect(
+    mockState.infos.some((line) =>
+      line.includes("did not close the session at 5 idle boundaries"),
+    ),
+  ).toBe(true);
+  // Nothing was summed into anything: not a pair, not all three.
+  for (const summed of ["8 idle", "12 idle", "14 idle", "17 idle"])
+    expect(mockState.infos.some((line) => line.includes(summed))).toBe(false);
+  // A hold is not a reconnection, so nothing about it may reach the reconnect
+  // summary.
+  expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
+    false,
+  );
+});
+
+test("held boundaries exceeding their stretches state the stretch count", async () => {
+  // What separates one unbounded operation holding twenty boundaries from twenty
+  // that each settled in between: the first has stopped the mode for the rest of
+  // the run, the second is the mode working. The boundary count alone cannot say
+  // which, so the sub-clause carries the stretches whenever they say something it
+  // does not.
+  const heldSpy = vi
+    .spyOn(LocalFSClient.prototype, "heldBoundaryCount", "get")
+    .mockReturnValue(20);
+  const stretchSpy = vi
+    .spyOn(LocalFSClient.prototype, "heldBoundaryStretchCount", "get")
+    .mockReturnValue(2);
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    heldSpy.mockRestore();
+    stretchSpy.mockRestore();
+  }
+
+  const held = mockState.infos.find((line) =>
+    line.includes("held the SFTP session at 20 idle boundaries"),
+  );
+  expect(held).toBeDefined();
+  expect(held).toContain("in 2 unbroken stretches");
+});
+
+test("held boundaries equal to their stretches omit the stretch sub-clause", async () => {
+  // Every hold cost exactly one boundary, so the sub-count restates the total and
+  // adds nothing but noise.
+  const heldSpy = vi
+    .spyOn(LocalFSClient.prototype, "heldBoundaryCount", "get")
+    .mockReturnValue(6);
+  const stretchSpy = vi
+    .spyOn(LocalFSClient.prototype, "heldBoundaryStretchCount", "get")
+    .mockReturnValue(6);
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    heldSpy.mockRestore();
+    stretchSpy.mockRestore();
+  }
+
+  const held = mockState.infos.find((line) =>
+    line.includes("held the SFTP session at 6 idle boundaries"),
+  );
+  expect(held).toBeDefined();
+  expect(held).not.toContain("unbroken");
+});
+
+test("a held boundary with no session drop leaves the reconnect total and the metrics event untouched", async () => {
+  // A held boundary closed nothing, so nothing was lost. The reconnect total stays
+  // what it would have been -- here zero, so the line does not appear at all -- and
+  // the machine metrics event carries its own three counters and nothing else.
+  // Neither held count reaches either: they are an operator-facing line only.
+  const heldSpy = vi
+    .spyOn(LocalFSClient.prototype, "heldBoundaryCount", "get")
+    .mockReturnValue(11);
+  const stretchSpy = vi
+    .spyOn(LocalFSClient.prototype, "heldBoundaryStretchCount", "get")
+    .mockReturnValue(1);
+  mockFd3Open();
+  try {
+    // Party A runs flag-on; party B flag-off, so every captured fd-3 line is A's.
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    heldSpy.mockRestore();
+    stretchSpy.mockRestore();
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  expect(
+    mockState.infos.some((line) => line.includes("held the SFTP session")),
+  ).toBe(true);
+  expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
+    false,
+  );
+
+  const lines = takeFd3Lines();
+  const metrics = lines.find((l) => l.type === "metrics")!;
+  expect(Object.keys(metrics).sort()).toEqual([
+    "reconnects",
+    "recordsProcessed",
+    "transportRetries",
+    "type",
+    "v",
+  ]);
+  expect(metrics.reconnects).toBe(0);
+  expect(metrics.transportRetries).toBe(0);
+  expect(JSON.stringify(metrics)).not.toContain("11");
+});
+
+test("logs no reconnect, forced-release, declined-release, or held-boundary summary on a clean run", async () => {
   // The teardown summary is guarded on a non-zero count, so a normal exchange
   // stays quiet.
   await Promise.all([
@@ -3745,6 +3974,9 @@ test("logs no reconnect, forced-release, or declined-release summary on a clean 
   );
   expect(
     mockState.infos.some((line) => line.includes("did not close the session")),
+  ).toBe(false);
+  expect(
+    mockState.infos.some((line) => line.includes("held the SFTP session")),
   ).toBe(false);
 });
 
