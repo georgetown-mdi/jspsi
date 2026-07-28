@@ -60,10 +60,12 @@ Rename the `[Unreleased]` section to `[X.Y.Z] - YYYY-MM-DD`. Open a new empty `[
 ### 4. Review and audit dependencies
 
 ```sh
-npm audit
+npm audit --omit=dev -w packages/core -w apps/cli -w apps/web
 ```
 
 Resolve any high-severity findings before proceeding. For any dependency added since the last release, verify license compatibility (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
+
+That scope is the tree step 9 bills in the SBOM -- what the shipped image runs (see [Software Bill of Materials (SBOM)](#software-bill-of-materials-sbom)). The unscoped `npm audit` additionally reports development-tree findings, which are triaged separately rather than at release time; the accepted one is recorded in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-brace-expansion-advisory-is-accepted-rather-than-fixed).
 
 ### 5. Run the full test suite
 
