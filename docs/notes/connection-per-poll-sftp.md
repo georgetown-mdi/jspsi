@@ -186,13 +186,19 @@ the smaller change and the safer one:
   teardown -- the most security-sensitive, most-recently-decomposed surface -- and
   would force core to re-supply and re-verify SFTP connect options it deliberately
   discards after `open()`.
-- **Invariant ownership stays put.** The single-party appliance issues one op at a
-  time; the adapter's serialization of `end()` against an in-flight re-dial
-  covers the session transitions themselves, not the operations riding on them,
-  and is sound only because of that serial issuance. Keeping the lifecycle with the
-  adapter keeps that invariant with its owner. The correctness concern that the
-  invariants live in core is met regardless: the teardown *ordering* guarantee
-  stays in `close()` (below); what moves into the adapter is only the mechanism.
+- **Invariant ownership stays put.** The adapter's serialization of `end()`
+  against an in-flight re-dial covers the session transitions themselves, not the
+  operations riding on them, and needs nothing from how those operations are
+  issued -- they are issued concurrently (see
+  [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md)). What makes it sound is the
+  FIFO lock every session transition takes: each takes its queue slot
+  synchronously at the call, so a transition runs behind whichever one holds the
+  client rather than under it, whatever operations are in flight meanwhile. An
+  idle release is one more transition on that lock, and keeping the lifecycle
+  with the adapter keeps the lock with the transitions it orders. The correctness
+  concern that the invariants live in core is met regardless: the teardown *ordering*
+  guarantee stays in `close()` (below); what moves into the adapter is only the
+  mechanism.
 - **Testability.** The mode is unit-testable at the adapter boundary against the
   same surface the recovery path already grew, with no live server; the boundary
   signal is a single seam.
