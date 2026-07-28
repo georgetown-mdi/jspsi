@@ -3407,6 +3407,375 @@ describe("session recovery", () => {
   });
 });
 
+// --- mid-exchange drop whose close the partner withholds ---------------------
+//
+// A partner server that drops the SFTP session mid-exchange and then withholds
+// its connection close leaves the transport half-open -- this side's write half
+// ended, no FIN back -- with ssh2-sftp-client's `sftp` property STILL SET, since
+// the library clears it only from the ssh2 Client's 'close'. The operation on the
+// wire cannot complete on a transport that carries nothing, so it rides the
+// per-operation liveness deadline and rejects with the terminal stalled error.
+// Recovery therefore reads the TRANSPORT rather than the session property: it
+// forces the ended transport closed so the library clears the session, then
+// re-dials and re-issues exactly as it does for a partner that closes. A stall
+// over a transport that is still live stays terminal, which is the distinction
+// these cases pin. Measured against a real ssh2 server (docs/spec/DEPENDENCY_PINS.md);
+// the end-to-end exercise is test/integration/heldSessionWithheldClose.test.ts.
+
+describe("mid-exchange drop against a partner that withholds its close", () => {
+  interface WithheldCloseSocket {
+    setKeepAlive: () => void;
+    writableEnded: boolean;
+    readableEnded: boolean;
+    destroyed: boolean;
+    destroy?: () => void;
+  }
+
+  // An ssh2-sftp-client stand-in modeling the pinned library against that partner.
+  // `dropWithholdingClose` is the server's cut as ssh2 leaves it: a half of the
+  // transport ended, the session property untouched, and no 'close' -- so nothing
+  // clears the session until this side destroys the socket, which is what the
+  // library's global 'close' listener answers. `clearsOnDestroy: false` models an
+  // ssh2 that no longer emits that 'close'; omitting `destroy` from the socket
+  // models one that no longer exposes the seam at all.
+  function withholdingPartner(
+    options: { clearsOnDestroy?: boolean; withDestroy?: boolean } = {},
+  ) {
+    const state = { live: true };
+    const session = {
+      open: vi.fn(),
+      close: vi.fn(),
+      opendir: vi.fn(),
+      readdir: vi.fn(),
+      on: vi.fn(),
+    };
+    const socket: WithheldCloseSocket = {
+      setKeepAlive: () => {},
+      writableEnded: false,
+      readableEnded: false,
+      destroyed: false,
+    };
+    const rawClient = new EventEmitter() as EventEmitter &
+      Record<string, unknown>;
+    const destroy = vi.fn(() => {
+      socket.destroyed = true;
+      if (options.clearsOnDestroy === false) return;
+      state.live = false;
+      rawClient.emit("close");
+    });
+    if (options.withDestroy !== false) socket.destroy = destroy;
+    Object.assign(rawClient, {
+      setNoDelay: vi.fn(),
+      _sock: socket,
+      end: vi.fn(() => {
+        socket.writableEnded = true;
+      }),
+    });
+    // ssh2 mints a fresh socket per dial, so a re-dial leaves neither half ended.
+    const connect = vi.fn().mockImplementation(async () => {
+      state.live = true;
+      socket.writableEnded = false;
+      socket.readableEnded = false;
+      socket.destroyed = false;
+    });
+    const client = {
+      get sftp() {
+        return state.live ? session : null;
+      },
+      connect,
+      client: rawClient,
+      end: vi.fn().mockResolvedValue(true),
+      realPath: vi.fn().mockResolvedValue("/"),
+    };
+    const dropWithholdingClose = (
+      half: "writable" | "readable" = "writable",
+    ) => {
+      if (half === "writable") socket.writableEnded = true;
+      else socket.readableEnded = true;
+    };
+    return { client, connect, socket, state, destroy, dropWithholdingClose };
+  }
+
+  // The rejection such a drop produces: the operation is never answered, so the
+  // adapter's own per-operation deadline is what ends it.
+  const stalled = () =>
+    new TransportOperationStalledError(
+      "SFTP file delete of /remote/x.json stalled: no response from the " +
+        "server; refusing to wait on the server further",
+    );
+
+  // The adapter's own forced-close bound (not exported; a liveness backstop, not
+  // a tunable).
+  const FORCED_CLOSE_BOUND_MS = 1_000;
+
+  function loggedAdapter() {
+    const adapter = new SSH2SFTPClientAdapter();
+    const log = {
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+      trace: vi.fn(),
+      error: vi.fn(),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = log;
+    return { adapter, log };
+  }
+
+  const install = (adapter: SSH2SFTPClientAdapter, client: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = client;
+  };
+
+  // A delete that stalls on the drop and succeeds on the re-issue, the shape the
+  // recovered operation takes.
+  const stallingThenSucceedingDelete = (client: object) => {
+    const del = vi
+      .fn()
+      .mockRejectedValueOnce(stalled())
+      .mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).delete = del;
+    return del;
+  };
+
+  test.each([
+    { half: "writable" as const, flag: "writableEnded" },
+    { half: "readable" as const, flag: "readableEnded" },
+  ])(
+    "recovers the drop and completes the operation when the transport's $flag half has ended",
+    async ({ half }) => {
+      const { client, connect, destroy, dropWithholdingClose } =
+        withholdingPartner();
+      const del = stallingThenSucceedingDelete(client);
+      const { adapter } = loggedAdapter();
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+      dropWithholdingClose(half);
+
+      await expect(adapter.delete("/remote/x.json")).resolves.toBeUndefined();
+
+      // The session could only be cleared from this side: the forced close ran
+      // once, and the re-dial and re-issue followed it.
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(del).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  test("counts and warns the recovery as the mid-exchange drop it is, never as an idle release", async () => {
+    const { client, dropWithholdingClose } = withholdingPartner();
+    stallingThenSucceedingDelete(client);
+    const { adapter, log } = loggedAdapter();
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 3 });
+    dropWithholdingClose();
+    await adapter.delete("/remote/x.json");
+
+    // A survived server-side drop, counted in both metrics exactly as a drop the
+    // partner closed cleanly is.
+    expect(adapter.reconnectCount).toBe(1);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    // The connection-per-poll idle release's own accounting is untouched: this
+    // boundary was a partner-side drop, not a release.
+    expect(adapter.forcedReleaseCount).toBe(0);
+    expect(adapter.declinedReleaseCount).toBe(0);
+
+    // The existing mid-exchange drop warning, default-mode arm: it names the
+    // partner's session cap and points at connection-per-poll, which is the right
+    // advice for a server that behaves this way.
+    expect(log.warn).toHaveBeenCalledOnce();
+    const message = log.warn.mock.calls[0][0] as string;
+    expect(message).toContain("dropped mid-exchange and was transparently");
+    expect(message).toContain("session-duration or idle limit");
+    expect(message).toContain("--connection-per-poll");
+    expect(message).toContain("max_reconnect_attempts=3");
+    // Not the idle release's line, which reports a boundary this mode never has.
+    expect(message).not.toContain("idle release");
+  });
+
+  test("charges the drop to max_reconnect_attempts, and an exhausted budget is terminal", async () => {
+    const { client, connect, state, socket, dropWithholdingClose } =
+      withholdingPartner();
+    // Every attempt stalls the way the drop does; only the re-dial restores the
+    // session, so each drop costs exactly one re-dial.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).delete = vi.fn().mockImplementation(async () => {
+      if (socket.writableEnded) throw stalled();
+    });
+    const { adapter } = loggedAdapter();
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 1 });
+    dropWithholdingClose();
+    await expect(adapter.delete("/remote/x.json")).resolves.toBeUndefined();
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    expect(connect).toHaveBeenCalledTimes(2);
+
+    // The budget is spent, so the next such drop fails terminally with the
+    // existing actionable message and no further re-dial.
+    dropWithholdingClose();
+    const err = await adapter.delete("/remote/x.json").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UsageError);
+    expect((err as Error).message).toContain("max_reconnect_attempts=1");
+    expect((err as Error).message).toContain("--connection-per-poll");
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    expect(state.live).toBe(true);
+  });
+
+  test("leaves a stall on a live, still-writable transport terminal", async () => {
+    // The stall exclusion keeps its whole force wherever the transport has not
+    // ended: re-dialing on a timeout would hand a withholding server a free
+    // liveness reset, and nothing here says the session was lost.
+    const { client, connect, destroy } = withholdingPartner();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).delete = vi.fn().mockRejectedValue(stalled());
+    const { adapter } = loggedAdapter();
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+
+    await expect(adapter.delete("/remote/x.json")).rejects.toBeInstanceOf(
+      TransportOperationStalledError,
+    );
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(adapter.midExchangeReconnectCount).toBe(0);
+  });
+
+  test("recovers a partner that DOES close with no forced close and no extra dial", async () => {
+    // The library cleared the session itself, so there is nothing to force: the
+    // recovery is the one it has always been, with no added wait and no second
+    // mechanism driven.
+    const { client, connect, destroy, state } = withholdingPartner();
+    const del = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error("delete: No SFTP connection available"), {
+          code: "ERR_NOT_CONNECTED",
+        }),
+      )
+      .mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).delete = del;
+    const { adapter } = loggedAdapter();
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    // The partner closed the connection: ssh2-sftp-client's global 'close'
+    // listener cleared the session property.
+    state.live = false;
+
+    await expect(adapter.delete("/remote/x.json")).resolves.toBeUndefined();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+  });
+
+  test("warns and leaves the operation terminal when the socket destroy seam has moved", async () => {
+    // The mechanism is checked, not assumed: with the seam gone the recovery
+    // cannot clear the session, so it says so -- naming the seam and the upgrade
+    // checklist -- and degrades to the terminal outcome the operation already had,
+    // in the same error class the poll loop stops on.
+    const { client, connect, dropWithholdingClose } = withholdingPartner({
+      withDestroy: false,
+    });
+    const del = stallingThenSucceedingDelete(client);
+    const { adapter, log } = loggedAdapter();
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    dropWithholdingClose();
+
+    await expect(adapter.delete("/remote/x.json")).rejects.toBeInstanceOf(
+      TransportOperationStalledError,
+    );
+    expect(connect).toHaveBeenCalledTimes(1);
+    // The operation was not re-issued onto the session that can carry nothing.
+    expect(del).toHaveBeenCalledOnce();
+    expect(log.warn).toHaveBeenCalledOnce();
+    const message = log.warn.mock.calls[0][0] as string;
+    expect(message).toContain("client._sock.destroy()");
+    expect(message).toContain("Upgrading the SFTP Stack");
+    expect(message).toContain("docs/spec/DEPENDENCY_PINS.md");
+    // No drop was recovered, so none is counted.
+    expect(adapter.midExchangeReconnectCount).toBe(0);
+  });
+
+  test("warns and leaves the operation terminal when the forced close's destroy raises", async () => {
+    // net.Socket's destroy() is driven synchronously, so it can raise INTO the
+    // recovery rather than rejecting a wait it can absorb. The recovery catches
+    // that where the connection-per-poll release deliberately does not: the
+    // operation already carries the loss the poll loop stops on, and an error of
+    // the mechanism's own would replace it with one the loop reads differently.
+    const { client, connect, destroy, dropWithholdingClose } =
+      withholdingPartner();
+    destroy.mockImplementation(() => {
+      throw new Error("socket already destroyed");
+    });
+    const del = stallingThenSucceedingDelete(client);
+    const { adapter, log } = loggedAdapter();
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    dropWithholdingClose();
+
+    await expect(adapter.delete("/remote/x.json")).rejects.toBeInstanceOf(
+      TransportOperationStalledError,
+    );
+    expect(destroy).toHaveBeenCalledOnce();
+    // The session never cleared, so there is nothing to re-dial or re-issue onto.
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(del).toHaveBeenCalledOnce();
+    expect(log.warn).toHaveBeenCalledOnce();
+    const message = log.warn.mock.calls[0][0] as string;
+    expect(message).toContain("socket already destroyed");
+    // A destroy that raises is the shape a change in ssh2's teardown semantics
+    // reaches the operator as, so this warning routes them to the same
+    // re-verification checklist its two sibling failures do.
+    expect(message).toContain("Upgrading the SFTP Stack");
+    expect(message).toContain("docs/spec/DEPENDENCY_PINS.md");
+    expect(adapter.midExchangeReconnectCount).toBe(0);
+  });
+
+  test("warns and leaves the operation terminal when the forced close does not clear the session", async () => {
+    // The one premise no dial can check -- that destroying the transport takes the
+    // session with it -- is read back where it is driven, on the mid-exchange
+    // path's own terms: a warning and the operation's own loss, not a raise of its
+    // own that would replace it.
+    vi.useFakeTimers();
+    try {
+      const { client, connect, destroy, dropWithholdingClose } =
+        withholdingPartner({ clearsOnDestroy: false });
+      const del = stallingThenSucceedingDelete(client);
+      const { adapter, log } = loggedAdapter();
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+      dropWithholdingClose();
+
+      const failing = adapter.delete("/remote/x.json").catch((e: unknown) => e);
+      // The forced close waits out its own bound for a 'close' that never lands.
+      await vi.advanceTimersByTimeAsync(FORCED_CLOSE_BOUND_MS + 2);
+
+      expect(await failing).toBeInstanceOf(TransportOperationStalledError);
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(connect).toHaveBeenCalledTimes(1);
+      expect(del).toHaveBeenCalledOnce();
+      expect(log.warn).toHaveBeenCalledOnce();
+      const message = log.warn.mock.calls[0][0] as string;
+      expect(message).toContain("did not clear");
+      expect(message).toContain("Upgrading the SFTP Stack");
+      expect(adapter.midExchangeReconnectCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 // --- ephemeral session mode (connection-per-poll) ----------------------------
 //
 // In this mode the adapter releases its SFTP session at each poll-loop idle
@@ -5913,8 +6282,8 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
     await expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).redialForRecovery() as Promise<boolean>,
-    ).resolves.toBe(false);
+      (adapter as any).redialForRecovery() as Promise<string>,
+    ).resolves.toBe("noSession");
     await expect(adapter.connect({ host: "h" })).rejects.toThrow(
       "cannot be reopened",
     );
@@ -6383,7 +6752,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
         record(
           "redialForRecovery",
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (adapter as any).redialForRecovery() as Promise<boolean>,
+          (adapter as any).redialForRecovery() as Promise<string>,
         ),
         record("releaseForIdle", adapter.releaseForIdle()),
         record("teardown", adapter.end()),
@@ -6405,10 +6774,53 @@ describe("ephemeral session mode (connection-per-poll)", () => {
           `waited ${ACQUIRE_BOUND_MS} ms for the session transition ahead of it`,
         ),
         ensureConnected: "resolved false",
-        redialForRecovery: "resolved false",
+        redialForRecovery: "resolved noSession",
         releaseForIdle: "resolved undefined",
         teardown: "resolved undefined",
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a recovery re-dial that abandons over a held dead session fails the operation rather than re-issuing it", async () => {
+    // The other arm of the abandoned re-dial's reading. Giving up the wait clears
+    // nothing, so a session the partner dropped while withholding its close is
+    // still held over a transport that can carry nothing: a re-issue there would
+    // ride the per-operation deadline a second time to reach the loss the
+    // operation already has.
+    vi.useFakeTimers();
+    try {
+      const { client, connect, state, rawClient, socket } =
+        ephemeralClient(wrapperMethods());
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      stub(adapter);
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      neverSettlingHolder(adapter, connect, state, rawClient);
+      // The partner dropped this cycle's session and withheld its close while the
+      // dial above still holds the transition.
+      state.live = true;
+      socket.writableEnded = true;
+      client.delete.mockRejectedValueOnce(
+        new TransportOperationStalledError(
+          "SFTP file delete of /remote/x.json stalled: no response from the " +
+            "server; refusing to wait on the server further",
+        ),
+      );
+
+      const failing = adapter.delete("/remote/x.json").catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(ACQUIRE_BOUND_MS + 1_000);
+
+      expect(await failing).toBeInstanceOf(TransportOperationStalledError);
+      expect(client.delete).toHaveBeenCalledOnce();
+      // The abandon drove nothing on the client the dial ahead of it holds, and
+      // established nothing to count or report as a survived drop.
+      expect(socket.destroy).not.toHaveBeenCalled();
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(adapter.midExchangeReconnectCount).toBe(0);
+      expect(adapterLog(adapter).warn).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
