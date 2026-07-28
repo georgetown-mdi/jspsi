@@ -27,8 +27,9 @@ import { describe, expect, it } from "vitest";
 // regex: coverage here is a promise flowing through wrapper calls, callbacks and
 // executors, which no pattern over text can follow.
 //
-// Limits, stated rather than implied. The analysis is syntactic, and it is not
-// a proof in either direction; these are the two places it can be wrong.
+// Limits, stated rather than implied. The analysis is syntactic and is not a
+// proof in either direction; what follows is where it can be wrong, and which
+// way.
 //
 // It can call a site bracketed that is not. Inside a covered promise's executor,
 // a call is marked bracketed when one of its argument functions MENTIONS a
@@ -40,20 +41,38 @@ import { describe, expect, it } from "vitest";
 // opendir/readdir callback chain and createExclusiveOnce's open ->
 // code-4-exists -> close handshake, which a reachability test would reclassify.
 //
-// It can miss a site altogether. A receiver is followed only from `this.client`,
-// from a raw SFTPWrapper binding, and through locals initialized from either
-// (`const client = this.client`, `const { sftp } = internals`), chains included.
-// A receiver arriving any other way is not followed -- a parameter, an object or
-// array property, a binding assigned after its declaration, one returned from a
-// helper -- and a round trip issued on one of those is invisible here.
+// It can miss a site altogether, because being a site is itself decided
+// syntactically: a call that decision does not reach is never examined at all,
+// so it is never reported. A site is a call whose callee is written
+// as a property access, `receiver.member(...)` with optional chaining included;
+// whose member is not one of the session-lifecycle and EventEmitter names listed
+// below; and whose receiver is `this.client`, or an identifier bearing a name
+// bound anywhere in this file to the raw SFTPWrapper (destructured off the
+// internals cast or off a local resolving to a receiver, or declared as a
+// parameter of the wrapper's type), or an identifier declared in an enclosing
+// block -- plainly or by destructuring -- whose initializer leads through a
+// chain of such declarations back to either.
 //
-// Everywhere else the coverage propagation fails CLOSED: a site it cannot reach
-// is reported unbracketed, so a new promise-plumbing idiom shows up as a failure
-// to be answered (by extending the rules here, or by bracketing the site) rather
-// than passing unseen. An allowance matches by enclosing method and callee name,
-// so a SECOND unbracketed call to the same method in the same method is admitted
-// by the same reason -- that is the class the reason names, not an unexamined
-// site.
+// That is the whole reach, and the reach is the claim: a callee or a receiver
+// written some other way is not decided here. No enumeration of those other
+// forms is kept, deliberately. A list of what an analysis cannot see is a second
+// claim about the analysis that nothing checks, and a wrong entry in it reads as
+// a guarantee -- take the rules above as exhaustive instead, and anything they
+// do not name as unseen.
+//
+// Where the reach errs it errs toward over-reporting: the wrapper name match is
+// file-wide rather than scoped, so an unrelated binding that happens to share a
+// wrapper's name is reported as a site too. That direction costs a spurious
+// failure to be answered, never a miss.
+//
+// Failing CLOSED is a property of the coverage propagation and not of the site
+// rules above. A site the propagation cannot reach is reported unbracketed, so a
+// new promise-plumbing idiom shows up as a failure to be answered (by extending
+// the rules here, or by bracketing the site) rather than passing unseen; a call
+// the site rules do not reach has no such backstop and simply passes. An
+// allowance matches by enclosing method and callee name, so a SECOND unbracketed
+// call to the same method in the same method is admitted by the same reason --
+// that is the class the reason names, not an unexamined site.
 
 const ADAPTER = "apps/cli/src/connection/ssh2SftpAdapter.ts";
 const SELF = "scripts/sftp-tracked-round-trips.test.mjs";
@@ -226,7 +245,8 @@ function isTheClient(node) {
  * Whether `identifier` is bound to something requests are issued on: a raw
  * SFTPWrapper binding, `this.client`, or a local initialized from either,
  * followed through a chain of such locals (`const client = this.client`). Only
- * declaration initializers are followed; the header states what is not.
+ * a wrapper name and a declaration initializer are followed; the header states
+ * that reach.
  */
 function bindsARequestReceiver(identifier, wrappers = new Set()) {
   const seen = new Set();
@@ -275,9 +295,10 @@ export function wrapperBindings(sourceFile) {
 }
 
 /**
- * Every call expression that issues a server request: a call on `this.client`,
- * on a raw SFTPWrapper binding, or on a local aliasing either, whose member is
- * not session lifecycle or EventEmitter plumbing.
+ * The call expressions the site rules reach: a property-access call on
+ * `this.client`, on a raw SFTPWrapper binding, or on a local aliasing either,
+ * whose member is not session lifecycle or EventEmitter plumbing. A callee
+ * written any other way is not a site; see the header.
  */
 export function requestIssuingSites(sourceFile) {
   const wrappers = wrapperBindings(sourceFile);
