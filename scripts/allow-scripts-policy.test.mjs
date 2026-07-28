@@ -17,8 +17,8 @@ import { describe, expect, it } from "vitest";
 // deliberately so: npm decides from a live tree, reading each package's source
 // from its dependency edges and each extracted package.json from disk, while
 // this reads the committed lockfile. Where the lockfile cannot answer, the check
-// refuses the input rather than guessing at it -- a root manifest declaring
-// `overrides`, a key shape it does not model, a source it cannot name. The
+// refuses the input rather than guessing at it -- an `overrides` form it does
+// not model, a key shape it does not model, a source it cannot name. The
 // residual it does not cover is enumerated in docs/spec/DEPENDENCY_PINS.md.
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -48,8 +48,10 @@ const UNHONORED =
   'npm honors a bare name, name@*, one exact version spelled canonically, or exact versions joined by "||". Any other spec form it drops from the policy or keeps and matches against nothing, so the verdict is not in force';
 const UNMODELED_KEY =
   'this check reads only a package-name key. A "file:" path, a tarball URL and a git spec are matched by npm against the source an entry resolves to, through a canonicalization this does not model -- model that form here before recording such a verdict';
-const UNMODELED_OVERRIDES =
-  '"overrides" in package.json: npm reads each package\'s source from its dependency edges, whose specs an override rewrites, and refuses every name-keyed verdict for a package an override points at a git, file or remote source. The lockfile records the unrewritten specs, so this check would report such a verdict as in force while npm runs the script -- model overrides here before introducing one';
+const UNMODELED_OVERRIDE_KEY =
+  'this check reads only a flat "<name>": "<spec>" override, which rewrites every edge on that name. A nested per-parent object, a "." self key and a "name@range" key each rewrite some edges and not others, and the lockfile records neither the override nor which edge it rewrote -- model that form here before declaring one';
+const UNMODELED_OVERRIDE_SPEC =
+  'this check reads only a semver version or range, which npm resolves from the registry, and a source spec carrying a scheme, a path shape, or npm\'s "owner/repo" shorthand, for which npm honors no name-keyed verdict at all. A dist-tag, an "npm:" alias and a "$name" reference to a root dependency each name a source this does not model -- model that form here before declaring one';
 
 /** Split a policy key into its package name and version spec, scope-aware. */
 function splitKey(key) {
@@ -98,7 +100,88 @@ function policyEntries(allowScripts) {
   });
 }
 
+// The source class npm reads a verdict against comes from the root `overrides`,
+// not from the lockfile: an override rewrites the dependency edges npm reads
+// each package's source from, and the lockfile records neither the override nor
+// the rewritten spec -- every dependent entry keeps the range it declared.
+//
+// A comparator-set semver range -- comparators optionally joined by `||` --
+// leaves the identity model below untouched, because the lockfile records the
+// tarball npm resolved the override to and npm decides the verdict at that
+// version: measured on npm 11.17, an override moving a transitive
+// @parcel/watcher from 2.5.4 to 2.5.6 leaves a verdict keyed at 2.5.4 covering
+// nothing (the install fails ESTRICTALLOWSCRIPTS naming 2.5.6) and one keyed at
+// 2.5.6 in force. That grammar is narrower than what npm resolves from the
+// registry -- a hyphen range (`1.0.0 - 2.0.0`) and a `v`-prefixed version
+// (`v2.0.1`) are spellings npm honors and this refuses -- which costs a red
+// check naming the form to model, never a verdict read off an unmodeled spec.
+//
+// A source spec takes every name-keyed verdict out of force. Measured on npm
+// 11.17, a transitive dependency overridden to a `file:` tarball or to a remote
+// tarball URL spelled in the registry's own <name>/-/<name>-<version>.tgz shape
+// fails the install under a name-keyed `true` and under a name-keyed `false`
+// alike, reported exactly as with no verdict at all -- while the lockfile entry
+// npm writes carries that URL in `resolved`, which the identity below would
+// otherwise read a name and version out of. A git source is the same class in
+// npm's model and is treated as one here unmeasured, for want of a reachable git
+// host to measure it against; the assumption costs a refusal, never a verdict.
+const PARTIAL_VERSION = `(?:\\d+|[xX*])(?:\\.(?:\\d+|[xX*])){0,2}(?:-[0-9A-Za-z.-]+)?${BUILD}`;
+const COMPARATOR = `(?:[<>]=?|[~^=])?\\s*${PARTIAL_VERSION}`;
+const COMPARATOR_SET = `${COMPARATOR}(?:\\s+${COMPARATOR})*`;
+const REGISTRY_OVERRIDE_SPEC = new RegExp(
+  `^${COMPARATOR_SET}(?:\\s*\\|\\|\\s*${COMPARATOR_SET})*$`,
+);
+
+// A scheme, a path shape, or the bare `owner/repo` npm reads as a git host
+// shorthand. npm-package-arg reads `owner/repo` as either a hosted git spec or a
+// directory depending on what is on disk, and both readings are non-registry, so
+// the class does not turn on which one it picks. The one scheme it excludes is
+// `npm:`, an alias that resolves from the registry under another name: which
+// name npm then matches a verdict against is unmeasured, so the refusal below
+// takes it rather than this rule.
+const SOURCE_OVERRIDE_SPEC =
+  /^(?!npm:)(?:[A-Za-z][A-Za-z0-9+.-]*:|~?\.{0,2}\/)|^[^@\s/]+\/\S+$/;
+
+/**
+ * What each root override states about a package name: the source class npm
+ * resolves it from, or the reason this check cannot read one from it.
+ */
+function overrideEntries(overrides) {
+  return Object.entries(overrides ?? {}).map(([key, spec]) => {
+    if (typeof spec !== "string" || !PACKAGE_NAME_KEY.test(key)) {
+      return { key, unmodeled: UNMODELED_OVERRIDE_KEY };
+    }
+    const trimmed = spec.trim();
+    if (SOURCE_OVERRIDE_SPEC.test(trimmed)) {
+      return { key, name: key, source: trimmed };
+    }
+    if (REGISTRY_OVERRIDE_SPEC.test(trimmed)) {
+      return { key, name: key, source: null };
+    }
+    return { key, unmodeled: UNMODELED_OVERRIDE_SPEC };
+  });
+}
+
+/** Override forms npm applies and this check cannot read a source class from. */
+function unmodeledOverrides(overrides) {
+  return overrideEntries(overrides)
+    .filter((entry) => entry.unmodeled !== undefined)
+    .map((entry) => `"${entry.key}": ${entry.unmodeled}`);
+}
+
+/** The names an override points at a source no name-keyed verdict reaches. */
+function namesOverriddenToSource(overrides) {
+  return new Map(
+    overrideEntries(overrides)
+      .filter((entry) => typeof entry.source === "string")
+      .map((entry) => [entry.name, entry.source]),
+  );
+}
+
 const NM = "node_modules/";
+
+/** The name an entry is installed under, which is the edge an override keys on. */
+const installedAs = (path) => path.slice(path.lastIndexOf(NM) + NM.length);
 
 /**
  * The name and version a registry tarball URL carries, or `null` when it carries
@@ -144,19 +227,27 @@ function registryTarballIdentity(url) {
 }
 
 /**
- * The identity npm matches one lockfile entry by, read only from the source it
- * resolved to. `name` is `null` where that source yields npm no identity -- a
- * `file:` tarball or directory, a git URL, a tarball URL it cannot parse -- so
- * no name-keyed verdict applies to the entry.
+ * The identity npm matches one lockfile entry by, read from the source it
+ * resolved to and from the root overrides that rewrote the edge it hangs on.
+ * `name` is `null` where that source yields npm no identity -- a `file:` tarball
+ * or directory, a git URL, a tarball URL it cannot parse, or any source an
+ * override names -- so no name-keyed verdict applies to the entry. An override
+ * is keyed both to the name the entry is installed under and to the name its
+ * URL carries, since either can be the one the rewritten edge names.
  */
-function packageIdentity(path, entry) {
+function packageIdentity(path, entry, overriddenToSource = new Map()) {
   const resolved = typeof entry.resolved === "string" ? entry.resolved : null;
   const identity = resolved === null ? null : registryTarballIdentity(resolved);
+  const overrideSource =
+    overriddenToSource.get(installedAs(path)) ??
+    (identity === null ? undefined : overriddenToSource.get(identity.name));
+  const named = overrideSource === undefined ? identity : null;
   return {
     path,
     resolved,
-    name: identity?.name ?? null,
-    version: identity?.version ?? null,
+    name: named?.name ?? null,
+    version: named?.version ?? null,
+    overrideSource: overrideSource ?? null,
     hasInstallScript: entry.hasInstallScript === true,
   };
 }
@@ -167,13 +258,14 @@ function packageIdentity(path, entry) {
  * lifecycle its owner runs), and not a bundled dependency, whose install script
  * npm never runs and no policy entry can allow.
  */
-function installedPackages(lock) {
+function installedPackages(lock, overrides) {
+  const overriddenToSource = namesOverriddenToSource(overrides);
   return Object.entries(lock.packages ?? {})
     .filter(
       ([path, entry]) =>
         path.includes(NM) && entry.link !== true && entry.inBundle !== true,
     )
-    .map(([path, entry]) => packageIdentity(path, entry));
+    .map(([path, entry]) => packageIdentity(path, entry, overriddenToSource));
 }
 
 const matches = (entry, pkg) =>
@@ -216,16 +308,22 @@ function deadPolicyKeys(policy, installed) {
 function unreviewedInstallScripts(policy, installed) {
   return installed
     .filter((pkg) => pkg.hasInstallScript && verdictFor(policy, pkg) === null)
-    .map((pkg) =>
-      pkg.name === null
+    .map((pkg) => {
+      if (pkg.overrideSource !== null) {
+        return `${pkg.path} runs an install script and the root overrides point it at "${pkg.overrideSource}", which npm matches by that spec rather than by any name -- no name-keyed entry can cover it, so drop the override, or record the verdict against the resolved spec and model that key form here`;
+      }
+      return pkg.name === null
         ? `${pkg.path} runs an install script and resolves to "${pkg.resolved}", which npm matches by that spec rather than by any name -- no name-keyed entry can cover it, so record the verdict against the resolved spec and model that key form here`
-        : `${pkg.name}@${pkg.version} (${pkg.path}) runs an install script with no allowScripts verdict -- review what the script does, then record true to allow it or false to block it`,
-    );
+        : `${pkg.name}@${pkg.version} (${pkg.path}) runs an install script with no allowScripts verdict -- review what the script does, then record true to allow it or false to block it`;
+    });
 }
 
 const manifest = readRootJson("package.json");
 const policy = policyEntries(manifest.allowScripts);
-const installed = installedPackages(readRootJson("package-lock.json"));
+const installed = installedPackages(
+  readRootJson("package-lock.json"),
+  manifest.overrides,
+);
 
 describe("allowScripts install-script policy", () => {
   it("states every verdict in a form npm holds in force", () => {
@@ -263,8 +361,8 @@ describe("allowScripts install-script policy", () => {
     ]);
   });
 
-  it("refuses a manifest whose overrides it does not model", () => {
-    expect(manifest.overrides === undefined || UNMODELED_OVERRIDES).toBe(true);
+  it("reads every root override in a form it models", () => {
+    expect(unmodeledOverrides(manifest.overrides)).toEqual([]);
   });
 });
 
@@ -451,6 +549,151 @@ describe("the verdict npm reaches for a lockfile entry", () => {
       },
     });
     expect(unreviewedInstallScripts(policyEntries({}), packages)).toEqual([]);
+  });
+});
+
+describe("the verdict npm reaches under a root override", () => {
+  // One dependent whose declared range the lockfile records unrewritten, beside
+  // the entry npm installed for it, which is the only trace an override leaves.
+  const overriddenTree = (entry) => ({
+    packages: {
+      "node_modules/minimatch": {
+        version: "9.0.9",
+        resolved: "https://registry.npmjs.org/minimatch/-/minimatch-9.0.9.tgz",
+        dependencies: { "brace-expansion": "^2.0.2" },
+      },
+      "node_modules/brace-expansion": entry,
+    },
+  });
+
+  const registryInstall = {
+    version: "5.0.8",
+    resolved:
+      "https://registry.npmjs.org/brace-expansion/-/brace-expansion-5.0.8.tgz",
+    hasInstallScript: true,
+  };
+
+  it("holds a verdict at the version a registry override resolves to", () => {
+    const packages = installedPackages(overriddenTree(registryInstall), {
+      "brace-expansion": "^5.0.8",
+    });
+    const registered = policyEntries({ "brace-expansion@5.0.8": true });
+    expect(unreviewedInstallScripts(registered, packages)).toEqual([]);
+    expect(deadPolicyKeys(registered, packages)).toEqual([]);
+  });
+
+  it("reads a verdict at the range the dependent declared as dead", () => {
+    const packages = installedPackages(overriddenTree(registryInstall), {
+      "brace-expansion": "^5.0.8",
+    });
+    const stale = policyEntries({ "brace-expansion@2.1.2": true });
+    expect(deadPolicyKeys(stale, packages)).toHaveLength(1);
+    expect(unreviewedInstallScripts(stale, packages)).toHaveLength(1);
+  });
+
+  it("takes every name-keyed verdict out of force for an overridden source", () => {
+    // The entry resolves to a registry-shaped URL in each case, which is the
+    // form the identity model reads a name and version out of: what decides the
+    // source is the override's spec, not the lockfile's record of the install.
+    for (const source of [
+      "file:vendor/brace-expansion.tgz",
+      "git+ssh://git@host.test/owner/repo.git#0123456",
+      "https://host.test/brace-expansion/-/brace-expansion-5.0.8.tgz",
+      "owner/repo",
+    ]) {
+      const packages = installedPackages(overriddenTree(registryInstall), {
+        "brace-expansion": source,
+      });
+      const named = policyEntries({ "brace-expansion": true });
+      const unreviewed = unreviewedInstallScripts(named, packages);
+      expect(unreviewed).toHaveLength(1);
+      expect(unreviewed[0]).toContain(`point it at "${source}"`);
+      expect(deadPolicyKeys(named, packages)).toHaveLength(1);
+    }
+  });
+
+  it("refuses the name a foreign URL carries under an overridden directory", () => {
+    const source = "https://host.test/other/-/other-1.0.0.tgz";
+    const packages = installedPackages(
+      overriddenTree({
+        version: "1.0.0",
+        resolved: source,
+        hasInstallScript: true,
+      }),
+      { "brace-expansion": source },
+    );
+    expect(
+      unreviewedInstallScripts(policyEntries({ other: true }), packages),
+    ).toHaveLength(1);
+    expect(
+      deadPolicyKeys(policyEntries({ other: true }), packages),
+    ).toHaveLength(1);
+  });
+
+  it("needs no verdict for an overridden package running no install script", () => {
+    const source = "file:vendor/brace-expansion.tgz";
+    const packages = installedPackages(
+      overriddenTree({ version: "5.0.8", resolved: source }),
+      { "brace-expansion": source },
+    );
+    expect(unreviewedInstallScripts(policyEntries({}), packages)).toEqual([]);
+    expect(deadPolicyKeys(policyEntries({}), packages)).toEqual([]);
+  });
+
+  it("leaves a package no override names decided by its own source", () => {
+    const packages = installedPackages(overriddenTree(registryInstall), {
+      "some-other-package": "file:vendor/other.tgz",
+    });
+    const registered = policyEntries({ "brace-expansion@5.0.8": true });
+    expect(unreviewedInstallScripts(registered, packages)).toEqual([]);
+    expect(deadPolicyKeys(registered, packages)).toEqual([]);
+  });
+});
+
+describe("the overrides form this check models", () => {
+  it("reads a registry range and a source spec", () => {
+    for (const spec of [
+      "5.0.8",
+      "^5.0.8",
+      "~5.0",
+      ">=5.0.8 <6.0.0",
+      "5.0.8 || 6.0.0",
+      "1.x",
+      "*",
+      "file:vendor/pkg.tgz",
+      "./vendor/pkg",
+      "https://host.test/pkg/-/pkg-1.0.0.tgz",
+      "git+ssh://git@host.test/owner/repo.git#0123456",
+      "github:owner/repo",
+      "owner/repo",
+    ]) {
+      expect(unmodeledOverrides({ pkg: spec })).toEqual([]);
+    }
+  });
+
+  it("refuses a form rewriting some edges on a name and not others", () => {
+    for (const overrides of [
+      { pkg: { nested: "1.0.0" } },
+      { "pkg@^2": "3.0.0" },
+      { ".": "1.0.0" },
+      { "file:vendor/pkg.tgz": "1.0.0" },
+    ]) {
+      expect(unmodeledOverrides(overrides)).toHaveLength(1);
+      expect(unmodeledOverrides(overrides)[0]).toContain(
+        "model that form here before declaring one",
+      );
+    }
+  });
+
+  it("refuses a spec whose source it cannot name", () => {
+    for (const spec of ["latest", "npm:other@^1", "$pkg", ""]) {
+      expect(unmodeledOverrides({ pkg: spec })).toHaveLength(1);
+    }
+  });
+
+  it("reads no overrides from a manifest declaring none", () => {
+    expect(unmodeledOverrides(undefined)).toEqual([]);
+    expect(namesOverriddenToSource(undefined).size).toBe(0);
   });
 });
 

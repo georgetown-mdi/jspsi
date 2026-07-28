@@ -125,20 +125,32 @@ A non-registry source -- a `file:` tarball or directory, a git URL, a remote tar
 - **Denials are name-only** (`@parcel/watcher`, `unrs-resolver`), which covers every version. Both are dev-only native builds unreachable from the shipped image, so no future version of either needs a fresh review to stay blocked. A version that added a `bin` would lose its `.bin` links along with its script, which is the one change that would need a fresh look.
 - **`fsevents` is denied at both installed versions** (`"fsevents@2.3.2 || 2.3.3"`, 2.3.3 at the root and 2.3.2 nested under `playwright`). Nothing runs either way: both published tarballs declare only `clean`, `build`, `test` and `prepublishOnly` and ship no `binding.gyp`, so the `node-gyp rebuild` an install would run does not exist -- it sits in `build`. The lockfile's `hasInstallScript: true` comes from the registry packument's flag, which is also why npm prints the sentinel `(install scripts present)` rather than a script body, and why the registry's full version metadata (what `npm view fsevents@2.3.3 scripts` reads) disagrees with the tarball npm installs. The verdict is what makes the map complete against what the lockfile records: a flagged package with no verdict is precisely what `--strict-allow-scripts` refuses, whether or not a script exists to run.
 
-**The map is held in step with the lockfile by a check, not by prose.** `scripts/allow-scripts-policy.test.mjs` (run by `npm run test:scripts`, a CI static check) reads the committed `package.json` and `package-lock.json` and fails on an entry in a form npm does not match, an entry matching no package the lockfile installs, a lockfile package with an install script and no verdict, or a manifest or key form the check does not model. A dead entry draws no npm diagnostic at all and an unmatchable spelling draws one only sometimes, which is why both are pinned here: a bump that adds an install script, or moves one to a version no entry names, reddens `npm run test:scripts` instead of silently widening the policy.
+**The map is held in step with the lockfile by a check, not by prose.** `scripts/allow-scripts-policy.test.mjs` (run by `npm run test:scripts`, a CI static check) reads the committed `package.json` and `package-lock.json` and fails on an entry in a form npm does not match, an entry matching no package the lockfile installs, a lockfile package with an install script and no verdict, or a key or `overrides` form the check does not model. A dead entry draws no npm diagnostic at all and an unmatchable spelling draws one only sometimes, which is why both are pinned here: a bump that adds an install script, or moves one to a version no entry names, reddens `npm run test:scripts` instead of silently widening the policy.
 
 The check and the flag act at different moments, which is why the flag earns its place beside a check that already holds the map complete. CI installs dependencies in the setup action and reaches `npm run test:scripts` several steps later, so the check names an uncovered install script only after the runner has already executed it; the flag grounds that install before it runs. The check's own job is the part npm never diagnoses -- a dead or unmatchable verdict, and completeness read from the committed lockfile rather than from whatever tree an install happens to build.
 
 **What the check holds, and what it does not.** npm decides from a live tree and this check from the committed lockfile, so the check is not npm's own unreviewed set and does not try to be. npm's `--strict-allow-scripts` preflight walks the ideal tree, its post-install advisory walks the actual one, it reads each package's source from dependency edges an `overrides` entry rewrites, and its script enumeration reads each extracted `package.json` from disk. What the check holds is the lockfile-level property: every verdict in the map is one npm would match against the committed lockfile, and every install script that lockfile records has one.
 
-Where the lockfile cannot answer, the check refuses the input rather than guessing, failing red and naming what has to be modeled: a root manifest declaring `overrides` (an override rewrites the edge npm reads registry-ness from, and the lockfile records neither the override nor the rewritten spec; this repo declares none), and any key npm-package-arg does not read as a package name -- a `file:` path, a tarball URL, a git spec, a bare `owner/repo`. Matching those means canonicalizing a source the way npm does, and refusing is what keeps the check from reporting a verdict npm enforces as a dead key to delete.
+Where the lockfile cannot answer, the check refuses the input rather than guessing, failing red and naming what has to be modeled: an `overrides` form outside the one below, and any key npm-package-arg does not read as a package name -- a `file:` path, a tarball URL, a git spec, a bare `owner/repo`. Matching those means canonicalizing a source the way npm does, and refusing is what keeps the check from reporting a verdict npm enforces as a dead key to delete.
+
+**What the check models about a root `overrides` entry.** An override rewrites the dependency edges npm reads each package's source from, and the lockfile records neither the override nor the rewritten spec -- every dependent entry keeps the range it declared. The source class a verdict is read against therefore comes from the override's own spec, over the flat `"<name>": "<spec>"` form only:
+
+- **A comparator-set semver range** -- comparators (`5.0.8`, `^5.0.8`, `>=5.0.8 <6.0.0`, `1.x`, `*`) optionally joined by `||` -- leaves the identity model untouched: the lockfile records the tarball npm resolved the override to, and npm decides the verdict at that version. Measured on npm 11.17, an override moving a transitive `@parcel/watcher` from 2.5.4 to 2.5.6 fails the install under a verdict keyed at 2.5.4 (`ESTRICTALLOWSCRIPTS`, naming 2.5.6) and installs clean under one keyed at 2.5.6, so a verdict naming the version the dependent declared is a dead key. That grammar is narrower than the specs npm resolves from the registry, and the gap costs a refusal rather than a verdict: a hyphen range (`"1.0.0 - 2.0.0"`) and a `v`-prefixed version (`"v2.0.1"`) are ordinary registry spellings npm honors -- measured on npm 11.17, each resolves `brace-expansion`, to 2.0.0 and 2.0.1 respectively -- and each reddens the check as an unmodeled spec, whose message names modeling the form here as the way through. Refusing is the idiom rather than a gap to widen away: an unmodeled spelling costs a red check, never a verdict reported as in force.
+- **A source spec** -- a scheme, a path shape, or the bare `owner/repo` shorthand npm reads as a git host or a directory -- takes every name-keyed verdict for that name out of force. The check names such a package as unreviewed when the lockfile records an install script for it and passes it when it does not. Measured on npm 11.17, a transitive dependency overridden to a `file:` tarball, or to a remote tarball URL spelled in the registry's own `<name>/-/<name>-<version>.tgz` shape, is reported uncovered under a name-keyed `true` and a name-keyed `false` alike, exactly as with no verdict at all -- while the lockfile entry npm writes carries that URL in `resolved`, which the identity model would otherwise read a name and version out of.
+- **Every other form is refused** in the register of the key-shape refusal above: a nested per-parent object, a `"."` self key and a `"name@range"` key each rewrite some edges on a name and not others, which the lockfile cannot answer; a dist-tag, an `npm:` alias and a `$name` reference to a root dependency each name a source this does not model.
+
+Three residuals sit under that model, all of which cost a refusal rather than a verdict:
+
+- A git source is grouped with `file:` and remote unmeasured, for want of a reachable git host to measure it against.
+- The check keys an override both to the name a package is installed under and to the name its resolved URL carries, since either can be the name the rewritten edge names. Whether npm's own matcher follows an aliased edge (`"h3-v2": "npm:h3@2"`) to an override keyed on either name is unmeasured, so the check can refuse a verdict npm holds.
+- Nothing verifies that the committed lockfile is the one npm resolves with the overrides in force: npm 11.17 leaves a lockfile whose existing resolution already satisfies its dependents byte-identical when an override is added ([the brace-expansion fix](#the-brace-expansion-advisory-is-fixed-by-a-root-override) records the route around that). An override that has not been applied reads as covered. Where the lockfile already carries what that override resolves to, `npm ci` installs that same lockfile and what runs is what the check read -- measured on npm 11.17, a `brace-expansion` override standing over a lockfile whose resolution predates it installs clean, and `npm audit --package-lock-only` against that tree reports the 9 highs the override answers. Where the lockfile lacks a package the unapplied override needs, `npm ci` refuses rather than resolving one: an override of `"brace-expansion": "^1.1.11"` over a lockfile resolved to 5.0.8 fails `EUSAGE` (`Missing: brace-expansion@1.1.16 from lock file`), so nothing installs and no unreviewed script runs.
 
 The rest are limits rather than refusals:
 
 - A package whose tarball ships a `binding.gyp` and declares no install script gets a synthetic `install: node-gyp rebuild` that npm discovers only after extraction. Its lockfile entry carries no `hasInstallScript` flag, so a lockfile-level check cannot name it -- and neither can npm's own pre-extract preflight, which lets that script run under `--strict-allow-scripts` exactly as without it.
 - A stale `node_modules` holds packages the lockfile no longer installs, and npm's advisory reports those: `npm approve-scripts --allow-scripts-pending` can list packages the check is silent about. A clean install reconciles the two.
 - A denial whose package stops declaring an install script keeps matching it, so nothing reddens. That is deliberate: a `false` verdict still costs the package its bin links, so requiring every entry to govern a script would demand deleting verdicts npm still enforces.
-- A dependency introduced from a git or remote-URL source is one npm refuses name-keyed verdicts for while its lockfile entry can look like a registry install. None exists here, and adding one goes through the dependency review in [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy); the check has to be extended before such a dependency can be governed.
+- A dependency a **dependent's own manifest** introduces from a git or remote-URL source is one npm refuses name-keyed verdicts for while its lockfile entry can look like a registry install. The override model above reaches only the ones the root manifest introduces; for the rest the lockfile records a spec the check does not read. None exists here, and adding one goes through the dependency review in [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy).
 - The rules above were measured against npm 11.17 and are modeled here rather than re-derived from the npm in use, so a release that changes npm's matcher needs them re-measured.
 
 **What the dead-key rule costs.** Requiring every entry to match a package the lockfile installs means the map cannot carry a standing "never run this package's scripts" verdict for a package absent from the tree. That is what dropping `protoc-gen-js: false` gives up, and `strict-allow-scripts` recovers most of it: a reintroduced `protoc-gen-js` arrives with no verdict, so the install fails and its `postinstall` does not run, where an unset flag would have let it install, warn once, and run. What the standing denial would have added beyond that is a verdict already recorded -- under the flag the install stops and waits for a review rather than carrying the earlier answer. The protection lives in a stronger control regardless -- `scripts/vendored-psi-deps.test.mjs` fails if that package appears anywhere in the committed lockfile at all, which no install-script verdict does.
@@ -160,29 +172,48 @@ npm error invalid: crossws@0.3.5, ^0.4.1 required by h3-v2@npm:h3@2.0.1-rc.20
 
 The other candidates fail outright: `overrides` scoped to the parent or to the alias do not move the hoisted copy; a global override collapses the tree to one version and drops `crossws` below the dev dependents that genuinely require it; declaring it in `apps/web` leaves the peer unsatisfied because that directory is not on the resolution path; and `npm sbom --omit peer` still runs the tree-validity check.
 
-**Resolution path.** This clears upstream, without action here, once `h3` v2 ships stable (so `@tanstack/start-server-core` stops depending on a prerelease) or `nitropack` / `h3@1.x` move to the 0.4 line -- at which point the ranges are mutually satisfiable, npm hoists one version that satisfies everyone, and `npm sbom` runs again. Until then, treat step 9 as blocked and re-check after any `@tanstack/*` or `nitropack` bump. A local workaround should be reconsidered only if a release becomes due before upstream converges, and then only alongside a fix for the `custom-entry.ts` type seam.
+**Resolution path.** This clears upstream, without action here, once `h3` v2 ships stable (so `@tanstack/start-server-core` stops depending on a prerelease) or `nitropack` / `h3@1.x` move to the 0.4 line -- at which point the ranges are mutually satisfiable, npm hoists one version that satisfies everyone, and the release-scoped `npm sbom` runs again. A dev-inclusive `npm sbom` stays refused past that point, on two further entries the [`brace-expansion` override](#the-brace-expansion-advisory-is-fixed-by-a-root-override) contributes; the release command does not run one. Until then, treat step 9 as blocked and re-check after any `@tanstack/*` or `nitropack` bump. A local workaround should be reconsidered only if a release becomes due before upstream converges, and then only alongside a fix for the `custom-entry.ts` type seam.
 
-## The brace-expansion advisory is accepted rather than fixed
+## The brace-expansion advisory is fixed by a root override
 
-`npm audit --package-lock-only` reports 9 high-severity findings against the
-committed lockfile. They are one advisory, GHSA-mh99-v99m-4gvg
-(`brace-expansion`: denial of service via unbounded expansion length driving an
-out-of-memory process crash), rolled up through the nine packages that depend on
-it; npm answers it `No fix available`. The advisory affects every version at or
-below 5.0.7 and names 5.0.8 as its first patch, with no patched 2.x, 3.x or 4.x
-line, so no within-major bump clears it. The tree carries two copies at 2.1.2,
-nested under `archiver-utils` and `readdir-glob`, beside a root
-`brace-expansion@5.0.8` that is already out of range.
+The root `package.json` carries `"overrides": { "brace-expansion": "^5.0.8" }`,
+which holds `npm audit --package-lock-only` at `found 0 vulnerabilities` against
+the committed lockfile. It answers GHSA-mh99-v99m-4gvg (`brace-expansion`:
+denial of service via unbounded expansion length driving an out-of-memory
+process crash), which affects every version at or below 5.0.7 and names 5.0.8 as
+its first patch, with no patched 2.x, 3.x or 4.x line. Without the override the
+audit reports 9 high-severity findings -- one advisory rolled up through the
+nine packages that depend on it, which npm answers `No fix available` -- against
+two copies at 2.1.2 nested under `archiver-utils` and `readdir-glob`. This
+supersedes the accept recorded here before the override, which left those two
+copies in the tree as development-only.
 
-This finding has no corresponding Dependabot alert. The advisory published on
-2026-07-24, and Dependabot has opened no alert for it in any state;
-`gh api repos/georgetown-mdi/jspsi/dependabot/alerts` returns the authoritative
-list to re-check that against. The accept below is therefore recorded ahead of
-the alert rather than in response to one, and stands either way: the two
-vulnerable copies are in the tree and the advisory applies to them whichever
-tool reports it.
+**Why no bump reaches it.** `nitropack@2.13.4` is the current release and
+declares `archiver: ^7.0.1`. Under archiver 7, `archiver-utils` reaches
+`minimatch@9.0.9` through `glob@^10` and `readdir-glob` reaches
+`minimatch@5.1.9`; those two declare `brace-expansion` at `^2.0.2` and `^2.0.1`.
+Both ranges cap below the 5.0.8 line, so no bump of any package on that path
+delivers the fix, and an override is what is left. It requires minimatch to
+widen the range on one of those lines, or archiver and nitropack to move off
+them.
 
-**Why it does not reach the shipped tree.** Both copies are development-only.
+**What the override changes in the tree.** The hoisted root
+`brace-expansion@5.0.8` serves both minimatch declarations: the lockfile carries
+no nested `brace-expansion` entry and no nested `balanced-match` entry under
+`archiver-utils` or `readdir-glob`, and no other package version moves. An
+otherwise identical resolve without the override reports the same 9 high, which
+isolates the clearing to the override rather than to version drift.
+
+**Reproducing that lockfile.** npm 11.17 does not apply a newly added root
+`overrides` to a lockfile whose existing resolution already satisfies its
+dependents: `npm install`, `npm install --package-lock-only`, and `--force` all
+return the lockfile byte-identical. The override takes effect on a from-scratch
+resolve, which drifts on the order of 180 unrelated package versions, or -- the
+route that yields the surgical diff, and the one taken here -- after deleting
+exactly the four nested entries above from the lockfile and reinstalling. Take
+the same route after any bump that reintroduces a nested copy.
+
+**Why it did not reach the shipped tree.** Every copy is development-only:
 `npm ls --omit=dev brace-expansion` prints `(empty)`, which is npm's no-match
 answer -- it exits nonzero on a filtered query that matches nothing, while the
 unfiltered `npm ls --omit=dev` runs clean, so the nonzero exit reports the
@@ -197,51 +228,57 @@ toolchain:
 nitropack archiving its own build output. The brace patterns expanded there come
 from this repository's build configuration, not from partner, operator, or
 network input, so nothing an attacker controls reaches the expansion the
-advisory describes. The shipped CLI image installs `--omit=dev` (see [The Docker
-image's dependency freeze](#the-docker-images-dependency-freeze)), so none of it
-is in the image.
+advisory describes, and the shipped CLI image installs `--omit=dev` (see [The
+Docker image's dependency freeze](#the-docker-images-dependency-freeze)). That
+bounds the urgency rather than the fix, which clears the advisory at the cost
+recorded next.
 
-**Why no upstream fix exists.** `nitropack@2.13.4` is the current release and
-declares `archiver: ^7.0.1`. Under archiver 7, `archiver-utils` reaches
-`minimatch@9.0.9` through `glob@^10` and `readdir-glob` reaches
-`minimatch@5.1.9`; those two declare `brace-expansion` at `^2.0.2` and `^2.0.1`.
-Both ranges cap below the 5.0.8 line, so no bump of any package on that path
-delivers the fix. It requires minimatch to widen the range on one of those
-lines, or archiver and nitropack to move off them.
+**What the override costs: a dev-scoped invalid edge.** npm 11.17 marks an
+overridden edge `overridden` only where the override and the edge hang on the
+same project. Reached through a workspace it resolves the edge but reports it
+`invalid`, so a full-depth dev-inclusive walk fails: `npm ls --all` exits 1 with
+`ELSPROBLEMS`, and an unscoped `npm sbom` refuses with `ESBOMPROBLEMS` naming
+`brace-expansion@5.0.8, ^2.0.2 required by minimatch@9.0.9` and
+`^2.0.1 required by minimatch@5.1.9`. That is the override itself and not this
+tree's shape: a minimal workspaces repro carrying nothing but the same override
+reports the same two, and a single-project repro of the same dependency chain
+reports neither and produces an SBOM. The release path is out of its reach,
+measured on npm 11.17 against the committed lockfile -- `npm ls --omit=dev`
+exits 0, `npm ls --all --omit=dev` names only the
+[crossws peer](#the-crossws-peer-conflict-blocks-the-release-sbom), and the
+release-scoped `npm sbom --omit=dev -w packages/core -w apps/cli -w apps/web`
+(step 9 in [RELEASES.md](../RELEASES.md)) names only that same peer.
 
-**The override that would clear it, and the guard that gates it.** A root
-`overrides` entry of `"brace-expansion": "^5.0.8"` takes `npm audit` to zero
-vulnerabilities, builds and typechecks all three workspaces, and passes every
-unit suite. An otherwise identical resolve without it still reports the same 9
-high, which isolates the clearing to the override rather than to version drift.
-The resulting change is surgical: it deletes the two nested
-`brace-expansion@2.1.2` lockfile entries and their two nested `balanced-match`
-entries, so the hoisted root `brace-expansion@5.0.8` serves both minimatch
-declarations, and it moves no other version.
+**What that invalid edge is underneath: an API-incompatible major.** The npm
+reporting artifact is not the whole cost. `brace-expansion@5.0.8` exports a
+named `expand` and no callable default:
+`Object.keys(require("brace-expansion"))` is
+`["EXPANSION_MAX", "EXPANSION_MAX_LENGTH", "expand"]`, and `.default` is
+`undefined`. Both dependents the hoisted copy serves call the 2.x callable
+shape, so each breaks on any brace pattern -- measured against the committed
+tree, `braceExpand("a{b,c}d")` throws from `minimatch@5.1.9` (under
+`readdir-glob`, declaring `^2.0.1`) with `TypeError: expand is not a function`,
+and from `minimatch@9.0.9` (under `archiver-utils`, declaring `^2.0.2`) with
+`TypeError: (0 , brace_expansion_1.default) is not a function`. Non-brace
+patterns still match.
 
-Reproducing that is harder than it reads, because npm 11.17 does not apply a
-newly added root `overrides` to a lockfile whose existing resolution already
-satisfies its dependents: `npm install`, `npm install --package-lock-only`, and
-`--force` all return the lockfile byte-identical. The override takes effect on a
-from-scratch resolve, which drifts on the order of 180 unrelated package
-versions, or -- the route that yields the surgical diff -- after pruning exactly
-the pinned nested entries from the lockfile and reinstalling.
-
-What holds the override back is `scripts/allow-scripts-policy.test.mjs`, which
-fails on any root `overrides` key by design (see [The install-script
-policy](#the-install-script-policy-allowscripts)): npm reads each package's
-source from the dependency edges an override rewrites, while the check reads the
-committed lockfile, which records the unrewritten specs, so a name-keyed verdict
-could read as in force while npm runs the script. Introducing the override
-therefore means modeling overrides in that check first -- a change to an
-install-script control, in security-review scope, and larger than the advisory
-it clears.
+That break is latent and development-only. `npm run build -w apps/web` exits 0
+against the committed tree, because nothing built here reaches archiver's brace
+path: archiver arrives through nitropack's azure preset, which this repo does
+not build. Every `brace-expansion` copy is development-only besides, so none of
+it is in the shipped image. What is left is a forward risk -- a dependent
+arriving on `brace-expansion@^1` or `^2` is forced onto the 5.x line by the
+same override and hits the same `TypeError`. Nothing at install time reports
+that: npm resolves and installs the tree either way, and
+`npm audit --package-lock-only` answers `found 0 vulnerabilities` with the two
+invalid edges already in the tree. It surfaces when that dependent's brace path
+runs, or as one more `invalid` edge in the dev-inclusive walks above.
 
 **Revisit when** `nitropack` or `archiver` moves off `archiver@^7` to a line
-whose `minimatch` accepts `brace-expansion@^5`; when `minimatch` widens the `^2`
-range on its 5.x or 9.x lines; or when `scripts/allow-scripts-policy.test.mjs`
-models `overrides`, at which point the override above is the fix and needs no
-further measurement.
+whose `minimatch` accepts `brace-expansion@^5`, or `minimatch` widens the `^2`
+range on its 5.x or 9.x lines. Either one makes the override redundant, and
+dropping it restores a valid dev-scoped tree along with the dev-inclusive
+`npm sbom`.
 
 ## Upgrading the SFTP Stack (ssh2 / ssh2-sftp-client)
 
