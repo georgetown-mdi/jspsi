@@ -343,12 +343,13 @@ const ABANDONED_TRANSITION_DISPOSITION: Record<
   teardown: "forcesTheTransportClosed",
 };
 
-// One session transition, as runTransition takes it. The three arms are the three
-// abandon dispositions above, so the value each kind reports is stated where the
-// disposition record says it is needed and nowhere else. Teardown carries no
-// `skipped` because it is the transition the teardown latch is set FOR: every
-// other kind states what it returns when it reaches the front of the queue with
-// that latch already set.
+// One session transition, as runTransition takes it. The arms follow the abandon
+// dispositions above, so the value each kind reports is stated where the
+// disposition record says it is needed and nowhere else -- except the idle
+// release, split out because it alone carries a data-plane precondition and so
+// alone has a fourth thing it can report. Teardown carries no `skipped` because it
+// is the transition the teardown latch is set FOR: every other kind states what it
+// returns when it reaches the front of the queue with that latch already set.
 type SessionTransition<T> =
   | {
       kind: "teardown";
@@ -361,7 +362,24 @@ type SessionTransition<T> =
       skipped: () => T;
     }
   | {
-      kind: Exclude<SessionTransitionKind, "teardown" | "connect">;
+      kind: "releaseForIdle";
+      run: (held: HeldSessionTransition) => Promise<T>;
+      skipped: () => T;
+      abandoned: () => T;
+      // What the release reports at a boundary it declines to close because an
+      // operation is still outstanding on the session. Kept apart from both
+      // siblings because the causes differ and so do the remedies: `skipped`
+      // answers a connection closing on purpose, `abandoned` a transition that
+      // never got its turn, and this one a session deliberately kept up for the
+      // operation on it, which the first boundary past that operation's settlement
+      // releases.
+      heldForOutstandingOperation: () => T;
+    }
+  | {
+      kind: Exclude<
+        SessionTransitionKind,
+        "teardown" | "connect" | "releaseForIdle"
+      >;
       run: (held: HeldSessionTransition) => Promise<T>;
       skipped: () => T;
       // What this transition's caller reads when it gives up its wait for the one
@@ -528,6 +546,26 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // would then pace each line on the other's occurrences.
   private declinedCycleRedials = 0;
   private transportRetries = 0;
+  // Server-driven operations this adapter has ISSUED and not yet settled, counted
+  // at the bracket they pass through, save the three round trips issued outside it
+  // that tracked() names. Issued-and-unsettled is not the set that is on the wire,
+  // and departs from it in both directions: an adapter bound that expires settles
+  // the operation here while the library request it raced is still outstanding at
+  // the server, and an operation the server never answers is never settled from
+  // this side at all, core's whole-exchange budget being a race that abandons
+  // rather than a cancellation.
+  // Read by runTransition as the idle-boundary release's precondition: a boundary
+  // reached with an operation outstanding closes nothing, because the close would
+  // tear that operation off the wire. So what bounds the hold is the operation's
+  // own settlement -- its per-operation deadline where it carries one, and nothing
+  // on this side where it does not (a put from a string or stream source, and a
+  // progress-reset window a trickling server re-arms rather than trips), in which
+  // case the session stays held for the rest of the exchange. Owned here rather
+  // than read off the heartbeat's own in-flight count, which is no reading the
+  // release could take: releaseSessionForIdle stops the heartbeat as its first
+  // statement and stop() zeroes that count, and the heartbeat is not armed at all
+  // in the mode the precondition serves.
+  private outstandingOperations = 0;
   // The per-operation liveness bound (ms) every server-driven op is held to. See
   // the constructor's stallDeadlineMs doc for the test-seam and
   // not-operator-configurable rationale.
@@ -541,10 +579,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private readonly heartbeat: SftpHeartbeat;
   // Connection-per-poll (ephemeral-session) mode. When true, the adapter releases
   // its SFTP session at each poll-loop idle boundary (releaseForIdle) and re-dials
-  // at the start of the next cycle (ensureConnected), so no session is held across
-  // an idle gap a server's max-session/idle cap would drop. Off by default (the
-  // whole-exchange single-session model). Internal-only; the CLI/config surface
-  // and the flag name are a separate item. See docs/notes/connection-per-poll-sftp.md.
+  // at the start of the next cycle (ensureConnected), so a session a server's
+  // max-session/idle cap would drop is not held across an idle gap -- save a
+  // boundary kept for an operation still outstanding (see runTransition). Off by
+  // default (the whole-exchange single-session model). Internal-only; the
+  // CLI/config surface and the flag name are a separate item. See
+  // docs/notes/connection-per-poll-sftp.md.
   private readonly ephemeralSessions: boolean;
 
   /**
@@ -560,8 +600,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    *
    * `options.ephemeralSessions` turns on connection-per-poll (ephemeral-session)
    * mode: the adapter releases its SFTP session at each poll-loop idle boundary
-   * and re-dials at the start of the next cycle, so no session is held across an
-   * idle gap a server's max-session/idle cap would drop. Off by default.
+   * and re-dials at the start of the next cycle, so a session a server's
+   * max-session/idle cap would drop is not held across an idle gap -- save a
+   * boundary kept for an operation still outstanding (see {@link runTransition}).
+   * Off by default.
    * Internal-only -- the CLI/config surface and the flag name are a separate item.
    */
   constructor(
@@ -736,6 +778,23 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     const enter = async (): Promise<T> => {
       if (transition.kind !== "teardown" && this.closing)
         return transition.skipped();
+      // The idle release is the one transition with a data-plane precondition: an
+      // operation already on the wire when the boundary falls would be torn by the
+      // close, so the release keeps the session up and the first boundary past that
+      // operation's SETTLEMENT ends it. What bounds the wait for that settlement --
+      // which for some operations is nothing at all -- is at outstandingOperations.
+      // Read here, with the queue held and nothing yet driven, so an operation
+      // issued while this release was still QUEUED behind another transition is
+      // covered as well. The release gains no wait from this: it returns rather
+      // than draining, and every bound over the transition queue stands unchanged.
+      // No other kind may hold for an operation -- a teardown closes over whatever
+      // is outstanding by design, a recovery re-dial would park behind the very
+      // class of operation that drove it, and neither dial has a session to keep.
+      if (
+        transition.kind === "releaseForIdle" &&
+        this.outstandingOperations > 0
+      )
+        return transition.heldForOutstandingOperation();
       const boundaryOnEntry = this.sessionBoundary;
       this.transitionInProgress = held;
       try {
@@ -974,9 +1033,29 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // epoch token opStarted returns is handed back to opSettled so an op whose session
   // was torn down mid-flight (a reconnect advanced the heartbeat's epoch) cannot
   // decrement the new session's in-flight count when it finally settles.
+  //
+  // The adapter's own outstanding-operation count is kept here too, and takes no
+  // epoch: it counts operations this adapter issued and has not settled, whatever
+  // session they went out on, which is neither more nor less than what the
+  // idle-boundary release's precondition reads (see outstandingOperations for how
+  // that set differs from the wire, and what it leaves the hold bounded by). The
+  // two operations the recovery gate does not reach (the never-reject cleanup
+  // delete, and a put whose source cannot be re-issued) do pass through here, so
+  // the precondition covers those as well. Three server round trips do not pass
+  // here at all: the heartbeat's keepalive (see sendKeepalive), the best-effort
+  // handle close a listing fires once it has settled (whose loss the listing
+  // accounts for), and rename()'s re-issue existence probe, issued a layer above
+  // renameOnce's bracket -- a probe torn by a release reports a landed rename as
+  // the failure that drove the probe. finally() is what balances a rejecting
+  // operation against a resolving one; one unbalanced failure would pin the session
+  // open for the rest of the exchange.
   private tracked<T>(op: Promise<T>): Promise<T> {
     const epoch = this.heartbeat.opStarted();
-    return op.finally(() => this.heartbeat.opSettled(epoch));
+    this.outstandingOperations += 1;
+    return op.finally(() => {
+      this.outstandingOperations -= 1;
+      this.heartbeat.opSettled(epoch);
+    });
   }
 
   // Layers the non-fatal slow-operation warning (observability) over an in-flight
@@ -1153,7 +1232,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     );
   }
 
-  // The outermost layer around every server-driven op: it runs the op once and,
+  // The outermost layer around a recovery-wrapped op -- every server-driven op but
+  // safeDelete and a put whose source cannot be re-issued: it runs the op once and,
   // if that rejection is a CLEAN session loss, re-dials the connection ONCE and
   // re-issues the op ONCE before giving up. An SFTP server that enforces a
   // max-session or idle cap the operator cannot change drops the one long-lived
@@ -1172,18 +1252,28 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // progress every cycle and a reset-on-progress budget would never bound it. The
   // escape hatches are raising max_reconnect_attempts (a flaky link) and
   // connection-per-poll mode (a server that caps session lifetime), whose recovery
-  // re-dials are left uncapped by this count in every phase -- the poll loop holds
-  // no session across the idle gap, and the rendezvous that precedes it holds one
-  // across its waits and needs the uncapped re-dial to survive a cap that cuts it.
-  // Both are bounded instead by the peer-inactivity ceiling.
+  // re-dials are left uncapped by this count in every phase -- the poll loop's
+  // ordinary cycle session is not held across the idle gap, while the rendezvous
+  // that precedes it holds one across its waits and a held boundary keeps one for
+  // the operation outstanding on it, each needing the uncapped re-dial to survive a
+  // cap that cuts it. All are bounded instead by the peer-inactivity ceiling.
   // A teardown re-dial (abort marker / drain) is exempt so the fast-fail marker
   // still lands when the budget is spent. The op+re-dial is enclosed by
   // boundTransport's per-op peerTimeoutMs budget in core (a Promise.race), which is
   // the terminal ceiling against a pathological instant-drop server, so no bespoke
-  // total-time timer is added here. Serial op issuance (single-party appliance)
-  // guarantees no other tracked() op is in flight when the re-dial runs: the first
-  // attempt's promise has already settled by the time this catch fires, so
-  // connect()'s heartbeat re-arm never races a live op.
+  // total-time timer is added here. What the re-dial rests on is narrower than op
+  // seriality, which core does not offer: a send resuming from the protocol
+  // continuation issues its operations alongside the poll cycle's own, so another
+  // tracked() op can be unsettled while this re-dial runs. The re-dial neither
+  // waits for one nor is made unsound by one. THIS operation's first attempt has
+  // settled -- this catch is where it settled -- and what the re-dial replaces is
+  // the SESSION, so an operation unsettled at that moment was issued against the
+  // session being torn down: connect()'s heartbeat re-arm is synchronous with the
+  // dial that establishes the replacement and advances the heartbeat epoch, which
+  // is what keeps such a straggler's late settlement off the fresh session's
+  // in-flight count (see tracked() and ./sftpHeartbeat's epoch field). The unit
+  // case pinning that this re-dial does not drain an outstanding operation is where
+  // the concurrent state is constructed.
   //
   // `reissue` is applied ONLY on the re-issue, never the first attempt, so a
   // per-op idempotency relaxation (delete-absent, rename-dest-exists,
@@ -1274,12 +1364,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // is RUNNING. Both readings below are written from inside the release's own
   // transition, so an operation issued while that release is still QUEUED behind
   // another transition reads neither and is issued against the still-live
-  // session: it is in the on-the-wire class, not the covered one. Two operations
-  // do not reach this gate at all -- safeDelete, whose never-reject contract puts
-  // it outside recovery, and a put whose source cannot be re-issued (a one-shot
-  // stream, or flags:"a") -- and no gate at entry can cover an operation already
-  // on the wire when the release begins: that one is torn with the session, and
-  // can fail terminally (see shouldRecoverFromSessionLoss).
+  // session: it is in the on-the-wire class, not the covered one. No gate at entry
+  // can cover that class at all, and it is not this gate's to cover -- the release
+  // itself keeps a boundary reached with a counted operation outstanding (see
+  // runTransition), so no release closes over one. Two operations do not reach this
+  // gate in any case -- safeDelete, whose never-reject contract puts it outside
+  // recovery, and a put whose source cannot be re-issued (a one-shot stream, or
+  // flags:"a") -- and both are counted by that precondition, which reaches past the
+  // recovery-wrapped operations (tracked() names what it leaves uncounted).
   //
   // Returns undefined -- no gate, not even a microtask -- whenever the mode is off
   // or no release has intervened, so the default held-session mode runs exactly as
@@ -1470,16 +1562,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // Recovering it means clearing that session first, which is the re-dial's own
   // forced close (see redialForRecovery).
   //
-  // An op ISSUED once a connection-per-poll release is RUNNING reaches none of
-  // these readings: withSessionRecovery's gate waits the release out and
-  // re-establishes before the first attempt. An op ALREADY ON THE WIRE when that
-  // release begins is torn with the session -- no entry gate covers it, and
-  // neither does one issued while the release is still queued, which is the same
-  // class -- and at the pinned versions that tear reads as the loss it is, for a
-  // narrower reason than the transport event alone: ssh2 fails outstanding channel
-  // requests ONLY from the socket's 'close' handler (the socket's 'end' emits and
-  // cleans the protocol up but leaves them outstanding), and it does so after its
-  // own emit('close') has already run. Both ssh2-sftp-client listeners that emit
+  // No connection-per-poll idle release brings an operation of its own to these
+  // readings. One ISSUED while a release is RUNNING never reaches them:
+  // withSessionRecovery's gate waits the release out and re-establishes before the
+  // first attempt. One ALREADY ON THE WIRE -- including one issued while the
+  // release was still queued, the same class -- is what the release's own
+  // precondition keeps the boundary for (see runTransition), so no release closes
+  // over a counted one. What the ordering premise below carries is every OTHER tear
+  // of an outstanding op: a server-side drop, and the terminal close.
+  //
+  // At the pinned versions such a tear reads as the loss it is, for a narrower
+  // reason than the transport event alone: ssh2 fails outstanding channel requests
+  // ONLY from the socket's 'close' handler (the socket's 'end' emits and cleans the
+  // protocol up but leaves them outstanding), and it does so after its own
+  // emit('close') has already run. Both ssh2-sftp-client listeners that emit
   // reaches -- the per-operation temp closeListener and the constructor's global
   // one -- clear `sftp`, so by the time the rejection is delivered the session
   // always reads cleared. Its global 'end' listener does NOT clear `sftp`, which
@@ -1850,15 +1946,23 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // stretch (a PSI round on the computing side) does not let the server's idle
     // timeout drop it. start() resets the idle clock, so a reconnect re-arms
     // cleanly. It is torn down by end() and by the fatal-'error' guard. Skipped in
-    // ephemeral-session mode: in the POLL LOOP each cycle's session lives only for
-    // its op batch (seconds) and is released before the idle gap, so there is no
-    // held session to keep warm. The rendezvous that precedes the loop does hold one
-    // session across its waits, un-heartbeated, and that is accepted rather than
-    // fixed -- a keepalive defeats only an idle timer and is powerless against the
-    // maximum-session-lifetime caps this mode exists for, while the mode's uncapped
-    // recovery re-dials carry the rendezvous across a cap-forced drop (the
-    // uncapped-recovery unit case in test/unit/ssh2SftpAdapter.test.ts, driven end
-    // to end in test/integration/ephemeralSessionExchange.test.ts).
+    // ephemeral-session mode, where NO session is heartbeated. The poll loop's
+    // ordinary cycle session lives only for its op batch (seconds) and is released
+    // at the idle boundary, so there is none to keep warm; the two that DO span an
+    // idle stretch are accepted un-heartbeated rather than fixed here -- the
+    // rendezvous that precedes the loop, holding one across its waits, and a
+    // boundary the release keeps because an operation is still outstanding (see
+    // runTransition). A keepalive would buy either little: it defeats only an idle
+    // timer and is powerless against the maximum-session-lifetime caps this mode
+    // exists for, and it cannot be issued alongside the very operation a held
+    // boundary is waiting on, ssh2-sftp-client permitting no second concurrent
+    // operation (which is why the heartbeat suppresses a beat while one is in
+    // flight). What carries either session across a cap-forced drop is the mode's
+    // uncapped recovery re-dial (the uncapped-recovery unit case in
+    // test/unit/ssh2SftpAdapter.test.ts, driven end to end in
+    // test/integration/ephemeralSessionExchange.test.ts). It is not free: an
+    // operation outstanding on the cut session fails and recovers through that
+    // re-dial, which counts and warns the drop as the server-side loss it is.
     if (!this.ephemeralSessions) this.heartbeat.start();
     // Discharge the idle-boundary release (see the `sessionBoundary` field): LAST
     // and on success only, so a dial that threw above leaves the release standing
@@ -2173,12 +2277,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * The whole body, forced close included, holds the transition lock, so an
    * operation ISSUED while it runs re-establishes the session through
    * {@link withSessionRecovery}'s gate instead of racing the close or reporting the
-   * deliberate absence as a server drop. An operation already ON THE WIRE when the
-   * release begins is torn with the session instead, and at the pinned versions
-   * that tear clears the session as it rejects the operation, so the operation
-   * recovers (see {@link shouldRecoverFromSessionLoss} for the routes that still
-   * reach the terminal reading). Closing that case outright means holding the
-   * release while an operation is outstanding.
+   * deliberate absence as a server drop. An operation already ON THE WIRE reaches
+   * no gate at entry, so this release does not begin at all while one is
+   * outstanding: {@link runTransition} keeps the boundary, the operation completes
+   * on the session it was issued against, and the first boundary past its
+   * settlement releases as usual. Each boundary it straddles costs the mode one
+   * idle gap and is neither counted nor warned -- a concurrent `send()` straddling
+   * a boundary is ordinary rather than anomalous -- and it is a hold, not a drain:
+   * the release returns instead of awaiting the operation, so nothing above it
+   * waits any longer than it would have. An operation carrying no adapter-side
+   * deadline holds every boundary until the exchange ends; the hold's bound is the
+   * operation's, and {@link outstandingOperations} states which have one.
    */
   releaseForIdle(): Promise<void> {
     if (!this.ephemeralSessions) return Promise.resolve();
@@ -2186,6 +2295,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       kind: "releaseForIdle",
       skipped: () => undefined,
       abandoned: () => this.warnIdleReleaseDeclined(),
+      heldForOutstandingOperation: () => undefined,
       run: (held) => this.releaseSessionForIdle(held),
     });
   }

@@ -78,10 +78,10 @@ export interface SftpHeartbeatOptions {
 
 /**
  * A self-rescheduling keepalive for one SFTP session. {@link start} arms it after
- * a successful connect; the adapter brackets every server-driven operation with
- * {@link opStarted}/{@link opSettled} so a beat is suppressed while real traffic is
- * already keeping the session alive; {@link stop} tears it down on every terminal
- * path.
+ * a successful connect; the adapter brackets its server-driven operations with
+ * {@link opStarted}/{@link opSettled} (its own bracket names the few round trips it
+ * leaves out) so a beat is suppressed while real traffic is already keeping the
+ * session alive; {@link stop} tears it down on every terminal path.
  *
  * Concurrency: ssh2-sftp-client shares connection-level temp listeners across
  * operations, so two operations in flight on one client at once is unsafe. The
