@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -33,6 +34,31 @@ const FIXTURE = "apps/web/src/fixture.ts";
 
 const urlsIn = (source, path = FIXTURE) =>
   urlLiterals(source, path).map((hit) => hit.url);
+
+const LITERAL = 'const u = "https://evil.example/x";\n';
+
+// One file for every scanned pathspec, which is what a repository has to hold
+// for the scan to resolve at all.
+const SKELETON = [
+  ...SCANNED_ROOTS.map((root) => `${root}/entry.ts`),
+  ...SCANNED_FILES,
+];
+
+// A throwaway repository holding the skeleton plus whatever paths a case adds,
+// so real git decides which of them each pathspec matches.
+const withScannedRepo = (extraFiles, run) => {
+  const dir = mkdtempSync(resolve(tmpdir(), "egress-scan-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore" });
+    for (const file of [...SKELETON, ...extraFiles]) {
+      mkdirSync(resolve(dir, dirname(file)), { recursive: true });
+      writeFileSync(resolve(dir, file), LITERAL);
+    }
+    run(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
 
 describe("URL literal matcher", () => {
   it("flags an unlisted absolute URL in a scanned root", () => {
@@ -186,11 +212,71 @@ describe("URL literal matcher", () => {
     ]);
   });
 
-  it("does not trip on an authority with no alphanumeric character", () => {
-    const source =
-      'placeholder="https://...#... or the bare code"\n' +
-      'const scheme = "ws://, wss://, or file://";\n';
-    expect(urlsIn(source)).toEqual([]);
+  it("does not trip on an authority written entirely of dots", () => {
+    // How elided placeholder text spells a URL. `new URL()` does resolve the
+    // shape to a host, so this is a knowing skip, stated in the header.
+    expect(new URL("https://.../").host).toBe("...");
+    expect(urlsIn('placeholder="https://...#... or the bare code"\n')).toEqual(
+      [],
+    );
+  });
+
+  it("matches the schemes it names and no others", () => {
+    // The header's scheme limit, which PRIVACY.md and SECURITY_DESIGN.md
+    // state in turn: a `wss://` beacon names a host and is not reported.
+    for (const scheme of ["ws", "wss", "ftp", "file"]) {
+      expect(
+        urlsIn(
+          `new WebSocket("${scheme}://analytics.evil.example/collect");\n`,
+        ),
+      ).toEqual([]);
+    }
+    for (const scheme of ["http", "https", "stun", "stuns", "turn", "turns"]) {
+      const literal = `${scheme}://analytics.evil.example/collect`;
+      expect(urlsIn(`new WebSocket("${literal}");\n`)).toEqual([literal]);
+    }
+  });
+
+  it("flags an internationalized host, which resolves like any other", () => {
+    // Only the spelling in source is non-ASCII: the host a request reaches is
+    // the punycode form `new URL()` produces, which resolves and serves.
+    for (const [host, resolved] of [
+      ["пример.рф", "xn--e1afmkfd.xn--p1ai"],
+      ["例え.テスト", "xn--r8jz45g.xn--zckzah"],
+      ["中国.中国", "xn--fiqs8s.xn--fiqs8s"],
+      ["مثال.إختبار", "xn--mgbh0fb.xn--kgbechtv"],
+    ]) {
+      const literal = `https://${host}/collect`;
+      expect(new URL(literal).host).toBe(resolved);
+      expect(urlsIn(`fetch("${literal}");\n`)).toEqual([literal]);
+    }
+  });
+
+  it("flags a bracketed address holding no alphanumeric", () => {
+    for (const [literal, host] of [
+      ["https://[::]/x", "[::]"],
+      ["http://[::]:8443/x", "[::]:8443"],
+    ]) {
+      expect(new URL(literal).host).toBe(host);
+      expect(urlsIn(`fetch("${literal}");\n`)).toEqual([literal]);
+    }
+  });
+
+  it("reports host-shaped text that `new URL()` rejects", () => {
+    // The loud direction, stated in the header: the matcher judges an
+    // authority without parsing it, so a literal nothing could dereference can
+    // still fail the build, and the author rewrites or allowlists it.
+    for (const literal of [
+      "https://%zz/",
+      "https://[not-ipv6]/",
+      "https://[2001:db8::1",
+      "https://a:b/",
+      "https://ex^ample/",
+      "https://exa|mple/",
+    ]) {
+      expect(() => new URL(literal)).toThrow();
+      expect(urlsIn(`fetch("${literal}");\n`)).toEqual([literal]);
+    }
   });
 
   it("skips an empty web authority but not a short or bracketed one", () => {
@@ -497,23 +583,11 @@ describe("scanned roots", () => {
   it("scans a named file and not a sibling sharing its name", () => {
     // Same real-git question the tree test below asks, for the file
     // pathspecs: whether `Dockerfile` also admits `Dockerfile.dev`.
-    const dir = mkdtempSync(resolve(tmpdir(), "egress-files-"));
-    try {
-      execFileSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore" });
-      const literal = 'const u = "https://evil.example/x";\n';
-      for (const file of [
-        ...SCANNED_FILES,
-        "Dockerfile.dev",
-        "docker-entrypoint.sh.bak",
-      ]) {
-        writeFileSync(resolve(dir, file), literal);
-      }
+    withScannedRepo(["Dockerfile.dev", "docker-entrypoint.sh.bak"], (dir) => {
       const { files, violations } = scanRepo(dir);
-      expect(files.sort()).toEqual(["Dockerfile", "docker-entrypoint.sh"]);
-      expect(violations).toHaveLength(2);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+      expect(files).toEqual([...SKELETON].sort());
+      expect(violations).toHaveLength(SKELETON.length);
+    });
   });
 
   it("covers the server entry point the deployed web app boots", () => {
@@ -536,25 +610,46 @@ describe("scanned roots", () => {
     // Driven against real git rather than a model of its pathspec matching,
     // which is what decides whether `apps/web/server` also admits
     // `apps/web/server-extras`.
-    const dir = mkdtempSync(resolve(tmpdir(), "egress-roots-"));
-    try {
-      execFileSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore" });
-      const literal = 'const u = "https://evil.example/x";\n';
-      for (const file of [
-        "apps/web/server/custom-entry.ts",
-        "apps/web/server-extras/side.ts",
-        "apps/web/servers/other.ts",
-        "apps/web/srcery/other.ts",
-      ]) {
-        mkdirSync(resolve(dir, dirname(file)), { recursive: true });
-        writeFileSync(resolve(dir, file), literal);
-      }
+    const siblings = [
+      "apps/web/server-extras/side.ts",
+      "apps/web/servers/other.ts",
+      "apps/web/srcery/other.ts",
+    ];
+    withScannedRepo(siblings, (dir) => {
       const { files, violations } = scanRepo(dir);
-      expect(files).toEqual(["apps/web/server/custom-entry.ts"]);
-      expect(violations).toHaveLength(1);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+      expect(files).toEqual([...SKELETON].sort());
+      expect(violations).toHaveLength(SKELETON.length);
+    });
+  });
+
+  it("fails when a scanned root or file matches nothing", () => {
+    // A renamed shipped tree would otherwise leave the check passing over a
+    // smaller scan than its success line claims. Real git decides the premise:
+    // it reports an unmatched pathspec by printing nothing and exiting 0.
+    withScannedRepo([], (dir) => {
+      renameSync(
+        resolve(dir, "apps/web/server"),
+        resolve(dir, "apps/web/serverRenamed"),
+      );
+      rmSync(resolve(dir, "docker-entrypoint.sh"));
+      for (const pathspec of ["apps/web/server", "docker-entrypoint.sh"]) {
+        expect(
+          execFileSync(
+            "git",
+            [
+              "ls-files",
+              "--cached",
+              "--others",
+              "--exclude-standard",
+              "--",
+              pathspec,
+            ],
+            { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+          ),
+        ).toBe("");
+        expect(() => scanRepo(dir)).toThrow(pathspec);
+      }
+    });
   });
 });
 
@@ -619,6 +714,82 @@ describe("comment stripping", () => {
     expect(urlsIn(source)).toEqual(["https://evil.example/d"]);
   });
 
+  it("keeps a comment opener that is JSX text rather than code", () => {
+    // JSX text is not code, so a `/*` or `//` in ordinary UI prose about a
+    // glob or a path opens no comment. A stripper that reads one as a comment
+    // blanks the source after it and reports the file clean -- the silent
+    // direction. The trailing comment on each line is the other half: it still
+    // has to come off, or the case would pass on a stripper that gave up.
+    for (const path of [
+      "apps/web/src/f.tsx",
+      "apps/web/src/f.jsx",
+      "apps/web/src/f.js",
+    ]) {
+      expect([
+        path,
+        urlsIn(
+          "export const A = () => <p>files under data/* are read</p>;\n" +
+            'const u = "https://evil.example/x"; // https://commented.example/a\n',
+          path,
+        ),
+      ]).toEqual([path, ["https://evil.example/x"]]);
+      expect([
+        path,
+        urlsIn(
+          "export const B = () => <p>a // b</p>; " +
+            'const u = "https://evil.example/y"; /* https://commented.example/b */\n',
+          path,
+        ),
+      ]).toEqual([path, ["https://evil.example/y"]]);
+    }
+  });
+
+  it("keeps a URL that JSX text itself carries", () => {
+    expect(
+      urlsIn(
+        "export const A = () => <p>See https://evil.example/x for more</p>;\n",
+        "apps/web/src/f.tsx",
+      ),
+    ).toEqual(["https://evil.example/x"]);
+  });
+
+  it("leaves a file the parser cannot read unstripped", () => {
+    // Nothing is deleted on a broken parse, which locates comments no better
+    // than guesswork would: the commented URL surfaces as a false positive the
+    // author resolves, rather than a blanked line nobody sees.
+    const source = "const a = ;\nfunction (\n// https://evil.example/x\n";
+    expect(stripComments(source, FIXTURE)).toBe(source);
+    expect(urlsIn(source)).toEqual(["https://evil.example/x"]);
+  });
+
+  it("does not let a `/*` inside an unquoted CSS URL swallow the file", () => {
+    // CSS reads an unquoted url() to its closing paren as one token, so the
+    // `/*` opens no comment there. A lexer that thinks otherwise blanks on to
+    // the next `*/` and loses whatever literal follows -- silently.
+    const path = "apps/web/src/bench/tokens.css";
+    const trailing = "b { background: url(https://other.example/y) }\n";
+    expect(
+      urlsIn(
+        `a { background: url(https:evil.example/p/*x) }\n${trailing}`,
+        path,
+      ),
+    ).toEqual(["https:evil.example/p/*x", "https://other.example/y"]);
+    expect(
+      urlsIn(
+        `a { background: url(data:image/svg+xml,x/*y) }\n${trailing}`,
+        path,
+      ),
+    ).toEqual(["https://other.example/y"]);
+    // A quoted url() keeps its own rule: the paren inside the string is not
+    // the token's end.
+    expect(
+      urlsIn(
+        `a { background: url("data:image/svg+xml,<svg d='M0 0)'/>") }\n${trailing}`,
+        path,
+      ),
+    ).toEqual(["https://other.example/y"]);
+  });
+
   it("keeps template text that follows an interpolation", () => {
     const source = "const u = `${base} // not a comment`;\n";
     expect(stripComments(source, FIXTURE)).toBe(source);
@@ -657,13 +828,18 @@ describe("the repository as it stands", () => {
     // file before and after stripping and printing both back with comments
     // suppressed is what catches that -- the two programs must be identical.
     const printer = ts.createPrinter({ removeComments: true });
+    const scriptKind = (file) => {
+      if (file.endsWith(".tsx")) return ts.ScriptKind.TSX;
+      if (file.endsWith(".jsx")) return ts.ScriptKind.JSX;
+      return /\.[cm]?js$/.test(file) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+    };
     const canonical = (text, file) => {
       const parsed = ts.createSourceFile(
         file,
         text,
         ts.ScriptTarget.Latest,
         false,
-        file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+        scriptKind(file),
       );
       return {
         printed: printer.printFile(parsed),
@@ -679,8 +855,8 @@ describe("the repository as it stands", () => {
     ).toBeGreaterThan(0);
     expect(canonical("const a = 1;\n", "probe.ts").parseErrors).toBe(0);
 
-    const sources = scanRepo(repoRoot).files.filter((file) =>
-      /\.tsx?$/.test(file),
+    const sources = scanRepo(repoRoot).files.filter(
+      (file) => commentSyntaxFor(file) === "javascript",
     );
     expect(sources.length).toBeGreaterThan(100);
 
