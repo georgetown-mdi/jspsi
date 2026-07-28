@@ -141,7 +141,7 @@ export function fileVerdict({ path, before, after }) {
 }
 
 /**
- * Which sides of a `--name-status` entry exist, or null for a status this
+ * Which sides of a `--raw` record exist, or null for a status this
  * verifier does not model -- a type change (a file swapped for a symlink, whose
  * blob is a path rather than a program), or a rename/copy that survived
  * `--no-renames`.
