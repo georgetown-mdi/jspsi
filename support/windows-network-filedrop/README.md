@@ -1,11 +1,12 @@
 # Using a network file drop with psilink on Windows
 
-> **Status: provisional.** The checks this script runs inside the container are
-> verified against a real SMB server. The Windows half -- working out the real
-> server behind a mapped drive or a DFS path -- has not yet been confirmed on a
-> Windows machine. If it gets that wrong, use "Finding the real server by hand"
-> below, which is the method known to work. Corrections welcome; this page is
-> maintained from field reports rather than tests.
+> **Status: partly verified.** The script runs end to end on Windows 11 under
+> Windows PowerShell 5.1 -- path parsing, the container checks, and creating and
+> mounting the CIFS volume -- against a real SMB server. Two pieces still are
+> not exercised, because both need a domain environment: resolving a mapped
+> drive letter to its UNC root, and identifying the real server behind a DFS
+> namespace. If either goes wrong, use "Finding the real server by hand" below,
+> which is the method known to work. Corrections welcome.
 
 Your file-drop folder lives on a network location -- you open it in File
 Explorer as a mapped drive (`Z:\Exchange`) or a network path
@@ -50,9 +51,12 @@ reboots; you only need to run it again if the password changes.
 
 ## Finding the real server by hand
 
-The script does this for you, but if it cannot, here is the manual version --
-this is what worked for the one agency that got there before the script
-existed.
+The script tries to do this for you, but it cannot always. Reading the list of
+SMB connections -- how it tells a DFS namespace from the file server behind it
+-- requires Administrator rights, so an ordinary run skips the check and says
+so. Either run the script from an Administrator PowerShell window, or use the
+manual version here and pass the answer with `-Server` and `-Share`. This is
+what worked for the one agency that got there before the script existed.
 
 A drive letter hides the real server, and a DFS path names a namespace rather
 than a machine, so the server you actually need may be nothing like the path

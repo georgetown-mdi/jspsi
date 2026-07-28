@@ -69,6 +69,37 @@ function Write-Bad  { param([string] $T) Write-Host "  FAIL  $T" -ForegroundColo
 function Write-Note { param([string] $T) Write-Host "        $T" -ForegroundColor Yellow }
 function Write-Info { param([string] $T) Write-Host "        $T" }
 
+function Invoke-Docker {
+    <#  Runs docker and returns a hashtable of its combined output and exit
+        code.
+
+        Docker is never called with a bare "2>&1" in this script, because
+        Windows PowerShell 5.1 turns every stderr line of a native program
+        into an ErrorRecord when its stderr is redirected -- and this script
+        runs with $ErrorActionPreference = 'Stop', which makes that record
+        throw. Docker writes routine, expected messages to stderr ("no such
+        volume" when removing one that was never created, which is what every
+        first run hits), so the redirect must happen with the preference
+        relaxed or the script dies partway through with a raw .NET error
+        instead of the message it meant to print.
+
+        The arguments are passed as one explicit array rather than as loose
+        trailing words: a function that collects remaining arguments is an
+        advanced function, so PowerShell binds docker's own short flags to the
+        common parameters first -- "-v" becomes -Verbose and never reaches
+        docker, which then reads the volume spec as the image name and fails
+        with "invalid reference format". #>
+    param([Parameter(Mandatory = $true)][string[]] $DockerArgs)
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $lines = & docker @DockerArgs 2>&1 | ForEach-Object { "$_" }
+        return @{ Output = ($lines -join [Environment]::NewLine); ExitCode = $LASTEXITCODE }
+    }
+    finally { $ErrorActionPreference = $previous }
+}
+
 # ==========================================================================
 # Path resolution: Explorer-visible path -> real server, share, subdirectory
 # ==========================================================================
@@ -108,23 +139,38 @@ function Resolve-RealServer {
     <#  A DFS namespace path such as \\corp.example.com\dfs\exchange is served
         by some other machine entirely. Touching the path makes Windows open
         the real SMB connection; Get-SmbConnection then reports which server
-        that actually is. Returns $null when it cannot tell. #>
+        that actually is -- but only to an Administrator, so an ordinary run
+        cannot see it. Returns a hashtable whose Status is:
+
+          Resolved   - Server holds the server actually serving ShareName
+          NoMatch    - the connection list is readable and has no entry for
+                       ShareName, so there is nothing to correct
+          Unreadable - the connection list could not be read (the usual case:
+                       this window is not elevated)
+
+        There is deliberately no fallback to "some other server in the list":
+        an unrelated connection -- a mapped home drive, a print server's IPC$ --
+        is not evidence about this share, and reporting one as the real server
+        sends the user somewhere that has nothing to do with their file drop. #>
     param([string] $UncPath, [string] $NamespaceServer, [string] $ShareName)
 
     try { Get-ChildItem -LiteralPath $UncPath -ErrorAction SilentlyContinue | Out-Null } catch { }
 
+    $conns = $null
+    $readError = $null
     try {
-        $conns = Get-SmbConnection -ErrorAction SilentlyContinue
-        if (-not $conns) { return $null }
+        $conns = Get-SmbConnection -ErrorAction SilentlyContinue -ErrorVariable readError
+    } catch {
+        $readError = $_
+    }
+    if ($readError) { return @{ Status = 'Unreadable' } }
 
-        $match = $conns | Where-Object { $_.ShareName -eq $ShareName } | Select-Object -First 1
-        if ($match -and $match.ServerName) { return $match.ServerName }
+    $match = $conns | Where-Object { $_.ShareName -eq $ShareName } | Select-Object -First 1
+    if ($match -and $match.ServerName) {
+        return @{ Status = 'Resolved'; Server = $match.ServerName }
+    }
 
-        $other = $conns | Where-Object { $_.ServerName -ne $NamespaceServer } | Select-Object -First 1
-        if ($other -and $other.ServerName) { return $other.ServerName }
-    } catch { }
-
-    return $null
+    return @{ Status = 'NoMatch' }
 }
 
 function Resolve-DropPath {
@@ -133,20 +179,39 @@ function Resolve-DropPath {
         Kind is Network. #>
     param([string] $Raw)
 
-    $p = $Raw.Trim().Trim('"').TrimEnd('\', '/')
+    # Windows accepts either slash, and a path copied out of a browser, a
+    # ticket, or a shell script often arrives with forward ones. Fold them to
+    # backslashes up front so the patterns below only ever see one separator;
+    # matching a share name as "anything but a backslash" otherwise swallows
+    # //server/share/sub whole and reports the entire tail as the share.
+    $p = $Raw.Trim().Trim('"').Replace('/', '\').TrimEnd('\')
     if (-not $p) { return @{ Kind = 'Unknown'; Reason = 'empty path' } }
 
     # --- drive letter -----------------------------------------------------
-    if ($p -match '^([A-Za-z]):($|[\\/].*$)') {
+    if ($p -match '^([A-Za-z]):($|\\.*$)') {
         $letter = $Matches[1]
-        $rest   = $Matches[2].TrimStart('\', '/')
+        $rest   = $Matches[2].TrimStart('\')
 
         $unc = Resolve-MappedDrive -Letter $letter
         if (-not $unc) {
+            # No mapping. That means a local disk -- or a letter that is not
+            # there at all, which is worth saying: a mistyped letter would
+            # otherwise be reported as a local folder, and the user would be
+            # sent off to bind-mount a path that does not exist.
+            if (-not (Test-Path -LiteralPath "${letter}:\")) {
+                return @{ Kind = 'Unknown'
+                          Reason = "there is no ${letter}: drive on this PC. If it is a network drive that is not connected right now, open it in File Explorer first, then re-run" }
+            }
             return @{ Kind = 'Local'; LocalPath = $p }
         }
         Write-Good "${letter}: is mapped to $unc"
         $p = if ($rest) { "$unc\$rest" } else { $unc }
+    }
+
+    # --- UNC naming a server but no share ---------------------------------
+    if ($p -match '^\\\\([^\\]+)$') {
+        return @{ Kind = 'Unknown'
+                  Reason = "'$Raw' names the server '$($Matches[1])' but no share. Include the share as well, as in \\$($Matches[1])\exchange" }
     }
 
     # --- UNC --------------------------------------------------------------
@@ -156,11 +221,22 @@ function Resolve-DropPath {
         $sub     = $Matches[3].TrimStart('\').Replace('\', '/')
 
         $uncRoot = "\\$server\$share"
-        $real = Resolve-RealServer -UncPath $p -NamespaceServer $server -ShareName $share
-        if ($real -and $real -ne $server) {
-            Write-Good "'$server' is a namespace; the real server is '$real'"
-            Write-Info "(this is the address the right-click Properties DFS tab shows)"
-            $server = $real
+        $resolution = Resolve-RealServer -UncPath $p -NamespaceServer $server -ShareName $share
+        switch ($resolution.Status) {
+            'Resolved' {
+                if ($resolution.Server -ne $server) {
+                    Write-Good "'$server' is a namespace; the real server is '$($resolution.Server)'"
+                    Write-Info "(this is the address the right-click Properties DFS tab shows)"
+                    $server = $resolution.Server
+                }
+            }
+            'Unreadable' {
+                Write-Note "Could not check whether '$server' is a DFS namespace -- reading"
+                Write-Note "that needs Administrator rights."
+                Write-Info "Only matters if it is one, in which case '$server' names the"
+                Write-Info "namespace rather than the file server and the checks below will"
+                Write-Info "not reach it. See the runbook, 'Finding the real server by hand'."
+            }
         }
 
         return @{ Kind = 'Network'; Server = $server; Share = $share; SubPath = $sub; Unc = $uncRoot }
@@ -354,17 +430,14 @@ emit "ALL CHECKS PASSED"
 Write-Head 'psilink file-drop setup'
 
 Write-Host 'Checking Docker...'
-try {
-    $serverVersion = & docker version --format '{{.Server.Version}}' 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "$serverVersion" }
-    Write-Good "Docker engine $serverVersion is running."
-}
-catch {
+$dockerVersion = Invoke-Docker -DockerArgs @('version', '--format', '{{.Server.Version}}')
+if ($dockerVersion.ExitCode -ne 0) {
     Write-Bad 'Docker is not running, or is not installed.'
     Write-Note 'Start Docker Desktop, wait for the whale icon to stop animating,'
     Write-Note 'then run this script again.'
     exit 1
 }
+Write-Good "Docker engine $($dockerVersion.Output) is running."
 
 # ==========================================================================
 # Step 1: work out where the file drop really lives
@@ -386,6 +459,10 @@ if (-not ($Server -and $Share)) {
         'Local' {
             Write-Head 'This folder is already local'
             Write-Good "$($resolved.LocalPath) is on this PC, not a network server."
+            if (-not (Test-Path -LiteralPath $resolved.LocalPath)) {
+                Write-Note "It does not exist yet -- create it before running the exchange,"
+                Write-Note 'or Docker will report "bind source path does not exist".'
+            }
             Write-Host ''
             Write-Host 'That means you do not need a Docker volume at all -- you can mount'
             Write-Host 'the folder directly. Run your exchange like this:'
@@ -508,23 +585,27 @@ if ($plainPass.Contains(',')) {
 }
 
 try {
-    & docker volume rm $VolumeName 2>&1 | Out-Null
+    Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
 
     Write-Host "Creating volume '$VolumeName' for $device"
-    $createOut = & docker volume create --driver local `
-        --opt type=cifs --opt device=$device --opt o=$opts $VolumeName 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $create = Invoke-Docker -DockerArgs @(
+        'volume', 'create', '--driver', 'local',
+        '--opt', 'type=cifs', '--opt', "device=$device", '--opt', "o=$opts",
+        $VolumeName)
+    if ($create.ExitCode -ne 0) {
         Write-Bad 'Could not create the volume.'
-        Write-Host $createOut
+        Write-Host $create.Output
         exit 8
     }
     Write-Good 'Volume created. Docker mounts it the first time it is used.'
 
     Write-Host 'Mounting it and writing a test file...'
-    $testOut = & docker run --rm -v "${VolumeName}:/rz" alpine sh -c `
-        'echo probe > /rz/.psilink-probe.tmp && mv /rz/.psilink-probe.tmp /rz/.psilink-probe.renamed && rm /rz/.psilink-probe.renamed && echo MOUNTOK' 2>&1
+    $test = Invoke-Docker -DockerArgs @(
+        'run', '--rm', '-v', "${VolumeName}:/rz", 'alpine', 'sh', '-c',
+        'echo probe > /rz/.psilink-probe.tmp && mv /rz/.psilink-probe.tmp /rz/.psilink-probe.renamed && rm /rz/.psilink-probe.renamed && echo MOUNTOK')
+    $testOut = $test.Output
 
-    if ($LASTEXITCODE -ne 0 -or "$testOut" -notmatch 'MOUNTOK') {
+    if ($test.ExitCode -ne 0 -or "$testOut" -notmatch 'MOUNTOK') {
         Write-Bad 'The volume could not be mounted.'
         Write-Host $testOut
         Write-Host ''
@@ -537,7 +618,7 @@ try {
             Write-Note 'The SMB dialect is the most likely difference: re-run with'
             Write-Note '-Dialect SMB3, and if that fails, -Dialect SMB2.'
         }
-        & docker volume rm $VolumeName 2>&1 | Out-Null
+        Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
     }
     Write-Good 'The volume mounts and psilink can write to it.'
