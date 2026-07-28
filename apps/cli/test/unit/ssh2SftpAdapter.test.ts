@@ -42,7 +42,10 @@ const noDelayClient = () => ({
 
 // The same stand-in plus the seams the connection-per-poll idle release drives,
 // which connect() verifies in that mode: the ssh2 Client's EventEmitter surface
-// and its socket's destroy() and half-close flag.
+// and its socket's destroy() and half-close flag. Also what a faithful stand-in
+// for the pinned ssh2 Client looks like anywhere a recovery re-dial runs -- that
+// EventEmitter surface is what its transport-lifecycle watch attaches to, and a
+// Client without one puts the re-dial on its degraded branch.
 const releasableClient = () =>
   Object.assign(new EventEmitter(), {
     setNoDelay: () => {},
@@ -2566,6 +2569,14 @@ describe("session recovery", () => {
   // flipped false (a mid-exchange drop) and restored to `wrapper` by connect() (a
   // re-dial). High-level ops are attached per test and read `state.live` to model
   // ssh2-sftp-client's ERR_NOT_CONNECTED rejection on a cleared session.
+  //
+  // The raw ssh2 Client under it is an EventEmitter, as the pinned ssh2's is: the
+  // recovery re-dial watches its 'end'/'close' pair to tell a transport that still
+  // owes its 'close' from one whose events have all been delivered, and a Client
+  // that cannot be watched puts the re-dial on a different branch entirely. Here
+  // no lifecycle event is emitted at all, which is the drop these tests model --
+  // the raw-wrapper class, whose whole sequence has run by the time recovery is
+  // entered.
   function droppable(wrapper: ReturnType<typeof sessionWrapper>) {
     const state = { live: true };
     const connect = vi.fn().mockImplementation(async () => {
@@ -2576,7 +2587,7 @@ describe("session recovery", () => {
         return state.live ? wrapper : null;
       },
       connect,
-      client: noDelayClient(),
+      client: releasableClient(),
       end: vi.fn().mockResolvedValue(true),
       realPath: vi.fn().mockResolvedValue("/"),
     };
@@ -2735,7 +2746,7 @@ describe("session recovery", () => {
         return state.live ? wrapper : null;
       },
       connect,
-      client: noDelayClient(),
+      client: releasableClient(),
       end: vi.fn().mockResolvedValue(true),
     };
     const adapter = new SSH2SFTPClientAdapter();
@@ -3209,7 +3220,7 @@ describe("session recovery", () => {
         return state.live ? wrapper : null;
       },
       connect,
-      client: noDelayClient(),
+      client: releasableClient(),
       end,
       realPath: vi.fn().mockResolvedValue("/"),
     };
@@ -6431,28 +6442,184 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     }
   });
 
-  test("a Client that exposes no on() leaves the re-dial free to dial", async () => {
-    // The transport-lifecycle watch is best-effort: an ssh2 upgrade that relocates
-    // the Client's EventEmitter surface must cost the reading, not the recovery.
-    // With nothing to watch, the re-dial cannot see the window and dials anyway --
-    // which is what it does without the reading, not a refusal.
+  // Takes the lifecycle watch's seam away from a Client, leaving the seams the
+  // retirement DRIVES intact: EventEmitter's own once() is implemented in terms of
+  // on(), so a hand-rolled substitute is what separates the reading's seam from the
+  // forced close's rather than removing both at once.
+  function withoutClientOn(rawClient: EventEmitter & Record<string, unknown>) {
+    const attach = rawClient.on.bind(rawClient);
+    const once = (
+      event: string,
+      listener: (...args: unknown[]) => void,
+    ): EventEmitter => {
+      const wrapped = (...args: unknown[]): void => {
+        rawClient.removeListener(event, wrapped);
+        listener(...args);
+      };
+      attach(event, wrapped);
+      return rawClient;
+    };
+    Object.assign(rawClient, { once, on: undefined });
+  }
+
+  // The retirement's report that it had no lifecycle reading to take, picked out of
+  // the warnings the recovery itself raises alongside it.
+  function unreadableLifecycleWarnings(
+    warn: ReturnType<typeof vi.fn>,
+  ): string[] {
+    return warn.mock.calls
+      .map((call) => call[0] as string)
+      .filter((message) => message.includes("client.on()"));
+  }
+
+  test("a Client whose on() has moved still recovers the torn operation, warning for the reading it lost", async () => {
+    // The transport-lifecycle watch is best-effort, but its absence is "cannot
+    // tell", never "nothing owed": with no reading to take, the re-dial retires the
+    // transport rather than dialing into a window it cannot see -- so the torn
+    // operation still recovers on ONE dial, and the lost reading is reported as the
+    // seam failure it is instead of being spent silently on a failed dial.
+    const { client, connect, rawClient, socket, dropFromServer } =
+      tornOnEndClient(wrapperMethods());
+    withoutClientOn(rawClient);
+    const warn = vi.fn();
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = {
+      warn,
+      info: vi.fn(),
+      trace: vi.fn(),
+      error: vi.fn(),
+    };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 1 });
+    const operation = adapter.exists("/r/x.json");
+    dropFromServer();
+
+    await expect(operation).resolves.toBe(true);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(socket.destroy).toHaveBeenCalledOnce();
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    const lostReading = unreadableLifecycleWarnings(warn);
+    expect(lostReading).toHaveLength(1);
+    expect(lostReading[0]).toContain("Upgrading the SFTP Stack");
+    expect(lostReading[0]).toContain("docs/spec/DEPENDENCY_PINS.md");
+  });
+
+  test("a Client whose on() has moved pays the forced close's bound where the drop had already run its whole sequence", async () => {
+    // The cost of reading an absent lifecycle as "cannot tell": the neighbouring
+    // class, whose 'close' has already landed, no longer takes the shortcut the
+    // reading would have licensed. It closes a transport that had already closed
+    // and rides the forced close's whole bound -- a 'close' listener armed after
+    // the event never resolves early -- before dialing. The drop still recovers on
+    // one dial; only the wait is added, and only here.
     vi.useFakeTimers();
     try {
-      const { client, connect, rawClient, dropFromServer } =
+      const { client, connect, rawClient, socket, dropFromServer } =
         tornOnEndClient(wrapperMethods());
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (rawClient as any).on = undefined;
+      withoutClientOn(rawClient);
       const adapter = new SSH2SFTPClientAdapter();
       stub(adapter);
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 1 });
-      const operation = adapter.exists("/r/x.json").catch(() => "failed");
       dropFromServer();
-      await vi.advanceTimersByTimeAsync(10_000);
-      await operation;
+      // The partner's close arrives before anything else is issued, so nothing is
+      // owed -- which is exactly what this Client cannot be asked.
+      socket.destroy();
+      socket.destroy.mockClear();
 
-      expect(connect.mock.calls.length).toBeGreaterThan(1);
+      const operation = adapter.exists("/r/x.json");
+      // Everything that can settle without a timer expiring has settled.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(connect).toHaveBeenCalledTimes(1);
+      expect(socket.destroy).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(operation).resolves.toBe(true);
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(adapter.midExchangeReconnectCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a Client whose on() has moved warns once however many drops it recovers", async () => {
+    // Whether the Client exposes on() is the installed version's property, not the
+    // drop's, so the second recovery repeats the wait and not the warning.
+    const { client, connect, rawClient, dropFromServer } =
+      tornOnEndClient(wrapperMethods());
+    withoutClientOn(rawClient);
+    const warn = vi.fn();
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = {
+      warn,
+      info: vi.fn(),
+      trace: vi.fn(),
+      error: vi.fn(),
+    };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 4 });
+    const first = adapter.exists("/r/x.json");
+    dropFromServer();
+    await expect(first).resolves.toBe(true);
+    const second = adapter.exists("/r/y.json");
+    dropFromServer();
+    await expect(second).resolves.toBe(true);
+
+    expect(connect).toHaveBeenCalledTimes(3);
+    expect(adapter.midExchangeReconnectCount).toBe(2);
+    expect(unreadableLifecycleWarnings(warn)).toHaveLength(1);
+  });
+
+  test("a Client with no EventEmitter surface at all refuses the re-dial and leaves the operation its own loss", async () => {
+    // The whole surface gone, which is what relocating it actually looks like: the
+    // reading is unavailable AND so is the forced close the conservative branch
+    // falls through to. Both are reported, no dial is spent on a window nothing can
+    // see, and the operation fails with the session loss it already had rather than
+    // with a connect error of the recovery's making.
+    vi.useFakeTimers();
+    try {
+      const { client, connect, rawClient, socket, dropFromServer } =
+        tornOnEndClient(wrapperMethods());
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (rawClient as any).on = undefined;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (rawClient as any).once = undefined;
+      const warn = vi.fn();
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = {
+        warn,
+        info: vi.fn(),
+        trace: vi.fn(),
+        error: vi.fn(),
+      };
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 1 });
+      const failing = adapter.exists("/r/x.json").catch((e: unknown) => e);
+      dropFromServer();
+      // Past the retirement's own bound and the whole dialing-retry budget, so the
+      // case settles on what the recovery decided rather than on a wait still
+      // outstanding.
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const error = await failing;
+      expect((error as { code?: unknown }).code).toBe("ERR_NOT_CONNECTED");
+      expect(connect).toHaveBeenCalledTimes(1);
+      expect(socket.destroy).not.toHaveBeenCalled();
+      expect(adapter.midExchangeReconnectCount).toBe(0);
+      const messages = warn.mock.calls.map((call) => call[0] as string);
+      expect(unreadableLifecycleWarnings(warn)).toHaveLength(1);
+      expect(messages).toHaveLength(2);
+      expect(messages[1]).toContain("client.once()");
+      for (const message of messages) {
+        expect(message).toContain("Upgrading the SFTP Stack");
+        expect(message).toContain("docs/spec/DEPENDENCY_PINS.md");
+      }
     } finally {
       vi.useRealTimers();
     }

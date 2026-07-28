@@ -288,6 +288,16 @@ type RecoveryRedialOutcome =
 // re-dial outcome of the same name.
 type TransportRetirement = "retired" | "deadSessionHeld" | "unretiredTransport";
 
+// What the recovery re-dial can tell about the transport beneath a session that
+// has already been cleared: whether the ssh2 Client still owes that transport its
+// 'close', whether the whole lifecycle sequence has been delivered, or nothing at
+// all. `unreadable` is a THIRD state rather than a synonym for `delivered` --
+// a Client with no on() to watch never sets the awaiting-close flag, so reading
+// its absence as a delivered sequence would send the dial into an owed 'close',
+// which is the failure the retirement exists to prevent (see
+// SSH2SFTPClientAdapter.watchTransportLifecycle).
+type TransportCloseReading = "owed" | "delivered" | "unreadable";
+
 // Every point at which this adapter dials a session or closes one. All five run
 // under the adapter's one transition lock (see
 // SSH2SFTPClientAdapter.runTransition), so none can overlap another on the one
@@ -531,8 +541,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // warning. See attachKeyboardInteractive.
   private keyboardInteractiveAttached = false;
   // True once the transport-lifecycle listeners have been attached to that same
-  // Client, on the same once-per-adapter terms and for the same reason. See
-  // watchTransportLifecycle.
+  // Client, on the same once-per-adapter terms and for the same reason. Doubles as
+  // whether the flag below carries a reading at all: while this is false nothing
+  // writes it, so it is an absence of information rather than an observation. See
+  // watchTransportLifecycle and readTransportCloseState.
   private transportLifecycleWatched = false;
   // Whether the ssh2 Client has emitted the transport's 'end' without yet having
   // emitted its 'close' -- the window in which a dial issued on this Client is
@@ -543,10 +555,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // ahead of the 'close'), so it is the one that reads this. Written only by the
   // Client's own events, never cleared by a dial: the reading is about the
   // transport the events belong to, and the retirement that precedes the dial is
-  // what ends it. Stands at false on a Client that exposes no on() to watch it
-  // with, so an unwatchable Client leaves the re-dial free to dial rather than
-  // refusing over a window it cannot see (see watchTransportLifecycle).
+  // what ends it. Meaningful only alongside the flag above: on a Client with no
+  // on() to watch it with, nothing ever sets it, so it is read through
+  // readTransportCloseState rather than directly.
   private transportAwaitingClose = false;
+  // True once the retirement has warned that it has no lifecycle reading to take.
+  // Whether the Client exposes on() is a property of the installed version rather
+  // than of any one drop, so a second copy of that warning on the next re-dial
+  // tells the operator nothing the first did not. See
+  // warnUnreadableTransportLifecycle.
+  private transportLifecycleUnreadableWarned = false;
   private reconnectAttempts = 0;
   // Successful mid-exchange recovery re-dials over this adapter's life, tracked
   // apart from reconnectAttempts (which also counts connect-retry re-dials) to
@@ -1314,13 +1332,18 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // would stack until Node reported a leak.
   //
   // Best-effort by contract, and the one place this differs from the
-  // keyboard-interactive attach: a Client with no on() leaves the reading at
-  // false, so the re-dial dials rather than refusing over a window it cannot see.
-  // Failing it instead would turn a relocated EventEmitter surface into a broken
-  // recovery, which is the outcome this whole path exists to avoid; the seams the
-  // retirement DRIVES are checked where they are driven and warn there. The
-  // degradation is a case rather than a claim -- see the unit case driving a
-  // Client that exposes no on().
+  // keyboard-interactive attach: a Client with no on() leaves nothing to watch,
+  // and the attach degrades rather than failing the dial a relocated EventEmitter
+  // surface costs nothing else. What it must NOT do is leave the retirement a
+  // false reading -- the flag stands at its unwritten default, which is the same
+  // value a delivered sequence leaves, so the two are told apart by
+  // transportLifecycleWatched and an unwatched Client reads as `unreadable`. The
+  // retirement takes the conservative branch on that reading and warns there, for
+  // the reason this whole path exists: a dial issued into an owed 'close' is
+  // failed by the library's connect-time listeners, and treating "cannot tell" as
+  // "nothing owed" is what would turn a relocated EventEmitter surface into the
+  // broken recovery. The seams the retirement DRIVES are checked where they are
+  // driven and warn there.
   private watchTransportLifecycle(): void {
     if (this.transportLifecycleWatched) return;
     const client = (this.client as unknown as Ssh2SftpClientInternals).client;
@@ -1332,6 +1355,36 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     client.on("close", () => {
       this.transportAwaitingClose = false;
     });
+  }
+
+  // The lifecycle reading the retirement branches on, as the three states it can
+  // actually be in rather than the two the flag alone can express.
+  private readTransportCloseState(): TransportCloseReading {
+    if (!this.transportLifecycleWatched) return "unreadable";
+    return this.transportAwaitingClose ? "owed" : "delivered";
+  }
+
+  // Reported on the terms every other seam failure on this path is: what broke,
+  // what it costs, and this project's upgrade checklist. Paced to once per adapter
+  // because the condition is the installed version's rather than any one drop's,
+  // so a second copy carries nothing the first did not.
+  private warnUnreadableTransportLifecycle(): void {
+    if (this.transportLifecycleUnreadableWarned) return;
+    this.transportLifecycleUnreadableWarned = true;
+    this.log.warn(
+      `Re-dialing an SFTP session the partner's server dropped mid-exchange ` +
+        `means telling a connection that still owes ssh2 its 'close' from one ` +
+        `whose events have all been delivered, which is watched through ` +
+        `ssh2's client.on() -- not available after connect(), so there is no ` +
+        `reading to take. Rather than dial into a window it cannot see, every ` +
+        `mid-exchange re-dial this exchange closes the connection from this ` +
+        `side first and waits up to ${FORCED_CLOSE_TIMEOUT_MS} ms for that ` +
+        `close, which costs that wait on a connection that had already ` +
+        `closed. The installed ssh2 / ssh2-sftp-client version may have ` +
+        `renamed, relocated, or removed it - re-verify the internal premises ` +
+        `per the "Upgrading the SFTP Stack" checklist in ` +
+        `docs/spec/DEPENDENCY_PINS.md`,
+    );
   }
 
   // A terminal error built from a previously captured fatal SFTP-protocol error,
@@ -1852,17 +1905,35 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   //
   // Costs nothing in the ordinary case: a raw-wrapper operation is torn by the
   // 'close' itself, so both readings are already settled by the time recovery runs
-  // and this returns without driving anything. Every way it can fail warns, naming
-  // what broke and this project's upgrade checklist, and leaves the operation to
-  // fail with the loss it was already failing with: recovery that cannot retire the
-  // transport degrades to the terminal outcome it had before, and must not replace
-  // the operation's own error with one of its own.
+  // and this returns without driving anything. That shortcut needs a POSITIVE
+  // reading that the lifecycle sequence was delivered, never merely the absence of
+  // an owed-close reading: on a Client the lifecycle watch could not attach to,
+  // the absence means "cannot tell", and taking it for "nothing owed" puts the
+  // dial into the very window this method exists to keep it out of. So an
+  // unreadable lifecycle warns and falls through to the forced close, which
+  // retires an owed 'close' and, on a transport whose 'close' had already landed,
+  // costs the wait out of FORCED_CLOSE_TIMEOUT_MS that the shortcut saves (a
+  // 'close' listener armed after the event never resolves early).
+  //
+  // Every way it can fail warns, naming what broke and this project's upgrade
+  // checklist, and leaves the operation to fail with the loss it was already
+  // failing with: recovery that cannot retire the transport degrades to the
+  // terminal outcome it had before, and must not replace the operation's own error
+  // with one of its own.
   private async retireTransportForRedial(
     held: HeldSessionTransition,
     internals: Ssh2SftpClientInternals,
   ): Promise<TransportRetirement> {
     const sessionHeld = Boolean(internals.sftp);
-    if (!sessionHeld && !this.transportAwaitingClose) return "retired";
+    // Only a cleared session consults the lifecycle reading: a session still set
+    // is on its own enough to retire the transport, and the forced close reports
+    // back whether the property cleared, which is the library clearing it from the
+    // 'close' -- evidence the reading would otherwise have supplied.
+    if (!sessionHeld) {
+      const closeState = this.readTransportCloseState();
+      if (closeState === "delivered") return "retired";
+      if (closeState === "unreadable") this.warnUnreadableTransportLifecycle();
+    }
     // Which failure this reports turns on which state brought it here, because the
     // two leave the caller different work: a session still held over an ended
     // transport cannot carry a re-issue at all, while a cleared one rejects it at
