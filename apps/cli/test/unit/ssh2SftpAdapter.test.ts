@@ -6548,12 +6548,13 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await expect(released).resolves.toBeUndefined();
   });
 
-  test("a held boundary does not increment declinedReleaseCount", async () => {
-    // That count states a cause -- another session transition that did not complete
-    // within the release's wait -- which is false of a hold, and the end-of-run line
-    // it feeds would report an anomaly where a concurrent send straddling a boundary
-    // is ordinary. Nor is a held boundary a closed one, so the forced-release total
-    // stays where it is too.
+  test("a held boundary counts as held, not as declined or forced", async () => {
+    // The declined count states a cause -- another session transition that did not
+    // complete within the release's wait -- which is false of a hold, and the
+    // end-of-run line it feeds would report an anomaly where a concurrent send
+    // straddling a boundary is ordinary. Nor is a held boundary a closed one, so the
+    // forced-release total stays where it is too. The hold has an end-of-run total
+    // of its own, which is where these boundaries land instead.
     const { client, rawClient } = ephemeralClient(wrapperMethods());
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     stub(adapter);
@@ -6569,7 +6570,98 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(rawClient.end).not.toHaveBeenCalled();
     expect(adapter.declinedReleaseCount).toBe(0);
     expect(adapter.forcedReleaseCount).toBe(0);
+    expect(adapter.heldBoundaryCount).toBe(2);
+    expect(adapter.heldBoundaryStretchCount).toBe(1);
+    // Accounted, never warned: the operator hears about the run's total at the end
+    // and about no single occurrence.
     expect(adapterLog(adapter).warn).not.toHaveBeenCalled();
+
+    operation.settle();
+    await expect(removal).resolves.toBeUndefined();
+  });
+
+  test("one unsettled operation across several boundaries counts each boundary and one stretch", async () => {
+    // The case the total exists for: an operation with no bound of its own holds
+    // every remaining boundary, so the mode's per-cycle session lifetime has lapsed
+    // for the rest of the run. Five boundaries lost, one uninterrupted hold -- and
+    // it is the stretch count that says the mode stopped rather than merely paying
+    // for five straddling sends.
+    const { client, rawClient } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    const operation = pendingDelete(client);
+    const removal = adapter.delete("/remote/out.json");
+
+    for (let boundary = 0; boundary < 5; boundary += 1)
+      await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+
+    expect(rawClient.end).not.toHaveBeenCalled();
+    expect(adapter.heldBoundaryCount).toBe(5);
+    expect(adapter.heldBoundaryStretchCount).toBe(1);
+
+    operation.settle();
+    await expect(removal).resolves.toBeUndefined();
+  });
+
+  test("operations settling between boundaries count one stretch each", async () => {
+    // The ordinary case, which must not read like the one above: a send straddling
+    // a boundary costs one idle gap and then lets the wire empty, so the next hold
+    // is a fresh stretch. Three sends, three boundaries, three stretches -- the mode
+    // is working and the counts say so.
+    const { client, rawClient } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      const operation = pendingDelete(client);
+      const removal = adapter.delete(`/remote/out-${cycle}.json`);
+      await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+      operation.settle();
+      await expect(removal).resolves.toBeUndefined();
+    }
+
+    expect(rawClient.end).not.toHaveBeenCalled();
+    expect(adapter.heldBoundaryCount).toBe(3);
+    expect(adapter.heldBoundaryStretchCount).toBe(3);
+  });
+
+  test("both held counts stay at zero on a run that holds no boundary, in either mode", async () => {
+    // The guard the end-of-run line rests on: a clean run of the mode prints
+    // nothing, and the default held-session mode -- which runs no idle release at
+    // all -- prints nothing either.
+    const { client, rawClient } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    await expect(adapter.delete("/remote/out.json")).resolves.toBeUndefined();
+    await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    expect(adapter.heldBoundaryCount).toBe(0);
+    expect(adapter.heldBoundaryStretchCount).toBe(0);
+
+    const held = ephemeralClient(wrapperMethods());
+    const persistent = new SSH2SFTPClientAdapter();
+    stub(persistent);
+    install(persistent, held.client);
+
+    await persistent.connect({ host: "h", maxReconnectAttempts: 0 });
+    const operation = pendingDelete(held.client);
+    const removal = persistent.delete("/remote/out.json");
+    // No release runs in the default mode, so the outstanding operation reaches no
+    // boundary to hold.
+    await expect(persistent.releaseForIdle()).resolves.toBeUndefined();
+
+    expect(persistent.heldBoundaryCount).toBe(0);
+    expect(persistent.heldBoundaryStretchCount).toBe(0);
 
     operation.settle();
     await expect(removal).resolves.toBeUndefined();

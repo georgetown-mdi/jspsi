@@ -539,6 +539,26 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // separate statements about the mode: how often it closed a boundary itself, and
   // how often it could not close one at all.
   private declinedReleases = 0;
+  // Idle boundaries that closed NOTHING because an operation this adapter had
+  // ISSUED was still unsettled (see recordHeldBoundary). Kept apart from both
+  // release counters above because the cause differs and so does the remedy:
+  // neither a boundary this adapter closed nor a transition it gave up waiting on,
+  // but a session deliberately kept up for the operation on it. Carries an
+  // end-of-run total (heldBoundaryCount) and no warning of its own -- a held
+  // boundary is ordinary rather than anomalous.
+  private heldBoundaries = 0;
+  // Unbroken stretches of held boundaries: one is opened by a held boundary with
+  // none open, and closed when outstandingOperations next reaches zero. Reported
+  // beside heldBoundaries so one operation holding twenty boundaries does not read
+  // like twenty operations each holding one, which is the difference between a
+  // mode still delivering per-cycle sessions and one that has stopped. It measures
+  // unbroken hold rather than operations, so operations that overlap continuously
+  // are one stretch however many of them there were.
+  private heldBoundaryStretches = 0;
+  // Whether a held-boundary stretch is currently open. Not derivable from the two
+  // counters above: what closes a stretch is the outstanding count emptying, which
+  // leaves no trace in either.
+  private holdStretchOpen = false;
   // Cycle-start re-dials that dialed NOTHING because they gave up their wait for the
   // transition ahead of them (see warnCycleRedialDeclined). Paces that path's
   // warning and nothing else; kept apart from the release counter above because a
@@ -722,6 +742,39 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    */
   get declinedReleaseCount(): number {
     return this.declinedReleases;
+  }
+
+  /**
+   * Idle boundaries at which the connection-per-poll release closed NOTHING
+   * because an operation this adapter had ISSUED was still unsettled, so the
+   * session stayed live across the idle gap rather than being cut off that
+   * operation (see {@link releaseForIdle}). Its cause is neither
+   * {@link forcedReleaseCount}'s -- a boundary this adapter did end -- nor
+   * {@link declinedReleaseCount}'s -- a transition the release gave up waiting on
+   * -- so none of the three is ever summed into another. NOT a reconnection and
+   * not a lost session: nothing was closed, so it is absent from
+   * {@link reconnectCount} too. 0 in every other mode and on any run whose
+   * boundaries all fell with the wire empty. A plain operational counter, never a
+   * partner-controlled value.
+   */
+  get heldBoundaryCount(): number {
+    return this.heldBoundaries;
+  }
+
+  /**
+   * Unbroken stretches the boundaries of {@link heldBoundaryCount} fall in: a
+   * stretch opens at a held boundary with none open and closes when the adapter's
+   * outstanding-operation count next empties. One operation held across twenty
+   * boundaries is 20 boundaries in 1 stretch; twenty operations each settling
+   * between boundaries are 20 in 20 -- the first says the mode has stopped
+   * delivering per-cycle sessions, the second that it is working. It measures
+   * unbroken hold rather than operations: operations overlapping so the
+   * outstanding count never empties read as ONE stretch however many of them
+   * there were. Never exceeds {@link heldBoundaryCount}, and 0 wherever that is.
+   * A plain operational counter, never a partner-controlled value.
+   */
+  get heldBoundaryStretchCount(): number {
+    return this.heldBoundaryStretches;
   }
 
   // Acquire this adapter's one session-transition lock and run `transition` under
@@ -1054,6 +1107,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     this.outstandingOperations += 1;
     return op.finally(() => {
       this.outstandingOperations -= 1;
+      // An empty wire ends whatever stretch of held boundaries was open: the next
+      // held boundary begins a new one. Read after the decrement, so the operation
+      // settling here is not counted as still holding.
+      if (this.outstandingOperations === 0) this.holdStretchOpen = false;
       this.heartbeat.opSettled(epoch);
     });
   }
@@ -2282,12 +2339,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * outstanding: {@link runTransition} keeps the boundary, the operation completes
    * on the session it was issued against, and the first boundary past its
    * settlement releases as usual. Each boundary it straddles costs the mode one
-   * idle gap and is neither counted nor warned -- a concurrent `send()` straddling
-   * a boundary is ordinary rather than anomalous -- and it is a hold, not a drain:
-   * the release returns instead of awaiting the operation, so nothing above it
-   * waits any longer than it would have. An operation carrying no adapter-side
-   * deadline holds every boundary until the exchange ends; the hold's bound is the
-   * operation's, and {@link outstandingOperations} states which have one.
+   * idle gap and draws no warning -- a concurrent `send()` straddling a boundary
+   * is ordinary rather than anomalous -- though the run's totals are kept
+   * ({@link heldBoundaryCount}, {@link heldBoundaryStretchCount}); and it is a
+   * hold, not a drain: the release returns instead of awaiting the operation, so
+   * nothing above it waits any longer than it would have. An operation carrying no
+   * adapter-side deadline holds every boundary until the exchange ends; the hold's
+   * bound is the operation's, and {@link outstandingOperations} states which have
+   * one.
    */
   releaseForIdle(): Promise<void> {
     if (!this.ephemeralSessions) return Promise.resolve();
@@ -2295,9 +2354,24 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       kind: "releaseForIdle",
       skipped: () => undefined,
       abandoned: () => this.warnIdleReleaseDeclined(),
-      heldForOutstandingOperation: () => undefined,
+      heldForOutstandingOperation: () => this.recordHeldBoundary(),
       run: (held) => this.releaseSessionForIdle(held),
     });
+  }
+
+  // The idle release kept the session for an operation this side had issued rather
+  // than cutting that operation off the wire. Accounted and NOT warned, unlike its
+  // two sibling outcomes: an operation straddling a boundary is ordinary, so a
+  // per-occurrence line -- paced or not -- would report an anomaly where there is
+  // none. What the run total is for is the case that is not ordinary: an operation
+  // with no bound of its own holds every remaining boundary, and the mode's
+  // per-cycle session lifetime has then lapsed for that run with nothing else
+  // saying so.
+  private recordHeldBoundary(): void {
+    this.heldBoundaries += 1;
+    if (this.holdStretchOpen) return;
+    this.holdStretchOpen = true;
+    this.heldBoundaryStretches += 1;
   }
 
   // The idle release gave up its wait for the transition ahead of it: it released

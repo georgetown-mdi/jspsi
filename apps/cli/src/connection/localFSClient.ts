@@ -131,6 +131,25 @@ export class LocalFSClient implements FileTransportClient {
   }
 
   /**
+   * Idle boundaries held for an operation this client had issued. Always 0 for the
+   * filedrop transport: it opens no connection, so it has no session to keep for
+   * an operation and no poll boundary to keep it across. Present so both
+   * file-transport clients expose the same metrics surface.
+   */
+  get heldBoundaryCount(): number {
+    return 0;
+  }
+
+  /**
+   * Unbroken stretches of held idle boundaries. Always 0 for the filedrop
+   * transport, which holds no boundary to open a stretch at. Present so both
+   * file-transport clients expose the same metrics surface.
+   */
+  get heldBoundaryStretchCount(): number {
+    return 0;
+  }
+
+  /**
    * Verifies read/write access to the directory specified by `options.path`.
    * Enforces `options.connectTimeoutMs` (default: 30s) per attempt. A fast
    * transient failure (e.g. the share or its permissions still settling) is

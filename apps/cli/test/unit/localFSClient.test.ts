@@ -125,6 +125,8 @@ test("the release counters stay at zero across a connect and a write", async () 
   await client.end();
   expect(client.forcedReleaseCount).toBe(0);
   expect(client.declinedReleaseCount).toBe(0);
+  expect(client.heldBoundaryCount).toBe(0);
+  expect(client.heldBoundaryStretchCount).toBe(0);
 });
 
 // --- list --------------------------------------------------------------------
