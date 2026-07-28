@@ -1,5 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -99,11 +106,56 @@ describe("URL literal matcher", () => {
     ]);
   });
 
+  it("still flags a stun/turn host written behind slashes", () => {
+    // stun and turn URIs carry no `//` (RFC 7064, RFC 7065), so a slash before
+    // the host is stray punctuation and not the empty authority the same shape
+    // means under http.
+    expect(
+      urlsIn(
+        'const ice = ["turn://relay.evil.example:3478?transport=udp",\n' +
+          '  "stun:/relay.evil.example:3478",\n' +
+          '  "turns:///relay.evil.example:5349"];\n',
+      ),
+    ).toEqual([
+      "turn://relay.evil.example:3478?transport=udp",
+      "stun:/relay.evil.example:3478",
+      "turns:///relay.evil.example:5349",
+    ]);
+    expect(
+      urlLiterals('const u = "stun:/relay.evil.example:3478";\n')[0].authority,
+    ).toBe("relay.evil.example:3478");
+  });
+
+  it("does not trip on a stun/turn scheme with slashes and no host", () => {
+    expect(
+      urlsIn('const prefixes = ["stun://", "turn:/", "turns:"];\n'),
+    ).toEqual([]);
+  });
+
   it("does not trip on an authority that is an immediate interpolation", () => {
     const source =
       "const origin = originOf(`http://${host}`);\n" +
-      "const hostname = new URL(`http://${host}`).hostname;\n";
+      "const hostname = new URL(`http://${host}`).hostname;\n" +
+      "const authority = `http://${host}:${port}/api`;\n";
     expect(urlsIn(source)).toEqual([]);
+  });
+
+  it("still flags a literal host beside an interpolation", () => {
+    // The skip above is for an authority naming whatever an expression
+    // evaluates to. A per-tenant host is not that: the interpolation is a
+    // subdomain and the registrable name beside it is the literal host.
+    expect(
+      urlLiterals("await fetch(`https://${tenant}.evil.example/report`);\n"),
+    ).toEqual([
+      {
+        url: "https://${tenant}.evil.example/report",
+        authority: "${tenant}.evil.example",
+        line: 1,
+      },
+    ]);
+    expect(
+      urlsIn("await fetch(`http://${format({ a: 1 })}.evil.example`);\n"),
+    ).toEqual(["http://${format({ a: 1 })}.evil.example"]);
   });
 
   it("still flags a literal host carrying an interpolated path", () => {
@@ -120,14 +172,51 @@ describe("URL literal matcher", () => {
     expect(urlsIn(source)).toEqual([]);
   });
 
-  it("matches an uppercase scheme", () => {
-    expect(urlsIn('const u = "HTTPS://EVIL.EXAMPLE/x";\n')).toEqual([
+  it("skips an empty web authority but not a short or bracketed one", () => {
+    expect(
+      urlsIn('const u = "https:///path";\nconst v = "https://";\n'),
+    ).toEqual([]);
+    expect(
+      urlsIn(
+        'const u = "https://a/";\nconst v = "http://[2001:db8::1]:8080/x";\n' +
+          'const w = "https://evil.example//double";\n',
+      ),
+    ).toEqual([
+      "https://a/",
+      "http://[2001:db8::1]:8080/x",
+      "https://evil.example//double",
+    ]);
+  });
+
+  it("matches a scheme in any case", () => {
+    expect(
+      urlsIn(
+        'const u = "HTTPS://EVIL.EXAMPLE/x";\nconst v = "HtTp://evil.example/y";\n' +
+          'const w = "TURN:relay.evil.example:3478";\n',
+      ),
+    ).toEqual([
       "HTTPS://EVIL.EXAMPLE/x",
+      "HtTp://evil.example/y",
+      "TURN:relay.evil.example:3478",
     ]);
   });
 
   it("does not read a word ending in a scheme name as a URI", () => {
     expect(urlsIn('const note = "the call returns:2 rows";\n')).toEqual([]);
+  });
+
+  it("reads a scheme that punctuation rather than a word precedes", () => {
+    const source =
+      'const a = "?next=https://evil.example/one";\n' +
+      'const b = await import("https://evil.example/two.js");\n' +
+      'const c = "srcset:https://evil.example/three 2x";\n' +
+      "const d = `${origin}https://evil.example/four`;\n";
+    expect(urlsIn(source)).toEqual([
+      "https://evil.example/one",
+      "https://evil.example/two.js",
+      "https://evil.example/three",
+      "https://evil.example/four",
+    ]);
   });
 });
 
@@ -200,6 +289,81 @@ describe("scanned files", () => {
       ),
     ).toHaveLength(1);
   });
+
+  it("skips a notice file only on its whole basename", () => {
+    const attribution = 'const u = "https://evil.example/x";\n';
+    for (const near of [
+      "apps/web/src/LICENSE-INDEX.md",
+      "apps/web/src/THIRD-PARTY-NOTICE.md",
+      "apps/web/src/licenses.ts",
+      "apps/web/src/notice.txt",
+      "apps/web/src/vendor/LICENSE.ts",
+    ]) {
+      expect(isScannedFile(near)).toBe(true);
+      expect(fileViolations(near, attribution)).toHaveLength(1);
+    }
+  });
+
+  it("skips a file only on a blocklisted extension", () => {
+    const literal = 'const u = "https://evil.example/x";\n';
+    expect(isScannedFile("apps/web/public/psi.wasm")).toBe(false);
+    expect(isScannedFile("apps/web/public/ICON.PNG")).toBe(false);
+    for (const text of [
+      "apps/cli/src/entry", // extensionless
+      "apps/web/src/routes/index.tsx",
+      "apps/web/public/robots.txt",
+      "apps/web/public/manifest.json",
+      "apps/web/src/worker.mjs",
+      "apps/web/public/icon.png.ts",
+      "apps/web/src/README.md",
+    ]) {
+      expect(isScannedFile(text)).toBe(true);
+      expect(fileViolations(text, literal)).toHaveLength(1);
+    }
+  });
+});
+
+describe("scanned roots", () => {
+  it("covers the server entry point the deployed web app boots", () => {
+    // Nitro builds the deployed server around this entry, so a URL literal
+    // reached during server boot is as shipped as anything under src/.
+    const nitro = readFileSync(
+      resolve(repoRoot, "apps/web/nitro.config.ts"),
+      "utf8",
+    );
+    const entry = /\bentry:\s*"([^"]+)"/.exec(nitro);
+    expect(entry).not.toBeNull();
+    const entryPath = `apps/web/${entry[1].replace(/^\.\//, "")}`;
+    expect(SCANNED_ROOTS.some((root) => entryPath.startsWith(`${root}/`))).toBe(
+      true,
+    );
+    expect(scanRepo(repoRoot).files).toContain(entryPath);
+  });
+
+  it("scans a root's own tree and not a sibling sharing its prefix", () => {
+    // Driven against real git rather than a model of its pathspec matching,
+    // which is what decides whether `apps/web/server` also admits
+    // `apps/web/server-extras`.
+    const dir = mkdtempSync(resolve(tmpdir(), "egress-roots-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore" });
+      const literal = 'const u = "https://evil.example/x";\n';
+      for (const file of [
+        "apps/web/server/custom-entry.ts",
+        "apps/web/server-extras/side.ts",
+        "apps/web/servers/other.ts",
+        "apps/web/srcery/other.ts",
+      ]) {
+        mkdirSync(resolve(dir, dirname(file)), { recursive: true });
+        writeFileSync(resolve(dir, file), literal);
+      }
+      const { files, violations } = scanRepo(dir);
+      expect(files).toEqual(["apps/web/server/custom-entry.ts"]);
+      expect(violations).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("comment stripping", () => {
@@ -242,6 +406,15 @@ describe("comment stripping", () => {
       "  --bench-check: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\"/>');\n";
     expect(urlsIn(source)).toEqual(["http://www.w3.org/2000/svg"]);
     expect(fileViolations("apps/web/src/bench/tokens.css", source)).toEqual([]);
+  });
+
+  it("keeps a URL whose own path carries a comment opener", () => {
+    expect(urlsIn('const u = "https://evil.example/a/*b*/c";\n')).toEqual([
+      "https://evil.example/a/*b*/c",
+    ]);
+    expect(
+      urlsIn("@font-face { src: url(https://evil.example/a/*b*/c.woff2); }\n"),
+    ).toEqual(["https://evil.example/a/*b*/c.woff2"]);
   });
 
   it("does not let an escaped slash in a regex blank the rest of the line", () => {

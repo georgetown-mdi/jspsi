@@ -29,7 +29,8 @@
 //     string fragments, escaped inside a regular expression (`https:\/\/`),
 //     or percent- or entity-encoded. The check is a guard against egress added
 //     inadvertently, not against an author who wants to hide it.
-//   - Schemes outside http, https, stun, stuns, turn, and turns.
+//   - Schemes outside http, https, stun, stuns, turn, and turns, and a
+//     protocol-relative `//host` reference, which carries no scheme to match.
 //
 // License and notice files (LICENSE, LICENCE, NOTICE, COPYING) are not
 // scanned: license text is not executable, and the attribution URL in a
@@ -41,6 +42,17 @@
 // dropped into apps/web/public, say -- is scanned by default rather than
 // ignored by default. A new binary format that trips the check is fixed by
 // adding its extension here, a one-line edit a reviewer sees.
+//
+// SCANNED_ROOTS is source that ships or runs, not all TypeScript. Beside the
+// app and library trees and the web app's static assets it carries
+// apps/web/server, the Nitro entry point the deployed server boots (named by
+// apps/web/nitro.config.ts). Deliberately outside it: the build and test
+// configuration at each workspace root and the sibling test/ trees, which run
+// on a developer's machine and reach no user; and apps/web/deploy, whose nginx
+// and post-deploy files configure the Elastic Beanstalk host rather than the
+// application, addressing the instance itself (127.0.0.1, the EC2 metadata
+// service) and belonging to deploy review. A tree that starts shipping is added
+// here, so an exclusion reads as the decision it is rather than an oversight.
 //
 // Test files are NOT excluded. The scanned roots are shipped-source trees by
 // construction (the suites live in sibling test/ directories), so a `*.test.*`
@@ -58,6 +70,7 @@ export const SCANNED_ROOTS = [
   "apps/cli/src",
   "packages/core/src",
   "apps/web/public",
+  "apps/web/server",
 ];
 
 /**
@@ -161,10 +174,15 @@ const NOTICE_BASENAMES = new Set([
 // through the other.
 const TERMINATOR_CHARS = "\\s\"'`<>(),;}\\\\";
 const URL_TERMINATOR = new RegExp(`[${TERMINATOR_CHARS}]`);
-const URL_LITERAL = new RegExp(
-  `(?<![A-Za-z0-9_])(?<scheme>https?|stuns?|turns?):(?<rest>[^${TERMINATOR_CHARS}]*)`,
+const URL_SCHEME = new RegExp(
+  `(?<![A-Za-z0-9_])(?<scheme>https?|stuns?|turns?):`,
   "gi",
 );
+
+// A `${...}` span whose text names whatever the expression evaluates to rather
+// than a host. Removing the spans is what leaves the literal part of an
+// authority for the host rule to judge.
+const INTERPOLATION_SPAN = /\$\{[^}]*\}/g;
 
 // A scheme immediately before a `//`, which makes those slashes part of a URL
 // rather than the start of a line comment.
@@ -315,36 +333,80 @@ export function stripComments(source) {
 }
 
 /**
+ * The URL literal's text starting at `start`, ending at the first terminator.
+ *
+ * `}` is one of those terminators, and it is also what closes an interpolation
+ * inside an authority -- where the text after it, a literal host suffix
+ * included, is still part of the URL. So terminators end the literal only at
+ * interpolation depth zero. Inner braces raise the depth as well: stopping at
+ * the first `}` of `${format({ a: 1 })}` would drop back into the URL one brace
+ * early and lose everything the interpolation was prefixed to.
+ */
+function readUrlBody(text, start) {
+  let i = start;
+  let depth = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "$" && text[i + 1] === "{") {
+      depth += 1;
+      i += 2;
+      continue;
+    }
+    if (c === "}") {
+      if (depth === 0) break;
+      depth -= 1;
+    } else if (depth > 0) {
+      if (c === "{") depth += 1;
+    } else if (URL_TERMINATOR.test(c)) {
+      break;
+    }
+    i += 1;
+  }
+  return text.slice(start, i);
+}
+
+/** Whether `authority` still spells out a host once interpolations are removed. */
+function namesLiteralHost(authority) {
+  return /[A-Za-z0-9]/.test(authority.replace(INTERPOLATION_SPAN, ""));
+}
+
+/**
  * Absolute URL literals in `source` as `{url, authority, line}`, after comment
- * stripping. Four shapes are excluded here rather than allowlisted, because
+ * stripping. Three shapes are excluded here rather than allowlisted, because
  * none of them names a host:
  *
  *   - `http`/`https` without `://`, which is a protocol comparison
  *     (`location.protocol === "https:"`), not a URL.
- *   - `stun`/`turn` whose colon is not immediately followed by a host
- *     character. This is what makes the check usable at all: `stun:` and
- *     `turn:` are also object-property syntax in a Zod schema, the head of a
- *     `/^turns?:/` anchor, and the tail of prose like "must begin with turn:".
- *   - An authority opening with a `${` interpolation, which names whatever the
- *     expression evaluates to (the `URL`-parsing helpers over an inbound `Host`
- *     header do this) rather than a literal host.
- *   - An authority holding no alphanumeric character, such as the elided
- *     `https://...#...` in placeholder text.
+ *   - An empty authority, whether written as `https:///path` or, for `stun`
+ *     and `turn`, as a colon followed by nothing but slashes. That second form
+ *     is what makes the check usable at all: `stun:` and `turn:` are also
+ *     object-property syntax in a Zod schema, the head of a `/^turns?:/`
+ *     anchor, and the tail of prose like "must begin with turn:".
+ *   - An authority spelling out no host of its own: fully interpolated, as the
+ *     `URL`-parsing helpers over an inbound `Host` header write it
+ *     (`http://${host}`), or holding no alphanumeric character at all, as the
+ *     elided `https://...#...` of placeholder text does. An interpolation with
+ *     a literal host beside it (`https://${tenant}.evil.example`) names one and
+ *     is reported.
  */
 export function urlLiterals(source) {
   const found = [];
   const text = stripComments(source);
   let lineStart = 0;
   let line = 1;
-  for (const match of text.matchAll(URL_LITERAL)) {
-    const { scheme, rest } = match.groups;
+  for (const match of text.matchAll(URL_SCHEME)) {
+    const { scheme } = match.groups;
+    const rest = readUrlBody(text, match.index + match[0].length);
     const isWeb = /^https?$/i.test(scheme);
     if (isWeb && !rest.startsWith("//")) continue;
-    const afterScheme = isWeb ? rest.slice(2) : rest;
-    if (afterScheme === "" || afterScheme.startsWith("/")) continue;
+    // The authority follows `//` for the web schemes, so a slash still leading
+    // it means there is none. stun and turn carry no `//` (RFC 7064, RFC 7065),
+    // and a slash written before their host is stray punctuation around a real
+    // one rather than the same signal.
+    const afterScheme = isWeb ? rest.slice(2) : rest.replace(/^\/+/, "");
+    if (isWeb && afterScheme.startsWith("/")) continue;
     const authority = afterScheme.split(/[/?#]/, 1)[0];
-    if (authority.startsWith("${")) continue;
-    if (!/[A-Za-z0-9]/.test(authority)) continue;
+    if (!namesLiteralHost(authority)) continue;
 
     while (lineStart < match.index) {
       const nextBreak = text.indexOf("\n", lineStart);
