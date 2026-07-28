@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   canonicalSource,
   classifyPath,
+  collectVerdicts,
   fileVerdict,
   parseChangedPaths,
   sidesForStatus,
@@ -291,5 +297,198 @@ describe("summarize", () => {
 
   it("holds vacuously when the two refs differ in nothing", () => {
     expect(summarize([])).toMatchObject({ holds: true, exitCode: 0 });
+  });
+});
+
+// The `-z` records above are hand-written, which makes them a model of git's
+// output rather than a measurement of it. These drive real git instead, through
+// the same seam the CLI uses. The fixtures build their own repo rather than
+// naming a sha from this one: CI checks out with no `fetch-depth`, and in the
+// resulting shallow clone no historical sha resolves.
+describe("against a real git repository", () => {
+  const dirs = [];
+
+  afterEach(() => {
+    while (dirs.length > 0) {
+      rmSync(dirs.pop(), { recursive: true, force: true });
+    }
+  });
+
+  function makeFixture() {
+    const dir = mkdtempSync(join(tmpdir(), "nonexec-delta-"));
+    dirs.push(dir);
+    const git = (args) =>
+      execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+    git(["init", "-q", "-b", "main"]);
+    git(["config", "user.email", "verifier-test@example.invalid"]);
+    git(["config", "user.name", "Verifier Test"]);
+    return {
+      git,
+      write: (path, text) => {
+        mkdirSync(dirname(join(dir, path)), { recursive: true });
+        writeFileSync(join(dir, path), text);
+      },
+      remove: (path) => rmSync(join(dir, path)),
+      commit: (message) => {
+        git(["add", "-A"]);
+        git(["commit", "-q", "-m", message]);
+        return git(["rev-parse", "HEAD"]).trim();
+      },
+    };
+  }
+
+  const byPath = (verdicts) =>
+    Object.fromEntries(verdicts.map((v) => [v.path, v.verdict]));
+
+  it("verdicts a modified, added, deleted, markdown, and non-source path from one real diff", () => {
+    const { git, write, remove, commit } = makeFixture();
+    write("src/commented.ts", "export const a = 1;\n");
+    write("src/changed.ts", "export const b = 1;\n");
+    write("src/dropped.js", "// only a comment\n");
+    write("docs/notes.md", "# Notes\n");
+    write("package.json", '{ "name": "fixture" }\n');
+    write(".github/workflows/ci.yaml", "on: push\n");
+    const attested = commit("Base");
+
+    write("src/commented.ts", "// why this is one\nexport const a = 1;\n");
+    write("src/changed.ts", "export const b = 2;\n");
+    remove("src/dropped.js");
+    write("src/added.mjs", "export const c = 3;\n");
+    write("docs/notes.md", "# Notes\n\nMore prose.\n");
+    write("package.json", '{ "name": "fixture", "version": "1.0.0" }\n');
+    write(".github/workflows/ci.yaml", "on: pull_request\n");
+    const head = commit("Change");
+
+    const verdicts = collectVerdicts({ attested, head, git });
+    expect(byPath(verdicts)).toEqual({
+      "src/commented.ts": "comment-only",
+      "src/changed.ts": "executable-delta",
+      "src/dropped.js": "comment-only",
+      "src/added.mjs": "executable-delta",
+      "docs/notes.md": "exempt",
+      "package.json": "unverifiable",
+      ".github/workflows/ci.yaml": "unverifiable",
+    });
+    expect(summarize(verdicts).exitCode).toBe(1);
+  });
+
+  it("exits 0 for a real diff that is comments and markdown only", () => {
+    const { git, write, remove, commit } = makeFixture();
+    write("src/kept.ts", "export const a = 1;\n");
+    write("src/gone.mts", "/* only a comment */\n");
+    write("README.md", "# Fixture\n");
+    const attested = commit("Base");
+
+    write("src/kept.ts", "export const a = 1; // trailing\n");
+    remove("src/gone.mts");
+    write("README.md", "# Fixture\n\nRewritten wholesale.\n");
+    const head = commit("Comments and markdown");
+
+    const result = summarize(collectVerdicts({ attested, head, git }));
+    expect(result).toMatchObject({ holds: true, exitCode: 0 });
+    expect(result.deltas).toEqual([]);
+    expect(result.unverifiable).toEqual([]);
+  });
+
+  it("sees a rename as a delete plus an add, so a moved module is a delta", () => {
+    const { git, write, commit } = makeFixture();
+    write("src/mover.ts", "export const moved = 1;\n");
+    const attested = commit("Base");
+
+    git(["mv", "src/mover.ts", "src/moved.ts"]);
+    const head = commit("Move it");
+
+    expect(git(["diff", "--name-status", "-M", "-z", attested, head])).toBe(
+      "R100\0src/mover.ts\0src/moved.ts\0",
+    );
+    expect(byPath(collectVerdicts({ attested, head, git }))).toEqual({
+      "src/mover.ts": "executable-delta",
+      "src/moved.ts": "executable-delta",
+    });
+  });
+
+  it("reads paths that -z emits raw and the default format would C-quote", () => {
+    const { git, write, commit } = makeFixture();
+    write("src/has space.ts", "export const s = 1;\n");
+    write("src/uni-é.ts", "export const u = 1;\n");
+    const attested = commit("Base");
+
+    write("src/has space.ts", "export const s = 1; // note\n");
+    write("src/uni-é.ts", "export const u = 2;\n");
+    const head = commit("Touch both");
+
+    expect(
+      git([
+        "-c",
+        "core.quotePath=true",
+        "diff",
+        "--name-status",
+        "--no-renames",
+        attested,
+        head,
+      ]),
+    ).toContain('"src/uni-\\303\\251.ts"');
+    expect(byPath(collectVerdicts({ attested, head, git }))).toEqual({
+      "src/has space.ts": "comment-only",
+      "src/uni-é.ts": "executable-delta",
+    });
+  });
+});
+
+const SCRIPT = fileURLToPath(
+  new URL("./verify-nonexecutable-delta.mjs", import.meta.url),
+);
+
+// The script as an agent invokes it, so argv handling, the git error path, and
+// the exit codes are exercised rather than assumed. Every case here resolves
+// without repo history, which is what a shallow CI checkout has. Exit 3 stays
+// unreachable from a subprocess -- it needs a TypeScript whose printer fails a
+// probe -- and is covered only by the soundness-probe test above.
+describe("the script as an agent runs it", () => {
+  const runScript = (args) => {
+    try {
+      return {
+        status: 0,
+        stdout: execFileSync(process.execPath, [SCRIPT, ...args], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        }),
+        stderr: "",
+      };
+    } catch (error) {
+      return {
+        status: error.status,
+        stdout: error.stdout,
+        stderr: error.stderr,
+      };
+    }
+  };
+
+  it("prints usage and exits 2 unless given exactly two refs", () => {
+    for (const args of [[], ["only-one"], ["one", "two", "three"]]) {
+      const result = runScript(args);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toMatch(
+        /^Usage: node \.claude\/scripts\/verify-nonexecutable-delta\.mjs /,
+      );
+      expect(result.stdout).toBe("");
+    }
+  });
+
+  it("exits 2 when a ref does not resolve, rather than reporting a verdict", () => {
+    const result = runScript(["HEAD", "no-such-ref-9f3c1a"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toMatch(/^error: /m);
+    expect(result.stdout).not.toMatch(/HOLDS|VIOLATED/);
+  });
+
+  it("passes its probes and exits 0 over a ref compared with itself", () => {
+    const result = runScript(["HEAD", "HEAD"]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(
+      /soundness probes: (\d+)\/\1 passed on typescript /,
+    );
+    expect(result.stdout).toContain("(none)");
+    expect(result.stdout).toMatch(/non-executable-delta property: HOLDS/);
   });
 });

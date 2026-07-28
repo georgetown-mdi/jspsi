@@ -168,6 +168,39 @@ export function parseChangedPaths(stdout) {
   return entries;
 }
 
+/**
+ * Verdicts for every path changed between two refs. `git` runs one git command
+ * from an array of arguments and returns its stdout, throwing on a nonzero exit;
+ * injecting it lets a test drive a fixture repo through the same code the CLI
+ * runs against this one.
+ */
+export function collectVerdicts({ attested, head, git }) {
+  for (const ref of [attested, head]) {
+    git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  }
+  return parseChangedPaths(
+    git(["diff", "--name-status", "--no-renames", "-z", attested, head]),
+  ).map(({ status, path }) => {
+    const sides = sidesForStatus(status);
+    if (sides === null) {
+      return {
+        path,
+        verdict: "unverifiable",
+        reason: `diff status ${status} is not modelled -- compare it by hand or take a full round`,
+      };
+    }
+    // Content is read only for a parseable source path; an exempt or
+    // unverifiable verdict is decided by the path alone.
+    const isSource = classifyPath(path) === "source";
+    return fileVerdict({
+      path,
+      before:
+        isSource && sides.before ? git(["show", `${attested}:${path}`]) : null,
+      after: isSource && sides.after ? git(["show", `${head}:${path}`]) : null,
+    });
+  });
+}
+
 /** Overall outcome for a run's file verdicts, with the process exit code. */
 export function summarize(verdicts) {
   const deltas = verdicts.filter((v) => v.verdict === "executable-delta");
@@ -270,33 +303,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   let verdicts;
   try {
-    for (const ref of [attested, head]) {
-      git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
-    }
-    verdicts = parseChangedPaths(
-      git(["diff", "--name-status", "--no-renames", "-z", attested, head]),
-    ).map(({ status, path }) => {
-      const sides = sidesForStatus(status);
-      if (sides === null) {
-        return {
-          path,
-          verdict: "unverifiable",
-          reason: `diff status ${status} is not modelled -- compare it by hand or take a full round`,
-        };
-      }
-      // Content is read only for a parseable source path; an exempt or
-      // unverifiable verdict is decided by the path alone.
-      const isSource = classifyPath(path) === "source";
-      return fileVerdict({
-        path,
-        before:
-          isSource && sides.before
-            ? git(["show", `${attested}:${path}`])
-            : null,
-        after:
-          isSource && sides.after ? git(["show", `${head}:${path}`]) : null,
-      });
-    });
+    verdicts = collectVerdicts({ attested, head, git });
   } catch (error) {
     process.stderr.write(`error: ${error.message ?? error}\n`);
     process.exit(2);
