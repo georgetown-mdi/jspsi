@@ -69,6 +69,15 @@ jobs:
       # a rule is gated stops holding it itself.
       - name: Enforcement claims
         run: npm run check:enforcement-claims
+      # Encodes PRIVACY.md's published no-egress claims as a check: an absolute
+      # URL literal in shipped source either sits on the script's reasoned
+      # allowlist or fails the build, so a font CDN, an error-reporting SDK, an
+      # analytics snippet, or a version-check ping cannot silently falsify the
+      # statement handed to agency security reviewers. It reads literals only --
+      # what it does not cover is stated in its header and in
+      # docs/SECURITY_DESIGN.md.
+      - name: Egress claims
+        run: npm run check:egress-claims
       # Encodes the model-tiering rule where the hooks cannot reach it: a
       # Workflow script's agent() call that omits `model` inherits the session
       # model rather than the agent definition's pinned tier, and the model sits

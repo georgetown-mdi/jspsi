@@ -17,6 +17,8 @@ This is not a privacy notice for your agency's own data subjects, and it is not 
 - **The project collects, transmits, and retains no personal data on its own behalf**, in either deployment. There are no accounts, no registration, no license check, no update ping, no usage analytics, and no telemetry.
 - **What the two parties disclose to each other is governed by their data sharing agreement**, not by this project. PSI-Link enforces the protocol; the agreement decides what may be exchanged under it.
 
+Every statement in this document about what PSI-Link connects to is backstopped mechanically, not by review alone: a repository check (`npm run check:egress-claims`) fails the build when shipped source gains an absolute URL literal outside a reviewed allowlist, so an added content delivery network, analytics snippet, or update ping is caught before it can falsify this document. It reads literal URLs and is a backstop rather than a proof of no egress; its limits are in [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md#egress-hardening-and-its-limits).
+
 ## Two deployments
 
 The answers below differ by deployment. Read the section matching what you are deploying.
