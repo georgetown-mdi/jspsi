@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +15,7 @@ import {
   classifyPath,
   collectVerdicts,
   fileVerdict,
+  modeChange,
   parseChangedPaths,
   sidesForStatus,
   soundnessProbes,
@@ -246,20 +253,93 @@ describe("diff status handling", () => {
     }
   });
 
-  it("parses -z name-status records", () => {
-    expect(parseChangedPaths("M\0a.ts\0A\0b/c.mjs\0D\0d.md\0")).toEqual([
-      { status: "M", path: "a.ts" },
-      { status: "A", path: "b/c.mjs" },
-      { status: "D", path: "d.md" },
+  it("parses -z raw records as a status, a path, and both file modes", () => {
+    expect(
+      parseChangedPaths(
+        ":100644 100755 cc798ff cc798ff M\0a.ts\0" +
+          ":000000 100644 0000000 39a3655 A\0b/c.mjs\0" +
+          ":100644 000000 b240d97 0000000 D\0d.md\0",
+      ),
+    ).toEqual([
+      { status: "M", path: "a.ts", beforeMode: "100644", afterMode: "100755" },
+      {
+        status: "A",
+        path: "b/c.mjs",
+        beforeMode: "000000",
+        afterMode: "100644",
+      },
+      { status: "D", path: "d.md", beforeMode: "100644", afterMode: "000000" },
     ]);
     expect(parseChangedPaths("")).toEqual([]);
   });
 
   it("consumes both paths of an R/C record without desyncing the rest", () => {
-    expect(parseChangedPaths("R100\0old.ts\0new.ts\0M\0after.ts\0")).toEqual([
-      { status: "R100", path: "new.ts" },
-      { status: "M", path: "after.ts" },
+    expect(
+      parseChangedPaths(
+        ":100644 100644 97e87e5 97e87e5 R100\0old.ts\0new.ts\0" +
+          ":100644 100644 ac648be 15a410d M\0after.ts\0",
+      ),
+    ).toEqual([
+      {
+        status: "R100",
+        path: "new.ts",
+        beforeMode: "100644",
+        afterMode: "100644",
+      },
+      {
+        status: "M",
+        path: "after.ts",
+        beforeMode: "100644",
+        afterMode: "100644",
+      },
     ]);
+  });
+
+  it("fails a record shape it does not model closed, without desyncing the rest", () => {
+    // A bare name-status record and a combined-diff record: neither carries the
+    // modes the comparison needs, so neither may be read as a modelled entry.
+    for (const unmodelled of [
+      "M",
+      "::100644 100644 100644 aaaaaaa bbbbbbb ccccccc MM",
+    ]) {
+      expect(
+        parseChangedPaths(
+          `${unmodelled}\0legacy.ts\0:100644 100644 ac648be 15a410d M\0after.ts\0`,
+        ),
+      ).toEqual([
+        { status: null, record: unmodelled, path: "legacy.ts" },
+        {
+          status: "M",
+          path: "after.ts",
+          beforeMode: "100644",
+          afterMode: "100644",
+        },
+      ]);
+    }
+  });
+
+  it("reports a record it does not model as unverifiable rather than skipping it", () => {
+    const git = (args) => (args[0] === "diff" ? "M\0a.ts\0" : "");
+    const verdicts = collectVerdicts({ attested: "x", head: "y", git });
+    expect(verdicts).toMatchObject([{ path: "a.ts", verdict: "unverifiable" }]);
+    expect(verdicts[0].reason).toMatch(/does not model/);
+    expect(summarize(verdicts).exitCode).toBe(1);
+  });
+});
+
+describe("file modes", () => {
+  it("reports a mode change only where both sides exist", () => {
+    expect(modeChange("100644", "100755")).toEqual({
+      beforeMode: "100644",
+      afterMode: "100755",
+    });
+    expect(modeChange("100755", "100644")).toEqual({
+      beforeMode: "100755",
+      afterMode: "100644",
+    });
+    expect(modeChange("100644", "100644")).toBe(null);
+    expect(modeChange("000000", "100755")).toBe(null);
+    expect(modeChange("100755", "000000")).toBe(null);
   });
 });
 
@@ -329,6 +409,7 @@ describe("against a real git repository", () => {
         writeFileSync(join(dir, path), text);
       },
       remove: (path) => rmSync(join(dir, path)),
+      chmod: (path, mode) => chmodSync(join(dir, path), mode),
       commit: (message) => {
         git(["add", "-A"]);
         git(["commit", "-q", "-m", message]);
@@ -398,12 +479,108 @@ describe("against a real git repository", () => {
     git(["mv", "src/mover.ts", "src/moved.ts"]);
     const head = commit("Move it");
 
-    expect(git(["diff", "--name-status", "-M", "-z", attested, head])).toBe(
-      "R100\0src/mover.ts\0src/moved.ts\0",
+    expect(git(["diff", "--raw", "-M", "-z", attested, head])).toMatch(
+      /^:100644 100644 [0-9a-f]+ [0-9a-f]+ R100\0src\/mover\.ts\0src\/moved\.ts\0$/,
     );
     expect(byPath(collectVerdicts({ attested, head, git }))).toEqual({
       "src/mover.ts": "executable-delta",
       "src/moved.ts": "executable-delta",
+    });
+  });
+
+  it("fails a chmod that changes no content, which name-status reports as a bare M", () => {
+    const { git, write, chmod, commit } = makeFixture();
+    write("src/tool.mjs", "export const run = 1;\n");
+    const attested = commit("Base");
+
+    chmod("src/tool.mjs", 0o755);
+    const head = commit("Make it runnable");
+
+    // The premise of reading modes off `--raw`, measured rather than assumed:
+    // under `--name-status` this change carries no mode information at all, and
+    // the blobs it points at are the same one.
+    expect(
+      git(["diff", "--name-status", "--no-renames", "-z", attested, head]),
+    ).toBe("M\0src/tool.mjs\0");
+    expect(
+      git(["diff", "--raw", "--no-renames", "-z", attested, head]),
+    ).toMatch(/^:100644 100755 ([0-9a-f]+) \1 M\0src\/tool\.mjs\0$/);
+
+    const verdicts = collectVerdicts({ attested, head, git });
+    expect(byPath(verdicts)).toEqual({ "src/tool.mjs": "unverifiable" });
+    expect(verdicts[0].reason).toMatch(/mode changed from 100644 to 100755/);
+    const result = summarize(verdicts);
+    expect(result.holds).toBe(false);
+    expect(result.exitCode).toBe(1);
+    expect(result.unverifiable.map((v) => v.path)).toEqual(["src/tool.mjs"]);
+  });
+
+  it("fails a chmod that removes the executable bit", () => {
+    const { git, write, chmod, commit } = makeFixture();
+    write("src/tool.mjs", "export const run = 1;\n");
+    chmod("src/tool.mjs", 0o755);
+    const attested = commit("Base");
+
+    chmod("src/tool.mjs", 0o644);
+    const head = commit("Stop it running");
+
+    expect(byPath(collectVerdicts({ attested, head, git }))).toEqual({
+      "src/tool.mjs": "unverifiable",
+    });
+  });
+
+  it("fails a chmod on a markdown path, whose exemption covers content, not modes", () => {
+    const { git, write, chmod, commit } = makeFixture();
+    write("docs/plain.md", "# Plain\n");
+    write("docs/rewritten.md", "# Rewritten\n");
+    const attested = commit("Base");
+
+    chmod("docs/plain.md", 0o755);
+    chmod("docs/rewritten.md", 0o755);
+    write("docs/rewritten.md", "# Rewritten\n\nWholesale new prose.\n");
+    const head = commit("Chmod the docs");
+
+    expect(byPath(collectVerdicts({ attested, head, git }))).toEqual({
+      "docs/plain.md": "unverifiable",
+      "docs/rewritten.md": "unverifiable",
+    });
+  });
+
+  it("fails a chmod carried alongside a comment edit, which alone would hold", () => {
+    const { git, write, chmod, commit } = makeFixture();
+    write("src/both.ts", "export const a = 1;\n");
+    const attested = commit("Base");
+
+    write("src/both.ts", "// why this is one\nexport const a = 1;\n");
+    chmod("src/both.ts", 0o755);
+    const head = commit("Comment and chmod");
+
+    expect(byPath(collectVerdicts({ attested, head, git }))).toEqual({
+      "src/both.ts": "unverifiable",
+    });
+  });
+
+  it("does not fail an added or deleted file for its absent side's 000000 mode", () => {
+    const { git, write, chmod, remove, commit } = makeFixture();
+    write("src/goneComment.ts", "// only a comment\n");
+    chmod("src/goneComment.ts", 0o755);
+    write("src/goneCode.ts", "export const g = 1;\n");
+    chmod("src/goneCode.ts", 0o755);
+    const attested = commit("Base");
+
+    remove("src/goneComment.ts");
+    remove("src/goneCode.ts");
+    write("src/addedComment.mjs", "// only a comment\n");
+    chmod("src/addedComment.mjs", 0o755);
+    write("src/addedCode.mjs", "export const c = 3;\n");
+    chmod("src/addedCode.mjs", 0o755);
+    const head = commit("Swap them");
+
+    expect(byPath(collectVerdicts({ attested, head, git }))).toEqual({
+      "src/goneComment.ts": "comment-only",
+      "src/goneCode.ts": "executable-delta",
+      "src/addedComment.mjs": "comment-only",
+      "src/addedCode.mjs": "executable-delta",
     });
   });
 

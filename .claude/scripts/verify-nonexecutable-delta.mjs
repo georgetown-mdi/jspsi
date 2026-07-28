@@ -33,12 +33,19 @@
 // so a rename arrives as a delete plus an add and reads as an executable delta
 // on both paths -- a moved module is a changed program.
 //
-// Not covered: file modes, so a chmod with no content change reads comment-only;
-// markdown content wholesale, including a fenced code block an operator would
-// copy out; and the normalizations the printer applies, each measured and pinned
-// by the test -- whitespace, blank lines, indentation, quote style, ASI
-// semicolons, trailing commas, and numeric literal form all compare equal. The
-// verdict is "no executable delta", not "the bytes match".
+// File modes come off the diff record rather than the content, because a chmod
+// leaves the blob identical and any content comparison reads it as no change at
+// all. A path whose mode differs across two sides that both exist is
+// UNVERIFIABLE whatever its extension -- the markdown exemption is for content --
+// since the comparison reads programs and cannot say whether making one runnable
+// is harmless. Modes are compared only across sides that exist, so an addition or
+// a deletion, whose absent side reads 000000, is not failed for that alone.
+//
+// Not covered: markdown content wholesale, including a fenced code block an
+// operator would copy out; and the normalizations the printer applies, each
+// measured and pinned by the test -- whitespace, blank lines, indentation, quote
+// style, ASI semicolons, trailing commas, and numeric literal form all compare
+// equal. The verdict is "no executable delta", not "the bytes match".
 //
 // Exit codes: 0 the property holds; 1 it is violated or a changed path could not
 // be verified; 2 usage or git error; 3 the verifier failed its own soundness
@@ -146,24 +153,53 @@ export function sidesForStatus(status) {
   return null;
 }
 
+const ABSENT_MODE = "000000";
+
 /**
- * `git diff --name-status -z` output as `{status, path}` entries. An R/C entry
- * carries a second path; `--no-renames` rules those out, but the extra field is
- * consumed anyway so one unexpected entry cannot desync the rest of the parse.
+ * The file-mode change between the two sides of a diff record, or null where
+ * there is none to report. A side that does not exist reads `000000`, which is
+ * not a mode the file ever had, so modes are compared only where both sides
+ * exist.
+ */
+export function modeChange(beforeMode, afterMode) {
+  if (beforeMode === ABSENT_MODE || afterMode === ABSENT_MODE) return null;
+  if (beforeMode === afterMode) return null;
+  return { beforeMode, afterMode };
+}
+
+const RAW_RECORD = /^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ ([A-Z]\d*)$/;
+
+/**
+ * `git diff --raw -z` output as `{status, path, beforeMode, afterMode}` entries.
+ * The raw format is the one that carries file modes; `--name-status` reports a
+ * mode-only change as a bare `M` and would attest a chmod away. Its metadata
+ * field packs both modes and the status, NUL-separated from the path that
+ * follows, so a record whose metadata does not read reports a null status --
+ * with its raw text as `record` -- to fail closed downstream. Such a record
+ * still consumes one path field, as an R/C entry consumes its second path, so
+ * one unexpected entry cannot desync the rest of the parse.
  */
 export function parseChangedPaths(stdout) {
   const fields = stdout.split("\0").filter((field) => field !== "");
   const entries = [];
   for (let i = 0; i < fields.length;) {
-    const status = fields[i];
+    const record = fields[i];
     i += 1;
-    if (/^[RC]/.test(status)) {
-      entries.push({ status, path: fields[i + 1] });
-      i += 2;
+    const metadata = RAW_RECORD.exec(record);
+    if (metadata === null) {
+      entries.push({ status: null, record, path: fields[i] });
+      i += 1;
       continue;
     }
-    entries.push({ status, path: fields[i] });
-    i += 1;
+    const [, beforeMode, afterMode, status] = metadata;
+    const pathFields = /^[RC]/.test(status) ? 2 : 1;
+    entries.push({
+      status,
+      path: fields[i + pathFields - 1],
+      beforeMode,
+      afterMode,
+    });
+    i += pathFields;
   }
   return entries;
 }
@@ -179,14 +215,29 @@ export function collectVerdicts({ attested, head, git }) {
     git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
   }
   return parseChangedPaths(
-    git(["diff", "--name-status", "--no-renames", "-z", attested, head]),
-  ).map(({ status, path }) => {
+    git(["diff", "--raw", "--no-renames", "-z", attested, head]),
+  ).map(({ status, record, path, beforeMode, afterMode }) => {
+    if (status === null) {
+      return {
+        path,
+        verdict: "unverifiable",
+        reason: `diff record "${record}" has a shape this verifier does not model -- compare it by hand or take a full round`,
+      };
+    }
     const sides = sidesForStatus(status);
     if (sides === null) {
       return {
         path,
         verdict: "unverifiable",
         reason: `diff status ${status} is not modelled -- compare it by hand or take a full round`,
+      };
+    }
+    const mode = modeChange(beforeMode, afterMode);
+    if (mode !== null) {
+      return {
+        path,
+        verdict: "unverifiable",
+        reason: `file mode changed from ${mode.beforeMode} to ${mode.afterMode} -- this verifier compares file content, not modes`,
       };
     }
     // Content is read only for a parseable source path; an exempt or
