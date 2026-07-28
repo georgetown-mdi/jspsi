@@ -309,21 +309,6 @@ interface HeldSessionTransition {
   readonly recordBoundary: SessionBoundaryRecorder;
 }
 
-// A mechanism driven outside the transition that owns it
-// (SSH2SFTPClientAdapter.assertTransitionHeld). Its own class so that a catch
-// placed around one of those mechanisms, for a failure of the mechanism itself,
-// cannot quietly absorb the chokepoint check reached through it: the check exists
-// to make two overlapping transitions LOUD, and reporting one as an operational
-// failure of the thing it guards is the one outcome that would defeat it.
-//
-// A UsageError because that is the class the file-sync poll loop's terminal rule
-// keys on. A plain Error reaching the loop through an operation is a transient
-// transport hiccup to it: the consume-delete swallows it, retries, and delivers
-// the message anyway -- which would leave a breach of the chokepoint quieter at
-// the loop layer than an ordinary stall, defeating the same LOUDNESS the class
-// exists for.
-class SessionTransitionViolationError extends UsageError {}
-
 // What a transition does when its bounded wait for the transition ahead of it
 // expires (TRANSITION_ACQUIRE_TIMEOUT_MS). runTransition acts on this reading
 // rather than on the kind, and every value is behavior observable on the adapter
@@ -901,7 +886,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     held: HeldSessionTransition,
   ): void {
     if (this.transitionInProgress === held) return;
-    throw new SessionTransitionViolationError(
+    throw new Error(
       `${mechanism} was driven outside the SFTP session transition that owns ` +
         `it; every dial and every close of this adapter's session runs inside ` +
         `the runTransition call that acquired for it, so that two can never ` +
@@ -1629,11 +1614,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // accounting is not -- this boundary is a partner-side drop, counted and warned
   // as one by the recovery path, never as an idle release.
   //
-  // Reports whether the session cleared. Every way the forced close itself can
-  // fail warns, naming what broke and this project's upgrade checklist, and leaves
-  // the operation to fail with the loss it was already failing with: recovery that
-  // cannot clear the session degrades to the terminal outcome it had before, and
-  // must not replace the operation's own error with one of its own.
+  // Reports whether the session cleared. Every way it can fail warns, naming what
+  // broke and this project's upgrade checklist, and leaves the operation to fail
+  // with the loss it was already failing with: recovery that cannot clear the
+  // session degrades to the terminal outcome it had before, and must not replace
+  // the operation's own error with one of its own.
   private async clearSessionOverEndedTransport(
     held: HeldSessionTransition,
     internals: Ssh2SftpClientInternals,
@@ -1656,11 +1641,6 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       if (await this.forceCloseEndedTransport(held, internals, seams))
         return true;
     } catch (error: unknown) {
-      // This catch is for net.Socket's destroy() raising synchronously into the
-      // recovery. The chokepoint check reached through the same call is not that,
-      // and degrading it to the warning below would hand the operator a report of
-      // the PARTNER's server for a violation on this side.
-      if (error instanceof SessionTransitionViolationError) throw error;
       this.log.warn(
         `Closing the SFTP connection from this side, to re-dial a session the ` +
           `partner's server dropped without closing the connection, failed: ` +

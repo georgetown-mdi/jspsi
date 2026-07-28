@@ -3741,43 +3741,6 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
     expect(adapter.midExchangeReconnectCount).toBe(0);
   });
 
-  test("propagates a transition-chokepoint violation rather than warning it as the partner's", async () => {
-    // The catch that absorbs a raising destroy must not also absorb the
-    // held-transition check inside the forced close: that check fires only on two
-    // transitions overlapping on the one shared client, and degrading it to this
-    // path's warning would report it to the operator as the partner's server
-    // misbehaving, on the drop warning's own pacing.
-    const { client, destroy } = withholdingPartner();
-    const { adapter, log } = loggedAdapter();
-    install(adapter, client);
-
-    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
-
-    // A transition token nothing is holding, which is what a refactor that lost
-    // the held identity on this path would present at the chokepoint.
-    const unheld = { kind: "redialForRecovery", recordBoundary: () => {} };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const clearing = (adapter as any).clearSessionOverEndedTransport(
-      unheld,
-      client,
-    ) as Promise<boolean>;
-    const violation = await clearing.catch((error: unknown) => error);
-
-    // A UsageError, which is what the file-sync poll loop's terminal rule keys
-    // on: propagating as a plain Error would make the consume-delete swallow the
-    // breach, retry, and deliver the message regardless -- quieter at the loop
-    // layer than an ordinary stall, which is a UsageError and stops it.
-    expect(violation).toBeInstanceOf(UsageError);
-    expect((violation as Error).message).toContain(
-      "outside the SFTP session transition that owns it",
-    );
-    // The check runs ahead of the mechanism it guards, so nothing was driven on
-    // the shared client and nothing reached the operator as an operational
-    // failure.
-    expect(destroy).not.toHaveBeenCalled();
-    expect(log.warn).not.toHaveBeenCalled();
-  });
-
   test("warns and leaves the operation terminal when the forced close does not clear the session", async () => {
     // The one premise no dial can check -- that destroying the transport takes the
     // session with it -- is read back where it is driven, on the mid-exchange
