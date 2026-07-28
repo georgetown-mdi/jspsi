@@ -110,6 +110,44 @@ Everything else runs on one machine with Docker and no special rights:
   than the pipeline, so a scripted run needs a `Read-Host` shim defined in the
   calling scope; the script has no `-Password` or `-Credential` parameter.
 
+## Field notes: the DFS mock attempt, 28 July 2026
+
+The account below is reproduced as written at the end of the session that
+attempted it. The section above states the same conclusions as settled
+guidance; this is the raw record, kept because the negative result is the part
+most likely to be repeated by whoever tries next.
+
+> The DFS mock didn't work, and the reason is worth knowing.
+>
+> **Why it failed:** stopping LanmanServer does **not** free port 445. Two
+> listeners remained on PID 4 -- the SMB listener lives in the kernel drivers
+> and outlives the service stop. Docker couldn't bind `127.0.0.1:445`, so the
+> containers never started and every step after that failed on a name that
+> didn't resolve. Samba's side was fine: the `msdfs:dfstarget\exchange`
+> symlink was in place and the target server was serving. The obstacle is the
+> Windows client, not Docker. Freeing 445 means unbinding File and Printer
+> Sharing from an interface, which is a bigger change than this test justifies.
+>
+> **What the run did settle:** elevated, `Get-SmbConnection` returned 0 errors
+> against "Access is denied" unelevated. That positively confirms the
+> elevation finding I shipped in the first commit, which until now rested only
+> on the failing half.
+>
+> **What it turned up as a doubt:** even with a working namespace,
+> `Resolve-RealServer` probably can't do its job. The script parses
+> `\\namespace\dfs\link` into share `dfs`, and the function matches
+> connections on that share name. Following a referral, Windows holds a
+> connection to the namespace root (share `dfs`) *and* to the target (the
+> target's own share name). Matching on `dfs` should return the namespace
+> server -- equal to the name already in hand -- so no correction gets
+> applied, making the function a no-op on the exact case it exists for.
+> **That's read off the DFS protocol, not measured.** I've recorded it in the
+> handoff as the first thing to test rather than as a finding, along with the
+> note that the real client-side answer is `NetDfsGetClientInfo` (what
+> `dfsutil /pktinfo` reports), and that the honest alternative is dropping the
+> automatic resolution entirely. I did not change the code on the strength of
+> an unverified inference.
+
 ## Before running it
 
 The script creates a Docker volume named `psilink-rendezvous` and deletes any
