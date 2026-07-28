@@ -34,7 +34,7 @@ against the duration cap.
 ## What transparent reconnect already gives, and what it does not
 
 Transparent mid-exchange reconnect (shipped as "Recover a dropped SFTP session
-mid-exchange") wraps every server-driven SFTP op so that, on a *clean* session
+mid-exchange") wraps the server-driven SFTP ops so that, on a *clean* session
 loss, the adapter re-dials -- reusing the pinned host-key fingerprint and stored
 credentials with no re-prompt -- and re-issues the op before the loss is treated as
 failed. Per-op idempotency resolvers make the re-issue safe (a landed delete maps
@@ -396,9 +396,11 @@ release is serialized against it at the adapter's recovery chokepoint, which
 re-establishes the session before the op's first attempt -- queued behind the
 release on the transition lock, so it runs on the far side of the close rather
 than racing it. An op already on the wire is covered by the release's own
-precondition rather than by any gate at op entry: a boundary reached with an
+precondition rather than by any gate at op entry: a boundary reached with a counted
 operation outstanding closes nothing, so the op completes on the session it was
-issued against and the next boundary releases as usual. A held boundary costs the
+issued against and the next boundary releases as usual (what the count covers, and
+the few best-effort round trips outside it, are in
+[CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md)). A held boundary costs the
 mode one idle gap, is neither counted nor warned -- a concurrent send straddling a
 boundary is ordinary -- and adds no wait anywhere: the release returns rather than
 draining the operation.

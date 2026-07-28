@@ -546,7 +546,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private declinedCycleRedials = 0;
   private transportRetries = 0;
   // Server-driven operations issued on this adapter's session and not yet settled,
-  // counted at the single bracket every one of them passes through (see tracked()).
+  // counted at the bracket they pass through, save the three round trips issued
+  // outside it that tracked() names.
   // Read by runTransition as the idle-boundary release's precondition: a boundary
   // reached with an operation outstanding closes nothing, because the close would
   // tear that operation off the wire. Owned here rather than read off the
@@ -1019,12 +1020,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   //
   // The adapter's own outstanding-operation count is kept here too, and takes no
   // epoch: it is a count of what is on the wire whatever session that is, which is
-  // exactly what the idle-boundary release's precondition needs. Every server-driven
-  // operation passes through here, including the two the recovery gate does not
-  // reach (the never-reject cleanup delete, and a put whose source cannot be
-  // re-issued), so the precondition covers those as well. finally() is what balances
-  // a rejecting operation against a resolving one; one unbalanced failure would pin
-  // the session open for the rest of the exchange.
+  // exactly what the idle-boundary release's precondition needs. The two operations
+  // the recovery gate does not reach (the never-reject cleanup delete, and a put
+  // whose source cannot be re-issued) do pass through here, so the precondition
+  // covers those as well. Three server round trips do not pass here at all: the
+  // heartbeat's keepalive (see sendKeepalive), the best-effort handle close a
+  // listing fires once it has settled (whose loss the listing accounts for), and
+  // rename()'s re-issue existence probe, issued a layer above renameOnce's bracket
+  // -- a probe torn by a release reports a landed rename as the failure that drove
+  // the probe. finally() is what balances a rejecting operation against a resolving
+  // one; one unbalanced failure would pin the session open for the rest of the
+  // exchange.
   private tracked<T>(op: Promise<T>): Promise<T> {
     const epoch = this.heartbeat.opStarted();
     this.outstandingOperations += 1;
@@ -1208,7 +1214,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     );
   }
 
-  // The outermost layer around every server-driven op: it runs the op once and,
+  // The outermost layer around a recovery-wrapped op -- every server-driven op but
+  // safeDelete and a put whose source cannot be re-issued: it runs the op once and,
   // if that rejection is a CLEAN session loss, re-dials the connection ONCE and
   // re-issues the op ONCE before giving up. An SFTP server that enforces a
   // max-session or idle cap the operator cannot change drops the one long-lived
@@ -1331,12 +1338,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // another transition reads neither and is issued against the still-live
   // session: it is in the on-the-wire class, not the covered one. No gate at entry
   // can cover that class at all, and it is not this gate's to cover -- the release
-  // itself keeps a boundary reached with an operation outstanding (see
+  // itself keeps a boundary reached with a counted operation outstanding (see
   // runTransition), so no release closes over one. Two operations do not reach this
   // gate in any case -- safeDelete, whose never-reject contract puts it outside
   // recovery, and a put whose source cannot be re-issued (a one-shot stream, or
-  // flags:"a") -- and both are counted by that precondition, which brackets every
-  // server-driven operation rather than the recovery-wrapped ones alone.
+  // flags:"a") -- and both are counted by that precondition, which reaches past the
+  // recovery-wrapped operations (tracked() names what it leaves uncounted).
   //
   // Returns undefined -- no gate, not even a microtask -- whenever the mode is off
   // or no release has intervened, so the default held-session mode runs exactly as
@@ -1533,8 +1540,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // first attempt. One ALREADY ON THE WIRE -- including one issued while the
   // release was still queued, the same class -- is what the release's own
   // precondition keeps the boundary for (see runTransition), so no release closes
-  // over it. What the ordering premise below carries is every OTHER tear of an
-  // outstanding op: a server-side drop, and the terminal close.
+  // over a counted one. What the ordering premise below carries is every OTHER tear
+  // of an outstanding op: a server-side drop, and the terminal close.
   //
   // At the pinned versions such a tear reads as the loss it is, for a narrower
   // reason than the transport event alone: ssh2 fails outstanding channel requests
