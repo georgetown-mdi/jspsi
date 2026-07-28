@@ -616,14 +616,18 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // would then pace each line on the other's occurrences.
   private declinedCycleRedials = 0;
   private transportRetries = 0;
-  // Server-driven operations this adapter has ISSUED and not yet settled, counted
-  // at the bracket they pass through, save the two round trips issued outside it
-  // that tracked() names. Issued-and-unsettled is not the set that is on the wire,
-  // and departs from it in both directions: an adapter bound that expires settles
-  // the operation here while the library request it raced is still outstanding at
-  // the server, and an operation the server never answers is never settled from
-  // this side at all, core's whole-exchange budget being a race that abandons
-  // rather than a cancellation.
+  // Server-driven operations this adapter has ISSUED and not yet settled,
+  // counted at the bracket they pass through, save the two round trips issued
+  // outside it that tracked() names, and kept open across a recovery arm by the
+  // second span countOutstandingOperation describes -- which nests around the
+  // attempts' own brackets, so one operation inside its recovery reads as more
+  // than one. Nothing reads this as a quantity; the release's precondition is a
+  // non-zero test. Issued-and-unsettled is not the set that is on the wire, and
+  // departs from it in both directions: an adapter bound that expires settles
+  // the operation here while the library request it raced is still outstanding
+  // at the server, and an operation the server never answers is never settled
+  // from this side at all, core's whole-exchange budget being a race that
+  // abandons rather than a cancellation.
   // Read by runTransition as the idle-boundary release's precondition: a boundary
   // reached with an operation outstanding closes nothing, because the close would
   // tear that operation off the wire. So what bounds the hold is the operation's
@@ -1137,32 +1141,56 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // was torn down mid-flight (a reconnect advanced the heartbeat's epoch) cannot
   // decrement the new session's in-flight count when it finally settles.
   //
-  // The adapter's own outstanding-operation count is kept here too, and takes no
-  // epoch: it counts operations this adapter issued and has not settled, whatever
-  // session they went out on, which is neither more nor less than what the
-  // idle-boundary release's precondition reads (see outstandingOperations for how
-  // that set differs from the wire, and what it leaves the hold bounded by). The
-  // two operations the recovery gate does not reach (the never-reject cleanup
-  // delete, and a put whose source cannot be re-issued) do pass through here, so
-  // the precondition covers those as well. Two server round trips do not pass
-  // here at all: the heartbeat's keepalive (see sendKeepalive), and the
-  // best-effort handle close a listing fires once it has settled (whose loss the
-  // listing accounts for). Which call sites those are is a check rather than this
-  // sentence: scripts/sftp-tracked-round-trips.test.mjs parses this file and fails
-  // on any request-issuing site outside this bracket that is not one of the two.
+  // The adapter's own outstanding-operation count is opened here too, through
+  // countOutstandingOperation and taking no epoch: it counts operations this
+  // adapter issued and has not settled, whatever session they went out on, which
+  // is neither more nor less than what the idle-boundary release's precondition
+  // reads (see outstandingOperations for how that set differs from the wire, and
+  // what it leaves the hold bounded by, and countOutstandingOperation for the one
+  // other span that keeps it). The two operations the recovery gate does not reach
+  // (the never-reject cleanup delete, and a put whose source cannot be re-issued)
+  // do pass through here, so the precondition covers those as well. Two server
+  // round trips do not pass here at all: the heartbeat's keepalive (see
+  // sendKeepalive), and the best-effort handle close a listing fires once it has
+  // settled (whose loss the listing accounts for). Which call sites those are is a
+  // check rather than this sentence: scripts/sftp-tracked-round-trips.test.mjs
+  // parses this file and fails on any request-issuing site outside this bracket
+  // that is not one of the two.
   // finally() is what balances a rejecting operation against a resolving one; one
   // unbalanced failure would pin the session open for the rest of the exchange.
   private tracked<T>(op: Promise<T>): Promise<T> {
     const epoch = this.heartbeat.opStarted();
-    this.outstandingOperations += 1;
+    const settled = this.countOutstandingOperation();
     return op.finally(() => {
+      settled();
+      this.heartbeat.opSettled(epoch);
+    });
+  }
+
+  // Count one operation as outstanding, returning the call that ends it. The
+  // maintenance of the idle-boundary release's precondition, and of the held-
+  // boundary stretch that rides on it, lives here alone so its two spans keep it
+  // identically: the bracket above, and the recovery arm between an operation's
+  // failed attempt and its re-issued one (see withSessionRecovery), which is the
+  // same operation still unsettled and so has to read as one.
+  //
+  // The heartbeat's activity accounting deliberately stays at the bracket above
+  // rather than moving here. It is a different question -- whether a round trip is
+  // ON THE WIRE, which across the recovery arm nothing of this operation's is --
+  // and the arm has no need of it either way: the mode this precondition serves
+  // arms no heartbeat at all, and in the default held-session mode the arm's own
+  // re-dial re-arms one from scratch (SftpHeartbeat.start advances the epoch and
+  // zeroes the in-flight count), so a beat suppressed across the arm would be
+  // suppressed by a count the re-dial discards.
+  private countOutstandingOperation(): () => void {
+    this.outstandingOperations += 1;
+    return () => {
       this.outstandingOperations -= 1;
       // An empty wire ends whatever stretch of held boundaries was open: the next
       // held boundary begins a new one. Read after the decrement, so the operation
       // settling here is not counted as still holding.
       if (this.outstandingOperations === 0) this.holdStretchOpen = false;
-      this.heartbeat.opSettled(epoch);
-    });
+    };
   }
 
   // Layers the non-fatal slow-operation warning (observability) over an in-flight
@@ -1465,72 +1493,92 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     const first = gate === undefined ? op() : gate.then(op);
     return first.catch(async (error: unknown) => {
       if (!this.shouldRecoverFromSessionLoss(error)) throw error;
-      // A teardown re-dial (the abort-marker write or the terminal-frame drain) is
-      // exempt from the cap and neither counted nor warned; see the `tearingDown`
-      // field and beginTeardown().
-      const teardown = this.tearingDown;
-      // Likewise a re-dial that follows this adapter's OWN idle-boundary release;
-      // see the `sessionBoundary` field. Read BEFORE the re-dial, which discharges
-      // the boundary: reading it afterwards would classify every deliberate release
-      // as a drop -- the misreport this exists to stop. The release records the
-      // boundary before it drives the close that tears this operation off the wire,
-      // so an operation torn by it reads the boundary that tore it.
-      const deliberateRelease = this.sessionBoundary === "deliberatelyReleased";
-      // Cap the cumulative mid-exchange reconnections in the default held-session
-      // mode: once max_reconnect_attempts drops have already been re-dialed this
-      // exchange, refuse the next and fail terminally. Gated off in
-      // connection-per-poll mode and for a teardown re-dial.
-      if (
-        !teardown &&
-        !this.ephemeralSessions &&
-        this.midExchangeRedials >= this.operativeMaxReconnectAttempts()
-      )
-        throw this.midExchangeReconnectBudgetExhaustedError();
-      const redial = await this.redialForRecovery().catch(
-        (redialError: unknown) => {
-          // This re-dial can be the very dial an abandoning teardown destroyed the
-          // transport beneath, and its rejection then reports a close of this
-          // adapter's own as a partner-side one. Fall through to the closing branch
-          // below, which surfaces the loss this recovery was for, rather than
-          // replacing it with that error.
-          if (this.abandonedTeardownClosedTransport)
-            return "noSession" as RecoveryRedialOutcome;
-          throw redialError;
-        },
-      );
-      // end() may have latched `closing` while the re-dial held the transition
-      // lock: join the teardown that will close the freshly-dialed session, so no
-      // session outlives it, and surface the original loss rather than re-issuing
-      // into a closing adapter.
-      if (this.closing) {
-        await this.end().catch(() => {});
-        throw error;
+      // The operation is unsettled for the whole of this arm -- its first
+      // attempt failed and its re-issue has not run -- so it is counted as
+      // outstanding across the whole of it, and no idle boundary reached here
+      // closes a session the arm is still using. The attempt's own bracket has
+      // already settled the count by the time this catch runs, and each of the
+      // two spans that leaves uncovered costs a landed publish: between the
+      // re-issue's rejection and the destination probe rename() answers it
+      // with, a boundary would tear the probe and the unanswered probe reads as
+      // "the rename did not land"; between the re-dial and the re-issue, a
+      // boundary would close the session just dialed and the re-issue would
+      // reject with a dead-session error no resolver reads at all. Both surface
+      // a rename that DID land as a failure. The span therefore covers the
+      // re-dial as well as the re-issue, and its close is the arm's settlement
+      // either way.
+      const settled = this.countOutstandingOperation();
+      try {
+        // A teardown re-dial (the abort-marker write or the terminal-frame drain) is
+        // exempt from the cap and neither counted nor warned; see the `tearingDown`
+        // field and beginTeardown().
+        const teardown = this.tearingDown;
+        // Likewise a re-dial that follows this adapter's OWN idle-boundary release;
+        // see the `sessionBoundary` field. Read BEFORE the re-dial, which discharges
+        // the boundary: reading it afterwards would classify every deliberate release
+        // as a drop -- the misreport this exists to stop. The release records the
+        // boundary before it drives the close that tears this operation off the wire,
+        // so an operation torn by it reads the boundary that tore it.
+        const deliberateRelease =
+          this.sessionBoundary === "deliberatelyReleased";
+        // Cap the cumulative mid-exchange reconnections in the default held-session
+        // mode: once max_reconnect_attempts drops have already been re-dialed this
+        // exchange, refuse the next and fail terminally. Gated off in
+        // connection-per-poll mode and for a teardown re-dial.
+        if (
+          !teardown &&
+          !this.ephemeralSessions &&
+          this.midExchangeRedials >= this.operativeMaxReconnectAttempts()
+        )
+          throw this.midExchangeReconnectBudgetExhaustedError();
+        const redial = await this.redialForRecovery().catch(
+          (redialError: unknown) => {
+            // This re-dial can be the very dial an abandoning teardown destroyed the
+            // transport beneath, and its rejection then reports a close of this
+            // adapter's own as a partner-side one. Fall through to the closing branch
+            // below, which surfaces the loss this recovery was for, rather than
+            // replacing it with that error.
+            if (this.abandonedTeardownClosedTransport)
+              return "noSession" as RecoveryRedialOutcome;
+            throw redialError;
+          },
+        );
+        // end() may have latched `closing` while the re-dial held the transition
+        // lock: join the teardown that will close the freshly-dialed session, so no
+        // session outlives it, and surface the original loss rather than re-issuing
+        // into a closing adapter.
+        if (this.closing) {
+          await this.end().catch(() => {});
+          throw error;
+        }
+        // The re-dial could not retire the transport it had to dial past -- either a
+        // session still held over an ended one, or one still owing its 'close' (it
+        // warned, naming what broke). Nothing was dialed and there is nothing to
+        // re-issue onto, so the operation fails with the loss it already had, which
+        // names the drop and its remedies rather than a dial this adapter refused to
+        // make.
+        if (redial === "deadSessionHeld" || redial === "unretiredTransport")
+          throw error;
+        // A re-dial that DECLINED -- it gave up its wait for the transition ahead of
+        // it -- established nothing, so counting it would report a drop this adapter
+        // recovered from when it recovered from nothing, and warn the operator about
+        // a re-dial that never ran. The re-issue below still runs and rejects with
+        // the real session-loss cause.
+        if (redial === "sessionLive" && !teardown && !deliberateRelease) {
+          // The re-dial re-established the dropped session: count it as a
+          // reconnection so the operator's metrics show the exchange survived a
+          // server-side drop. connect()'s own counter only bumps on an internal
+          // retry past the first, so a re-dial that succeeds on its first attempt
+          // registers zero without this. A teardown re-dial is counted in neither
+          // metric -- it is teardown mechanics, not a survived mid-exchange drop.
+          this.reconnectAttempts += 1;
+          this.midExchangeRedials += 1;
+          this.warnSessionRecovered();
+        }
+        return await reissue(op);
+      } finally {
+        settled();
       }
-      // The re-dial could not retire the transport it had to dial past -- either a
-      // session still held over an ended one, or one still owing its 'close' (it
-      // warned, naming what broke). Nothing was dialed and there is nothing to
-      // re-issue onto, so the operation fails with the loss it already had, which
-      // names the drop and its remedies rather than a dial this adapter refused to
-      // make.
-      if (redial === "deadSessionHeld" || redial === "unretiredTransport")
-        throw error;
-      // A re-dial that DECLINED -- it gave up its wait for the transition ahead of
-      // it -- established nothing, so counting it would report a drop this adapter
-      // recovered from when it recovered from nothing, and warn the operator about
-      // a re-dial that never ran. The re-issue below still runs and rejects with
-      // the real session-loss cause.
-      if (redial === "sessionLive" && !teardown && !deliberateRelease) {
-        // The re-dial re-established the dropped session: count it as a
-        // reconnection so the operator's metrics show the exchange survived a
-        // server-side drop. connect()'s own counter only bumps on an internal
-        // retry past the first, so a re-dial that succeeds on its first attempt
-        // registers zero without this. A teardown re-dial is counted in neither
-        // metric -- it is teardown mechanics, not a survived mid-exchange drop.
-        this.reconnectAttempts += 1;
-        this.midExchangeRedials += 1;
-        this.warnSessionRecovered();
-      }
-      return reissue(op);
     });
   }
 
