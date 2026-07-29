@@ -71,7 +71,7 @@ param(
     [string] $SubPath,
     [ValidateSet('', 'SMB3', 'SMB2', 'NT1')]
     [string] $Dialect = '',
-    [string] $VolumeName = 'psilink-rendezvous',
+    [string] $VolumeName = 'psilink-sync',
     # Pinned to alpine:3.22's multi-arch index digest so a run today and a run
     # next year test the same thing. Bumping it is deliberate; override it if
     # your site pulls through a registry mirror that does not carry the digest.
@@ -955,15 +955,15 @@ if (-not $explicitTarget) {
             Write-Host ''
             Write-Host "  docker run --rm ``"
             Write-Host "    -v 'C:\path\to\your\work:/work' ``"
-            Write-Host "    -v '$($resolved.LocalPath):/rendezvous' ``"
+            Write-Host "    -v '$($resolved.LocalPath):/sync' ``"
             Write-Host "    vdorie/psi-link:latest ``"
-            Write-Host "    file:///rendezvous input.csv matches.csv"
+            Write-Host "    file:///sync input.csv matches.csv"
             Write-Host ''
             Write-Warn 'If this folder is kept in step with your partner by a sync client'
             Write-Note '(OneDrive, Dropbox, Egnyte, ShareFile), both sides must also pass'
             Write-Note '--lockless-rendezvous, after the command line above:'
             Write-Info ''
-            Write-Info '    file:///rendezvous input.csv matches.csv --lockless-rendezvous'
+            Write-Info '    file:///sync input.csv matches.csv --lockless-rendezvous'
             Write-Info ''
             Write-Info 'See the troubleshooting page, "Synced folders".'
             exit 0
@@ -1407,9 +1407,9 @@ Write-Host 'Run your exchange like this:' -ForegroundColor Cyan
 Write-Host ''
 Write-Host "  docker run --rm ``"
 Write-Host "    -v 'C:\path\to\your\work:/work' ``"
-Write-Host "    -v '${VolumeName}:/rendezvous' ``"
+Write-Host "    -v '${VolumeName}:/sync' ``"
 Write-Host "    vdorie/psi-link:latest ``"
-Write-Host "    file:///rendezvous input.csv matches.csv"
+Write-Host "    file:///sync input.csv matches.csv"
 Write-Host ''
 Write-Info 'C:\path\to\your\work is a LOCAL folder on this PC holding your input'
 Write-Info 'CSV; results are written back there. It must not be a network path.'
@@ -1428,16 +1428,16 @@ Write-Warn 'Check with your exchange partner: if this folder is kept in step by 
 Write-Note 'sync service rather than being a live file server, both sides must'
 Write-Note 'pass --lockless-rendezvous, at the end of the command line:'
 Write-Info ''
-Write-Info '    file:///rendezvous input.csv matches.csv --lockless-rendezvous'
+Write-Info '    file:///sync input.csv matches.csv --lockless-rendezvous'
 Write-Info ''
 Write-Info 'See the troubleshooting page, "Synced folders".'
 Write-Host ''
 Write-Host 'There is also a browser console:' -ForegroundColor Cyan
 Write-Host ''
 Write-Host "  docker run --rm -p 127.0.0.1:3000:3000 ``"
-Write-Host "    --env JOB_DATA_ROOT=/data --env JOB_RENDEZVOUS_DIR=/rendezvous ``"
+Write-Host "    --env JOB_DATA_ROOT=/data --env JOB_RENDEZVOUS_DIR=/sync ``"
 Write-Host "    -v 'C:\path\to\your\work:/data' ``"
-Write-Host "    -v '${VolumeName}:/rendezvous' ``"
+Write-Host "    -v '${VolumeName}:/sync' ``"
 Write-Host "    vdorie/psi-link:latest serve"
 Write-Host ''
 Write-Info 'then open http://127.0.0.1:3000'

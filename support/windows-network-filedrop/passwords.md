@@ -35,7 +35,7 @@ The main places it ends up:
   EDR agent). That is a wider boundary than "Docker on this PC" -- the password
   may leave the machine and be retained by people you will never speak to.
 - **In the volume metadata, in cleartext.** `docker volume inspect
-  psilink-rendezvous` shows it to anyone who can run Docker here.
+  psilink-sync` shows it to anyone who can run Docker here.
 - **On the screen you were typing at,** if you used the Command Prompt version,
   which cannot hide typing. It stays in the window's scrollback until you run
   `cls` or close it -- which matters most when you copy the run out of that

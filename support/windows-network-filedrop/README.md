@@ -10,14 +10,15 @@ bind source path does not exist
 ```
 
 This is not a typo or a permissions problem. Docker does its work inside a small
-Linux computer it keeps hidden on your PC, and two things follow from that:
+Linux virtual machine it keeps hidden on your PC, and two things follow from
+that:
 
 - **It cannot see your drive letters or network paths.** Those belong to
   Windows, not to it. Docker Desktop's file-sharing settings do not help either;
   that list is only for local drives.
 - **Your file server treats it as a different computer.** It cannot borrow the
-  Windows sign-in that gets you into the folder, so it needs a username and
-  password of its own.
+  Windows sign-in that gets you into the folder, so you have to give it a
+  username and password to sign in with.
 
 The fix is to let Docker open the network folder itself and keep that connection
 saved under a name. Docker calls that a **volume**, and creating one is the only
@@ -29,31 +30,22 @@ about ten minutes.
 - **Docker Desktop, running.** The whale icon should be still, not animating.
 - **The file-drop folder path.** Click once in the File Explorer address bar and
   it turns into text you can copy.
-- **A username and password for that folder.** Not your own Windows sign-in, and
-  never an administrator account: Docker stores this password where anyone who
-  can use Docker on this PC can read it. Ask for an account that reaches only
-  this shared folder and that IT can switch off when you are finished. If you
-  have no such account, send IT
-  [this ready-made request](troubleshooting.md#what-to-ask-your-it-department-for).
-  [Choosing an account](passwords.md) is five minutes well spent -- it is the
-  choice here that is awkward to undo.
-- **A password with no comma in it.** The script refuses one outright, because
-  Docker has no way to pass it. No double quote either, if you end up on the
-  Command Prompt version below.
+- **The username and password the file server accepts for that folder.** Often
+  your usual Windows sign-in, but not always, as some servers want a separate
+  account for the share. If you can create a new account just for the project,
+  [choosing an account](passwords.md) is five minutes well spent first -- it is
+  the one choice here that is awkward to undo.
 
 ## Which version to run
 
-**Use the PowerShell script, `Setup-PsilinkFileDrop.ps1`.** If it refuses to run
--- some agency PCs block PowerShell scripts -- use the Command Prompt one,
-`cmd_Setup-PsilinkFileDrop.cmd`, and stay with it from then on. They ask the
-same questions and report the same failures. The one difference to know about is
-that Command Prompt cannot hide typing, so your password shows on screen as you
-enter it.
+Try the **PowerShell script** first, listed below. If it refuses to run use the
+Command Prompt one instead and stay with it from then on. They ask the same
+questions and report the same failures.
 
 Where the two need different commands, this guide gives both, PowerShell first.
 A single block means the command is the same in either.
 
-Would rather not run a downloaded script at all? Step through
+Rather not run a downloaded script at all? Step through
 [**setting it up by hand**](by-hand.md) instead. It is the same checks in the
 same order, one command at a time with an explanation of each, and it ends in
 the same place. Allow half an hour.
@@ -63,6 +55,8 @@ the same place. Allow half an hour.
 Open the Start menu, type `PowerShell`, or `cmd` for the Command Prompt version,
 and press Enter. Do not choose **Run as administrator**: an elevated window
 cannot see the drive letters you mapped as yourself.
+
+First, get the script:
 
 **PowerShell:**
 
@@ -112,7 +106,8 @@ It asks you for three things, in this order:
 3. **A username, a domain, and a password.** If you sign in to Windows as
    something like `AGENCY\yourname`, the domain is the `AGENCY` part; if you
    just type a username, leave it blank. In PowerShell nothing appears on screen
-   as you type the password, which is normal.
+   as you type the password, which is normal; Command Prompt cannot hide typing,
+   so there it shows as you enter it.
 
 A good run ends with a heading reading **Ready to run an exchange**, followed by
 the command to copy. Anything in red before that is a failure, and the script
@@ -123,20 +118,8 @@ says underneath what to do about it.
 It prints the `docker run` command for an exchange with your volume name already
 filled in, and explains underneath which parts to replace. One of them is a
 folder on this PC that holds your input file; results are written back into the
-same folder. It has to be a folder on this PC -- not the file drop, and not a
+same folder. It should be a folder on this PC -- not the file drop, and not a
 network path.
-
-Three things to know before the first run:
-
-- **The `.keys.json` file is not a result.** Each run writes one next to the
-  matches. It holds the keys to the exchange, so treat it like the input data
-  and do not send it on with the results.
-- **One exchange per folder at a time.** The folder must start empty, so agree
-  who goes first. If a run fails and leaves files behind, see
-  [running the exchange](troubleshooting.md#running-the-exchange).
-- **Setting up a second file drop replaces this one.** For a second partner,
-  give it its own name with `-VolumeName psilink-partner-b`, and use that name
-  when you run that exchange.
 
 ## When you are done with this partner
 
@@ -144,11 +127,11 @@ Remove the volume. The script prints this command with your volume name in it
 when it finishes, and it is the same in either shell:
 
 ```text
-docker volume rm psilink-rendezvous
+docker volume rm psilink-sync
 ```
 
-Then have the account switched off, or its password changed. That, rather than
-removing the volume, is what ends the exposure --
+That does not end the exposure of the password you gave it. Having that password
+changed, or the account switched off, is what does --
 [choosing an account, and where its password ends up](passwords.md) says why.
 
 ## If something goes wrong
