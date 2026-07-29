@@ -1204,10 +1204,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // like any other. Two server round trips do not pass here at all: the
   // heartbeat's keepalive (see sendKeepalive), and the best-effort handle close a
   // listing fires once it has settled (whose loss the listing accounts for).
-  // Which call sites those are is a
-  // check rather than this sentence: scripts/sftp-tracked-round-trips.test.mjs
-  // parses this file and fails on any request-issuing site outside this bracket
-  // that is not one of the two.
+  // Which call sites those are is a check rather than this sentence:
+  // scripts/sftp-tracked-round-trips.test.mjs parses this file and fails on
+  // any request-issuing site outside this bracket that is not one of the two.
+  //
   // finally() is what balances a rejecting operation against a resolving one; one
   // unbalanced failure would pin the session open for the rest of the exchange.
   private tracked<T>(op: Promise<T>): Promise<T> {
@@ -3679,13 +3679,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // Re-issue every recorded cleanup delete, at a point where a session exists.
   // Hooked at the tail of ensureConnected() -- OUTSIDE the transition, so it
   // neither dials nor closes under another transition's lock -- which is the one
-  // seam that covers both places a re-establishment happens: the cycle-start
-  // re-dial the poll loop drives, and the re-establishment core's close() drives
-  // before the terminal-frame drain. The recovery re-dial is deliberately not
-  // hooked: it runs inside an operation's own recovery arm, under that
-  // operation's budget, and whatever it leaves recorded is drained by the
-  // cycle-start re-establishment or the teardown one that follows it in the same
-  // run.
+  // seam every re-establishment in a run passes through: the cycle-start re-dial
+  // the poll loop drives, the one core's close() drives before the terminal-frame
+  // drain, and the recovery chokepoint's own session gate (see
+  // reestablishAfterIdleRelease), which is what sweeps the record when an ordinary
+  // data-plane op is the first thing to follow the idle gap. That op waits the
+  // drain out before its first attempt, which the concurrent re-issues below and
+  // the gate's best-effort contract keep bounded.
+  //
+  // What is deliberately not hooked is redialForRecovery, a different re-dial: it
+  // runs inside an operation's own recovery arm, under that operation's budget,
+  // and whatever it leaves recorded is drained by one of the three above.
   //
   // Four states drain nothing, each for its own reason. A fatal SFTP error means
   // the wrapper is destroyed and a request posted to it never calls back, which

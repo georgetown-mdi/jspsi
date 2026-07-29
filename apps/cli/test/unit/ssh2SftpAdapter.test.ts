@@ -5143,6 +5143,50 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     ).toBe(true);
   });
 
+  test("an op re-establishing through the recovery gate drains the record before its own attempt", async () => {
+    // The third route into the drain: the gate withSessionRecovery applies at
+    // operation entry re-establishes through ensureConnected, so an ordinary
+    // data-plane op sweeps the record with no cycle-start or teardown
+    // re-establishment involved. The op behind it therefore waits the drain out
+    // before its first attempt, which is bounded -- the re-issues go out
+    // concurrently under one per-operation deadline, and the gate is best-effort
+    // -- and it still completes in that one attempt.
+    const { client, state, deleted } = ephemeralClient(wrapperMethods());
+    const order: string[] = [];
+    const performDelete = client.delete;
+    client.delete = vi.fn(async (path: string) => {
+      await performDelete(path);
+      order.push("cleanup delete");
+    });
+    client.exists = vi.fn(async () => {
+      order.push("exists attempt");
+      if (!state.live) throw notConnected("exists");
+      return true;
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.releaseForIdle();
+    expect(state.live).toBe(false);
+    expect(releaseBoundaryStands(adapter)).toBe(true);
+
+    await expect(
+      adapter.safeDelete("/remote/temp-gated.tmp"),
+    ).resolves.toBeUndefined();
+    expect(deferredCleanupPaths(adapter)).toEqual(["/remote/temp-gated.tmp"]);
+
+    // No ensureConnected() of its own: the gate is the only route this op has to
+    // a session, and so the only route the record has to the drain.
+    await expect(adapter.exists("/remote/file.json")).resolves.toBe(true);
+
+    expect(deleted).toEqual(["/remote/temp-gated.tmp"]);
+    expect(deferredCleanupPaths(adapter)).toEqual([]);
+    expect(order).toEqual(["cleanup delete", "exists attempt"]);
+    expect(adapterLog(adapter).warn).not.toHaveBeenCalled();
+  });
+
   test("an op issued while the release is in flight completes instead of failing terminally", async () => {
     // The release drives the ssh2 Client's end() and then awaits its 'close'.
     // ssh2-sftp-client clears `this.sftp` from that 'close', not from end(), so
