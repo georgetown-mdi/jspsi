@@ -1055,7 +1055,7 @@ interface SessionBoundary {
 }
 
 // Consulted with the 0-based index of the transport op about to be issued;
-// returning true forces a session drop and re-dial immediately before it.
+// returning true places a session boundary immediately before it.
 type BoundaryPredicate = (opIndex: number, op: string) => boolean;
 
 const TRANSPORT_OPS = [
@@ -1072,12 +1072,13 @@ const TRANSPORT_OPS = [
 type TransportOp = (typeof TRANSPORT_OPS)[number];
 
 // Wraps every transport method of `client` in place so a session boundary can be
-// forced before a chosen op. Returns a reader for the total op count, so a test
-// can size its sweep from an undropped baseline run.
+// placed before a chosen op, recording the directory state a fresh session would
+// find there. Returns a reader for the total op count, so a test can size its
+// sweep from a boundary-free baseline run.
 function installSessionBoundaries(
   client: FileTransportClient,
   files: Map<string, Buffer>,
-  shouldDrop: BoundaryPredicate,
+  isBoundary: BoundaryPredicate,
   boundaries: SessionBoundary[],
 ): () => number {
   const methods = client as unknown as Record<
@@ -1089,7 +1090,7 @@ function installSessionBoundaries(
     const inner = methods[op].bind(client);
     methods[op] = async (...args: never[]) => {
       const at = opIndex++;
-      if (shouldDrop(at, op))
+      if (isBoundary(at, op))
         boundaries.push({
           op,
           contents: [...files.entries()]
@@ -1147,10 +1148,10 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
   }
 
   // Drives one rendezvous with the boundary predicate installed, sweeping the
-  // whole run once per boundary position: `baseline` measures the undropped op
+  // whole run once per boundary position: `baseline` measures the boundary-free op
   // count, then each position is replayed on a fresh directory.
   const sweepBoundaries = async <T extends BoundaryRun>(
-    start: (shouldDrop: BoundaryPredicate) => Promise<T>,
+    start: (isBoundary: BoundaryPredicate) => Promise<T>,
     check: (run: T) => void,
   ): Promise<void> => {
     const baseline = await start(() => false);
@@ -1166,7 +1167,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
 
   test("a lockless rendezvous completes across a session drop and re-dial at every op boundary", async () => {
     const start = async (
-      shouldDrop: BoundaryPredicate,
+      isBoundary: BoundaryPredicate,
     ): Promise<BoundaryRun> => {
       const files = new Map<string, Buffer>();
       const flags = { locklessRendezvous: true, retainFiles: false };
@@ -1179,7 +1180,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
       const ops = installSessionBoundaries(
         party.client,
         files,
-        shouldDrop,
+        isBoundary,
         boundaries,
       );
       await party.rdv.run(party.scope);
@@ -1213,7 +1214,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
 
   test("the lock-joiner's joining sentinel survives a session drop at every op boundary", async () => {
     const start = async (
-      shouldDrop: BoundaryPredicate,
+      isBoundary: BoundaryPredicate,
     ): Promise<BoundaryRun> => {
       const files = new Map<string, Buffer>();
       const flags = { locklessRendezvous: false, retainFiles: false };
@@ -1223,7 +1224,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
       const ops = installSessionBoundaries(
         party.client,
         files,
-        shouldDrop,
+        isBoundary,
         boundaries,
       );
       await party.rdv.run(party.scope);
@@ -1261,7 +1262,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
 
   test("the lock file is created exactly once across a session drop at every op boundary", async () => {
     const start = async (
-      shouldDrop: BoundaryPredicate,
+      isBoundary: BoundaryPredicate,
     ): Promise<BoundaryRun & { exclusiveCreates: number }> => {
       const files = new Map<string, Buffer>();
       const flags = { locklessRendezvous: false, retainFiles: false };
@@ -1275,7 +1276,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
       const ops = installSessionBoundaries(
         party.client,
         files,
-        shouldDrop,
+        isBoundary,
         boundaries,
       );
       let exclusiveCreates = 0;

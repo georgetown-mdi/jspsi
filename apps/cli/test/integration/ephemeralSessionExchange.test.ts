@@ -48,10 +48,14 @@ async function waitFor(
   throw new Error("waitFor: condition not met within timeout");
 }
 
-// Count the dials the adapter issues, so a case can wait on a cycle having tried
-// to dial rather than on a delay. It wraps the ssh2-sftp-client connect() the
-// adapter calls, which is one dial per attempt.
-function countDials(adapter: SSH2SFTPClientAdapter): () => number {
+// Count the dials the adapter issues and the dials that settle as failures, so a
+// case can wait on a cycle having tried to dial, or on its attempt having
+// actually failed, rather than on a delay. It wraps the ssh2-sftp-client
+// connect() the adapter calls, which is one dial per attempt.
+function countDials(adapter: SSH2SFTPClientAdapter): {
+  issued: () => number;
+  failed: () => number;
+} {
   const client = (
     adapter as unknown as {
       client: {
@@ -60,12 +64,16 @@ function countDials(adapter: SSH2SFTPClientAdapter): () => number {
     }
   ).client;
   const connect = client.connect.bind(client);
-  let dials = 0;
+  let issued = 0;
+  let failed = 0;
   client.connect = (options: Record<string, unknown>) => {
-    dials += 1;
-    return connect(options);
+    issued += 1;
+    return connect(options).catch((error: unknown) => {
+      failed += 1;
+      throw error;
+    });
   };
-  return () => dials;
+  return { issued: () => issued, failed: () => failed };
 }
 
 // The peer-inactivity budget for the abort-marker case. Generous enough that the
@@ -754,9 +762,13 @@ inProcessOnly(
           // handshake: every cycle-start dial issued while this is armed is
           // established and never ready, and spends its own connect deadline.
           srv.sessionControls.resetHandshakeCount();
-          const dialsBeforeStall = dials();
+          const failedBeforeStall = dials.failed();
           srv.sessionControls.stallHandshakeOnConnect = true;
-          await waitFor(() => dials() - dialsBeforeStall >= 2);
+          // Wait on dials that have actually FAILED, not on dials issued: the
+          // stall is installed when the server accepts the socket, so a dial
+          // counted the instant connect() is called may not have reached it yet,
+          // and disarming on that count lets the cycle establish after all.
+          await waitFor(() => dials.failed() - failedBeforeStall >= 2);
           const failuresDuringStall = failures.length;
           const handshakesDuringStall = srv.sessionControls.handshakeCount();
           srv.sessionControls.stopStallingHandshakes();
@@ -811,9 +823,9 @@ inProcessOnly(
       expect(failures).toHaveLength(1);
       expect(failures[0]).toBeInstanceOf(Error);
       expect((failures[0] as Error).message).toContain("Host denied");
-      const dialsAtFailure = dials();
+      const dialsAtFailure = dials.issued();
       await new Promise((resolve) => setTimeout(resolve, 500));
-      expect(dials()).toBe(dialsAtFailure);
+      expect(dials.issued()).toBe(dialsAtFailure);
     } finally {
       receiver.stop();
       srv.sessionControls.stopStallingHandshakes();
