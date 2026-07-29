@@ -1,3 +1,4 @@
+import type { EventEmitter } from "node:events";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
@@ -69,6 +70,24 @@ const LISTING_ENTRIES = 200;
 // over the never-reject `safeDelete`.
 const FAN_OUT_FILES = 40;
 
+// ssh2-sftp-client adds an 'end'/'close'/'error' listener trio to the shared ssh2
+// Client for the duration of each operation, so a fan this wide crosses Node's
+// default ceiling of 10 and prints a MaxListenersExceededWarning -- written
+// straight to stderr rather than through console, so the suite's console sentinel
+// does not gate it. Raised only far enough that the bounded fan fits (measured at a
+// peak of 42 on a fan of 40): growth that is genuinely unbounded still trips the
+// warning.
+const FAN_OUT_LISTENER_CEILING = FAN_OUT_FILES + 20;
+
+// The ssh2 Client ssh2-sftp-client constructs once and reuses across every dial,
+// reached through the adapter's own client field the way the listener-accounting
+// case in sftpConnection.test.ts reaches it.
+function raiseListenerCeiling(adapter: SSH2SFTPClientAdapter): void {
+  (
+    adapter as unknown as { client: { client: EventEmitter } }
+  ).client.client.setMaxListeners(FAN_OUT_LISTENER_CEILING);
+}
+
 // How a dial the adapter issued ended. A dial failed by a stale lifecycle event
 // leaves the handshake it started running unowned at the server, so a case that
 // recovers cleanly must show none.
@@ -122,63 +141,79 @@ async function connectParty(options: {
   withholdCloseOnDisconnect?: boolean;
 }): Promise<Party> {
   const srv = await startInProcessSftpServer();
-  const localDir = await fsp.mkdtemp(
-    path.join(srv.handle.backingDir, "concurrent-"),
-  );
-  const remote = `${srv.handle.remoteRoot}/${path.basename(localDir)}`;
-  const adapter = new SSH2SFTPClientAdapter({
-    ephemeralSessions: false,
-    ...(options.stallDeadlineMs === undefined
-      ? {}
-      : { stallDeadlineMs: options.stallDeadlineMs }),
-  });
-  const dials = recordDials(adapter);
-  const conn = new FileSyncConnection(adapter, {
-    verbose: -1,
-    pollingFrequency: 10,
-  });
-  conn.on("error", () => {});
-  // Armed before the dial, because the control replaces the closers on every
-  // socket the server accepts and this party's own connection is the one it has
-  // to reach.
-  if (options.withholdCloseOnDisconnect)
-    srv.sessionControls.withholdCloseOnDisconnect = true;
-  await conn.open({
-    channel: "sftp",
-    server: {
-      host: srv.handle.host,
-      port: srv.handle.port,
-      ...serverAuth(srv.handle.usera),
-      path: remote,
-    },
-    options: { maxReconnectAttempts: options.maxReconnectAttempts },
-  });
-  // From here on the record holds only the dials a case provoked; the party's own
-  // first connect is setup, not a subject.
-  dials.length = 0;
-  return {
-    srv,
-    adapter,
-    conn,
-    dials,
-    remote,
-    localDir,
-    stop: async () => {
-      // Clear every standing cap and injection before the teardown dials and
-      // closes: one left armed cuts or withholds from the teardown instead of the
-      // call under test.
-      srv.sessionControls.maxIdleMs = 0;
-      srv.sessionControls.maxOps = 0;
-      srv.sessionControls.maxLifetimeMs = 0;
-      srv.sessionControls.dropActiveAfterOps(0);
-      srv.sessionControls.stopWithholdingCloses();
-      srv.inject.withholdOn = null;
-      srv.inject.readdirBatchSize = 0;
-      await conn.close().catch(() => {});
-      await fsp.rm(localDir, { recursive: true, force: true });
-      await srv.stop();
-    },
-  };
+  // Every case calls this outside its own try, so nothing else owns what is
+  // allocated below once the dial throws: unwound here, a failed setup surfaces its
+  // own error; unwound nowhere, it leaves its listening server and its temp
+  // directory alive for the rest of the worker's life.
+  let allocatedDir: string | undefined;
+  let openedConn: FileSyncConnection | undefined;
+  try {
+    const localDir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "concurrent-"),
+    );
+    allocatedDir = localDir;
+    const remote = `${srv.handle.remoteRoot}/${path.basename(localDir)}`;
+    const adapter = new SSH2SFTPClientAdapter({
+      ephemeralSessions: false,
+      ...(options.stallDeadlineMs === undefined
+        ? {}
+        : { stallDeadlineMs: options.stallDeadlineMs }),
+    });
+    const dials = recordDials(adapter);
+    const conn = new FileSyncConnection(adapter, {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    openedConn = conn;
+    conn.on("error", () => {});
+    // Armed before the dial, because the control replaces the closers on every
+    // socket the server accepts and this party's own connection is the one it has
+    // to reach.
+    if (options.withholdCloseOnDisconnect)
+      srv.sessionControls.withholdCloseOnDisconnect = true;
+    await conn.open({
+      channel: "sftp",
+      server: {
+        host: srv.handle.host,
+        port: srv.handle.port,
+        ...serverAuth(srv.handle.usera),
+        path: remote,
+      },
+      options: { maxReconnectAttempts: options.maxReconnectAttempts },
+    });
+    // From here on the record holds only the dials a case provoked; the party's
+    // own first connect is setup, not a subject.
+    dials.length = 0;
+    return {
+      srv,
+      adapter,
+      conn,
+      dials,
+      remote,
+      localDir,
+      stop: async () => {
+        // Clear every standing cap and injection before the teardown dials and
+        // closes: one left armed cuts or withholds from the teardown instead of
+        // the call under test.
+        srv.sessionControls.maxIdleMs = 0;
+        srv.sessionControls.maxOps = 0;
+        srv.sessionControls.maxLifetimeMs = 0;
+        srv.sessionControls.dropActiveAfterOps(0);
+        srv.sessionControls.stopWithholdingCloses();
+        srv.inject.withholdOn = null;
+        srv.inject.readdirBatchSize = 0;
+        await conn.close().catch(() => {});
+        await fsp.rm(localDir, { recursive: true, force: true });
+        await srv.stop();
+      },
+    };
+  } catch (error: unknown) {
+    await openedConn?.close().catch(() => {});
+    if (allocatedDir !== undefined)
+      await fsp.rm(allocatedDir, { recursive: true, force: true });
+    await srv.stop();
+    throw error;
+  }
 }
 
 async function plantTransfer(party: Party): Promise<string> {
@@ -345,6 +380,7 @@ inProcessOnly(
       stallDeadlineMs: STALL_DEADLINE_MS,
     });
     try {
+      raiseListenerCeiling(party.adapter);
       const targets = await plantFanOut(party);
       const controls = party.srv.sessionControls;
       controls.resetHandshakeCount();
@@ -374,6 +410,11 @@ inProcessOnly(
         ),
       ).toEqual([]);
       expect(outcomes.elapsedMs).toBeLessThan(2_000);
+      // The whole fan cost one tear, not one per torn member: a fan that re-dialed
+      // per member would carry the same results, land inside the same ceiling, and
+      // reject no dial, so nothing else here separates the two.
+      expect(controls.handshakeCount()).toBe(1);
+      expect(party.dials).toHaveLength(1);
       expect(party.dials.filter((dial) => dial.settled === "rejected")).toEqual(
         [],
       );
@@ -396,6 +437,7 @@ inProcessOnly(
       stallDeadlineMs: STALL_DEADLINE_MS,
     });
     try {
+      raiseListenerCeiling(party.adapter);
       const targets = await plantFanOut(party);
       const controls = party.srv.sessionControls;
       controls.resetHandshakeCount();
@@ -403,14 +445,16 @@ inProcessOnly(
       const outcomes = await withCapturedLogs(
         async () => {
           controls.dropActiveAfterOps(1);
-          return Promise.allSettled(
+          const startedAt = performance.now();
+          const settled = await Promise.allSettled(
             targets.map((target) => party.adapter.safeDelete(target)),
           );
+          return { settled, elapsedMs: performance.now() - startedAt };
         },
         (level) => level === "WARN" || level === "ERROR",
       ).then(([result]) => result);
 
-      expect(outcomes.map(describeSettlement)).toEqual(
+      expect(outcomes.settled.map(describeSettlement)).toEqual(
         targets.map(() => ({ status: "fulfilled", detail: "undefined" })),
       );
       expect(
@@ -418,6 +462,12 @@ inProcessOnly(
           name.startsWith("victim-"),
         ),
       ).toEqual([]);
+      // Neither assertion above can see what the client saw: safeDelete swallows
+      // every error by its contract, and the server unlinks the whole fan in the
+      // turn before the cut, so both stand even for a member left riding its
+      // liveness deadline. The ceiling is the only thing here that separates a fan
+      // settled by its tear from one settled by a deadline apiece.
+      expect(outcomes.elapsedMs).toBeLessThan(500);
     } finally {
       await party.stop();
     }

@@ -440,11 +440,8 @@ function attachSftpHandlers(
     // and cannot bypass confinement: the value returned is the client's own
     // virtual path, never a backingDir-rooted host path, and every actual file
     // operation re-confines independently through resolve() regardless of what
-    // REALPATH returned. The production adapter addresses files by absolute path,
-    // which ssh2-sftp-client does not canonicalize, so the only request that
-    // reaches here is the session heartbeat's realPath(".") -- which is what the
-    // withhold above parks on the wire. Routing it through resolve() would be
-    // wrong -- that returns the host path and would expose backingDir.
+    // REALPATH returned. Routing it through resolve() would be wrong -- that
+    // returns the host path and would expose backingDir.
     sftp.name(reqid, [
       { filename: p, longname: p, attrs: attrsFromStat({ size: 0 }) },
     ]);
