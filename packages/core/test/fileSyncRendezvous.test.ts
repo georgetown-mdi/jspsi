@@ -1026,3 +1026,481 @@ describe("FileSyncRendezvous entry scan and sweep contract", () => {
     );
   });
 });
+
+// --- connection-per-poll session boundaries ----------------------------------
+//
+// A transport in connection-per-poll mode drops its session between polls and
+// dials a fresh one for the next cycle. The rendezvous directory lives on the
+// server, so a boundary between two transport ops changes nothing durable: the
+// whole handshake state is the directory plus the coordinator's function-local
+// variables (FileSyncRendezvous holds no fields at all). What a boundary CAN
+// expose is a publish caught between its own ops, so each forced boundary
+// records the directory exactly as the fresh session would find it and the
+// assertions below check that no final protocol name is ever observed
+// half-published.
+//
+// No session transition is interposed here: the client below has no session to
+// drop, so a boundary is an observation point rather than a cut. Each test
+// measures the directory a fresh session would find at that point, and that the
+// run reaches the same committed identity and the same final directory wherever
+// the point falls. The two properties this cannot reach are checked where they
+// can be: that no reconnect resets the coordinator's session state is driven
+// against a cycling transport in fileSyncConnection.test.ts, and real
+// server-forced cuts are driven against the SFTP server in
+// apps/cli/test/integration/ephemeralSessionExchange.test.ts.
+//
+// Measured bound: the boundary falls BETWEEN two transport ops. A boundary that
+// cuts a single op mid-flight is a different property, decided by driving the
+// real SFTP server rather than modelled here.
+
+interface SessionBoundary {
+  op: string;
+  contents: Array<{ name: string; body: Buffer }>;
+}
+
+// Consulted with the 0-based index of the transport op about to be issued;
+// returning true places a session boundary immediately before it.
+type BoundaryPredicate = (opIndex: number, op: string) => boolean;
+
+const TRANSPORT_OPS = [
+  "list",
+  "get",
+  "put",
+  "delete",
+  "safeDelete",
+  "rename",
+  "createExclusive",
+  "exists",
+] as const;
+
+type TransportOp = (typeof TRANSPORT_OPS)[number];
+
+// Wraps every transport method of `client` in place so a session boundary can be
+// placed before a chosen op, recording the directory state a fresh session would
+// find there. Returns a reader for the total op count, so a test can size its
+// sweep from a boundary-free baseline run.
+function installSessionBoundaries(
+  client: FileTransportClient,
+  files: Map<string, Buffer>,
+  isBoundary: BoundaryPredicate,
+  boundaries: SessionBoundary[],
+): () => number {
+  const methods = client as unknown as Record<
+    TransportOp,
+    (...args: never[]) => Promise<unknown>
+  >;
+  let opIndex = 0;
+  for (const op of TRANSPORT_OPS) {
+    const inner = methods[op].bind(client);
+    methods[op] = async (...args: never[]) => {
+      const at = opIndex++;
+      if (isBoundary(at, op))
+        boundaries.push({
+          op,
+          contents: [...files.entries()]
+            .filter(([path]) => path.startsWith(`${DIR}/`))
+            .map(([path, body]) => ({
+              name: path.slice(DIR.length + 1),
+              body,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        });
+      return inner(...args);
+    };
+  }
+  return () => opIndex;
+}
+
+// Fails when the fresh session would find a protocol file that is not yet
+// complete: a hello or joining sentinel must carry a parseable envelope, an ack
+// marker and a lock must be zero-length. A `temp-*.tmp` is the in-flight half of
+// a temp-then-rename publish and is expected -- the property it exists to give
+// is that the FINAL name never appears before the file is committed. Non-`.json`
+// names are foreign files and carry no protocol shape to check; a `.json` name
+// outside the grammar fails closed rather than passing unexamined.
+function expectNoHalfPublishedFile(
+  contents: Array<{ name: string; body: Buffer }>,
+): void {
+  for (const { name, body } of contents) {
+    if (name.endsWith(".tmp") || !name.endsWith(".json")) continue;
+    if (name.endsWith(HELLO_SUFFIX) || name.endsWith(JOINING_SUFFIX)) {
+      expect(() =>
+        HelloEnvelopeSchema.parse(JSON.parse(body.toString())),
+      ).not.toThrow();
+      continue;
+    }
+    if (name.endsWith("-ack.json") || name.endsWith(LOCK_SUFFIX)) {
+      expect(body).toHaveLength(0);
+      continue;
+    }
+    throw new Error(
+      `unclassified file observed at a session boundary: ${name}`,
+    );
+  }
+}
+
+const namesIn = (files: Map<string, Buffer>): string[] =>
+  [...files.keys()]
+    .filter((path) => path.startsWith(`${DIR}/`))
+    .map((path) => path.slice(DIR.length + 1));
+
+describe("FileSyncRendezvous across connection-per-poll session boundaries", () => {
+  interface BoundaryRun {
+    party: Party;
+    boundaries: SessionBoundary[];
+    ops: number;
+  }
+
+  // Drives one rendezvous with the boundary predicate installed, sweeping the
+  // whole run once per boundary position: `baseline` measures the boundary-free op
+  // count, then each position is replayed on a fresh directory.
+  const sweepBoundaries = async <T extends BoundaryRun>(
+    start: (isBoundary: BoundaryPredicate) => Promise<T>,
+    check: (run: T) => void,
+  ): Promise<void> => {
+    const baseline = await start(() => false);
+    expect(baseline.boundaries).toHaveLength(0);
+    expect(baseline.ops).toBeGreaterThan(3);
+    for (let boundary = 0; boundary < baseline.ops; boundary++) {
+      const run = await start((at) => at === boundary);
+      expect(run.boundaries).toHaveLength(1);
+      expectNoHalfPublishedFile(run.boundaries[0].contents);
+      check(run);
+    }
+  };
+
+  test("a lockless rendezvous commits identically at every op-boundary position", async () => {
+    const start = async (
+      isBoundary: BoundaryPredicate,
+    ): Promise<BoundaryRun> => {
+      const files = new Map<string, Buffer>();
+      const flags = { locklessRendezvous: true, retainFiles: false };
+      placePeerHello(files, "zzz", flags);
+      placePeerAckOf(files, "zzz", "aaa");
+      const party = makeParty("aaa", flags, files, {
+        hideAtEntry: [ackMarkerName("zzz", helloStem("aaa"))],
+      });
+      const boundaries: SessionBoundary[] = [];
+      const ops = installSessionBoundaries(
+        party.client,
+        files,
+        isBoundary,
+        boundaries,
+      );
+      await party.rdv.run(party.scope);
+      return { party, boundaries, ops: ops() };
+    };
+
+    // The ack's temp-then-rename gap: the sweep must reach a boundary sitting
+    // inside it, or it proves nothing about the publish it exists to protect.
+    let sawAckPublishGap = false;
+    const ownAck = ackMarkerName("aaa", helloStem("zzz"));
+    await sweepBoundaries(start, (run) => {
+      expect(run.party.state.role).toBe("starter");
+      expect(run.party.state.handshakeRole).toBe("responder");
+      expect(run.party.state.peerId).toBe("zzz");
+
+      const atBoundary = run.boundaries[0].contents.map((entry) => entry.name);
+      if (atBoundary.some((n) => n.endsWith(".tmp"))) {
+        // A fresh session opening in the gap finds the in-flight temp and no
+        // ack: the final name never exists half-written for the peer to match.
+        expect(atBoundary).not.toContain(ownAck);
+        sawAckPublishGap = true;
+      }
+
+      const names = namesIn(run.party.files);
+      expect(names.filter((n) => n === helloName("aaa"))).toHaveLength(1);
+      expect(names.filter((n) => n === ownAck)).toHaveLength(1);
+      expect(names.filter((n) => n.endsWith(".tmp"))).toHaveLength(0);
+    });
+    expect(sawAckPublishGap).toBe(true);
+  });
+
+  test("the lock-joiner's joining sentinel is never missing at an op-boundary position", async () => {
+    const start = async (
+      isBoundary: BoundaryPredicate,
+    ): Promise<BoundaryRun> => {
+      const files = new Map<string, Buffer>();
+      const flags = { locklessRendezvous: false, retainFiles: false };
+      placePeerHello(files, "zzz", flags);
+      const party = makeParty("aaa", flags, files);
+      const boundaries: SessionBoundary[] = [];
+      const ops = installSessionBoundaries(
+        party.client,
+        files,
+        isBoundary,
+        boundaries,
+      );
+      await party.rdv.run(party.scope);
+      return { party, boundaries, ops: ops() };
+    };
+
+    // The window the sentinel exists for: the peer hello has been deleted and
+    // this party's hello is not yet renamed into place. A boundary inside it is
+    // what the sentinel is for, so the sweep must actually reach it.
+    let sawRecoveryWindow = false;
+    await sweepBoundaries(start, (run) => {
+      expect(run.party.state.role).toBe("joiner");
+      expect(run.party.state.handshakeRole).toBe("initiator");
+      expect(run.party.state.peerId).toBe("zzz");
+
+      const atBoundary = new Set(
+        run.boundaries[0].contents.map((entry) => entry.name),
+      );
+      if (
+        !atBoundary.has(helloName("zzz")) &&
+        !atBoundary.has(helloName("aaa"))
+      ) {
+        expect(atBoundary.has(`aaa${JOINING_SUFFIX}`)).toBe(true);
+        sawRecoveryWindow = true;
+      }
+
+      const names = namesIn(run.party.files);
+      expect(names.filter((n) => n === helloName("aaa"))).toHaveLength(1);
+      expect(names).not.toContain(`aaa${JOINING_SUFFIX}`);
+      expect(names).not.toContain(helloName("zzz"));
+      expect(names.filter((n) => n.endsWith(".tmp"))).toHaveLength(0);
+    });
+    expect(sawRecoveryWindow).toBe(true);
+  });
+
+  test("the lock file is created exactly once across every op-boundary position", async () => {
+    const start = async (
+      isBoundary: BoundaryPredicate,
+    ): Promise<BoundaryRun & { exclusiveCreates: number }> => {
+      const files = new Map<string, Buffer>();
+      const flags = { locklessRendezvous: false, retainFiles: false };
+      placePeerHello(files, "zzz", flags);
+      // The peer hello is absent at entry, so the dispatch takes the
+      // hello-exchange path and this party races the createExclusive lock.
+      const party = makeParty("aaa", flags, files, {
+        hideAtEntry: [helloName("zzz")],
+      });
+      const boundaries: SessionBoundary[] = [];
+      const ops = installSessionBoundaries(
+        party.client,
+        files,
+        isBoundary,
+        boundaries,
+      );
+      let exclusiveCreates = 0;
+      const innerCreate = party.client.createExclusive.bind(party.client);
+      party.client.createExclusive = async (path: string) => {
+        exclusiveCreates += 1;
+        return innerCreate(path);
+      };
+      await party.rdv.run(party.scope);
+      return { party, boundaries, ops: ops(), exclusiveCreates };
+    };
+
+    let sawPreLockBoundary = false;
+    await sweepBoundaries(start, ({ exclusiveCreates, ...run }) => {
+      expect(run.party.state.role).toBe("starter");
+      expect(run.party.state.handshakeRole).toBe("responder");
+      expect(run.party.state.peerId).toBe("zzz");
+      // The atomic exclusive create is one op, so a boundary either precedes it
+      // or follows it -- it is never re-issued into an EEXIST against itself.
+      expect(exclusiveCreates).toBe(1);
+      if (run.boundaries[0].op === "createExclusive") sawPreLockBoundary = true;
+
+      const names = namesIn(run.party.files);
+      expect(names.filter((n) => n === `aaa-zzz${LOCK_SUFFIX}`)).toHaveLength(
+        1,
+      );
+      expect(run.party.files.get(`${DIR}/aaa-zzz${LOCK_SUFFIX}`)).toHaveLength(
+        0,
+      );
+      expect(names.filter((n) => n.endsWith(".tmp"))).toHaveLength(0);
+    });
+    expect(sawPreLockBoundary).toBe(true);
+  });
+
+  test("the zero-length ack is written once across op-boundary positions, never re-written per boundary", async () => {
+    const files = new Map<string, Buffer>();
+    const flags = { locklessRendezvous: true, retainFiles: false };
+    placePeerHello(files, "zzz", flags);
+    placePeerAckOf(files, "zzz", "aaa");
+    const peerAck = ackMarkerName("zzz", helloStem("aaa"));
+    // The peer's ack is withheld from the first three listings, so the barrier
+    // polls several times -- each poll behind its own session boundary -- after
+    // this party has already written its own ack.
+    const party = makeParty("aaa", flags, files, {
+      listScript: (entries, call) =>
+        call < 3 ? entries.filter((e) => e.name !== peerAck) : entries,
+    });
+    const boundaries: SessionBoundary[] = [];
+    installSessionBoundaries(party.client, files, () => true, boundaries);
+    const ackRenames: string[] = [];
+    const innerRename = party.client.rename.bind(party.client);
+    party.client.rename = async (from: string, to: string) => {
+      if (to.endsWith("-ack.json")) ackRenames.push(to);
+      return innerRename(from, to);
+    };
+
+    await party.rdv.run(party.scope);
+
+    expect(party.state.peerId).toBe("zzz");
+    // The one-time ack is a local of the single rendezvousViaHelloExchange
+    // invocation, so no number of session boundaries makes the barrier re-write
+    // it on a later poll.
+    const ownAck = ackMarkerName("aaa", helloStem("zzz"));
+    expect(ackRenames).toEqual([`${DIR}/${ownAck}`]);
+    expect(files.get(`${DIR}/${ownAck}`)).toHaveLength(0);
+    expect(namesIn(files).filter((n) => n.endsWith(".tmp"))).toHaveLength(0);
+    // The barrier really did poll across several boundaries rather than
+    // completing on its first pass.
+    expect(
+      boundaries.filter((b) => b.op === "list").length,
+    ).toBeGreaterThanOrEqual(4);
+    for (const boundary of boundaries)
+      expectNoHalfPublishedFile(boundary.contents);
+  });
+
+  test("the strict-empty entry guard does not re-run on a later cycle", async () => {
+    const flags = { locklessRendezvous: true, retainFiles: false };
+    // Control: this party's own hello present AT entry is exactly what the
+    // guard rejects.
+    const atEntry = new Map<string, Buffer>();
+    atEntry.set(`${DIR}/${helloName("aaa")}`, serializeEnvelope(flags));
+    const rejected = makeParty("aaa", flags, atEntry);
+    await expect(rejected.rdv.run(rejected.scope)).rejects.toMatchObject({
+      name: "UsageError",
+      message: expect.stringContaining("unexpected protocol file"),
+    });
+
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, "zzz", flags);
+    placePeerAckOf(files, "zzz", "aaa");
+    const party = makeParty("aaa", flags, files, {
+      hideAtEntry: [ackMarkerName("zzz", helloStem("aaa"))],
+    });
+    const boundaries: SessionBoundary[] = [];
+    const ops = installSessionBoundaries(
+      party.client,
+      files,
+      () => true,
+      boundaries,
+    );
+    const listings: string[][] = [];
+    const innerList = party.client.list.bind(party.client);
+    party.client.list = async (dir: string) => {
+      const entries = await innerList(dir);
+      listings.push(entries.map((entry) => entry.name));
+      return entries;
+    };
+
+    await party.rdv.run(party.scope);
+
+    expect(party.state.peerId).toBe("zzz");
+    // Every op ran on its own re-dialed session, and none of those sessions
+    // opened onto a half-published file.
+    expect(boundaries).toHaveLength(ops());
+    for (const boundary of boundaries)
+      expectNoHalfPublishedFile(boundary.contents);
+    expect(listings.length).toBeGreaterThan(1);
+    // The entry scan ran against a directory holding only the peer hello; every
+    // later listing carries the self-hello the control run above rejects, and
+    // none of them re-applies the guard to it.
+    expect(listings[0]).not.toContain(helloName("aaa"));
+    for (const listing of listings.slice(1))
+      expect(listing).toContain(helloName("aaa"));
+  });
+
+  test("the entry sweep does not re-run: this party's own hello and ack are never deleted", async () => {
+    const files = new Map<string, Buffer>();
+    // A crashed prior exchange's leftover for the entry sweep to clear, and a
+    // foreign file the sweep never touches.
+    files.set(`${DIR}/x-y${LOCK_SUFFIX}`, Buffer.alloc(0));
+    files.set(`${DIR}/leftover.txt`, Buffer.from("x"));
+    placePeerHello(files, "zzz", {
+      locklessRendezvous: true,
+      retainFiles: false,
+    });
+    placePeerAckOf(files, "zzz", "aaa");
+    // Both peer files arrive after the entry scan, so the sweep sees only the
+    // leftover lock and rendezvous proceeds against the swept directory.
+    const party = makeParty(
+      "aaa",
+      {
+        locklessRendezvous: true,
+        retainFiles: false,
+        sweepExchangeFiles: true,
+        forceRetainSweep: false,
+      },
+      files,
+      {
+        hideAtEntry: [helloName("zzz"), ackMarkerName("zzz", helloStem("aaa"))],
+      },
+    );
+    const boundaries: SessionBoundary[] = [];
+    const ops = installSessionBoundaries(
+      party.client,
+      files,
+      () => true,
+      boundaries,
+    );
+    const removed: string[] = [];
+    for (const op of ["delete", "safeDelete"] as const) {
+      const inner = party.client[op].bind(party.client);
+      party.client[op] = async (path: string) => {
+        removed.push(path);
+        return inner(path);
+      };
+    }
+
+    await party.rdv.run(party.scope);
+
+    expect(party.state.peerId).toBe("zzz");
+    // The entry sweep cleared the crashed exchange's leftover...
+    expect(removed).toContain(`${DIR}/x-y${LOCK_SUFFIX}`);
+    expect(files.has(`${DIR}/x-y${LOCK_SUFFIX}`)).toBe(false);
+    // ...and never ran again over the files this party wrote after it.
+    const ownAck = ackMarkerName("aaa", helloStem("zzz"));
+    expect(removed).not.toContain(`${DIR}/${helloName("aaa")}`);
+    expect(removed).not.toContain(`${DIR}/${ownAck}`);
+    expect(files.has(`${DIR}/${helloName("aaa")}`)).toBe(true);
+    expect(files.has(`${DIR}/${ownAck}`)).toBe(true);
+    // Nor over the peer's hello and ack, nor the foreign file.
+    expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
+    expect(files.has(`${DIR}/${ackMarkerName("zzz", helloStem("aaa"))}`)).toBe(
+      true,
+    );
+    expect(removed).not.toContain(`${DIR}/leftover.txt`);
+    expect(files.has(`${DIR}/leftover.txt`)).toBe(true);
+    // Every op ran on its own re-dialed session, and none of those sessions
+    // opened onto a half-published file.
+    expect(boundaries).toHaveLength(ops());
+    for (const boundary of boundaries)
+      expectNoHalfPublishedFile(boundary.contents);
+  });
+
+  test("an op-boundary position mid-rendezvous does not re-enter the entry snapshot", async () => {
+    const files = new Map<string, Buffer>();
+    const flags = { locklessRendezvous: true, retainFiles: false };
+    files.set(`${DIR}/at-entry.txt`, Buffer.from("x"));
+    placePeerHello(files, "zzz", flags);
+    placePeerAckOf(files, "zzz", "aaa");
+    const party = makeParty("aaa", flags, files, {
+      hideAtEntry: [ackMarkerName("zzz", helloStem("aaa"))],
+    });
+    const boundaries: SessionBoundary[] = [];
+    installSessionBoundaries(party.client, files, () => true, boundaries);
+    // A foreign file a sync tool drops in after the entry scan has run.
+    let listCalls = 0;
+    const innerList = party.client.list.bind(party.client);
+    party.client.list = async (dir: string) => {
+      if (listCalls++ === 1)
+        files.set(`${DIR}/after-entry.txt`, Buffer.from("y"));
+      return innerList(dir);
+    };
+
+    await party.rdv.run(party.scope);
+
+    expect(party.state.peerId).toBe("zzz");
+    expect(boundaries.length).toBeGreaterThan(3);
+    // A re-entered scan would have cleared the snapshot and rebuilt it from the
+    // later listing, dropping the entry-time name and adopting the later one.
+    expect([...party.state.foreignFileSnapshot]).toEqual(["at-entry.txt"]);
+    expect(files.has(`${DIR}/after-entry.txt`)).toBe(true);
+  });
+});
