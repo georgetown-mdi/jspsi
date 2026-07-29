@@ -6769,6 +6769,45 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(adapter.midExchangeReconnectCount).toBe(1);
   });
 
+  test("the re-dial stops the keepalive, then retires the transport, then dials", async () => {
+    // The order the whole recovery rests on, asserted as an order rather than as
+    // three outcomes that a reordering would leave individually intact. Retiring
+    // AFTER the dial would put the dial in the window the retirement exists to
+    // clear, and it is the retirement's close that settles whatever else the drop
+    // left on that transport, so an operation concurrent with this one would be
+    // left for its own liveness deadline instead. Stopping the keepalive after
+    // either would let the dropped session's still-armed timer post a realPath
+    // onto a transport this is about to destroy, or onto a handshake in progress.
+    const { client, connect, socket, dropFromServer } =
+      tornOnEndClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 3 });
+    // Spied after the first dial, so the arming that dial does is not what the
+    // reading below picks up.
+    const stopKeepalive = vi.spyOn(
+      (adapter as unknown as { heartbeat: { stop: () => void } }).heartbeat,
+      "stop",
+    );
+    connect.mockClear();
+
+    const operation = adapter.exists("/r/x.json");
+    dropFromServer();
+    await expect(operation).resolves.toBe(true);
+
+    // Vitest stamps every mock call with a run-wide sequence number, which is what
+    // orders calls on three separate mocks against each other.
+    const [stopped] = stopKeepalive.mock.invocationCallOrder;
+    const [retired] = socket.destroy.mock.invocationCallOrder;
+    const [dialed] = connect.mock.invocationCallOrder;
+    expect(stopped).toBeLessThan(retired);
+    expect(retired).toBeLessThan(dialed);
+    expect(connect).toHaveBeenCalledOnce();
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+  });
+
   test("an idle boundary reached with an operation outstanding does not close the session, and the operation completes on the session it was issued against", async () => {
     // The one operation no entry gate can cover: it is already on the wire when
     // the idle boundary falls. The release reads that off the adapter's own
