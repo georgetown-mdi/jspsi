@@ -468,6 +468,8 @@ inProcessOnly(
       // liveness deadline. The ceiling is the only thing here that separates a fan
       // settled by its tear from one settled by a deadline apiece.
       expect(outcomes.elapsedMs).toBeLessThan(500);
+      expect(controls.handshakeCount()).toBe(0);
+      expect(party.dials).toHaveLength(0);
     } finally {
       await party.stop();
     }
