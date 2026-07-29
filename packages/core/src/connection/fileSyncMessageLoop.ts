@@ -8,18 +8,19 @@
 // defaults live in one place and cannot silently diverge between call sites.
 //
 // Second, the FileSyncMessageLoop coordinator: the stateful poll/ack/seq loop.
-// It is a union shape -- a stateful subsystem that OWNS the nine message-loop
-// counters (seq, recvSeq, lastAckedNNN, lastSentFile, consecutiveEnoentCount,
-// inboundFrameCap, poller, pollerActive, warnedUnexpectedFiles), mutating them
-// as plain field writes in the hot paths, AND a deps-composed coordinator that
-// reaches the connection's shared/root state through a bidirectional
-// MessageLoopDeps object. It holds no EventEmitter: it emits solely through
-// deps.emit, a synchronous pass-through to the connection's overridden emit, so
-// the unhandled-error buffering, cause-chaining, and listener delivery stay
-// byte-identical. The RATIONALE -- the frame-size and liveness bounds, the
-// replay/sequencing guarantees, and the durable-ack contract -- is normatively
-// specified in docs/spec/FILE_SYNC.md and docs/spec/CHANNEL_SECURITY.md; this
-// module implements it and does not restate it.
+// It is a union shape -- a stateful subsystem that OWNS the ten message-loop
+// counters (seq, recvSeq, lastAckedNNN, lastSentFile, indeterminatePublish,
+// consecutiveEnoentCount, inboundFrameCap, poller, pollerActive,
+// warnedUnexpectedFiles), mutating them as plain field writes in the hot paths,
+// AND a deps-composed coordinator that reaches the connection's shared/root
+// state through a bidirectional MessageLoopDeps object. It holds no
+// EventEmitter: it emits solely through deps.emit, a synchronous pass-through
+// to the connection's overridden emit, so the unhandled-error buffering,
+// cause-chaining, and listener delivery stay byte-identical. The RATIONALE --
+// the frame-size and liveness bounds, the replay/sequencing guarantees, and the
+// durable-ack contract -- is normatively specified in docs/spec/FILE_SYNC.md
+// and docs/spec/CHANNEL_SECURITY.md; this module implements it and does not
+// restate it.
 //
 // This module is deliberately NOT re-exported by the package barrel (main.ts
 // barrels fileSyncConnection.ts via `export *`, not this file), so its
@@ -35,7 +36,12 @@ import { v4 as uuidv4 } from "uuid";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
 import { parseBoundedJson } from "../utils/boundedJson";
 import type { getLoggerForVerbosity } from "../utils/logger";
-import { UsageError, FrameSizeExceededError, PeerAbortError } from "../errors";
+import {
+  UsageError,
+  FrameSizeExceededError,
+  PeerAbortError,
+  TransportPublishIndeterminateError,
+} from "../errors";
 import { MAX_FRAME_SIZE_BYTES } from "./frameSize";
 import {
   MESSAGE_ENVELOPE_VERSION,
@@ -306,7 +312,7 @@ export interface MessageLoopDeps {
 
 /**
  * The stateful file-sync message loop (poll/ack/seq) as a self-contained
- * subsystem {@link FileSyncConnection} composes. A union shape: it OWNS the nine
+ * subsystem {@link FileSyncConnection} composes. A union shape: it OWNS the ten
  * message-loop counters and mutates them as plain field writes in poll()/send(),
  * AND reads the connection's shared/root state through {@link MessageLoopDeps}
  * accessors, sharing the responsibleFiles/foreignFileSnapshot Sets by reference.
@@ -356,6 +362,14 @@ export class FileSyncMessageLoop {
   // because close() reads it through the connection's delegating getter.
   lastSentFile: string | undefined;
   private consecutiveEnoentCount = 0;
+  // The message publish whose outcome the transport could not settle, if one has
+  // happened this session: the seq it spent, and the transport's own error, which
+  // the refusal carries as its `cause` so the destination and status that error
+  // names stay reachable without spending the refusal's display budget. Set from
+  // send()'s rename, read by the next send(), which refuses rather than write a
+  // second message under a seq the peer may already have consumed one under.
+  private indeterminatePublish:
+    { seq: number; error: TransportPublishIndeterminateError } | undefined;
   // Distinct names already warned about under `unexpectedFiles: "warn"`. poll()
   // re-lists every cycle, so a recurring unexpected file would log on each pass
   // without this; membership caps it at one warning per name. Reset per session
@@ -378,6 +392,38 @@ export class FileSyncMessageLoop {
     // (before mode-specific branches) so both retain and non-retain modes
     // require synchronize() to have completed first.
     if (!deps.peerId()) throw new Error("not synchronized");
+
+    // A publish whose outcome the transport could not settle spends its seq slot
+    // without advancing the counter (see the rename in the try below): the peer
+    // may have consumed a message under that name and delivered it, and the
+    // receive path has no check that would reject a second message arriving under
+    // the same seq -- in delete mode it emits it as the next message. So this send
+    // would be silently double-delivered rather than being the retry it looks
+    // like. The session cannot continue: which of the two happened is not
+    // knowable from here, and the ack/consume gates below would be waiting on the
+    // wrong message either way.
+    // Tagged unlike its untagged siblings in errors.ts: those are settled before
+    // the handshake or carry no competing step, while this one prescribes a
+    // restart that the CLI's generic "retry without re-inviting" advisory would
+    // contradict. The tag is what makes this message's length load-bearing: it
+    // suppresses the generic next step, so the restart prescribed here is the
+    // only one an operator reaching this error gets, and it must survive the
+    // display boundary's per-error cap. Hence the refusal and its remedy alone,
+    // with the publish identified by the transport error hung off `cause`, which
+    // renders under its own cap.
+    if (this.indeterminatePublish !== undefined)
+      throw Object.assign(
+        new UsageError(
+          `cannot send: sequence number ${this.indeterminatePublish.seq} was ` +
+            `spent on a publish the transport could not confirm, so the partner ` +
+            `may already hold a message under it. Re-run the exchange in a ` +
+            `clean directory; both parties must start the new exchange fresh.`,
+        ),
+        {
+          cause: this.indeterminatePublish.error,
+          psilinkRecoveryHintEmitted: true,
+        },
+      );
 
     // `path` is the inbound directory: where the peer's ack of our message (and,
     // in delete mode, the consume-delete of our own last message) is observed.
@@ -493,8 +539,6 @@ export class FileSyncMessageLoop {
       }
 
       const ts = Date.now();
-      // Do not increment this.seq yet: advance only after the durable rename so
-      // a failed send does not leave the counter past an unwritten message.
       const seq = this.seq;
       // Build only the 10-byte header and derive the on-disk byte count from it
       // plus the payload length, so the encoded count is the exact on-disk size;
@@ -531,12 +575,17 @@ export class FileSyncMessageLoop {
       });
 
       deps.log().debug(`[${deps.role()}] renaming ${tempFile} to ${outName}`);
-      await deps.client().rename(tempPath, outPath);
+      try {
+        await deps.client().rename(tempPath, outPath);
+      } catch (renameErr: unknown) {
+        // The counter does not advance below, but this seq is spent all the same
+        // -- see the refusal at send() entry for what that costs.
+        if (renameErr instanceof TransportPublishIndeterminateError)
+          this.indeterminatePublish = { seq, error: renameErr };
+        throw renameErr;
+      }
       if (!deps.options().retainFiles) deps.responsibleFiles.add(outName);
       this.lastSentFile = outName;
-      // Advance after the durable rename: a write failure above leaves seq
-      // unchanged so a retry can reuse this slot and the retain-mode ack gate
-      // cannot block on a message that was never written.
       this.seq = seq + 1;
     } catch (err: unknown) {
       // tempPath may never have been written: both pre-write gate loops above
@@ -1213,6 +1262,7 @@ export class FileSyncMessageLoop {
     this.recvSeq = 0;
     this.lastAckedNNN = -1;
     this.lastSentFile = undefined;
+    this.indeterminatePublish = undefined;
     this.warnedUnexpectedFiles.clear();
     // Clear any per-exchange inbound cap so a stale tight cap from a prior
     // exchange on a reused connection cannot reject a later one. The protocol

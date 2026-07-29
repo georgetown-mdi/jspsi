@@ -1,4 +1,4 @@
-import type { SftpSessionControls } from "./types";
+import type { SftpRenameTearControls, SftpSessionControls } from "./types";
 
 /**
  * The slice of an ssh2 server {@link import("ssh2").Connection} the session
@@ -62,12 +62,34 @@ interface TrackedSession {
 }
 
 /**
+ * The public {@link SftpRenameTearControls} surface plus the wiring the RENAME,
+ * REMOVE, and STAT/LSTAT handlers invoke as they serve a staged tear.
+ */
+export interface SftpRenameTearControlHub extends SftpRenameTearControls {
+  /** Record the destination of the RENAME a tear has just fired on. */
+  noteTorn(virtualPath: string): void;
+  /** Record a REMOVE, releasing any probe parked on that path. */
+  noteRemoved(virtualPath: string): void;
+  /**
+   * Resolve once {@link SftpRenameTearControls.tornDestination} has been
+   * REMOVEd, or at once when it already has been.
+   */
+  waitForConsumption(): Promise<void>;
+}
+
+/**
  * The public {@link SftpSessionControls} surface plus the server-side wiring the
  * in-process backend invokes as connections come and go. A test sees only the
  * public surface on the server handle; the wiring methods are called only by the
  * backend.
  */
 export interface SftpSessionControlHub extends SftpSessionControls {
+  renameTear: SftpRenameTearControlHub;
+  /**
+   * End the connection serving a staged rename tear. Shares the one-drop claim
+   * with the caps, so a tear and an armed cap cannot both end one connection.
+   */
+  tearSession(conn: DroppableConnection): void;
   /**
    * Apply the withheld-close and stalled-handshake controls to a newly accepted
    * connection's socket, before any SSH traffic runs on it. A no-op while both
@@ -161,7 +183,52 @@ export function createSftpSessionControls(): SftpSessionControlHub {
     session.idleTimer.unref();
   };
 
+  // Probes parked by holdProbeUntilDestinationConsumed, released by the REMOVE of
+  // the torn destination or by reset().
+  let probeWaiters: Array<() => void> = [];
+  let tornDestinationConsumed = false;
+  const releaseProbes = (): void => {
+    const waiting = probeWaiters;
+    probeWaiters = [];
+    for (const release of waiting) release();
+  };
+
+  const renameTear: SftpRenameTearControlHub = {
+    tearAfterRenameLands: false,
+    tearBeforeRenameLands: false,
+    consumeDestinationAtTear: false,
+    holdProbeUntilDestinationConsumed: false,
+    tornDestination: undefined,
+
+    noteTorn(virtualPath: string): void {
+      renameTear.tornDestination = virtualPath;
+      tornDestinationConsumed = false;
+    },
+
+    noteRemoved(virtualPath: string): void {
+      if (renameTear.tornDestination !== virtualPath) return;
+      tornDestinationConsumed = true;
+      releaseProbes();
+    },
+
+    waitForConsumption(): Promise<void> {
+      if (tornDestinationConsumed) return Promise.resolve();
+      return new Promise<void>((resolve) => probeWaiters.push(resolve));
+    },
+
+    reset(): void {
+      renameTear.tearAfterRenameLands = false;
+      renameTear.tearBeforeRenameLands = false;
+      renameTear.consumeDestinationAtTear = false;
+      renameTear.holdProbeUntilDestinationConsumed = false;
+      renameTear.tornDestination = undefined;
+      tornDestinationConsumed = false;
+      releaseProbes();
+    },
+  };
+
   const hub: SftpSessionControlHub = {
+    renameTear,
     maxLifetimeMs: 0,
     maxOps: 0,
     maxIdleMs: 0,
@@ -187,6 +254,10 @@ export function createSftpSessionControls(): SftpSessionControlHub {
         dropNow(target);
       }, ms);
       pendingMsTimer.unref();
+    },
+
+    tearSession(conn: DroppableConnection): void {
+      dropNow(conn);
     },
 
     handshakeCount(): number {

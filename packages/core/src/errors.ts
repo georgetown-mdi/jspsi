@@ -281,6 +281,45 @@ export class TransportOperationStalledError extends UsageError {
 }
 
 /**
+ * Thrown by a transport whose publish of a file was torn by a session drop and
+ * whose outcome the transport cannot settle: the operation is rejected, and
+ * whether the peer received what was published is undetermined. It is the
+ * distinguishable middle between a publish confirmed to have landed (the
+ * operation resolves) and one determined not to have (the operation rejects with
+ * the failure the server reported).
+ *
+ * A rejection, never a resolution: a caller that treats this as success would be
+ * reporting an unpublished message as sent. What it changes is the CHARACTER of
+ * the rejection, so a caller that must not act on a message the peer may already
+ * hold -- {@link FileSyncMessageLoop}'s send path, whose `seq` slot is not
+ * reusable once the peer may have consumed a message under that name -- can tell
+ * the two apart. The `cause` carries the transport's original error, so the
+ * status and paths it names render on their own line of the operator-facing
+ * cause chain rather than inside this message.
+ *
+ * A plain `Error` rather than a {@link UsageError}, the classification the poll
+ * loop reads as terminal. What that distinction buys is measured in
+ * `fileSyncConnection.test.ts`, on the one publish this class can reach from
+ * `poll()` -- the retain-mode ack, whose name the next cycle re-derives
+ * identically. In isolation the loop reschedules, republishes the ack, and
+ * delivers the message; under the CLI's composition, where `fromEventConnection`
+ * fails the connection on the first emitted poll error, the same staging ends the
+ * exchange with the ack never republished. So the classification buys the loop's
+ * own retry, not a surviving exchange.
+ *
+ * It carries no `psilinkRecoveryHintEmitted` tag, on the same reasoning as
+ * {@link BilateralModeMismatchError}: the CLI's generic advisory concerns token
+ * rotation and re-inviting, which this condition neither contradicts nor
+ * answers.
+ */
+export class TransportPublishIndeterminateError extends Error {
+  constructor(message: string, options: { cause: unknown }) {
+    super(message, options);
+    this.name = "TransportPublishIndeterminateError";
+  }
+}
+
+/**
  * Thrown into an in-flight {@link FileSyncConnection} wait when the connection
  * is closed mid-rendezvous or mid-send. `close()` aborts a shared
  * `AbortController` whose `reason` is an instance of this class, so any wait

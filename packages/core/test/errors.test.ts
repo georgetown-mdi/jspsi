@@ -8,6 +8,7 @@ import {
   TransportOperationStalledError,
   ConnectionClosedError,
   PeerAbortError,
+  TransportPublishIndeterminateError,
 } from "../src/errors";
 
 // These assertions guard the operator-facing-error audit (board item 199419757):
@@ -68,6 +69,26 @@ describe("errors deliberately left without a recovery hint", () => {
         .psilinkRecoveryHintEmitted,
     ).toBeUndefined();
     expect(err.message).toBe(message);
+  });
+
+  test("TransportPublishIndeterminateError stays untagged and is not a UsageError", () => {
+    // Not a UsageError, which the poll loop reads as terminal; what that
+    // distinction does and does not buy is measured in fileSyncConnection.test.ts
+    // rather than argued here. Untagged because the generic advisory concerns
+    // token rotation and re-inviting, which an unsettled publish neither
+    // contradicts nor answers.
+    const cause = new Error("_rename: No such file or directory");
+    const err = new TransportPublishIndeterminateError("publish torn", {
+      cause,
+    });
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(UsageError);
+    expect(err.name).toBe("TransportPublishIndeterminateError");
+    expect(err.cause).toBe(cause);
+    expect(
+      (err as { psilinkRecoveryHintEmitted?: unknown })
+        .psilinkRecoveryHintEmitted,
+    ).toBeUndefined();
   });
 
   test("ConnectionClosedError carries no hint and is not a UsageError", () => {

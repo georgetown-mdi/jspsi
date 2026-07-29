@@ -15,10 +15,12 @@ import {
   PutOptions,
   PutSource,
   TransportOperationStalledError,
+  TransportPublishIndeterminateError,
   UsageError,
   getLoggerForVerbosity,
   retryPromise,
   sanitizeErrorForDisplay,
+  sanitizeForDisplay,
 } from "@psilink/core";
 
 import { createCappedSink } from "./frameSizeGuard";
@@ -3562,29 +3564,83 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // is self-prefixed (<id>-hello.json, the <id>-...json message temp->final,
       // <myId>-<orig>-ack.json, <id>-abort.json, the joiner <id>-joining.json ->
       // <id>-hello.json), so a present destination is unambiguously our own landed
-      // attempt, never a peer file -- and resolve as success. Any other failure, or
-      // an absent destination, propagates.
+      // attempt, never a peer file -- and resolve as success.
+      //
+      // The CONVERSE does not hold, and the arm below is what that costs. An
+      // absent destination is not evidence the rename failed: in delete mode the
+      // peer's consume-delete removes exactly this party's own self-prefixed
+      // publish, so a rename that landed durably and was then consumed inside the
+      // recovery window reports the identical state a rename that never landed
+      // does -- source gone, destination absent, SSH_FX_NO_SUCH_FILE. Nothing the
+      // adapter can read separates them (see CHANNEL_SECURITY.md), so that state
+      // is surfaced as the indeterminate outcome it is rather than as a
+      // determined non-delivery. Every OTHER failure keeps propagating verbatim.
       (run) =>
         run().catch(async (error: unknown) => {
           const code = (error as Ssh2SftpError | null | undefined)?.code;
-          if (this.isNoSuchFileError(error) || code === SSH_FX_FAILURE) {
-            // The probe is a server round trip like any other, so it goes through
-            // the private once-layer: that is the seam carrying the
-            // outstanding-operation count (a probe outside it would be torn by an
-            // idle-boundary release, and a torn probe reports a LANDED rename as
-            // the failure that drove it), the per-operation deadline, and the
-            // dead-session guard. The public exists() is the wrong seam here: it
-            // would arm a second recovery round from inside this one's catch.
-            // However the probe rejects -- dead session, expired deadline, or a
-            // real I/O error -- the ambiguity is unresolved, so the ORIGINAL rename
-            // error surfaces rather than the probe's own failure (mirrors
-            // createExclusiveOnce's SFTPv3 fallback, which keeps the original
-            // openErr when its exists() check rejects).
-            const landed = await this.existsOnce(toPath).catch(() => false);
-            if (landed) return;
+          const sourceGone = this.isNoSuchFileError(error);
+          if (!sourceGone && code !== SSH_FX_FAILURE) throw error;
+          // The probe is a server round trip like any other, so it goes through
+          // the private once-layer: that is the seam carrying the
+          // outstanding-operation count (a probe outside it would be torn by an
+          // idle-boundary release, and a torn probe reports a LANDED rename as
+          // the failure that drove it), the per-operation deadline, and the
+          // dead-session guard. The public exists() is the wrong seam here: it
+          // would arm a second recovery round from inside this one's catch.
+          // However the probe rejects -- dead session, expired deadline, or a
+          // real I/O error -- it has confirmed nothing, which is a different
+          // answer from a destination the server reported absent (mirrors
+          // createExclusiveOnce's SFTPv3 fallback, which keeps the original
+          // openErr when its exists() check rejects).
+          const destination = await this.existsOnce(toPath).then(
+            (present) => (present ? "present" : "absent"),
+            () => "unanswered",
+          );
+          if (destination === "present") return;
+          // A code-4 failure is the server's own answer that the rename did not
+          // take effect, so it stays determinate and surfaces as itself; only the
+          // source-gone code can be the landed-then-consumed state.
+          if (!sourceGone) throw error;
+          if (destination === "absent") {
+            // The one reading that settles it the other way: a source still on
+            // the server means nothing moved this party's file, so the publish
+            // determinately did not land. Worth the second round trip only where
+            // the first was answered -- a probe that could not answer has already
+            // left the question open, and a second on the same session would
+            // spend another deadline to leave it open again.
+            const sourceHeld = await this.existsOnce(fromPath).catch(
+              () => false,
+            );
+            if (sourceHeld) throw error;
           }
-          throw error;
+          throw this.indeterminatePublishError(error, toPath);
         }),
+    );
+  }
+
+  // The rejection for a publish whose fate the transport cannot settle: a
+  // mid-operation drop tore the rename, and what the recovery could read of the
+  // aftermath is the state a landed-then-consumed publish and an unlanded one
+  // share. It stays a rejection -- nothing here reports an unpublished message as
+  // sent.
+  //
+  // Written to survive the display boundary, which caps each error in a rendered
+  // cause chain at DEFAULT_MAX_DISPLAY_LENGTH: the sentence the operator must act
+  // on leads, and the destination -- named because the caller's own message may
+  // now be in the peer's hands under it -- comes last, where the cap costs least.
+  // The re-issue's own error is carried only as the `cause`, so the SFTP status
+  // it names is rendered on its own line under its own cap rather than spending
+  // this message's. `toPath` is partner-derived on the ack and rendezvous rename
+  // paths, so it is escaped like every other path this app puts in an error.
+  private indeterminatePublishError(
+    error: unknown,
+    toPath: string,
+  ): TransportPublishIndeterminateError {
+    return new TransportPublishIndeterminateError(
+      `the message may or may not have reached the partner: the publish was ` +
+        `cut off mid-operation and could not be confirmed afterwards. ` +
+        `Destination: ${sanitizeForDisplay(toPath)}`,
+      { cause: error },
     );
   }
 

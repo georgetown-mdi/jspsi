@@ -2,7 +2,12 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test } from "vitest";
-import { FileSyncConnection, UsageError } from "@psilink/core";
+import {
+  FileSyncConnection,
+  TransportPublishIndeterminateError,
+  UsageError,
+  sanitizeErrorForDisplay,
+} from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
@@ -24,6 +29,12 @@ import type { InProcessSftpServer } from "../sftpServer/types";
 // and every dial the adapter makes is one it keeps. The raw-wrapper operations
 // (list, createExclusive) are torn by the 'close' itself and so never reached this
 // window; they are here as the no-regression half.
+//
+// One case covers the publish the recovery can neither complete nor fail: a
+// rename torn after it landed, whose destination something removes before the
+// re-dialed session can confirm it. It is staged through the rename-tear controls
+// rather than an op-count drop, which cannot say whether the request's filesystem
+// work ran before the connection went.
 //
 // Only the in-process backend can be told to cut a session this way (a native sshd
 // cannot; see test/sftpServer/types.ts), so these run there and stand up their own
@@ -367,6 +378,139 @@ inProcessOnly(
       expect(controls.handshakeCount()).toBe(1);
       expect(party.dials).toHaveLength(1);
     } finally {
+      await party.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+// How many times each arm of the landed-publish pair is driven. The staging is
+// deterministic by construction -- the tear cuts inside the RENAME handler at a
+// named point, and the destination's removal is the server's own -- so the repeat
+// is there to show that determinism holds rather than to hunt for an interleaving.
+const LANDED_PUBLISH_REPEATS = 10;
+
+inProcessOnly(
+  "a publish torn after it landed resolves while its destination is there and " +
+    "is reported indeterminate once something has taken it",
+  async () => {
+    // Each tear costs one re-dial, and the two determinate arms one each.
+    const party = await connectParty({
+      maxReconnectAttempts: LANDED_PUBLISH_REPEATS * 2 + 4,
+      stallDeadlineMs: STALL_DEADLINE_MS,
+    });
+    const tear = party.srv.sessionControls.renameTear;
+    // One publish: write the temp, tear its rename as staged, and report what the
+    // adapter's rename() made of the recovery.
+    const publish = async (
+      name: string,
+      stage: () => void,
+      destination?: string,
+    ): Promise<{ source: string; dest: string; error: unknown }> => {
+      const source = `${party.remote}/temp-${name}.tmp`;
+      const dest = destination ?? `${party.remote}/${name}.json`;
+      await party.adapter.put(Buffer.from(name), source, {
+        flags: "w",
+        encoding: null,
+      });
+      tear.reset();
+      stage();
+      const error = await party.adapter.rename(source, dest).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      return { source, dest, error };
+    };
+
+    try {
+      await withCapturedLogs(
+        async () => {
+          for (let i = 0; i < LANDED_PUBLISH_REPEATS; i++) {
+            // The publish LANDED and its destination is still on the server: the
+            // premise the landed-confirmation probe rests on is intact, so the
+            // torn rename resolves as the success it was.
+            const kept = await publish(`kept-${i}`, () => {
+              tear.tearAfterRenameLands = true;
+            });
+            expect(kept.error).toBeUndefined();
+            await expect(party.adapter.exists(kept.dest)).resolves.toBe(true);
+
+            // The same publish, with the destination consumed inside the recovery
+            // window -- what a partner's consume-delete of this party's own
+            // message does. The re-issue and both probes now read exactly what a
+            // publish that never landed reads, so the rename rejects, and rejects
+            // as the undetermined outcome it is rather than as a failure to
+            // publish.
+            const taken = await publish(`taken-${i}`, () => {
+              tear.tearAfterRenameLands = true;
+              tear.consumeDestinationAtTear = true;
+            });
+            expect(taken.error).toBeInstanceOf(
+              TransportPublishIndeterminateError,
+            );
+            // The publish is never reported as sent: the operation still rejects,
+            // and the transport's own error -- the SFTP status and both paths --
+            // is carried rather than replaced. Both reach the operator, each
+            // rendered under its own display cap.
+            const cause = (taken.error as Error).cause;
+            expect(cause).toBeInstanceOf(Error);
+            expect((cause as Error).message).toContain("_rename");
+            const rendered = sanitizeErrorForDisplay(taken.error);
+            expect(rendered).toContain(
+              "the message may or may not have reached the partner",
+            );
+            expect(rendered).toContain((cause as Error).message);
+            await expect(party.adapter.exists(taken.dest)).resolves.toBe(false);
+          }
+
+          // A determinate non-delivery, on an ENOENT that is not about the
+          // source: the destination's directory does not exist, and the source
+          // is still on the server, so nothing this party wrote can be in the
+          // peer's hands. Its own error stands.
+          const unreachable = await publish(
+            "unreachable",
+            () => {
+              tear.tearBeforeRenameLands = true;
+            },
+            `${party.remote}/no-such-directory/unreachable.json`,
+          );
+          expect(unreachable.error).not.toBeInstanceOf(
+            TransportPublishIndeterminateError,
+          );
+          expect((unreachable.error as Error).message).toContain("_rename");
+          await expect(party.adapter.exists(unreachable.source)).resolves.toBe(
+            true,
+          );
+
+          // A determinate non-delivery on a non-ENOENT status: the server reports
+          // the generic failure that means the rename did not take effect, which
+          // is an answer and not an ambiguity.
+          const refused = await publish("refused", () => {
+            tear.tearBeforeRenameLands = true;
+            // Above the rename retry budget, so every attempt of the re-issue is
+            // answered with the generic failure rather than the last one landing.
+            party.srv.inject.renameFailuresRemaining = 10;
+          });
+          party.srv.inject.renameFailuresRemaining = 0;
+          expect(refused.error).not.toBeInstanceOf(
+            TransportPublishIndeterminateError,
+          );
+          expect((refused.error as Error).message).toContain("_rename");
+          await expect(party.adapter.exists(refused.source)).resolves.toBe(
+            true,
+          );
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      // Every arm's tear was a real drop the adapter recovered from, so no
+      // outcome above is one the staging failed to produce.
+      expect(party.adapter.midExchangeReconnectCount).toBe(
+        LANDED_PUBLISH_REPEATS * 2 + 2,
+      );
+    } finally {
+      tear.reset();
+      party.srv.inject.renameFailuresRemaining = 0;
       await party.stop();
     }
   },

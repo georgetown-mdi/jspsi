@@ -30,6 +30,7 @@ import {
   ConnectionClosedError,
   FrameSizeExceededError,
   TransportOperationStalledError,
+  TransportPublishIndeterminateError,
 } from "../src/errors";
 import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
 import { computeHostKeyFingerprint } from "../src/utils/sshHostKey";
@@ -7796,6 +7797,101 @@ test("composed via fromEventConnection: the first transient poll() error is term
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(listCalls).toBe(1);
   expect(messageLoopInternals(conn).recvSeq).toBe(0);
+});
+
+// The ack publish poll() writes in retain mode is the one publish a transport can
+// leave undetermined from inside the poll loop, so TransportPublishIndeterminateError
+// -- a plain Error, not a UsageError -- is reachable at poll()'s catch. The pair
+// below measures what that classification does and does not buy, in isolation and
+// under the production composition.
+
+// Stage the retain-mode ack publish as undetermined on its first attempt: the ack
+// name is re-derived identically each cycle, so a later attempt republishes it.
+function undeterminedFirstAck(client: FileTransportClient): () => number {
+  let renames = 0;
+  const realRename = client.rename.bind(client);
+  client.rename = async (from: string, to: string) => {
+    renames += 1;
+    if (renames > 1) return realRename(from, to);
+    throw new TransportPublishIndeterminateError(
+      "the message may or may not have reached the partner",
+      { cause: new Error("_rename: No such file or directory") },
+    );
+  };
+  return () => renames;
+}
+
+test("poll() retryable: an undetermined ack publish reschedules and the ack lands on a later cycle", async () => {
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const body = objectMessage({ v: 1 });
+  files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
+  const conn = makeRetainConn(client, "receiver-me", peerId);
+  const renameCount = undeterminedFirstAck(client);
+
+  const errors: unknown[] = [];
+  const received: unknown[] = [];
+  let notifyReceived!: () => void;
+  const delivered = new Promise<void>((r) => (notifyReceived = r));
+  conn.on("data", (msg) => {
+    received.push(msg);
+    notifyReceived();
+  });
+  conn.on("error", (err) => errors.push(err));
+
+  await runPoller(conn, delivered);
+
+  // Not a UsageError, so poll()'s catch leaves pollerActive set: the next cycle
+  // re-derives the same ack name, republishes it, and delivers the message.
+  expect(errors[0]).toBeInstanceOf(TransportPublishIndeterminateError);
+  expect(errors[0]).not.toBeInstanceOf(UsageError);
+  expect(renameCount()).toBeGreaterThan(1);
+  expect(received).toHaveLength(1);
+  expect(messageLoopInternals(conn).recvSeq).toBe(1);
+  expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(true);
+});
+
+test("composed via fromEventConnection: an undetermined ack publish ends the exchange, so the reschedule above never runs", async () => {
+  // The measurement that settles what the plain-Error classification is worth to
+  // an EXCHANGE. The reschedule the test above measures is a property of poll()
+  // standalone; in the CLI a FileSyncConnection is always bridged through
+  // fromEventConnection, whose error listener fails the MessageConnection on the
+  // first emitted poll error. So a publish this class leaves undetermined ends
+  // the exchange whether or not it is classified terminal -- the classification
+  // buys the loop's own retry, not a surviving exchange.
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const body = objectMessage({ v: 1 });
+  files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
+  const conn = makeRetainConn(client, "receiver-me", peerId);
+  const renameCount = undeterminedFirstAck(client);
+
+  const mc = fromEventConnection(conn);
+  conn.start();
+
+  const err = await mc.receive(1_000).then(
+    () => {
+      throw new Error(
+        "receive() resolved; expected the poll error to reject it",
+      );
+    },
+    (e: unknown) => e,
+  );
+
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as Error).message).toContain("may or may not have reached");
+  expect((err as ConnectionError).cause).toBeInstanceOf(
+    TransportPublishIndeterminateError,
+  );
+  expect(messageLoopInternals(conn).pollerActive).toBe(false);
+
+  // No later cycle: the ack was never republished and the message was never
+  // delivered, where the isolation test above republishes and delivers.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(renameCount()).toBe(1);
+  expect(messageLoopInternals(conn).recvSeq).toBe(0);
+  expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(false);
 });
 
 test("poll() terminal: delete mode also stops the poller on a fully-synced corrupt message", async () => {
