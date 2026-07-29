@@ -282,6 +282,7 @@ Its reach is narrower than the claim it guards, and deliberately so. It does not
 - a scheme outside `http`, `https`, `stun`, `stuns`, `turn`, and `turns`, so a `wss://` beacon or a protocol-relative `//host` reference is not matched;
 - a host assembled at runtime from configuration or an operator-supplied value, which is what the SFTP server and the signaling endpoint legitimately are;
 - egress introduced by build configuration, which sits at a workspace root outside the scanned trees even though what it emits ships;
+- a URL literal in a file the repository ignores, which the scan's listing excludes along with build output -- a narrow gap, since a CI checkout holds no ignored file;
 - egress originating inside a dependency, which is the dependency review's ground;
 - a URL an author took the trouble to split, encode, or otherwise spell around the matcher.
 

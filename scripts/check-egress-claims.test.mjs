@@ -515,6 +515,11 @@ describe("scanned files", () => {
         '# a // b\nexec curl "https://evil.example/e" "$@"\n',
         "https://evil.example/e",
       ],
+      [
+        "apps/web/src/bench/tokens.css",
+        "a { b: c } // https://evil.example/f\n",
+        "https://evil.example/f",
+      ],
     ];
     for (const [path, source, expected] of cases) {
       expect(commentSyntaxFor(path)).toBe("none");
@@ -524,22 +529,23 @@ describe("scanned files", () => {
     }
   });
 
-  it("strips only block comments from a stylesheet", () => {
+  it("scans a stylesheet raw, its block comments included", () => {
+    // A URL inside a CSS comment is reported: the loud direction, which an
+    // author resolves with an allowlist entry. A stripper written from CSS
+    // comment rules rather than the whole grammar fails the other way -- a
+    // backslash line continuation inside a string is enough to make one blank
+    // real declarations, and the literals in them, to end of file.
     const path = "apps/web/src/bench/tokens.css";
-    expect(commentSyntaxFor(path)).toBe("css");
-    expect(urlsIn("/* see https://commented.example/x */\n", path)).toEqual([]);
-    // CSS has no `//` line comment, so text after one is content.
-    expect(urlsIn("a { b: c } // https://evil.example/y\n", path)).toEqual([
+    const source =
+      "/* see https://commented.example/x */\n" +
+      "a { background: url(https://evil.example/y) }\n";
+    expect(commentSyntaxFor(path)).toBe("none");
+    expect(stripComments(source, path)).toBe(source);
+    expect(urlsIn(source, path)).toEqual([
+      "https://commented.example/x",
       "https://evil.example/y",
     ]);
-    // Nor any template literal, so a lone backtick opens no state that would
-    // swallow the rest of the file.
-    expect(
-      urlsIn(
-        "a { content: '`' }\nb { background: url(https://evil.example/z) }\n",
-        path,
-      ),
-    ).toEqual(["https://evil.example/z"]);
+    expect(fileViolations(path, source)).toHaveLength(2);
   });
 
   it("strips both comment forms from every JavaScript-family extension", () => {
@@ -622,6 +628,26 @@ describe("scanned roots", () => {
     });
   });
 
+  it("reads a file whose name is not ASCII", () => {
+    // Real git decides the premise: under the default core.quotePath it prints
+    // such a path quoted and C-escaped, a spelling that names no file on disk,
+    // so a listing without `-z` reaches readFileSync with it and throws ENOENT
+    // in place of any egress finding.
+    const nonAscii = "apps/web/src/naïve.ts";
+    withScannedRepo([nonAscii], (dir) => {
+      expect(
+        execFileSync(
+          "git",
+          ["ls-files", "--cached", "--others", "--exclude-standard", "--"],
+          { cwd: dir, encoding: "utf8" },
+        ),
+      ).toContain('"apps/web/src/na\\303\\257ve.ts"');
+      const { files, violations } = scanRepo(dir);
+      expect(files).toContain(nonAscii);
+      expect(violations).toHaveLength(SKELETON.length + 1);
+    });
+  });
+
   it("fails when a scanned root or file matches nothing", () => {
     // A renamed shipped tree would otherwise leave the check passing over a
     // smaller scan than its success line claims. Real git decides the premise:
@@ -700,12 +726,6 @@ describe("comment stripping", () => {
     expect(urlsIn('const u = "https://evil.example/a/*b*/c";\n')).toEqual([
       "https://evil.example/a/*b*/c",
     ]);
-    expect(
-      urlsIn(
-        "@font-face { src: url(https://evil.example/a/*b*/c.woff2); }\n",
-        "apps/web/src/bench/tokens.css",
-      ),
-    ).toEqual(["https://evil.example/a/*b*/c.woff2"]);
   });
 
   it("does not let an escaped slash in a regex blank the rest of the line", () => {
@@ -760,34 +780,6 @@ describe("comment stripping", () => {
     const source = "const a = ;\nfunction (\n// https://evil.example/x\n";
     expect(stripComments(source, FIXTURE)).toBe(source);
     expect(urlsIn(source)).toEqual(["https://evil.example/x"]);
-  });
-
-  it("does not let a `/*` inside an unquoted CSS URL swallow the file", () => {
-    // CSS reads an unquoted url() to its closing paren as one token, so the
-    // `/*` opens no comment there. A lexer that thinks otherwise blanks on to
-    // the next `*/` and loses whatever literal follows -- silently.
-    const path = "apps/web/src/bench/tokens.css";
-    const trailing = "b { background: url(https://other.example/y) }\n";
-    expect(
-      urlsIn(
-        `a { background: url(https:evil.example/p/*x) }\n${trailing}`,
-        path,
-      ),
-    ).toEqual(["https:evil.example/p/*x", "https://other.example/y"]);
-    expect(
-      urlsIn(
-        `a { background: url(data:image/svg+xml,x/*y) }\n${trailing}`,
-        path,
-      ),
-    ).toEqual(["https://other.example/y"]);
-    // A quoted url() keeps its own rule: the paren inside the string is not
-    // the token's end.
-    expect(
-      urlsIn(
-        `a { background: url("data:image/svg+xml,<svg d='M0 0)'/>") }\n${trailing}`,
-        path,
-      ),
-    ).toEqual(["https://other.example/y"]);
   });
 
   it("keeps template text that follows an interpolation", () => {
@@ -877,20 +869,33 @@ describe("the repository as it stands", () => {
   it("deletes nothing from a scanned file whose syntax is unmodeled", () => {
     // The parser guard above reaches the JavaScript family only. For every
     // other scanned file the property that stands in for it is that stripping
-    // changes nothing at all, and for a stylesheet that it changes no length.
+    // changes nothing at all.
     const { files } = scanRepo(repoRoot);
-    const changed = files.filter((file) => {
+    const unmodeled = files.filter((file) => commentSyntaxFor(file) === "none");
+    expect(unmodeled.length).toBeGreaterThan(0);
+    const changed = unmodeled.filter((file) => {
       const source = readFileSync(resolve(repoRoot, file), "utf8");
-      const stripped = stripComments(source, file);
-      if (commentSyntaxFor(file) === "none") return stripped !== source;
-      return stripped.length !== source.length;
+      return stripComments(source, file) !== source;
     });
     expect(changed).toEqual([]);
-    expect(
-      files.filter((file) => commentSyntaxFor(file) === "none").length,
-    ).toBeGreaterThan(0);
-    expect(
-      files.filter((file) => commentSyntaxFor(file) === "css").length,
-    ).toBeGreaterThan(0);
+  });
+
+  it("reports only allowlisted hits from the stylesheets it scans", () => {
+    // Scanning a stylesheet raw costs nothing measurable here: the shipped
+    // stylesheets carry their URL literals in real declarations, not in
+    // comments, so the hits are the allowlisted SVG namespace and no others.
+    const { files } = scanRepo(repoRoot);
+    const stylesheets = files.filter((file) => file.endsWith(".css"));
+    expect(stylesheets.length).toBeGreaterThan(0);
+    const hits = [];
+    for (const file of stylesheets) {
+      const source = readFileSync(resolve(repoRoot, file), "utf8");
+      expect([file, stripComments(source, file)]).toEqual([file, source]);
+      expect([file, fileViolations(file, source)]).toEqual([file, []]);
+      hits.push(...urlLiterals(source, file).map(({ url }) => url));
+    }
+    // Not a vacuous pass: the stylesheets do carry a literal, and the raw scan
+    // reaches it in the declaration it sits in.
+    expect(hits).toContain("http://www.w3.org/2000/svg");
   });
 });

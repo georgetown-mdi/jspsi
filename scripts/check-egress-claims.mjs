@@ -29,20 +29,33 @@
 //     apps/web/vite.config.ts or apps/web/nitro.config.ts emits into the
 //     shipped page, but those files sit at a workspace root, outside
 //     SCANNED_ROOTS.
+//   - A file git ignores. The listing in scanRepo excludes them, so a URL
+//     literal in one is never read, wherever under a scanned root it sits. The
+//     reach of that gap is small: CI checks out clean, so an ignored file
+//     exists only in the working tree of whoever wrote it.
 //   - A URL spelled so as to evade the matcher: split across concatenated
 //     string fragments, escaped inside a regular expression (`https:\/\/`),
-//     percent- or entity-encoded, or glued to an alphanumeric character
-//     (`xhttps://host`), which the scheme rule requires be preceded by
-//     punctuation or the start of the text. The check is a guard against egress
-//     added inadvertently, not against an author who wants to hide it.
+//     percent- or entity-encoded in the scheme or the colon after it
+//     (`%68ttps://`, `&#104;ttps://`, `https%3A//`, `https&#58;//`; an encoded
+//     host is still reported, since the scheme is what the matcher reads), or
+//     glued to an alphanumeric character (`xhttps://host`), which the scheme
+//     rule requires be preceded by punctuation or the start of the text. The
+//     check is a guard against egress added inadvertently, not against an
+//     author who wants to hide it.
 //   - Schemes outside http, https, stun, stuns, turn, and turns: a `wss://`,
 //     `ws://`, `ftp://` or `file://` literal names a host and is not reported.
 //     Nor is a protocol-relative `//host` reference, which carries no scheme to
 //     match.
-//   - An authority written entirely of dots. `new URL()` resolves
-//     `https://.../` to the host `...`, but that spelling is how elided
-//     placeholder text writes a URL (`https://...#...` in the invitation
-//     field), so it is skipped knowingly.
+//   - An authority naming no host of its own: empty, a scheme followed by
+//     nothing but slashes, which is what a protocol comparison
+//     (`location.protocol === "https:"`) is; wholly interpolated
+//     (`http://${host}`, `http://${host}:8443`), as the helpers over an inbound
+//     Host header write it; or written entirely of dots, which `new URL()` does
+//     resolve to the host `...` but is how elided placeholder text writes a URL
+//     (`https://...#...` in the invitation field). All are skipped knowingly;
+//     why none of them can be tightened is at `urlLiterals`. An interpolation
+//     with a literal host beside it names a host and is reported
+//     (`https://${tenant}.evil.example`).
 //
 // The opposite direction is loud and left that way: an authority spelling out
 // host-shaped text is reported even where `new URL()` rejects it outright
@@ -63,13 +76,14 @@
 // ignored by default. A new binary format that trips the check is fixed by
 // adding its extension here, a one-line edit a reviewer sees.
 //
-// Comment syntax, by contrast, is recognized by extension and only where it is
-// known: the JavaScript family, whose comments the TypeScript parser locates,
-// and CSS, which gets the small lexer below. Every other text format is scanned
-// raw. Stripping is the one step that can delete text before the matcher sees
-// it, so guessing wrong there would report a file clean rather than loudly; raw
-// leaves a URL written inside an unmodeled comment syntax visible, as the false
-// positive an author resolves.
+// Comment syntax, by contrast, is recognized by extension and only for the
+// family a real parser reads here: JavaScript and TypeScript, whose comments
+// the TypeScript parser locates. Every other text format -- CSS, HTML, SVG,
+// Markdown, shell -- is scanned raw. Stripping is the one step that can delete
+// text before the matcher sees it, and a lexer written from a language's
+// comment rules rather than its whole grammar gets that wrong silently, which
+// reports a file clean; raw leaves a URL written inside an unmodeled comment
+// visible, as the false positive an author resolves with an allowlist entry.
 //
 // SCANNED_ROOTS is source that ships or runs, not all TypeScript. Beside the
 // app and library trees and the web app's static assets it carries
@@ -212,9 +226,7 @@ const NOTICE_BASENAMES = new Set([
 // Where a URL literal ends in source: whitespace, the quote forms, and the
 // punctuation that brackets one in TypeScript, JSX, and CSS. `{` is left out so
 // a leading `${` interpolation stays visible to the authority rules, `[` and `]`
-// so an IPv6 host literal is not truncated to nothing. The stripper and the
-// matcher share the set, or a URL one of them consumes whole could end mid-way
-// through the other.
+// so an IPv6 host literal is not truncated to nothing.
 const TERMINATOR_CHARS = "\\s\"'`<>(),;}\\\\";
 const URL_TERMINATOR = new RegExp(`[${TERMINATOR_CHARS}]`);
 const URL_SCHEME = new RegExp(
@@ -226,15 +238,6 @@ const URL_SCHEME = new RegExp(
 // than a host. Removing the spans is what leaves the literal part of an
 // authority for the host rule to judge.
 const INTERPOLATION_SPAN = /\$\{[^}]*\}/g;
-
-// A matched scheme starting here, which makes what follows a URL rather than
-// the CSS lexer's punctuation: the `//` of `src: http://host/a` is not a
-// comment start, and neither is the `/*` inside `src: https:host/a/*b*/c`.
-const URL_SCHEME_AT = /^(?:https?|stuns?|turns?):/i;
-
-// The head of a CSS `url()` whose content is unquoted, and so runs to the
-// closing paren rather than to a quote.
-const UNQUOTED_CSS_URL = /^url\(\s*[^"'\s)]/i;
 
 /** Whether `path` is scanned at all (a text file that is not license text). */
 export function isScannedFile(path) {
@@ -257,18 +260,11 @@ const SCRIPT_KIND_BY_EXTENSION = new Map([
   [".tsx", ts.ScriptKind.TSX],
 ]);
 
-// CSS earns a lexer of its own because a scanned stylesheet carries URL
-// literals in real content (the SVG namespace inside a data URI), so its block
-// comments have to come off with the JavaScript rules that would misread it
-// turned off: `//` opens no comment in CSS, and a backtick opens no template
-// literal.
-const CSS_EXTENSION = ".css";
-
-/** Comment syntax recognized for `path`: "javascript", "css", or "none". */
+/** Comment syntax recognized for `path`: "javascript" or "none". */
 export function commentSyntaxFor(path) {
-  const extension = extname(path).toLowerCase();
-  if (SCRIPT_KIND_BY_EXTENSION.has(extension)) return "javascript";
-  return extension === CSS_EXTENSION ? "css" : "none";
+  return SCRIPT_KIND_BY_EXTENSION.has(extname(path).toLowerCase())
+    ? "javascript"
+    : "none";
 }
 
 /** `text` with every character but a line break spaced out, so positions hold. */
@@ -327,19 +323,9 @@ function commentRanges(source, path) {
  * a format whose comments cannot be located; so is a JavaScript-family file the
  * TypeScript parser rejects, since a broken parse locates them no better than
  * guesswork does.
- *
- * The CSS lexer is string-aware in both directions, which is the whole
- * difficulty there: a `/*` inside a string is not a comment start (or the check
- * would be blind to a URL in a quoted data URI), and one inside an unquoted
- * `url(...)` belongs to the URL. Its `'` and `"` states are scoped to one line,
- * since neither string form spans a newline unescaped, which bounds the damage
- * of a quote the lexer misreads: the mis-read ends at the newline, and leaves a
- * comment unstripped -- a loud false positive -- rather than swallowing source.
  */
 export function stripComments(source, path) {
-  const syntax = commentSyntaxFor(path);
-  if (syntax === "none") return source;
-  if (syntax === "css") return stripCssComments(source);
+  if (commentSyntaxFor(path) === "none") return source;
 
   const ranges = commentRanges(source, path);
   if (ranges === undefined) return source;
@@ -351,88 +337,6 @@ export function stripComments(source, path) {
     cursor = end;
   }
   return out + source.slice(cursor);
-}
-
-function stripCssComments(source) {
-  let out = "";
-  let i = 0;
-  const n = source.length;
-  // "code" | "block" | "single" | "double"
-  let state = "code";
-
-  while (i < n) {
-    const c = source[i];
-    const next = source[i + 1];
-
-    if (state === "block") {
-      if (c === "*" && next === "/") {
-        state = "code";
-        out += "  ";
-        i += 2;
-        continue;
-      }
-      out += blankOut(c);
-      i += 1;
-      continue;
-    }
-
-    if (state === "single" || state === "double") {
-      out += c;
-      if (c === "\\" && next !== undefined) {
-        out += next;
-        i += 2;
-        continue;
-      }
-      if (c === "\n") state = "code";
-      else if (c === (state === "single" ? "'" : '"')) state = "code";
-      i += 1;
-      continue;
-    }
-
-    // state === "code"
-    if (c === "\\" && next !== undefined) {
-      // A backslash in a selector or identifier escapes the character after
-      // it, so `\/*` is an escaped slash beside an asterisk, not a comment.
-      out += c + next;
-      i += 2;
-      continue;
-    }
-    if (UNQUOTED_CSS_URL.test(source.slice(i, i + 8))) {
-      // CSS reads an unquoted `url(...)` to its closing paren as one token,
-      // comment syntax and all, so a `/*` inside a data URI opens nothing. An
-      // unquoted URL cannot carry an unescaped paren, and the quoted forms are
-      // left to the string states, which copy them whole already.
-      const close = source.indexOf(")", i);
-      const stop = close === -1 ? n : close + 1;
-      out += source.slice(i, stop);
-      i = stop;
-      continue;
-    }
-    if (
-      URL_SCHEME_AT.test(source.slice(i, i + 7)) &&
-      (i === 0 || !/[A-Za-z0-9_]/.test(source[i - 1]))
-    ) {
-      // Copy the whole literal so nothing inside it -- a `/*` in a path, say --
-      // is read as a comment opener.
-      while (i < n && !URL_TERMINATOR.test(source[i])) {
-        out += source[i];
-        i += 1;
-      }
-      continue;
-    }
-    if (c === "/" && next === "*") {
-      state = "block";
-      out += "  ";
-      i += 2;
-      continue;
-    }
-    out += c;
-    if (c === "'") state = "single";
-    else if (c === '"') state = "double";
-    i += 1;
-  }
-
-  return out;
 }
 
 /**
@@ -562,6 +466,11 @@ export function fileViolations(path, source) {
  * The listing covers tracked and untracked files but not ignored ones, which
  * keeps build output out of the scan and leaves a generated file dropped into a
  * scanned tree unread.
+ *
+ * `-z` is what makes a non-ASCII filename readable: the default `core.quotePath`
+ * has git print such a path quoted and C-escaped, and that spelling names no
+ * file on disk, so the read of it would fail with a bare ENOENT rather than any
+ * egress finding.
  */
 export function scanRepo(root) {
   const matched = new Set();
@@ -571,6 +480,7 @@ export function scanRepo(root) {
       "git",
       [
         "ls-files",
+        "-z",
         "--cached",
         "--others",
         "--exclude-standard",
@@ -579,7 +489,7 @@ export function scanRepo(root) {
       ],
       { cwd: root, encoding: "utf8" },
     )
-      .split("\n")
+      .split("\0")
       .filter(Boolean);
     if (listed.length === 0) unresolved.push(pathspec);
     for (const file of listed) matched.add(file);
