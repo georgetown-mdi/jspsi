@@ -66,11 +66,12 @@ reboots; you only need to run it again if the password changes.
 > **How far this has been tested.** The checks that run inside the container,
 > and the volume once it is created, are verified against a real SMB server:
 > the failures they report, and the share behaviour psilink depends on. The
-> Windows side has been run on Windows 11 under Windows PowerShell 5.1, but not
-> in its current form and never against a real DFS namespace, which is why the
-> script asks you to confirm the server it worked out rather than trusting it.
-> Corrections from a real environment are welcome and are worth more here than
-> anywhere else in this repository.
+> Windows side is verified on Windows 11 under Windows PowerShell 5.1 against
+> the same kind of server, apart from one message added since that run. It has
+> never been tried against a real DFS namespace, which is why the script asks
+> you to confirm the server it worked out rather than trusting it. Corrections
+> from a real environment are welcome and are worth more here than anywhere
+> else in this repository.
 
 To send the whole run to whoever is helping you:
 
