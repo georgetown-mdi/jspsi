@@ -1167,3 +1167,106 @@ inProcessOnly(
   },
   BOUNDARY_TEST_TIMEOUT_MS,
 );
+
+inProcessOnly(
+  "a retain-mode run leaves no temp file behind either, with its transcript intact",
+  async () => {
+    // Retain mode skips the terminal-frame drain and makes cleanup() a global
+    // no-op, but the re-establishment the drain rides sits ABOVE that skip and
+    // must stay there: a temp-<uuidv4()>.tmp is a failed in-flight write, never
+    // transcript, so no run of either mode may end holding one. Asserted on the
+    // directory rather than a call count, which is what a future change moving
+    // the re-establishment below the retain skip would still satisfy.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "per-poll-retain-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const senderAdapter = new SSH2SFTPClientAdapter({
+      ephemeralSessions: true,
+    });
+    const publishedRename = senderAdapter.rename.bind(senderAdapter);
+    let tearNextRename = false;
+    senderAdapter.rename = async (fromPath: string, toPath: string) => {
+      if (!tearNextRename) return publishedRename(fromPath, toPath);
+      tearNextRename = false;
+      await senderAdapter.releaseForIdle();
+      throw new Error("the partner's server refused the rename");
+    };
+    // Retain mode requires the lockless rendezvous and timestamped filenames,
+    // and both parties must agree: the hello envelope carries the flags and a
+    // mismatch is a terminal rendezvous failure.
+    const retainOptions = {
+      verbose: -1 as const,
+      pollingFrequency: 10,
+      retainFiles: true,
+      locklessRendezvous: true,
+      timestampInFilename: true,
+    };
+    const sender = new FileSyncConnection(senderAdapter, retainOptions);
+    const peer = new FileSyncConnection(
+      new SSH2SFTPClientAdapter(),
+      retainOptions,
+    );
+    const failures: unknown[] = [];
+    sender.on("error", (err: unknown) => failures.push(err));
+    peer.on("error", (err: unknown) => failures.push(err));
+
+    try {
+      const [outcome] = await withCapturedLogs(
+        async () => {
+          await sender.open({
+            channel: "sftp",
+            server: {
+              host: srv.handle.host,
+              port: srv.handle.port,
+              ...serverAuth(srv.handle.usera),
+              path: remote,
+            },
+            options: { peerTimeoutMs: PEER_TIMEOUT_MS },
+          });
+          await peer.open({
+            channel: "sftp",
+            server: {
+              host: srv.handle.host,
+              port: srv.handle.port,
+              ...serverAuth(srv.handle.userb),
+              path: remote,
+            },
+            options: { peerTimeoutMs: PEER_TIMEOUT_MS },
+          });
+          await Promise.all([sender.synchronize(), peer.synchronize()]);
+
+          tearNextRename = true;
+          const sendError = await sender
+            .send({ message: "the publish that never landed" })
+            .then(
+              () => undefined,
+              (error: unknown) => error,
+            );
+          const afterSweep = await fsp.readdir(dir);
+          await sender.close();
+          return { sendError, afterSweep, afterClose: await fsp.readdir(dir) };
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      expect(outcome.sendError).toBeInstanceOf(Error);
+      expect(outcome.afterSweep.filter(isProtocolTemp)).toHaveLength(1);
+      expect(outcome.afterClose.filter(isProtocolTemp)).toEqual([]);
+      // The drain took the temp and nothing else: the transcript retain mode
+      // exists to keep is still on the server.
+      expect(
+        outcome.afterClose.filter((name) => name.endsWith(".json")).length,
+      ).toBeGreaterThan(0);
+      expect(failures).toEqual([]);
+    } finally {
+      peer.stop();
+      await sender.close().catch(() => {});
+      await peer.close().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);

@@ -7,6 +7,12 @@ export * from "./link";
 export * from "./protocolSetup";
 export * from "./types";
 export * from "./connection/fileSyncConnection";
+// The filename grammar module is not barrelled (see its header); this one
+// recognizer is named individually because a FileTransportClient implementation
+// outside this package needs it -- the CLI's SFTP adapter decides from it
+// whether a path handed to safeDelete is the protocol's own in-flight temp
+// write.
+export { isProtocolTempName } from "./connection/fileSyncNames";
 export type { HelloEnvelope } from "./connection/controlEnvelope";
 export * from "./connection/messageConnection";
 export {

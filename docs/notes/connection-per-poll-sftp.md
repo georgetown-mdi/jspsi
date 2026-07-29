@@ -425,8 +425,12 @@ sweeps that temp: it is in no responsible-file set, and the entry guard that
 recognizes the shape ran before the loop started. The adapter is the only layer
 that can tell a no-op cleanup from a performed one, so it is the layer that
 records one and re-issues it at its next re-establishment, which is also why this
-does not become a precondition spread over core's call sites. The mechanism and
-its bounds are in [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md).
+does not become a precondition spread over core's call sites. Only that temp
+shape is recorded: `safeDelete` is also handed durable protocol files and names
+the peer wrote, and a re-issue deferred to a later point could reach a different
+file at such a name. The mechanism, the shape narrowing, and the bounds on both
+the record and the drain are in
+[CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md).
 
 **Close, drain, and the authenticated abort marker -- real code, the one genuine
 gap.** At teardown the last cycle's connection is already released, but `close()`
