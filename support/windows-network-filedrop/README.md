@@ -116,6 +116,10 @@ other shares on your file server.
 > Windows side is verified on Windows 11 under Windows PowerShell 5.1 against
 > the same kind of server, apart from one message added since that run. It has
 > never been tried against a real DFS namespace, which is why the script asks
-> you to confirm the server it worked out rather than trusting it. Corrections
-> from a real environment are welcome and are worth more here than anywhere
-> else in this repository.
+> you to confirm the server it worked out rather than trusting it. The
+> [Command Prompt version](command-prompt.md) was verified the same way against
+> the same server, including a password holding every character that Command
+> Prompt is known to mangle -- but its container checks have been replaced since
+> that run, with the ones the PowerShell script uses, and that replacement has
+> not been driven from Windows. Corrections from a real environment are welcome
+> and are worth more here than anywhere else in this repository.

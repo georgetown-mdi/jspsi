@@ -54,3 +54,7 @@ To send the whole run to whoever is helping you, run it like this instead:
 ```text
 cmd_Setup-PsilinkFileDrop.cmd 1> setup-log.txt 2>&1
 ```
+
+As on the setup page, that log holds the server, share and account names and
+what each check said. It does not hold your password, the names of the files in
+your drop folder, or the other shares on your file server.

@@ -81,6 +81,39 @@ status_of() {
   printf '%s' "$1" | grep -o 'NT_STATUS_[A-Z_]*' | grep -v '^NT_STATUS_OK$' | head -1
 }
 
+# An empty status means "the server supplied no verdict", never "the command
+# succeeded". A transport that dies before the server answers -- a firewall that
+# completes the TCP handshake and then swallows the session, a server wedged
+# mid-negotiation -- returns no NT_STATUS token at all, so scraping alone reads
+# it as success and every later step reports an OK it never established. The
+# exit status is the only evidence that the command ran, so both are consulted:
+# nonzero with no status token is a transport failure, nonzero with one is an
+# ordinary server refusal that the caller's own case block classifies.
+transport_failed() {
+  [ "$1" -eq 0 ] && return 1
+  [ -n "$(status_of "$2")" ] && return 1
+  return 0
+}
+
+report_transport_failure() {
+  emit "FAIL: the connection to $SMB_SERVER stopped responding."
+  emit ""
+  indent "$2"
+  emit ""
+  if [ "$1" -eq 124 ]; then
+    emit "MEANING: the server accepted the connection and then sent nothing back"
+    emit "         within the time allowed. Nothing about your credentials or"
+    emit "         your folder has been established either way."
+  else
+    emit "MEANING: smbclient could not finish the request and the server gave no"
+    emit "         reason for it (exit $1). Nothing about your credentials or"
+    emit "         your folder has been established either way."
+  fi
+  emit "ACTION:  see the troubleshooting page, 'The container cannot reach"
+  emit "         the server'. A firewall or VPN that allows the connection"
+  emit "         and then drops the traffic behaves exactly like this."
+}
+
 report_space() {
   set -- $(printf '%s\n' "$1" | sed -n \
     's/.*blocks of size \([0-9][0-9]*\)\. *\([0-9][0-9]*\) blocks available.*/\1 \2/p' | head -1)
@@ -116,7 +149,8 @@ else
   emit ""
   emit "          cmd_Setup-PsilinkFileDrop.cmd -Server <full-name-or-IP> -Share $SMB_SHARE"
   emit ""
-  emit "        See the runbook, 'The container cannot resolve the name'."
+  emit "        See the troubleshooting page, 'The container cannot find"
+  emit "        the server'."
   exit 2
 fi
 
@@ -132,8 +166,8 @@ else
   emit "server-side address restriction blocks the VM while File Explorer keeps"
   emit "working."
   emit ""
-  emit "ACTION: if you are on a VPN, that is the likely cause. See the runbook"
-  emit "        section 'The container cannot reach the server'."
+  emit "ACTION: if you are on a VPN, that is the likely cause. See the"
+  emit "        troubleshooting page, 'The container cannot reach the server'."
   exit 3
 fi
 
@@ -153,7 +187,8 @@ APKOUT=$(apk add --no-cache samba-client 2>&1) || {
   emit "         usually, and Docker Desktop needs its certificate. 'DNS' or"
   emit "         'temporary error' means name resolution inside the VM."
   emit ""
-  emit "ACTION:  see the runbook, 'The container cannot install its tools'."
+  emit "ACTION:  see the troubleshooting page, 'The container cannot install"
+  emit "         its tools'."
   exit 1
 }
 
@@ -165,10 +200,19 @@ umask 077
 } > "$AUTH"
 
 step "3. Authentication"
-OUT=$(smb_list)
+OUT=$(smb_list); RC=$?
 STATUS=$(status_of "$OUT")
 
-if printf '%s' "$OUT" | grep -qi 'protocol negotiation.*failed'; then
+# Ahead of the negotiation check on purpose: a server that dies mid-negotiation
+# and one that refuses the dialect both mention negotiation, and only the second
+# carries an NT_STATUS token. Classifying on the token rather than on the word
+# keeps a wedged server from being reported as a dialect disagreement.
+if transport_failed "$RC" "$OUT"; then
+  report_transport_failure "$RC" "$OUT"
+  exit 3
+fi
+
+if printf '%s' "$OUT" | grep -qi 'protocol negotiation'; then
   emit "FAIL: the client and the server could not agree on an SMB dialect."
   emit ""
   indent "$OUT"
@@ -192,8 +236,8 @@ case "$STATUS" in
     emit "ACTION:  if this is a domain account, run the script again with"
     emit "         -Domain set. If the folder opens in File Explorer WITHOUT"
     emit "         ever asking for a password, Windows is signing you in"
-    emit "         automatically with Kerberos and there may be no password"
-    emit "         that works here. See the runbook, 'No password exists'."
+    emit "         automatically with Kerberos and there may be no password that"
+    emit "         works here. See the troubleshooting page, 'No password exists'."
     emit ""
     emit "         Do not work through passwords one at a time. Each run is one"
     emit "         failed sign-in against the account, and a handful of those"
@@ -213,6 +257,21 @@ case "$STATUS" in
     emit "MEANING: the password is expired."
     emit "ACTION:  change it in Windows, then run this script again."
     exit 4 ;;
+  NT_STATUS_ACCOUNT_DISABLED|NT_STATUS_ACCOUNT_EXPIRED|NT_STATUS_ACCOUNT_RESTRICTION|NT_STATUS_INVALID_LOGON_HOURS|NT_STATUS_INVALID_WORKSTATION|NT_STATUS_PASSWORD_RESTRICTION)
+    emit "FAIL: $STATUS"
+    emit ""
+    indent "$OUT"
+    emit ""
+    emit "MEANING: the account itself is not permitted to sign in -- disabled,"
+    emit "         expired, restricted to certain hours, or restricted to"
+    emit "         certain machines. The password is not the problem and"
+    emit "         neither are the rights on your folder."
+    emit "ACTION:  ask whoever issued the account to lift that restriction, or"
+    emit "         ask for a service account instead -- it is item 1 of the IT"
+    emit "         request on the troubleshooting page. Without this, every"
+    emit "         later check would report the same status and blame your"
+    emit "         folder for it."
+    exit 4 ;;
   NT_STATUS_NOT_SUPPORTED|NT_STATUS_LOGON_TYPE_NOT_GRANTED)
     emit "FAIL: $STATUS"
     emit ""
@@ -221,7 +280,7 @@ case "$STATUS" in
     emit "MEANING: the server rejected the authentication METHOD, not the"
     emit "         credentials. NTLM is probably disabled server-side, or this"
     emit "         account is not allowed to sign in over the network."
-    emit "ACTION:  see the runbook, 'No password exists'."
+    emit "ACTION:  see the troubleshooting page, 'No password exists'."
     exit 4 ;;
 esac
 
@@ -231,8 +290,21 @@ esac
 # for rights they already have. Step 4 opens the share the exchange will
 # actually use, and that is the question worth answering.
 if printf '%s' "$OUT" | grep -q 'Sharename'; then
-  emit "OK: authenticated. Shares visible to this account:"
-  printf '%s\n' "$OUT" | sed -n '/Sharename/,/^$/p' | sed 's/^/      /'
+  # A derived fact rather than the list itself. This runs against an agency file
+  # server, the share names can identify programs and departments, and the
+  # runbook asks the operator to send this output to whoever is helping them --
+  # who is not a party to their exchange. The only thing worth reading off the
+  # list is whether the share they named is on it.
+  if printf '%s\n' "$OUT" | sed -n 's/^\t\([^ \t]*\).*/\1/p' | grep -qxF "$SMB_SHARE"; then
+    emit "OK: authenticated, and '$SMB_SHARE' is one of the shares this account"
+    emit "    can see."
+  else
+    emit "OK: authenticated."
+    emit ""
+    emit "NOTE: '$SMB_SHARE' is not among the shares this account can see. That"
+    emit "      does not decide anything -- a share can be reachable without"
+    emit "      being listed. Step 4 opens it, and that is the test that counts."
+  fi
 elif [ -n "$STATUS" ]; then
   emit "OK: the credentials were accepted."
   emit ""
@@ -247,8 +319,12 @@ else
 fi
 
 step "4. Opening share '$SMB_SHARE'"
-OUT=$(smb -c 'ls')
+OUT=$(smb -c 'ls'); RC=$?
 STATUS=$(status_of "$OUT")
+if transport_failed "$RC" "$OUT"; then
+  report_transport_failure "$RC" "$OUT"
+  exit 3
+fi
 if [ -n "$STATUS" ]; then
   case "$STATUS" in
     NT_STATUS_BAD_NETWORK_NAME|NT_STATUS_OBJECT_NAME_NOT_FOUND)
@@ -259,8 +335,8 @@ if [ -n "$STATUS" ]; then
       emit "MEANING: there is no share called '$SMB_SHARE' on this server."
       emit "ACTION:  the share is the FIRST path component only, not the whole"
       emit "         folder path: in \\\\server\\exchange\\dropbox the share is"
-      emit "         'exchange' and 'dropbox' is the subfolder. Check it"
-      emit "         against the listing in step 3 if one was printed."
+      emit "         'exchange' and 'dropbox' is the subfolder. Step 3 above"
+      emit "         says whether this name was one the server offered."
       exit 5 ;;
     NT_STATUS_PATH_NOT_COVERED)
       emit "FAIL: $STATUS"
@@ -276,7 +352,8 @@ if [ -n "$STATUS" ]; then
       emit ""
       emit "           cmd_Setup-PsilinkFileDrop.cmd -Server <server> -Share <share> -SubPath <folder>"
       emit ""
-      emit "         See the runbook, 'Finding the real server by hand'."
+      emit "         See the troubleshooting page, 'Finding the real server"
+      emit "         by hand'."
       exit 5 ;;
     NT_STATUS_NOT_A_DIRECTORY)
       emit "FAIL: $STATUS"
@@ -306,8 +383,8 @@ if [ -n "$STATUS" ]; then
     emit ""
     emit "ACTION:  the account probably lacks rights when connecting from a"
     emit "         machine that is not domain-joined, or the server requires"
-    emit "         Kerberos. See the runbook, 'Credentials correct, still"
-    emit "         denied'."
+    emit "         Kerberos. See the troubleshooting page, 'Credentials right,"
+    emit "         access refused'."
     exit 5
   fi
 else
@@ -317,8 +394,12 @@ fi
 
 if [ -n "$SMB_PATH" ]; then
   step "5. Entering subdirectory '$SMB_PATH'"
-  OUT=$(smb -D "$SMB_PATH" -c 'ls')
+  OUT=$(smb -D "$SMB_PATH" -c 'ls'); RC=$?
   STATUS=$(status_of "$OUT")
+  if transport_failed "$RC" "$OUT"; then
+    report_transport_failure "$RC" "$OUT"
+    exit 3
+  fi
   if [ -n "$STATUS" ]; then
     emit "FAIL: $STATUS"
     emit ""
@@ -336,7 +417,7 @@ if [ -n "$SMB_PATH" ]; then
         emit "         and the Docker VM has no DFS client to follow it."
         emit "ACTION:  read the real path from the folder's Properties, DFS tab"
         emit "         and pass it with -Server, -Share and -SubPath. See the"
-        emit "         runbook, 'Finding the real server by hand'." ;;
+        emit "         troubleshooting page, 'Finding the real server by hand'." ;;
       *)
         emit "MEANING: the subfolder exists but this account cannot open it."
         emit "ACTION:  access to a share does not imply access to every folder"
@@ -344,8 +425,20 @@ if [ -n "$SMB_PATH" ]; then
     esac
     exit 6
   fi
-  emit "OK: directory listed."
-  indent "$OUT"
+  # A count, deliberately, and not the listing. These are the operator's own
+  # filenames on their own share, and the runbook asks them to send this output
+  # to whoever is helping them -- who is not a party to their exchange and has
+  # no business holding the names. Nothing downstream reads them: report_space
+  # parses LISTING, not what was printed here.
+  entries=$(printf '%s\n' "$OUT" |
+    awk '/^  [^ ]/ { if ($1 != "." && $1 != "..") n++ } END { print n+0 }')
+  emit "OK: directory listed, $entries file(s) in it."
+  if [ "$entries" -gt 8192 ]; then
+    emit ""
+    emit "WARN: psilink will not read a rendezvous folder holding more than 8192"
+    emit "      entries, so an exchange here will fail however the permissions"
+    emit "      come out. Use a folder dedicated to the exchange."
+  fi
   TARGET="$SMB_PATH"
   LISTING="$OUT"
 else
@@ -363,20 +456,33 @@ emit "place, so read access alone is not enough."
 # rather than after it. Left in place, one of them makes the rename stage fail
 # and the probe report a read-only share that is nothing of the kind -- a trap
 # that sustains itself once sprung, since the failed run litters again.
-for stale in psilink-write-probe.tmp psilink-write-probe.tmp.renamed "$SMB_MARKER"; do
-  [ -n "$stale" ] || continue
-  if [ -z "$(status_of "$(smb_at -c "del $stale")")" ]; then
-    emit "NOTE: removed '$stale', left behind by an earlier run."
-  fi
-done
+STALE=$(smb_at -c "del psilink-probe-*.tmp*"); STALE_RC=$?
+if [ "$STALE_RC" -eq 0 ] && [ -z "$(status_of "$STALE")" ]; then
+  emit "NOTE: removed probe files left behind by an earlier run."
+fi
 
-PROBE="psilink-probe-$$.tmp"
+# Named from the per-run token rather than $$, which is not a source of
+# uniqueness here: the probe runs as a child of "sh -c", where it draws the same
+# small pid on every run on every machine. A fixed name makes two operators
+# setting up the same share collide, and the one who loses the race is told the
+# share is create-only. The sweep above is by mask for the same reason -- it has
+# to match what a *previous* run named, which a fixed list cannot do.
+#
+# The marker file is deliberately not swept. It is the one file another operator
+# may be relying on right now, and deleting it turns their volume check into a
+# MARKER_MISSING verdict that blames their server for a wrong folder. The volume
+# check owns the marker's lifecycle.
+PROBE="psilink-probe-${SMB_TOKEN:-$$}.tmp"
 RENAMED="$PROBE.renamed"
 printf 'psilink write probe\n' > "/tmp/$PROBE"
 
 LITTER="$PROBE $RENAMED"
-OUT=$(smb_at -c "put /tmp/$PROBE $PROBE")
+OUT=$(smb_at -c "put /tmp/$PROBE $PROBE"); RC=$?
 STATUS=$(status_of "$OUT")
+if transport_failed "$RC" "$OUT"; then
+  report_transport_failure "$RC" "$OUT"
+  exit 3
+fi
 if [ -n "$STATUS" ]; then
   emit "FAIL: $STATUS -- could not create a file."
   emit ""
@@ -392,8 +498,12 @@ if [ -n "$STATUS" ]; then
 fi
 emit "OK: created a file."
 
-OUT=$(smb_at -c "rename $PROBE $RENAMED")
+OUT=$(smb_at -c "rename $PROBE $RENAMED"); RC=$?
 STATUS=$(status_of "$OUT")
+if transport_failed "$RC" "$OUT"; then
+  report_transport_failure "$RC" "$OUT"
+  exit 3
+fi
 if [ -n "$STATUS" ]; then
   emit "FAIL: $STATUS -- created a file but could not rename it."
   emit ""
@@ -410,8 +520,12 @@ if [ -n "$STATUS" ]; then
 fi
 emit "OK: renamed it."
 
-OUT=$(smb_at -c "del $RENAMED")
+OUT=$(smb_at -c "del $RENAMED"); RC=$?
 STATUS=$(status_of "$OUT")
+if transport_failed "$RC" "$OUT"; then
+  report_transport_failure "$RC" "$OUT"
+  exit 3
+fi
 if [ -n "$STATUS" ]; then
   emit "FAIL: $STATUS -- created and renamed a file but could not delete it."
   emit ""

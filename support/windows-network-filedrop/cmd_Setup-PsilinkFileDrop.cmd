@@ -13,8 +13,8 @@ rem  About the password. The checks receive it through an inherited environment
 rem  variable, so it never reaches a command line there. Creating the volume is
 rem  different -- Docker takes the credentials only as a mount option, which is
 rem  a command-line argument -- so it appears on one command line, and is then
-rem  stored in cleartext in the volume metadata. See the runbook, "What this
-rem  does with your password".
+rem  stored in cleartext in the volume metadata. See the troubleshooting
+rem  page, "What this does with your password".
 rem
 rem  https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/README.md
 rem ==========================================================================
@@ -238,7 +238,7 @@ call :note "Run the script again with the real values:"
 echo(
 echo     cmd_Setup-PsilinkFileDrop.cmd -Server fs-04.agency.gov -Share exchange$ -SubPath dropbox
 echo(
-call :info "See the runbook, 'Finding the real server by hand'."
+call :info "See the troubleshooting page, 'Finding the real server by hand'."
 goto done_ok
 
 rem ============================================== part 2: credentials
@@ -255,7 +255,7 @@ call :note "metadata and puts it on a command line while creating the volume."
 call :note "Do not use a domain administrator account, and do not use one whose"
 call :note "password protects anything else you care about."
 call :info ""
-call :info "See the runbook, 'What this does with your password'."
+call :info "See the troubleshooting page, 'What this does with your password'."
 echo(
 
 if not defined SMB_USERNAME set /p "SMB_USERNAME=Username: "
@@ -462,7 +462,7 @@ call :warn "Check with your exchange partner: if this folder is kept in step by 
 call :note "sync service rather than being a live file server, both sides must"
 call :note "pass --lockless-rendezvous at the end of the command line."
 call :info ""
-call :info "See the runbook, 'Synced folders'."
+call :info "See the troubleshooting page, 'Synced folders'."
 echo(
 echo There is also a browser console, on one line:
 echo(
@@ -481,8 +481,8 @@ call :info ""
 call :info "    docker volume rm %VOLUME_NAME%"
 call :info ""
 call :info "That removes the volume but not every trace of the password, so"
-call :info "retire or rotate the account when the exchanges are done. The runbook"
-call :info "section 'What this does with your password' says why."
+call :info "retire or rotate the account when the exchanges are done. See the"
+call :info "troubleshooting page, 'What this does with your password'."
 echo(
 rem Echoed directly rather than through :info. A redirection character survives
 rem being passed to a subroutine as a quoted argument, but not the echo that
@@ -550,7 +550,7 @@ call :warn "If this folder is kept in step with your partner by a sync client"
 call :note "(OneDrive, Dropbox, Egnyte, ShareFile), both sides must also pass"
 call :note "--lockless-rendezvous at the end of that command line."
 call :info ""
-call :info "See the runbook, 'Synced folders'."
+call :info "See the troubleshooting page, 'Synced folders'."
 goto done_ok
 
 :cannot_use
@@ -574,7 +574,7 @@ goto fail_generic
 call :bad "No password entered."
 call :note "If you never type a password when opening this folder in Explorer,"
 call :note "Windows signs you in automatically and this approach may not work at"
-call :note "all. Read the runbook section 'No password exists' first."
+call :note "all. Read the troubleshooting page, 'No password exists', first."
 goto fail_generic
 
 :pw_comma
@@ -584,8 +584,9 @@ call :note "the first one and the mount fails with 'invalid argument'. There is"
 call :note "no way to quote or escape it -- this is a limit of Docker volumes,"
 call :note "not of psilink, and doing it by hand hits exactly the same wall."
 call :info ""
-call :info "Use an account whose password has no comma, or use the local-folder"
-call :info "approach in the runbook, which needs no Docker volume at all."
+call :info "Use an account whose password has no comma. The troubleshooting"
+call :info "page has a ready-made request for one, under 'What to ask your IT"
+call :info "department for'."
 goto fail_generic
 
 :pw_quote
@@ -595,8 +596,9 @@ call :note "inside the password ends that argument early: Docker then reads the"
 call :note "rest as separate words and creates an unnamed volume instead of the"
 call :note "one asked for. Refusing now avoids leaving that stray behind."
 call :info ""
-call :info "Use an account whose password has no double quote, or use the"
-call :info "local-folder approach in the runbook, which needs no Docker volume."
+call :info "Use an account whose password has no double quote. The"
+call :info "troubleshooting page has a ready-made request for one, under"
+call :info "'What to ask your IT department for'."
 goto fail_generic
 
 :docker_broke
@@ -613,8 +615,8 @@ exit /b 1
 call :head "Not ready yet"
 call :bad "The file drop is not usable from Docker. Follow the ACTION above."
 call :info ""
-call :info "The runbook explains every one of these in more detail:"
-call :info "https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/README.md"
+call :info "The troubleshooting page explains every one of these in detail:"
+call :info "https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md"
 call :cleanup
 endlocal
 exit /b 1
@@ -686,8 +688,8 @@ if not errorlevel 1 (
 findstr /c:"Required key not available" "%WORK%" >nul 2>&1
 if not errorlevel 1 (
   call :note "The mount wanted a Kerberos ticket and the Docker VM has none."
-  call :note "The server is refusing password authentication. See the runbook,"
-  call :note "'No password exists'."
+  call :note "The server is refusing password authentication. See the"
+  call :note "troubleshooting page, 'No password exists'."
 )
 docker volume rm "%VOLUME_NAME%" >nul 2>&1
 goto fail_generic
@@ -701,8 +703,8 @@ call :note "the usual reason, because the namespace and the real location can"
 call :note "differ in all three."
 call :info ""
 call :info "Read the real path from the folder Properties, DFS tab, and run"
-call :info "again with -Server, -Share and -SubPath. See the runbook,"
-call :info '"Finding the real server by hand'."
+call :info "again with -Server, -Share and -SubPath. See the troubleshooting"
+call :info "page, 'Finding the real server by hand'."
 docker volume rm "%VOLUME_NAME%" >nul 2>&1
 goto fail_generic
 
@@ -775,7 +777,9 @@ if /i "%DIALECT%"=="NT1" (
   call :warn "The Docker VM kernel is built without SMB1, so the mount below"
   call :note "will be refused however well the checks went. -Dialect NT1 is"
   call :note "useful for diagnosis only. If the server speaks nothing newer,"
-  call :note "use the local-folder approach in the runbook instead."
+  call :note "ask IT for a scheduled mirror to a local folder instead -- the"
+  call :note "troubleshooting page has the request, under 'What to ask your"
+  call :note "IT department for'."
 )
 exit /b 0
 

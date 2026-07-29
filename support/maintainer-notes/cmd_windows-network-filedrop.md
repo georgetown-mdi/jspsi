@@ -29,7 +29,8 @@ scripts.
 ## What is here
 
 - `cmd_Setup-PsilinkFileDrop.cmd` -- the operator-facing script. Same four
-  parts, same exit codes, same runbook section names as the PowerShell version.
+  parts, same exit codes, and it cites the same troubleshooting sections by
+  name as the PowerShell version does.
 - `cmd_psilink-probe.sh` -- the container checks, steps 1 to 6. A port of the
   `$probe` here-string in the PowerShell script.
 - `cmd_psilink-credcheck.sh` -- inspects the password and mints the run token.
@@ -71,6 +72,15 @@ of `MARKER_OK` was exercised by the full runs. Its routing of `MARKER_MISSING`
 was not: forcing it needs the volume and the probe to disagree about which
 directory they reached, which is the DFS case, and the DFS case cannot be
 mocked here. The PowerShell notes reach the same limit by the same route.
+
+Two of those results have since been invalidated, and the pass has not been
+re-run. The `EXCL_OK` was not evidence of anything: the test was `set -C`, which
+busybox ash answers from a `stat` without issuing a create, so it returned
+`EXCL_OK` whatever the share would have done. It is now `mkdir`, measured under
+`strace` in `alpine:3.22` to issue `mkdirat` and take `EEXIST` from the
+filesystem rather than from the shell. And the mismatching-token state now
+leaves the marker where it is instead of removing it, matching the PowerShell
+copy, so what that state does after reporting has changed.
 
 Still unverified: the Windows-containers branch, which needs Docker Desktop
 switched to Windows containers to reach; the localised-Windows behaviour
@@ -194,10 +204,23 @@ hand-maintained copy of the container diagnostic already drifted once -- it read
 `SMB_VERS` where the script exported `SMB_DIALECT`, so the dialect was silently
 ignored -- and was deleted rather than resynchronised. `cmd_psilink-probe.sh`
 is that same text again, and nothing currently detects the two falling out of
-step. A check that extracts the `$probe` here-string from the `.ps1` and
-compares it to this file, ignoring only the script-name references, would close
-it. It has not been built, because adding a repository check was not part of
-what was asked for.
+step. It drifted immediately: the port was cut before the probe's fixes landed,
+so it shipped a copy that read an empty status scrape as success, swept a name
+it never created, deleted a concurrent operator's marker, drew its uniqueness
+from a `$$` that is constant under `sh -c`, and printed the server's share list
+and the drop folder's file listing into a log the guide asks operators to send
+onward.
+
+It was resynchronised rather than patched, and the two are now the same text
+again. The measured divergence is small enough that keeping them so is
+mechanical: extract the here-string, prepend this file's nine-line delivery
+header, and substitute four message lines -- the script name in three of them
+and `Resolve-DnsName` to `nslookup` in the fourth. Nothing else differs, so a
+diff that expects exactly those four substitutions is the whole check.
+
+That check is still not built, and until it is, the resynchronisation is a
+point-in-time fact rather than a guarantee. Building it means adding a
+repository check, which is the maintainer's call rather than this branch's.
 
 **The password is visible as it is typed.** `cmd` has no equivalent of
 `Read-Host -AsSecureString`, and `set /p` echoes. No reliable way to suppress
