@@ -202,12 +202,18 @@ replaced was 543 lines, of which about 111 served a reader whose run succeeded
 -- so four readers in five were paying for a failure they did not have, on a
 page whose length is itself the risk with this audience.
 
-Keep the setup page near its current 120 lines. The pressure will always be to
+Keep the setup page near its current 140 lines. The pressure will always be to
 add "just one more caution" to it, and every one of those is a line every
 operator reads to serve a case most of them do not hit. A caution earns its
 place there only if acting on it late is expensive: the keys file, one exchange
-at a time, and asking the partner whether the drop is a synced folder are the
-three that do.
+at a time, retiring the account at the end, and asking the partner whether the
+drop is a synced folder are the four that do.
+
+The synced-folder question is a fork rather than a caution, which is why it is
+a section before "What you need" instead of a bullet after the run. A synced
+drop needs no volume at all, so an operator who reads it late has already
+gathered credentials and possibly opened a ticket for a service account that
+was never needed. Nothing else on the page has that shape.
 
 The pages all sit in the guide folder, so handing it over as a unit still
 works; the unit was always the folder rather than the file. Both scripts cite
@@ -328,5 +334,5 @@ overrides it. An existing volume of that name is replaced, but only after
 inspecting it -- one that is not a CIFS volume is left alone and the run
 refuses, because the name is unvalidated and a typo would otherwise destroy
 something unrelated. Docker stores the share password in cleartext in the
-volume metadata; the runbook section "What this does with your password" is the
-full account, including the residue that survives `docker volume rm`.
+volume metadata; the troubleshooting section "Where your password ends up" is
+the full account, including the residue that survives `docker volume rm`.

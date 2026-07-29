@@ -14,9 +14,9 @@ rem  variable, so it never reaches a command line there. Creating the volume is
 rem  different -- Docker takes the credentials only as a mount option, which is
 rem  a command-line argument -- so it appears on one command line, and is then
 rem  stored in cleartext in the volume metadata. See the troubleshooting
-rem  page, "What this does with your password".
+rem  page, "Where your password ends up".
 rem
-rem  https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/README.md
+rem  https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md
 rem ==========================================================================
 
 setlocal disabledelayedexpansion
@@ -238,7 +238,7 @@ call :note "Run the script again with the real values:"
 echo(
 echo     cmd_Setup-PsilinkFileDrop.cmd -Server fs-04.agency.gov -Share exchange$ -SubPath dropbox
 echo(
-call :info "See the troubleshooting page, 'Finding the real server by hand'."
+call :info "See the troubleshooting page, 'Reading the real path from Windows'."
 goto done_ok
 
 rem ============================================== part 2: credentials
@@ -255,7 +255,7 @@ call :note "metadata and puts it on a command line while creating the volume."
 call :note "Do not use a domain administrator account, and do not use one whose"
 call :note "password protects anything else you care about."
 call :info ""
-call :info "See the troubleshooting page, 'What this does with your password'."
+call :info "See the troubleshooting page, 'Where your password ends up'."
 echo(
 
 if not defined SMB_USERNAME set /p "SMB_USERNAME=Username: "
@@ -396,8 +396,18 @@ docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN "%HELPER_IMAG
 set "VOL_RC=%errorlevel%"
 set "MARKER="
 
+rem "Did not mount" and "mounted, then refused the write" are different answers
+rem and used to share one message. A volume that reported any marker line has
+rem demonstrably reached a directory, so calling that a mount failure sent the
+rem operator round the -Dialect loop for what is a permissions or quota problem
+rem on the share.
 findstr /c:"WRITE_OK" "%WORK%" >nul 2>&1
-if errorlevel 1 goto volume_mount_failed
+if not errorlevel 1 goto volume_write_ok
+findstr /c:"MARKER_OK" /c:"MARKER_MISMATCH" /c:"MARKER_MISSING" "%WORK%" >nul 2>&1
+if not errorlevel 1 goto volume_not_writable
+goto volume_mount_failed
+
+:volume_write_ok
 if not "%VOL_RC%"=="0" goto volume_mount_failed
 
 call :good "The volume mounts and psilink can write to it."
@@ -407,10 +417,12 @@ if not errorlevel 1 goto marker_missing
 
 findstr /c:"MARKER_MISMATCH" "%WORK%" >nul 2>&1
 if not errorlevel 1 (
-  call :warn "Someone else appears to be setting up this same share right now."
-  call :note "The check file in the folder is not the one part 3 wrote. The"
-  call :note "volume is fine; if you were not expecting company, confirm the"
-  call :note "folder is yours to use before running an exchange."
+  call :warn "The check file in the folder is not the one part 3 wrote."
+  call :note "Either someone else is setting up this same share right now, or"
+  call :note "an earlier run of this script left the file behind. The volume"
+  call :note "itself reached the folder either way."
+  call :note "To tell the two apart, delete %MARKER_NAME% from the drop folder"
+  call :note "and run this again: if it comes back, you have company."
 ) else (
   call :good "The volume and the checks agree on which folder this is."
 )
@@ -482,7 +494,7 @@ call :info "    docker volume rm %VOLUME_NAME%"
 call :info ""
 call :info "That removes the volume but not every trace of the password, so"
 call :info "retire or rotate the account when the exchanges are done. See the"
-call :info "troubleshooting page, 'What this does with your password'."
+call :info "troubleshooting page, 'Where your password ends up'."
 echo(
 rem Echoed directly rather than through :info. A redirection character survives
 rem being passed to a subroutine as a quoted argument, but not the echo that
@@ -574,7 +586,8 @@ goto fail_generic
 call :bad "No password entered."
 call :note "If you never type a password when opening this folder in Explorer,"
 call :note "Windows signs you in automatically and this approach may not work at"
-call :note "all. Read the troubleshooting page, 'No password exists', first."
+call :note "all. Read the troubleshooting page, 'The share never asks for a"
+call :note "password', first."
 goto fail_generic
 
 :pw_comma
@@ -658,6 +671,20 @@ echo(
 call :show_safely
 goto fail_generic
 
+:volume_not_writable
+call :bad "The volume mounted, but psilink cannot write in that folder."
+echo(
+call :show_safely
+echo(
+call :note "The share was reached, so this is not a mount or a dialect"
+call :note "problem and -Dialect will not change it. Either the account"
+call :note "can open the folder but not create files in it, or the share"
+call :note "is out of space."
+call :info ""
+call :info "See the troubleshooting page, 'The folder cannot be written to'."
+docker volume rm "%VOLUME_NAME%" >nul 2>&1
+goto fail_generic
+
 :volume_mount_failed
 call :bad "The volume could not be mounted."
 echo(
@@ -689,7 +716,7 @@ findstr /c:"Required key not available" "%WORK%" >nul 2>&1
 if not errorlevel 1 (
   call :note "The mount wanted a Kerberos ticket and the Docker VM has none."
   call :note "The server is refusing password authentication. See the"
-  call :note "troubleshooting page, 'No password exists'."
+  call :note "troubleshooting page, 'The share never asks for a password'."
 )
 docker volume rm "%VOLUME_NAME%" >nul 2>&1
 goto fail_generic
@@ -704,7 +731,7 @@ call :note "differ in all three."
 call :info ""
 call :info "Read the real path from the folder Properties, DFS tab, and run"
 call :info "again with -Server, -Share and -SubPath. See the troubleshooting"
-call :info "page, 'Finding the real server by hand'."
+call :info "page, 'Reading the real path from Windows'."
 docker volume rm "%VOLUME_NAME%" >nul 2>&1
 goto fail_generic
 

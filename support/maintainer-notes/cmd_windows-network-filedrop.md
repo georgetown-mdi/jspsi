@@ -29,8 +29,9 @@ scripts.
 ## What is here
 
 - `cmd_Setup-PsilinkFileDrop.cmd` -- the operator-facing script. Same four
-  parts, same exit codes, and it cites the same troubleshooting sections by
-  name as the PowerShell version does.
+  parts, same exit codes, and where it cites a troubleshooting section it uses
+  the same name the PowerShell version does. It cites fewer of them: the
+  PowerShell script reaches some conditions this one does not.
 - `cmd_psilink-probe.sh` -- the container checks, steps 1 to 6. A port of the
   `$probe` here-string in the PowerShell script.
 - `cmd_psilink-credcheck.sh` -- inspects the password and mints the run token.
@@ -73,14 +74,33 @@ was not: forcing it needs the volume and the probe to disagree about which
 directory they reached, which is the DFS case, and the DFS case cannot be
 mocked here. The PowerShell notes reach the same limit by the same route.
 
-Two of those results have since been invalidated, and the pass has not been
-re-run. The `EXCL_OK` was not evidence of anything: the test was `set -C`, which
-busybox ash answers from a `stat` without issuing a create, so it returned
-`EXCL_OK` whatever the share would have done. It is now `mkdir`, measured under
-`strace` in `alpine:3.22` to issue `mkdirat` and take `EEXIST` from the
-filesystem rather than from the shell. And the mismatching-token state now
-leaves the marker where it is instead of removing it, matching the PowerShell
-copy, so what that state does after reporting has changed.
+**Most of that pass no longer covers the code it was run against, and it has
+not been re-run.** `cmd_psilink-probe.sh` was replaced wholesale afterwards (see
+"The probe is a second copy" below), and the probe is what produced most of the
+"Covered:" list -- the full pass to a mounted volume, the
+`NT_STATUS_LOGON_FAILURE` report, and the `-Dialect SMB3` confirmation all run
+through it. Treat those as unverified against the current file. What the swap
+does not touch, and what therefore still stands, is everything measured on the
+Windows side of the batch file: the password handling, the path classification,
+the volume replacement, and the usage text.
+
+Two volume-check results are invalidated outright. The `EXCL_OK` was not
+evidence of anything: the test was `set -C`, which busybox ash answers from a
+`stat` without issuing a create, so it returned `EXCL_OK` whatever the share
+would have done. It is now `mkdir`, measured under `strace` in `alpine:3.22` to
+issue `mkdirat` and take `EEXIST` from the filesystem rather than from the
+shell. And the mismatching-token state now leaves the marker where it is instead
+of removing it, matching the PowerShell copy, so what that state does after
+reporting has changed.
+
+That last change costs the old self-healing behaviour: a marker left by an
+aborted earlier run used to be deleted, so the next run saw `MARKER_MISSING`.
+It now persists, and every later run reports the mismatch instead. Both scripts
+say so in that message and tell the operator to delete the file and re-run to
+distinguish a stale marker from a live one. Gating the removal on age would
+restore self-healing without touching a concurrent operator's marker; it was not
+done, because it adds a staleness heuristic to the one check whose whole job is
+to be unambiguous.
 
 Still unverified: the Windows-containers branch, which needs Docker Desktop
 switched to Windows containers to reach; the localised-Windows behaviour
@@ -213,14 +233,26 @@ onward.
 
 It was resynchronised rather than patched, and the two are now the same text
 again. The measured divergence is small enough that keeping them so is
-mechanical: extract the here-string, prepend this file's nine-line delivery
-header, and substitute four message lines -- the script name in three of them
-and `Resolve-DnsName` to `nslookup` in the fourth. Nothing else differs, so a
-diff that expects exactly those four substitutions is the whole check.
+mechanical. To redo it:
 
-That check is still not built, and until it is, the resynchronisation is a
-point-in-time fact rather than a guarantee. Building it means adding a
-repository check, which is the maintainer's call rather than this branch's.
+1. Extract the `$probe` here-string from the `.ps1` -- there is exactly one, so
+   `awk "/^\\\$probe = @'\$/{f=1;next} /^'@\$/{f=0} f"` is unambiguous.
+2. Insert `cmd_psilink-probe.sh`'s own nine-line delivery header immediately
+   after the shebang, not at the top of the file.
+3. Substitute four message lines: the script name in three of them, and
+   `Resolve-DnsName` to `nslookup` in the fourth.
+
+Nothing else differs, so a diff expecting that header plus exactly those four
+substitutions is the whole check.
+
+**A repository check for this was considered and declined.** It would have to
+gate the build on a support guide's internal consistency, which is out of
+proportion to what it protects: this folder is a self-contained artifact handed
+to an operator, not something the rest of the repository builds against. The
+consequence is accepted rather than overlooked -- the copies are in step as of
+this commit and nothing enforces that they stay so, which is why the recipe
+above is written out. Do not re-propose the check without a reason that has
+changed.
 
 **The password is visible as it is typed.** `cmd` has no equivalent of
 `Read-Host -AsSecureString`, and `set /p` echoes. No reliable way to suppress

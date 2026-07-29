@@ -1,15 +1,29 @@
 # When the file-drop setup does not work
 
-One section per thing that goes wrong, in the order you would meet it. Start
-from [the setup page](README.md) if you have not run the script yet.
+One section per thing that goes wrong, in the order you would meet it, and then
+reference material: the status codes, the request to send IT, how to read the
+real path from Windows, and how to do by hand what the script does for you.
+Start from [the setup page](README.md) if you have not run the script yet.
 
 The script prints a MEANING and an ACTION for every failure it can name. Follow
 those first; this page is the longer version.
 
+The script runs in four numbered parts, and the checks inside part 3 are
+numbered separately, steps 1 to 6. A "step" on this page is always one of those
+checks.
+
+Commands here are PowerShell. If you are using
+[the Command Prompt version](command-prompt.md), run
+`cmd_Setup-PsilinkFileDrop.cmd` wherever one shows `.\Setup-PsilinkFileDrop.ps1`
+-- the options are the same -- and `nslookup` wherever one shows
+`Resolve-DnsName`. Only [Doing it by hand](#doing-it-by-hand) has no Command
+Prompt equivalent, and it says so.
+
 ## The script will not run
 
-`-ExecutionPolicy Bypass`, as on [the setup page](README.md#run-it), covers the
-ordinary refusal, and `Unblock-File` covers a file saved through a browser.
+The `-ExecutionPolicy Bypass` on [the setup page](README.md#get-it-and-run-it)
+covers the ordinary refusal, and `Unblock-File` covers a file saved through a
+browser.
 
 Neither helps if the refusal comes from **Group Policy**, which is likely on an
 agency machine. Check with:
@@ -27,7 +41,7 @@ In either case use [the Command Prompt version](command-prompt.md). Do not
 reach for [Doing it by hand](#doing-it-by-hand) first: those are PowerShell
 commands too, and they meet the same policy.
 
-## A comma in the password
+## A comma or a double quote in the password
 
 The script refuses before it does anything.
 
@@ -36,7 +50,12 @@ off at the first comma and the mount fails. There is no way to quote or escape
 it: the local volume driver takes the credentials only as a single
 comma-separated string. Doing it by hand hits exactly the same wall.
 
-Use an account whose password has no comma -- it is item 1 of the
+[The Command Prompt version](command-prompt.md) refuses a double quote as well.
+Docker takes the mount options as one quoted argument, and a quote inside the
+password ends that argument early, so Docker creates an unnamed volume instead
+of the one asked for.
+
+Use an account whose password has neither -- it is item 1 of the
 [IT request](#what-to-ask-your-it-department-for).
 
 ## The container cannot find the server
@@ -66,14 +85,14 @@ mount it this way at all. See [Synced folders](#synced-folders).
 Step 2 fails, or the checks report that the connection stopped responding.
 
 The Docker VM reaches the network through Docker's own address translation, so
-as far as the file server is concerned it is a different machine than Windows.
-Three things commonly block it while File Explorer keeps working:
+the file server sees it as a different machine from Windows. Three things
+commonly block it while File Explorer keeps working:
 
 - **A split-tunnel VPN.** The VPN routes the Windows side only; the VM's
   traffic goes out the normal interface and never reaches the server. This is
   the most common cause by far.
-- **A host firewall rule** scoped to specific processes or interfaces.
-- **A server-side address restriction** that does not cover the VM.
+- **A host firewall rule.** One scoped to specific processes or interfaces.
+- **A server-side address restriction.** One that does not cover the VM.
 
 If you are on a VPN, that is almost certainly it. Take items 3 and 5 of the
 [IT request](#what-to-ask-your-it-department-for) to whoever runs the network.
@@ -83,8 +102,7 @@ If you are on a VPN, that is almost certainly it. Take items 3 and 5 of the
 The checks stop before step 3 saying `samba-client` could not be installed, and
 print what the package manager said.
 
-Read that message -- it names the cause precisely, which is why the script
-shows it rather than summarising:
+Read that message; it names the cause:
 
 - **`certificate`, `TLS`, or `not trusted`.** Something is intercepting HTTPS,
   which on a corporate network is a proxy doing inspection. Docker Desktop
@@ -92,13 +110,14 @@ shows it rather than summarising:
 - **`DNS`, `temporary error`, or `could not resolve`.** Name resolution inside
   the VM. Same ground as the section above.
 
-## No password exists
+## The share never asks for a password
 
 The share opens in Explorer without ever prompting you, and the checks report
 `NT_STATUS_LOGON_FAILURE` or `NT_STATUS_NOT_SUPPORTED`.
 
-Windows is signing you in silently with your domain identity over Kerberos. You
-never had a password for this share as such. The Docker VM is not domain-joined
+Windows is signing you in silently with your domain identity over Kerberos.
+There was never a password for this share to begin with. The Docker VM is not
+domain-joined
 and holds no Kerberos ticket, so it must fall back to username and password --
 and if your organization has disabled NTLM, which is common, no password will
 work.
@@ -107,7 +126,7 @@ work.
 sign-in against the account, and a handful of them will lock it out -- adding a
 second problem on top of the one you have.
 
-Three options:
+Two options, and one dead end:
 
 - Ask IT for a **service account** with a real password that can reach the
   share. This is the cleanest fix and usually the fastest to get; it is item 1
@@ -117,10 +136,10 @@ Three options:
 - Kerberos from the container is possible in principle but needs a keytab
   inside the VM. It is not worth the effort here.
 
-`Required key not available`, when a volume fails to mount, is the same problem
-arriving later: the mount wanted a Kerberos ticket and the VM has none.
+If a volume later fails to mount with `Required key not available`, that is the
+same problem: the mount wanted a Kerberos ticket and the VM has none.
 
-## Credentials right, access refused
+## The password works but access is refused
 
 The checks report `NT_STATUS_ACCESS_DENIED` rather than
 `NT_STATUS_LOGON_FAILURE`. The difference matters: your credentials were
@@ -149,18 +168,24 @@ file-drop folder specifically -- item 2 of the
 
 ## The folder cannot be written to
 
-Step 6 fails, or the volume mounts and then refuses the write. The message says
-which of the three operations failed, and they mean different things:
+Step 6 fails, or the volume mounts and then refuses the write.
+
+When step 6 is what failed, the message names which of the three operations
+failed, and they mean different things:
 
 - **Could not create a file.** The account has read but not write access.
-- **Created a file but could not rename it.** Create rights without the DELETE
+- **Created a file but could not rename it.** Create rights without the delete
   right, which a rename needs. psilink renames every message into place, so
   this stops an exchange even though the folder looks writable.
 - **Created and renamed but could not delete.** psilink removes each message
   once the other side has read it. Without delete rights the folder fills up
   and a second exchange will not start.
 
-Ask for full change rights on the folder -- item 2 of the
+When the volume is what refused, the operation is not named: either the account
+can open the folder but not create files in it, or the share is out of space.
+Check the free space first, since that is the one you can see.
+
+Either way, ask for full change rights on the folder -- item 2 of the
 [IT request](#what-to-ask-your-it-department-for).
 
 Mount options such as `file_mode` and `dir_mode` cannot fix any of these. They
@@ -191,13 +216,12 @@ cannot be mounted at all. For a server like that, ask for the scheduled mirror
 The script reports that a file it left in the folder is not visible through the
 volume.
 
-The checks reach the folder one way and the volume mounts it another, and
-nothing else in the process compares them. When they disagree, the server,
-share or subfolder is wrong somewhere -- most often because the path is a DFS
-namespace, where the real location can differ in all three parts at once.
+The checks reach the folder one way and the volume mounts it another. This is
+the only step that compares the two. When they disagree, the server, share or
+subfolder is wrong somewhere -- most often a DFS path.
 
-Read the real path by hand, below, and pass it with `-Server`, `-Share` and
-`-SubPath`.
+[Read the real path from Windows](#reading-the-real-path-from-windows) and pass
+it with `-Server`, `-Share` and `-SubPath`.
 
 ## Status codes
 
@@ -206,20 +230,23 @@ Read the real path by hand, below, and pass it with `-Server`, `-Share` and
 | `NT_STATUS_LOGON_FAILURE` | Username, password, or domain genuinely wrong |
 | `NT_STATUS_ACCESS_DENIED` | Credentials accepted, authorization refused |
 | `NT_STATUS_ACCOUNT_LOCKED_OUT` | Locked out, probably by earlier retries |
-| `NT_STATUS_ACCOUNT_DISABLED` | The account cannot sign in at all |
-| `NT_STATUS_PASSWORD_EXPIRED` | Password expired |
-| `NT_STATUS_NOT_SUPPORTED` | Auth method refused; NTLM likely disabled |
+| `NT_STATUS_ACCOUNT_DISABLED` | Cannot sign in at all |
+| `NT_STATUS_ACCOUNT_EXPIRED`, `NT_STATUS_ACCOUNT_RESTRICTION`, `NT_STATUS_INVALID_LOGON_HOURS`, `NT_STATUS_INVALID_WORKSTATION`, `NT_STATUS_PASSWORD_RESTRICTION` | Barred from signing in, for a reason that is not the password |
+| `NT_STATUS_PASSWORD_EXPIRED`, `NT_STATUS_PASSWORD_MUST_CHANGE` | Password expired or must be changed first |
+| `NT_STATUS_NOT_SUPPORTED`, `NT_STATUS_LOGON_TYPE_NOT_GRANTED` | Auth method refused; NTLM likely disabled |
 | `NT_STATUS_BAD_NETWORK_NAME` | Share name wrong |
-| `NT_STATUS_OBJECT_NAME_NOT_FOUND` | Folder inside the share does not exist |
-| `NT_STATUS_NOT_A_DIRECTORY` | The path names a file, not a folder |
-| `NT_STATUS_PATH_NOT_COVERED` | A DFS link; find the real server, below |
+| `NT_STATUS_OBJECT_NAME_NOT_FOUND`, `NT_STATUS_OBJECT_PATH_NOT_FOUND` | Folder inside the share does not exist |
+| `NT_STATUS_NOT_A_DIRECTORY` | Path names a file, not a folder |
+| `NT_STATUS_PATH_NOT_COVERED` | A DFS link; read the real path, below |
 
-If your code is not in the table, the script printed the server's own message
-above it. That text, plus what you were doing, is what to put in a ticket.
+The script prints its own MEANING and ACTION for every code in this table, so
+the table is for looking one up afterwards rather than for diagnosing. If your
+code is not here, the script printed the server's own message on screen just
+above the code. That text, plus what you were doing, is what to put in a ticket.
 
 ## What to ask your IT department for
 
-Several of the dead ends above end at a ticket. This is what to put in it --
+Several of the problems above end at a ticket. This is what to put in it --
 edit the bracketed parts and paste the rest:
 
 ```text
@@ -227,7 +254,7 @@ Subject: SMB share access for a container on my workstation
 
 I need to run a record-linkage tool (psilink, https://github.com/georgetown-mdi/jspsi)
 in Docker Desktop on my workstation [MACHINE NAME]. It exchanges files with
-[PARTNER ORGANISATION] through the shared folder:
+[PARTNER ORGANIZATION] through the shared folder:
 
     [\\server\share\folder as it appears in File Explorer]
 
@@ -239,7 +266,7 @@ Please could you provide:
 
 1. A service account that can reach that folder with a username and password
    (not Kerberos/single sign-on only), scoped to this share if possible. The
-   password must not contain a comma.
+   password must not contain a comma or a double quote.
 2. Read, write, rename and delete rights on that folder specifically -- not
    only on the share above it. The tool creates a file, renames it into place,
    and deletes it once the other side has read it.
@@ -257,10 +284,10 @@ The account will be used only for this exchange. Please retire it, or reset its
 password, when I tell you the exchange is finished -- I will follow up.
 ```
 
-## Finding the real server by hand
+## Reading the real path from Windows
 
 The path you see is not always the path that exists. A drive letter hides the
-server behind it, and a DFS path names a *namespace* rather than a machine --
+server behind it, and a DFS path names a **namespace** rather than a machine --
 the real server, the real share, and the folder within it can all be different.
 The script asks you to confirm the three values it worked out precisely because
 this is the step it cannot verify for you.
@@ -295,9 +322,13 @@ the path from Properties, as above, is the method that works.
 
 ## Doing it by hand
 
-If the script cannot run -- policy, ConstrainedLanguage mode, or you would
-rather see each step -- this is what it does. You need the real server, share
-and subfolder from the section above.
+If you would rather see each step, or the script failed for a reason nothing
+above covers, this is what it does. You need the real server, share and
+subfolder from the section above.
+
+These are PowerShell commands, so policy that blocks the script blocks them
+too. If that is why you are here, use
+[the Command Prompt version](command-prompt.md) instead.
 
 ```powershell
 docker volume create --driver local `
@@ -321,8 +352,8 @@ docker run --rm -v 'psilink-rendezvous:/rz' alpine:3.22 ls -la /rz
 
 This route puts the password on a command line, where it is recorded in your
 PowerShell history file as well as everywhere described under
-[What this does with your password](#what-this-does-with-your-password). Clear
-it afterwards, or use the script.
+[Where your password ends up](#where-your-password-ends-up). Clear it
+afterwards, or use the script.
 
 ## Running the exchange
 
@@ -330,13 +361,13 @@ it afterwards, or use the script.
 still holds files from a previous exchange, because a leftover message would
 corrupt or stall the run. Emptying it in File Explorer is the simplest fix.
 
-There is also a flag that clears it, but **only one of you may use it**, and
-that side must start first. It deletes every psilink file in the folder,
-including the greeting the other side has just written, so if you both pass it
-you will delete each other's greeting and both runs will sit waiting for a
-partner who is no longer there. Agree who goes first; that person adds
-`--sweep-exchange-files` to the end of the command, and the other side waits
-until that run has started and then uses the ordinary command.
+`--sweep-exchange-files`, added to the end of the command, empties it for you.
+**Only one of you may use it,** and that side must start first. It deletes every
+psilink file in the folder, including the first message the other side has just
+written. If you both pass it, you will delete each other's first message and
+both runs will sit waiting for a partner that is no longer there. Agree who goes
+first. That person runs with the flag; the other waits until that run has
+started, then uses the ordinary command.
 
 **Setting up a second file drop replaces the first.** The volume name is
 `psilink-rendezvous` unless you say otherwise, so running the script again for
@@ -347,7 +378,7 @@ exchange.
 ## Synced folders
 
 Some file drops are not live file servers at all: a sync client (OneDrive,
-Dropbox, Egnyte, SharePoint) keeps a local copy on each side in step. There is
+Dropbox, Egnyte, ShareFile) keeps a local copy on each side in step. There is
 no volume to create -- point Docker at the local synced folder, which it can
 bind-mount directly:
 
@@ -374,12 +405,12 @@ you if the share needs it. If you are bind-mounting a synced folder instead,
 assume you need it, and confirm with your partner which kind of folder you are
 sharing before the first run.
 
-## What this does with your password
+## Where your password ends up
 
 The setup script passes the password to its checks through an environment
-variable, so it never reaches a command line there. That is the smaller of two
-exposures rather than the absence of one: while the check container runs,
-`docker inspect` shows the password to anyone who can run Docker on this PC.
+variable, so it never reaches a command line there. That reduces the exposure
+but does not remove it: while the check container runs, `docker inspect` shows
+the password to anyone who can run Docker on this PC.
 Creating the volume is worse again, because Docker's CIFS volume driver accepts
 credentials only as a mount option, and that is a command-line argument. There
 is no way around it, so it is worth knowing the main places it ends up.
@@ -391,13 +422,14 @@ is no way around it, so it is worth knowing the main places it ends up.
   machine and be retained by people you will never speak to.
 - **In the volume metadata, in cleartext.** `docker volume inspect
   psilink-rendezvous` shows it to anyone who can run Docker here.
-- **In your PowerShell history**, if you used
+- **In your PowerShell history,** if you used
   [Doing it by hand](#doing-it-by-hand). The file is at
   `$env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt`.
-- **After `docker volume rm`,** still in Docker's volume metadata database as a
-  freed record. That file lives inside the Docker Desktop virtual disk, which
-  endpoint backup and imaging tooling copies wholesale -- so it is the one
-  residue that can leave the machine without anyone running Docker.
+- **In Docker's volume metadata database, after `docker volume rm`.** It
+  survives there as a freed record. That file lives inside the Docker Desktop
+  virtual disk, which endpoint backup and imaging tooling copies wholesale --
+  so it is the one residue that can leave the machine without anyone running
+  Docker.
 
 None of that is introduced by psilink; it is how Docker CIFS volumes work, and
 a password that has been in a process's memory on a Windows PC cannot be

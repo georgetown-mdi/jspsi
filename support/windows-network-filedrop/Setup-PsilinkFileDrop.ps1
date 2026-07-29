@@ -42,8 +42,8 @@
 
     All of that is inherent to Docker CIFS volumes. The mitigation you control
     is the account: use one scoped to the exchange share, or one you are
-    prepared to retire, and rotate it when you are finished. See the troubleshooting page,
-    "What this does with your password".
+    prepared to retire, and rotate it when you are finished. See the
+    troubleshooting page, "Where your password ends up".
 
 .LINK
     https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md
@@ -256,7 +256,7 @@ function Resolve-DropPath {
             # does not exist.
             if (Test-Elevated) {
                 return @{ Kind = 'Unknown'
-                          Reason = "this window is running as Administrator, and an elevated session cannot see the drive letters you mapped as yourself -- ${letter}: is invisible here even if File Explorer shows it. Close this window, open PowerShell normally, and run the script again. If you were told to elevate in order to resolve a DFS path, you no longer need to: see the troubleshooting page, 'Finding the real server by hand'" }
+                          Reason = "this window is running as Administrator, and an elevated session cannot see the drive letters you mapped as yourself -- ${letter}: is invisible here even if File Explorer shows it. Close this window, open PowerShell normally, and run the script again. If you were told to elevate in order to resolve a DFS path, you no longer need to: see the troubleshooting page, 'Reading the real path from Windows'" }
             }
             if ($kind -eq 'Network') {
                 return @{ Kind = 'Unknown'
@@ -524,8 +524,9 @@ case "$STATUS" in
     emit "ACTION:  if this is a domain account, run the script again with"
     emit "         -Domain set. If the folder opens in File Explorer WITHOUT"
     emit "         ever asking for a password, Windows is signing you in"
-    emit "         automatically with Kerberos and there may be no password that"
-    emit "         works here. See the troubleshooting page, 'No password exists'."
+    emit "         automatically with Kerberos and there may be no password"
+    emit "         that works here. See the troubleshooting page, 'The share"
+    emit "         never asks for a password'."
     emit ""
     emit "         Do not work through passwords one at a time. Each run is one"
     emit "         failed sign-in against the account, and a handful of those"
@@ -568,7 +569,8 @@ case "$STATUS" in
     emit "MEANING: the server rejected the authentication METHOD, not the"
     emit "         credentials. NTLM is probably disabled server-side, or this"
     emit "         account is not allowed to sign in over the network."
-    emit "ACTION:  see the troubleshooting page, 'No password exists'."
+    emit "ACTION:  see the troubleshooting page, 'The share never asks for a"
+    emit "         password'."
     exit 4 ;;
 esac
 
@@ -640,8 +642,8 @@ if [ -n "$STATUS" ]; then
       emit ""
       emit "           .\\Setup-PsilinkFileDrop.ps1 -Server <server> -Share <share> -SubPath <folder>"
       emit ""
-      emit "         See the troubleshooting page, 'Finding the real server"
-      emit "         by hand'."
+      emit "         See the troubleshooting page, 'Reading the real path"
+      emit "         from Windows'."
       exit 5 ;;
     NT_STATUS_NOT_A_DIRECTORY)
       emit "FAIL: $STATUS"
@@ -671,8 +673,8 @@ if [ -n "$STATUS" ]; then
     emit ""
     emit "ACTION:  the account probably lacks rights when connecting from a"
     emit "         machine that is not domain-joined, or the server requires"
-    emit "         Kerberos. See the troubleshooting page, 'Credentials right,"
-    emit "         access refused'."
+    emit "         Kerberos. See the troubleshooting page, 'The password works"
+    emit "         but access is refused'."
     exit 5
   fi
 else
@@ -705,7 +707,8 @@ if [ -n "$SMB_PATH" ]; then
         emit "         and the Docker VM has no DFS client to follow it."
         emit "ACTION:  read the real path from the folder's Properties, DFS tab"
         emit "         and pass it with -Server, -Share and -SubPath. See the"
-        emit "         troubleshooting page, 'Finding the real server by hand'." ;;
+        emit "         troubleshooting page, 'Reading the real path from"
+        emit "         Windows'." ;;
       *)
         emit "MEANING: the subfolder exists but this account cannot open it."
         emit "ACTION:  access to a share does not imply access to every folder"
@@ -861,10 +864,10 @@ if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
     Write-Note 'are blocked. It cannot run here, and there is nothing you can'
     Write-Note 'change locally to allow it.'
     Write-Info ''
-    Write-Info 'Set the volume up by hand instead: see the troubleshooting'
-    Write-Info 'page, "Doing it by hand". You will need the real server name,'
-    Write-Info 'which the same section explains how to read from the folder'
-    Write-Info 'Properties.'
+    Write-Info 'Use the Command Prompt version instead, which the same policy'
+    Write-Info 'does not reach: see the troubleshooting page, "The script will'
+    Write-Info 'not run". Doing it by hand is PowerShell too, so it will not'
+    Write-Info 'help here.'
     exit 1
 }
 
@@ -1016,7 +1019,8 @@ if (-not $explicitTarget -and -not $SkipConfirm) {
         Write-Info ''
         Write-Info '    .\Setup-PsilinkFileDrop.ps1 -Server fs-04.agency.gov -Share ''exchange$'' -SubPath dropbox'
         Write-Info ''
-        Write-Info 'See the troubleshooting page, "Finding the real server by hand".'
+        Write-Info 'See the troubleshooting page, "Reading the real path from'
+        Write-Info 'Windows".'
         exit 0
     }
 }
@@ -1036,7 +1040,7 @@ Write-Note 'metadata and puts it on a command line while creating the volume.'
 Write-Note 'Do not use a domain administrator account, and do not use one whose'
 Write-Note 'password protects anything else you care about.'
 Write-Info ''
-Write-Info 'See the troubleshooting page, "What this does with your password".'
+Write-Info 'See the troubleshooting page, "Where your password ends up".'
 Write-Host ''
 
 if (-not $Username) { $Username = Read-Host 'Username' }
@@ -1062,7 +1066,8 @@ if ([string]::IsNullOrEmpty($plainPass)) {
     Write-Bad 'No password entered.'
     Write-Note 'If you never type a password when opening this folder in Explorer,'
     Write-Note 'Windows signs you in automatically and this approach may not work at'
-    Write-Note 'all. Read the troubleshooting page section "No password exists" first.'
+    Write-Note 'all. Read the troubleshooting page, "The share never asks for a'
+    Write-Note 'password", first.'
     exit 1
 }
 
@@ -1331,7 +1336,7 @@ rm -f .psilink-a.tmp .psilink-b.tmp
         elseif ($testOut -match 'Required key not available') {
             Write-Note 'The mount wanted a Kerberos ticket and the Docker VM has none.'
             Write-Note 'The server is refusing password authentication. See the'
-            Write-Note 'troubleshooting page, "No password exists".'
+            Write-Note 'troubleshooting page, "The share never asks for a password".'
         }
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
@@ -1347,16 +1352,18 @@ rm -f .psilink-a.tmp .psilink-b.tmp
         Write-Note 'differ in all three.'
         Write-Info ''
         Write-Info 'Read the real path from the folder Properties, DFS tab, and run'
-        Write-Info 'again with -Server, -Share and -SubPath. See the troubleshooting page,'
-        Write-Info '"Finding the real server by hand".'
+        Write-Info 'again with -Server, -Share and -SubPath. See the'
+        Write-Info 'troubleshooting page, "Reading the real path from Windows".'
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
     }
     if ($testOut -match 'MARKER_MISMATCH') {
-        Write-Warn 'Someone else appears to be setting up this same share right now.'
-        Write-Note 'The check file in the folder is not the one part 3 wrote. The'
-        Write-Note 'volume is fine; if you were not expecting company, confirm the'
-        Write-Note 'folder is yours to use before running an exchange.'
+        Write-Warn 'The check file in the folder is not the one part 3 wrote.'
+        Write-Note 'Either someone else is setting up this same share right now,'
+        Write-Note 'or an earlier run of this script left the file behind. The'
+        Write-Note 'volume itself reached the folder either way.'
+        Write-Note "To tell the two apart, delete $MarkerName from the drop folder"
+        Write-Note 'and run this again: if it comes back, you have company.'
     }
     else {
         Write-Good 'The volume and the checks agree on which folder this is.'
@@ -1444,7 +1451,7 @@ Write-Info "    docker volume rm $VolumeName"
 Write-Info ''
 Write-Info 'That removes the volume but not every trace of the password, so'
 Write-Info 'retire or rotate the account when the exchanges are done. The'
-Write-Info 'troubleshooting page, "What this does with your password", says why.'
+Write-Info 'troubleshooting page, "Where your password ends up", says why.'
 Write-Host ''
 Write-Info 'To send this output to whoever is helping you, run the script again'
 Write-Info 'with:  ... 6>&1 | Tee-Object setup-log.txt'

@@ -236,8 +236,9 @@ case "$STATUS" in
     emit "ACTION:  if this is a domain account, run the script again with"
     emit "         -Domain set. If the folder opens in File Explorer WITHOUT"
     emit "         ever asking for a password, Windows is signing you in"
-    emit "         automatically with Kerberos and there may be no password that"
-    emit "         works here. See the troubleshooting page, 'No password exists'."
+    emit "         automatically with Kerberos and there may be no password"
+    emit "         that works here. See the troubleshooting page, 'The share"
+    emit "         never asks for a password'."
     emit ""
     emit "         Do not work through passwords one at a time. Each run is one"
     emit "         failed sign-in against the account, and a handful of those"
@@ -280,7 +281,8 @@ case "$STATUS" in
     emit "MEANING: the server rejected the authentication METHOD, not the"
     emit "         credentials. NTLM is probably disabled server-side, or this"
     emit "         account is not allowed to sign in over the network."
-    emit "ACTION:  see the troubleshooting page, 'No password exists'."
+    emit "ACTION:  see the troubleshooting page, 'The share never asks for a"
+    emit "         password'."
     exit 4 ;;
 esac
 
@@ -352,8 +354,8 @@ if [ -n "$STATUS" ]; then
       emit ""
       emit "           cmd_Setup-PsilinkFileDrop.cmd -Server <server> -Share <share> -SubPath <folder>"
       emit ""
-      emit "         See the troubleshooting page, 'Finding the real server"
-      emit "         by hand'."
+      emit "         See the troubleshooting page, 'Reading the real path"
+      emit "         from Windows'."
       exit 5 ;;
     NT_STATUS_NOT_A_DIRECTORY)
       emit "FAIL: $STATUS"
@@ -383,8 +385,8 @@ if [ -n "$STATUS" ]; then
     emit ""
     emit "ACTION:  the account probably lacks rights when connecting from a"
     emit "         machine that is not domain-joined, or the server requires"
-    emit "         Kerberos. See the troubleshooting page, 'Credentials right,"
-    emit "         access refused'."
+    emit "         Kerberos. See the troubleshooting page, 'The password works"
+    emit "         but access is refused'."
     exit 5
   fi
 else
@@ -417,7 +419,8 @@ if [ -n "$SMB_PATH" ]; then
         emit "         and the Docker VM has no DFS client to follow it."
         emit "ACTION:  read the real path from the folder's Properties, DFS tab"
         emit "         and pass it with -Server, -Share and -SubPath. See the"
-        emit "         troubleshooting page, 'Finding the real server by hand'." ;;
+        emit "         troubleshooting page, 'Reading the real path from"
+        emit "         Windows'." ;;
       *)
         emit "MEANING: the subfolder exists but this account cannot open it."
         emit "ACTION:  access to a share does not imply access to every folder"

@@ -3,11 +3,15 @@
 `cmd_Setup-PsilinkFileDrop.cmd` is the same setup driven from a Command Prompt.
 It asks the same questions, runs the same checks inside the same container, and
 reports the same failures. Use it when PowerShell is missing, or when Group
-Policy or application-control policy stops it running.
+Policy or application-control policy stops it from running.
 
-Everything on [the setup page](README.md) and in
-[troubleshooting](troubleshooting.md) applies to it unchanged. Only this page
-differs.
+Every diagnosis on [the setup page](README.md) and in
+[troubleshooting](troubleshooting.md) applies to it unchanged. The commands on
+those pages do not: they are PowerShell. Run `cmd_Setup-PsilinkFileDrop.cmd`
+wherever one shows `.\Setup-PsilinkFileDrop.ps1`, with the same options, and
+`nslookup` wherever one shows `Resolve-DnsName`. Only
+[Doing it by hand](troubleshooting.md#doing-it-by-hand) has no Command Prompt
+equivalent.
 
 ## Get it and run it
 
@@ -38,11 +42,11 @@ Two things, both worth knowing before you start:
 - **Your password is visible as you type it.** Command Prompt cannot hide
   typing the way PowerShell does. Close the window when you are finished, or
   run `cls` to clear it.
-- **A password containing a double quote is refused**, as well as one
-  containing a comma. Docker takes the mount options as a single quoted
+- **The password cannot contain a double quote,** on top of the no-comma rule
+  on the setup page. Docker takes the mount options as a single quoted
   argument, and a quote inside the password ends that argument early. Use an
   account whose password has neither -- it is item 1 of the
-  [request to send IT](troubleshooting.md#what-to-ask-your-it-department-for).
+  [IT request](troubleshooting.md#what-to-ask-your-it-department-for).
 
 ## If something goes wrong
 
@@ -55,6 +59,6 @@ To send the whole run to whoever is helping you, run it like this instead:
 cmd_Setup-PsilinkFileDrop.cmd 1> setup-log.txt 2>&1
 ```
 
-As on the setup page, that log holds the server, share and account names and
-what each check said. It does not hold your password, the names of the files in
-your drop folder, or the other shares on your file server.
+That log holds the server, share and account names and what each check said. It
+does not hold your password, the names of the files in your drop folder, or the
+other shares on your file server.
