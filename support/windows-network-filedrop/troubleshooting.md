@@ -24,14 +24,16 @@ questions still appear on screen, because PowerShell writes them to the window
 rather than into the log, so you answer them exactly as usual:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Setup-PsilinkFileDrop.ps1" 6>&1 |
-  Tee-Object "$env:USERPROFILE\psilink-setup-log.txt"
+cd "$env:USERPROFILE\psilink"
+powershell -ExecutionPolicy Bypass -File .\Setup-PsilinkFileDrop.ps1 6>&1 |
+  Tee-Object .\psilink-setup-log.txt
 ```
 
 The `6>&1` is not decoration: without it the file comes out empty, because the
 script writes its report to a stream a plain redirect does not carry. The log
-holds the server, share and account names and what each check said. It does not
-hold your password.
+lands next to the script, in `C:\Users\<you>\psilink`. It holds the server,
+share and account names and what each check said. It does not hold your
+password.
 
 There is no Command Prompt equivalent, and this is the one place the two shells
 genuinely differ. Sending output to a file there sends the questions with it,
@@ -48,6 +50,10 @@ first, the Command Prompt one after, matching
 means the command is the same in either. The Command Prompt script takes the
 same options as the PowerShell one, and accepts them in either form -- `-Server`
 or `/Server`. Run either script with `-?` for the list.
+
+Commands below that name the script assume your window is in the folder you
+downloaded it to: `cd "$env:USERPROFILE\psilink"` in PowerShell,
+`cd /d "%USERPROFILE%\psilink"` in the Command Prompt.
 
 ## The script will not run
 

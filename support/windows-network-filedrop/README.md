@@ -56,21 +56,27 @@ Open the Start menu, type `PowerShell`, or `cmd` for the Command Prompt version,
 and press Enter. Do not choose **Run as administrator**: an elevated window
 cannot see the drive letters you mapped as yourself.
 
-First, get the script:
+First, make a folder for the script and download it there -- its own folder
+rather than loose among everything else in your user folder, so that it is easy
+to find again and easy to delete when you are finished.
 
 **PowerShell:**
 
 ```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\psilink" | Out-Null
+cd "$env:USERPROFILE\psilink"
 Invoke-WebRequest -UseBasicParsing `
   -Uri 'https://raw.githubusercontent.com/georgetown-mdi/jspsi/main/support/windows-network-filedrop/Setup-PsilinkFileDrop.ps1' `
-  -OutFile "$env:USERPROFILE\Setup-PsilinkFileDrop.ps1"
+  -OutFile .\Setup-PsilinkFileDrop.ps1
 ```
 
 **Command Prompt** -- four files rather than one, and **all four have to be in
-the same folder**, because the script feeds the other three to Docker:
+the same folder**, which is what the folder is for: the script feeds the other
+three to Docker.
 
 ```text
-cd /d "%USERPROFILE%"
+mkdir "%USERPROFILE%\psilink" 2>nul
+cd /d "%USERPROFILE%\psilink"
 set BASE=https://raw.githubusercontent.com/georgetown-mdi/jspsi/main/support/windows-network-filedrop
 curl -L -o cmd_Setup-PsilinkFileDrop.cmd %BASE%/cmd_Setup-PsilinkFileDrop.cmd
 curl -L -o cmd_psilink-probe.sh %BASE%/cmd_psilink-probe.sh
@@ -80,19 +86,22 @@ curl -L -o cmd_psilink-volcheck.sh %BASE%/cmd_psilink-volcheck.sh
 
 Use the command rather than saving from a browser, which saves it in a form
 Windows will not run. Nothing appears on screen when the download works -- that
-is success, and the files land in your user folder.
+is success, and the files land in `C:\Users\<you>\psilink`.
 
-Then run it:
+Then run it. The first line is only needed if you have opened a new window
+since:
 
 **PowerShell:**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Setup-PsilinkFileDrop.ps1"
+cd "$env:USERPROFILE\psilink"
+powershell -ExecutionPolicy Bypass -File .\Setup-PsilinkFileDrop.ps1
 ```
 
 **Command Prompt:**
 
 ```text
+cd /d "%USERPROFILE%\psilink"
 cmd_Setup-PsilinkFileDrop.cmd
 ```
 
