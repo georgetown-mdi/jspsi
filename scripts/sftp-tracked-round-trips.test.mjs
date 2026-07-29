@@ -114,6 +114,20 @@ const ALLOWED_OUTSIDE_THE_BRACKET = [
       "leaks the handle until session teardown), and awaiting it would " +
       "restore the unbounded wait the listing's deadline exists to defeat",
   },
+  {
+    enclosingMethod: "reissueCleanupDelete",
+    callee: "delete",
+    reason:
+      "the drain's re-issue of a recorded cleanup delete, the one round trip " +
+      "an idle release MAY tear: the tear rejects it, which records the path " +
+      "again for the next re-establishment, so the release defers the work " +
+      "rather than losing it -- while counting it would let a server that " +
+      "accepts DELETE and withholds its callback hold every boundary and so " +
+      "revert connection-per-poll to a held session. The bracket's other duty " +
+      "does not reach it either: the record and the drain exist only in " +
+      "connection-per-poll mode, which arms no heartbeat, so there is no " +
+      "keepalive to draw alongside it",
+  },
 ];
 
 const here = dirname(fileURLToPath(import.meta.url));

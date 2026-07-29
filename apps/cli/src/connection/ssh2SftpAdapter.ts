@@ -146,10 +146,38 @@ const TRANSITION_ACQUIRE_TIMEOUT_MS = 10_000;
 export const MAX_DEFERRED_CLEANUP_DELETES = 64;
 
 /**
- * Upper bound (ms) on the whole re-issue drain
- * ({@link SSH2SFTPClientAdapter.drainDeferredCleanupDeletes}), past which the
- * drain gives up its wait and keeps whatever it could not perform for the next
- * re-establishment.
+ * How many times a recorded cleanup delete is re-issued before the record gives
+ * up on it and its file is left behind
+ * ({@link SSH2SFTPClientAdapter.reissueCleanupDelete}).
+ *
+ * A budget is needed because a re-issue's failure is what records the path
+ * again, and nothing in that loop distinguishes a server briefly unreachable at
+ * one boundary from a delete that can never succeed -- the peer-owned temp under
+ * a sticky-bit directory the entry sweep still attempts. Without a budget the
+ * second is retried once per re-establishment for the life of the exchange, and
+ * with the record full that is a whole record's worth of extra DELETE round trips
+ * per poll cycle against the partner's server.
+ *
+ * The value: the record's healthy path succeeds on the first re-issue, so the
+ * budget is what covers a transient failure, and the re-establishments it spans
+ * are the poll cycles the exchange is made of. Two retries past that first
+ * re-issue is enough for a server unreachable across consecutive boundaries and
+ * short enough that a permanently-refused path costs a handful of round trips
+ * rather than a run's worth. Exhausting it degrades that cleanup to exactly the
+ * behavior it had before the record existed (its file survives the run), which is
+ * also what the cap above does on overflow. Deliberately not operator-
+ * configurable, like every other bound in this file.
+ *
+ * @internal exported for the adapter's own tests
+ */
+export const MAX_DEFERRED_CLEANUP_REISSUES = 3;
+
+/**
+ * Per-operation deadline (ms) a drain re-issue is held to
+ * ({@link SSH2SFTPClientAdapter.reissueCleanupDelete}) in place of the
+ * {@link SFTP_STALL_DEADLINE_MS} every other round trip carries, and so -- the
+ * re-issues being concurrent -- the bound on the whole drain
+ * ({@link SSH2SFTPClientAdapter.drainDeferredCleanupDeletes}).
  *
  * It exists because of WHERE the drain sits rather than what it costs. Core
  * forwards `ensureConnected` unwrapped and awaits it inside `close()`, so the
@@ -161,9 +189,11 @@ export const MAX_DEFERRED_CLEANUP_DELETES = 64;
  * {@link SFTP_STALL_DEADLINE_MS} to every close, an order of magnitude above the
  * teardown bounds beneath it.
  *
- * Abandoning at this bound loses nothing real: against a server withholding
- * delete callbacks the delete would not have taken effect anyway, and each path
- * still outstanding is recorded again, so the next re-establishment retries it.
+ * Cutting a re-issue short at this bound loses nothing real: against a server
+ * withholding delete callbacks the delete would not have taken effect anyway, and
+ * the expiry is a rejection like any other, so the path is offered back to the
+ * record for the next re-establishment -- on the same capped, budgeted terms as
+ * any other record, which is what "offered" rather than "kept" says.
  *
  * The value is teardown-scale, sized against the close budget the drain sits
  * directly above ({@link CLIENT_CLOSE_TIMEOUT_MS} then
@@ -739,9 +769,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // so outside the session gate that chokepoint applies -- can be issued into an
   // idle gap and reach no session at all. Only the adapter can tell that no-op
   // from a real delete: safeDelete resolves either way, so its caller in core
-  // cannot. A Set because the same path recorded twice is one cleanup, and
-  // because the drain removes by identity.
-  private readonly deferredCleanupDeletes = new Set<string>();
+  // cannot. Keyed by path because the same path recorded twice is one cleanup,
+  // and because the drain removes by identity; the value is the re-issues that
+  // path has left (see MAX_DEFERRED_CLEANUP_REISSUES), carried on the record
+  // rather than in a counter of its own so an entry cannot outlive its budget.
+  private readonly deferredCleanupDeletes = new Map<string, number>();
   // The drain currently running, so a second call joins it rather than issuing a
   // second delete for the same path. Cleared when it settles, which is what lets
   // a later re-establishment drain a record made after this one took its
@@ -1241,13 +1273,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // has already fallen is not an operation any count can hold a boundary for; a
   // cleanup of the protocol's own temp write is covered instead by the record it
   // leaves for the next re-establishment to drain (see deferCleanupDelete), and
-  // every other cleanup path is best-effort with nothing beneath it. The drain's
-  // own re-issue passes through here like any other. Two server round trips do not
-  // pass here at all: the heartbeat's keepalive (see sendKeepalive), and the
-  // best-effort handle close a listing fires once it has settled (whose loss the
-  // listing accounts for). Which call sites those are is a check rather than this
-  // sentence: scripts/sftp-tracked-round-trips.test.mjs parses this file and fails
-  // on any request-issuing site outside this bracket that is not one of the two.
+  // every other cleanup path is best-effort with nothing beneath it. Three server
+  // round trips do not pass here at all: the heartbeat's keepalive (see
+  // sendKeepalive), the best-effort handle close a listing fires once it has
+  // settled (whose loss the listing accounts for), and the drain's re-issue of a
+  // recorded cleanup delete, which a release MAY tear because the record survives
+  // the tear (see reissueCleanupDelete). Which call sites those are is a check
+  // rather than this sentence: scripts/sftp-tracked-round-trips.test.mjs parses
+  // this file and fails on any request-issuing site outside this bracket that is
+  // not one of the three.
   //
   // finally() is what balances a rejecting operation against a resolving one; one
   // unbalanced failure would pin the session open for the rest of the exchange.
@@ -3725,9 +3759,26 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   //
   // Refusing past the cap rather than evicting is deliberate; see
   // MAX_DEFERRED_CLEANUP_DELETES.
-  private deferCleanupDelete(path: string): void {
+  //
+  // `reissuesLeft` is what a re-issue's own failure re-records with, one below
+  // what it ran with; a fresh record from safeDelete gets the whole budget. An
+  // exhausted budget is given up on HERE rather than at the re-issue, so every
+  // route back into the record passes the same shape and cap checks.
+  private deferCleanupDelete(
+    path: string,
+    reissuesLeft = MAX_DEFERRED_CLEANUP_REISSUES,
+  ): void {
     if (!this.ephemeralSessions) return;
     if (!isProtocolTempName(remoteBasename(path))) return;
+    if (reissuesLeft <= 0) {
+      this.log.debug(
+        `a cleanup delete was re-issued ${MAX_DEFERRED_CLEANUP_REISSUES} ` +
+          `times on this SFTP connection without succeeding, so it is not ` +
+          `recorded again and its file is left behind: ` +
+          sanitizeForDisplay(path),
+      );
+      return;
+    }
     if (this.deferredCleanupDeletes.has(path)) return;
     if (this.deferredCleanupDeletes.size >= MAX_DEFERRED_CLEANUP_DELETES) {
       this.log.debug(
@@ -3737,7 +3788,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       );
       return;
     }
-    this.deferredCleanupDeletes.add(path);
+    this.deferredCleanupDeletes.set(path, reissuesLeft);
   }
 
   // Re-issue every recorded cleanup delete, at a point where a session exists.
@@ -3764,14 +3815,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // issue onto, and the record keeps for the next re-establishment. An empty
   // record means the mode's own healthy path, which must cost no round trip.
   //
-  // The re-issues go out CONCURRENTLY, so the drain costs one round trip's wait
-  // rather than one per record; each carries the per-operation deadline through
-  // the same bracket every other round trip does. Above that the WHOLE drain is
-  // bounded by DEFERRED_CLEANUP_DRAIN_TIMEOUT_MS, because its wait lands on
-  // core's close() and on the recovery gate's first attempt after an idle gap,
-  // neither of which has a budget over it. A re-issue that fails, and one still
-  // outstanding when that bound expires, are recorded again through the same
-  // capped record, so nothing regrows without bound.
+  // The re-issues go out CONCURRENTLY, and each is bounded by
+  // DEFERRED_CLEANUP_DRAIN_TIMEOUT_MS rather than by the per-operation deadline
+  // every other round trip carries, so the whole drain is bounded by that one
+  // value -- which is what its position demands, its wait landing on core's
+  // close() and on the recovery gate's first attempt after an idle gap, neither
+  // of which has a budget over it. A re-issue that fails, the expiry of that
+  // bound included, is recorded again through the same capped record and against
+  // the same per-path re-issue budget, so neither the record nor any one path's
+  // retries grow without bound.
   private drainDeferredCleanupDeletes(): Promise<void> {
     if (this.deferredCleanupDeletes.size === 0) return Promise.resolve();
     if (this.fatalSftpError !== undefined) return Promise.resolve();
@@ -3788,76 +3840,64 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   private runDeferredCleanupDrain(): Promise<void> {
-    const paths = [...this.deferredCleanupDeletes];
+    const recorded = [...this.deferredCleanupDeletes];
     this.deferredCleanupDeletes.clear();
-    const outstanding = new Set(paths);
-    const issued = Promise.all(
-      paths.map((path) =>
-        this.reissueCleanupDelete(path).finally(() => {
-          outstanding.delete(path);
-        }),
+    return Promise.all(
+      recorded.map(([path, reissuesLeft]) =>
+        this.reissueCleanupDelete(path, reissuesLeft),
       ),
-    );
-    return this.abandonDrainAfterBound(issued, outstanding);
-  }
-
-  // The drain's own ceiling, over the per-operation deadline each re-issue
-  // already carries: a server that ACCEPTS delete requests and WITHHOLDS their
-  // callbacks would otherwise hold core's close() -- which awaits ensureConnected
-  // with no budget above it -- for a whole stall deadline. Abandoning the wait
-  // costs nothing the run had: such a delete was not going to take effect, so
-  // every path still outstanding is recorded again for the next re-establishment
-  // to retry. A re-issue abandoned here keeps running; if it eventually succeeds,
-  // the re-recorded path costs one delete of an already-absent file at the next
-  // drain, which then clears it.
-  //
-  // Resolves rather than rejecting at the bound, so the drain keeps the
-  // never-reject shape its callers in ensureConnected and the recovery gate read
-  // it with. The timer is unref'd: a best-effort sweep must not hold the process
-  // open past the work that needed it.
-  private abandonDrainAfterBound(
-    issued: Promise<unknown>,
-    outstanding: Set<string>,
-  ): Promise<void> {
-    return new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        this.log.debug(
-          `${outstanding.size} re-issued cleanup ${
-            outstanding.size === 1 ? "delete" : "deletes"
-          } did not settle within the ` +
-            `${DEFERRED_CLEANUP_DRAIN_TIMEOUT_MS} ms drain bound on this SFTP ` +
-            `connection; each is kept for the next re-establishment`,
-        );
-        for (const path of outstanding) this.deferCleanupDelete(path);
-        resolve();
-      }, DEFERRED_CLEANUP_DRAIN_TIMEOUT_MS);
-      timer.unref();
-      const settle = () => {
-        clearTimeout(timer);
-        resolve();
-      };
-      void issued.then(settle, settle);
-    });
+    ).then(() => {});
   }
 
   // One re-issued cleanup delete, on the same never-reject terms as safeDelete's
-  // own: bounded by the per-operation deadline, counted at the bracket, and
-  // resolving whatever happens. A failure records the path again rather than
-  // dropping it -- a server that is briefly unreachable at one cycle boundary is
-  // reachable at the next -- so the only thing that clears a record is a delete
-  // this adapter saw succeed.
-  private reissueCleanupDelete(path: string): Promise<void> {
-    return this.tracked(
-      this.boundByDeadline(
-        this.client.delete(path, true).then(() => {}),
-        "file delete",
-        path,
-        "delete",
-      ),
+  // own, and resolving whatever happens. A failure offers the path back to the
+  // record rather than dropping it -- a server that is briefly unreachable at one
+  // cycle boundary is reachable at the next -- against a budget of re-issues, so
+  // what ends a record is a delete this adapter saw succeed or a budget spent.
+  // Offered rather than kept: the re-record runs the same cap the first record
+  // did, so a full record refuses it like any other.
+  //
+  // It is the one round trip in this file deliberately issued OUTSIDE the
+  // tracked() bracket, which is a statement about the idle-boundary release: a
+  // release MAY tear this operation off the wire, where it may tear no other. Two
+  // things make that sound. The record survives the tear -- the torn delete
+  // rejects, which offers the path back for the next re-establishment -- so the
+  // work is not lost, only deferred, which is the very thing the record exists to
+  // do. And a torn DELETE of this party's own temp cannot leave a state its
+  // re-issue misreads: the server either performed the unlink or did not, and the
+  // re-issue's notFoundOK reads the first as the success it is. Counting it
+  // instead is what pins the mode off: the count is the release's precondition, so
+  // a server that accepts DELETE and withholds its callback would hold every
+  // boundary through the re-issue's whole deadline, and each held boundary leaves
+  // the session live for the next re-establishment to drain and re-issue again.
+  // The bracket's other duty does not reach here either: the heartbeat is never
+  // armed in the mode that keeps this record, so there is no keepalive for an
+  // uncounted round trip to draw alongside it. Both halves of that are checks
+  // rather than this sentence -- the unit suite drives a whole idle stretch in
+  // this mode with no keepalive firing, and a failed cleanup delete in the
+  // default mode with nothing recorded.
+  //
+  // The allowance is registered, with this reason, in
+  // scripts/sftp-tracked-round-trips.test.mjs, which fails on an unbracketed
+  // round trip that is not one of the three it names.
+  private reissueCleanupDelete(
+    path: string,
+    reissuesLeft: number,
+  ): Promise<void> {
+    return withSftpOperationDeadline(
+      this.client.delete(path, true).then(() => {}),
+      DEFERRED_CLEANUP_DRAIN_TIMEOUT_MS,
+      () =>
+        transportOperationStalledError(
+          "file delete",
+          path,
+          `did not complete within ${DEFERRED_CLEANUP_DRAIN_TIMEOUT_MS} ms ` +
+            "(the server withheld the delete response)",
+        ),
     ).then(
       () => {},
       () => {
-        this.deferCleanupDelete(path);
+        this.deferCleanupDelete(path, reissuesLeft - 1);
       },
     );
   }

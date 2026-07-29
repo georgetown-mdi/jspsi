@@ -16,6 +16,7 @@ import {
 
 import {
   MAX_DEFERRED_CLEANUP_DELETES,
+  MAX_DEFERRED_CLEANUP_REISSUES,
   SSH2SFTPClientAdapter,
   SFTP_REDIAL_WARN_INTERVAL,
 } from "../../src/connection/ssh2SftpAdapter";
@@ -64,7 +65,15 @@ const releasableClient = () =>
 // enforces, neither of which is observable from outside until the drain runs.
 const deferredCleanupPaths = (adapter: SSH2SFTPClientAdapter): string[] => [
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ...((adapter as any).deferredCleanupDeletes as Set<string>),
+  ...((adapter as any).deferredCleanupDeletes as Map<string, number>).keys(),
+];
+
+// The re-issues each recorded path has left, in record order: the budget that
+// decides whether a cleanup delete the server will never let succeed is retried
+// again or given up on.
+const deferredCleanupBudgets = (adapter: SSH2SFTPClientAdapter): number[] => [
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ...((adapter as any).deferredCleanupDeletes as Map<string, number>).values(),
 ];
 
 // A remote path naming the protocol's own in-flight write, temp-<uuidv4()>.tmp:
@@ -5088,13 +5097,14 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(deferredCleanupPaths(adapter)).toEqual([orphan]);
   });
 
-  test("a drain a partner will not answer is abandoned at the drain bound, well inside the per-operation deadline", async () => {
+  test("a drain a partner will not answer ends at the drain bound, well inside the per-operation deadline", async () => {
     // Core forwards ensureConnected unwrapped and close() awaits it with no
     // budget above, so the drain's wait lands on teardown and on the recovery
     // gate's first attempt after an idle gap. A partner that ACCEPTS delete
     // requests and WITHHOLDS their callbacks must therefore not cost either of
-    // them a whole per-operation deadline: the drain gives up at its own
-    // teardown-scale bound and keeps what it could not perform.
+    // them a whole per-operation deadline: the re-issue carries the
+    // teardown-scale bound in its place, and its expiry keeps what it could not
+    // perform.
     const { client, deleteControls } = ephemeralClient(wrapperMethods());
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     stub(adapter);
@@ -5128,6 +5138,59 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // The delete that could not be performed is kept, not dropped: the next
     // re-establishment tries again.
     expect(deferredCleanupPaths(adapter)).toEqual([withheld]);
+  });
+
+  test("an idle boundary reached with a drain re-issue in flight still closes the session", async () => {
+    // The re-issue is the one round trip an idle release MAY tear, and this is
+    // what that buys. Counted at the bracket instead, it would hold the boundary
+    // for its whole bound -- and a boundary that closes nothing leaves the
+    // session live, so the next re-establishment finds one, re-runs the drain and
+    // regenerates the operation, which against a server that accepts DELETE and
+    // withholds its callback reverts the mode to a held session for the run. The
+    // tear costs the cleanup nothing: the torn delete rejects, which records the
+    // path again for the next re-establishment.
+    const { client, state } = ephemeralClient(wrapperMethods());
+    const calls: string[] = [];
+    let releaseDelete!: () => void;
+    const parked = new Promise<void>((resolve) => {
+      releaseDelete = resolve;
+    });
+    client.delete = vi.fn(async (path: string) => {
+      calls.push(path);
+      // The sweep that fell into the idle gap; the re-issue behind it is the one
+      // held on the wire.
+      if (calls.length === 1) throw notConnected("delete");
+      await parked;
+      if (!state.live) throw notConnected("delete");
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.releaseForIdle();
+    const withheld = protocolTempPath();
+    await expect(adapter.safeDelete(withheld)).resolves.toBeUndefined();
+    expect(deferredCleanupPaths(adapter)).toEqual([withheld]);
+
+    const reestablishing = adapter.ensureConnected();
+    await waitUntil(() => calls.length === 2);
+    expect(state.live).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((adapter as any).outstandingOperations).toBe(0);
+
+    await adapter.releaseForIdle();
+    expect(state.live).toBe(false);
+    expect(adapter.heldBoundaryCount).toBe(0);
+
+    releaseDelete();
+    expect(await reestablishing).toBe(true);
+    // The torn re-issue spent one of its budget and left the rest, so the next
+    // re-establishment sweeps the path again.
+    expect(deferredCleanupPaths(adapter)).toEqual([withheld]);
+    expect(deferredCleanupBudgets(adapter)).toEqual([
+      MAX_DEFERRED_CLEANUP_REISSUES - 1,
+    ]);
   });
 
   test("the drain bound covers the whole record, not one deadline per re-issued delete", async () => {
@@ -5237,15 +5300,66 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(attempted).toEqual([recorded]);
   });
 
-  test("the record of unperformed cleanup deletes stays bounded across many released cycles", async () => {
-    // A server that has stopped answering deletes entirely: every cycle records
-    // one more cleanup and none of them can be drained. The record must not grow
-    // with the run.
+  test("the record of unperformed cleanup deletes stays bounded, refusing rather than evicting", async () => {
+    // A run whose cycles keep sweeping temps into an idle gap and whose re-dial
+    // keeps failing, so nothing is ever drained. The record must not grow with
+    // the run -- and what overflow does is refuse the newcomer, never drop a
+    // cleanup this adapter had already promised to re-issue.
+    const { client, connect, state } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const debug = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = {
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug,
+      trace: vi.fn(),
+      error: vi.fn(),
+    };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.releaseForIdle();
+    expect(state.live).toBe(false);
+    connect.mockRejectedValue(new Error("connect ECONNREFUSED"));
+
+    const first = protocolTempPath();
+    await adapter.safeDelete(first);
+    for (let cycle = 1; cycle < MAX_DEFERRED_CLEANUP_DELETES * 3; cycle += 1)
+      await adapter.safeDelete(protocolTempPath());
+    // No session comes back, so no drain runs and nothing leaves the record by
+    // that route either.
+    await expect(adapter.ensureConnected()).resolves.toBe(false);
+
+    expect(deferredCleanupPaths(adapter)).toHaveLength(
+      MAX_DEFERRED_CLEANUP_DELETES,
+    );
+    expect(deferredCleanupPaths(adapter)[0]).toBe(first);
+    // The refusal is reported where an operator looking for it would find it, and
+    // says which file was left behind.
+    expect(
+      debug.mock.calls.some(
+        (call) =>
+          (call[0] as string).includes(
+            "cleanup deletes are already recorded",
+          ) && (call[0] as string).includes("is left behind"),
+      ),
+    ).toBe(true);
+  });
+
+  test("a cleanup delete the server keeps refusing is re-issued a bounded number of times, then given up on", async () => {
+    // The only thing that clears a record is a delete this side saw succeed, so
+    // without a budget a delete that can never succeed -- a peer-owned temp under
+    // a sticky-bit directory, which the entry sweep still attempts -- is re-issued
+    // once per re-establishment for the life of the exchange, and with the record
+    // full that is a record's worth of extra round trips per poll cycle against
+    // the partner's server.
     const { client, state } = ephemeralClient(wrapperMethods());
-    // The re-established session answers every delete with a refusal, so no
-    // record is ever cleared.
-    client.delete = vi.fn(async () => {
-      throw notConnected("delete");
+    const attempts: string[] = [];
+    client.delete = vi.fn(async (path: string) => {
+      attempts.push(path);
+      if (!state.live) throw notConnected("delete");
+      throw new Error("permission denied");
     });
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const debug = vi.fn();
@@ -5260,24 +5374,39 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
-    for (let cycle = 0; cycle < MAX_DEFERRED_CLEANUP_DELETES * 3; cycle += 1) {
+    await adapter.releaseForIdle();
+    const refused = protocolTempPath();
+    await expect(adapter.safeDelete(refused)).resolves.toBeUndefined();
+    expect(deferredCleanupBudgets(adapter)).toEqual([
+      MAX_DEFERRED_CLEANUP_REISSUES,
+    ]);
+
+    // Each re-establishment spends one of the budget and re-records the rest, so
+    // the record narrows toward giving up rather than standing for the run.
+    for (let spent = 1; spent <= MAX_DEFERRED_CLEANUP_REISSUES; spent += 1) {
+      await expect(adapter.ensureConnected()).resolves.toBe(true);
       await adapter.releaseForIdle();
-      expect(state.live).toBe(false);
-      await adapter.safeDelete(protocolTempPath());
-      await adapter.ensureConnected();
+      expect(deferredCleanupBudgets(adapter)).toEqual(
+        spent === MAX_DEFERRED_CLEANUP_REISSUES
+          ? []
+          : [MAX_DEFERRED_CLEANUP_REISSUES - spent],
+      );
     }
 
-    expect(deferredCleanupPaths(adapter)).toHaveLength(
-      MAX_DEFERRED_CLEANUP_DELETES,
-    );
-    // The refusal is reported where an operator looking for it would find it, and
-    // says which file was left behind.
+    // One attempt for the sweep that reached no session, then the budget, and
+    // then nothing however many further cycles run.
+    for (let cycle = 0; cycle < 10; cycle += 1) {
+      await expect(adapter.ensureConnected()).resolves.toBe(true);
+      await adapter.releaseForIdle();
+    }
+    expect(attempts).toHaveLength(1 + MAX_DEFERRED_CLEANUP_REISSUES);
+    expect(deferredCleanupPaths(adapter)).toEqual([]);
+    // Giving up says so, and says which file was left behind.
     expect(
       debug.mock.calls.some(
         (call) =>
-          (call[0] as string).includes(
-            "cleanup deletes are already recorded",
-          ) && (call[0] as string).includes("is left behind"),
+          (call[0] as string).includes("without succeeding") &&
+          (call[0] as string).includes("is left behind"),
       ),
     ).toBe(true);
   });

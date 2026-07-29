@@ -432,6 +432,25 @@ file at such a name. The mechanism, the shape narrowing, and the bounds on both
 the record and the drain are in
 [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md).
 
+The re-issue that drain makes is then the one op the release may TEAR, and that
+inverts the rule above for it alone. The reason is what a counted best-effort
+sweep would cost this mode: against a server that accepts DELETE and never
+answers it, a counted re-issue is outstanding at every boundary, every boundary
+therefore closes nothing, and every live session left behind is another
+re-establishment that drains and re-issues again -- the per-cycle session the mode
+exists for, gone for the rest of the run, and reachable without a failed publish
+at all, since the entry sweep hands the cleanup delete every temp-shaped name a
+server-supplied listing offers. Uncounted, the release simply closes over the
+re-issue; the torn delete rejects, which offers the path back to the record, and the
+next re-establishment tries again. That is the same deferral the record already
+is, so the tear costs the cleanup nothing but a cycle. It is safe to tear where an
+ordinary op is not because a DELETE of this party's own temp has no half-state:
+the server unlinked the file or it did not, and the re-issue treats an absent file
+as the success it is. The same reading is why the retry is BUDGETED rather than
+standing: a delete the partner will never let succeed is indistinguishable from
+one it will, so the only way not to retry the first forever is to stop retrying
+either after a few cycles, which costs the second nothing a healthy run notices.
+
 **Close, drain, and the authenticated abort marker -- real code, the one genuine
 gap.** At teardown the last cycle's connection is already released, but `close()`
 still needs a live session to drain the final terminal frame and to write the
