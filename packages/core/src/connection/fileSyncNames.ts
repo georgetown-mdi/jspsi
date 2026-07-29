@@ -14,13 +14,13 @@
 // split (overview owns the grammar, spec owns the state machine) is a
 // deliberate, recorded tier inversion: see docs/spec/README.md.
 //
-// This module is deliberately NOT re-exported by the package barrel (main.ts
-// barrels fileSyncConnection.ts via `export *`, not this file), so an
+// This module is deliberately NOT re-exported wholesale by the package barrel
+// (main.ts barrels fileSyncConnection.ts via `export *`, not this file), so an
 // `@internal` export here stays out of the package's public runtime surface
 // while a unit test can still deep-import it -- the same pattern as
-// fileSyncConstants.ts. The two currently-public grammar recognizers,
-// isAbortMarkerName and isExpectedAbortName, keep their public surface by being
-// re-exported from fileSyncConnection.ts (which IS barrelled).
+// fileSyncConstants.ts. Three recognizers are public: isAbortMarkerName and
+// isExpectedAbortName, re-exported from fileSyncConnection.ts (which IS
+// barrelled), and isProtocolTempName, named individually by main.ts.
 
 import { validate as uuidValidate, version as uuidVersion } from "uuid";
 
@@ -127,17 +127,27 @@ export const peerIdFromControlName = (
   return id.length > 0 ? id : undefined;
 };
 
-// True only for the protocol's OWN in-flight temp file: `temp-<uuidv4()>.tmp`,
-// the exact shape send() and writeAck() write (`temp-${uuidv4()}.tmp`,
-// independent of any id). Validating the stem as a v4 UUID is what lets every
-// other `temp-*.tmp` -- a foreign `temp-export.tmp`, an unrelated sync-tool
-// scratch file -- fall through to the foreign-file policy (tolerated) rather
-// than being deleted by the entry sweep. Matching any `temp-`/`.tmp` name would
-// destroy such a foreign file in a namespace collision; the v4-UUID validation
-// keeps the two notions of "foreign" (here and the foreign-file snapshot) in
-// agreement. uuidVersion() throws on a non-UUID stem, so the uuidValidate()
-// short-circuit must precede it.
-/** @internal */
+/**
+ * True only for the protocol's OWN in-flight temp file: `temp-<uuidv4()>.tmp`,
+ * the exact shape `send()` and `writeAck()` write (`temp-${uuidv4()}.tmp`,
+ * independent of any id).
+ *
+ * Validating the stem as a v4 UUID is what lets every other `temp-*.tmp` -- a
+ * foreign `temp-export.tmp`, an unrelated sync-tool scratch file -- fall through
+ * to the foreign-file policy (tolerated) rather than being deleted by the entry
+ * sweep. Matching any `temp-`/`.tmp` name would destroy such a foreign file in a
+ * namespace collision; the v4-UUID validation keeps the two notions of "foreign"
+ * (here and the foreign-file snapshot) in agreement. `uuidVersion()` throws on a
+ * non-UUID stem, so the `uuidValidate()` short-circuit must precede it.
+ *
+ * Public because a `FileTransportClient` implementation may need to decide
+ * whether a path it was handed names this protocol's own in-flight write rather
+ * than a durable protocol file or the peer's: the CLI's SFTP adapter defers and
+ * re-issues a cleanup delete only for this shape, whose per-file v4 UUID is what
+ * makes a deferred re-issue unable to reach a file other than the one it was
+ * issued for. One grammar, recognized in one place, so a transport cannot drift
+ * from the sweeps that produce and remove these files.
+ */
 export const isProtocolTempName = (name: string): boolean => {
   if (!name.startsWith("temp-") || !name.endsWith(".tmp")) return false;
   const stem = name.slice("temp-".length, -".tmp".length);

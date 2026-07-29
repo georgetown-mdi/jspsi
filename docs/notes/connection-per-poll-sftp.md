@@ -415,6 +415,61 @@ count covers, how that set differs from what is on the wire, what bounds the hol
 the ops for which nothing does, and what the totals measure, are in
 [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md).
 
+One op is outside both of those, and it is the cleanup delete a torn send sweeps
+its own temp with. Its never-reject contract keeps it outside the recovery
+chokepoint, so it reaches no gate at op entry; and issued after the boundary
+rather than before it, it is not an outstanding op the release could have held
+the boundary for. Against a released session it therefore removes nothing --
+while resolving, so the caller in core cannot tell. Nothing else in the run
+sweeps that temp: it is in no responsible-file set, and the entry guard that
+recognizes the shape ran before the loop started. The adapter is the only layer
+that can tell a no-op cleanup from a performed one, so it is the layer that
+records one and re-issues it at its next re-establishment, which is also why this
+does not become a precondition spread over core's call sites. Only that temp
+shape is recorded: `safeDelete` is also handed durable protocol files and names
+the peer wrote, and a re-issue deferred to a later point could reach a different
+file at such a name. The mechanism, the shape narrowing, and the bounds on both
+the record and the drain are in
+[CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md).
+
+The re-issue that drain makes is then the one op still owing a settlement that the
+release may TEAR, and that inverts the rule above for it alone. (A listing's
+best-effort handle close is unbracketed too and a boundary tears that as readily,
+but it is fired after the listing has settled, so nothing is owed for it: its loss
+is the leaked handle a withheld close callback already costs, and in this mode the
+session ends at that boundary anyway.) The reason is what a counted best-effort
+sweep would cost this mode: against a server that accepts DELETE and never
+answers it, a counted re-issue is outstanding at every boundary, every boundary
+therefore closes nothing, and every live session left behind is another
+re-establishment that drains and re-issues again -- the per-cycle session the mode
+exists for, gone for the rest of the run, and reachable without a failed publish
+at all, since the entry sweep hands the cleanup delete every temp-shaped name a
+server-supplied listing offers. Uncounted, the release simply closes over the
+re-issue; the torn delete rejects, which offers the path back to the record, and the
+next re-establishment tries again. That is the same deferral the record already
+is, so the tear costs the cleanup nothing but a cycle. It is safe to tear where an
+ordinary op is not because a DELETE of this party's own temp has no half-state:
+the server unlinked the file or it did not, and the re-issue treats an absent file
+as the success it is. The same reading is why the retry is BUDGETED rather than
+standing: a delete the partner will never let succeed is indistinguishable from
+one it will, so the only way not to retry the first forever is to stop retrying
+either after a few cycles, which costs the second nothing a healthy run notices.
+
+That budget belongs to a RECORDING and not to the path, which is what its
+give-up is scoped to: nothing about a path is remembered once its recording ends,
+so a path offered again is recorded again with the whole budget. What that costs
+depends on who offers it, and the sweep that turns up an undeletable temp runs at
+rendezvous entry, once per exchange rather than once per cycle -- so such a temp
+is recorded once and costs a few round trips for the whole run. Paying that per
+cycle instead is what a caller re-offering the same path every cycle would cost,
+which is worth re-checking before one is written. It is bounded amplification
+either way, the record's own cap being what
+bounds how many such recordings stand at once, and the alternative is worse: a
+tombstone remembering the given-up path would occupy a cap slot, which is exactly
+how a peer could crowd the send path's own cleanups out of the record. What the
+budget is not is the thing that keeps the per-cycle session -- that is the
+re-issue being uncounted, which holds whether or not the retry is budgeted.
+
 **Close, drain, and the authenticated abort marker -- real code, the one genuine
 gap.** At teardown the last cycle's connection is already released, but `close()`
 still needs a live session to drain the final terminal frame and to write the

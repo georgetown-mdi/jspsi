@@ -13,7 +13,10 @@ import {
 } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
-import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
+import {
+  MAX_DEFERRED_CLEANUP_REISSUES,
+  SSH2SFTPClientAdapter,
+} from "../../src/connection/ssh2SftpAdapter";
 import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 
@@ -35,6 +38,11 @@ const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 // close lands, and the assertions want several of them.
 const BOUNDARY_TEST_TIMEOUT_MS = 120_000;
 
+// The protocol's own in-flight write, `temp-<uuidv4()>.tmp`: a failed publish and
+// never transcript, so no run of either mode may end with one on the server.
+const isProtocolTemp = (name: string): boolean =>
+  name.startsWith("temp-") && name.endsWith(".tmp");
+
 // Poll a predicate until it holds, failing if it never does.
 async function waitFor(
   predicate: () => boolean,
@@ -47,6 +55,48 @@ async function waitFor(
   }
   throw new Error(`waitFor: ${what} not met within timeout`);
 }
+
+// Count the deletes the adapter issues per remote path, so a case can assert
+// that a cleanup delete the partner's server will never let succeed costs a
+// bounded number of round trips rather than one per re-establishment for the
+// life of the run. It wraps the ssh2-sftp-client delete() the adapter calls,
+// which is one call per attempt, and leaves the real request to the real server.
+function countDeletes(
+  adapter: SSH2SFTPClientAdapter,
+): (remotePath: string) => number {
+  const client = (
+    adapter as unknown as {
+      client: {
+        delete: (remotePath: string, notFoundOK?: boolean) => Promise<unknown>;
+      };
+    }
+  ).client;
+  const performDelete = client.delete.bind(client);
+  const attempts = new Map<string, number>();
+  client.delete = (remotePath: string, notFoundOK?: boolean) => {
+    attempts.set(remotePath, (attempts.get(remotePath) ?? 0) + 1);
+    return performDelete(remotePath, notFoundOK);
+  };
+  return (remotePath: string) => attempts.get(remotePath) ?? 0;
+}
+
+// The adapter's count of operations it has issued and not settled: the idle
+// release's precondition, and so the state that decides whether a boundary
+// closes anything. Private, with no public surface -- what a case can read from
+// outside is the consequence (a boundary that closed nothing), and these cases
+// assert that too.
+const outstandingOperations = (adapter: SSH2SFTPClientAdapter): number =>
+  (adapter as unknown as { outstandingOperations: number })
+    .outstandingOperations;
+
+// The cleanup deletes still recorded for re-issue. Private for the same reason:
+// what it holds decides whether a later re-establishment issues another round
+// trip, which is exactly what a bounded retry budget must stop it doing.
+const deferredCleanupPaths = (adapter: SSH2SFTPClientAdapter): string[] => [
+  ...(
+    adapter as unknown as { deferredCleanupDeletes: Map<string, number> }
+  ).deferredCleanupDeletes.keys(),
+];
 
 // Count the dials the adapter issues and the dials that settle as failures, so a
 // case can wait on a cycle having tried to dial, or on its attempt having
@@ -1051,6 +1101,426 @@ inProcessOnly(
       waiting.stop();
       await failing.close().catch(() => {});
       await waiting.close().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "an idle release between a publish and its cleanup leaves no temp file behind",
+  async () => {
+    // The one cleanup delete that reaches no session gate: send()'s catch sweeps
+    // the temp it wrote, and its never-reject contract keeps it outside the
+    // recovery chokepoint that re-establishes for every other operation. Issued
+    // after an idle boundary it reaches no session at all, and the file it was to
+    // remove is what survives -- so the assertion here is the directory, not a
+    // counter. The rename is torn deliberately, with the release driven inside the
+    // tear, because the two orderings that produce this state (a send resuming
+    // from the protocol continuation, a failing publish) are both races the loop
+    // will not stage on demand.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "per-poll-temp-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const senderAdapter = new SSH2SFTPClientAdapter({
+      ephemeralSessions: true,
+    });
+    const publishedRename = senderAdapter.rename.bind(senderAdapter);
+    let tearNextRename = false;
+    senderAdapter.rename = async (fromPath: string, toPath: string) => {
+      if (!tearNextRename) return publishedRename(fromPath, toPath);
+      tearNextRename = false;
+      // The idle boundary falls here: the temp is on the server, the publish has
+      // not landed, and the sweep that follows runs with the session released.
+      await senderAdapter.releaseForIdle();
+      throw new Error("the partner's server refused the rename");
+    };
+    const sender = new FileSyncConnection(senderAdapter, {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    const peer = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    const failures: unknown[] = [];
+    sender.on("error", (err: unknown) => failures.push(err));
+    peer.on("error", (err: unknown) => failures.push(err));
+
+    try {
+      const [outcome] = await withCapturedLogs(
+        async () => {
+          await sender.open({
+            channel: "sftp",
+            server: {
+              host: srv.handle.host,
+              port: srv.handle.port,
+              ...serverAuth(srv.handle.usera),
+              path: remote,
+            },
+            options: { peerTimeoutMs: PEER_TIMEOUT_MS },
+          });
+          await peer.open({
+            channel: "sftp",
+            server: {
+              host: srv.handle.host,
+              port: srv.handle.port,
+              ...serverAuth(srv.handle.userb),
+              path: remote,
+            },
+            options: { peerTimeoutMs: PEER_TIMEOUT_MS },
+          });
+          await Promise.all([sender.synchronize(), peer.synchronize()]);
+
+          tearNextRename = true;
+          const sendError = await sender
+            .send({ message: "the publish that never landed" })
+            .then(
+              () => undefined,
+              (error: unknown) => error,
+            );
+          const afterSweep = await fsp.readdir(dir);
+          await sender.close();
+          return { sendError, afterSweep, afterClose: await fsp.readdir(dir) };
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      // The publish failed, which is what put a temp on the server with no
+      // session left to remove it.
+      expect(outcome.sendError).toBeInstanceOf(Error);
+      // The sweep itself removed nothing -- this is the state the fix is for, and
+      // asserting it keeps the case honest if the tear ever stops reaching it.
+      expect(outcome.afterSweep.filter(isProtocolTemp)).toHaveLength(1);
+      // And the run does not end with it: the re-establishment teardown drives
+      // before its drain re-issues the cleanup the released session could not
+      // perform.
+      expect(outcome.afterClose.filter(isProtocolTemp)).toEqual([]);
+      // The sweep never surfaced to the caller: safeDelete's contract is
+      // unchanged by the record it now leaves.
+      expect(failures).toEqual([]);
+    } finally {
+      peer.stop();
+      await sender.close().catch(() => {});
+      await peer.close().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "a retain-mode run leaves no temp file behind either, with its transcript intact",
+  async () => {
+    // Retain mode skips the terminal-frame drain and makes cleanup() a global
+    // no-op, but the re-establishment the drain rides sits ABOVE that skip and
+    // must stay there: a temp-<uuidv4()>.tmp is a failed in-flight write, never
+    // transcript, so no run of either mode may end holding one. Asserted on the
+    // directory rather than a call count, which is what a future change moving
+    // the re-establishment below the retain skip would still satisfy.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "per-poll-retain-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const senderAdapter = new SSH2SFTPClientAdapter({
+      ephemeralSessions: true,
+    });
+    const publishedRename = senderAdapter.rename.bind(senderAdapter);
+    let tearNextRename = false;
+    senderAdapter.rename = async (fromPath: string, toPath: string) => {
+      if (!tearNextRename) return publishedRename(fromPath, toPath);
+      tearNextRename = false;
+      await senderAdapter.releaseForIdle();
+      throw new Error("the partner's server refused the rename");
+    };
+    // Retain mode requires the lockless rendezvous and timestamped filenames,
+    // and both parties must agree: the hello envelope carries the flags and a
+    // mismatch is a terminal rendezvous failure.
+    const retainOptions = {
+      verbose: -1 as const,
+      pollingFrequency: 10,
+      retainFiles: true,
+      locklessRendezvous: true,
+      timestampInFilename: true,
+    };
+    const sender = new FileSyncConnection(senderAdapter, retainOptions);
+    const peer = new FileSyncConnection(
+      new SSH2SFTPClientAdapter(),
+      retainOptions,
+    );
+    const failures: unknown[] = [];
+    sender.on("error", (err: unknown) => failures.push(err));
+    peer.on("error", (err: unknown) => failures.push(err));
+
+    try {
+      const [outcome] = await withCapturedLogs(
+        async () => {
+          await sender.open({
+            channel: "sftp",
+            server: {
+              host: srv.handle.host,
+              port: srv.handle.port,
+              ...serverAuth(srv.handle.usera),
+              path: remote,
+            },
+            options: { peerTimeoutMs: PEER_TIMEOUT_MS },
+          });
+          await peer.open({
+            channel: "sftp",
+            server: {
+              host: srv.handle.host,
+              port: srv.handle.port,
+              ...serverAuth(srv.handle.userb),
+              path: remote,
+            },
+            options: { peerTimeoutMs: PEER_TIMEOUT_MS },
+          });
+          await Promise.all([sender.synchronize(), peer.synchronize()]);
+
+          tearNextRename = true;
+          const sendError = await sender
+            .send({ message: "the publish that never landed" })
+            .then(
+              () => undefined,
+              (error: unknown) => error,
+            );
+          const afterSweep = await fsp.readdir(dir);
+          await sender.close();
+          return { sendError, afterSweep, afterClose: await fsp.readdir(dir) };
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      expect(outcome.sendError).toBeInstanceOf(Error);
+      expect(outcome.afterSweep.filter(isProtocolTemp)).toHaveLength(1);
+      expect(outcome.afterClose.filter(isProtocolTemp)).toEqual([]);
+      // The drain took the temp and nothing else: the transcript retain mode
+      // exists to keep is still on the server.
+      expect(
+        outcome.afterClose.filter((name) => name.endsWith(".json")).length,
+      ).toBeGreaterThan(0);
+      expect(failures).toEqual([]);
+    } finally {
+      peer.stop();
+      await sender.close().catch(() => {});
+      await peer.close().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
+
+// Poll cycles the two re-issue cases drive. Enough that a per-cycle repetition
+// separates from a bounded one by a wide margin rather than by one occurrence.
+const REISSUE_CYCLES = 7;
+
+inProcessOnly(
+  "a cleanup delete the partner accepts and never answers does not pin the " +
+    "idle release off",
+  async () => {
+    // The mode exists to give up its session at every idle boundary. A drain
+    // re-issue must therefore not be able to keep one: a server that ACCEPTS
+    // DELETE and withholds its callback would otherwise leave an operation
+    // outstanding at every boundary, and since a boundary that closes nothing
+    // leaves the session live, the next re-establishment finds one, re-runs the
+    // drain, and regenerates the operation -- connection-per-poll reverting to a
+    // held session for the rest of the run. Driven at the adapter rather than
+    // through an exchange because the record's entry point is a cleanup delete
+    // no exchange stages on demand.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "per-poll-withheld-delete-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const deletesOf = countDeletes(adapter);
+    const stray = `temp-${randomUUID()}.tmp`;
+    await fsp.writeFile(path.join(dir, stray), "an in-flight write");
+
+    try {
+      await adapter.connect({
+        host: srv.handle.host,
+        port: srv.handle.port,
+        ...serverAuth(srv.handle.usera),
+        maxReconnectAttempts: 0,
+      });
+
+      // The idle gap, and the cleanup sweep that falls into it: the delete
+      // reaches no session, so the path is recorded for the drain.
+      await adapter.releaseForIdle();
+      await expect(adapter.safeDelete(`${remote}/${stray}`)).resolves.toBe(
+        undefined,
+      );
+
+      srv.inject.withholdOn = "REMOVE";
+      srv.sessionControls.resetHandshakeCount();
+      for (let cycle = 0; cycle < REISSUE_CYCLES; cycle += 1) {
+        const reissuing = deferredCleanupPaths(adapter).length > 0;
+        const before = deletesOf(`${remote}/${stray}`);
+        const reestablishing = adapter.ensureConnected();
+        // The boundary falls with the re-issue ON THE WIRE rather than behind
+        // it, which is the interleaving the mode actually produces: the drain
+        // and the poll interval are the same order of magnitude against a server
+        // that withholds, and a re-establishment driven by a resuming send()
+        // straddles the next boundary outright.
+        if (reissuing)
+          await waitFor(() => deletesOf(`${remote}/${stray}`) > before, {
+            what: "the drain's re-issue reaching the server",
+          });
+        await adapter.releaseForIdle();
+        await reestablishing;
+      }
+
+      // Every cycle got its own session: a cycle that had to dial is a cycle
+      // whose predecessor's boundary actually closed something. Counted at the
+      // bracket instead, this reads 4: the budget bounds the pin to the cycles
+      // its re-issues reach rather than lifting it, so three boundaries are held
+      // before the record gives up and the rest of the run dials again.
+      expect(srv.sessionControls.handshakeCount()).toBe(REISSUE_CYCLES);
+      expect(adapter.heldBoundaryCount).toBe(0);
+      // And nothing of the drain's is left counted, which is the state a held
+      // boundary reads.
+      expect(outstandingOperations(adapter)).toBe(0);
+      // The re-issues themselves are bounded: the record gives up rather than
+      // producing a delete per cycle for the run. One for the sweep that reached
+      // no session, then the re-issue budget.
+      expect(deletesOf(`${remote}/${stray}`)).toBe(
+        1 + MAX_DEFERRED_CLEANUP_REISSUES,
+      );
+    } finally {
+      srv.inject.withholdOn = null;
+      await adapter.end().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "a cleanup delete the partner's server permanently refuses is given up on " +
+    "rather than retried for the run",
+  async () => {
+    // The only thing that clears a record is a delete this side saw succeed, so
+    // a delete that can never succeed -- the case the spec itself names, a temp
+    // this party cannot unlink -- would otherwise be re-issued once per
+    // re-establishment for the life of the exchange, and with the record full
+    // that is a record's worth of extra DELETE round trips per poll cycle
+    // against the partner's server. A real refusal drives it: the temp sits in a
+    // directory this party may read but not write, so the server's own unlink
+    // fails with permission denied.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "per-poll-refused-delete-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const sealed = path.join(dir, "sealed");
+    await fsp.mkdir(sealed);
+    const stray = `temp-${randomUUID()}.tmp`;
+    await fsp.writeFile(path.join(sealed, stray), "an in-flight write");
+    await fsp.chmod(sealed, 0o555);
+    const strayPath = `${remote}/sealed/${stray}`;
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const deletesOf = countDeletes(adapter);
+
+    try {
+      await adapter.connect({
+        host: srv.handle.host,
+        port: srv.handle.port,
+        ...serverAuth(srv.handle.usera),
+        maxReconnectAttempts: 0,
+      });
+
+      await adapter.releaseForIdle();
+      await expect(adapter.safeDelete(strayPath)).resolves.toBe(undefined);
+
+      srv.sessionControls.resetHandshakeCount();
+      for (let cycle = 0; cycle < REISSUE_CYCLES; cycle += 1) {
+        await adapter.ensureConnected();
+        await adapter.releaseForIdle();
+      }
+
+      // Bounded by the budget, not by the run: without it this is one delete per
+      // cycle for as long as the exchange lasts.
+      expect(deletesOf(strayPath)).toBe(1 + MAX_DEFERRED_CLEANUP_REISSUES);
+      expect(deferredCleanupPaths(adapter)).toEqual([]);
+      // The refusal was the server's, and it stands: the file is still there, so
+      // what the budget bought is the round trips, not the outcome.
+      expect(await fsp.readdir(sealed)).toEqual([stray]);
+      // Giving up costs the mode nothing else: every boundary still closed.
+      expect(srv.sessionControls.handshakeCount()).toBe(REISSUE_CYCLES);
+      expect(adapter.heldBoundaryCount).toBe(0);
+    } finally {
+      await adapter.end().catch(() => {});
+      await fsp.chmod(sealed, 0o755).catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "a recorded cleanup delete whose file is already gone is cleared by its " +
+    "re-issue rather than costing the budget",
+  async () => {
+    // Letting an idle release tear a re-issue rests on a DELETE of this party's
+    // own temp leaving no state the re-issue can misread: the server performed
+    // the unlink or it did not, and an absent file is the success it is. That
+    // last reading is ssh2-sftp-client's `notFoundOK`, a library behaviour, so
+    // it is driven against a real server here rather than argued -- the state a
+    // torn delete leaves when the unlink landed and the tear took the reply is
+    // staged directly, as a recorded path that was never created on disk. A
+    // regression reads it as a failure instead: the whole re-issue budget spent
+    // on round trips for a file that is gone, and a "left behind" line about it.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "per-poll-absent-delete-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const deletesOf = countDeletes(adapter);
+    const gone = `temp-${randomUUID()}.tmp`;
+    const gonePath = `${remote}/${gone}`;
+
+    try {
+      await adapter.connect({
+        host: srv.handle.host,
+        port: srv.handle.port,
+        ...serverAuth(srv.handle.usera),
+        maxReconnectAttempts: 0,
+      });
+
+      await adapter.releaseForIdle();
+      await expect(adapter.safeDelete(gonePath)).resolves.toBe(undefined);
+      expect(existsSync(path.join(dir, gone))).toBe(false);
+      // The sweep reached no session, so the path stands recorded and its one
+      // attempt is the only DELETE issued for it so far.
+      expect(deferredCleanupPaths(adapter)).toEqual([gonePath]);
+      expect(deletesOf(gonePath)).toBe(1);
+
+      await adapter.ensureConnected();
+
+      // One re-issue, read as the success it is, and the record clear.
+      expect(deletesOf(gonePath)).toBe(2);
+      expect(deferredCleanupPaths(adapter)).toEqual([]);
+
+      // Cleared and not merely quiet for a cycle: no later re-establishment
+      // issues another round trip for it.
+      for (let cycle = 0; cycle < REISSUE_CYCLES; cycle += 1) {
+        await adapter.releaseForIdle();
+        await adapter.ensureConnected();
+      }
+      expect(deletesOf(gonePath)).toBe(2);
+      expect(deferredCleanupPaths(adapter)).toEqual([]);
+    } finally {
+      await adapter.end().catch(() => {});
       await fsp.rm(dir, { recursive: true, force: true });
       await srv.stop();
     }

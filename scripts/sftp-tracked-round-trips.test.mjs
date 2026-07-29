@@ -19,8 +19,8 @@ import { describe, expect, it } from "vitest";
 // (rename()'s re-issue existence probe was issued a layer above the bracket).
 // This is that claim as a check, and it is an INCLUSION check -- it fails on any
 // request-issuing call site the bracket does not cover, whether or not anyone
-// thought to list it. The two known exceptions are what it ALLOWS, each with its
-// reason; an allowance that no longer matches a call site fails too, so the list
+// thought to list it. The known exceptions below are what it ALLOWS, each with
+// its reason; an allowance that no longer matches a call site fails too, so the list
 // cannot rot into a record of what used to be true.
 //
 // The adapter is parsed with the TypeScript compiler API rather than matched by
@@ -113,6 +113,21 @@ const ALLOWED_OUTSIDE_THE_BRACKET = [
       "already settled: the listing accounts for its loss (a withheld close " +
       "leaks the handle until session teardown), and awaiting it would " +
       "restore the unbounded wait the listing's deadline exists to defeat",
+  },
+  {
+    enclosingMethod: "reissueCleanupDelete",
+    callee: "delete",
+    reason:
+      "the drain's re-issue of a recorded cleanup delete, the one UNSETTLED " +
+      "round trip an idle release MAY tear: the tear rejects it, which records " +
+      "the path " +
+      "again for the next re-establishment, so the release defers the work " +
+      "rather than losing it -- while counting it would let a server that " +
+      "accepts DELETE and withholds its callback hold every boundary and so " +
+      "revert connection-per-poll to a held session. The bracket's other duty " +
+      "does not reach it either: the record and the drain exist only in " +
+      "connection-per-poll mode, which arms no heartbeat, so there is no " +
+      "keepalive to draw alongside it",
   },
 ];
 
