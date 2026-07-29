@@ -415,6 +415,19 @@ count covers, how that set differs from what is on the wire, what bounds the hol
 the ops for which nothing does, and what the totals measure, are in
 [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md).
 
+One op is outside both of those, and it is the cleanup delete a torn send sweeps
+its own temp with. Its never-reject contract keeps it outside the recovery
+chokepoint, so it reaches no gate at op entry; and issued after the boundary
+rather than before it, it is not an outstanding op the release could have held
+the boundary for. Against a released session it therefore removes nothing --
+while resolving, so the caller in core cannot tell. Nothing else in the run
+sweeps that temp: it is in no responsible-file set, and the entry guard that
+recognizes the shape ran before the loop started. The adapter is the only layer
+that can tell a no-op cleanup from a performed one, so it is the layer that
+records one and re-issues it at its next re-establishment, which is also why this
+does not become a precondition spread over core's call sites. The mechanism and
+its bounds are in [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md).
+
 **Close, drain, and the authenticated abort marker -- real code, the one genuine
 gap.** At teardown the last cycle's connection is already released, but `close()`
 still needs a live session to drain the final terminal frame and to write the

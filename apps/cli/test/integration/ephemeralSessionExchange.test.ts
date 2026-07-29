@@ -35,6 +35,11 @@ const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 // close lands, and the assertions want several of them.
 const BOUNDARY_TEST_TIMEOUT_MS = 120_000;
 
+// The protocol's own in-flight write, `temp-<uuidv4()>.tmp`: a failed publish and
+// never transcript, so no run of either mode may end with one on the server.
+const isProtocolTemp = (name: string): boolean =>
+  name.startsWith("temp-") && name.endsWith(".tmp");
+
 // Poll a predicate until it holds, failing if it never does.
 async function waitFor(
   predicate: () => boolean,
@@ -1051,6 +1056,111 @@ inProcessOnly(
       waiting.stop();
       await failing.close().catch(() => {});
       await waiting.close().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "an idle release between a publish and its cleanup leaves no temp file behind",
+  async () => {
+    // The one cleanup delete that reaches no session gate: send()'s catch sweeps
+    // the temp it wrote, and its never-reject contract keeps it outside the
+    // recovery chokepoint that re-establishes for every other operation. Issued
+    // after an idle boundary it reaches no session at all, and the file it was to
+    // remove is what survives -- so the assertion here is the directory, not a
+    // counter. The rename is torn deliberately, with the release driven inside the
+    // tear, because the two orderings that produce this state (a send resuming
+    // from the protocol continuation, a failing publish) are both races the loop
+    // will not stage on demand.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "per-poll-temp-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const senderAdapter = new SSH2SFTPClientAdapter({
+      ephemeralSessions: true,
+    });
+    const publishedRename = senderAdapter.rename.bind(senderAdapter);
+    let tearNextRename = false;
+    senderAdapter.rename = async (fromPath: string, toPath: string) => {
+      if (!tearNextRename) return publishedRename(fromPath, toPath);
+      tearNextRename = false;
+      // The idle boundary falls here: the temp is on the server, the publish has
+      // not landed, and the sweep that follows runs with the session released.
+      await senderAdapter.releaseForIdle();
+      throw new Error("the partner's server refused the rename");
+    };
+    const sender = new FileSyncConnection(senderAdapter, {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    const peer = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
+    const failures: unknown[] = [];
+    sender.on("error", (err: unknown) => failures.push(err));
+    peer.on("error", (err: unknown) => failures.push(err));
+
+    try {
+      const [outcome] = await withCapturedLogs(
+        async () => {
+          await sender.open({
+            channel: "sftp",
+            server: {
+              host: srv.handle.host,
+              port: srv.handle.port,
+              ...serverAuth(srv.handle.usera),
+              path: remote,
+            },
+            options: { peerTimeoutMs: PEER_TIMEOUT_MS },
+          });
+          await peer.open({
+            channel: "sftp",
+            server: {
+              host: srv.handle.host,
+              port: srv.handle.port,
+              ...serverAuth(srv.handle.userb),
+              path: remote,
+            },
+            options: { peerTimeoutMs: PEER_TIMEOUT_MS },
+          });
+          await Promise.all([sender.synchronize(), peer.synchronize()]);
+
+          tearNextRename = true;
+          const sendError = await sender
+            .send({ message: "the publish that never landed" })
+            .then(
+              () => undefined,
+              (error: unknown) => error,
+            );
+          const afterSweep = await fsp.readdir(dir);
+          await sender.close();
+          return { sendError, afterSweep, afterClose: await fsp.readdir(dir) };
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      // The publish failed, which is what put a temp on the server with no
+      // session left to remove it.
+      expect(outcome.sendError).toBeInstanceOf(Error);
+      // The sweep itself removed nothing -- this is the state the fix is for, and
+      // asserting it keeps the case honest if the tear ever stops reaching it.
+      expect(outcome.afterSweep.filter(isProtocolTemp)).toHaveLength(1);
+      // And the run does not end with it: the re-establishment teardown drives
+      // before its drain re-issues the cleanup the released session could not
+      // perform.
+      expect(outcome.afterClose.filter(isProtocolTemp)).toEqual([]);
+      // The sweep never surfaced to the caller: safeDelete's contract is
+      // unchanged by the record it now leaves.
+      expect(failures).toEqual([]);
+    } finally {
+      peer.stop();
+      await sender.close().catch(() => {});
+      await peer.close().catch(() => {});
       await fsp.rm(dir, { recursive: true, force: true });
       await srv.stop();
     }

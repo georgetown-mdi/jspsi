@@ -10121,6 +10121,40 @@ describe("connection-per-poll idle-boundary signal", () => {
     expect(calls.indexOf("ensure")).toBeLessThan(calls.indexOf("list"));
   });
 
+  test("close() re-establishes the released session in retain mode too", async () => {
+    // The re-establishment sits ABOVE the retain skip, not inside it, and must
+    // stay there. Retain mode skips the terminal-frame drain below this call and
+    // cleanup() is a global no-op in it, but a transport that could not perform a
+    // cleanup delete across an idle boundary re-issues it at this re-dial -- and
+    // an in-flight `temp-*.tmp` is a failed write rather than transcript, so a
+    // retain run must not end holding one either.
+    const { client } = makeMockClient();
+    let ensured = 0;
+    // Set before constructing: the constructor's boundTransport wrap forwards
+    // the optional cycle-boundary signals only when the transport implements
+    // them, and it reads that once.
+    client.ensureConnected = async () => {
+      ensured += 1;
+      return true;
+    };
+    client.releaseForIdle = async () => {};
+    const conn = new FileSyncConnection(client, {
+      pollingFrequency: 10,
+      timeToLive: new Date(Date.now() + 5_000),
+      verbose: -1,
+      locklessRendezvous: true,
+      timestampInFilename: true,
+      retainFiles: true,
+    });
+    conn.connected = true;
+    conn.path = "/test";
+    conn.peerId = "stub-peer";
+
+    await conn.close();
+
+    expect(ensured).toBe(1);
+  });
+
   test("a transport without the optional methods polls unchanged (default mode)", async () => {
     // The default mock omits releaseForIdle/ensureConnected; the loop's optional
     // calls must no-op and the cycle must run exactly as before.

@@ -114,6 +114,36 @@ const FORCED_CLOSE_TIMEOUT_MS = 1_000;
 // operator-configurable, like every other SFTP liveness bound.
 const TRANSITION_ACQUIRE_TIMEOUT_MS = 10_000;
 
+/**
+ * Upper bound on how many unperformed cleanup deletes the connection-per-poll
+ * mode records for re-issue (see
+ * {@link SSH2SFTPClientAdapter.deferCleanupDelete}). The record exists because
+ * the never-reject cleanup delete sits outside the recovery chokepoint and so
+ * outside the session gate that chokepoint applies: issued across an idle
+ * boundary it reaches no session, and the file it was to remove would otherwise
+ * survive the run.
+ *
+ * Overflow REFUSES the new record rather than evicting an older one, which is a
+ * shape this file has nowhere else -- every other cap here fails loudly instead,
+ * and neither failing nor evicting fits a best-effort list whose caller must
+ * never see a rejection. Refusing degrades the overflowing cleanup to exactly the
+ * behavior it had before the record existed (its file survives the run), and
+ * cannot discard a record already destined for the drain, whereas evicting the
+ * oldest would turn a cleanup this adapter had already promised to re-issue into
+ * a silent loss. It fires only where a drain has repeatedly failed to reach the
+ * server, so it is logged at debug rather than warned: the operator hears about
+ * an unreachable server from the operation that needed it, not from a
+ * best-effort sweep.
+ *
+ * The value: a run records at most one entry per cleanup delete that could not
+ * be performed, and each cycle-start re-establishment drains the whole set, so a
+ * healthy run holds zero or one. Sized well above that so the cap is reached only
+ * by a server that has stopped answering deletes entirely, and small enough that
+ * the paths held are bounded memory. Deliberately not operator-configurable, like
+ * every other bound in this file.
+ */
+export const MAX_DEFERRED_CLEANUP_DELETES = 64;
+
 // The ssh2 Client's underlying net.Socket, which the adapter reaches directly for
 // what ssh2 does not expose. Every member is optional so a relocated or
 // non-net.Socket transport reads undefined at each site; what that site does with
@@ -662,6 +692,21 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // CLI/config surface and the flag name are a separate item. See
   // docs/notes/connection-per-poll-sftp.md.
   private readonly ephemeralSessions: boolean;
+  // Paths whose cleanup delete was not performed, kept for re-issue at the next
+  // point a session exists (see deferCleanupDelete and
+  // drainDeferredCleanupDeletes). Populated only in connection-per-poll mode,
+  // where the never-reject cleanup delete -- outside the recovery chokepoint, and
+  // so outside the session gate that chokepoint applies -- can be issued into an
+  // idle gap and reach no session at all. Only the adapter can tell that no-op
+  // from a real delete: safeDelete resolves either way, so its caller in core
+  // cannot. A Set because the same path recorded twice is one cleanup, and
+  // because the drain removes by identity.
+  private readonly deferredCleanupDeletes = new Set<string>();
+  // The drain currently running, so a second call joins it rather than issuing a
+  // second delete for the same path. Cleared when it settles, which is what lets
+  // a later re-establishment drain a record made after this one took its
+  // snapshot.
+  private deferredCleanupDrain: Promise<void> | undefined;
 
   /**
    * `options.verbosity` sets the adapter's log verbosity (default 1).
@@ -1151,10 +1196,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // what it leaves the hold bounded by, and countOutstandingOperation for the one
   // other span that keeps it). The two operations the recovery gate does not reach
   // (the never-reject cleanup delete, and a put whose source cannot be re-issued)
-  // do pass through here, so the precondition covers those as well. Two server
-  // round trips do not pass here at all: the heartbeat's keepalive (see
-  // sendKeepalive), and the best-effort handle close a listing fires once it has
-  // settled (whose loss the listing accounts for). Which call sites those are is a
+  // do pass through here, so the precondition covers those as well -- for each of
+  // them, from the moment it is ISSUED. A cleanup delete issued after the boundary
+  // has already fallen is not an operation any count can hold a boundary for, and
+  // is covered instead by the record it leaves for the next re-establishment to
+  // drain (see deferCleanupDelete); the drain's own re-issue passes through here
+  // like any other. Two server round trips do not pass here at all: the
+  // heartbeat's keepalive (see sendKeepalive), and the best-effort handle close a
+  // listing fires once it has settled (whose loss the listing accounts for).
+  // Which call sites those are is a
   // check rather than this sentence: scripts/sftp-tracked-round-trips.test.mjs
   // parses this file and fails on any request-issuing site outside this bracket
   // that is not one of the two.
@@ -1423,9 +1473,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // channel never calls back, so without this guard the op would ride its full
   // per-operation bound before failing; consulting the captured error rejects at
   // once with the real cause instead. safeDelete shares the same fatalSftpError
-  // check but RESOLVES (its never-reject contract); see it for why. A typed
-  // TransportOperationStalledError (a UsageError) so the poll loop and the
-  // rendezvous gate treat it as terminal, the same as every other liveness bound.
+  // check but RESOLVES (its never-reject contract); see it for why, and see
+  // drainDeferredCleanupDeletes for why a cleanup recorded before that error is
+  // not re-issued after it. A typed TransportOperationStalledError (a UsageError)
+  // so the poll loop and the rendezvous gate treat it as terminal, the same as
+  // every other liveness bound.
   private deadSessionError(
     operation: string,
     path: string,
@@ -1602,7 +1654,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // gate in any case -- safeDelete, whose never-reject contract puts it outside
   // recovery, and a put whose source cannot be re-issued (a one-shot stream, or
   // flags:"a") -- and both are counted by that precondition, which reaches past the
-  // recovery-wrapped operations (tracked() names what it leaves uncounted).
+  // recovery-wrapped operations (tracked() names what it leaves uncounted). That
+  // covers each of them only where it was ISSUED before the boundary; for the
+  // cleanup delete, one issued AFTER the release reaches no session at all, and
+  // what covers that is not this gate but the record the delete leaves for the
+  // next re-establishment to drain (see deferCleanupDelete).
   //
   // Returns undefined -- no gate, not even a microtask -- whenever the mode is off
   // or no release has intervened, so the default held-session mode runs exactly as
@@ -1623,20 +1679,30 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // step later out of the recovery path's own dial, which is what keeps the
   // fail-closed host-key behavior.
   private reestablishAfterIdleRelease(): Promise<void> | undefined {
-    // Both readings are the release's to set, and the release returns before
-    // enqueuing when the mode is off, so the default held-session mode takes this
-    // return every time without a mode check of its own. The first covers the
-    // close window itself, including a release the PEER began (which records no
-    // boundary); the second covers the gap after a release completed, sparing the
-    // one attempt that would be guaranteed to fail on the session it closed.
-    if (
-      this.transitionInProgress?.kind !== "releaseForIdle" &&
-      this.sessionBoundary !== "deliberatelyReleased"
-    )
-      return undefined;
+    if (!this.idleReleaseLeftNoSession()) return undefined;
     return this.ensureConnected().then(
       () => {},
       () => {},
+    );
+  }
+
+  // The two readings that say an idle release has taken the session away from an
+  // operation being issued now. Both are the release's to set, and the release
+  // returns before enqueuing when the mode is off, so the default held-session
+  // mode reads false here every time without a mode check of its own. The first
+  // covers the close window itself, including a release the PEER began (which
+  // records no boundary); the second covers the gap after a release completed.
+  //
+  // Read from two places, which is why it is one method rather than two copies of
+  // the pair: the recovery chokepoint's gate, which re-establishes before the
+  // operation's first attempt, and the cleanup delete, which reaches no gate and
+  // records itself for the drain instead. The two must read the same window or the
+  // operation the gate spares and the cleanup the record covers stop being the
+  // same boundary.
+  private idleReleaseLeftNoSession(): boolean {
+    return (
+      this.transitionInProgress?.kind === "releaseForIdle" ||
+      this.sessionBoundary === "deliberatelyReleased"
     );
   }
 
@@ -2961,9 +3027,22 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * {@link TRANSITION_ACQUIRE_TIMEOUT_MS} and nothing else. Past it the re-dial
    * reports the same `false` a transient dial failure reports, under a paced
    * warning, so the loop skips this cycle and retries on the next tick.
+   *
+   * Once a session is live it also re-issues whatever cleanup deletes an earlier
+   * idle gap left unperformed (see {@link drainDeferredCleanupDeletes}), which is
+   * why the drain is here and not inside the transition: it must run with the
+   * transition lock released, and every re-establishment in a run passes through
+   * this method.
    */
   ensureConnected(): Promise<boolean> {
     if (!this.ephemeralSessions) return Promise.resolve(true);
+    return this.reestablishSession().then(async (live) => {
+      if (live) await this.drainDeferredCleanupDeletes();
+      return live;
+    });
+  }
+
+  private reestablishSession(): Promise<boolean> {
     return this.runTransition({
       kind: "ensureConnected",
       skipped: () => true,
@@ -3530,28 +3609,138 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // by the same 60 s per-op deadline as delete()/rename()/exists(), so a hostile
     // server cannot stall teardown to the coarse whole-exchange budget while every
     // other write op fast-fails in 60 s. The never-reject contract is preserved by
-    // swallowing BOTH the delete's own error (the inner .then(noop, noop)) AND the
-    // deadline's TransportOperationStalledError (the trailing .then(noop, noop)):
-    // safeDelete still always resolves, just within 60 s rather than the budget.
-    // The whole-exchange budget (withTransportBudgetVoid in FileSyncConnection)
-    // remains the backstop beneath. No retry: a best-effort cleanup delete does not
-    // need one, exactly as delete() does not -- and the prior retryPromise here was
-    // in any case a no-op, since the inner swallow resolved every attempt so it
-    // never saw a rejection to re-issue.
+    // swallowing BOTH the delete's own error and the deadline's
+    // TransportOperationStalledError in the one trailing rejection arm: safeDelete
+    // still always resolves, just within 60 s rather than the budget. The
+    // whole-exchange budget (withTransportBudgetVoid in FileSyncConnection)
+    // remains the backstop beneath. No retry within the operation: a best-effort
+    // cleanup delete does not need one, exactly as delete() does not, and what
+    // re-issues a cleanup that did not take effect is the drain rather than a
+    // loop here.
+    //
+    // What that arm does before it resolves is record the cleanup for the drain
+    // (see deferCleanupDelete): the rejection is this side's only evidence that
+    // the file is still there, and it is evidence core cannot read, since
+    // safeDelete resolves either way. It rides alongside the reading taken at
+    // issue time below rather than replacing it -- either alone would leave the
+    // record resting on a premise about the library, and the two together do not.
+    // What that redundancy costs, where the reading fires over a delete that then
+    // succeeds (a concurrent dial re-established the session under it), is one
+    // delete of an already-absent file at the next re-establishment, which then
+    // clears the record.
     if (this.fatalSftpError !== undefined) return Promise.resolve();
+    // Taken BEFORE the delete is issued, because what it reads is a boundary the
+    // delete itself does not move: the release that took the session away is
+    // already behind this call.
+    if (this.idleReleaseLeftNoSession()) this.deferCleanupDelete(path);
     return this.tracked(
       this.boundByDeadline(
-        this.client.delete(path, true).then(
-          () => {},
-          () => {},
-        ),
+        this.client.delete(path, true).then(() => {}),
         "file delete",
         path,
         "delete",
       ).then(
         () => {},
-        () => {},
+        () => {
+          this.deferCleanupDelete(path);
+        },
       ),
+    );
+  }
+
+  // Record a cleanup delete that was not performed, so the next point at which a
+  // session exists re-issues it. Connection-per-poll only: the default
+  // held-session mode keeps no record and runs no drain, so it costs that mode
+  // neither state nor a round trip.
+  //
+  // The never-reject contract is what makes this the adapter's problem rather
+  // than the caller's. safeDelete resolves whether the file went away or not, so
+  // core cannot tell a performed cleanup from one issued into an idle gap, and a
+  // precondition spread over core's call sites would be an invariant held by
+  // discipline -- the same reason the recovery-wrapped operations' session gate is
+  // owned here (see reestablishAfterIdleRelease).
+  //
+  // Refusing past the cap rather than evicting is deliberate; see
+  // MAX_DEFERRED_CLEANUP_DELETES.
+  private deferCleanupDelete(path: string): void {
+    if (!this.ephemeralSessions) return;
+    if (this.deferredCleanupDeletes.has(path)) return;
+    if (this.deferredCleanupDeletes.size >= MAX_DEFERRED_CLEANUP_DELETES) {
+      this.log.debug(
+        `${MAX_DEFERRED_CLEANUP_DELETES} cleanup deletes are already recorded ` +
+          `for re-issue on this SFTP connection, so this one is not recorded ` +
+          `and its file is left behind: ${sanitizeForDisplay(path)}`,
+      );
+      return;
+    }
+    this.deferredCleanupDeletes.add(path);
+  }
+
+  // Re-issue every recorded cleanup delete, at a point where a session exists.
+  // Hooked at the tail of ensureConnected() -- OUTSIDE the transition, so it
+  // neither dials nor closes under another transition's lock -- which is the one
+  // seam that covers both places a re-establishment happens: the cycle-start
+  // re-dial the poll loop drives, and the re-establishment core's close() drives
+  // before the terminal-frame drain. The recovery re-dial is deliberately not
+  // hooked: it runs inside an operation's own recovery arm, under that
+  // operation's budget, and whatever it leaves recorded is drained by the
+  // cycle-start re-establishment or the teardown one that follows it in the same
+  // run.
+  //
+  // Four states drain nothing, each for its own reason. A fatal SFTP error means
+  // the wrapper is destroyed and a request posted to it never calls back, which
+  // is exactly what safeDelete's own short-circuit refuses to do -- so a cleanup
+  // recorded BEFORE that error is not reintroduced by this drain afterwards. A
+  // latched teardown means end() is already closing the client and a delete
+  // issued now would race that close. No live session means there is nothing to
+  // issue onto, and the record keeps for the next re-establishment. An empty
+  // record means the mode's own healthy path, which must cost no round trip.
+  //
+  // The re-issues go out CONCURRENTLY, so the whole drain is bounded by one
+  // per-operation deadline rather than by one per record; each carries that
+  // deadline through the same bracket every other round trip does. A re-issue
+  // that fails is recorded again, through the same capped record, so nothing
+  // regrows without bound.
+  private drainDeferredCleanupDeletes(): Promise<void> {
+    if (this.deferredCleanupDeletes.size === 0) return Promise.resolve();
+    if (this.fatalSftpError !== undefined) return Promise.resolve();
+    if (this.closing) return Promise.resolve();
+    if (!this.hasLiveSession()) return Promise.resolve();
+    // A drain already running holds the snapshot it took; a record made after
+    // that snapshot is left for the next re-establishment rather than issued
+    // alongside it, so no path is deleted twice concurrently and this cannot
+    // re-enter itself.
+    this.deferredCleanupDrain ??= this.runDeferredCleanupDrain().finally(() => {
+      this.deferredCleanupDrain = undefined;
+    });
+    return this.deferredCleanupDrain;
+  }
+
+  private async runDeferredCleanupDrain(): Promise<void> {
+    const paths = [...this.deferredCleanupDeletes];
+    this.deferredCleanupDeletes.clear();
+    await Promise.all(paths.map((path) => this.reissueCleanupDelete(path)));
+  }
+
+  // One re-issued cleanup delete, on the same never-reject terms as safeDelete's
+  // own: bounded by the per-operation deadline, counted at the bracket, and
+  // resolving whatever happens. A failure records the path again rather than
+  // dropping it -- a server that is briefly unreachable at one cycle boundary is
+  // reachable at the next -- so the only thing that clears a record is a delete
+  // this adapter saw succeed.
+  private reissueCleanupDelete(path: string): Promise<void> {
+    return this.tracked(
+      this.boundByDeadline(
+        this.client.delete(path, true).then(() => {}),
+        "file delete",
+        path,
+        "delete",
+      ),
+    ).then(
+      () => {},
+      () => {
+        this.deferCleanupDelete(path);
+      },
     );
   }
 

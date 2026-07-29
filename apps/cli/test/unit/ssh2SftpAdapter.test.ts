@@ -14,6 +14,7 @@ import {
 } from "@psilink/core";
 
 import {
+  MAX_DEFERRED_CLEANUP_DELETES,
   SSH2SFTPClientAdapter,
   SFTP_REDIAL_WARN_INTERVAL,
 } from "../../src/connection/ssh2SftpAdapter";
@@ -55,6 +56,15 @@ const releasableClient = () =>
     _sock: { setKeepAlive: () => {}, writableEnded: false, destroy: () => {} },
     end: () => {},
   });
+
+// The cleanup deletes the adapter has recorded for re-issue, in record order.
+// Private state with no public surface: what it holds decides whether a later
+// re-establishment re-issues the delete, and its size is the bound the cap
+// enforces, neither of which is observable from outside until the drain runs.
+const deferredCleanupPaths = (adapter: SSH2SFTPClientAdapter): string[] => [
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ...((adapter as any).deferredCleanupDeletes as Set<string>),
+];
 
 // Replaces the adapter's logger with a warn-swallowing stub. The deadline /
 // idle-window tests advance past SFTP_SLOW_OPERATION_WARNING_MS (30 s) on the
@@ -1100,6 +1110,55 @@ describe("bounded safeDelete", () => {
       delete: vi.fn().mockRejectedValue(new Error("permission denied")),
     };
     await expect(adapter.safeDelete("/remote/x.json")).resolves.toBeUndefined();
+  });
+
+  test("records a withheld safeDelete for re-issue in connection-per-poll mode and still resolves", async () => {
+    // The deadline's own expiry is one of the two readings that record a cleanup
+    // for re-issue (the other is the session boundary at issue time): the server
+    // never answered, so nothing says the file went away. The record must not cost
+    // the contract -- the call still resolves within the deadline rather than
+    // rejecting.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        delete: vi.fn().mockImplementation(() => new Promise(() => {})),
+      };
+      const deleting = adapter.safeDelete("/remote/temp-withheld.tmp");
+      const assertion = expect(deleting).resolves.toBeUndefined();
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      await assertion;
+      expect(deferredCleanupPaths(adapter)).toEqual([
+        "/remote/temp-withheld.tmp",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("the default held-session mode records nothing for a safeDelete that fails", async () => {
+    // The record and the drain are connection-per-poll machinery: the default mode
+    // holds one session for the whole exchange, so a cleanup delete never lands in
+    // a gap with no session, and it keeps no state and issues no re-delete.
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
+    const del = vi.fn().mockRejectedValue(new Error("permission denied"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = { delete: del };
+
+    await expect(
+      adapter.safeDelete("/remote/temp-x.tmp"),
+    ).resolves.toBeUndefined();
+
+    expect(deferredCleanupPaths(adapter)).toEqual([]);
+    // ensureConnected is a no-op in this mode, so nothing re-issues and the one
+    // attempt above is the only round trip.
+    await expect(adapter.ensureConnected()).resolves.toBe(true);
+    expect(del).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -4198,6 +4257,18 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       code: "ERR_NOT_CONNECTED",
     });
 
+  // A wrapper stand-in that is a real EventEmitter, so connect()'s guarded
+  // fatal-'error' listener actually registers and a test can emit the malformed
+  // packet that kills the session. wrapperMethods()'s `on` is a plain mock, which
+  // registers nothing.
+  const fatalErrorWrapper = () =>
+    Object.assign(new EventEmitter(), {
+      open: vi.fn(),
+      close: vi.fn(),
+      opendir: vi.fn(),
+      readdir: vi.fn(),
+    }) as unknown as EventEmitter & ReturnType<typeof wrapperMethods>;
+
   // A droppable client whose underlying ssh2 Client is a real EventEmitter: its
   // end() clears the session (state.live=false) and emits 'close', modeling the
   // ssh2-sftp-client global 'close' listener that clears this.sftp when the
@@ -4208,6 +4279,11 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   // be driven end to end across a boundary.
   function ephemeralClient(wrapper: ReturnType<typeof wrapperMethods>) {
     const state = { live: true };
+    // The deletes the fixture actually performed, and the one lever a test needs
+    // over them: a partner that accepts the request and withholds its callback,
+    // which only a bound can end.
+    const deleted: string[] = [];
+    const deleteControls = { withholdCallback: false };
     const rawClient = new EventEmitter() as EventEmitter &
       Record<string, unknown>;
     // A live net.Socket reports Node's half-close flags and its post-destroy flag,
@@ -4264,11 +4340,23 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       realPath: vi.fn().mockResolvedValue("/"),
       get: vi.fn(onLiveSession("get", Buffer.from("payload"))),
       put: vi.fn(onLiveSession("put", "ok")),
-      delete: vi.fn(onLiveSession("delete", undefined)),
+      delete: vi.fn(async (path: string) => {
+        if (deleteControls.withholdCallback) await new Promise<void>(() => {});
+        if (!state.live) throw notConnected("delete");
+        deleted.push(path);
+      }),
       rename: vi.fn(onLiveSession("rename", undefined)),
       exists: vi.fn(onLiveSession("exists", true)),
     };
-    return { client, connect, state, rawClient, socket };
+    return {
+      client,
+      connect,
+      state,
+      rawClient,
+      socket,
+      deleted,
+      deleteControls,
+    };
   }
 
   // A client whose ssh2 Client models the real close SEQUENCE rather than
@@ -4280,6 +4368,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   // recoverable clean loss.
   function slowClosingClient(wrapper: ReturnType<typeof wrapperMethods>) {
     const state = { live: true, ending: false };
+    const deleted: string[] = [];
     const rawClient = new EventEmitter() as EventEmitter &
       Record<string, unknown>;
     Object.assign(rawClient, {
@@ -4312,8 +4401,14 @@ describe("ephemeral session mode (connection-per-poll)", () => {
         if (!state.live) throw notConnected("exists");
         return true;
       }),
+      delete: vi.fn(async (path: string) => {
+        if (state.ending)
+          throw new Error("Channel closed while the connection was ending");
+        if (!state.live) throw notConnected("delete");
+        deleted.push(path);
+      }),
     };
-    return { client, connect, state, rawClient };
+    return { client, connect, state, rawClient, deleted };
   }
 
   // A client that models what an ssh2 'end' does to an operation ALREADY ON THE
@@ -4843,6 +4938,209 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // the first attempt lands on the released session, rejects, and only the
     // re-issue behind the recovery re-dial succeeds.
     expect(attempts).toEqual([true]);
+  });
+
+  // The never-reject cleanup delete reaches no gate at all: its contract keeps it
+  // outside the recovery chokepoint, so it is the one operation that can be issued
+  // into an idle gap and reach no session. It resolves either way, so its caller
+  // in core cannot tell that from a delete that landed -- only the adapter can,
+  // and what it does with the reading is record the cleanup and re-issue it at the
+  // next point a session exists.
+
+  test("a cleanup delete issued while the deliberate-release boundary stands is re-issued at the next re-establishment", async () => {
+    const { client, state, deleted } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.releaseForIdle();
+    expect(state.live).toBe(false);
+    expect(releaseBoundaryStands(adapter)).toBe(true);
+
+    // The send()-catch sweep resuming into the idle gap: it must not reject, and
+    // on the released session it removes nothing.
+    await expect(
+      adapter.safeDelete("/remote/temp-abandoned.tmp"),
+    ).resolves.toBeUndefined();
+    expect(deleted).toEqual([]);
+    expect(deferredCleanupPaths(adapter)).toEqual([
+      "/remote/temp-abandoned.tmp",
+    ]);
+
+    // The next cycle's re-establishment is where the file actually goes away.
+    await expect(adapter.ensureConnected()).resolves.toBe(true);
+    expect(deleted).toEqual(["/remote/temp-abandoned.tmp"]);
+    expect(deferredCleanupPaths(adapter)).toEqual([]);
+  });
+
+  test("a cleanup delete issued while the release is in flight is re-issued at the next re-establishment", async () => {
+    // The other reading, and the one no completed-boundary check covers: the
+    // release has driven the ssh2 Client's end() and is awaiting its 'close', so
+    // the session still reads live over a transport that can no longer carry the
+    // delete.
+    const { client, rawClient, deleted } = slowClosingClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+
+    const release = adapter.releaseForIdle();
+    expect(rawClient.end).toHaveBeenCalledOnce();
+    expect(client.sftp).not.toBeNull();
+
+    await expect(
+      adapter.safeDelete("/remote/temp-inflight.tmp"),
+    ).resolves.toBeUndefined();
+    expect(deleted).toEqual([]);
+    await release;
+
+    await expect(adapter.ensureConnected()).resolves.toBe(true);
+    expect(deleted).toEqual(["/remote/temp-inflight.tmp"]);
+    expect(deferredCleanupPaths(adapter)).toEqual([]);
+  });
+
+  test("a cleanup delete that can obtain no session at all resolves and keeps its record", async () => {
+    // The dial keeps failing, so the drain never runs. The contract still holds --
+    // the caller in a catch block sees no rejection -- and the record is kept
+    // rather than dropped, so the first re-establishment that does land sweeps it.
+    const { client, connect, state } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    await adapter.releaseForIdle();
+    expect(state.live).toBe(false);
+    connect.mockRejectedValue(new Error("connect ECONNREFUSED"));
+
+    await expect(
+      adapter.safeDelete("/remote/temp-orphan.tmp"),
+    ).resolves.toBeUndefined();
+    await expect(adapter.ensureConnected()).resolves.toBe(false);
+
+    expect(deferredCleanupPaths(adapter)).toEqual(["/remote/temp-orphan.tmp"]);
+  });
+
+  test("a cleanup delete the drain cannot perform is bounded by the per-operation deadline", async () => {
+    // The re-issued delete is a server round trip like any other, so a partner
+    // that withholds its callback must not park the re-establishment -- and
+    // therefore teardown, which re-establishes before its drain -- on anything
+    // longer than the per-operation deadline.
+    const { client, deleteControls } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.releaseForIdle();
+    await adapter.safeDelete("/remote/temp-withheld.tmp");
+    expect(deferredCleanupPaths(adapter)).toEqual([
+      "/remote/temp-withheld.tmp",
+    ]);
+
+    vi.useFakeTimers();
+    try {
+      deleteControls.withholdCallback = true;
+      const reconnected = adapter.ensureConnected();
+      const assertion = expect(reconnected).resolves.toBe(true);
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+    // The delete that could not be performed is kept, not dropped: the next
+    // re-establishment tries again.
+    expect(deferredCleanupPaths(adapter)).toEqual([
+      "/remote/temp-withheld.tmp",
+    ]);
+  });
+
+  test("after a fatal SFTP error a cleanup delete short-circuits and no recorded one is re-issued", async () => {
+    // Both halves of the post-fatal posture. A request posted to a destroyed
+    // wrapper never calls back, so safeDelete returns at once rather than driving
+    // one -- and the drain must not reintroduce, at teardown, exactly the request
+    // that short-circuit refuses.
+    const wrapper = fatalErrorWrapper();
+    const { client } = ephemeralClient(wrapper);
+    const attempted: string[] = [];
+    client.delete = vi.fn(async (path: string) => {
+      attempted.push(path);
+      // A cleanup that fails for its own reason, so it is recorded without a
+      // release having taken the session away.
+      throw new Error("permission denied");
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    // A cleanup that failed for its own reason, recorded before anything went
+    // fatal.
+    await expect(
+      adapter.safeDelete("/remote/temp-recorded.tmp"),
+    ).resolves.toBeUndefined();
+    expect(attempted).toEqual(["/remote/temp-recorded.tmp"]);
+    expect(deferredCleanupPaths(adapter)).toEqual([
+      "/remote/temp-recorded.tmp",
+    ]);
+
+    wrapper.emit("error", new Error("Malformed NAME packet"));
+
+    await expect(
+      adapter.safeDelete("/remote/temp-after-fatal.tmp"),
+    ).resolves.toBeUndefined();
+    adapter.beginTeardown();
+    await adapter.ensureConnected();
+
+    // Nothing further reached the dead session, from either route.
+    expect(attempted).toEqual(["/remote/temp-recorded.tmp"]);
+  });
+
+  test("the record of unperformed cleanup deletes stays bounded across many released cycles", async () => {
+    // A server that has stopped answering deletes entirely: every cycle records
+    // one more cleanup and none of them can be drained. The record must not grow
+    // with the run.
+    const { client, state } = ephemeralClient(wrapperMethods());
+    // The re-established session answers every delete with a refusal, so no
+    // record is ever cleared.
+    client.delete = vi.fn(async () => {
+      throw notConnected("delete");
+    });
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const debug = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = {
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug,
+      trace: vi.fn(),
+      error: vi.fn(),
+    };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    for (let cycle = 0; cycle < MAX_DEFERRED_CLEANUP_DELETES * 3; cycle += 1) {
+      await adapter.releaseForIdle();
+      expect(state.live).toBe(false);
+      await adapter.safeDelete(`/remote/temp-${cycle}.tmp`);
+      await adapter.ensureConnected();
+    }
+
+    expect(deferredCleanupPaths(adapter)).toHaveLength(
+      MAX_DEFERRED_CLEANUP_DELETES,
+    );
+    // The refusal is reported where an operator looking for it would find it, and
+    // says which file was left behind.
+    expect(
+      debug.mock.calls.some(
+        (call) =>
+          (call[0] as string).includes(
+            "cleanup deletes are already recorded",
+          ) && (call[0] as string).includes("is left behind"),
+      ),
+    ).toBe(true);
   });
 
   test("an op issued while the release is in flight completes instead of failing terminally", async () => {
@@ -5503,8 +5801,13 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     | "ensureConnected"
     | "beginTeardown"
     // The never-reject cleanup delete. It swallows every outcome instead of being
-    // recovery-wrapped, so it has no counter and no warning to protect; adding a
-    // second such op is a deliberate edit of this list, not an omission.
+    // recovery-wrapped, so it never reaches this table's chokepoint: it neither
+    // re-establishes before its attempt nor touches the reconnect counters and the
+    // warning these rows assert about. What it does across a boundary instead --
+    // record the cleanup and re-issue it at the next re-establishment -- is
+    // asserted by the cleanup-delete cases above, which is what keeps this
+    // exclusion an exclusion from THIS crossing rather than from coverage. Adding
+    // a second such op is a deliberate edit of this list, not an omission.
     | "safeDelete"
   >;
   const dataPlaneOps = [
