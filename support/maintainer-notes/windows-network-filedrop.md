@@ -152,6 +152,21 @@ real console would additionally exercise is the console read itself, including
 the masked `-AsSecureString` entry. The `SecureString` handling downstream of
 it is the script's own and did run, as it did in the earlier pass.
 
+**Logging a run does not hide its questions, and the guide should keep saying
+so.** `Read-Host` writes its prompt through the host rather than down the
+success stream, so a pipe never carries it. Measured with a script emitting a
+distinct marker from `Write-Host` and from `Read-Host`, run as
+`... 6>&1 | Tee-Object log.txt`: the `Write-Host` marker reached the file, and
+while the process sat blocked at the prompt the `Read-Host` marker was absent
+from it -- it had gone to the console, which is where the operator needs it.
+`6>&1` is what carries the report itself, because `Write-Host` writes to the
+information stream; without it the file is empty. The Command Prompt script is
+the opposite case and has no equivalent: `set /p` prompts go to standard
+output, so `1> log.txt 2>&1` puts every question in the file and leaves a blank
+screen -- confirmed by a full run that completed with nothing displayed at all.
+That asymmetry is the reason the guide offers logging for one shell and copying
+out of the window for the other.
+
 Two Windows-only defects were found by that pass and fixed. **The volume check
 never ran**: its here-string reached `sh` with the CRLF line endings a checkout
 with `core.autocrlf` produces, and `sh` does not treat a carriage return as

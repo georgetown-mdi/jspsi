@@ -180,6 +180,20 @@ eaten**. `set "SMB_PASS=Pa!ss&w%rd^1"` stores `Pa!ss&wrd^1`, which presents as
 a wrong password. It has to be written `%%` in a file, or read at run time.
 This bit the first verification harness written for this script.
 
+**At the command line the rule is different, and the difference matters to the
+guide.** Typed at a prompt rather than read from a batch file, a lone `%` is
+passed through untouched, and so is a pair naming a variable that does not
+exist: `one%two` and `pa%NOSUCHVAR%ss` both reach Docker intact, measured by
+creating a volume and reading the stored options back. Only a pair around the
+name of a real environment variable expands, and that one is silent --
+`pa%USERNAME%ss` was stored as the account name with `pa` and `ss` around it.
+This is why "Doing it by hand" now warns about two `%`, not one: the earlier
+wording sent anyone with an ordinary `%` in their password away from a route
+that works. The script is immune either way, since `set /p` never parses what
+it reads and the single expansion at volume-create time is not rescanned --
+confirmed by a full run authenticating with `pa%USERNAME%ss` and storing it
+verbatim.
+
 ## Hazards in cmd that this script had to be shaped around
 
 Each of these was a real defect in this script before it was a note here.

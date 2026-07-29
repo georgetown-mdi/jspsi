@@ -14,10 +14,29 @@ against a real server more recently than these diagnoses have, so if one of them
 does not match what you are seeing, trust what is on your screen.
 
 To send the whole run to whoever is helping you, copy it straight out of the
-window rather than running it again: right-click the title bar, then **Edit >
-Select All** and **Edit > Copy**. In Command Prompt your password is on that
-screen, so drag-select from just below the `Password:` line instead of using
-Select All -- everything the checks printed comes after it.
+window: right-click the title bar, then **Edit > Select All** and **Edit >
+Copy**. In Command Prompt your password is on that screen, so drag-select from
+just below the `Password:` line instead of using Select All -- everything the
+checks printed comes after it.
+
+In PowerShell you can also log the next attempt to a file as it runs. The
+questions still appear on screen, because PowerShell writes them to the window
+rather than into the log, so you answer them exactly as usual:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Setup-PsilinkFileDrop.ps1" 6>&1 |
+  Tee-Object "$env:USERPROFILE\psilink-setup-log.txt"
+```
+
+The `6>&1` is not decoration: without it the file comes out empty, because the
+script writes its report to a stream a plain redirect does not carry. The log
+holds the server, share and account names and what each check said. It does not
+hold your password.
+
+There is no Command Prompt equivalent, and this is the one place the two shells
+genuinely differ. Sending output to a file there sends the questions with it,
+leaving you typing at a blank screen with nothing to say what is being asked.
+Copy out of the window instead.
 
 The script runs in four numbered parts, and the checks inside part 3 are
 numbered separately, steps 1 to 6. A "step" on this page is always one of those
@@ -376,8 +395,13 @@ the password does the same to the credentials -- producing a login failure that
 looks exactly like a wrong password. In Command Prompt each `--opt` is one
 argument that has to survive whatever punctuation the password holds, which is
 what the double quotes are for; `$` means nothing there. `%` is the character to
-watch instead, since Command Prompt uses it for variable expansion: if the
-password contains one, run the script rather than doing this by hand.
+watch instead, and only in pairs: a single `%` is passed through, and so is a
+pair naming something that does not exist, but a pair around the name of a real
+environment variable is replaced before Docker ever sees it. A password of
+`pa%USERNAME%ss` arrives with your Windows account name in the middle of it,
+silently, and every later attempt reads as a wrong password. If yours has two
+`%` in it, run the script instead: it reads the password rather than taking it
+from a command line, so nothing expands.
 
 Check that it mounts and that the folder is the one you meant:
 
