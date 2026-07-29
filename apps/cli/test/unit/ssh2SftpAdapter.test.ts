@@ -5141,14 +5141,15 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   });
 
   test("an idle boundary reached with a drain re-issue in flight still closes the session", async () => {
-    // The re-issue is the one round trip an idle release MAY tear, and this is
-    // what that buys. Counted at the bracket instead, it would hold the boundary
-    // for its whole bound -- and a boundary that closes nothing leaves the
-    // session live, so the next re-establishment finds one, re-runs the drain and
-    // regenerates the operation, which against a server that accepts DELETE and
-    // withholds its callback reverts the mode to a held session for the run. The
-    // tear costs the cleanup nothing: the torn delete rejects, which records the
-    // path again for the next re-establishment.
+    // The re-issue is the one round trip still owing a settlement that an idle
+    // release MAY tear, and this is what that buys. Counted at the bracket
+    // instead, it would hold the boundary for its whole bound -- and a boundary
+    // that closes nothing leaves the session live, so the next re-establishment
+    // finds one, re-runs the drain and regenerates the operation, which against
+    // a server that accepts DELETE and withholds its callback reverts the mode
+    // to a held session for the run. The tear costs the cleanup nothing: the
+    // torn delete rejects, which records the path again for the next
+    // re-establishment.
     const { client, state } = ephemeralClient(wrapperMethods());
     const calls: string[] = [];
     let releaseDelete!: () => void;

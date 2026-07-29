@@ -432,8 +432,12 @@ file at such a name. The mechanism, the shape narrowing, and the bounds on both
 the record and the drain are in
 [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md).
 
-The re-issue that drain makes is then the one op the release may TEAR, and that
-inverts the rule above for it alone. The reason is what a counted best-effort
+The re-issue that drain makes is then the one op still owing a settlement that the
+release may TEAR, and that inverts the rule above for it alone. (A listing's
+best-effort handle close is unbracketed too and a boundary tears that as readily,
+but it is fired after the listing has settled, so nothing is owed for it: its loss
+is the leaked handle a withheld close callback already costs, and in this mode the
+session ends at that boundary anyway.) The reason is what a counted best-effort
 sweep would cost this mode: against a server that accepts DELETE and never
 answers it, a counted re-issue is outstanding at every boundary, every boundary
 therefore closes nothing, and every live session left behind is another
@@ -450,6 +454,19 @@ as the success it is. The same reading is why the retry is BUDGETED rather than
 standing: a delete the partner will never let succeed is indistinguishable from
 one it will, so the only way not to retry the first forever is to stop retrying
 either after a few cycles, which costs the second nothing a healthy run notices.
+
+That budget belongs to a RECORDING and not to the path, which is what its
+give-up is scoped to: nothing about a path is remembered once its recording ends,
+so a temp the entry sweep keeps offering is recorded again on the next cycle that
+offers it. Against a temp this party can never delete, the steady state is
+therefore that sweep's own attempt plus one re-issue per cycle -- about double
+what the cleanup cost before the record existed -- rather than a few round trips
+for the whole run. It is bounded amplification, the record's own cap being what
+bounds how many such recordings stand at once, and the alternative is worse: a
+tombstone remembering the given-up path would occupy a cap slot, which is exactly
+how a peer could crowd the send path's own cleanups out of the record. What the
+budget is not is the thing that keeps the per-cycle session -- that is the
+re-issue being uncounted, which holds whether or not the retry is budgeted.
 
 **Close, drain, and the authenticated abort marker -- real code, the one genuine
 gap.** At teardown the last cycle's connection is already released, but `close()`

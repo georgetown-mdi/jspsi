@@ -146,8 +146,8 @@ const TRANSITION_ACQUIRE_TIMEOUT_MS = 10_000;
 export const MAX_DEFERRED_CLEANUP_DELETES = 64;
 
 /**
- * How many times a recorded cleanup delete is re-issued before the record gives
- * up on it and its file is left behind
+ * How many times ONE RECORDING of a cleanup delete is re-issued before that
+ * recording gives up and its file is left behind
  * ({@link SSH2SFTPClientAdapter.reissueCleanupDelete}).
  *
  * A budget is needed because a re-issue's failure is what records the path
@@ -158,15 +158,37 @@ export const MAX_DEFERRED_CLEANUP_DELETES = 64;
  * with the record full that is a whole record's worth of extra DELETE round trips
  * per poll cycle against the partner's server.
  *
+ * What it bounds is that recording rather than the path for the connection's
+ * life. Giving up remembers nothing about the path, so a path handed to
+ * {@link SSH2SFTPClientAdapter.safeDelete} again is recorded afresh with the
+ * whole budget, by either route into the record (the delete's own rejection, and
+ * the release reading taken before it); and a path re-recorded while its own
+ * re-issue is still in flight keeps the budget that re-record wrote, since an
+ * entry already standing is left alone rather than taking the failing re-issue's
+ * decrement. So where the same undeletable temp keeps reaching the cleanup
+ * delete -- the entry sweep offering it cycle after cycle -- the steady state is
+ * that sweep's own attempt plus one re-issue per cycle, about double the DELETE
+ * traffic that cleanup cost before the record existed, rather than three per
+ * connection. That amplification is bounded by the cap above rather than here: a
+ * drain issues one re-issue per recording, and MAX_DEFERRED_CLEANUP_DELETES
+ * bounds how many recordings stand at once. Remembering a given-up path as a
+ * tombstone would make the budget per path per connection and is deliberately not
+ * done -- a tombstone consumes a cap slot, which is how a peer would crowd the
+ * send path's own cleanups out of the record.
+ *
+ * It is not what keeps this mode's per-cycle session either: an idle release is
+ * kept from being pinned off by the re-issue's exclusion from the tracked()
+ * bracket (see reissueCleanupDelete), which holds with or without a budget.
+ *
  * The value: the record's healthy path succeeds on the first re-issue, so the
  * budget is what covers a transient failure, and the re-establishments it spans
  * are the poll cycles the exchange is made of. Two retries past that first
  * re-issue is enough for a server unreachable across consecutive boundaries and
- * short enough that a permanently-refused path costs a handful of round trips
- * rather than a run's worth. Exhausting it degrades that cleanup to exactly the
- * behavior it had before the record existed (its file survives the run), which is
- * also what the cap above does on overflow. Deliberately not operator-
- * configurable, like every other bound in this file.
+ * short enough that a permanently-refused path costs a handful of round trips per
+ * recording rather than a run's worth. Exhausting it degrades that cleanup to
+ * exactly the behavior it had before the record existed (its file survives the
+ * run), which is also what the cap above does on overflow. Deliberately not
+ * operator-configurable, like every other bound in this file.
  *
  * @internal exported for the adapter's own tests
  */
@@ -3763,7 +3785,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // `reissuesLeft` is what a re-issue's own failure re-records with, one below
   // what it ran with; a fresh record from safeDelete gets the whole budget. An
   // exhausted budget is given up on HERE rather than at the re-issue, so every
-  // route back into the record passes the same shape and cap checks.
+  // route back into the record passes the same shape and cap checks. Giving up
+  // ends that RECORDING and leaves nothing behind about the path, so the budget
+  // is not per path per connection -- a deliberate shape, and what it costs
+  // against a temp this party can never delete is in
+  // MAX_DEFERRED_CLEANUP_REISSUES.
   private deferCleanupDelete(
     path: string,
     reissuesLeft = MAX_DEFERRED_CLEANUP_REISSUES,
@@ -3779,6 +3805,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       );
       return;
     }
+    // An entry already standing keeps the budget it holds: a decrement arriving
+    // from a re-issue whose path was re-recorded while it was in flight is
+    // discarded rather than applied to that newer recording.
     if (this.deferredCleanupDeletes.has(path)) return;
     if (this.deferredCleanupDeletes.size >= MAX_DEFERRED_CLEANUP_DELETES) {
       this.log.debug(
@@ -3822,7 +3851,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // close() and on the recovery gate's first attempt after an idle gap, neither
   // of which has a budget over it. A re-issue that fails, the expiry of that
   // bound included, is recorded again through the same capped record and against
-  // the same per-path re-issue budget, so neither the record nor any one path's
+  // the budget that recording carried, so neither the record nor one recording's
   // retries grow without bound.
   private drainDeferredCleanupDeletes(): Promise<void> {
     if (this.deferredCleanupDeletes.size === 0) return Promise.resolve();
@@ -3858,18 +3887,24 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // did, so a full record refuses it like any other.
   //
   // It is the one round trip in this file deliberately issued OUTSIDE the
-  // tracked() bracket, which is a statement about the idle-boundary release: a
-  // release MAY tear this operation off the wire, where it may tear no other. Two
-  // things make that sound. The record survives the tear -- the torn delete
-  // rejects, which offers the path back for the next re-establishment -- so the
-  // work is not lost, only deferred, which is the very thing the record exists to
-  // do. And a torn DELETE of this party's own temp cannot leave a state its
-  // re-issue misreads: the server either performed the unlink or did not, and the
-  // re-issue's notFoundOK reads the first as the success it is. Counting it
-  // instead is what pins the mode off: the count is the release's precondition, so
-  // a server that accepts DELETE and withholds its callback would hold every
-  // boundary through the re-issue's whole deadline, and each held boundary leaves
-  // the session live for the next re-establishment to drain and re-issue again.
+  // tracked() bracket while its settlement is still owed, which is a statement
+  // about the idle-boundary release: a release MAY tear this operation off the
+  // wire, where the only other unbracketed round trip it can reach -- a listing's
+  // best-effort handle close, fired once that listing has already settled -- is
+  // work no guarantee is owed for, its tear costing what a withheld close
+  // callback costs anyway. Two things make the re-issue's tear sound. The record
+  // survives it -- the torn delete rejects, which offers the path back for the
+  // next re-establishment -- so the work is not lost, only deferred, which is the
+  // very thing the record exists to do. And a torn DELETE of this party's own
+  // temp cannot leave a state its re-issue misreads: the server either performed
+  // the unlink or did not, and the re-issue's notFoundOK reads the first as the
+  // success it is -- a library behaviour, so the integration suite drives it
+  // against a real server (a recorded temp that was never created, re-issued and
+  // cleared) rather than resting on this sentence. Counting it instead is what
+  // pins the mode off: the count is the release's precondition, so a server that
+  // accepts DELETE and withholds its callback would hold every boundary through
+  // the re-issue's whole deadline, and each held boundary leaves the session
+  // live for the next re-establishment to drain and re-issue again.
   // The bracket's other duty does not reach here either: the heartbeat is never
   // armed in the mode that keeps this record, so there is no keepalive for an
   // uncounted round trip to draw alongside it. Both halves of that are checks

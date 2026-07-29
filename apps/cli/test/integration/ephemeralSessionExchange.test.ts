@@ -1464,3 +1464,65 @@ inProcessOnly(
   },
   BOUNDARY_TEST_TIMEOUT_MS,
 );
+
+inProcessOnly(
+  "a recorded cleanup delete whose file is already gone is cleared by its " +
+    "re-issue rather than costing the budget",
+  async () => {
+    // Letting an idle release tear a re-issue rests on a DELETE of this party's
+    // own temp leaving no state the re-issue can misread: the server performed
+    // the unlink or it did not, and an absent file is the success it is. That
+    // last reading is ssh2-sftp-client's `notFoundOK`, a library behaviour, so
+    // it is driven against a real server here rather than argued -- the state a
+    // torn delete leaves when the unlink landed and the tear took the reply is
+    // staged directly, as a recorded path that was never created on disk. A
+    // regression reads it as a failure instead: the whole re-issue budget spent
+    // on round trips for a file that is gone, and a "left behind" line about it.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "per-poll-absent-delete-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const deletesOf = countDeletes(adapter);
+    const gone = `temp-${randomUUID()}.tmp`;
+    const gonePath = `${remote}/${gone}`;
+
+    try {
+      await adapter.connect({
+        host: srv.handle.host,
+        port: srv.handle.port,
+        ...serverAuth(srv.handle.usera),
+        maxReconnectAttempts: 0,
+      });
+
+      await adapter.releaseForIdle();
+      await expect(adapter.safeDelete(gonePath)).resolves.toBe(undefined);
+      expect(existsSync(path.join(dir, gone))).toBe(false);
+      // The sweep reached no session, so the path stands recorded and its one
+      // attempt is the only DELETE issued for it so far.
+      expect(deferredCleanupPaths(adapter)).toEqual([gonePath]);
+      expect(deletesOf(gonePath)).toBe(1);
+
+      await adapter.ensureConnected();
+
+      // One re-issue, read as the success it is, and the record clear.
+      expect(deletesOf(gonePath)).toBe(2);
+      expect(deferredCleanupPaths(adapter)).toEqual([]);
+
+      // Cleared and not merely quiet for a cycle: no later re-establishment
+      // issues another round trip for it.
+      for (let cycle = 0; cycle < REISSUE_CYCLES; cycle += 1) {
+        await adapter.releaseForIdle();
+        await adapter.ensureConnected();
+      }
+      expect(deletesOf(gonePath)).toBe(2);
+      expect(deferredCleanupPaths(adapter)).toEqual([]);
+    } finally {
+      await adapter.end().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
