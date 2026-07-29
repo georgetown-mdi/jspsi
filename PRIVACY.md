@@ -50,7 +50,7 @@ An exchange relies on services that are operated by one of the parties, by the p
 | Service | Typically operated by | What it can observe |
 |---------|----------------------|---------------------|
 | Peer coordination (signaling) | The project, for the hosted web application; you, if you deploy the web application yourself; or a public third-party service if you point at one | Rendezvous identifiers, connection timing, and client IP addresses. Never data-channel content: the two browsers run an authenticated key exchange directly and the server relays only opaque setup messages. |
-| STUN | A third party. The hosted web application is configured with public STUN servers by default, one of them Google-operated | The client IP address that queried it, and nothing further. STUN is used to discover a public address before the connection is established. |
+| STUN | A third party. The hosted web application is configured by default with two public STUN servers, `stun.l.google.com:19302` (Google-operated) and `44.247.30.68:443` | The client IP address that queried it, and nothing further. STUN is used to discover a public address before the connection is established. |
 | TURN relay | Whoever you configure; commonly a commercial ICE service | The two endpoints' addresses and the traffic volume between them. It forwards encrypted DTLS packets without terminating the session, so it cannot read content. |
 | Shared SFTP server or file drop | One of the two parties, or a third party both trust | The exchange's files. What those files reveal depends on the exchange -- see below. |
 

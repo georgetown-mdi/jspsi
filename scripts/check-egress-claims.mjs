@@ -15,7 +15,8 @@
 // under one of the schemes below either sits on ALLOWLIST, each entry carrying
 // the reason it does not contradict the document, or it fails the build.
 //
-// WHAT THIS CHECK DOES NOT COVER, and cannot:
+// WHAT THIS CHECK DOES NOT COVER -- most of it past the reach of a literal
+// scan, the rest by decision:
 //
 //   - Egress assembled at runtime. A host built from configuration, from an
 //     operator-supplied value, or by string concatenation never appears as a
@@ -31,17 +32,33 @@
 //     SCANNED_ROOTS.
 //   - A file git ignores. The listing in scanRepo excludes them, so a URL
 //     literal in one is never read, wherever under a scanned root it sits. The
-//     reach of that gap is small: CI checks out clean, so an ignored file
-//     exists only in the working tree of whoever wrote it.
+//     reach of that gap is small, but not because a tree holds no ignored file:
+//     an install and a core build leave plenty (node_modules, the workspace
+//     dist trees), in CI as much as locally. It is that none of them land under
+//     a scanned root, so the gap opens only for a file written under one of
+//     those roots and ignored there.
+//   - A text file in an encoding other than UTF-8. Every scanned file is
+//     decoded as UTF-8, so a UTF-16 one reads as its characters separated by
+//     NULs, matches nothing, and is still counted among the files scanned.
+//   - A URL literal inside a JavaScript or TypeScript comment. Comment text is
+//     blanked before the matcher reads the file, so a `@see` link in a JSDoc
+//     block and a trailing `// https://cdn.example/a.js` alike go unreported.
+//     This is the one step that deletes text, and a decision rather than a
+//     limit of reach: a comment issues no request, and a documentation link
+//     would otherwise have to be allowlisted. It reaches the JavaScript and
+//     TypeScript family alone; every other text format is scanned raw, for the
+//     reason set out below.
 //   - A URL spelled so as to evade the matcher: split across concatenated
 //     string fragments, escaped inside a regular expression (`https:\/\/`),
 //     percent- or entity-encoded in the scheme or the colon after it
 //     (`%68ttps://`, `&#104;ttps://`, `https%3A//`, `https&#58;//`; an encoded
 //     host is still reported, since the scheme is what the matcher reads), or
-//     glued to an alphanumeric character (`xhttps://host`), which the scheme
-//     rule requires be preceded by punctuation or the start of the text. The
-//     check is a guard against egress added inadvertently, not against an
-//     author who wants to hide it.
+//     glued to a letter, digit, or underscore (`xhttps://host`,
+//     `_https://host`), none of which the scheme rule admits before the
+//     scheme; any other character, or the start of the text, still matches
+//     (`.https://host` and `-https://host` are reported). The check is a guard
+//     against egress added inadvertently, not against an author who wants to
+//     hide it.
 //   - Schemes outside http, https, stun, stuns, turn, and turns: a `wss://`,
 //     `ws://`, `ftp://` or `file://` literal names a host and is not reported.
 //     Nor is a protocol-relative `//host` reference, which carries no scheme to
@@ -50,11 +67,13 @@
 //     nothing but slashes, which is what a protocol comparison
 //     (`location.protocol === "https:"`) is; wholly interpolated
 //     (`http://${host}`, `http://${host}:8443`), as the helpers over an inbound
-//     Host header write it; or written entirely of dots, which `new URL()` does
-//     resolve to the host `...` but is how elided placeholder text writes a URL
-//     (`https://...#...` in the invitation field). All are skipped knowingly;
-//     why none of them can be tightened is at `urlLiterals`. An interpolation
-//     with a literal host beside it names a host and is reported
+//     Host header write it; nothing but a numeric port (`https://:8443/x`),
+//     which the port rule leaves empty and `new URL()` rejects outright; or
+//     written entirely of dots, which `new URL()` does resolve to the host
+//     `...` but is how elided placeholder text writes a URL (`https://...#...`
+//     in the invitation field). Those four are skipped knowingly; why none of
+//     them can be tightened is at `urlLiterals` and `namesLiteralHost`. An
+//     interpolation with a literal host beside it names a host and is reported
 //     (`https://${tenant}.evil.example`).
 //
 // The opposite direction is loud and left that way: an authority spelling out
