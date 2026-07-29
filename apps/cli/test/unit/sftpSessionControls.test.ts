@@ -324,3 +324,61 @@ describe("SFTP session controls: op counting and handshakes", () => {
     expect(end).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("SFTP session controls: rename-tear staging", () => {
+  test("a probe parked on a torn destination is released by that path's REMOVE", async () => {
+    const controls = createSftpSessionControls();
+    const { renameTear } = controls;
+    renameTear.noteTorn("/psi/dir/id-29.json");
+
+    let released = false;
+    const parked = renameTear.waitForConsumption().then(() => {
+      released = true;
+    });
+    // Another path's REMOVE is not this destination's consumption.
+    renameTear.noteRemoved("/psi/dir/other.json");
+    await Promise.resolve();
+    expect(released).toBe(false);
+
+    renameTear.noteRemoved("/psi/dir/id-29.json");
+    await parked;
+    expect(released).toBe(true);
+    // Already consumed: a later probe of the same path is not parked at all.
+    await expect(renameTear.waitForConsumption()).resolves.toBeUndefined();
+  });
+
+  test("reset disarms every flag and releases a probe nothing will consume", async () => {
+    const controls = createSftpSessionControls();
+    const { renameTear } = controls;
+    renameTear.tearAfterRenameLands = true;
+    renameTear.tearBeforeRenameLands = true;
+    renameTear.consumeDestinationAtTear = true;
+    renameTear.holdProbeUntilDestinationConsumed = true;
+    renameTear.noteTorn("/psi/dir/id-29.json");
+    const parked = renameTear.waitForConsumption();
+
+    renameTear.reset();
+
+    // A parked probe outliving its case would hold a reply for the whole run.
+    await expect(parked).resolves.toBeUndefined();
+    expect(renameTear.tearAfterRenameLands).toBe(false);
+    expect(renameTear.tearBeforeRenameLands).toBe(false);
+    expect(renameTear.consumeDestinationAtTear).toBe(false);
+    expect(renameTear.holdProbeUntilDestinationConsumed).toBe(false);
+    expect(renameTear.tornDestination).toBeUndefined();
+  });
+
+  test("tearing a session shares the one-drop claim with the caps", async () => {
+    const controls = createSftpSessionControls();
+    const { conn, end } = stubConnection();
+    controls.onConnectionReady(conn);
+    controls.dropActiveAfterOps(1);
+
+    controls.tearSession(conn);
+    expect(end).toHaveBeenCalledTimes(1);
+    // The armed cap now has nothing left to end: a session is dropped once.
+    controls.recordOp(conn);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+});

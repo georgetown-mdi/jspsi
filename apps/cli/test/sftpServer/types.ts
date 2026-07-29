@@ -102,6 +102,56 @@ export interface SftpFaultInjection {
 }
 
 /**
+ * Deterministic staging of a RENAME torn by a session drop, and of the partner
+ * consumption that can follow it. Every flag is OFF by default and each arming
+ * flag is one-shot: the RENAME that fires it clears it, so a recovery's re-issue
+ * of the same rename is served normally.
+ *
+ * The op-count drops ({@link SftpSessionControls.dropActiveAfterOps} and
+ * {@link SftpSessionControls.maxOps}) cannot stage this: they arm the teardown as
+ * a request is counted and defer it to the check phase, so whether the request's
+ * own filesystem work lands before the connection goes is a race against that
+ * request's fs callback. These controls cut at a named point inside the RENAME
+ * handler instead, so what landed at the server is decided rather than raced.
+ *
+ * In-process only, like the fault hooks: a native sshd can neither be told where
+ * inside a request to cut nor made to hold a reply for another request.
+ */
+export interface SftpRenameTearControls {
+  /**
+   * Tear the connection serving the next RENAME from inside its `fs.rename`
+   * callback, on success and before its reply is written: the publish is durably
+   * in place at the server and the client's rename is torn off the wire with no
+   * status ever sent.
+   */
+  tearAfterRenameLands: boolean;
+  /**
+   * Tear the connection serving the next RENAME before any filesystem work runs,
+   * so nothing lands and the destination never exists. The source is left in
+   * place, so a recovery's re-issue can complete it.
+   */
+  tearBeforeRenameLands: boolean;
+  /**
+   * At a {@link tearAfterRenameLands} tear, also unlink the landed destination
+   * server-side. This stands in for a partner that consumed the message inside
+   * the recovery window, for a case driving one adapter with no partner in it.
+   */
+  consumeDestinationAtTear: boolean;
+  /**
+   * Hold any STAT/LSTAT of {@link tornDestination} until that path has been
+   * REMOVEd, so a real partner's consume-delete strictly precedes the sender's
+   * landed-confirmation probe of the same path regardless of how the two would
+   * otherwise interleave. Released by {@link reset} as well, so a case whose
+   * partner never consumes does not park the probe for the run.
+   */
+  holdProbeUntilDestinationConsumed: boolean;
+  /** The destination path of the torn RENAME, as the client named it. */
+  tornDestination: string | undefined;
+  /** Disarm every flag, forget the torn destination, and release parked probes. */
+  reset(): void;
+}
+
+/**
  * Opt-in session-lifecycle controls the in-process backend exposes so the
  * connection-per-poll and mid-exchange-recovery tests can drive a server that
  * drops sessions the way the real partner's does. Every control is OFF by
@@ -213,6 +263,8 @@ export interface SftpSessionControls {
   handshakeCount(): number;
   /** Reset {@link handshakeCount} to zero (e.g. after a fixture's own connect). */
   resetHandshakeCount(): void;
+  /** Deterministic rename-tear staging; see {@link SftpRenameTearControls}. */
+  renameTear: SftpRenameTearControls;
 }
 
 /**

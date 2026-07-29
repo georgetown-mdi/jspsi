@@ -7,6 +7,7 @@ import {
   FileTransportClient,
   FrameSizeExceededError,
   TransportOperationStalledError,
+  TransportPublishIndeterminateError,
   UsageError,
 } from "@psilink/core";
 
@@ -3252,9 +3253,10 @@ describe("session recovery", () => {
 
   test("preserves the original rename error when the re-issue's exists() probe rejects", async () => {
     // rename()'s re-issue confirms a landed pre-drop rename via exists(dest); if
-    // that probe itself rejects, the ambiguity is unresolved and the ORIGINAL
-    // rename error must surface, not the probe's failure (mirrors
-    // createExclusiveOnce's SFTPv3 fallback to the original openErr).
+    // that probe itself rejects, the ambiguity is unresolved, so the outcome is
+    // the undetermined one -- carrying the ORIGINAL rename error, not the probe's
+    // failure (mirrors createExclusiveOnce's SFTPv3 fallback to the original
+    // openErr).
     const wrapper = sessionWrapper();
     const { client, connect, state } = droppable(wrapper);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3279,9 +3281,11 @@ describe("session recovery", () => {
     const err = await adapter
       .rename("/remote/id-joining.json", "/remote/id-hello.json")
       .catch((e: unknown) => e);
-    // The original rename error (code 2), not the exists() rejection.
-    expect((err as NodeJS.ErrnoException).code).toBe(2);
+    // The original rename error (code 2) is the cause, not the exists() rejection.
+    expect(err).toBeInstanceOf(TransportPublishIndeterminateError);
+    expect(((err as Error).cause as NodeJS.ErrnoException).code).toBe(2);
     expect((err as Error).message).toContain("No such file");
+    expect((err as Error).message).not.toContain("network timeout");
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
@@ -3291,7 +3295,9 @@ describe("session recovery", () => {
   // dead-session guard. The cases below pin what that seam buys on this path;
   // what the count itself buys is pinned in the connection-per-poll block, the
   // one mode where a boundary can fall while the probe is on the wire. Whichever
-  // way the probe fails, the ORIGINAL rename error is what surfaces.
+  // way the probe fails, it confirms nothing, so the rename fails carrying the
+  // ORIGINAL error -- and fails promptly, rather than riding the whole-exchange
+  // budget.
 
   test("refuses the re-issue's probe on a session already dead rather than hanging on it", async () => {
     // A fatal protocol error can land on the re-issued rename's own reply: the
@@ -3325,7 +3331,7 @@ describe("session recovery", () => {
     const err = await adapter
       .rename("/remote/id-joining.json", "/remote/id-hello.json")
       .catch((e: unknown) => e);
-    expect((err as NodeJS.ErrnoException).code).toBe(2);
+    expect(((err as Error).cause as NodeJS.ErrnoException).code).toBe(2);
     expect(probe.exists).not.toHaveBeenCalled();
     expect(connect).toHaveBeenCalledTimes(2);
   });
@@ -3355,16 +3361,23 @@ describe("session recovery", () => {
       .rename("/remote/id-joining.json", "/remote/id-hello.json")
       .catch((e: unknown) => e);
     // The probe was issued and timed out; the ambiguity it could not resolve
-    // leaves the ORIGINAL rename error, not the stall, as the failure.
+    // leaves the ORIGINAL rename error, not the stall, as the cause. One probe,
+    // not two: an unanswered destination has already left the question open, so
+    // the source is not asked and a second deadline is not spent.
     expect(probe.exists).toHaveBeenCalledOnce();
     expect(err).not.toBeInstanceOf(TransportOperationStalledError);
-    expect((err as NodeJS.ErrnoException).code).toBe(2);
+    expect(err).toBeInstanceOf(TransportPublishIndeterminateError);
+    expect(((err as Error).cause as NodeJS.ErrnoException).code).toBe(2);
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
-  test("surfaces the original rename error when the destination is genuinely absent", async () => {
-    // The probe answers, and answers false: the pre-drop rename did NOT land, so
-    // there is nothing to report as success and the absence must surface.
+  test("reports an absent destination whose source is gone too as undetermined", async () => {
+    // Both probes answer, and both answer false. That is NOT evidence the rename
+    // failed: in delete mode the peer's consume-delete removes exactly this
+    // party's own publish, so a rename that landed durably and was consumed
+    // inside the recovery window reads identically to one that never landed. The
+    // rejection stands -- nothing here reports an unpublished message as sent --
+    // but as the undetermined outcome it is.
     const wrapper = sessionWrapper();
     const { client, connect, state } = droppable(wrapper);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3386,6 +3399,43 @@ describe("session recovery", () => {
     const err = await adapter
       .rename("/remote/id-joining.json", "/remote/id-hello.json")
       .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TransportPublishIndeterminateError);
+    expect(((err as Error).cause as NodeJS.ErrnoException).code).toBe(2);
+    expect((err as Error).message).toContain("No such file");
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("surfaces the original rename error when the source is still on the server", async () => {
+    // The other half of that pair: the destination is absent and the source is
+    // still there, so nothing moved this party's file and the publish
+    // determinately did not land. Its own error surfaces, unwrapped -- the
+    // undetermined classification must not swallow a determinate failure.
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).rename = vi.fn().mockImplementation(async () => {
+      if (!state.live) throw notConnected("rename");
+      throw Object.assign(new Error("rename: No such file From: a To: b"), {
+        code: 2,
+      });
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).exists = vi
+      .fn()
+      .mockImplementation(async (path: string) =>
+        path.endsWith("id-joining.json"),
+      );
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    const err = await adapter
+      .rename("/remote/id-joining.json", "/remote/id-hello.json")
+      .catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(TransportPublishIndeterminateError);
     expect((err as NodeJS.ErrnoException).code).toBe(2);
     expect((err as Error).message).toContain("No such file");
     expect(connect).toHaveBeenCalledTimes(2);

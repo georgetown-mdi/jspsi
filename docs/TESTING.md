@@ -74,6 +74,15 @@ paths. The in-process backend adds two surfaces a real `sshd` cannot offer:
   FIN and sends nothing back, leaving it in half-close, and a handshake stall
   that accepts the TCP connection and never writes a byte, so a dial hangs
   established but never ready.
+- Rename-tear staging, on the same hub. The op-count drops arm a teardown as a
+  request is counted and defer it, so whether that request's filesystem work ran
+  before the connection went is a race; these cut at a named point inside the
+  RENAME handler instead -- before any filesystem work, or from inside the
+  `fs.rename` callback with the publish durably in place and the reply never
+  written. The landed destination can be removed at the tear (standing in for a
+  partner that consumed it), and a STAT/LSTAT of it can be held until it has been
+  REMOVEd, which orders a real partner's consume-delete strictly before the
+  sender's landed-confirmation probe of the same path.
 
 Adapter behavior against a partner that cuts, stalls, or never closes is
 asserted through those controls. A probe that settles a dependency fact belongs

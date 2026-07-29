@@ -25,6 +25,7 @@ import {
   UsageError,
   PeerAbortError,
   FrameSizeExceededError,
+  TransportPublishIndeterminateError,
 } from "../src/errors";
 import { getLoggerForVerbosity } from "../src/utils/logger";
 
@@ -283,6 +284,7 @@ type LoopInternals = {
   recvSeq: number;
   lastAckedNNN: number;
   consecutiveEnoentCount: number;
+  indeterminatePublish: { seq: number; name: string } | undefined;
   inboundFrameCap: number | undefined;
   warnedUnexpectedFiles: Set<string>;
   poll(): Promise<void>;
@@ -292,6 +294,9 @@ const internals = (loop: FileSyncMessageLoop): LoopInternals =>
 
 interface LoopFixture {
   loop: FileSyncMessageLoop;
+  // The transport the loop was built on, so a case can replace one method for a
+  // per-call behavior the shared MemClientOptions do not express.
+  client: FileTransportClient;
   files: Map<string, Buffer>;
   emitted: EmittedEvent[];
   options: MessageLoopOptions;
@@ -383,6 +388,7 @@ function makeLoop(
   holder.loop = loop;
   return {
     loop,
+    client,
     files,
     emitted,
     options,
@@ -471,6 +477,75 @@ describe("FileSyncMessageLoop counter commit points", () => {
     expect(fail.loop.seq).toBe(0);
     expect(fail.loop.lastSentFile).toBeUndefined();
     expect([...failFiles.keys()].some((p) => p.endsWith(".tmp"))).toBe(false);
+  });
+
+  test("a publish the transport could not settle spends its seq slot", async () => {
+    const files = new Map<string, Buffer>();
+    const f = makeLoop({}, {}, files);
+    const realRename = f.client.rename.bind(f.client);
+    let renames = 0;
+    f.client.rename = async (from: string, to: string) => {
+      renames += 1;
+      if (renames > 1) return realRename(from, to);
+      // The publish landed durably and the peer consumed it before the transport
+      // could confirm it; from the transport's side that is indistinguishable
+      // from a publish that never landed at all.
+      await realRename(from, to);
+      files.delete(to);
+      throw new TransportPublishIndeterminateError("publish torn", {
+        cause: new Error("_rename: No such file or directory"),
+      });
+    };
+
+    await expect(f.loop.send({ a: 1 })).rejects.toBeInstanceOf(
+      TransportPublishIndeterminateError,
+    );
+    // The mechanical state after a rejected send is unchanged: the counter did
+    // not advance, nothing was recorded as sent, and the temp was swept.
+    expect(f.loop.seq).toBe(0);
+    expect(f.loop.lastSentFile).toBeUndefined();
+    expect([...f.responsibleFiles]).toEqual([]);
+    expect([...files.keys()].filter((p) => p.endsWith(".tmp"))).toEqual([]);
+
+    // What the counter's position does NOT license is reusing the slot: the peer
+    // may already have consumed a message under that seq and delivered it, so a
+    // second message written under it would be read as a second message rather
+    // than as the retry it is. The refusal is at send() entry, before any write.
+    const refused = await f.loop.send({ a: 2 }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(refused).toBeInstanceOf(UsageError);
+    expect((refused as Error).message).toContain("cannot send");
+    expect(renames).toBe(1);
+    expect([...files.keys()]).toEqual([]);
+
+    // Per-session state, not per-connection: a fresh session starts clean.
+    f.loop.resetSessionState();
+    await expect(f.loop.send({ a: 3 })).resolves.toBeUndefined();
+    expect(f.loop.seq).toBe(1);
+  });
+
+  test("an ordinary rename failure leaves the seq slot reusable", async () => {
+    const files = new Map<string, Buffer>();
+    const f = makeLoop({}, {}, files);
+    const realRename = f.client.rename.bind(f.client);
+    let renames = 0;
+    f.client.rename = async (from: string, to: string) => {
+      renames += 1;
+      if (renames > 1) return realRename(from, to);
+      throw new Error("rename failed");
+    };
+
+    await expect(f.loop.send({ a: 1 })).rejects.toThrow("rename failed");
+    // A determinate failure publishes nothing, so the same seq is written again
+    // and the send completes -- the refusal above is scoped to the outcome the
+    // transport could not settle, not to any failed send.
+    await expect(f.loop.send({ a: 1 })).resolves.toBeUndefined();
+    expect(f.loop.seq).toBe(1);
+    expect(f.loop.lastSentFile).toBe(
+      `${SELF}-${objectMessage({ a: 1 }).length}.json`,
+    );
   });
 
   test("retain: writeAck then lastAckedNNN then emit(data) then recvSeq++", async () => {
@@ -647,13 +722,14 @@ describe("FileSyncMessageLoop inboundFrameCap", () => {
 });
 
 describe("FileSyncMessageLoop resetSessionState", () => {
-  test("clears the six per-session fields and leaves poller/enoent counters", () => {
+  test("clears the seven per-session fields and leaves poller/enoent counters", () => {
     const f = makeLoop();
     const i = internals(f.loop);
     f.loop.seq = 5;
     i.recvSeq = 3;
     i.lastAckedNNN = 2;
     f.loop.lastSentFile = "self-99.json";
+    i.indeterminatePublish = { seq: 4, name: "self-42.json" };
     f.loop.setInboundFrameCap(50);
     i.warnedUnexpectedFiles.add("stray.json");
     i.consecutiveEnoentCount = 4;
@@ -664,6 +740,7 @@ describe("FileSyncMessageLoop resetSessionState", () => {
     expect(i.recvSeq).toBe(0);
     expect(i.lastAckedNNN).toBe(-1);
     expect(f.loop.lastSentFile).toBeUndefined();
+    expect(i.indeterminatePublish).toBeUndefined();
     expect(i.inboundFrameCap).toBeUndefined();
     expect(i.warnedUnexpectedFiles.size).toBe(0);
     // consecutiveEnoentCount is NOT a per-session-reset field (start() clears it),

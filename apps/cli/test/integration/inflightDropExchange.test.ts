@@ -2,7 +2,11 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test } from "vitest";
-import { FileSyncConnection } from "@psilink/core";
+import {
+  FileSyncConnection,
+  TransportPublishIndeterminateError,
+  UsageError,
+} from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
@@ -17,6 +21,15 @@ import type { InProcessSftpServer } from "../sftpServer/types";
 // outcome the exchange must never produce -- the sender's exchange proceeds to the
 // next protocol step believing the peer has what it needs, while the peer is still
 // waiting for it.
+//
+// The contract has a second side, driven by the last case here. A rejected send()
+// does NOT mean the peer has nothing: a publish that landed durably and was
+// consumed by the partner inside the sender's recovery window leaves the sender
+// with the same reading a publish that never landed leaves, so its send() rejects
+// over a message the partner has already delivered to its application. What the
+// caller is owed there is the difference between the two -- an undetermined
+// outcome is not a determined non-delivery -- and that the sequence slot the
+// publish spent is not silently reused underneath it.
 //
 // Both parties connect and synchronize BEFORE the drop is armed, so no connection
 // is established under a standing control, but unlike the withheld-close exercise
@@ -56,19 +69,27 @@ const DELIVERY_DEADLINE_MS = 20_000;
 const CUT_POINTS = [11, 14, 15, 16];
 
 interface ExchangeOutcome {
-  cutPoint: number;
-  sendRejection: string | undefined;
+  label: string;
+  sendRejection: Error | undefined;
   delivered: boolean;
   redials: number;
+  // The rejection of a second send() issued after a rejected one, for the case
+  // that asks whether the spent sequence slot is reusable; undefined where the
+  // case did not issue one.
+  retryRejection?: Error;
 }
 
 // One two-party exchange, in its own rendezvous directory under the shared server
-// (never a shared one; see sftpConnection.test.ts's header), cut once at the given
-// operation count and reported on. Throws nothing for the drop itself: a rejected
-// send() is a permitted outcome here, so it is recorded rather than raised.
-async function exchangeCutAt(
+// (never a shared one; see sftpConnection.test.ts's header), cut once by `arm` and
+// reported on. Throws nothing for the drop itself: a rejected send() is a
+// permitted outcome here, so it is recorded rather than raised. `retryAfterSend`
+// issues a second send() on the same connection once the first has settled and
+// records how it went.
+async function exchangeCutBy(
   srv: InProcessSftpServer,
-  cutPoint: number,
+  label: string,
+  arm: () => void,
+  retryAfterSend = false,
 ): Promise<ExchangeOutcome> {
   const dir = await fsp.mkdtemp(path.join(srv.handle.backingDir, "inflight-"));
   const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
@@ -114,10 +135,7 @@ async function exchangeCutAt(
 
     const delivery = new Promise<boolean>((resolve) => {
       receiver.once("data", (message: unknown) => {
-        resolve(
-          JSON.stringify(message) ===
-            JSON.stringify({ message: `in flight at ${cutPoint}` }),
-        );
+        resolve(JSON.stringify(message) === JSON.stringify({ message: label }));
       });
       // A drop the exchange cannot recover from ends the receiver with no `data`
       // event at all; resolving false on it reports that outcome at once rather
@@ -125,15 +143,13 @@ async function exchangeCutAt(
       receiver.once("error", () => resolve(false));
     });
 
-    srv.sessionControls.dropActiveAfterOps(cutPoint);
+    arm();
     receiver.start();
+    const asError = (error: unknown): Error =>
+      error instanceof Error ? error : new Error(String(error));
     const sendRejection = await sender
-      .send({ message: `in flight at ${cutPoint}` })
-      .then(
-        () => undefined,
-        (error: unknown) =>
-          error instanceof Error ? error.message : String(error),
-      );
+      .send({ message: label })
+      .then(() => undefined, asError);
     let deliveryTimer: NodeJS.Timeout | undefined;
     const delivered = await Promise.race([
       delivery,
@@ -141,21 +157,28 @@ async function exchangeCutAt(
         deliveryTimer = setTimeout(() => resolve(false), DELIVERY_DEADLINE_MS);
       }),
     ]).finally(() => clearTimeout(deliveryTimer));
+    const retryRejection = retryAfterSend
+      ? await sender
+          .send({ message: `${label} (retry)` })
+          .then(() => undefined, asError)
+      : undefined;
     receiver.stop();
 
     return {
-      cutPoint,
+      label,
       sendRejection,
       delivered,
+      retryRejection,
       redials:
         senderAdapter.midExchangeReconnectCount +
         receiverAdapter.midExchangeReconnectCount,
     };
   } finally {
     receiver.stop();
-    // Disarm before the teardown dials and closes, so a drop this position did not
-    // spend cannot cut the pre-drain reconnect or the next position's exchange.
+    // Disarm before the teardown dials and closes, so a drop this case did not
+    // spend cannot cut the pre-drain reconnect or the next case's exchange.
     srv.sessionControls.dropActiveAfterOps(0);
+    srv.sessionControls.renameTear.reset();
     await receiver.close().catch(() => {});
     await sender.close().catch(() => {});
     await fsp.rm(dir, { recursive: true, force: true });
@@ -171,7 +194,11 @@ inProcessOnly(
         async () => {
           const results: ExchangeOutcome[] = [];
           for (const cutPoint of CUT_POINTS)
-            results.push(await exchangeCutAt(srv, cutPoint));
+            results.push(
+              await exchangeCutBy(srv, `in flight at ${cutPoint}`, () =>
+                srv.sessionControls.dropActiveAfterOps(cutPoint),
+              ),
+            );
           return results;
         },
         (level) => level === "WARN" || level === "ERROR",
@@ -198,7 +225,7 @@ inProcessOnly(
       expect(
         outcomes.filter((outcome) =>
           /getConnection|Unexpected (end|close) event/.test(
-            outcome.sendRejection ?? "",
+            outcome.sendRejection?.message ?? "",
           ),
         ),
       ).toEqual([]);
@@ -224,6 +251,77 @@ inProcessOnly(
           entry.message.includes("Upgrading the SFTP Stack"),
         ),
       ).toEqual([]);
+    } finally {
+      await srv.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+// How many times the divergence is driven. It is staged rather than swept -- the
+// tear cuts inside the RENAME handler once its filesystem work has landed, and the
+// sender's landed-confirmation probe of that destination is held until the
+// receiver's consume-delete of it has been served -- so every run reaches the same
+// state, and the repeat shows that rather than searching for it.
+const DIVERGENCE_REPEATS = 3;
+
+inProcessOnly(
+  "a message the partner did receive over a rejected send() is reported as an " +
+    "undetermined outcome, and does not silently reuse its sequence slot",
+  async () => {
+    const srv = await startInProcessSftpServer();
+    try {
+      const [outcomes] = await withCapturedLogs(
+        async () => {
+          const results: ExchangeOutcome[] = [];
+          for (let i = 0; i < DIVERGENCE_REPEATS; i++)
+            results.push(
+              await exchangeCutBy(
+                srv,
+                `landed then consumed ${i}`,
+                () => {
+                  const tear = srv.sessionControls.renameTear;
+                  tear.reset();
+                  tear.tearAfterRenameLands = true;
+                  tear.holdProbeUntilDestinationConsumed = true;
+                },
+                true,
+              ),
+            );
+          return results;
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      // The divergence itself, at every run: the partner received and delivered
+      // the message, and the sender's send() rejected over it.
+      expect(
+        outcomes.filter(
+          (outcome) => outcome.sendRejection !== undefined && outcome.delivered,
+        ),
+      ).toHaveLength(DIVERGENCE_REPEATS);
+      expect(outcomes.filter((outcome) => outcome.redials < 1)).toEqual([]);
+
+      // What the caller is told about it. A rejection over a message the partner
+      // holds must not read as a determined non-delivery, so it carries the
+      // distinguishable type -- with the transport's own error as its cause, so
+      // the detail the operator would have been given is still there.
+      for (const outcome of outcomes) {
+        expect(outcome.sendRejection).toBeInstanceOf(
+          TransportPublishIndeterminateError,
+        );
+        expect((outcome.sendRejection as Error).cause).toBeInstanceOf(Error);
+        expect(outcome.sendRejection?.message).toContain("may or may not");
+      }
+
+      // And what it costs the session: the rejected publish spent its sequence
+      // number, because the partner has already delivered a message under it. A
+      // send() that reused it would be read as a second message rather than as a
+      // retry of the first, so the next send() is refused instead.
+      for (const outcome of outcomes) {
+        expect(outcome.retryRejection).toBeInstanceOf(UsageError);
+        expect(outcome.retryRejection?.message).toContain("cannot send");
+      }
     } finally {
       await srv.stop();
     }

@@ -9,7 +9,10 @@ import type { Attributes, Connection, SFTPWrapper } from "ssh2";
 import { computeHostKeyFingerprint } from "@psilink/core";
 
 import { COUNTED_SFTP_OPS, createSftpSessionControls } from "./sessionControls";
-import type { ControlledSocket } from "./sessionControls";
+import type {
+  ControlledSocket,
+  SftpRenameTearControlHub,
+} from "./sessionControls";
 import type {
   InProcessSftpServer,
   SftpFaultInjection,
@@ -246,7 +249,13 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
           for (const op of COUNTED_SFTP_OPS) {
             counter.on(op, () => sessionControls.recordOp(client));
           }
-          const closeOpenHandles = attachSftpHandlers(sftp, backingDir, inject);
+          const closeOpenHandles = attachSftpHandlers(
+            sftp,
+            backingDir,
+            inject,
+            sessionControls.renameTear,
+            () => sessionControls.tearSession(client),
+          );
           // A graceful client sends CLOSE per handle; an abrupt disconnect (the
           // adversarial tests abort mid-stream) does not, so close any fds still
           // open for this session when the connection drops.
@@ -315,6 +324,9 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
       // either, so it is handed its write back on the same terms.
       sessionControls.stopWithholdingCloses();
       sessionControls.stopStallingHandshakes();
+      // Release any probe parked on a consumption that is no longer coming, so a
+      // held reply does not outlive the server it was served by.
+      sessionControls.renameTear.reset();
       // Force any still-open connection closed so server.close()'s callback can
       // fire, then bound the wait so a connection that refuses to end cannot hang
       // teardown forever.
@@ -374,6 +386,8 @@ function attachSftpHandlers(
   sftp: SFTPWrapper,
   backingDir: string,
   inject: SftpFaultInjection,
+  renameTear: SftpRenameTearControlHub,
+  tearSession: () => void,
 ): () => void {
   // A forced session drop (the session-control tests cut a connection mid-batch)
   // can land while an fs callback below is still pending; when that callback then
@@ -585,10 +599,8 @@ function attachSftpHandlers(
   // STAT follows symlinks; LSTAT must not (SFTP spec). No symlinks exist in the
   // backing dir today, but keeping the contract honest avoids a future test that
   // plants one silently getting dereferenced.
-  const onStat =
-    (op: "STAT" | "LSTAT", statFn: typeof fs.stat) =>
-    (reqid: number, p: string) => {
-      if (inject.withholdOn === op) return;
+  const onStat = (op: "STAT" | "LSTAT", statFn: typeof fs.stat) => {
+    const answer = (reqid: number, p: string): void => {
       statFn(resolve(p), (err, st) => {
         // Only a genuinely missing path is NO_SUCH_FILE; anything else (EACCES,
         // ENOTDIR) is a generic failure, matching the OPEN/OPENDIR handlers so a
@@ -603,12 +615,29 @@ function attachSftpHandlers(
         sftp.attrs(reqid, attrsFromStat(st));
       });
     };
+    return (reqid: number, p: string): void => {
+      if (inject.withholdOn === op) return;
+      // Order the staged tear's two observers: a probe of the torn destination is
+      // held until that destination has been REMOVEd, so "the partner consumed
+      // it" strictly precedes "the probe read it" however the two would otherwise
+      // interleave.
+      if (
+        renameTear.holdProbeUntilDestinationConsumed &&
+        renameTear.tornDestination === p
+      ) {
+        void renameTear.waitForConsumption().then(() => answer(reqid, p));
+        return;
+      }
+      answer(reqid, p);
+    };
+  };
   sftp.on("STAT", onStat("STAT", fs.stat));
   sftp.on("LSTAT", onStat("LSTAT", fs.lstat));
 
   sftp.on("REMOVE", (reqid: number, p: string) => {
     if (inject.withholdOn === "REMOVE") return;
     fs.unlink(resolve(p), (err) => {
+      if (!err) renameTear.noteRemoved(p);
       if (err && err.code === "ENOENT")
         return sftp.status(reqid, STATUS_CODE.NO_SUCH_FILE);
       sftp.status(reqid, err ? STATUS_CODE.FAILURE : STATUS_CODE.OK);
@@ -617,6 +646,14 @@ function attachSftpHandlers(
 
   sftp.on("RENAME", (reqid: number, oldPath: string, newPath: string) => {
     if (inject.withholdOn === "RENAME") return;
+    // Staged tear with nothing landed: no filesystem work runs, so the
+    // destination never exists and the source is left for a re-issue.
+    if (renameTear.tearBeforeRenameLands) {
+      renameTear.tearBeforeRenameLands = false;
+      renameTear.noteTorn(newPath);
+      tearSession();
+      return;
+    }
     if (inject.renameFailuresRemaining > 0) {
       // SSH_FX_FAILURE (status 4) N times, then let it through, so the adapter's
       // generic-failure rename retry recovers against a real server.
@@ -624,6 +661,23 @@ function attachSftpHandlers(
       return sftp.status(reqid, STATUS_CODE.FAILURE);
     }
     fs.rename(resolve(oldPath), resolve(newPath), (err) => {
+      // Staged tear with the publish durably in place: end the connection here,
+      // in the callback the filesystem work completed in, instead of writing the
+      // reply, so the client's rename is torn off the wire over a destination
+      // that exists.
+      if (!err && renameTear.tearAfterRenameLands) {
+        renameTear.tearAfterRenameLands = false;
+        renameTear.noteTorn(newPath);
+        if (renameTear.consumeDestinationAtTear) {
+          // `force` so a failure here cannot throw out of an fs callback and past
+          // the connection-level error handler; the case's own assertion on the
+          // torn destination is what proves the removal happened.
+          fs.rmSync(resolve(newPath), { force: true });
+          renameTear.noteRemoved(newPath);
+        }
+        tearSession();
+        return;
+      }
       if (err && err.code === "ENOENT")
         return sftp.status(reqid, STATUS_CODE.NO_SUCH_FILE);
       sftp.status(reqid, err ? STATUS_CODE.FAILURE : STATUS_CODE.OK);
