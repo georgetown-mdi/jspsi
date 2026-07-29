@@ -18,6 +18,7 @@
     "check:pr-checklist": "node scripts/check-pr-checklist.mjs",
     "check:command-inventory": "node scripts/check-command-inventory.mjs",
     "check:enforcement-claims": "node scripts/check-enforcement-claims.mjs",
+    "check:egress-claims": "node scripts/check-egress-claims.mjs",
     "check:workflow-agent-models": "node scripts/check-workflow-agent-models.mjs",
     "check:action-pin-drift": "node scripts/check-action-pin-drift.mjs",
     "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p apps/cli/tsconfig.test.json && tsc -p apps/web/tsconfig.json",
