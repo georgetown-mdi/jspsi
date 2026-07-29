@@ -96,6 +96,17 @@ with everything working, and nothing was made to fail, so the
 `NT_STATUS_LOGON_FAILURE` report and the `-Dialect SMB3` confirmation are still
 unverified against the current probe.
 
+Running the two scripts against the same share and reading the transcripts
+against each other is what found the one divergence between them. The volume
+check emits `EXCL_OK`, and the PowerShell script turns it into "Exclusive
+create and rename behave the way psilink needs"; the port had all three of the
+warning branches and no positive one, so a share that was entirely fine said
+nothing about it. The port now carries that branch, gated on the rename result
+the same way. This is the failure mode the guide's "reports the same failures"
+claim invites -- the failures were ported carefully and the confirmation was
+not -- and it is only visible by running both, which is worth doing whenever
+one of them changes.
+
 Two volume-check results are invalidated outright. The `EXCL_OK` was not
 evidence of anything: the test was `set -C`, which busybox ash answers from a
 `stat` without issuing a create, so it returned `EXCL_OK` whatever the share

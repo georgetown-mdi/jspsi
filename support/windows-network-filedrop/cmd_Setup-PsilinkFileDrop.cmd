@@ -448,6 +448,17 @@ if not errorlevel 1 (
   call :note "hangs at the start, try --lockless-rendezvous on both sides."
 )
 
+rem The positive counterpart of the three warnings above, and the only one that
+rem tells an operator whose share is fine that it is fine. It is stated only
+rem when both halves held: a share that refuses a duplicate create but will not
+rem rename onto an existing file still needs --lockless-rendezvous, so the
+rem rename result gates the message.
+findstr /c:"RENAME_FAIL" "%WORK%" >nul 2>&1
+if not errorlevel 1 goto skip_excl_ok
+findstr /c:"EXCL_OK" "%WORK%" >nul 2>&1
+if not errorlevel 1 call :good "Exclusive create and rename behave the way psilink needs."
+:skip_excl_ok
+
 rem ===================================================================== done
 call :head "Ready to run an exchange"
 echo The volume '%VOLUME_NAME%' is set up and survives reboots. You do not

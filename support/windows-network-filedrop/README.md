@@ -130,14 +130,15 @@ other shares on your file server.
 > and the volume once it is created, are verified against a real SMB server:
 > both the failures they report and the share behaviour psilink depends on. The
 > Windows side is verified on Windows 11 under Windows PowerShell 5.1 against
-> the same kind of server; a few messages have been added since that run. It has
-> never been tried against a real DFS namespace, which is why the script asks
-> you to confirm the server it worked out rather than trusting it. The
-> [Command Prompt version](command-prompt.md) was verified the same way, on the
-> same server, with a password holding every character Command Prompt is known
-> to mangle. Its container checks were later replaced by the ones the PowerShell
-> script uses, and a setup from start to finish has since been run from Windows
-> against that replacement; the failures it reports have not been provoked again
-> since the swap.
-> Corrections from a real environment are welcome, and are worth more here than
-> anywhere else in this repository.
+> the same kind of server, and a setup from start to finish has been run there
+> again since the last changes to it. It has never been tried against a real DFS
+> namespace, which is why the script asks you to confirm the server it worked
+> out rather than trusting it. The [Command Prompt version](command-prompt.md)
+> was verified the same way, on the same server, with a password holding every
+> character Command Prompt is known to mangle; its container checks were later
+> replaced by the ones the PowerShell script uses, and it too has been run from
+> start to finish since. Both were last run side by side against the same share,
+> and report the same result. What neither has been made to do again since those
+> checks changed is fail, so the diagnoses on the troubleshooting page are the
+> part now resting on the older run. Corrections from a real environment are
+> welcome, and are worth more here than anywhere else in this repository.

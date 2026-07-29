@@ -133,6 +133,19 @@ itself. The branch is reached only on a path that has already failed, so the
 cost of it being wrong is a wrong message rather than a wrong outcome, but it
 has not been run there and the next Windows pass should start with it.
 
+A later pass ran the script as it now stands, from Windows against the same
+kind of rig, with no options and answering its prompts: a full setup ending in
+a mounted volume, including the message changes made since `7396cc73`. It does
+not reach the branch above -- everything worked, and that branch is only
+reached after a failure. It also does not exercise the prompts themselves. The
+script cannot be driven from a non-interactive session, because `Read-Host`
+reads the console rather than redirected input and blocks at the confirmation;
+the run used the `Read-Host` shim described under "If you pick this up", which
+substitutes the five prompt reads and nothing else. What a person typing at a
+real console would additionally exercise is the console read itself, including
+the masked `-AsSecureString` entry. The `SecureString` handling downstream of
+it is the script's own and did run, as it did in the earlier pass.
+
 Two Windows-only defects were found by that pass and fixed. **The volume check
 never ran**: its here-string reached `sh` with the CRLF line endings a checkout
 with `core.autocrlf` produces, and `sh` does not treat a carriage return as
