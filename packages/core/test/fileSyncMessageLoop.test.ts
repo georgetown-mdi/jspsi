@@ -517,6 +517,13 @@ describe("FileSyncMessageLoop counter commit points", () => {
     );
     expect(refused).toBeInstanceOf(UsageError);
     expect((refused as Error).message).toContain("cannot send");
+    // The refusal prescribes a clean-directory restart, so it is tagged to
+    // suppress the CLI's generic "retry without re-inviting" advisory: the two
+    // would otherwise print together and contradict each other.
+    expect(
+      (refused as { psilinkRecoveryHintEmitted?: unknown })
+        .psilinkRecoveryHintEmitted,
+    ).toBe(true);
     expect(renames).toBe(1);
     expect([...files.keys()]).toEqual([]);
 

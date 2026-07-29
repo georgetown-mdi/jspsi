@@ -399,16 +399,24 @@ export class FileSyncMessageLoop {
     // like. The session cannot continue: which of the two happened is not
     // knowable from here, and the ack/consume gates below would be waiting on the
     // wrong message either way.
+    // Tagged unlike its untagged siblings in errors.ts: those are settled before
+    // the handshake or carry no competing step, while this is reached
+    // mid-exchange, where the CLI's generic "retry without re-inviting" advisory
+    // does fire and would contradict the restart prescribed here.
     if (this.indeterminatePublish !== undefined)
-      throw new UsageError(
-        `cannot send: message ` +
-          `${sanitizeForDisplay(this.indeterminatePublish.name)} (seq ` +
-          `${this.indeterminatePublish.seq}) was published over a transport that ` +
-          `could not determine whether ${sanitizeForDisplay(deps.peerId()!)} ` +
-          `received it, so sequence number ${this.indeterminatePublish.seq} ` +
-          `cannot be reused for this message. Re-run the exchange in a clean ` +
-          `directory; both parties must start the new exchange fresh, since this ` +
-          `one's message sequence is no longer known to be in step.`,
+      throw Object.assign(
+        new UsageError(
+          `cannot send: message ` +
+            `${sanitizeForDisplay(this.indeterminatePublish.name)} (seq ` +
+            `${this.indeterminatePublish.seq}) was published over a transport ` +
+            `that could not determine whether ` +
+            `${sanitizeForDisplay(deps.peerId()!)} received it, so sequence ` +
+            `number ${this.indeterminatePublish.seq} cannot be reused for this ` +
+            `message. Re-run the exchange in a clean directory; both parties ` +
+            `must start the new exchange fresh, since this one's message ` +
+            `sequence is no longer known to be in step.`,
+        ),
+        { psilinkRecoveryHintEmitted: true },
       );
 
     // `path` is the inbound directory: where the peer's ack of our message (and,
