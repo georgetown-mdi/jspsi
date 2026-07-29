@@ -23,17 +23,27 @@ If you are choosing, evaluating, or operating psilink deliberately, start at
 | Docker cannot use a mapped drive (`Z:\...`) or a network path (`\\server\share`) | [windows-network-filedrop](windows-network-filedrop/README.md) |
 | `permission denied` creating or mounting a Docker CIFS/SMB volume | [windows-network-filedrop](windows-network-filedrop/README.md) |
 | A file drop that a sync service keeps in step, rather than a live file server | [windows-network-filedrop](windows-network-filedrop/README.md#synced-folders) |
+| A network folder the container reaches but cannot write, rename, or delete in | [windows-network-filedrop](windows-network-filedrop/README.md#it-mounts-but-psilink-cannot-write) |
+| Nothing to send IT when a network problem turns out to be theirs | [windows-network-filedrop](windows-network-filedrop/README.md#what-to-ask-your-it-department-for) |
 
 ## Each guide
 
 A guide is a self-contained folder: the instructions plus whatever scripts go
-with them, so it can be handed to someone as a unit. Each opens with a status
-note saying what has been confirmed and where, because these age with the
-platforms they describe rather than with this repository.
+with them, so it can be handed to someone as a unit. Each says how far it has
+actually been confirmed and where, because these age with the platforms they
+describe rather than with this repository.
 
 - [windows-network-filedrop](windows-network-filedrop/README.md) -- using a
   file drop that lives on a Windows network location (mapped drive, UNC path,
   or DFS namespace) with the psilink container.
+
+## Maintainer notes
+
+[`maintainer-notes/`](maintainer-notes/) holds what a guide's maintainer needs
+and its reader does not: which claims are measured and which are inferred, what
+was attempted and failed, and why a given approach was chosen over another. It
+is deliberately outside the guide folders, so that handing one over does not
+hand over a working document addressed to someone else.
 
 ## Contributing a guide
 
