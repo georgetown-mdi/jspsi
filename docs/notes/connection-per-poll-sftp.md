@@ -381,8 +381,8 @@ that its own per-cycle releases never END in that state.
 
 **Rendezvous handshake -- test-hardening, given two placement rules.** The hello,
 the zero-length ack, the lock-path joining sentinel, and the lock are committed
-files that outlive any session, and the in-memory role and peer id are cleared only
-at `close()`. So a release across a steady-state idle gap loses nothing. Two rules
+files that outlive any session, and no reconnect clears the in-memory role and peer
+id (nor does `close()`). So a release across a steady-state idle gap loses nothing. Two rules
 make this hold and are the substance of the verification work: the one-time entry
 guard and directory sweep must run exactly once, never re-entered on a later cycle
 (a second entry would see this party's own hello and reject the directory as
