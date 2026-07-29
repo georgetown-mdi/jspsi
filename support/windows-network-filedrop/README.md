@@ -135,7 +135,9 @@ other shares on your file server.
 > you to confirm the server it worked out rather than trusting it. The
 > [Command Prompt version](command-prompt.md) was verified the same way, on the
 > same server, with a password holding every character Command Prompt is known
-> to mangle. Its container checks have since been replaced by the ones the
-> PowerShell script uses, and that replacement has not been run from Windows.
+> to mangle. Its container checks were later replaced by the ones the PowerShell
+> script uses, and a setup from start to finish has since been run from Windows
+> against that replacement; the failures it reports have not been provoked again
+> since the swap.
 > Corrections from a real environment are welcome, and are worth more here than
 > anywhere else in this repository.

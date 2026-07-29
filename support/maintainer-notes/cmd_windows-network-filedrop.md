@@ -74,8 +74,8 @@ was not: forcing it needs the volume and the probe to disagree about which
 directory they reached, which is the DFS case, and the DFS case cannot be
 mocked here. The PowerShell notes reach the same limit by the same route.
 
-**Most of that pass no longer covers the code it was run against, and it has
-not been re-run.** `cmd_psilink-probe.sh` was replaced wholesale afterwards (see
+**Most of that pass no longer covers the code it was run against.**
+`cmd_psilink-probe.sh` was replaced wholesale afterwards (see
 "The probe is a second copy" below), and the probe is what produced most of the
 "Covered:" list -- the full pass to a mounted volume, the
 `NT_STATUS_LOGON_FAILURE` report, and the `-Dialect SMB3` confirmation all run
@@ -83,6 +83,18 @@ through it. Treat those as unverified against the current file. What the swap
 does not touch, and what therefore still stands, is everything measured on the
 Windows side of the batch file: the password handling, the path classification,
 the volume replacement, and the usage text.
+
+**The first of those has since been re-run against the replaced files**, from
+`cmd.exe` on the same rig and the same `Pa!ss&w%rd^1`: the script invoked with
+no options, answering its prompts with a UNC path, `Y` to the confirmation, a
+username and a blank domain. It ran the current probe through all six steps,
+created the volume, and got agreement from the current volume check. So the
+swap works from Windows, and the `MARKER_OK` routing and the `mkdir`
+exclusive-create test have now met a real share rather than only a reading of
+busybox. That restores one line of the list and no more: it was a single pass
+with everything working, and nothing was made to fail, so the
+`NT_STATUS_LOGON_FAILURE` report and the `-Dialect SMB3` confirmation are still
+unverified against the current probe.
 
 Two volume-check results are invalidated outright. The `EXCL_OK` was not
 evidence of anything: the test was `set -C`, which busybox ash answers from a
