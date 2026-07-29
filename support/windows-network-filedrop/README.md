@@ -2,58 +2,56 @@
 
 Your file-drop folder lives on a network location -- you open it in File
 Explorer as a mapped drive (`Z:\Exchange`) or a network path
-(`\\fileserver\exchange`). Passing that path to Docker does not work:
+(`\\fileserver\exchange`). Pointing Docker at it does not work:
 
 ```text
 docker: Error response from daemon: invalid mount config for type "bind":
 bind source path does not exist
 ```
 
-This is not a typo or a permissions problem. The Docker engine runs inside a
-Linux virtual machine, and that VM cannot see mapped drive letters or network
-paths at all. Docker Desktop's file-sharing settings do not help either; that
-list is only for local drives.
+This is not a typo or a permissions problem. Docker does its work inside a small
+Linux computer it keeps hidden on your PC, and two things follow from that:
 
-The fix is to let Docker mount the network folder itself, as a named volume.
-The setup script works out what that takes and does it. You run it once, before
-your first exchange, and it takes about ten minutes.
+- **It cannot see your drive letters or network paths.** Those belong to
+  Windows, not to it. Docker Desktop's file-sharing settings do not help either;
+  that list is only for local drives.
+- **Your file server treats it as a different computer.** It cannot borrow the
+  Windows sign-in that gets you into the folder, so it needs a username and
+  password of its own.
+
+The fix is to let Docker open the network folder itself and keep that connection
+saved under a name. Docker calls that a **volume**, and creating one is the only
+thing the setup script does. Run it once, before your first exchange; it takes
+about ten minutes.
 
 ## What you need
 
-- **Docker Desktop, running.** The whale icon in the notification area should
-  be still, not animating.
-- **The file-drop folder path.** Click once in the File Explorer address bar
-  and it turns into text you can copy.
-- **A username and password** that can reach that folder. Not your own Windows
-  sign-in, and never a domain administrator: Docker stores this password where
-  anyone who can run Docker on this PC can read it, so use an account scoped to
-  this share or one you can retire afterwards. It is the choice here that is
-  awkward to undo, so [the passwords page](passwords.md) is worth five minutes
-  before you ask for one. The password must not contain a comma, or a double
-  quote if you use
-  [the Command Prompt version](#which-version-to-run). If you have no such
-  account, send IT
+- **Docker Desktop, running.** The whale icon should be still, not animating.
+- **The file-drop folder path.** Click once in the File Explorer address bar and
+  it turns into text you can copy.
+- **A username and password for that folder.** Not your own Windows sign-in, and
+  never an administrator account: Docker stores this password where anyone who
+  can use Docker on this PC can read it. Ask for an account that reaches only
+  this shared folder and that IT can switch off when you are finished. If you
+  have no such account, send IT
   [this ready-made request](troubleshooting.md#what-to-ask-your-it-department-for).
+  [Choosing an account](passwords.md) is five minutes well spent -- it is the
+  choice here that is awkward to undo.
+- **A password with no comma in it.** The script refuses one outright, because
+  Docker has no way to pass it. No double quote either, if you end up on the
+  Command Prompt version below.
 
 ## Which version to run
 
-There are two scripts. They ask the same questions, run the same checks in the
-same container, and report the same failures.
+**Use the PowerShell script, `Setup-PsilinkFileDrop.ps1`.** If it refuses to run
+-- some agency PCs block PowerShell scripts -- use the Command Prompt one,
+`cmd_Setup-PsilinkFileDrop.cmd`, and stay with it from then on. They ask the
+same questions and report the same failures. The one difference to know about is
+that Command Prompt cannot hide typing, so your password shows on screen as you
+enter it.
 
-- **PowerShell -- `Setup-PsilinkFileDrop.ps1`.** Use this one if you can.
-- **Command Prompt -- `cmd_Setup-PsilinkFileDrop.cmd`.** Use it when PowerShell
-  is missing, or when Group Policy or application-control policy stops it from
-  running.
-
-Pick one and stay with it. Wherever the two need different commands, this guide
-gives both: the PowerShell one first, the Command Prompt one after. A single
-block means the command is the same in either.
-
-The Command Prompt version differs in two ways worth knowing before you start.
-**Your password is visible as you type it** -- Command Prompt cannot hide typing
-the way PowerShell does, so run `cls` or close the window when you are done.
-And **it will not accept a password containing a double quote**, on top of the
-no-comma rule that applies to both.
+Where the two need different commands, this guide gives both, PowerShell first.
+A single block means the command is the same in either.
 
 ## Get it and run it
 
@@ -61,15 +59,16 @@ Open the Start menu, type `PowerShell`, or `cmd` for the Command Prompt version,
 and press Enter. Do not choose **Run as administrator**: an elevated window
 cannot see the drive letters you mapped as yourself.
 
+**PowerShell:**
+
 ```powershell
 Invoke-WebRequest -UseBasicParsing `
   -Uri 'https://raw.githubusercontent.com/georgetown-mdi/jspsi/main/support/windows-network-filedrop/Setup-PsilinkFileDrop.ps1' `
   -OutFile "$env:USERPROFILE\Setup-PsilinkFileDrop.ps1"
 ```
 
-The Command Prompt version comes as four files rather than one, and **all four
-have to be in the same folder** -- the script feeds the other three to the
-container:
+**Command Prompt** -- four files rather than one, and **all four have to be in
+the same folder**, because the script feeds the other three to Docker:
 
 ```text
 cd /d "%USERPROFILE%"
@@ -80,54 +79,59 @@ curl -L -o cmd_psilink-credcheck.sh %BASE%/cmd_psilink-credcheck.sh
 curl -L -o cmd_psilink-volcheck.sh %BASE%/cmd_psilink-volcheck.sh
 ```
 
-Downloading rather than saving from a browser avoids two things that catch
-people out: a browser renders a script as text and often saves it as `.txt`, and
-a file saved from a browser is refused until you run `Unblock-File` on it.
-`curl` is part of Windows 10 and 11, and a `.cmd` file has no execution policy
-to work around and nothing to unblock.
-
-It will ask you for three things, in this order:
-
-1. **The file-drop folder**, exactly as you see it in Explorer.
-2. **Whether the server, share and folder it worked out are right.** If you are
-   not sure, answer `Y`. A later check compares the folder the volume opens
-   against the one it just tested, and tells you if they differ.
-3. **A username, a domain, and a password.** Leave the domain blank if you do
-   not have one. In PowerShell nothing appears on screen as you type the
-   password; that is normal.
+Use the command rather than saving from a browser, which saves it in a form
+Windows will not run. Nothing appears on screen when the download works -- that
+is success, and the files land in your user folder.
 
 Then run it:
+
+**PowerShell:**
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Setup-PsilinkFileDrop.ps1"
 ```
 
+**Command Prompt:**
+
 ```text
 cmd_Setup-PsilinkFileDrop.cmd
 ```
 
-It tests the share from inside a container, creates the volume, and prints the
-command to run your exchange.
+It asks you for three things, in this order:
+
+1. **The file-drop folder**, exactly as you see it in Explorer.
+2. **Whether the server, share and folder it worked out are right.** The
+   **share** is the first name after the server -- in
+   `\\fileserver\exchange\dropbox` it is `exchange`. If you are not sure, answer
+   `Y`; a later check catches a wrong answer.
+3. **A username, a domain, and a password.** If you sign in to Windows as
+   something like `AGENCY\yourname`, the domain is the `AGENCY` part; if you
+   just type a username, leave it blank. In PowerShell nothing appears on screen
+   as you type the password, which is normal.
+
+A good run ends with a heading reading **Ready to run an exchange**, followed by
+the command to copy. Anything in red before that is a failure, and the script
+says underneath what to do about it.
 
 ## When it finishes
 
 It prints the `docker run` command for an exchange with your volume name already
 filled in, and explains underneath which parts to replace. One of them is a
-local folder on this PC to keep your data in, which results are written back
-into; it has to be a real local folder, not the file drop and not a network
-path. It prints a second command as well, for driving the same exchange from a
-page in your browser instead of the command line.
+folder on this PC that holds your input file; results are written back into the
+same folder. It has to be a folder on this PC -- not the file drop, and not a
+network path.
 
-Two things to know before the first run:
+Three things to know before the first run:
 
 - **The `.keys.json` file is not a result.** Each run writes one next to the
   matches. It holds the keys to the exchange, so treat it like the input data
   and do not send it on with the results.
 - **One exchange per folder at a time.** The folder must start empty, so agree
   who goes first. If a run fails and leaves files behind, see
-  [running the exchange](troubleshooting.md#running-the-exchange) -- which also
-  covers setting up a second file drop, since a second one replaces the first
-  unless you give it its own name.
+  [running the exchange](troubleshooting.md#running-the-exchange).
+- **Setting up a second file drop replaces this one.** For a second partner,
+  give it its own name with `-VolumeName psilink-partner-b`, and use that name
+  when you run that exchange.
 
 ## When you are done with this partner
 
@@ -138,38 +142,20 @@ when it finishes, and it is the same in either shell:
 docker volume rm psilink-rendezvous
 ```
 
-Then have the account retired, or its password reset. Docker stores the share
-password in the volume's metadata in cleartext and leaves traces of it behind
-even after the volume is gone, so rotating the password is the step that
-actually ends the exposure.
-[Choosing an account, and where its password ends up](passwords.md) is the whole
-of that story.
+Then have the account switched off, or its password changed. That, rather than
+removing the volume, is what ends the exposure --
+[choosing an account, and where its password ends up](passwords.md) says why.
 
 ## If something goes wrong
 
-The script says what failed, what it means, and what to do about it. Follow
-that first. [**Troubleshooting**](troubleshooting.md) is the longer version,
-with a section for each failure.
+The script says what failed, what it means, and what to do about it. Follow that
+first. [**Troubleshooting**](troubleshooting.md) is the longer version, with a
+section for each failure, and it covers how to send the whole run to whoever is
+helping you.
 
-To send the whole run to whoever is helping you, copy it straight out of the
-window rather than running it again: right-click the title bar, then **Edit >
-Select All** and **Edit > Copy**. In Command Prompt your password is on that
-screen, so drag-select from just below the `Password:` line instead of using
-Select All -- everything the checks printed comes after it.
-
-> **How far this has been tested.** The checks that run inside the container,
-> and the volume once it is created, are verified against a real SMB server:
-> both the failures they report and the share behaviour psilink depends on. The
-> Windows side is verified on Windows 11 under Windows PowerShell 5.1 against
-> the same kind of server, and a setup from start to finish has been run there
-> again since the last changes to it. It has never been tried against a real DFS
+> **How far this has been tested.** Both versions have been run start to finish
+> on Windows 11 against a real file server, and the checks they run inside
+> Docker are verified against that server too. Neither has ever met a real DFS
 > namespace, which is why the script asks you to confirm the server it worked
-> out rather than trusting it. The Command Prompt version was verified the same
-> way, on the same server, with a password holding every character Command
-> Prompt is known to mangle; its container checks were later replaced by the
-> ones the PowerShell script uses, and it too has been run from start to finish
-> since. Both were last run side by side against the same share, and report the
-> same result. What neither has been made to do again since those checks changed
-> is fail, so the diagnoses on the troubleshooting page are the part now resting
-> on the older run. Corrections from a real environment are welcome, and are
-> worth more here than anywhere else in this repository.
+> out rather than trusting it. Corrections from a real environment are welcome,
+> and are worth more here than anywhere else in this repository.

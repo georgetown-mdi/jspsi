@@ -9,7 +9,15 @@ Which account to use, and what Docker does with its password, is on
 read it when the exchange is over.
 
 The script prints a MEANING and an ACTION for every failure it can name. Follow
-those first; this page is the longer version.
+those first; this page is the longer version. The setup path has been exercised
+against a real server more recently than these diagnoses have, so if one of them
+does not match what you are seeing, trust what is on your screen.
+
+To send the whole run to whoever is helping you, copy it straight out of the
+window rather than running it again: right-click the title bar, then **Edit >
+Select All** and **Edit > Copy**. In Command Prompt your password is on that
+screen, so drag-select from just below the `Password:` line instead of using
+Select All -- everything the checks printed comes after it.
 
 The script runs in four numbered parts, and the checks inside part 3 are
 numbered separately, steps 1 to 6. A "step" on this page is always one of those
@@ -52,10 +60,9 @@ whose PowerShell commands the same policy blocks.
 
 The script refuses before it does anything.
 
-Docker separates mount options with commas, so a password containing one is cut
-off at the first comma and the mount fails. There is no way to quote or escape
-it: the local volume driver takes the credentials only as a single
-comma-separated string. Doing it by hand hits exactly the same wall.
+Docker has no way to pass a password containing a comma: it separates its own
+settings with commas, so the password is cut off at the first one. There is no
+workaround, and doing it by hand hits the same wall.
 
 The Command Prompt version refuses a double quote as well. Docker takes the
 mount options as one quoted argument, and a quote inside the password ends that
@@ -69,11 +76,13 @@ Use an account whose password has neither -- it is item 1 of the
 
 Step 1 fails.
 
-The Docker VM runs its own resolver. It does not inherit Windows' DNS suffix
-search list and has no NetBIOS name resolution, so a short server name that
-works perfectly in File Explorer often means nothing inside the VM.
+The hidden Linux computer looks up server names on its own, and does not know
+your agency's shortcuts. A short name like `fileserver` can work perfectly in
+File Explorer and mean nothing to it.
 
-Find the full name on Windows and pass it directly:
+Find the full name on Windows and pass it directly. Run the first command with
+your own server's short name; it prints the full name, which goes into the
+second:
 
 ```powershell
 Resolve-DnsName fileserver
@@ -96,15 +105,13 @@ mount it this way at all. See [Synced folders](#synced-folders).
 
 Step 2 fails, or the checks report that the connection stopped responding.
 
-The Docker VM reaches the network through Docker's own address translation, so
-the file server sees it as a different machine from Windows. Three things
-commonly block it while File Explorer keeps working:
+Remember that the file server sees the hidden Linux computer as a different
+machine. Three things commonly stop *it* while File Explorer keeps working:
 
-- **A split-tunnel VPN.** The VPN routes the Windows side only; the VM's
-  traffic goes out the normal interface and never reaches the server. This is
-  the most common cause by far.
-- **A host firewall rule.** One scoped to specific processes or interfaces.
-- **A server-side address restriction.** One that does not cover the VM.
+- **A VPN.** Many VPNs carry only Windows' own traffic. Docker's goes out the
+  ordinary way and never arrives. This is the most common cause by far.
+- **A firewall on this PC** that allows Windows but not Docker.
+- **A rule on the server** that only accepts computers it already knows.
 
 If you are on a VPN, that is almost certainly it. Take items 3 and 5 of the
 [IT request](#what-to-ask-your-it-department-for) to whoever runs the network.
@@ -114,25 +121,23 @@ If you are on a VPN, that is almost certainly it. Take items 3 and 5 of the
 The checks stop before step 3 saying `samba-client` could not be installed, and
 print what the package manager said.
 
-Read that message; it names the cause:
+Read the error printed underneath; it names the cause:
 
 - **`certificate`, `TLS`, or `not trusted`.** Something is intercepting HTTPS,
   which on a corporate network is a proxy doing inspection. Docker Desktop
   needs its certificate: Settings > Resources > Proxies.
-- **`DNS`, `temporary error`, or `could not resolve`.** Name resolution inside
-  the VM. Same ground as the section above.
+- **`DNS`, `temporary error`, or `could not resolve`.** The hidden Linux
+  computer cannot look up names. Same ground as the section above.
 
 ## The share never asks for a password
 
 The share opens in Explorer without ever prompting you, and the checks report
 `NT_STATUS_LOGON_FAILURE` or `NT_STATUS_NOT_SUPPORTED`.
 
-Windows is signing you in silently with your domain identity over Kerberos.
-There was never a password for this share to begin with. The Docker VM is not
-domain-joined
-and holds no Kerberos ticket, so it must fall back to username and password --
-and if your organization has disabled NTLM, which is common, no password will
-work.
+Windows signs you in to this folder automatically, as yourself. There was never
+a password for it. The hidden Linux computer cannot be signed in that way -- it
+can only use a username and password, and many agencies have switched that off
+entirely.
 
 **Do not work through passwords one at a time.** Each attempt is a real failed
 sign-in against the account, and a handful of them will lock it out -- adding a
@@ -145,27 +150,26 @@ Two options, and one dead end:
   of the [IT request](#what-to-ask-your-it-department-for).
 - If no account can be made to work, ask for the scheduled mirror instead --
   item 5 of the [IT request](#what-to-ask-your-it-department-for).
-- Kerberos from the container is possible in principle but needs a keytab
-  inside the VM. It is not worth the effort here.
 
 If a volume later fails to mount with `Required key not available`, that is the
-same problem: the mount wanted a Kerberos ticket and the VM has none.
+same problem in a different place.
 
 ## The password works but access is refused
 
 The checks report `NT_STATUS_ACCESS_DENIED` rather than
-`NT_STATUS_LOGON_FAILURE`. The difference matters: your credentials were
-accepted and then authorization was refused.
+`NT_STATUS_LOGON_FAILURE`. The username and password were right; the account
+simply is not allowed in.
+
+This one needs IT. Ask whoever administers the folder to let the account in from
+an unmanaged computer, or to provide a service account, and give them these
+possibilities:
 
 - The account may lack rights when connecting from a machine that is not
   domain-joined.
 - Conditional access or device-based policy may require a managed device; the
-  VM is not one.
-- The share ACL may grant access to your **computer** account rather than your
+  Docker VM is not one.
+- The share ACL may grant access to the **computer** account rather than the
   user account.
-
-Ask whoever administers the share to grant the account access from an unmanaged
-client, or to provide a service account.
 
 Note that a refusal at the **share root** alone is not a problem. Being granted
 rights to your own folder and nothing above it is the ordinary shape of an
@@ -210,9 +214,9 @@ dialect is not what is refusing you.
 `permission denied`, `mount error(112)`, `Host is down`, or
 `Operation not supported` at part 4, after part 3 passed.
 
-The volume mount and the checks negotiate the SMB dialect differently, and the
-kernel doing the mount is stricter than the diagnostic client. Run again
-pinning one:
+The checks and the volume ask the server for different versions of the
+file-sharing protocol, and the volume is the fussier of the two. Run it again,
+naming a version:
 
 ```powershell
 .\Setup-PsilinkFileDrop.ps1 -Dialect SMB3
@@ -222,10 +226,9 @@ pinning one:
 cmd_Setup-PsilinkFileDrop.cmd -Dialect SMB3
 ```
 
-and if that fails, `-Dialect SMB2`. `-Dialect NT1` is for diagnosis only: the
-Docker VM's kernel is built without SMB1, so a server that speaks nothing newer
-cannot be mounted at all. For a server like that, ask for the scheduled mirror
--- item 5 of the [IT request](#what-to-ask-your-it-department-for).
+and if that fails, `-Dialect SMB2`. If both fail, the server is too old for
+Docker to use it at all. Ask for the scheduled mirror -- item 5 of the
+[IT request](#what-to-ask-your-it-department-for).
 
 ## The volume opens the wrong folder
 
@@ -303,10 +306,10 @@ password, when I tell you the exchange is finished -- I will follow up.
 ## Reading the real path from Windows
 
 The path you see is not always the path that exists. A drive letter hides the
-server behind it, and a DFS path names a **namespace** rather than a machine --
-the real server, the real share, and the folder within it can all be different.
-The script asks you to confirm the three values it worked out precisely because
-this is the step it cannot verify for you.
+server behind it, and a DFS path is a nickname your agency invented: the real
+server, the real shared folder, and the folder inside it can all be different
+from what you see. The script asks you to confirm the three values it worked out
+precisely because this is the step it cannot verify for you.
 
 Windows will tell you:
 
@@ -314,8 +317,9 @@ Windows will tell you:
 2. Right-click it and choose **Properties**.
 3. If there is a **DFS** tab, open it. The **Referral list** shows the real
    path, something like `\\fs-04.agency.gov\exchange$\dropbox`.
-4. If there is no DFS tab and it is a mapped drive, run `net use` and read the
-   **Remote** column for that letter.
+4. If there is no DFS tab and it is a mapped drive, go back to the PowerShell or
+   Command Prompt window, run `net use`, and read the **Remote** column for that
+   letter.
 
 Then split that path into its three parts and pass them directly:
 
@@ -337,16 +341,16 @@ quotes.
 Give all three together. `-Server` on its own is ignored, and passing `-Server`
 and `-Share` without `-SubPath` builds the volume on the share root.
 
-**Do not run PowerShell as Administrator to work around this.** An elevated
-session has its own drive table and cannot see the drives you mapped as
-yourself, so elevating makes a `Z:\...` path stop resolving entirely. Reading
-the path from Properties, as above, is the method that works.
+**Do not run PowerShell as Administrator to work around this.** A window opened
+that way keeps its own list of drive letters and cannot see the ones you mapped,
+so a `Z:\...` path stops working entirely. Reading the path from Properties, as
+above, is the method that works.
 
 ## Doing it by hand
 
-If you would rather see each step, or the script failed for a reason nothing
-above covers, this is what it does. You need the real server, share and
-subfolder from the section above.
+This one is for someone comfortable at a command line. If you would rather see
+each step, or the script failed for a reason nothing above covers, this is what
+it does. You need the real server, share and subfolder from the section above.
 
 **PowerShell:**
 
@@ -436,11 +440,11 @@ docker run --rm `
 docker run --rm -v "C:\path\to\your\work:/work" -v "C:\Users\you\Egnyte\exchange:/rendezvous" vdorie/psi-link:latest file:///rendezvous input.csv matches.csv --lockless-rendezvous
 ```
 
-`--lockless-rendezvous` is not optional there and **both parties** must pass
-it. A synced folder does not behave like a real filesystem: deletions take time
-to propagate and both sides can create the same file at once, which breaks
-psilink's default way of deciding who goes first. A mismatch between the two
-sides fails the run immediately, naming each side's value.
+`--lockless-rendezvous` is not optional there and **both parties** must pass it.
+A synced folder is slower and less exact than a real one: deletions take time to
+reach the other side, and both sides can create the same file at the same
+moment. That breaks the way psilink normally decides who goes first. If only one
+of you passes it, the run stops straight away and says so.
 
 If your sync client never propagates deletions -- some do not, by design or by
 policy -- both sides need `--retain-files` as well, and the folder has to be

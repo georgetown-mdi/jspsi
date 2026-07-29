@@ -242,12 +242,43 @@ gets one block, as `docker volume rm` does. Where the two blocks would look
 nearly alike, label them, since position alone is a weak cue for a reader who
 arrived mid-page.
 
-Keep the setup page near its current 170 lines, about twenty of which are the
-testedness note. The pressure will always be to add "just one more caution" to
-it, and every one of those is a line every operator reads to serve a case most
-of them do not hit. A caution earns its place there only if acting on it late is
-expensive: the keys file, one exchange at a time, and which account you pick are
-the three that do.
+Keep the setup page near its current 160 lines. The pressure will always be to
+add "just one more caution" to it, and every one of those is a line every
+operator reads to serve a case most of them do not hit. A caution earns its
+place there only if acting on it late is expensive: the keys file, one exchange
+at a time, which account you pick, and that a second file drop replaces the
+first are the four that do.
+
+The line count is the weaker half of that test. The stronger half is that a
+line has to change what the operator *does*, and specifically what they do
+*before* the script could have told them. Both scripts print, at the moment of
+use, most of what the page says in advance -- the whale icon, the elevation
+warning, the keys file, the one-exchange rule, the retirement step, the
+copy-out procedure. Advance notice earns its place where it changes what the
+reader gathers: the comma rule reaches them before they open an IT ticket, and
+the account guidance before they ask for the wrong account. Where it does not,
+the script is the better place for it and the page should let it go.
+
+**The opening delivers a mental model, deliberately, and it is load-bearing.**
+Everything on these pages follows from one idea: Docker works inside a hidden
+Linux computer, which cannot see Windows' drive letters *and* which the file
+server treats as a different machine. The second half is what makes a second
+username and password make sense, and for a long time the page carried only the
+first -- so the credentials requirement arrived as an unexplained demand, and
+the network half surfaced only on the troubleshooting page, behind "Docker's own
+address translation". With both halves stated once at the top, later sections
+can say "the hidden Linux computer" instead of introducing VM, container,
+resolver, domain-joined and address translation separately. Do not trade those
+lines away for brevity: they are why the rest of the guide can be short.
+
+**The testedness note stays on the guide, trimmed.** A review argued it is
+maintainer provenance and belongs here instead. It is both -- but
+`support/README.md` requires each guide to say how far it has been confirmed, so
+the note discharges a convention rather than merely informing. What it does not
+need is the audit trail: which script was reverified against which change, and
+in what order. Keep the DFS caveat, because it is why the confirmation prompt
+exists, and keep the invitation to send corrections. The fuller account lives
+here.
 
 **The synced-folder fork was cut from the setup page, deliberately.** It used to
 open the page, sending a reader whose drop is kept in step by OneDrive or Egnyte
