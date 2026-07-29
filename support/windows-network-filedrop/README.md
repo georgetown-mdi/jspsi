@@ -53,6 +53,11 @@ enter it.
 Where the two need different commands, this guide gives both, PowerShell first.
 A single block means the command is the same in either.
 
+Would rather not run a downloaded script at all? Step through
+[**setting it up by hand**](by-hand.md) instead. It is the same checks in the
+same order, one command at a time with an explanation of each, and it ends in
+the same place. Allow half an hour.
+
 ## Get it and run it
 
 Open the Start menu, type `PowerShell`, or `cmd` for the Command Prompt version,

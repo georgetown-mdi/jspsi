@@ -367,9 +367,13 @@ above, is the method that works.
 
 ## Doing it by hand
 
-This one is for someone comfortable at a command line. If you would rather see
-each step, or the script failed for a reason nothing above covers, this is what
-it does. You need the real server, share and subfolder from the section above.
+This one is for someone comfortable at a command line: the two commands the
+script comes down to, for when it failed for a reason nothing above covers. You
+need the real server, share and subfolder from the section above.
+
+If you want the whole setup this way rather than these two commands -- every
+check the script runs, one at a time, with what each one establishes --
+[setting it up by hand](by-hand.md) is that, at a slower pace.
 
 **PowerShell:**
 
