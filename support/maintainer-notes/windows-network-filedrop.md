@@ -208,34 +208,61 @@ the whole guide is trying to spare one. The entry count also closes a coverage
 gap for free -- it is where the 8192-entry limit is now checked.
 
 **The guide is split, and the split is the point.** `README.md` is the setup
-page: the problem, what you need, run it, what you got, and where to go if it
-broke. `troubleshooting.md` is everything else, and `command-prompt.md` carries
-only what the Command Prompt port does differently. The single page they
-replaced was 543 lines, of which about 111 served a reader whose run succeeded
--- so four readers in five were paying for a failure they did not have, on a
-page whose length is itself the risk with this audience.
+page: the problem, what you need, which of the two scripts to run, run it, what
+you got, and where to go if it broke. `troubleshooting.md` is one section per
+failure. `passwords.md` is the account decision and what Docker does with the
+password. The single page all three replaced was 543 lines, of which about 111
+served a reader whose run succeeded -- so four readers in five were paying for a
+failure they did not have, on a page whose length is itself the risk with this
+audience.
 
-Keep the setup page near its current 140 lines. The pressure will always be to
-add "just one more caution" to it, and every one of those is a line every
-operator reads to serve a case most of them do not hit. A caution earns its
-place there only if acting on it late is expensive: the keys file, one exchange
-at a time, retiring the account at the end, and asking the partner whether the
-drop is a synced folder are the four that do.
+The two axes of that split are different and should not be confused. Splitting
+off `troubleshooting.md` spares the successful reader a failure they do not
+have. Splitting off `passwords.md` spares the *failing* reader a question no
+failure asks: it was three pages' worth of exposure detail sitting in the middle
+of the page you are on precisely because something broke. The test for a third
+page is that nothing forces the reader to it -- an operator who never opens
+`passwords.md` still completes an exchange.
 
-The synced-folder question is a fork rather than a caution, which is why it is
-a section before "What you need" instead of a bullet after the run. A synced
-drop needs no volume at all, so an operator who reads it late has already
-gathered credentials and possibly opened a ticket for a service account that
-was never needed. Nothing else on the page has that shape.
+Which script you are running is *not* such an axis, which is why the Command
+Prompt page was folded back in. The reader who lacks PowerShell finds that out
+on the setup page and has to act on it there; sending them to a second page to
+do so put a mandatory hop in the one path that was already the harder one. Every
+command is now given twice, PowerShell first and Command Prompt after, on all
+three pages, and only where the two actually differ -- `docker volume rm` is one
+block, not two.
+
+Keep the setup page near its current 170 lines, about twenty of which are the
+testedness note. The pressure will always be to add "just one more caution" to
+it, and every one of those is a line every operator reads to serve a case most
+of them do not hit. A caution earns its place there only if acting on it late is
+expensive: the keys file, one exchange at a time, and which account you pick are
+the three that do.
 
 The pages all sit in the guide folder, so handing it over as a unit still
 works; the unit was always the folder rather than the file. Both scripts cite
-sections by name and say "the troubleshooting page" rather than "the runbook",
-and the URL each prints on failure points there too. A section rename is
-therefore a change to both scripts as well. Nothing in CI catches a citation
-that has stopped naming a real heading, so check it by hand: pull the quoted
-names out of each script, including the ones wrapped across two `emit` lines,
-and confirm each is a heading in `troubleshooting.md`.
+sections by name, saying "the troubleshooting page" or "the passwords page"
+rather than "the runbook", and the URLs each prints on failure point at both. A
+section rename is therefore a change to both scripts as well. Nothing in CI
+catches a citation that has stopped naming a real heading, so check it by hand:
+pull the quoted names out of each script, including the ones wrapped across two
+`emit` lines, and confirm each is a heading in the page it names.
+
+**"Send me the whole run" is copy-from-window, not a redirect.** Both pages used
+to tell the operator to re-run the script with `6>&1 | Tee-Object` in PowerShell
+or `1> setup-log.txt 2>&1` in Command Prompt. Both are worse than they look.
+`set /p` writes its prompt to stdout, so the Command Prompt form sends all five
+questions into the file and leaves the operator answering a blank window; that
+much follows from what `set /p` does. The PowerShell form is doubtful for a
+related reason: `Read-Host` writes its prompt with no trailing newline, and a
+native command's output reaches a PowerShell pipeline a line at a time, so the
+prompt should not surface until after it has been answered. **That second one is
+reasoned, not measured** -- it has never been run on Windows, and it is the
+first thing to check if anyone is tempted to bring the redirect back. Copying
+out of the console window replaces both: no second run, and nothing to blind.
+Its one cost falls only on Command Prompt, which cannot hide typing, so the
+password sits in that scrollback -- which is why both the page and the script
+say to start the selection below the `Password:` line.
 
 **The local-folder fallback was cut.** It was forty-three lines showing the
 operator how to build a two-way `robocopy` mirror on a Scheduled Task and point

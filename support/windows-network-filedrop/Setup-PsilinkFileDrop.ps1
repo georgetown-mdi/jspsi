@@ -42,11 +42,14 @@
 
     All of that is inherent to Docker CIFS volumes. The mitigation you control
     is the account: use one scoped to the exchange share, or one you are
-    prepared to retire, and rotate it when you are finished. See the
-    troubleshooting page, "Where your password ends up".
+    prepared to retire, and rotate it when you are finished. See the passwords
+    page.
 
 .LINK
     https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md
+
+.LINK
+    https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/passwords.md
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\Setup-PsilinkFileDrop.ps1
@@ -1040,7 +1043,7 @@ Write-Note 'metadata and puts it on a command line while creating the volume.'
 Write-Note 'Do not use a domain administrator account, and do not use one whose'
 Write-Note 'password protects anything else you care about.'
 Write-Info ''
-Write-Info 'See the troubleshooting page, "Where your password ends up".'
+Write-Info 'See the passwords page, "Where the password ends up".'
 Write-Host ''
 
 if (-not $Username) { $Username = Read-Host 'Username' }
@@ -1451,7 +1454,8 @@ Write-Info "    docker volume rm $VolumeName"
 Write-Info ''
 Write-Info 'That removes the volume but not every trace of the password, so'
 Write-Info 'retire or rotate the account when the exchanges are done. The'
-Write-Info 'troubleshooting page, "Where your password ends up", says why.'
+Write-Info 'passwords page, "Ending the exposure", says why.'
 Write-Host ''
-Write-Info 'To send this output to whoever is helping you, run the script again'
-Write-Info 'with:  ... 6>&1 | Tee-Object setup-log.txt'
+Write-Info 'To send this output to whoever is helping you, copy it out of this'
+Write-Info 'window: right-click the title bar, then Edit > Select All, Edit >'
+Write-Info 'Copy. Nothing you typed as a password is on it.'

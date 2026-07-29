@@ -21,10 +21,13 @@ machine where PowerShell is the obstacle. The Command Prompt script closes
 that: it does the same four parts against the same container checks, using
 nothing but `cmd`, `net use`, `fsutil`, `findstr` and `docker`.
 
-The operator-facing page for it is
-[`command-prompt.md`](../windows-network-filedrop/command-prompt.md), which
-carries only what differs; the setup and troubleshooting pages serve both
-scripts.
+There is no operator-facing page of its own. All three pages serve both scripts,
+giving each command in both shells, and
+[the setup page](../windows-network-filedrop/README.md#which-version-to-run)
+carries the choice between them plus the two things this script does
+differently: it echoes the password as it is typed, and it refuses a double
+quote in it. A page that existed only for this script put a mandatory second hop
+in the path of the reader who was already worse off.
 
 ## What is here
 

@@ -13,10 +13,10 @@ rem  About the password. The checks receive it through an inherited environment
 rem  variable, so it never reaches a command line there. Creating the volume is
 rem  different -- Docker takes the credentials only as a mount option, which is
 rem  a command-line argument -- so it appears on one command line, and is then
-rem  stored in cleartext in the volume metadata. See the troubleshooting
-rem  page, "Where your password ends up".
+rem  stored in cleartext in the volume metadata. See the passwords page.
 rem
 rem  https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md
+rem  https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/passwords.md
 rem ==========================================================================
 
 setlocal disabledelayedexpansion
@@ -255,7 +255,7 @@ call :note "metadata and puts it on a command line while creating the volume."
 call :note "Do not use a domain administrator account, and do not use one whose"
 call :note "password protects anything else you care about."
 call :info ""
-call :info "See the troubleshooting page, 'Where your password ends up'."
+call :info "See the passwords page, 'Where the password ends up'."
 echo(
 
 if not defined SMB_USERNAME set /p "SMB_USERNAME=Username: "
@@ -505,17 +505,19 @@ call :info "    docker volume rm %VOLUME_NAME%"
 call :info ""
 call :info "That removes the volume but not every trace of the password, so"
 call :info "retire or rotate the account when the exchanges are done. See the"
-call :info "troubleshooting page, 'Where your password ends up'."
+call :info "passwords page, 'Ending the exposure'."
 echo(
-rem Echoed directly rather than through :info. A redirection character survives
-rem being passed to a subroutine as a quoted argument, but not the echo that
-rem prints it there -- the line redirects into a file instead of appearing, and
-rem the run ends with "'1' is not recognized as an internal or external
-rem command". Escaped here, at the level where the escape is read.
-echo(        To send this output to whoever is helping you, run the script
-echo(        again and add, at the end of the command line:
-echo(
-echo(            1^> setup-log.txt 2^>^&1
+rem No redirection character appears in the text below, and none may be added.
+rem One survives being passed to a subroutine as a quoted argument, but not the
+rem echo that prints it there: the line redirects into a file instead of
+rem appearing, and the run ends with "'1' is not recognized as an internal or
+rem external command".
+call :info "To send this output to whoever is helping you, copy it out of"
+call :info "this window: right-click the title bar, open the Edit menu and"
+call :info "choose Select All, then open it again and choose Copy."
+call :info ""
+call :info "Start the selection below the Password: line. Command Prompt"
+call :info "cannot hide typing, so what you typed there is still on screen."
 
 :done_ok
 call :cleanup

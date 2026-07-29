@@ -3,7 +3,10 @@
 One section per thing that goes wrong, in the order you would meet it, and then
 reference material: the status codes, the request to send IT, how to read the
 real path from Windows, and how to do by hand what the script does for you.
-Start from [the setup page](README.md) if you have not run the script yet.
+Start from [the setup page](README.md) if you have not run the script yet. The
+question of which account to use, and what Docker does with its password, is on
+[a third page](passwords.md) -- nothing there is needed to make an exchange
+work, so nothing here waits on it.
 
 The script prints a MEANING and an ACTION for every failure it can name. Follow
 those first; this page is the longer version.
@@ -12,14 +15,16 @@ The script runs in four numbered parts, and the checks inside part 3 are
 numbered separately, steps 1 to 6. A "step" on this page is always one of those
 checks.
 
-Commands here are PowerShell. If you are using
-[the Command Prompt version](command-prompt.md), run
-`cmd_Setup-PsilinkFileDrop.cmd` wherever one shows `.\Setup-PsilinkFileDrop.ps1`
--- the options are the same -- and `nslookup` wherever one shows
-`Resolve-DnsName`. Only [Doing it by hand](#doing-it-by-hand) has no Command
-Prompt equivalent, and it says so.
+Commands are given both ways where the two differ, PowerShell first and Command
+Prompt after, matching
+[which version you are running](README.md#which-version-to-run). The two scripts
+take the same options, in either form -- `-Server` or `/Server`. Run either with
+`-?` for the list.
 
 ## The script will not run
+
+This one is PowerShell's alone; a `.cmd` file has no execution policy to refuse
+it.
 
 The `-ExecutionPolicy Bypass` on [the setup page](README.md#get-it-and-run-it)
 covers the ordinary refusal, and `Unblock-File` covers a file saved through a
@@ -37,9 +42,11 @@ it wins over everything else and you cannot override it locally. The same is
 true if the script reports that PowerShell is in ConstrainedLanguage mode,
 which application-control policy (WDAC or AppLocker) imposes.
 
-In either case use [the Command Prompt version](command-prompt.md). Do not
-reach for [Doing it by hand](#doing-it-by-hand) first: those are PowerShell
-commands too, and they meet the same policy.
+In either case switch to
+[the Command Prompt version](README.md#which-version-to-run), and use its
+commands from here on -- including in
+[Doing it by hand](#doing-it-by-hand), whose PowerShell form meets the same
+policy.
 
 ## A comma or a double quote in the password
 
@@ -50,10 +57,10 @@ off at the first comma and the mount fails. There is no way to quote or escape
 it: the local volume driver takes the credentials only as a single
 comma-separated string. Doing it by hand hits exactly the same wall.
 
-[The Command Prompt version](command-prompt.md) refuses a double quote as well.
-Docker takes the mount options as one quoted argument, and a quote inside the
-password ends that argument early, so Docker creates an unnamed volume instead
-of the one asked for.
+The Command Prompt version refuses a double quote as well. Docker takes the
+mount options as one quoted argument, and a quote inside the password ends that
+argument early, so Docker creates an unnamed volume instead of the one asked
+for.
 
 Use an account whose password has neither -- it is item 1 of the
 [IT request](#what-to-ask-your-it-department-for).
@@ -71,6 +78,11 @@ Find the full name on Windows and pass it directly:
 ```powershell
 Resolve-DnsName fileserver
 .\Setup-PsilinkFileDrop.ps1 -Server fileserver.agency.gov -Share exchange -SubPath dropbox
+```
+
+```text
+nslookup fileserver
+cmd_Setup-PsilinkFileDrop.cmd -Server fileserver.agency.gov -Share exchange -SubPath dropbox
 ```
 
 An IP address works too, and is the right answer when there is no DNS entry at
@@ -206,6 +218,10 @@ pinning one:
 .\Setup-PsilinkFileDrop.ps1 -Dialect SMB3
 ```
 
+```text
+cmd_Setup-PsilinkFileDrop.cmd -Dialect SMB3
+```
+
 and if that fails, `-Dialect SMB2`. `-Dialect NT1` is for diagnosis only: the
 Docker VM's kernel is built without SMB1, so a server that speaks nothing newer
 cannot be mounted at all. For a server like that, ask for the scheduled mirror
@@ -307,10 +323,16 @@ Then split that path into its three parts and pass them directly:
 .\Setup-PsilinkFileDrop.ps1 -Server fs-04.agency.gov -Share 'exchange$' -SubPath dropbox
 ```
 
+```text
+cmd_Setup-PsilinkFileDrop.cmd -Server fs-04.agency.gov -Share exchange$ -SubPath dropbox
+```
+
 `\\fs-04.agency.gov\exchange$\dropbox` splits into server `fs-04.agency.gov`,
 share `exchange$` (the **first** path component only), and subfolder `dropbox`
-(everything after it). Quote the share if it contains a `$`, as most
-administrative shares do.
+(everything after it). In PowerShell, quote the share if it contains a `$`, as
+most administrative shares do -- unquoted, PowerShell reads it as the start of a
+variable name. Command Prompt does not treat `$` specially, so it needs no
+quotes.
 
 Give all three together. `-Server` on its own is ignored, and passing `-Server`
 and `-Share` without `-SubPath` builds the volume on the share root.
@@ -326,10 +348,6 @@ If you would rather see each step, or the script failed for a reason nothing
 above covers, this is what it does. You need the real server, share and
 subfolder from the section above.
 
-These are PowerShell commands, so policy that blocks the script blocks them
-too. If that is why you are here, use
-[the Command Prompt version](command-prompt.md) instead.
-
 ```powershell
 docker volume create --driver local `
   --opt type=cifs `
@@ -338,11 +356,21 @@ docker volume create --driver local `
   psilink-rendezvous
 ```
 
+```text
+docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=USER,password=PASS,domain=AGENCY" psilink-rendezvous
+```
+
 Note the forward slashes in `device`, and that `\\fs-04\exchange$\dropbox`
-becomes `//fs-04/exchange$/dropbox`. Keep the single quotes: without them
-PowerShell expands `$/dropbox` as a variable and the path silently changes, and
-a `$` in the password does the same to the credentials -- producing a login
-failure that looks exactly like a wrong password.
+becomes `//fs-04/exchange$/dropbox`. The quotes are load-bearing in both, for
+different reasons. In PowerShell they must be single quotes: without them it
+expands `$/dropbox` as a variable and the path silently changes, and a `$` in
+the password does the same to the credentials -- producing a login failure that
+looks exactly like a wrong password. In Command Prompt each `--opt` is one
+argument that has to survive whatever punctuation the password holds, which is
+what the double quotes are for; `$` means nothing there. `%` is the character to
+watch instead, since Command Prompt uses it for variable expansion and the
+escaping differs between a typed command and a batch file -- if the password
+contains one, use the script rather than doing this by hand.
 
 Check that it mounts and that the folder is the one you meant:
 
@@ -350,10 +378,14 @@ Check that it mounts and that the folder is the one you meant:
 docker run --rm -v 'psilink-rendezvous:/rz' alpine:3.22 ls -la /rz
 ```
 
-This route puts the password on a command line, where it is recorded in your
-PowerShell history file as well as everywhere described under
-[Where your password ends up](#where-your-password-ends-up). Clear it
-afterwards, or use the script.
+```text
+docker run --rm -v "psilink-rendezvous:/rz" alpine:3.22 ls -la /rz
+```
+
+This route puts the password on a command line, on top of everywhere
+[the passwords page](passwords.md) describes -- and in PowerShell that means
+your history file, which persists across sessions. Clear it afterwards, or use
+the script.
 
 ## Running the exchange
 
@@ -390,6 +422,10 @@ docker run --rm `
   file:///rendezvous input.csv matches.csv --lockless-rendezvous
 ```
 
+```text
+docker run --rm -v "C:\path\to\your\work:/work" -v "C:\Users\you\Egnyte\exchange:/rendezvous" vdorie/psi-link:latest file:///rendezvous input.csv matches.csv --lockless-rendezvous
+```
+
 `--lockless-rendezvous` is not optional there and **both parties** must pass
 it. A synced folder does not behave like a real filesystem: deletions take time
 to propagate and both sides can create the same file at once, which breaks
@@ -404,46 +440,3 @@ The setup script tests for this directly when it creates a volume, and tells
 you if the share needs it. If you are bind-mounting a synced folder instead,
 assume you need it, and confirm with your partner which kind of folder you are
 sharing before the first run.
-
-## Where your password ends up
-
-The setup script passes the password to its checks through an environment
-variable, so it never reaches a command line there. That reduces the exposure
-but does not remove it: while the check container runs, `docker inspect` shows
-the password to anyone who can run Docker on this PC.
-Creating the volume is worse again, because Docker's CIFS volume driver accepts
-credentials only as a mount option, and that is a command-line argument. There
-is no way around it, so it is worth knowing the main places it ends up.
-
-- **On a command line, once.** While the volume is created. On a managed
-  workstation, command-line auditing (Windows event 4688, Sysmon, or your EDR
-  agent) records that durably, and usually forwards it to a central log. That
-  is a wider boundary than "Docker on this PC" -- the password may leave the
-  machine and be retained by people you will never speak to.
-- **In the volume metadata, in cleartext.** `docker volume inspect
-  psilink-rendezvous` shows it to anyone who can run Docker here.
-- **In your PowerShell history,** if you used
-  [Doing it by hand](#doing-it-by-hand). The file is at
-  `$env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt`.
-- **In Docker's volume metadata database, after `docker volume rm`.** It
-  survives there as a freed record. That file lives inside the Docker Desktop
-  virtual disk, which endpoint backup and imaging tooling copies wholesale --
-  so it is the one residue that can leave the machine without anyone running
-  Docker.
-
-None of that is introduced by psilink; it is how Docker CIFS volumes work, and
-a password that has been in a process's memory on a Windows PC cannot be
-reliably erased afterwards. What you control is **which account** you use. Do
-not use your own Windows sign-in, and do not use a domain administrator
-account. Use one scoped to the exchange share, or one you are prepared to
-retire, and rotate it when the exchanges are done.
-
-When you are finished:
-
-```powershell
-docker volume rm psilink-rendezvous
-```
-
-That removes the volume and its options file. Given the last point above, treat
-rotating the password as the step that actually ends the exposure -- and if IT
-issued the account, that means going back to them.
