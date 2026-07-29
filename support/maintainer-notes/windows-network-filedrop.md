@@ -48,6 +48,38 @@ a missing environment variable; a dialect the server refuses, reported as a
 negotiation failure rather than as an NTLM policy problem; and the free-space
 warning on a share reporting zero blocks available.
 
+Four defects found by review and fixed against that server, each reproduced
+before and after:
+
+- **An empty status was read as success.** `status_of` scrapes for an
+  `NT_STATUS_` token, and a transport that dies before the server answers
+  supplies none. A `socat` listener accepting port 445 and never speaking SMB
+  drove the probe to `ALL CHECKS PASSED`, exit 0, having authenticated,
+  opened, written and deleted nothing -- and to three fabricated "removed ...
+  left behind by an earlier run" notices. `transport_failed` now consults the
+  exit status as well, and the same listener exits 3. This is the reason the
+  exit status is captured at every decisive call site rather than only the
+  output.
+- **`set -C` never asked the share.** Under `strace`, busybox ash implements
+  the noclobber retry as `newfstatat` and refuses in the shell -- no `openat`
+  is issued, so `EXCL_WEAK` was unreachable and the check was a no-op on
+  exactly the sync-backed shares it exists to catch. `mkdir` issues `mkdirat`
+  and takes `EEXIST` from the server. Note the residue: both map to an SMB
+  create with `FILE_CREATE` disposition, so `mkdir` is a proxy for the
+  `O_CREAT|O_EXCL` that `createExclusive` actually uses, and a share
+  arbitrating the two differently still slips through.
+- **The stale sweep cleared names the probe never wrote.** It listed
+  `psilink-write-probe.tmp`; the write stage created `psilink-probe-$$.tmp`.
+  Seeding `psilink-probe-9.tmp.renamed` on a fully writable share produced
+  `NT_STATUS_OBJECT_NAME_COLLISION -- created a file but could not rename it`
+  and sent the operator to ask for rights they already held. Swept by mask now,
+  and the probe name comes from `SMB_TOKEN`: `$$` is not unique here, measured
+  at 9 on essentially every run, because the probe is a child of `sh -c`.
+- **The marker was swept too**, which deleted a concurrent operator's live
+  marker and turned their volume check into the `MARKER_MISSING` "wrong server,
+  probably DFS" verdict. The volume check owns the marker now, and removes it
+  only on `MARKER_OK`.
+
 Also measured directly against smbclient: `-m NT1` alone fails with
 `NT_STATUS_INVALID_PARAMETER_MIX` against every server, because `-m` sets the
 maximum protocol only and the client minimum stays at `SMB2_02`. Adding
@@ -112,6 +144,21 @@ ConstrainedLanguage blocks on exactly the locked-down endpoints this guide
 targets, and there is no way to test it here. If a domain-joined machine
 becomes available, measure the premise first -- if `Get-SmbConnection` does
 name the target, a much smaller fix exists.
+
+**The probe reports derived facts, not the operator's data.** Step 3 used to
+print the server's share list and step 5 the drop folder's listing. The runbook
+asks the operator to tee the run to a file and send it to whoever is helping
+them, which for a supported deployment is us -- and we are not a party to their
+exchange, so an agency's share names and the filenames in a record-linkage drop
+folder are things we should not end up holding. Step 3 now reports only whether
+the named share was among those offered, and step 5 an entry count. Nothing
+downstream read either: `report_space` parses `LISTING`, not what was printed.
+
+Reducing at source rather than warning the operator to review the log is
+deliberate. A warning cannot protect the recipient, since it leaves the decision
+with someone who has no basis for it, and it adds a judgment call to an audience
+the whole guide is trying to spare one. The entry count also closes a coverage
+gap for free -- it is where the 8192-entry limit is now checked.
 
 **A comma in the password is refused up front** rather than warned about.
 Docker's local driver takes CIFS credentials only as one comma-separated

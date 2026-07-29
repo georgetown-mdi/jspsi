@@ -408,7 +408,7 @@ afterwards, or use the script.
 A few things about psilink itself that the setup script cannot check for you.
 
 **The keys file is not a result.** Each run writes a
-`psilink-record-<timestamp>.<name>.keys.json` into your work folder alongside
+`psilink-record-<timestamp>.keys.json` into your work folder alongside
 the matches. It holds the keys to the exchange. Treat it like the input data:
 do not send it on with the results, and do not leave it in a folder that syncs
 somewhere.
@@ -421,8 +421,14 @@ with your partner who goes when.
 If a run fails and leaves the folder dirty -- which the `--lockless-rendezvous`
 mismatch below reliably does, since both sides write a greeting file before
 either discovers the disagreement -- the next attempt will be refused on both
-sides until the folder is cleared. Empty it in Explorer, or have **both** sides
-re-run once with:
+sides until the folder is cleared. Emptying it in File Explorer is the simplest
+fix and the one to reach for first.
+
+There is also a flag that clears it, but **only one of you may use it**, and
+that side must start first. It deletes every psilink file in the folder,
+including the greeting the other side has just written, so if you both pass it
+you will delete each other's greeting and both runs will sit waiting for a
+partner who is no longer there. Agree who goes first; that person runs:
 
 ```powershell
 docker run --rm `
@@ -431,6 +437,9 @@ docker run --rm `
   vdorie/psi-link:latest `
   file:///rendezvous input.csv matches.csv --sweep-exchange-files
 ```
+
+The other side waits until that run has started, then uses the ordinary command
+without the flag.
 
 **A big or busy folder will be refused.** psilink will not read a rendezvous
 directory holding more than 8192 entries, or one containing a filename longer
@@ -483,8 +492,9 @@ still deletes each message once it has been read. Both sides need
 instead. That folder then has to be emptied between exchanges.
 
 A sync round trip also makes every message slower. If runs time out waiting for
-the other side, raise the limits on both sides -- for example
-`--polling-frequency 30s --peer-timeout 30m`.
+the other side, raise the limits on both sides. psilink already waits an hour
+for a partner, so raise it past that, and check less often than the default of
+every five seconds -- for example `--polling-frequency 30s --peer-timeout 4h`.
 
 Confirm with your exchange partner which kind of folder you are sharing before
 the first run.
