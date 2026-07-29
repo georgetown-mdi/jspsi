@@ -22,9 +22,9 @@ If you are choosing, evaluating, or operating psilink deliberately, start at
 | `bind source path does not exist` when mounting a network folder on Windows | [windows-network-filedrop](windows-network-filedrop/README.md) |
 | Docker cannot use a mapped drive (`Z:\...`) or a network path (`\\server\share`) | [windows-network-filedrop](windows-network-filedrop/README.md) |
 | `permission denied` creating or mounting a Docker CIFS/SMB volume | [windows-network-filedrop](windows-network-filedrop/README.md) |
-| A file drop that a sync service keeps in step, rather than a live file server | [windows-network-filedrop](windows-network-filedrop/README.md#synced-folders) |
-| A network folder the container reaches but cannot write, rename, or delete in | [windows-network-filedrop](windows-network-filedrop/README.md#it-mounts-but-psilink-cannot-write) |
-| Nothing to send IT when a network problem turns out to be theirs | [windows-network-filedrop](windows-network-filedrop/README.md#what-to-ask-your-it-department-for) |
+| A file drop that a sync service keeps in step, rather than a live file server | [synced folders](windows-network-filedrop/troubleshooting.md#synced-folders) |
+| A network folder the container reaches but cannot write, rename, or delete in | [the folder cannot be written to](windows-network-filedrop/troubleshooting.md#the-folder-cannot-be-written-to) |
+| Nothing to send IT when a network problem turns out to be theirs | [what to ask IT for](windows-network-filedrop/troubleshooting.md#what-to-ask-your-it-department-for) |
 
 ## Each guide
 
@@ -35,7 +35,9 @@ describe rather than with this repository.
 
 - [windows-network-filedrop](windows-network-filedrop/README.md) -- using a
   file drop that lives on a Windows network location (mapped drive, UNC path,
-  or DFS namespace) with the psilink container.
+  or DFS namespace) with the psilink container. The folder holds a short setup
+  page, a [troubleshooting page](windows-network-filedrop/troubleshooting.md)
+  with a section per failure, and the script itself.
 
 ## Maintainer notes
 

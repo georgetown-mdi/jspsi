@@ -42,11 +42,11 @@
 
     All of that is inherent to Docker CIFS volumes. The mitigation you control
     is the account: use one scoped to the exchange share, or one you are
-    prepared to retire, and rotate it when you are finished. See the runbook,
+    prepared to retire, and rotate it when you are finished. See the troubleshooting page,
     "What this does with your password".
 
 .LINK
-    https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/README.md
+    https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\Setup-PsilinkFileDrop.ps1
@@ -256,7 +256,7 @@ function Resolve-DropPath {
             # does not exist.
             if (Test-Elevated) {
                 return @{ Kind = 'Unknown'
-                          Reason = "this window is running as Administrator, and an elevated session cannot see the drive letters you mapped as yourself -- ${letter}: is invisible here even if File Explorer shows it. Close this window, open PowerShell normally, and run the script again. If you were told to elevate in order to resolve a DFS path, you no longer need to: see the runbook, 'Finding the real server by hand'" }
+                          Reason = "this window is running as Administrator, and an elevated session cannot see the drive letters you mapped as yourself -- ${letter}: is invisible here even if File Explorer shows it. Close this window, open PowerShell normally, and run the script again. If you were told to elevate in order to resolve a DFS path, you no longer need to: see the troubleshooting page, 'Finding the real server by hand'" }
             }
             if ($kind -eq 'Network') {
                 return @{ Kind = 'Unknown'
@@ -397,9 +397,9 @@ report_transport_failure() {
     emit "         reason for it (exit $1). Nothing about your credentials or"
     emit "         your folder has been established either way."
   fi
-  emit "ACTION:  see the runbook, 'The container cannot reach the server'. A"
-  emit "         firewall or VPN that allows the connection and then drops the"
-  emit "         traffic behaves exactly like this."
+  emit "ACTION:  see the troubleshooting page, 'The container cannot reach"
+  emit "         the server'. A firewall or VPN that allows the connection"
+  emit "         and then drops the traffic behaves exactly like this."
 }
 
 report_space() {
@@ -437,7 +437,8 @@ else
   emit ""
   emit "          .\\Setup-PsilinkFileDrop.ps1 -Server <full-name-or-IP> -Share $SMB_SHARE"
   emit ""
-  emit "        See the runbook, 'The container cannot resolve the name'."
+  emit "        See the troubleshooting page, 'The container cannot find"
+  emit "        the server'."
   exit 2
 fi
 
@@ -453,8 +454,8 @@ else
   emit "server-side address restriction blocks the VM while File Explorer keeps"
   emit "working."
   emit ""
-  emit "ACTION: if you are on a VPN, that is the likely cause. See the runbook"
-  emit "        section 'The container cannot reach the server'."
+  emit "ACTION: if you are on a VPN, that is the likely cause. See the"
+  emit "        troubleshooting page, 'The container cannot reach the server'."
   exit 3
 fi
 
@@ -474,7 +475,8 @@ APKOUT=$(apk add --no-cache samba-client 2>&1) || {
   emit "         usually, and Docker Desktop needs its certificate. 'DNS' or"
   emit "         'temporary error' means name resolution inside the VM."
   emit ""
-  emit "ACTION:  see the runbook, 'The container cannot install its tools'."
+  emit "ACTION:  see the troubleshooting page, 'The container cannot install"
+  emit "         its tools'."
   exit 1
 }
 
@@ -522,8 +524,8 @@ case "$STATUS" in
     emit "ACTION:  if this is a domain account, run the script again with"
     emit "         -Domain set. If the folder opens in File Explorer WITHOUT"
     emit "         ever asking for a password, Windows is signing you in"
-    emit "         automatically with Kerberos and there may be no password"
-    emit "         that works here. See the runbook, 'No password exists'."
+    emit "         automatically with Kerberos and there may be no password that"
+    emit "         works here. See the troubleshooting page, 'No password exists'."
     emit ""
     emit "         Do not work through passwords one at a time. Each run is one"
     emit "         failed sign-in against the account, and a handful of those"
@@ -554,8 +556,9 @@ case "$STATUS" in
     emit "         neither are the rights on your folder."
     emit "ACTION:  ask whoever issued the account to lift that restriction, or"
     emit "         ask for a service account instead -- it is item 1 of the IT"
-    emit "         request in the runbook. Without this, every later check would"
-    emit "         report the same status and blame your folder for it."
+    emit "         request on the troubleshooting page. Without this, every"
+    emit "         later check would report the same status and blame your"
+    emit "         folder for it."
     exit 4 ;;
   NT_STATUS_NOT_SUPPORTED|NT_STATUS_LOGON_TYPE_NOT_GRANTED)
     emit "FAIL: $STATUS"
@@ -565,7 +568,7 @@ case "$STATUS" in
     emit "MEANING: the server rejected the authentication METHOD, not the"
     emit "         credentials. NTLM is probably disabled server-side, or this"
     emit "         account is not allowed to sign in over the network."
-    emit "ACTION:  see the runbook, 'No password exists'."
+    emit "ACTION:  see the troubleshooting page, 'No password exists'."
     exit 4 ;;
 esac
 
@@ -637,7 +640,8 @@ if [ -n "$STATUS" ]; then
       emit ""
       emit "           .\\Setup-PsilinkFileDrop.ps1 -Server <server> -Share <share> -SubPath <folder>"
       emit ""
-      emit "         See the runbook, 'Finding the real server by hand'."
+      emit "         See the troubleshooting page, 'Finding the real server"
+      emit "         by hand'."
       exit 5 ;;
     NT_STATUS_NOT_A_DIRECTORY)
       emit "FAIL: $STATUS"
@@ -667,8 +671,8 @@ if [ -n "$STATUS" ]; then
     emit ""
     emit "ACTION:  the account probably lacks rights when connecting from a"
     emit "         machine that is not domain-joined, or the server requires"
-    emit "         Kerberos. See the runbook, 'Credentials correct, still"
-    emit "         denied'."
+    emit "         Kerberos. See the troubleshooting page, 'Credentials right,"
+    emit "         access refused'."
     exit 5
   fi
 else
@@ -701,7 +705,7 @@ if [ -n "$SMB_PATH" ]; then
         emit "         and the Docker VM has no DFS client to follow it."
         emit "ACTION:  read the real path from the folder's Properties, DFS tab"
         emit "         and pass it with -Server, -Share and -SubPath. See the"
-        emit "         runbook, 'Finding the real server by hand'." ;;
+        emit "         troubleshooting page, 'Finding the real server by hand'." ;;
       *)
         emit "MEANING: the subfolder exists but this account cannot open it."
         emit "ACTION:  access to a share does not imply access to every folder"
@@ -857,9 +861,10 @@ if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
     Write-Note 'are blocked. It cannot run here, and there is nothing you can'
     Write-Note 'change locally to allow it.'
     Write-Info ''
-    Write-Info 'Set the volume up by hand instead: see the runbook, "Doing it by'
-    Write-Info 'hand". You will need the real server name, which the same section'
-    Write-Info 'explains how to read from the folder Properties.'
+    Write-Info 'Set the volume up by hand instead: see the troubleshooting'
+    Write-Info 'page, "Doing it by hand". You will need the real server name,'
+    Write-Info 'which the same section explains how to read from the folder'
+    Write-Info 'Properties.'
     exit 1
 }
 
@@ -954,7 +959,7 @@ if (-not $explicitTarget) {
             Write-Info ''
             Write-Info '    file:///rendezvous input.csv matches.csv --lockless-rendezvous'
             Write-Info ''
-            Write-Info 'See the runbook, "Synced folders".'
+            Write-Info 'See the troubleshooting page, "Synced folders".'
             exit 0
         }
         'Unknown' {
@@ -1011,7 +1016,7 @@ if (-not $explicitTarget -and -not $SkipConfirm) {
         Write-Info ''
         Write-Info '    .\Setup-PsilinkFileDrop.ps1 -Server fs-04.agency.gov -Share ''exchange$'' -SubPath dropbox'
         Write-Info ''
-        Write-Info 'See the runbook, "Finding the real server by hand".'
+        Write-Info 'See the troubleshooting page, "Finding the real server by hand".'
         exit 0
     }
 }
@@ -1031,7 +1036,7 @@ Write-Note 'metadata and puts it on a command line while creating the volume.'
 Write-Note 'Do not use a domain administrator account, and do not use one whose'
 Write-Note 'password protects anything else you care about.'
 Write-Info ''
-Write-Info 'See the runbook, "What this does with your password".'
+Write-Info 'See the troubleshooting page, "What this does with your password".'
 Write-Host ''
 
 if (-not $Username) { $Username = Read-Host 'Username' }
@@ -1057,7 +1062,7 @@ if ([string]::IsNullOrEmpty($plainPass)) {
     Write-Bad 'No password entered.'
     Write-Note 'If you never type a password when opening this folder in Explorer,'
     Write-Note 'Windows signs you in automatically and this approach may not work at'
-    Write-Note 'all. Read the runbook section "No password exists" first.'
+    Write-Note 'all. Read the troubleshooting page section "No password exists" first.'
     exit 1
 }
 
@@ -1073,8 +1078,9 @@ if ($plainPass.Contains(',')) {
     Write-Note 'no way to quote or escape it -- this is a limit of Docker volumes,'
     Write-Note 'not of psilink, and doing it by hand hits exactly the same wall.'
     Write-Info ''
-    Write-Info 'Use an account whose password has no comma. The runbook has a ready'
-    Write-Info 'made request for one, under "What to ask your IT department for".'
+    Write-Info 'Use an account whose password has no comma. The troubleshooting'
+    Write-Info 'page has a ready-made request for one, under "What to ask your'
+    Write-Info 'IT department for".'
     exit 1
 }
 
@@ -1133,8 +1139,8 @@ try {
         Write-Head 'Not ready yet'
         Write-Bad 'The file drop is not usable from Docker. Follow the ACTION above.'
         Write-Info ''
-        Write-Info 'The runbook explains every one of these in more detail:'
-        Write-Info 'https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/README.md'
+        Write-Info 'The troubleshooting page explains every one of these in more detail:'
+        Write-Info 'https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md'
         exit $probeExit
     }
     Write-Good 'The share is reachable, writable, and supports rename.'
@@ -1165,8 +1171,8 @@ try {
             Write-Note 'will be refused however well the checks went. -Dialect NT1 is'
             Write-Note 'useful for diagnosis only. If the server speaks nothing newer,'
             Write-Note 'ask IT for a scheduled mirror to a local folder instead -- the'
-            Write-Note 'runbook has the request, under "What to ask your IT department'
-            Write-Note 'for".'
+            Write-Note 'troubleshooting page has the request, under "What to ask'
+            Write-Note 'your IT department for".'
         }
     }
 
@@ -1296,7 +1302,7 @@ rm -f .psilink-a.tmp .psilink-b.tmp
             Write-Note 'can open the folder but not create files in it, or the share'
             Write-Note 'is out of space.'
             Write-Info ''
-            Write-Info 'See the runbook, "It mounts but psilink cannot write".'
+            Write-Info 'See the troubleshooting page, "The folder cannot be written to".'
             Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
             exit 9
         }
@@ -1324,8 +1330,8 @@ rm -f .psilink-a.tmp .psilink-b.tmp
         }
         elseif ($testOut -match 'Required key not available') {
             Write-Note 'The mount wanted a Kerberos ticket and the Docker VM has none.'
-            Write-Note 'The server is refusing password authentication. See the runbook,'
-            Write-Note '"No password exists".'
+            Write-Note 'The server is refusing password authentication. See the'
+            Write-Note 'troubleshooting page, "No password exists".'
         }
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
@@ -1341,7 +1347,7 @@ rm -f .psilink-a.tmp .psilink-b.tmp
         Write-Note 'differ in all three.'
         Write-Info ''
         Write-Info 'Read the real path from the folder Properties, DFS tab, and run'
-        Write-Info 'again with -Server, -Share and -SubPath. See the runbook,'
+        Write-Info 'again with -Server, -Share and -SubPath. See the troubleshooting page,'
         Write-Info '"Finding the real server by hand".'
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
@@ -1414,7 +1420,7 @@ Write-Note 'pass --lockless-rendezvous, at the end of the command line:'
 Write-Info ''
 Write-Info '    file:///rendezvous input.csv matches.csv --lockless-rendezvous'
 Write-Info ''
-Write-Info 'See the runbook, "Synced folders".'
+Write-Info 'See the troubleshooting page, "Synced folders".'
 Write-Host ''
 Write-Host 'There is also a browser console:' -ForegroundColor Cyan
 Write-Host ''
@@ -1437,8 +1443,8 @@ Write-Info ''
 Write-Info "    docker volume rm $VolumeName"
 Write-Info ''
 Write-Info 'That removes the volume but not every trace of the password, so'
-Write-Info 'retire or rotate the account when the exchanges are done. The runbook'
-Write-Info 'section "What this does with your password" says why.'
+Write-Info 'retire or rotate the account when the exchanges are done. The'
+Write-Info 'troubleshooting page, "What this does with your password", says why.'
 Write-Host ''
 Write-Info 'To send this output to whoever is helping you, run the script again'
 Write-Info 'with:  ... 6>&1 | Tee-Object setup-log.txt'
