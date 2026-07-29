@@ -194,9 +194,10 @@ with someone who has no basis for it, and it adds a judgment call to an audience
 the whole guide is trying to spare one. The entry count also closes a coverage
 gap for free -- it is where the 8192-entry limit is now checked.
 
-**The guide is two pages, and the split is the point.** `README.md` is the
-setup page: the problem, what you need, run it, what you got, and where to go
-if it broke. `troubleshooting.md` is everything else. The single page it
+**The guide is split, and the split is the point.** `README.md` is the setup
+page: the problem, what you need, run it, what you got, and where to go if it
+broke. `troubleshooting.md` is everything else, and `command-prompt.md` carries
+only what the Command Prompt port does differently. The single page they
 replaced was 543 lines, of which about 111 served a reader whose run succeeded
 -- so four readers in five were paying for a failure they did not have, on a
 page whose length is itself the risk with this audience.
@@ -208,14 +209,14 @@ place there only if acting on it late is expensive: the keys file, one exchange
 at a time, and asking the partner whether the drop is a synced folder are the
 three that do.
 
-Both pages sit in the guide folder, so handing it over as a unit still works;
-the unit was always the folder rather than the file. The script cites sections
-by name and now says "the troubleshooting page" rather than "the runbook", and
-the URL it prints on failure points there too. A section rename is therefore a
-change to the script as well. Nothing in CI catches a citation that has stopped
-naming a real heading, so check it by hand: pull the quoted names out of the
-script, including the ones wrapped across two `emit` lines, and confirm each is
-a heading in `troubleshooting.md`.
+The pages all sit in the guide folder, so handing it over as a unit still
+works; the unit was always the folder rather than the file. Both scripts cite
+sections by name and say "the troubleshooting page" rather than "the runbook",
+and the URL each prints on failure points there too. A section rename is
+therefore a change to both scripts as well. Nothing in CI catches a citation
+that has stopped naming a real heading, so check it by hand: pull the quoted
+names out of each script, including the ones wrapped across two `emit` lines,
+and confirm each is a heading in `troubleshooting.md`.
 
 **The local-folder fallback was cut.** It was forty-three lines showing the
 operator how to build a two-way `robocopy` mirror on a Scheduled Task and point

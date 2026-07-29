@@ -43,6 +43,10 @@ Every command here is PowerShell. Open the Start menu, type `PowerShell`, and
 press Enter -- **not** "as Administrator", because an elevated window cannot
 see the drive letters you mapped as yourself.
 
+If this PC has no PowerShell, or policy blocks it, use the
+[Command Prompt version](command-prompt.md) instead. It does the same thing and
+reports the same failures, and everything below applies to it unchanged.
+
 ```powershell
 Invoke-WebRequest -UseBasicParsing `
   -Uri 'https://raw.githubusercontent.com/georgetown-mdi/jspsi/main/support/windows-network-filedrop/Setup-PsilinkFileDrop.ps1' `

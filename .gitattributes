@@ -3,3 +3,18 @@
 # endings -- Git for Windows' core.autocrlf=true default does -- would redden
 # that check over the checkout rather than over the file.
 /.npmrc -text
+
+# The Command Prompt setup script is delivered by raw download as well as by
+# checkout, and a raw download serves the stored blob rather than a converted
+# working copy. cmd needs CRLF: with LF alone it stops at the first goto with
+# "The system cannot find the batch label specified". Storing the exact bytes
+# is what makes both delivery paths work.
+/support/windows-network-filedrop/cmd_Setup-PsilinkFileDrop.cmd -text
+
+# Its container-side scripts are the opposite case -- sh does not treat a
+# carriage return as whitespace -- so they are stored LF and kept that way.
+# They are also fed through "tr -d '\r'" at run time, which covers a copy that
+# picked up CRLF some other way.
+/support/windows-network-filedrop/cmd_psilink-probe.sh -text
+/support/windows-network-filedrop/cmd_psilink-credcheck.sh -text
+/support/windows-network-filedrop/cmd_psilink-volcheck.sh -text

@@ -23,8 +23,9 @@ it wins over everything else and you cannot override it locally. The same is
 true if the script reports that PowerShell is in ConstrainedLanguage mode,
 which application-control policy (WDAC or AppLocker) imposes.
 
-In either case use [Doing it by hand](#doing-it-by-hand), which is ordinary
-commands rather than a script.
+In either case use [the Command Prompt version](command-prompt.md). Do not
+reach for [Doing it by hand](#doing-it-by-hand) first: those are PowerShell
+commands too, and they meet the same policy.
 
 ## A comma in the password
 
