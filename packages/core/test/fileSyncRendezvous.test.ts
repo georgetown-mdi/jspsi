@@ -1039,11 +1039,15 @@ describe("FileSyncRendezvous entry scan and sweep contract", () => {
 // assertions below check that no final protocol name is ever observed
 // half-published.
 //
-// The coordinator awaits every op and derives nothing from the session, so
-// interposing a boundary cannot by itself change a run -- which is the property
-// under test, not an assumption behind it. Each test therefore measures what the
-// boundary WOULD expose and that the run reaches the same committed identity and
-// the same final directory at every boundary position.
+// No session transition is interposed here: the client below has no session to
+// drop, so a boundary is an observation point rather than a cut. Each test
+// measures the directory a fresh session would find at that point, and that the
+// run reaches the same committed identity and the same final directory wherever
+// the point falls. The two properties this cannot reach are checked where they
+// can be: that no reconnect resets the coordinator's session state is driven
+// against a cycling transport in fileSyncConnection.test.ts, and real
+// server-forced cuts are driven against the SFTP server in
+// apps/cli/test/integration/ephemeralSessionExchange.test.ts.
 //
 // Measured bound: the boundary falls BETWEEN two transport ops. A boundary that
 // cuts a single op mid-flight is a different property, decided by driving the
@@ -1165,7 +1169,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
     }
   };
 
-  test("a lockless rendezvous completes across a session drop and re-dial at every op boundary", async () => {
+  test("a lockless rendezvous commits identically at every op-boundary position", async () => {
     const start = async (
       isBoundary: BoundaryPredicate,
     ): Promise<BoundaryRun> => {
@@ -1212,7 +1216,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
     expect(sawAckPublishGap).toBe(true);
   });
 
-  test("the lock-joiner's joining sentinel survives a session drop at every op boundary", async () => {
+  test("the lock-joiner's joining sentinel is never missing at an op-boundary position", async () => {
     const start = async (
       isBoundary: BoundaryPredicate,
     ): Promise<BoundaryRun> => {
@@ -1260,7 +1264,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
     expect(sawRecoveryWindow).toBe(true);
   });
 
-  test("the lock file is created exactly once across a session drop at every op boundary", async () => {
+  test("the lock file is created exactly once across every op-boundary position", async () => {
     const start = async (
       isBoundary: BoundaryPredicate,
     ): Promise<BoundaryRun & { exclusiveCreates: number }> => {
@@ -1311,7 +1315,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
     expect(sawPreLockBoundary).toBe(true);
   });
 
-  test("the zero-length ack is written once across session drops, never re-written per session", async () => {
+  test("the zero-length ack is written once across op-boundary positions, never re-written per boundary", async () => {
     const files = new Map<string, Buffer>();
     const flags = { locklessRendezvous: true, retainFiles: false };
     placePeerHello(files, "zzz", flags);
@@ -1470,7 +1474,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
       expectNoHalfPublishedFile(boundary.contents);
   });
 
-  test("a session drop mid-rendezvous does not re-enter the entry snapshot", async () => {
+  test("an op-boundary position mid-rendezvous does not re-enter the entry snapshot", async () => {
     const files = new Map<string, Buffer>();
     const flags = { locklessRendezvous: true, retainFiles: false };
     files.set(`${DIR}/at-entry.txt`, Buffer.from("x"));

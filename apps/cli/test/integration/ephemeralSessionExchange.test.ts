@@ -38,14 +38,14 @@ const BOUNDARY_TEST_TIMEOUT_MS = 120_000;
 // Poll a predicate until it holds, failing if it never does.
 async function waitFor(
   predicate: () => boolean,
-  { timeoutMs = 60_000, intervalMs = 50 } = {},
+  { timeoutMs = 60_000, intervalMs = 50, what = "condition" } = {},
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  throw new Error("waitFor: condition not met within timeout");
+  throw new Error(`waitFor: ${what} not met within timeout`);
 }
 
 // Count the dials the adapter issues and the dials that settle as failures, so a
@@ -497,18 +497,14 @@ inProcessOnly(
 
       // The durable handshake files survived the loss of the session: this party's
       // hello is the directory's single hello, written before the first cut and
-      // still there after the last, with no orphaned lock or joining sentinel
-      // beside it.
+      // still there after the last. The lock and the joining sentinel are not
+      // asserted here: this snapshot is taken while the waiter is still the sole
+      // party, so neither can exist yet and their absence would prove nothing.
+      // The assertion that carries them is the post-rendezvous one below.
       expect(outcome.acrossTheCuts).toContain(`${waiter.id}-hello.json`);
       expect(
         outcome.acrossTheCuts.filter((name) => name.endsWith("-hello.json")),
       ).toEqual([`${waiter.id}-hello.json`]);
-      expect(
-        outcome.acrossTheCuts.filter(
-          (name) =>
-            name.endsWith("-lock.json") || name.endsWith("-joining.json"),
-        ),
-      ).toEqual([]);
       // And the joiner's arrival consumed its sentinel rather than losing it: the
       // rendezvous leaves neither hello, no lock, and no sentinel behind.
       expect(
@@ -641,11 +637,19 @@ inProcessOnly(
             // sender is idle between its sends, so the server-wide counter can
             // only be spent by the polling party.
             srv.sessionControls.dropActiveAfterOps(1);
+            // A drop landing in a cycle's tail is absorbed by the next
+            // cycle-start dial and counted by neither counter, so this wait is
+            // the one that would spend its deadline if that ever happened.
             await waitFor(
               () => receiverAdapter.midExchangeReconnectCount > before,
+              {
+                what: `drop ${sent + 1} to be counted as a mid-exchange reconnect`,
+              },
             );
             await sender.send({ message: sent });
-            await waitFor(() => received.length === sent + 1);
+            await waitFor(() => received.length === sent + 1, {
+              what: `message ${sent} to arrive after drop ${sent + 1}`,
+            });
           }
           receiver.stop();
         },
