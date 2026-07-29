@@ -457,11 +457,13 @@ either after a few cycles, which costs the second nothing a healthy run notices.
 
 That budget belongs to a RECORDING and not to the path, which is what its
 give-up is scoped to: nothing about a path is remembered once its recording ends,
-so a temp the entry sweep keeps offering is recorded again on the next cycle that
-offers it. Against a temp this party can never delete, the steady state is
-therefore that sweep's own attempt plus one re-issue per cycle -- about double
-what the cleanup cost before the record existed -- rather than a few round trips
-for the whole run. It is bounded amplification, the record's own cap being what
+so a path offered again is recorded again with the whole budget. What that costs
+depends on who offers it, and the sweep that turns up an undeletable temp runs at
+rendezvous entry, once per exchange rather than once per cycle -- so such a temp
+is recorded once and costs a few round trips for the whole run. Paying that per
+cycle instead is what a caller re-offering the same path every cycle would cost,
+which is worth re-checking before one is written. It is bounded amplification
+either way, the record's own cap being what
 bounds how many such recordings stand at once, and the alternative is worse: a
 tombstone remembering the given-up path would occupy a cap slot, which is exactly
 how a peer could crowd the send path's own cleanups out of the record. What the

@@ -1378,9 +1378,10 @@ inProcessOnly(
       }
 
       // Every cycle got its own session: a cycle that had to dial is a cycle
-      // whose predecessor's boundary actually closed something. Without the
-      // re-issue kept off the outstanding count this reads 1 -- one handshake
-      // for the whole run, every boundary held, and a delete per cycle.
+      // whose predecessor's boundary actually closed something. Counted at the
+      // bracket instead, this reads 4: the budget bounds the pin to the cycles
+      // its re-issues reach rather than lifting it, so three boundaries are held
+      // before the record gives up and the rest of the run dials again.
       expect(srv.sessionControls.handshakeCount()).toBe(REISSUE_CYCLES);
       expect(adapter.heldBoundaryCount).toBe(0);
       // And nothing of the drain's is left counted, which is the state a held

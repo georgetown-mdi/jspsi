@@ -19,8 +19,8 @@ import { describe, expect, it } from "vitest";
 // (rename()'s re-issue existence probe was issued a layer above the bracket).
 // This is that claim as a check, and it is an INCLUSION check -- it fails on any
 // request-issuing call site the bracket does not cover, whether or not anyone
-// thought to list it. The two known exceptions are what it ALLOWS, each with its
-// reason; an allowance that no longer matches a call site fails too, so the list
+// thought to list it. The known exceptions below are what it ALLOWS, each with
+// its reason; an allowance that no longer matches a call site fails too, so the list
 // cannot rot into a record of what used to be true.
 //
 // The adapter is parsed with the TypeScript compiler API rather than matched by

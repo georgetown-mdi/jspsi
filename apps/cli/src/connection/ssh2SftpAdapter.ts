@@ -165,13 +165,16 @@ export const MAX_DEFERRED_CLEANUP_DELETES = 64;
  * the release reading taken before it); and a path re-recorded while its own
  * re-issue is still in flight keeps the budget that re-record wrote, since an
  * entry already standing is left alone rather than taking the failing re-issue's
- * decrement. So where the same undeletable temp keeps reaching the cleanup
- * delete -- the entry sweep offering it cycle after cycle -- the steady state is
- * that sweep's own attempt plus one re-issue per cycle, about double the DELETE
- * traffic that cleanup cost before the record existed, rather than three per
- * connection. That amplification is bounded by the cap above rather than here: a
- * drain issues one re-issue per recording, and MAX_DEFERRED_CLEANUP_DELETES
- * bounds how many recordings stand at once. Remembering a given-up path as a
+ * decrement. What a run actually pays for that turns on which call site offers
+ * the path, and today only one offers an undeletable temp at all: core sweeps
+ * orphaned temps in the rendezvous entry scan, which runs once per exchange and
+ * not once per poll cycle. Such a temp is therefore recorded once and costs that
+ * sweep's own attempt plus MAX_DEFERRED_CLEANUP_REISSUES re-issues spread over
+ * the re-establishments that follow -- a few round trips for the whole run. A
+ * caller that re-offered the same path every cycle would pay that attempt plus
+ * one re-issue per cycle instead, each re-offer being a fresh recording; the cap
+ * above is what bounds how many recordings stand at once either way.
+ * Remembering a given-up path as a
  * tombstone would make the budget per path per connection and is deliberately not
  * done -- a tombstone consumes a cap slot, which is how a peer would crowd the
  * send path's own cleanups out of the record.
