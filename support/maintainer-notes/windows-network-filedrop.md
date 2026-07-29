@@ -249,6 +249,21 @@ of them do not hit. A caution earns its place there only if acting on it late is
 expensive: the keys file, one exchange at a time, and which account you pick are
 the three that do.
 
+**The synced-folder fork was cut from the setup page, deliberately.** It used to
+open the page, sending a reader whose drop is kept in step by OneDrive or Egnyte
+to `troubleshooting.md#synced-folders` before they gathered credentials. Three
+independent reviews of the fold-in asked for it back, on the grounds that an
+operator who learns this late may already have opened an IT ticket for a service
+account they never needed. It stays out, because the premise those reviews share
+is wrong: nobody arrives at this page cold. The page exists for one symptom, and
+its first fifteen lines are that symptom -- Docker refusing a bind mount with
+"bind source path does not exist". A synced folder is a local path, so it
+bind-mounts without complaint and never produces the error that sends anyone
+here. A reader on this page has a network path by construction. `support/README.md`
+routes the synced-folder symptom separately, which is the right place for it.
+Do not restore the fork; if a real operator is ever found to have needed it,
+that is new evidence and this paragraph is what it overturns.
+
 The pages all sit in the guide folder, so handing it over as a unit still
 works; the unit was always the folder rather than the file. Both scripts cite
 sections by name, saying "the troubleshooting page" or "the passwords page"
