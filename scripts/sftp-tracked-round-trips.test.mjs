@@ -118,8 +118,9 @@ const ALLOWED_OUTSIDE_THE_BRACKET = [
     enclosingMethod: "reissueCleanupDelete",
     callee: "delete",
     reason:
-      "the drain's re-issue of a recorded cleanup delete, the one round trip " +
-      "an idle release MAY tear: the tear rejects it, which records the path " +
+      "the drain's re-issue of a recorded cleanup delete, the one UNSETTLED " +
+      "round trip an idle release MAY tear: the tear rejects it, which records " +
+      "the path " +
       "again for the next re-establishment, so the release defers the work " +
       "rather than losing it -- while counting it would let a server that " +
       "accepts DELETE and withholds its callback hold every boundary and so " +
