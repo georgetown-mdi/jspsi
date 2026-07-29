@@ -113,6 +113,11 @@ Please could you provide:
    workstation's Docker network, which is a different source address than my
    Windows session. [If you use a VPN, say so here.]
 4. The real server name and share, if the path above is a DFS namespace.
+5. If none of that is possible -- the container cannot reach the server from
+   its own address, or the account can only sign in with single sign-on -- then
+   a scheduled mirror between that shared folder and a local folder on my
+   workstation would work instead, and I would point the tool at the local
+   copy. Deletions need to propagate in both directions.
 
 The account will be used only for this exchange and can be retired afterwards.
 ```
@@ -155,8 +160,7 @@ Three things commonly block it while File Explorer keeps working:
 - **A host firewall rule** scoped to specific processes or interfaces.
 - **A server-side address restriction** that does not cover the VM.
 
-If you are on a VPN, that is almost certainly it. Use the
-[local-folder approach](#local-folder-fallback) instead, or take item 3 of the
+If you are on a VPN, that is almost certainly it. Take items 3 and 5 of the
 [IT request](#what-to-ask-your-it-department-for) to whoever runs the network.
 
 ### The container cannot install its tools
@@ -193,7 +197,8 @@ Three options:
 - Ask IT for a **service account** with a real password that can reach the
   share. This is the cleanest fix and usually the fastest to get; it is item 1
   of the [IT request](#what-to-ask-your-it-department-for).
-- Use the [local-folder approach](#local-folder-fallback).
+- If no account can be made to work, ask for the scheduled mirror instead --
+  item 5 of the [IT request](#what-to-ask-your-it-department-for).
 - Kerberos from the container is possible in principle but needs a keytab
   inside the VM. It is not worth the effort here.
 
@@ -257,8 +262,8 @@ pinning one:
 
 and if that fails, `-Dialect SMB2`. `-Dialect NT1` is for diagnosis only: the
 Docker VM's kernel is built without SMB1, so a server that speaks nothing newer
-cannot be mounted at all. Use the
-[local-folder approach](#local-folder-fallback) for one of those.
+cannot be mounted at all. For a server like that, ask for the scheduled mirror
+-- item 5 of the [IT request](#what-to-ask-your-it-department-for).
 
 `Required key not available` is different -- it means the mount wanted a
 Kerberos ticket. See [No password exists](#no-password-exists).
@@ -286,8 +291,7 @@ it: the local volume driver takes the credentials only as a single
 comma-separated string. Doing it by hand hits exactly the same wall.
 
 Use an account whose password has no comma -- it is item 1 of the
-[IT request](#what-to-ask-your-it-department-for) -- or use the
-[local-folder approach](#local-folder-fallback), which needs no volume.
+[IT request](#what-to-ask-your-it-department-for).
 
 ### The script will not run at all
 
@@ -499,49 +503,6 @@ every five seconds -- for example `--polling-frequency 30s --peer-timeout 4h`.
 
 Confirm with your exchange partner which kind of folder you are sharing before
 the first run.
-
-## Local-folder fallback
-
-If the container cannot reach the server, or no password exists, stop trying to
-mount the share in Docker. Let Windows -- which already has working access --
-move the files, and give Docker a local folder.
-
-Make a local folder and mirror it both ways on a schedule:
-
-```powershell
-New-Item -ItemType Directory -Force 'C:\psilink\rendezvous'
-
-$mirror = @'
-robocopy "Z:\Exchange\psilink" "C:\psilink\rendezvous" /E /PURGE /R:2 /W:2 /NJH /NJS /NP
-robocopy "C:\psilink\rendezvous" "Z:\Exchange\psilink" /E /R:2 /W:2 /NJH /NJS /NP
-'@
-Set-Content -Path 'C:\psilink\mirror.cmd' -Value $mirror -Encoding ASCII
-
-$action  = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument '/c C:\psilink\mirror.cmd'
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
-             -RepetitionInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName 'psilink-mirror' -Action $action -Trigger $trigger
-```
-
-Then bind-mount the local folder, exactly as in the synced-folder example
-above, and pass `--lockless-rendezvous` on both sides -- this is
-sync-mediated, not a live shared filesystem.
-
-Two cautions. The `/PURGE` is on the inbound copy only: mirroring deletions in
-both directions races the exchange and deletes files the other side is still
-writing. And **do not** configure the task to run while you are signed out --
-Windows then stores that account's password in the machine's LSA secrets,
-which is a durable copy you did not intend to make. Leave it running as
-yourself, signed in.
-
-If this is more moving parts than you want to own, it is a reasonable thing to
-hand to IT: they do this kind of mirroring routinely.
-
-Delete the task when the exchange is over:
-
-```powershell
-Unregister-ScheduledTask -TaskName 'psilink-mirror' -Confirm:$false
-```
 
 ## What this does with your password
 

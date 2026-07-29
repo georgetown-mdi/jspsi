@@ -194,6 +194,21 @@ with someone who has no basis for it, and it adds a judgment call to an audience
 the whole guide is trying to spare one. The entry count also closes a coverage
 gap for free -- it is where the 8192-entry limit is now checked.
 
+**The local-folder fallback was cut.** It was forty-three lines showing the
+operator how to build a two-way `robocopy` mirror on a Scheduled Task and point
+Docker at the local copy, as the escape hatch for a container that cannot reach
+the server, an account with no usable password, and an SMB1-only server. The
+operator running an exchange is not the person who configures file movement
+between their agency and a partner, and the drop is remote in every deployment
+we have, so the section was asking the wrong reader to build the wrong thing --
+its own closing line already said to hand it to IT.
+
+What replaced it is item 5 of the IT request, which asks for the same mirror in
+one sentence, and the four places that routed into the section now route there.
+The two cautions it carried went with it and are not lost: the `/PURGE`-inbound
+-only point is a property of a mirror IT now owns, and the LSA-secrets warning
+applied to a Scheduled Task the operator no longer creates.
+
 **A comma in the password is refused up front** rather than warned about.
 Docker's local driver takes CIFS credentials only as one comma-separated
 string, so there is no escaping available and the mount cannot work. Refusing

@@ -1073,8 +1073,8 @@ if ($plainPass.Contains(',')) {
     Write-Note 'no way to quote or escape it -- this is a limit of Docker volumes,'
     Write-Note 'not of psilink, and doing it by hand hits exactly the same wall.'
     Write-Info ''
-    Write-Info 'Use an account whose password has no comma, or use the local-folder'
-    Write-Info 'approach in the runbook, which needs no Docker volume at all.'
+    Write-Info 'Use an account whose password has no comma. The runbook has a ready'
+    Write-Info 'made request for one, under "What to ask your IT department for".'
     exit 1
 }
 
@@ -1164,7 +1164,9 @@ try {
             Write-Warn 'The Docker VM kernel is built without SMB1, so the mount below'
             Write-Note 'will be refused however well the checks went. -Dialect NT1 is'
             Write-Note 'useful for diagnosis only. If the server speaks nothing newer,'
-            Write-Note 'use the local-folder approach in the runbook instead.'
+            Write-Note 'ask IT for a scheduled mirror to a local folder instead -- the'
+            Write-Note 'runbook has the request, under "What to ask your IT department'
+            Write-Note 'for".'
         }
     }
 
