@@ -24,11 +24,15 @@ your first exchange, and it takes about ten minutes.
   be still, not animating.
 - **The file-drop folder path.** Click once in the File Explorer address bar
   and it turns into text you can copy.
-- **A username and password** that can reach that folder. The password must not
-  contain a comma, or a double quote if you use the Command Prompt version
-  below. Prefer an account that is not your own Windows sign-in:
-  [which one you pick](passwords.md) is the choice here that is awkward to undo.
-  If you have no such account, send IT
+- **A username and password** that can reach that folder. Not your own Windows
+  sign-in, and never a domain administrator: Docker stores this password where
+  anyone who can run Docker on this PC can read it, so use an account scoped to
+  this share or one you can retire afterwards. It is the choice here that is
+  awkward to undo, so [the passwords page](passwords.md) is worth five minutes
+  before you ask for one. The password must not contain a comma, or a double
+  quote if you use
+  [the Command Prompt version](#which-version-to-run). If you have no such
+  account, send IT
   [this ready-made request](troubleshooting.md#what-to-ask-your-it-department-for).
 
 ## Which version to run
@@ -41,18 +45,21 @@ same container, and report the same failures.
   is missing, or when Group Policy or application-control policy stops it from
   running.
 
-Every command from here on is given both ways, PowerShell first and Command
-Prompt after. Pick one and stay with it.
+Pick one and stay with it. Wherever the two need different commands, this guide
+gives both: the PowerShell one first, the Command Prompt one after. A single
+block means the command is the same in either.
 
-The Command Prompt version differs in one way worth knowing before you start:
-**your password is visible as you type it.** Command Prompt cannot hide typing
+The Command Prompt version differs in two ways worth knowing before you start.
+**Your password is visible as you type it** -- Command Prompt cannot hide typing
 the way PowerShell does, so run `cls` or close the window when you are done.
+And **it will not accept a password containing a double quote**, on top of the
+no-comma rule that applies to both.
 
 ## Get it and run it
 
-Open the Start menu, type `PowerShell` (or `cmd`), and press Enter. Do not
-choose **Run as administrator**: an elevated window cannot see the drive letters
-you mapped as yourself.
+Open the Start menu, type `PowerShell`, or `cmd` for the Command Prompt version,
+and press Enter. Do not choose **Run as administrator**: an elevated window
+cannot see the drive letters you mapped as yourself.
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing `
@@ -76,8 +83,8 @@ curl -L -o cmd_psilink-volcheck.sh %BASE%/cmd_psilink-volcheck.sh
 Downloading rather than saving from a browser avoids two things that catch
 people out: a browser renders a script as text and often saves it as `.txt`, and
 a file saved from a browser is refused until you run `Unblock-File` on it.
-`curl` is part of Windows 10 and 11, and a `.cmd` file needs neither of those
-steps.
+`curl` is part of Windows 10 and 11, and a `.cmd` file has no execution policy
+to work around and nothing to unblock.
 
 It will ask you for three things, in this order:
 
@@ -104,10 +111,12 @@ command to run your exchange.
 
 ## When it finishes
 
-It prints the `docker run` command for an exchange with the volume name already
-filled in, and a browser-console command as well. The one blank left in them is
-a local folder on this PC to keep your data in; results are written back into
-it. It has to be a real local folder, not the file drop and not a network path.
+It prints the `docker run` command for an exchange with your volume name already
+filled in, and explains underneath which parts to replace. One of them is a
+local folder on this PC to keep your data in, which results are written back
+into; it has to be a real local folder, not the file drop and not a network
+path. It prints a second command as well, for driving the same exchange from a
+page in your browser instead of the command line.
 
 Two things to know before the first run:
 
@@ -120,21 +129,10 @@ Two things to know before the first run:
   covers setting up a second file drop, since a second one replaces the first
   unless you give it its own name.
 
-## If something goes wrong
-
-The script says what failed, what it means, and what to do about it. Follow
-that first. [**Troubleshooting**](troubleshooting.md) is the longer version,
-with a section for each failure.
-
-To send the whole run to whoever is helping you, copy it straight out of the
-window rather than running it again: right-click the title bar, choose **Edit >
-Select All**, then **Edit > Copy**. In Command Prompt your password is on that
-screen, so start the selection below the `Password:` line instead -- everything
-the checks printed comes after it.
-
 ## When you are done with this partner
 
-Remove the volume -- the script prints this command when it finishes:
+Remove the volume. The script prints this command with your volume name in it
+when it finishes, and it is the same in either shell:
 
 ```text
 docker volume rm psilink-rendezvous
@@ -145,9 +143,19 @@ password in the volume's metadata in cleartext and leaves traces of it behind
 even after the volume is gone, so rotating the password is the step that
 actually ends the exposure.
 [Choosing an account, and where its password ends up](passwords.md) is the whole
-of that story. None of it is needed to get an exchange working, but the account
-you pick is decided before your first run and awkward to change after, so it is
-worth the five minutes now.
+of that story.
+
+## If something goes wrong
+
+The script says what failed, what it means, and what to do about it. Follow
+that first. [**Troubleshooting**](troubleshooting.md) is the longer version,
+with a section for each failure.
+
+To send the whole run to whoever is helping you, copy it straight out of the
+window rather than running it again: right-click the title bar, then **Edit >
+Select All** and **Edit > Copy**. In Command Prompt your password is on that
+screen, so drag-select from just below the `Password:` line instead of using
+Select All -- everything the checks printed comes after it.
 
 > **How far this has been tested.** The checks that run inside the container,
 > and the volume once it is created, are verified against a real SMB server:

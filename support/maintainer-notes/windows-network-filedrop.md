@@ -25,7 +25,13 @@ folder and reading the DFS tab.
   Explorer plus network credentials, resolves the server, share and subfolder,
   asks the operator to confirm them, tests the share from inside a container,
   creates the volume, tests it, and prints the `docker run` command.
-- `README.md` -- the user-facing runbook the script's errors point into.
+- `README.md` -- the setup page, covering this script and the Command Prompt
+  one alike.
+- `troubleshooting.md` -- the page the script's errors cite by section name.
+- `passwords.md` -- the account decision, cited by the script in two places.
+
+The Command Prompt script and its three container-side shell scripts have their
+own notes, [`cmd_windows-network-filedrop.md`](cmd_windows-network-filedrop.md).
 
 The container-side diagnostic lives only as a here-string inside the script. A
 second, hand-maintained copy of it used to sit beside the script for reading;
@@ -194,8 +200,8 @@ name the target, a much smaller fix exists.
 
 **The probe reports derived facts, not the operator's data.** Step 3 used to
 print the server's share list and step 5 the drop folder's listing. The runbook
-asks the operator to tee the run to a file and send it to whoever is helping
-them, which for a supported deployment is us -- and we are not a party to their
+asks the operator to send the run to whoever is helping them, which for a
+supported deployment is us -- and we are not a party to their
 exchange, so an agency's share names and the filenames in a record-linkage drop
 folder are things we should not end up holding. Step 3 now reports only whether
 the named share was among those offered, and step 5 an entry count. Nothing
@@ -209,9 +215,11 @@ gap for free -- it is where the 8192-entry limit is now checked.
 
 **The guide is split, and the split is the point.** `README.md` is the setup
 page: the problem, what you need, which of the two scripts to run, run it, what
-you got, and where to go if it broke. `troubleshooting.md` is one section per
-failure. `passwords.md` is the account decision and what Docker does with the
-password. The single page all three replaced was 543 lines, of which about 111
+you got, how the exchange ends, and where to go if it broke. `troubleshooting.md`
+is a section per failure and then reference material -- status codes, the IT
+request, reading the real path, doing it by hand. `passwords.md` is the account
+decision and what Docker does with the password. The single page all three
+replaced was 543 lines, of which about 111
 served a reader whose run succeeded -- so four readers in five were paying for a
 failure they did not have, on a page whose length is itself the risk with this
 audience.
@@ -219,18 +227,20 @@ audience.
 The two axes of that split are different and should not be confused. Splitting
 off `troubleshooting.md` spares the successful reader a failure they do not
 have. Splitting off `passwords.md` spares the *failing* reader a question no
-failure asks: it was three pages' worth of exposure detail sitting in the middle
-of the page you are on precisely because something broke. The test for a third
-page is that nothing forces the reader to it -- an operator who never opens
+failure asks: forty-odd lines of exposure detail sitting in the middle of the
+page you are on precisely because something broke. The test for a third page is
+that nothing forces the reader to it -- an operator who never opens
 `passwords.md` still completes an exchange.
 
 Which script you are running is *not* such an axis, which is why the Command
 Prompt page was folded back in. The reader who lacks PowerShell finds that out
 on the setup page and has to act on it there; sending them to a second page to
-do so put a mandatory hop in the one path that was already the harder one. Every
-command is now given twice, PowerShell first and Command Prompt after, on all
-three pages, and only where the two actually differ -- `docker volume rm` is one
-block, not two.
+do so put a mandatory hop in the one path that was already the harder one. Both
+forms are now given wherever the two shells need different commands, PowerShell
+first, on all three pages -- and only there: a command that is identical in both
+gets one block, as `docker volume rm` does. Where the two blocks would look
+nearly alike, label them, since position alone is a weak cue for a reader who
+arrived mid-page.
 
 Keep the setup page near its current 170 lines, about twenty of which are the
 testedness note. The pressure will always be to add "just one more caution" to
@@ -242,11 +252,13 @@ the three that do.
 The pages all sit in the guide folder, so handing it over as a unit still
 works; the unit was always the folder rather than the file. Both scripts cite
 sections by name, saying "the troubleshooting page" or "the passwords page"
-rather than "the runbook", and the URLs each prints on failure point at both. A
-section rename is therefore a change to both scripts as well. Nothing in CI
-catches a citation that has stopped naming a real heading, so check it by hand:
-pull the quoted names out of each script, including the ones wrapped across two
-`emit` lines, and confirm each is a heading in the page it names.
+rather than "the runbook". The URL each prints on failure is the troubleshooting
+page; the passwords URL appears only in each script's header and help text, so
+the operator reaches that page from the pages themselves. A section rename is
+therefore a change to both scripts as well. Nothing in CI catches a citation
+that has stopped naming a real heading, so check it by hand: pull the quoted
+names out of each script, including the ones wrapped across two `emit` lines,
+and confirm each is a heading in the page it names.
 
 **"Send me the whole run" is copy-from-window, not a redirect.** Both pages used
 to tell the operator to re-run the script with `6>&1 | Tee-Object` in PowerShell
@@ -259,7 +271,8 @@ native command's output reaches a PowerShell pipeline a line at a time, so the
 prompt should not surface until after it has been answered. **That second one is
 reasoned, not measured** -- it has never been run on Windows, and it is the
 first thing to check if anyone is tempted to bring the redirect back. Copying
-out of the console window replaces both: no second run, and nothing to blind.
+out of the console window replaces both: no second run, and no prompt swallowed
+into a file.
 Its one cost falls only on Command Prompt, which cannot hide typing, so the
 password sits in that scrollback -- which is why both the page and the script
 say to start the selection below the `Password:` line.
@@ -374,5 +387,5 @@ overrides it. An existing volume of that name is replaced, but only after
 inspecting it -- one that is not a CIFS volume is left alone and the run
 refuses, because the name is unvalidated and a typo would otherwise destroy
 something unrelated. Docker stores the share password in cleartext in the
-volume metadata; the troubleshooting section "Where your password ends up" is
-the full account, including the residue that survives `docker volume rm`.
+volume metadata; the passwords page, "Where the password ends up", is the full
+account, including the residue that survives `docker volume rm`.

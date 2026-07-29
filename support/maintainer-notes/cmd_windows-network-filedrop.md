@@ -21,20 +21,22 @@ machine where PowerShell is the obstacle. The Command Prompt script closes
 that: it does the same four parts against the same container checks, using
 nothing but `cmd`, `net use`, `fsutil`, `findstr` and `docker`.
 
-There is no operator-facing page of its own. All three pages serve both scripts,
-giving each command in both shells, and
+This script has no operator-facing page of its own. All three pages serve both
+scripts, giving both forms of a command wherever the two shells need different
+ones, and
 [the setup page](../windows-network-filedrop/README.md#which-version-to-run)
 carries the choice between them plus the two things this script does
 differently: it echoes the password as it is typed, and it refuses a double
-quote in it. A page that existed only for this script put a mandatory second hop
-in the path of the reader who was already worse off.
+quote in it. The reasoning for folding its page back in is in
+[the PowerShell notes](windows-network-filedrop.md).
 
 ## What is here
 
 - `cmd_Setup-PsilinkFileDrop.cmd` -- the operator-facing script. Same four
-  parts, same exit codes, and where it cites a troubleshooting section it uses
-  the same name the PowerShell version does. It cites fewer of them: the
-  PowerShell script reaches some conditions this one does not.
+  parts, same exit codes, and where it cites a section of the troubleshooting or
+  passwords page it uses the same name the PowerShell version does. It cites
+  fewer of them: the PowerShell script reaches some conditions this one does
+  not.
 - `cmd_psilink-probe.sh` -- the container checks, steps 1 to 6. A port of the
   `$probe` here-string in the PowerShell script.
 - `cmd_psilink-credcheck.sh` -- inspects the password and mints the run token.
@@ -254,7 +256,7 @@ step. It drifted immediately: the port was cut before the probe's fixes landed,
 so it shipped a copy that read an empty status scrape as success, swept a name
 it never created, deleted a concurrent operator's marker, drew its uniqueness
 from a `$$` that is constant under `sh -c`, and printed the server's share list
-and the drop folder's file listing into a log the guide asks operators to send
+and the drop folder's file listing into output the guide asks operators to send
 onward.
 
 It was resynchronised rather than patched, and the two are now the same text

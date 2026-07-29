@@ -2,11 +2,10 @@
 
 Nothing on this page is needed to make an exchange work. It covers one decision
 -- **which account** you hand to the setup script -- and what Docker does with
-its password afterwards, so that you can make that decision knowing the cost
-rather than discovering it later.
+that account's password afterwards.
 
-Two points are worth having before your first run, and the rest can wait until
-you are finished with the exchange:
+Two things are worth knowing before your first run; the rest can wait until the
+exchange is over:
 
 - Do not use your own Windows sign-in, and never a domain administrator
   account. Use one scoped to the exchange share, or one you are prepared to
@@ -22,10 +21,10 @@ Start from [the setup page](README.md) if you have not run the script yet;
 The setup script passes the password to its checks through an environment
 variable, so it never reaches a command line there. That reduces the exposure
 but does not remove it: while the check container runs, `docker inspect` shows
-the password to anyone who can run Docker on this PC.
-Creating the volume is worse again, because Docker's CIFS volume driver accepts
-credentials only as a mount option, and that is a command-line argument. There
-is no way around it, so it is worth knowing the main places it ends up.
+the password to anyone who can run Docker on this PC. Creating the volume is
+worse again, because Docker's CIFS volume driver accepts credentials only as a
+mount option, and that is a command-line argument. There is no way around it.
+The main places it ends up:
 
 - **On a command line, once.** While the volume is created. On a managed
   workstation, command-line auditing (Windows event 4688, Sysmon, or your EDR
@@ -54,23 +53,18 @@ reliably erased afterwards. What you control is which account you use.
 
 ## Ending the exposure
 
-When you are finished with this partner, in either shell:
-
-```text
-docker volume rm psilink-rendezvous
-```
-
-That removes the volume and its options file. Given the last point above, treat
-rotating the password as the step that actually ends the exposure -- and if IT
-issued the account, that means going back to them. The
+Removing the volume, which
+[the setup page](README.md#when-you-are-done-with-this-partner) tells you to do
+at the end, deletes the volume and its options file and no more. Given the last
+point above, treat rotating the password as the step that actually ends the
+exposure -- and if IT issued the account, that means going back to them. The
 [request to send IT](troubleshooting.md#what-to-ask-your-it-department-for) ends
 by telling them to expect exactly that.
 
-## If the account has no password to give
+## If the share never asks for a password
 
 Some shares never prompt you at all: Windows signs you in silently over
 Kerberos, and there is no password for the container to use. That is a failure
-mode rather than a hardening question, and it has its own section --
+mode rather than a question about which account to pick, and it has its own
+section --
 [the share never asks for a password](troubleshooting.md#the-share-never-asks-for-a-password).
-Do not work through candidate passwords one at a time; each attempt is a real
-failed sign-in and a handful of them will lock the account out.

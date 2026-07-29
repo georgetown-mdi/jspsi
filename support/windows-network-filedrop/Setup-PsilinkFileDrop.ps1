@@ -869,8 +869,8 @@ if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
     Write-Info ''
     Write-Info 'Use the Command Prompt version instead, which the same policy'
     Write-Info 'does not reach: see the troubleshooting page, "The script will'
-    Write-Info 'not run". Doing it by hand is PowerShell too, so it will not'
-    Write-Info 'help here.'
+    Write-Info 'not run". Doing it by hand has a Command Prompt form too; the'
+    Write-Info 'PowerShell commands there meet this same policy.'
     exit 1
 }
 

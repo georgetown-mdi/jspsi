@@ -3,10 +3,10 @@
 One section per thing that goes wrong, in the order you would meet it, and then
 reference material: the status codes, the request to send IT, how to read the
 real path from Windows, and how to do by hand what the script does for you.
-Start from [the setup page](README.md) if you have not run the script yet. The
-question of which account to use, and what Docker does with its password, is on
-[a third page](passwords.md) -- nothing there is needed to make an exchange
-work, so nothing here waits on it.
+Start from [the setup page](README.md) if you have not run the script yet.
+Which account to use, and what Docker does with its password, is on
+[the passwords page](passwords.md); nothing there is needed to fix a failure, so
+read it when the exchange is over.
 
 The script prints a MEANING and an ACTION for every failure it can name. Follow
 those first; this page is the longer version.
@@ -15,11 +15,12 @@ The script runs in four numbered parts, and the checks inside part 3 are
 numbered separately, steps 1 to 6. A "step" on this page is always one of those
 checks.
 
-Commands are given both ways where the two differ, PowerShell first and Command
-Prompt after, matching
-[which version you are running](README.md#which-version-to-run). The two scripts
-take the same options, in either form -- `-Server` or `/Server`. Run either with
-`-?` for the list.
+Where the two shells need different commands, both are given: the PowerShell one
+first, the Command Prompt one after, matching
+[which version you are running](README.md#which-version-to-run). A single block
+means the command is the same in either. The Command Prompt script takes the
+same options as the PowerShell one, and accepts them in either form -- `-Server`
+or `/Server`. Run either script with `-?` for the list.
 
 ## The script will not run
 
@@ -43,10 +44,9 @@ true if the script reports that PowerShell is in ConstrainedLanguage mode,
 which application-control policy (WDAC or AppLocker) imposes.
 
 In either case switch to
-[the Command Prompt version](README.md#which-version-to-run), and use its
-commands from here on -- including in
-[Doing it by hand](#doing-it-by-hand), whose PowerShell form meets the same
-policy.
+[the Command Prompt version](README.md#which-version-to-run) and use its
+commands from here on, including in [Doing it by hand](#doing-it-by-hand) --
+whose PowerShell commands the same policy blocks.
 
 ## A comma or a double quote in the password
 
@@ -348,6 +348,8 @@ If you would rather see each step, or the script failed for a reason nothing
 above covers, this is what it does. You need the real server, share and
 subfolder from the section above.
 
+**PowerShell:**
+
 ```powershell
 docker volume create --driver local `
   --opt type=cifs `
@@ -355,6 +357,8 @@ docker volume create --driver local `
   --opt 'o=username=USER,password=PASS,domain=AGENCY' `
   psilink-rendezvous
 ```
+
+**Command Prompt:**
 
 ```text
 docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=USER,password=PASS,domain=AGENCY" psilink-rendezvous
@@ -368,24 +372,26 @@ the password does the same to the credentials -- producing a login failure that
 looks exactly like a wrong password. In Command Prompt each `--opt` is one
 argument that has to survive whatever punctuation the password holds, which is
 what the double quotes are for; `$` means nothing there. `%` is the character to
-watch instead, since Command Prompt uses it for variable expansion and the
-escaping differs between a typed command and a batch file -- if the password
-contains one, use the script rather than doing this by hand.
+watch instead, since Command Prompt uses it for variable expansion: if the
+password contains one, run the script rather than doing this by hand.
 
 Check that it mounts and that the folder is the one you meant:
+
+**PowerShell:**
 
 ```powershell
 docker run --rm -v 'psilink-rendezvous:/rz' alpine:3.22 ls -la /rz
 ```
 
+**Command Prompt:**
+
 ```text
 docker run --rm -v "psilink-rendezvous:/rz" alpine:3.22 ls -la /rz
 ```
 
-This route puts the password on a command line, on top of everywhere
-[the passwords page](passwords.md) describes -- and in PowerShell that means
-your history file, which persists across sessions. Clear it afterwards, or use
-the script.
+This route puts the password on a command line -- in PowerShell, that means your
+history file, which persists across sessions. Clear it afterwards, or use the
+script. [The passwords page](passwords.md) covers everywhere else it ends up.
 
 ## Running the exchange
 
@@ -414,6 +420,8 @@ Dropbox, Egnyte, ShareFile) keeps a local copy on each side in step. There is
 no volume to create -- point Docker at the local synced folder, which it can
 bind-mount directly:
 
+**PowerShell:**
+
 ```powershell
 docker run --rm `
   -v 'C:\path\to\your\work:/work' `
@@ -421,6 +429,8 @@ docker run --rm `
   vdorie/psi-link:latest `
   file:///rendezvous input.csv matches.csv --lockless-rendezvous
 ```
+
+**Command Prompt:**
 
 ```text
 docker run --rm -v "C:\path\to\your\work:/work" -v "C:\Users\you\Egnyte\exchange:/rendezvous" vdorie/psi-link:latest file:///rendezvous input.csv matches.csv --lockless-rendezvous
