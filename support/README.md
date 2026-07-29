@@ -25,6 +25,7 @@ If you are choosing, evaluating, or operating psilink deliberately, start at
 | A file drop that a sync service keeps in step, rather than a live file server | [windows-network-filedrop](windows-network-filedrop/README.md#synced-folders) |
 | A network folder the container reaches but cannot write, rename, or delete in | [windows-network-filedrop](windows-network-filedrop/README.md#it-mounts-but-psilink-cannot-write) |
 | Nothing to send IT when a network problem turns out to be theirs | [windows-network-filedrop](windows-network-filedrop/README.md#what-to-ask-your-it-department-for) |
+| A Windows PC with no PowerShell, or with policy blocking it | [windows-network-filedrop](windows-network-filedrop/README.md#if-you-have-no-powershell) |
 
 ## Each guide
 

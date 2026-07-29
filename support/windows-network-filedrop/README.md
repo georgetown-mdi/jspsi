@@ -23,6 +23,11 @@ Every command on this page is PowerShell. Open the Start menu, type
 `PowerShell`, and press Enter -- **not** "as Administrator" (see
 [Finding the real server by hand](#finding-the-real-server-by-hand) for why).
 
+If this PC has no PowerShell, or policy blocks it, there is a Command Prompt
+version that does the same four parts and reports the same failures. Every
+diagnosis on this page applies to it unchanged. See
+[If you have no PowerShell](#if-you-have-no-powershell).
+
 ## Before you start
 
 You need four things in front of you:
@@ -69,8 +74,10 @@ reboots; you only need to run it again if the password changes.
 > Windows side is verified on Windows 11 under Windows PowerShell 5.1, in its
 > current form, against the same kind of server -- but never against a real DFS
 > namespace, which is why the script asks you to confirm the server it worked
-> out rather than trusting it. Corrections from a real environment are welcome
-> and are worth more here than anywhere else in this repository.
+> out rather than trusting it. The Command Prompt version is verified the same
+> way, against the same server, including a password holding every character
+> that Command Prompt is known to mangle. Corrections from a real environment
+> are welcome and are worth more here than anywhere else in this repository.
 
 To send the whole run to whoever is helping you:
 
@@ -306,8 +313,56 @@ it wins over everything else and you cannot override it locally. The same is
 true if the script reports that PowerShell is in ConstrainedLanguage mode,
 which application-control policy (WDAC or AppLocker) imposes.
 
-In either case, use [Doing it by hand](#doing-it-by-hand) below, which is
-ordinary commands rather than a script.
+In either case, use the Command Prompt version below. Do not reach for
+[Doing it by hand](#doing-it-by-hand) first: those are PowerShell commands too,
+and they run into the same policy.
+
+## If you have no PowerShell
+
+`cmd_Setup-PsilinkFileDrop.cmd` is the same setup driven from a Command Prompt.
+It asks the same questions, runs the same checks inside the same container, and
+points at the same sections of this page when something fails. Use it when
+PowerShell is missing, or when Group Policy or application-control policy stops
+it running.
+
+It comes as four files rather than one, and **all four have to be in the same
+folder** -- the script feeds the other three to the container. Open the Start
+menu, type `cmd`, press Enter, and run:
+
+```text
+cd /d "%USERPROFILE%"
+set BASE=https://raw.githubusercontent.com/georgetown-mdi/jspsi/main/support/windows-network-filedrop
+curl -L -o cmd_Setup-PsilinkFileDrop.cmd %BASE%/cmd_Setup-PsilinkFileDrop.cmd
+curl -L -o cmd_psilink-probe.sh %BASE%/cmd_psilink-probe.sh
+curl -L -o cmd_psilink-credcheck.sh %BASE%/cmd_psilink-credcheck.sh
+curl -L -o cmd_psilink-volcheck.sh %BASE%/cmd_psilink-volcheck.sh
+cmd_Setup-PsilinkFileDrop.cmd
+```
+
+`curl` is part of Windows 10 and 11. There is no execution policy to work
+around and nothing to unblock: a `.cmd` file saved from the internet runs.
+
+Options are the same as the PowerShell script's, and take either form --
+`-Server` or `/Server`. Run it with `-?` for the list.
+
+To send the whole run to whoever is helping you, add this to the end of the
+command line:
+
+```text
+cmd_Setup-PsilinkFileDrop.cmd 1> setup-log.txt 2>&1
+```
+
+Two things differ from the PowerShell version, both of them worth knowing
+before you start:
+
+- **Your password is visible as you type it.** Command Prompt cannot hide
+  typing the way PowerShell does. Close the window when you are finished, or
+  run `cls` to clear it.
+- **A password containing a double quote is refused**, as well as one
+  containing a comma. Docker takes the mount options as a single quoted
+  argument, and a quote inside the password ends that argument early. Use an
+  account whose password has neither -- it is item 1 of the
+  [IT request](#what-to-ask-your-it-department-for).
 
 ### Status codes
 
