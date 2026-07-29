@@ -6,6 +6,7 @@ import {
   FileSyncConnection,
   TransportPublishIndeterminateError,
   UsageError,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
@@ -449,13 +450,16 @@ inProcessOnly(
             );
             // The publish is never reported as sent: the operation still rejects,
             // and the transport's own error -- the SFTP status and both paths --
-            // is carried rather than replaced.
+            // is carried rather than replaced. Both reach the operator, each
+            // rendered under its own display cap.
             const cause = (taken.error as Error).cause;
             expect(cause).toBeInstanceOf(Error);
             expect((cause as Error).message).toContain("_rename");
-            expect((taken.error as Error).message).toContain(
-              (cause as Error).message,
+            const rendered = sanitizeErrorForDisplay(taken.error);
+            expect(rendered).toContain(
+              "the message may or may not have reached the partner",
             );
+            expect(rendered).toContain((cause as Error).message);
             await expect(party.adapter.exists(taken.dest)).resolves.toBe(false);
           }
 

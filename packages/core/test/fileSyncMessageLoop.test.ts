@@ -28,6 +28,8 @@ import {
   TransportPublishIndeterminateError,
 } from "../src/errors";
 import { getLoggerForVerbosity } from "../src/utils/logger";
+import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
+import { DISPLAY_TRUNCATION_MARKER } from "../src/utils/sanitizeForDisplay";
 
 // Per-seam contract coverage for the pure message-loop classification helpers.
 // Before the split these were only exercised behind FileSyncConnection's
@@ -189,7 +191,7 @@ describe("isRecognizedLoopFile", () => {
 // only indirectly: that deps.emit is the sole emission channel (no local
 // EventEmitter), the send/ack/recv counter commit points, the poller
 // lifecycle/terminality, the inboundFrameCap clamp and read gate, the
-// six-field session reset, and the abort-armed gate on the peer-marker read.
+// seven-field session reset, and the abort-armed gate on the peer-marker read.
 
 const DIR = "/loop";
 const SELF = "self";
@@ -284,7 +286,8 @@ type LoopInternals = {
   recvSeq: number;
   lastAckedNNN: number;
   consecutiveEnoentCount: number;
-  indeterminatePublish: { seq: number; name: string } | undefined;
+  indeterminatePublish:
+    { seq: number; error: TransportPublishIndeterminateError } | undefined;
   inboundFrameCap: number | undefined;
   warnedUnexpectedFiles: Set<string>;
   poll(): Promise<void>;
@@ -492,9 +495,12 @@ describe("FileSyncMessageLoop counter commit points", () => {
       // from a publish that never landed at all.
       await realRename(from, to);
       files.delete(to);
-      throw new TransportPublishIndeterminateError("publish torn", {
-        cause: new Error("_rename: No such file or directory"),
-      });
+      throw new TransportPublishIndeterminateError(
+        `the message may or may not have reached the partner: the publish was ` +
+          `cut off mid-operation and could not be confirmed afterwards. ` +
+          `Destination: ${to}`,
+        { cause: new Error("_rename: No such file or directory") },
+      );
     };
 
     await expect(f.loop.send({ a: 1 })).rejects.toBeInstanceOf(
@@ -516,7 +522,6 @@ describe("FileSyncMessageLoop counter commit points", () => {
       (e: unknown) => e,
     );
     expect(refused).toBeInstanceOf(UsageError);
-    expect((refused as Error).message).toContain("cannot send");
     // The refusal prescribes a clean-directory restart, so it is tagged to
     // suppress the CLI's generic "retry without re-inviting" advisory: the two
     // would otherwise print together and contradict each other.
@@ -524,6 +529,27 @@ describe("FileSyncMessageLoop counter commit points", () => {
       (refused as { psilinkRecoveryHintEmitted?: unknown })
         .psilinkRecoveryHintEmitted,
     ).toBe(true);
+    // Asserted where the operator reads it, not on the raw .message: the tag
+    // above is what makes this the only next step printed, and the renderer caps
+    // each link of the cause chain, so a refusal whose remedy falls past that cap
+    // leaves the operator no next step at all. The refusal's own link must
+    // therefore carry the whole remedy and end inside the cap.
+    const rendered = sanitizeErrorForDisplay(refused);
+    const [refusalLink, ...causeLinks] = rendered.split("\ncaused by: ");
+    expect(refusalLink).toContain("cannot send: sequence number 0 was spent");
+    expect(refusalLink).toContain(
+      "Re-run the exchange in a clean directory; both parties must start the " +
+        "new exchange fresh.",
+    );
+    expect(refusalLink).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    // The publish itself is identified by the transport's own error, which the
+    // refusal hangs off `cause` so it renders under its own cap.
+    expect(causeLinks.join("\n")).toContain(
+      `Destination: ${DIR}/${SELF}-${objectMessage({ a: 1 }).length}.json`,
+    );
+    expect(causeLinks.join("\n")).toContain(
+      "_rename: No such file or directory",
+    );
     expect(renames).toBe(1);
     expect([...files.keys()]).toEqual([]);
 
@@ -736,7 +762,12 @@ describe("FileSyncMessageLoop resetSessionState", () => {
     i.recvSeq = 3;
     i.lastAckedNNN = 2;
     f.loop.lastSentFile = "self-99.json";
-    i.indeterminatePublish = { seq: 4, name: "self-42.json" };
+    i.indeterminatePublish = {
+      seq: 4,
+      error: new TransportPublishIndeterminateError("publish torn", {
+        cause: new Error("_rename: No such file or directory"),
+      }),
+    };
     f.loop.setInboundFrameCap(50);
     i.warnedUnexpectedFiles.add("stray.json");
     i.consecutiveEnoentCount = 4;

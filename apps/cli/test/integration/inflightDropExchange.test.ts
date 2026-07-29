@@ -6,6 +6,7 @@ import {
   FileSyncConnection,
   TransportPublishIndeterminateError,
   UsageError,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
@@ -305,22 +306,36 @@ inProcessOnly(
       // What the caller is told about it. A rejection over a message the partner
       // holds must not read as a determined non-delivery, so it carries the
       // distinguishable type -- with the transport's own error as its cause, so
-      // the detail the operator would have been given is still there.
+      // the detail the operator would have been given is still there. Read at the
+      // display boundary, over the real names and the real transport error this
+      // run produced: that boundary caps each link of the cause chain, and it is
+      // the whole of what an operator is told.
       for (const outcome of outcomes) {
         expect(outcome.sendRejection).toBeInstanceOf(
           TransportPublishIndeterminateError,
         );
         expect((outcome.sendRejection as Error).cause).toBeInstanceOf(Error);
-        expect(outcome.sendRejection?.message).toContain("may or may not");
+        const rendered = sanitizeErrorForDisplay(outcome.sendRejection);
+        expect(rendered).toContain(
+          "the message may or may not have reached the partner",
+        );
+        expect(rendered).toContain("_rename");
       }
 
       // And what it costs the session: the rejected publish spent its sequence
       // number, because the partner has already delivered a message under it. A
       // send() that reused it would be read as a second message rather than as a
-      // retry of the first, so the next send() is refused instead.
+      // retry of the first, so the next send() is refused instead. That refusal
+      // suppresses the CLI's generic advisory, so its own remedy is the only next
+      // step the operator gets and has to clear the same cap.
       for (const outcome of outcomes) {
         expect(outcome.retryRejection).toBeInstanceOf(UsageError);
-        expect(outcome.retryRejection?.message).toContain("cannot send");
+        const rendered = sanitizeErrorForDisplay(outcome.retryRejection);
+        expect(rendered).toContain("cannot send: sequence number");
+        expect(rendered).toContain(
+          "Re-run the exchange in a clean directory; both parties must start " +
+            "the new exchange fresh.",
+        );
       }
     } finally {
       await srv.stop();

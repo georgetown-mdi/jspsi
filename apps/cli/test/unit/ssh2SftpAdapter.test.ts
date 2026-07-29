@@ -3,12 +3,14 @@ import { Readable, Writable } from "node:stream";
 
 import { describe, expect, test, vi, beforeEach } from "vitest";
 import {
+  DISPLAY_TRUNCATION_MARKER,
   DirectoryListingBoundsError,
   FileTransportClient,
   FrameSizeExceededError,
   TransportOperationStalledError,
   TransportPublishIndeterminateError,
   UsageError,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 
 import {
@@ -3281,11 +3283,14 @@ describe("session recovery", () => {
     const err = await adapter
       .rename("/remote/id-joining.json", "/remote/id-hello.json")
       .catch((e: unknown) => e);
-    // The original rename error (code 2) is the cause, not the exists() rejection.
+    // The original rename error (code 2) is the cause, not the exists() rejection,
+    // and it is the original that reaches the operator: asserted where they read
+    // it, since the wrapper's own message names only the destination.
     expect(err).toBeInstanceOf(TransportPublishIndeterminateError);
     expect(((err as Error).cause as NodeJS.ErrnoException).code).toBe(2);
-    expect((err as Error).message).toContain("No such file");
-    expect((err as Error).message).not.toContain("network timeout");
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).toContain("No such file");
+    expect(rendered).not.toContain("network timeout");
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
@@ -3401,8 +3406,80 @@ describe("session recovery", () => {
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(TransportPublishIndeterminateError);
     expect(((err as Error).cause as NodeJS.ErrnoException).code).toBe(2);
-    expect((err as Error).message).toContain("No such file");
+    expect(sanitizeErrorForDisplay(err)).toContain("No such file");
     expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  // Renders the undetermined outcome of a rename into `toPath` exactly as a
+  // terminal CLI error is rendered, so the assertions below read what an operator
+  // would see rather than what went into the Error.
+  async function renderUndeterminedPublish(toPath: string): Promise<string> {
+    const wrapper = sessionWrapper();
+    const { client, state } = droppable(wrapper);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).rename = vi.fn().mockImplementation(async () => {
+      if (!state.live) throw notConnected("rename");
+      throw Object.assign(new Error("_rename: No such file or directory"), {
+        code: 2,
+      });
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).exists = vi.fn().mockResolvedValue(false);
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    const err = await adapter
+      .rename("/remote/id-msg.json", toPath)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TransportPublishIndeterminateError);
+    return sanitizeErrorForDisplay(err);
+  }
+
+  test("the undetermined publish's operative sentence outlives a destination that spends the display budget", async () => {
+    // The rendering boundary, not the raw message: sanitizeErrorForDisplay is the
+    // only path a terminal CLI error takes to a terminal, and it caps each link of
+    // the cause chain at DEFAULT_MAX_DISPLAY_LENGTH. The sentence the operator
+    // must act on -- that the message MAY have arrived -- has to clear that cap
+    // even against an ack name long enough to spend the whole budget, since a
+    // truncation reaching it would leave prose asserting the opposite.
+    const rendered = await renderUndeterminedPublish(
+      `/remote/${"a".repeat(200)}-ack.json`,
+    );
+    const [publishLink, ...causeLinks] = rendered.split("\ncaused by: ");
+    expect(publishLink).toContain(
+      "the message may or may not have reached the partner",
+    );
+    // The truncation the cap does impose falls on the destination, which trails
+    // the sentence rather than preceding it.
+    expect(publishLink).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(publishLink.indexOf("Destination:")).toBeGreaterThan(
+      publishLink.indexOf("may or may not"),
+    );
+    // The transport's own status is a separate link with a separate budget.
+    expect(causeLinks.join("\n")).toContain(
+      "_rename: No such file or directory",
+    );
+  });
+
+  test("the undetermined publish escapes a destination carrying ANSI and a line break", async () => {
+    // `toPath` is partner-derived on the ack and rendezvous rename paths (the ack
+    // name's middle segments are unconstrained), so the destination is escaped
+    // like every other path this app names in an error -- a hostile name must not
+    // drive the operator's terminal or forge a log line.
+    const rendered = await renderUndeterminedPublish(
+      "/remote/\u001b[31mid\n2026-01-01 not a real log line-ack.json",
+    );
+    expect(rendered).not.toContain("\u001b");
+    expect(rendered).not.toContain("\n2026-01-01");
+    expect(rendered).toContain("x1b[31mid");
+    expect(rendered).toContain("x0a2026-01-01");
+    expect(rendered).toContain(
+      "the message may or may not have reached the partner",
+    );
   });
 
   test("surfaces the original rename error when the source is still on the server", async () => {
@@ -7173,8 +7250,11 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(state.live).toBe(true);
 
     // The probe is never answered: its deadline is what settles it, and the
-    // ORIGINAL rename error surfaces rather than the probe's own stall.
-    await expect(publish).rejects.toThrow("No such file");
+    // ORIGINAL rename error is what the rejection carries rather than the probe's
+    // own stall.
+    const err = await publish.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TransportPublishIndeterminateError);
+    expect(sanitizeErrorForDisplay(err)).toContain("No such file");
     expect(probe.exists).toHaveBeenCalledOnce();
     expect(outstandingOperations(adapter)).toBe(0);
 

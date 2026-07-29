@@ -20,6 +20,7 @@ import {
   getLoggerForVerbosity,
   retryPromise,
   sanitizeErrorForDisplay,
+  sanitizeForDisplay,
 } from "@psilink/core";
 
 import { createCappedSink } from "./frameSizeGuard";
@@ -3621,21 +3622,24 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // mid-operation drop tore the rename, and what the recovery could read of the
   // aftermath is the state a landed-then-consumed publish and an unlanded one
   // share. It stays a rejection -- nothing here reports an unpublished message as
-  // sent -- and embeds the re-issue's own error, which names the SFTP status and
-  // the two paths, so nothing the operator would have seen is dropped; the same
-  // error is the `cause`. The destination is named because the caller's own
-  // message may now be in the peer's hands under it.
+  // sent.
+  //
+  // Written to survive the display boundary, which caps each error in a rendered
+  // cause chain at DEFAULT_MAX_DISPLAY_LENGTH: the sentence the operator must act
+  // on leads, and the destination -- named because the caller's own message may
+  // now be in the peer's hands under it -- comes last, where the cap costs least.
+  // The re-issue's own error is carried only as the `cause`, so the SFTP status
+  // it names is rendered on its own line under its own cap rather than spending
+  // this message's. `toPath` is partner-derived on the ack and rendezvous rename
+  // paths, so it is escaped like every other path this app puts in an error.
   private indeterminatePublishError(
     error: unknown,
     toPath: string,
   ): TransportPublishIndeterminateError {
     return new TransportPublishIndeterminateError(
-      `the publish of ${toPath} was cut off mid-operation and could not be ` +
-        `confirmed afterwards: the re-issued rename found the source gone and ` +
-        `the destination unconfirmed, which is what a publish that never landed ` +
-        `and one the partner has already consumed both look like. The message ` +
-        `may or may not have reached the partner. Underlying failure: ` +
-        `${sanitizeErrorForDisplay(error)}`,
+      `the message may or may not have reached the partner: the publish was ` +
+        `cut off mid-operation and could not be confirmed afterwards. ` +
+        `Destination: ${sanitizeForDisplay(toPath)}`,
       { cause: error },
     );
   }

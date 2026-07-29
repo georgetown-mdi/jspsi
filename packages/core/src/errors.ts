@@ -293,15 +293,21 @@ export class TransportOperationStalledError extends UsageError {
  * the rejection, so a caller that must not act on a message the peer may already
  * hold -- {@link FileSyncMessageLoop}'s send path, whose `seq` slot is not
  * reusable once the peer may have consumed a message under that name -- can tell
- * the two apart. The `cause` carries the transport's original error, whose
- * message this one embeds, so the operator-facing detail is not lost.
+ * the two apart. The `cause` carries the transport's original error, so the
+ * status and paths it names render on their own line of the operator-facing
+ * cause chain rather than inside this message.
  *
- * Deliberately a plain `Error`, not a {@link UsageError}: the poll loop treats a
- * `UsageError` as terminal, and the ack publish that reaches this class from
- * `poll()` is name-idempotent -- the next cycle re-derives the identical marker
- * name and re-publishes it -- so classifying it as terminal would fail an
- * exchange that recovers by rescheduling. It carries no
- * `psilinkRecoveryHintEmitted` tag, on the same reasoning as
+ * A plain `Error` rather than a {@link UsageError}, the classification the poll
+ * loop reads as terminal. What that distinction buys is measured in
+ * `fileSyncConnection.test.ts`, on the one publish this class can reach from
+ * `poll()` -- the retain-mode ack, whose name the next cycle re-derives
+ * identically. In isolation the loop reschedules, republishes the ack, and
+ * delivers the message; under the CLI's composition, where `fromEventConnection`
+ * fails the connection on the first emitted poll error, the same staging ends the
+ * exchange with the ack never republished. So the classification buys the loop's
+ * own retry, not a surviving exchange.
+ *
+ * It carries no `psilinkRecoveryHintEmitted` tag, on the same reasoning as
  * {@link BilateralModeMismatchError}: the CLI's generic advisory concerns token
  * rotation and re-inviting, which this condition neither contradicts nor
  * answers.

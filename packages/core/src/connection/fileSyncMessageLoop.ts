@@ -12,15 +12,15 @@
 // counters (seq, recvSeq, lastAckedNNN, lastSentFile, indeterminatePublish,
 // consecutiveEnoentCount, inboundFrameCap, poller, pollerActive,
 // warnedUnexpectedFiles), mutating them as plain field writes in the hot paths,
-// AND a deps-composed coordinator that
-// reaches the connection's shared/root state through a bidirectional
-// MessageLoopDeps object. It holds no EventEmitter: it emits solely through
-// deps.emit, a synchronous pass-through to the connection's overridden emit, so
-// the unhandled-error buffering, cause-chaining, and listener delivery stay
-// byte-identical. The RATIONALE -- the frame-size and liveness bounds, the
-// replay/sequencing guarantees, and the durable-ack contract -- is normatively
-// specified in docs/spec/FILE_SYNC.md and docs/spec/CHANNEL_SECURITY.md; this
-// module implements it and does not restate it.
+// AND a deps-composed coordinator that reaches the connection's shared/root
+// state through a bidirectional MessageLoopDeps object. It holds no
+// EventEmitter: it emits solely through deps.emit, a synchronous pass-through
+// to the connection's overridden emit, so the unhandled-error buffering,
+// cause-chaining, and listener delivery stay byte-identical. The RATIONALE --
+// the frame-size and liveness bounds, the replay/sequencing guarantees, and the
+// durable-ack contract -- is normatively specified in docs/spec/FILE_SYNC.md
+// and docs/spec/CHANNEL_SECURITY.md; this module implements it and does not
+// restate it.
 //
 // This module is deliberately NOT re-exported by the package barrel (main.ts
 // barrels fileSyncConnection.ts via `export *`, not this file), so its
@@ -363,10 +363,13 @@ export class FileSyncMessageLoop {
   lastSentFile: string | undefined;
   private consecutiveEnoentCount = 0;
   // The message publish whose outcome the transport could not settle, if one has
-  // happened this session: its seq and the name it was published under. Set from
+  // happened this session: the seq it spent, and the transport's own error, which
+  // the refusal carries as its `cause` so the destination and status that error
+  // names stay reachable without spending the refusal's display budget. Set from
   // send()'s rename, read by the next send(), which refuses rather than write a
   // second message under a seq the peer may already have consumed one under.
-  private indeterminatePublish: { seq: number; name: string } | undefined;
+  private indeterminatePublish:
+    { seq: number; error: TransportPublishIndeterminateError } | undefined;
   // Distinct names already warned about under `unexpectedFiles: "warn"`. poll()
   // re-lists every cycle, so a recurring unexpected file would log on each pass
   // without this; membership caps it at one warning per name. Reset per session
@@ -402,21 +405,24 @@ export class FileSyncMessageLoop {
     // Tagged unlike its untagged siblings in errors.ts: those are settled before
     // the handshake or carry no competing step, while this is reached
     // mid-exchange, where the CLI's generic "retry without re-inviting" advisory
-    // does fire and would contradict the restart prescribed here.
+    // does fire and would contradict the restart prescribed here. That tag is
+    // what makes the length of this message load-bearing: it suppresses the
+    // generic next step, so the restart prescribed here is the only one the
+    // operator gets and must survive the display boundary's per-error cap. Hence
+    // the refusal and its remedy alone, with the publish itself identified by the
+    // transport error hung off `cause`, which renders under its own cap.
     if (this.indeterminatePublish !== undefined)
       throw Object.assign(
         new UsageError(
-          `cannot send: message ` +
-            `${sanitizeForDisplay(this.indeterminatePublish.name)} (seq ` +
-            `${this.indeterminatePublish.seq}) was published over a transport ` +
-            `that could not determine whether ` +
-            `${sanitizeForDisplay(deps.peerId()!)} received it, so sequence ` +
-            `number ${this.indeterminatePublish.seq} cannot be reused for this ` +
-            `message. Re-run the exchange in a clean directory; both parties ` +
-            `must start the new exchange fresh, since this one's message ` +
-            `sequence is no longer known to be in step.`,
+          `cannot send: sequence number ${this.indeterminatePublish.seq} was ` +
+            `spent on a publish the transport could not confirm, so the partner ` +
+            `may already hold a message under it. Re-run the exchange in a ` +
+            `clean directory; both parties must start the new exchange fresh.`,
         ),
-        { psilinkRecoveryHintEmitted: true },
+        {
+          cause: this.indeterminatePublish.error,
+          psilinkRecoveryHintEmitted: true,
+        },
       );
 
     // `path` is the inbound directory: where the peer's ack of our message (and,
@@ -575,7 +581,7 @@ export class FileSyncMessageLoop {
         // The counter does not advance below, but this seq is spent all the same
         // -- see the refusal at send() entry for what that costs.
         if (renameErr instanceof TransportPublishIndeterminateError)
-          this.indeterminatePublish = { seq, name: outName };
+          this.indeterminatePublish = { seq, error: renameErr };
         throw renameErr;
       }
       if (!deps.options().retainFiles) deps.responsibleFiles.add(outName);
