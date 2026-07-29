@@ -786,3 +786,197 @@ describe("FileSyncMessageLoop resetSessionState", () => {
     expect(i.consecutiveEnoentCount).toBe(4);
   });
 });
+
+// --- connection-per-poll session boundaries ----------------------------------
+//
+// In connection-per-poll mode the loop releases the transport session at the
+// idle boundary of every cycle and dials a fresh one at the next cycle's start.
+// The directory is server-side, so the boundary destroys nothing durable: what
+// these pin is that the loop carries its own state across it -- the sequence
+// shadow, the entry foreign-file snapshot, and the responsible-file set -- and
+// that the only thing that clears any of them is resetSessionState(), which the
+// boundary never calls.
+
+// Records every transport op and attaches the two optional cycle-boundary
+// methods, so a test can see where the boundary falls relative to the loop's own
+// ops.
+function installConnectionPerPoll(
+  client: FileTransportClient,
+  trace: string[],
+): void {
+  const ops = [
+    "list",
+    "get",
+    "put",
+    "delete",
+    "safeDelete",
+    "rename",
+    "createExclusive",
+    "exists",
+  ] as const;
+  const methods = client as unknown as Record<
+    (typeof ops)[number],
+    (...args: never[]) => Promise<unknown>
+  >;
+  for (const op of ops) {
+    const inner = methods[op].bind(client);
+    methods[op] = async (...args: never[]) => {
+      trace.push(op);
+      return inner(...args);
+    };
+  }
+  client.ensureConnected = async () => {
+    trace.push("dial");
+    return true;
+  };
+  client.releaseForIdle = async () => {
+    trace.push("release");
+  };
+}
+
+const RETAIN_OPTIONS: Partial<MessageLoopOptions> = {
+  retainFiles: true,
+  timestampInFilename: true,
+  locklessRendezvous: true,
+};
+
+// Plants the peer's retain-mode message for a given NNN, which retain never
+// deletes: the directory accumulates the whole transcript and every poll
+// re-lists it.
+function plantRetainMessageAt(
+  files: Map<string, Buffer>,
+  nnn: number,
+  payload: unknown,
+): string {
+  const body = objectMessage(payload, nnn);
+  const name = messageFilename({
+    id: PEER,
+    timestampInFilename: true,
+    byteCount: body.length,
+    seq: nnn,
+    ts: Date.UTC(2026, 0, 2, 3, 4, 5),
+  });
+  files.set(`${DIR}/${name}`, body);
+  return name;
+}
+
+describe("FileSyncMessageLoop across connection-per-poll session boundaries", () => {
+  // One poll cycle plus the release and reschedule its finally arms, with the
+  // pending timer cleared so the next cycle starts from a quiet loop.
+  const runCycle = async (f: LoopFixture): Promise<void> => {
+    await f.pollOnce();
+    f.loop.stop();
+  };
+
+  test("recvSeq stays aligned with the on-disk retain sequence across a session drop and re-dial", async () => {
+    const files = new Map<string, Buffer>();
+    const trace: string[] = [];
+    const f = makeLoop(RETAIN_OPTIONS, {}, files);
+    installConnectionPerPoll(f.client, trace);
+    const planted = [0, 1, 2].map((nnn) =>
+      plantRetainMessageAt(files, nnn, { n: nnn }),
+    );
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await runCycle(f);
+      expect(internals(f.loop).recvSeq).toBe(cycle + 1);
+      expect(internals(f.loop).lastAckedNNN).toBe(cycle);
+    }
+
+    expect(f.emitted.map((e) => e.arg)).toEqual([{ n: 0 }, { n: 1 }, { n: 2 }]);
+    // Retain never deletes, so the on-disk sequence stays authoritative: each
+    // re-dialed session re-lists the same transcript the released one saw, and
+    // the shadow selects the next NNN from it rather than from anything the
+    // session held.
+    for (const name of planted) expect(files.has(`${DIR}/${name}`)).toBe(true);
+    for (const name of planted)
+      expect(
+        files.has(
+          `${DIR}/${ackMarkerName(SELF, name.slice(0, -".json".length))}`,
+        ),
+      ).toBe(true);
+    // Every cycle ran inside its own dial/release bracket.
+    expect(trace.filter((entry) => entry === "dial")).toHaveLength(3);
+    expect(trace.filter((entry) => entry === "release")).toHaveLength(3);
+    expect(trace[0]).toBe("dial");
+    expect(trace[trace.length - 1]).toBe("release");
+  });
+
+  test("a mid-loop reconnect does not reset the sequence shadow", async () => {
+    const files = new Map<string, Buffer>();
+    const trace: string[] = [];
+    const f = makeLoop(RETAIN_OPTIONS, {}, files);
+    installConnectionPerPoll(f.client, trace);
+    // The claim that a cycle boundary never resets the session, as a check: the
+    // production callers of resetSessionState are the rendezvous recovery sites
+    // and close(), none of which a poll cycle reaches.
+    let resets = 0;
+    const innerReset = f.loop.resetSessionState.bind(f.loop);
+    f.loop.resetSessionState = () => {
+      resets += 1;
+      innerReset();
+    };
+
+    plantRetainMessageAt(files, 0, { n: 0 });
+    await runCycle(f);
+    expect(internals(f.loop).recvSeq).toBe(1);
+
+    // Three further cycles with nothing to consume, each behind its own release
+    // and re-dial.
+    for (let cycle = 0; cycle < 3; cycle++) await runCycle(f);
+
+    expect(internals(f.loop).recvSeq).toBe(1);
+    expect(internals(f.loop).lastAckedNNN).toBe(0);
+    expect(f.loop.seq).toBe(0);
+    expect(resets).toBe(0);
+    expect(trace.filter((entry) => entry === "dial")).toHaveLength(4);
+    expect(trace.filter((entry) => entry === "release")).toHaveLength(4);
+    expect(f.emitted.map((e) => e.arg)).toEqual([{ n: 0 }]);
+
+    // The reset a cycle boundary never performs is what actually clears the
+    // shadow, so the counters above were not simply inert.
+    f.loop.resetSessionState();
+    expect(internals(f.loop).recvSeq).toBe(0);
+    expect(internals(f.loop).lastAckedNNN).toBe(-1);
+  });
+
+  test("retain-mode foreign and responsible-file bookkeeping is unchanged across cycles", async () => {
+    const files = new Map<string, Buffer>();
+    const trace: string[] = [];
+    const f = makeLoop(
+      { ...RETAIN_OPTIONS, unexpectedFiles: "error" },
+      {},
+      files,
+    );
+    installConnectionPerPoll(f.client, trace);
+    // A foreign file the rendezvous entry scan snapshotted before the loop
+    // started.
+    files.set(`${DIR}/at-entry.txt`, Buffer.from("x"));
+    f.foreignFileSnapshot.add("at-entry.txt");
+    plantRetainMessageAt(files, 0, { n: 0 });
+    plantRetainMessageAt(files, 1, { n: 1 });
+
+    for (let cycle = 0; cycle < 4; cycle++) await runCycle(f);
+
+    // Four release/re-dial boundaries introduced no foreign-file false
+    // positive: the entry snapshot still classifies the same name as tolerated
+    // under the strictest policy.
+    expect(f.emitted.filter((e) => e.event === "error")).toEqual([]);
+    expect(f.emitted.map((e) => e.arg)).toEqual([{ n: 0 }, { n: 1 }]);
+    // Retain tracks nothing for cleanup, boundary or not.
+    expect([...f.responsibleFiles]).toEqual([]);
+    expect([...f.foreignFileSnapshot]).toEqual(["at-entry.txt"]);
+    expect(trace.filter((entry) => entry === "release")).toHaveLength(4);
+
+    // The snapshot is still discriminating rather than merely permissive: a
+    // foreign file that was NOT there at entry is a genuine unexpected file
+    // after the boundaries, exactly as it would be without them.
+    files.set(`${DIR}/after-entry.txt`, Buffer.from("y"));
+    await runCycle(f);
+
+    const errors = f.emitted.filter((e) => e.event === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].arg).toBeInstanceOf(UsageError);
+    expect((errors[0].arg as UsageError).message).toContain("after-entry.txt");
+  });
+});

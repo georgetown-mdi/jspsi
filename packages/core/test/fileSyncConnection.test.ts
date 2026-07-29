@@ -10144,4 +10144,154 @@ describe("connection-per-poll idle-boundary signal", () => {
     expect(listCalls).toBeGreaterThanOrEqual(2);
     expect(errors).toEqual([]);
   });
+
+  test("a cycle-boundary release and re-dial does not reset the in-memory session state", async () => {
+    const { client, files } = makeMockClient();
+    let dials = 0;
+    let releases = 0;
+    client.ensureConnected = async () => {
+      dials += 1;
+      return true;
+    };
+    client.releaseForIdle = async () => {
+      releases += 1;
+    };
+    const conn = new FileSyncConnection(client, {
+      pollingFrequency: 5,
+      timeToLive: new Date(Date.now() + 5_000),
+      verbose: -1,
+      locklessRendezvous: true,
+    });
+    conn.id = "aaa";
+    conn.connected = true;
+    conn.path = "/test";
+    // A peer hello (the one file the entry guard tolerates) and a foreign file
+    // the entry scan snapshots; the peer's ack of this party's hello arrives
+    // only after that scan, so the lockless barrier completes on a later poll.
+    files.set(
+      "/test/zzz-hello.json",
+      Buffer.from(
+        JSON.stringify({ locklessRendezvous: true, retainFiles: false }),
+      ),
+    );
+    files.set("/test/notes.txt", Buffer.from("unrelated"));
+    let listCalls = 0;
+    const origList = client.list.bind(client);
+    client.list = async (dir: string) => {
+      if (listCalls++ === 1)
+        files.set("/test/zzz-aaa-hello-ack.json", Buffer.alloc(0));
+      return origList(dir);
+    };
+
+    await conn.synchronize();
+
+    const snapshotOf = (c: FileSyncConnection): Set<string> =>
+      (c as unknown as { foreignFileSnapshot: Set<string> })
+        .foreignFileSnapshot;
+    const capture = () => ({
+      role: conn.role,
+      peerId: conn.peerId,
+      handshakeRole: conn.handshakeRole,
+      seq: conn.seq,
+      recvSeq: messageLoopInternals(conn).recvSeq,
+      lastAckedNNN: messageLoopInternals(conn).lastAckedNNN,
+      responsible: [...responsibleFilesOf(conn)].sort(),
+      snapshot: [...snapshotOf(conn)].sort(),
+    });
+    const before = capture();
+    // Rendezvous really did commit, so the comparison below is over live state
+    // rather than an untouched blank.
+    expect(before.peerId).toBe("zzz");
+    expect(before.role).toBe("starter");
+    expect(before.responsible).toEqual([
+      "aaa-hello.json",
+      "aaa-zzz-hello-ack.json",
+    ]);
+    expect(before.snapshot).toEqual(["notes.txt"]);
+    expect(dials).toBe(0);
+
+    const errors: unknown[] = [];
+    conn.on("error", (err) => errors.push(err));
+    conn.start();
+    await new Promise((r) => setTimeout(r, 40));
+    conn.stop();
+
+    expect(errors).toEqual([]);
+    expect(dials).toBeGreaterThanOrEqual(3);
+    expect(releases).toBeGreaterThanOrEqual(2);
+    expect(capture()).toEqual(before);
+  });
+
+  test("the idle-boundary release never falls inside a publish the poll loop performs", async () => {
+    const { client, files } = makeMockClient();
+    const trace: string[] = [];
+    client.ensureConnected = async () => {
+      trace.push("dial");
+      return true;
+    };
+    client.releaseForIdle = async () => {
+      trace.push("release");
+    };
+    const origPut = client.put.bind(client);
+    client.put = async (src, dest, options) => {
+      trace.push(`put ${dest}`);
+      return origPut(src, dest, options);
+    };
+    const origRename = client.rename.bind(client);
+    client.rename = async (from: string, to: string) => {
+      trace.push(`rename ${to}`);
+      return origRename(from, to);
+    };
+
+    const conn = new FileSyncConnection(client, {
+      pollingFrequency: 5,
+      timeToLive: new Date(Date.now() + 5_000),
+      verbose: -1,
+      locklessRendezvous: true,
+      timestampInFilename: true,
+      retainFiles: true,
+    });
+    conn.id = "receiver-me";
+    conn.connected = true;
+    conn.path = "/test";
+    conn.peerId = "peer-sender";
+
+    const message = objectMessage({ v: 1 });
+    files.set(
+      `/test/peer-sender-20260101T000000-000-${message.length}.json`,
+      message,
+    );
+
+    let notifyReceived!: () => void;
+    const delivered = new Promise<void>((r) => (notifyReceived = r));
+    conn.on("data", () => notifyReceived());
+    conn.start();
+    await Promise.race([
+      delivered,
+      new Promise<void>((r) => setTimeout(r, 2_000)),
+    ]);
+    // Keep polling past the delivery so the run brackets the publish with a
+    // boundary on both sides rather than stopping at the first one.
+    await new Promise((r) => setTimeout(r, 25));
+    conn.stop();
+
+    // The retain ack is the publish the poll loop itself performs: a temp put
+    // followed by the rename that commits the final name. The only release site
+    // is the cycle's own finally, so the two ops are contiguous and no boundary
+    // can leave the temp orphaned with the peer's go-ahead signal missing.
+    const tempPut = trace.findIndex(
+      (entry) => entry.startsWith("put ") && entry.endsWith(".tmp"),
+    );
+    const ackRename = trace.findIndex(
+      (entry) => entry.startsWith("rename ") && entry.endsWith("-ack.json"),
+    );
+    expect(tempPut).toBeGreaterThanOrEqual(0);
+    expect(ackRename).toBeGreaterThan(tempPut);
+    expect(trace.slice(tempPut, ackRename)).not.toContain("release");
+    // The boundaries are live in this run, so the exclusion above is real: the
+    // first release lands after the publish committed, and further cycles
+    // dialed again.
+    expect(trace.indexOf("release")).toBeGreaterThan(ackRename);
+    expect(trace.filter((entry) => entry === "dial").length).toBeGreaterThan(1);
+  });
 });
