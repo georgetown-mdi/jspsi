@@ -2,9 +2,9 @@
 
 This is the setup script's job done one command at a time, by you. Use it if
 you would rather not run a script you downloaded, or if your PC will not let
-you run one. It ends in the same place: a Docker volume called
-`psilink-rendezvous` that points at your file-drop folder, tested against the
-things psilink actually needs. Allow half an hour rather than ten minutes.
+you run one. It ends in the same place: a Docker volume called `psilink-sync`
+that points at your file-drop folder, tested against the things psilink
+actually needs. Allow half an hour rather than ten minutes.
 
 Nothing here installs anything on Windows. Every check runs inside a throwaway
 Linux container that Docker deletes when you close it.
@@ -319,7 +319,7 @@ deletes. You are back in Windows.
 **If you have been here before,** remove the old volume first:
 
 ```text
-docker volume rm psilink-rendezvous
+docker volume rm psilink-sync
 ```
 
 Creating a volume over a name that already exists succeeds and quietly keeps
@@ -337,13 +337,13 @@ docker volume create --driver local `
   --opt type=cifs `
   --opt 'device=//fs-04.agency.gov/exchange$/dropbox' `
   --opt 'o=username=yourname,password=YOURPASSWORD,domain=AGENCY' `
-  psilink-rendezvous
+  psilink-sync
 ```
 
 **Command Prompt:**
 
 ```text
-docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=yourname,password=YOURPASSWORD,domain=AGENCY" psilink-rendezvous
+docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=yourname,password=YOURPASSWORD,domain=AGENCY" psilink-sync
 ```
 
 Things to get right:
@@ -376,7 +376,7 @@ establish anything.
 ### Check it mounts, and opens the right folder
 
 ```text
-docker run --rm -v psilink-rendezvous:/rz alpine:3.22 ls -la /rz
+docker run --rm -v psilink-sync:/rz alpine:3.22 ls -la /rz
 ```
 
 You are looking for **`psilink-setup-check.tmp`**, the marker you left at the
@@ -408,7 +408,7 @@ over the volume rather than through smbclient, which refuses some of these
 whatever the server would have allowed.
 
 ```text
-docker run --rm -it -v psilink-rendezvous:/rz alpine:3.22 sh
+docker run --rm -it -v psilink-sync:/rz alpine:3.22 sh
 ```
 
 You are inside a container again, with your file drop mounted at `/rz`. Move
@@ -465,15 +465,15 @@ and you do not need to do any of this again unless the password changes.
 ```powershell
 docker run --rm `
   -v 'C:\path\to\your\work:/work' `
-  -v 'psilink-rendezvous:/rendezvous' `
+  -v 'psilink-sync:/sync' `
   vdorie/psi-link:latest `
-  file:///rendezvous input.csv matches.csv
+  file:///sync input.csv matches.csv
 ```
 
 **Command Prompt:**
 
 ```text
-docker run --rm -v "C:\path\to\your\work:/work" -v "psilink-rendezvous:/rendezvous" vdorie/psi-link:latest file:///rendezvous input.csv matches.csv
+docker run --rm -v "C:\path\to\your\work:/work" -v "psilink-sync:/sync" vdorie/psi-link:latest file:///sync input.csv matches.csv
 ```
 
 `C:\path\to\your\work` is a folder **on this PC** holding your input CSV;
@@ -495,7 +495,7 @@ Three things to know before the first run:
 ## When you are done with this partner
 
 ```text
-docker volume rm psilink-rendezvous
+docker volume rm psilink-sync
 ```
 
 Then have the account switched off, or its password changed. That, rather than

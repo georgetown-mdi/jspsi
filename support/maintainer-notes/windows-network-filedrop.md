@@ -443,7 +443,7 @@ repeated by whoever tries next.
 
 ## Before running it
 
-The script creates a Docker volume named `psilink-rendezvous`; `-VolumeName`
+The script creates a Docker volume named `psilink-sync`; `-VolumeName`
 overrides it. An existing volume of that name is replaced, but only after
 inspecting it -- one that is not a CIFS volume is left alone and the run
 refuses, because the name is unvalidated and a typo would otherwise destroy

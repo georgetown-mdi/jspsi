@@ -26,7 +26,7 @@ rem containing "!" is silently emptied of it -- "Pa!ss" becomes "Pass", which
 rem reports as a wrong password with nothing on screen to explain why.
 
 set "SCRIPT_DIR=%~dp0"
-set "VOLUME_NAME=psilink-rendezvous"
+set "VOLUME_NAME=psilink-sync"
 rem Pinned to alpine:3.22's multi-arch index digest so a run today and a run
 rem next year test the same thing. Override it if your site pulls through a
 rem registry mirror that does not carry the digest.
@@ -126,7 +126,7 @@ echo   -SubPath ^<folder^>    the folder inside the share
 echo   -Username ^<name^>     the account the container will use
 echo   -Domain ^<name^>       its domain, if it has one
 echo   -Dialect ^<d^>         pin the SMB dialect: SMB3, SMB2, or NT1
-echo   -VolumeName ^<name^>   the Docker volume to create (psilink-rendezvous)
+echo   -VolumeName ^<name^>   the Docker volume to create (psilink-sync)
 echo   -HelperImage ^<image^> the image the checks run in
 echo   -SkipConfirm         do not ask you to confirm the server and share
 echo   -SkipVolumeTest      run the checks but do not create the volume
@@ -466,7 +466,7 @@ echo need to run this script again unless the password changes.
 echo(
 echo Run your exchange like this, on one line:
 echo(
-echo   docker run --rm -v "C:\path\to\your\work:/work" -v "%VOLUME_NAME%:/rendezvous" vdorie/psi-link:latest file:///rendezvous input.csv matches.csv
+echo   docker run --rm -v "C:\path\to\your\work:/work" -v "%VOLUME_NAME%:/sync" vdorie/psi-link:latest file:///sync input.csv matches.csv
 echo(
 call :info "C:\path\to\your\work is a LOCAL folder on this PC holding your input"
 call :info "CSV; results are written back there. It must not be a network path."
@@ -489,7 +489,7 @@ call :info "See the troubleshooting page, 'Synced folders'."
 echo(
 echo There is also a browser console, on one line:
 echo(
-echo   docker run --rm -p 127.0.0.1:3000:3000 --env JOB_DATA_ROOT=/data --env JOB_RENDEZVOUS_DIR=/rendezvous -v "C:\path\to\your\work:/data" -v "%VOLUME_NAME%:/rendezvous" vdorie/psi-link:latest serve
+echo   docker run --rm -p 127.0.0.1:3000:3000 --env JOB_DATA_ROOT=/data --env JOB_RENDEZVOUS_DIR=/sync -v "C:\path\to\your\work:/data" -v "%VOLUME_NAME%:/sync" vdorie/psi-link:latest serve
 echo(
 call :info "then open http://127.0.0.1:3000"
 call :info ""
@@ -569,7 +569,7 @@ echo(
 echo That means you do not need a Docker volume at all -- you can mount
 echo the folder directly. Run your exchange like this, on one line:
 echo(
-echo   docker run --rm -v "C:\path\to\your\work:/work" -v "%RESOLVE_LOCAL%:/rendezvous" vdorie/psi-link:latest file:///rendezvous input.csv matches.csv
+echo   docker run --rm -v "C:\path\to\your\work:/work" -v "%RESOLVE_LOCAL%:/sync" vdorie/psi-link:latest file:///sync input.csv matches.csv
 echo(
 call :warn "If this folder is kept in step with your partner by a sync client"
 call :note "(OneDrive, Dropbox, Egnyte, ShareFile), both sides must also pass"

@@ -382,13 +382,13 @@ docker volume create --driver local `
   --opt type=cifs `
   --opt 'device=//fs-04.agency.gov/exchange$/dropbox' `
   --opt 'o=username=USER,password=PASS,domain=AGENCY' `
-  psilink-rendezvous
+  psilink-sync
 ```
 
 **Command Prompt:**
 
 ```text
-docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=USER,password=PASS,domain=AGENCY" psilink-rendezvous
+docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=USER,password=PASS,domain=AGENCY" psilink-sync
 ```
 
 Note the forward slashes in `device`, and that `\\fs-04\exchange$\dropbox`
@@ -412,13 +412,13 @@ Check that it mounts and that the folder is the one you meant:
 **PowerShell:**
 
 ```powershell
-docker run --rm -v 'psilink-rendezvous:/rz' alpine:3.22 ls -la /rz
+docker run --rm -v 'psilink-sync:/rz' alpine:3.22 ls -la /rz
 ```
 
 **Command Prompt:**
 
 ```text
-docker run --rm -v "psilink-rendezvous:/rz" alpine:3.22 ls -la /rz
+docker run --rm -v "psilink-sync:/rz" alpine:3.22 ls -la /rz
 ```
 
 This route puts the password on a command line -- in PowerShell, that means your
@@ -440,8 +440,8 @@ first. That person runs with the flag; the other waits until that run has
 started, then uses the ordinary command.
 
 **Setting up a second file drop replaces the first.** The volume name is
-`psilink-rendezvous` unless you say otherwise, so running the script again for
-a different partner overwrites the first one's settings. Give each its own with
+`psilink-sync` unless you say otherwise, so running the script again for a
+different partner overwrites the first one's settings. Give each its own with
 `-VolumeName psilink-partner-b`, and pass that name to `-v` when you run that
 exchange.
 
@@ -457,15 +457,15 @@ bind-mount directly:
 ```powershell
 docker run --rm `
   -v 'C:\path\to\your\work:/work' `
-  -v 'C:\Users\you\Egnyte\exchange:/rendezvous' `
+  -v 'C:\Users\you\Egnyte\exchange:/sync' `
   vdorie/psi-link:latest `
-  file:///rendezvous input.csv matches.csv --lockless-rendezvous
+  file:///sync input.csv matches.csv --lockless-rendezvous
 ```
 
 **Command Prompt:**
 
 ```text
-docker run --rm -v "C:\path\to\your\work:/work" -v "C:\Users\you\Egnyte\exchange:/rendezvous" vdorie/psi-link:latest file:///rendezvous input.csv matches.csv --lockless-rendezvous
+docker run --rm -v "C:\path\to\your\work:/work" -v "C:\Users\you\Egnyte\exchange:/sync" vdorie/psi-link:latest file:///sync input.csv matches.csv --lockless-rendezvous
 ```
 
 `--lockless-rendezvous` is not optional there and **both parties** must pass it.
