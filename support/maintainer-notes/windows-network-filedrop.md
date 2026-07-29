@@ -63,23 +63,43 @@ existing file succeeds -- note that smbclient's own `rename` refuses that,
 which is why the two halves test different things and why a rename check built
 on smbclient produces a false negative.
 
-**The Windows half is not verified in its current form.** An earlier revision
-ran end to end on Windows 11 under Windows PowerShell 5.1 -- path parsing,
-resolving a mapped drive letter, the container checks, and creating and
-mounting the CIFS volume against a real SMB server, with a wrong password
-classified correctly. `Resolve-MappedDrive` was exercised against a real
-Windows drive mapping and all three of its lookup methods returned the UNC
-root; the mapping was served over WebDAV rather than SMB, because Windows' own
-file-sharing service holds port 445, so SMB-specific mapping behaviour remains
-untouched.
+**The Windows half is verified in its current form**, on Windows 11 under
+Windows PowerShell 5.1 against a Samba container on the Docker bridge. Covered:
+a full pass ending in a mounted CIFS volume, driven both from `-Server`/`-Share`
+and from `-DropPath`; the confirmation prompt and the warning that fires when
+Windows itself cannot open the path; the ConstrainedLanguage preflight, run in a
+runspace whose language mode really is constrained, which stops before touching
+anything; the helper-image pull; `Get-DriveKind` returning Fixed and Absent from
+`IO.DriveInfo`; `Test-Elevated` in both states, including the elevated-session
+message, which an elevated run reaches through a letter the session cannot see;
+`PtrToStringBSTR` round-tripping a password through `SecureString` intact,
+including non-Latin characters; the stale-marker recovery, reached for real
+after an earlier run left a marker behind; and all three volume cases -- absent,
+already a CIFS volume made by this script, and already something else.
 
-Since then the Windows side has changed substantially and none of it has been
-run on Windows. Unverified: the elevation detection and the message it prints,
-`Get-DriveKind` and its `IO.DriveInfo` drive-type classification, the
-confirmation prompt, the ConstrainedLanguage preflight, the helper-image pull
-preflight, the Windows-containers check, the existing-volume inspection, and
-`PtrToStringBSTR` on Windows. Most are small and independent; the one worth
-running first is a plain end-to-end pass on 5.1, which touches all of them.
+`Resolve-MappedDrive` was exercised against a real Windows drive mapping in an
+earlier revision and all three of its lookup methods returned the UNC root; the
+mapping was served over WebDAV rather than SMB, because Windows' own
+file-sharing service holds port 445, so SMB-specific mapping behaviour remains
+untouched. The function is unchanged since.
+
+Still unverified: the Windows-containers branch, which needs Docker Desktop
+switched to Windows containers to reach -- only the `{{.Server.Os}}` parse it
+keys on is confirmed, against a `linux` engine.
+
+Two Windows-only defects were found by that pass and fixed. **The volume check
+never ran**: its here-string reached `sh` with the CRLF line endings a checkout
+with `core.autocrlf` produces, and `sh` does not treat a carriage return as
+whitespace, so `fi` arrived as `fi\r` and the interpreter reported an
+unterminated `if`. The probe here-string strips line endings for this reason;
+the volume check did not. **The existing-volume guard never ran either**, and
+this one destroyed data: its inspection template embedded double quotes around
+the map key, Windows PowerShell strips those while building a native command
+line, and Docker rejected the template for every volume. The non-zero exit was
+read as "no such volume", so an unrelated volume of the same name was reused,
+mounted, and then removed by the marker branch. The template is now quote-free
+and existence is established from `docker volume ls`, so an inspection that
+cannot run refuses rather than proceeds.
 
 ## Decisions worth not relitigating
 

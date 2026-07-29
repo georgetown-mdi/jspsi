@@ -1058,10 +1058,23 @@ try {
         }
     }
 
-    $existing = Invoke-Docker -DockerArgs @('volume', 'inspect', '--format',
-                                            '{{.Driver}} {{index .Options "type"}}', $VolumeName)
-    if ($existing.ExitCode -eq 0) {
-        if ($existing.Output.Trim() -ne 'local cifs') {
+    # Existence is established from the volume list rather than from the exit
+    # code of the inspection below. Anything that stops the inspection running
+    # -- a template Docker will not parse, a daemon that answers oddly -- also
+    # exits non-zero, and reading that as "no such volume" walks straight past
+    # the guard and into the removal further down.
+    $listed = Invoke-Docker -DockerArgs @('volume', 'ls', '--quiet')
+    $volumeExists = ($listed.ExitCode -eq 0 -and
+        (@($listed.Output -split '\r?\n' | Where-Object { $_.Trim() -eq $VolumeName }).Count -gt 0))
+
+    if ($volumeExists) {
+        # No quotes inside the template. Windows PowerShell strips them while
+        # building a native command line, so "{{index .Options """type"""}}"
+        # reaches Docker as {{index .Options type}} and fails to parse -- for
+        # every volume, which disables the check entirely.
+        $existing = Invoke-Docker -DockerArgs @('volume', 'inspect', '--format',
+                                                '{{.Driver}} {{.Options.type}}', $VolumeName)
+        if ($existing.ExitCode -ne 0 -or $existing.Output.Trim() -ne 'local cifs') {
             Write-Bad "A Docker volume called '$VolumeName' already exists and was not"
             Write-Note 'made by this script -- it is not a network-share volume. It has'
             Write-Note 'been left alone; removing it could destroy data belonging to'
@@ -1126,8 +1139,13 @@ if mv -f .psilink-a.tmp .psilink-b.tmp 2>/dev/null; then echo RENAME_OK; else ec
 rm -f .psilink-a.tmp .psilink-b.tmp
 "@
     Write-Host 'Mounting it and testing what psilink needs...'
+    # Line endings are stripped for the same reason the probe strips them: a
+    # checkout with core.autocrlf on gives this here-string CRLF, and sh does
+    # not treat a carriage return as whitespace, so "fi" arrives as "fi\r" and
+    # the interpreter reports an unterminated if.
     $test = Invoke-Docker -DockerArgs @(
-        'run', '--rm', '-v', "${VolumeName}:/rz", $HelperImage, 'sh', '-c', $volumeCheck)
+        'run', '--rm', '-v', "${VolumeName}:/rz", $HelperImage, 'sh', '-c',
+        ($volumeCheck -replace "`r`n", "`n"))
     $testOut = Hide-Secret -Text $test.Output -Secret $plainPass
 
     if ($test.ExitCode -ne 0 -or $testOut -notmatch 'WRITE_OK') {
