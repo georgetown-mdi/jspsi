@@ -517,21 +517,34 @@ withheld), not reading the library:
   sockets, none on a writable one.
 - **Teardown pre-drain reconnect** (`close()` reaching `ensureConnected`): one
   dial, on a destroyed socket, 221 ms.
-- **Recovery re-dial** (`withSessionRecovery` reaching `redialForRecovery`):
-  never fires at all against a withheld-close partner, because
-  ssh2-sftp-client's session property never clears. Against a normally-closing
-  partner it does fire, on a destroyed socket, in 219 ms -- the control that
-  proves the driving works.
+- **Recovery re-dial** (`withSessionRecovery` reaching `redialForRecovery`): fires
+  against a withheld-close partner, on a destroyed socket. The gate admits a SET
+  session whose transport has ENDED -- exactly what that partner leaves behind --
+  and the re-dial retires that torn transport before dialing its replacement.
+  Against a normally-closing partner it also fires, on a destroyed socket, in
+  219 ms -- the control that proved the driving works, and the arm the library
+  reaches by clearing the session itself. SUPERSEDED: this bullet recorded the
+  path as never firing against a withheld-close partner at all, because
+  ssh2-sftp-client's session property never clears. That measured the gate as it
+  then stood, refusing recovery on any set session; the library's property
+  behaves as it did, and the gate no longer does.
 
-Two independent barriers hold it there, and the load-bearing one is not the
-forced close:
+Two barriers hold it there, and the forced close is load-bearing in both -- the
+first barrier's recovery arm reaches its dial only after one, and the second is
+about the state they leave:
 
-1. **No dial gate fires while the session is set.** `ensureConnected` returns
+1. **No dial gate puts a dial on a live transport.** `ensureConnected` returns
    early on a set session (measured returning true in 0 ms with the transport
-   live) and `shouldRecoverFromSessionLoss` refuses recovery on one; on the
-   pinned versions the session is set exactly while the transport is live.
+   live), and `shouldRecoverFromSessionLoss` refuses a set session unless its
+   transport has ended. The session is not set exactly while the transport is
+   live: the withheld-close partner this note describes throughout leaves it set
+   over an ENDED one. That is the one set-session loss the gates admit to a dial,
+   and what carries the conclusion there is the re-dial's own ordering --
+   `redialForRecovery` retires the torn transport before it dials, so that dial
+   too is issued over a destroyed socket rather than a writable one.
    ssh2-sftp-client's own "An existing SFTP connection is already defined" guard
-   is a third, redundant backstop.
+   rejects any dial that reaches it with the session still set, a redundant
+   backstop behind both.
 2. **Neither state a withheld close can leave defers.** A withheld close leaves
    an ENDED transport, which the forced closes destroy -- and a dial on
    `writableEnded: true, destroyed: false` completes in ~220 ms, as does one on a
