@@ -403,14 +403,14 @@ export class FileSyncMessageLoop {
     // knowable from here, and the ack/consume gates below would be waiting on the
     // wrong message either way.
     // Tagged unlike its untagged siblings in errors.ts: those are settled before
-    // the handshake or carry no competing step, while this is reached
-    // mid-exchange, where the CLI's generic "retry without re-inviting" advisory
-    // does fire and would contradict the restart prescribed here. That tag is
-    // what makes the length of this message load-bearing: it suppresses the
-    // generic next step, so the restart prescribed here is the only one the
-    // operator gets and must survive the display boundary's per-error cap. Hence
-    // the refusal and its remedy alone, with the publish itself identified by the
-    // transport error hung off `cause`, which renders under its own cap.
+    // the handshake or carry no competing step, while this one prescribes a
+    // restart that the CLI's generic "retry without re-inviting" advisory would
+    // contradict. The tag is what makes this message's length load-bearing: it
+    // suppresses the generic next step, so the restart prescribed here is the
+    // only one an operator reaching this error gets, and it must survive the
+    // display boundary's per-error cap. Hence the refusal and its remedy alone,
+    // with the publish identified by the transport error hung off `cause`, which
+    // renders under its own cap.
     if (this.indeterminatePublish !== undefined)
       throw Object.assign(
         new UsageError(
