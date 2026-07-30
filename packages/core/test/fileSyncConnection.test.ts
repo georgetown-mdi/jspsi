@@ -2233,6 +2233,73 @@ test("synchronize() recognize-and-sweeps leftover abort markers (own and peer) a
   expect(conn.peerId).toBe(peerId);
 });
 
+test("synchronize() recognize-and-sweeps a leftover abort marker whose id names neither this party nor a hello present at entry", async () => {
+  // The shape a retry after a failed exchange actually presents: both parties
+  // draw fresh ids, so the marker the failure left is named by neither the
+  // retrying party nor the peer whose hello is on disk. The sweep matches any
+  // well-formed marker rather than an id it can name, so the retry proceeds.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const priorSessionId = "22222222-2222-4222-8222-222222222222";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myId = conn.id;
+
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const lockName = `${peerId}-${myId}-lock.json`;
+  const lockPath = `${conn.path}/${lockName}`;
+  const priorAbortPath = `${conn.path}/${priorSessionId}-abort.json`;
+
+  files.set(priorAbortPath, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1)
+      return [
+        {
+          name: peerHelloName,
+          modifyTime: mtime,
+          size: LOCK_HELLO_BODY.length,
+        },
+        { name: `${priorSessionId}-abort.json`, modifyTime: mtime, size: 2 },
+      ];
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: LOCK_HELLO_BODY.length },
+    ];
+  };
+  client.createExclusive = async (path) => {
+    files.set(lockPath, Buffer.alloc(0));
+    throw Object.assign(new Error(`${path}: file already exists`), {
+      code: "EEXIST",
+    });
+  };
+
+  await conn.synchronize();
+
+  expect(files.has(priorAbortPath)).toBe(false);
+  expect(conn.peerId).toBe(peerId);
+});
+
+test("synchronize() does not sweep a bare `-abort.json`; it stays an unexpected protocol file", async () => {
+  // The empty-prefix form recovers no id, so it is attributable to no party and
+  // is not a marker any honest party writes. The sweep requires a non-empty
+  // recovered id, so this name keeps the same fate as a bare `-hello.json`:
+  // rejected by the clean-entry guard rather than deleted.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  const barePath = `${conn.path}/-abort.json`;
+  files.set(barePath, Buffer.from("{}"));
+  client.list = async () => [{ name: "-abort.json", modifyTime: 0, size: 2 }];
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+  expect(files.has(barePath)).toBe(true);
+});
+
 test("synchronize() does NOT sweep a leftover abort marker in retain mode; it surfaces as exit-64", async () => {
   // In retain mode the directory is a durable audit transcript, so a leftover
   // marker beside it must not be auto-swept (that would reintroduce the

@@ -301,9 +301,17 @@ inProcessOnly(
 
       // What the suppressed advisory would have prescribed, measured: a plain
       // retry, same directory, no re-invite, both parties on the token the failed
-      // attempt rotated. It fails on BOTH sides at the clean-entry guard -- the
-      // residue is the failed party's own abort marker, and each party re-enters
-      // under a fresh id that recognizes neither it nor the peer's.
+      // attempt rotated. In THIS shape of the condition the torn publish's
+      // destination was consumed before the tear, so the failed party's abort
+      // marker is the only residue -- asserted, so the retry below is measured
+      // against a known directory -- and entry recognize-and-sweeps a leftover
+      // marker under any id, leaving both parties a clean slate to run a whole
+      // fresh exchange on.
+      const residue = await fsp.readdir(
+        path.join(srv.handle.backingDir, shared),
+      );
+      expect(residue).toHaveLength(1);
+      expect(residue[0]).toMatch(/-abort\.json$/);
       const retry = await runAttempt({
         srv,
         remoteDir: `${srv.handle.remoteRoot}/${shared}`,
@@ -311,17 +319,21 @@ inProcessOnly(
         tag: "retry",
         keyFiles,
       });
-      expect(retry.parties.filter((party) => party.ok)).toEqual([]);
-      for (const party of retry.parties) {
-        expect(party.error).toBeInstanceOf(UsageError);
-        expect(party.rendered).toContain(
-          "must be empty except for a single peer hello",
-        );
-      }
+      expect(retry.parties.filter((party) => !party.ok)).toEqual([]);
+      expect(
+        (await fsp.readFile(path.join(work, "retry-receiver-out.csv"), "utf8"))
+          .trim()
+          .split("\n"),
+      ).toHaveLength(1 + RECEIVER_ROWS.length);
 
-      // And what the remedy does prescribe: a clean directory, both parties
-      // fresh, carrying the same key files forward. It completes, so the sentence
-      // the operator is given is the one that recovers the exchange.
+      // That success does not make a retry the recovery to prescribe: the
+      // publishing party cannot tell this shape from the one where its message
+      // landed and was NOT consumed, which leaves that message in the directory
+      // for the clean-entry guard to refuse (the marker sweep does not touch a
+      // message-shaped name -- core's fileSyncConnection.test.ts pins its
+      // rejection at entry). So the remedy names a clean directory, which works
+      // whichever shape the publish was in: both parties fresh, carrying the same
+      // key files forward.
       const clean = "undetermined-publish-clean";
       await fsp.mkdir(path.join(srv.handle.backingDir, clean), {
         recursive: true,
