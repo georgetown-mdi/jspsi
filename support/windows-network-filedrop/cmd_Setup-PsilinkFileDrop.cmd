@@ -800,18 +800,27 @@ call :bad "The volume could not be mounted."
 echo(
 call :show_safely
 echo(
-findstr /c:"invalid argument" "%WORK%" >nul 2>&1
-if not errorlevel 1 (
-  call :note "The mount options were malformed. An equals sign or a special"
-  call :note "character in the password or the domain is the usual cause."
-)
-findstr /c:"permission denied" "%WORK%" >nul 2>&1
-if errorlevel 1 goto mount_denied_done
+rem The message being classified is the one the Docker daemon prints, which is
+rem the mount(2) errno rendered from Go's own table -- lowercase throughout,
+rem where mount.cifs and glibc capitalise the same errors. findstr is
+rem case-sensitive unless told otherwise, so every arm below takes /i and
+rem carries the literal as the daemon prints it. The arms are also chained
+rem rather than independent, so that output naming two of these produces one
+rem diagnosis, as it does in the PowerShell script.
+findstr /i /c:"invalid argument" "%WORK%" >nul 2>&1
+if errorlevel 1 goto mount_arm_denied
+call :note "The mount options were malformed. An equals sign or a special"
+call :note "character in the password or the domain is the usual cause."
+goto mount_arms_done
+
+:mount_arm_denied
+findstr /i /c:"permission denied" "%WORK%" >nul 2>&1
+if errorlevel 1 goto mount_arm_dialect
 if defined DEGRADED goto mount_denied_untested
 call :note "The kernel refused the mount even though the checks in part 3"
 call :note "authenticated. The SMB dialect is the most likely difference:"
 call :note "run again with -Dialect SMB3, and if that fails, -Dialect SMB2."
-goto mount_denied_done
+goto mount_arms_done
 
 rem With the checks stopped at step 2 this mount is the first thing to have
 rem presented the credentials, so a refusal is the ordinary answer to a wrong
@@ -825,26 +834,33 @@ call :note "'permission denied' is what a wrong password and an account that"
 call :note "is refused this folder both look like, and nothing here can tell"
 call :note "them apart. The attempt reached the server as a real sign-in, so"
 call :note "do NOT work through candidate passwords from here."
-:mount_denied_done
-findstr /c:"Host is down" "%WORK%" >nul 2>&1
-if not errorlevel 1 (
-  call :note "The server accepted the connection and then dropped it, which"
-  call :note "almost always means it requires a newer SMB dialect than the"
-  call :note "mount asked for. Run again with -Dialect SMB3."
-  if defined DEGRADED call :degraded_dialect_retry
-)
-findstr /c:"Operation not supported" "%WORK%" >nul 2>&1
-if not errorlevel 1 (
-  call :note "The server refused an option the mount asked for -- usually SMB"
-  call :note "encryption or signing. Run again with -Dialect SMB3."
-  if defined DEGRADED call :degraded_dialect_retry
-)
-findstr /c:"Required key not available" "%WORK%" >nul 2>&1
-if not errorlevel 1 (
-  call :note "The mount wanted a Kerberos ticket and the Docker VM has none."
-  call :note "The server is refusing password authentication. See the"
-  call :note "troubleshooting page, 'The share never asks for a password'."
-)
+goto mount_arms_done
+
+:mount_arm_dialect
+findstr /i /c:"mount error(112)" /c:"host is down" "%WORK%" >nul 2>&1
+if errorlevel 1 goto mount_arm_unsupported
+call :note "The server accepted the connection and then dropped it, which"
+call :note "almost always means it requires a newer SMB dialect than the"
+call :note "mount asked for. Run again with -Dialect SMB3."
+if defined DEGRADED call :degraded_dialect_retry
+goto mount_arms_done
+
+:mount_arm_unsupported
+findstr /i /c:"operation not supported" "%WORK%" >nul 2>&1
+if errorlevel 1 goto mount_arm_nokey
+call :note "The server refused an option the mount asked for -- usually SMB"
+call :note "encryption or signing. Run again with -Dialect SMB3."
+if defined DEGRADED call :degraded_dialect_retry
+goto mount_arms_done
+
+:mount_arm_nokey
+findstr /i /c:"required key not available" "%WORK%" >nul 2>&1
+if errorlevel 1 goto mount_arms_done
+call :note "The mount wanted a Kerberos ticket and the Docker VM has none."
+call :note "The server is refusing password authentication. See the"
+call :note "troubleshooting page, 'The share never asks for a password'."
+
+:mount_arms_done
 if defined DEGRADED call :degraded_losses
 docker volume rm "%VOLUME_NAME%" >nul 2>&1
 goto fail_generic

@@ -389,14 +389,14 @@ end of part 3.
   is wrong somewhere, and a DFS path is the usual reason. Read the real path
   from the folder's Properties, DFS tab, and start again from part 1. See
   [the volume opens the wrong folder](troubleshooting.md#the-volume-opens-the-wrong-folder).
-- **An error instead of a listing** -- `permission denied`, `mount error(112)`,
-  `Host is down`, `Operation not supported`. The volume did not mount at all.
+- **An error instead of a listing** -- `permission denied`, `host is down`,
+  `operation not supported`. The volume did not mount at all.
   The volume asks the server for a different version of the file-sharing
   protocol than smbclient did, and is the fussier of the two. Remove the volume
   and create it again with `,vers=3.1.1` added to the end of the `o=` option;
   if that fails, `,vers=2.1`. See
   [the volume will not mount](troubleshooting.md#the-volume-will-not-mount).
-- **`Required key not available`.** The server is refusing password
+- **`required key not available`.** The server is refusing password
   authentication and wants a Kerberos ticket the container cannot have. See
   [the share never asks for a password](troubleshooting.md#the-share-never-asks-for-a-password).
 

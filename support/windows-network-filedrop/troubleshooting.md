@@ -216,7 +216,7 @@ Two options, and one dead end:
 - If no account can be made to work, ask for the scheduled mirror instead --
   item 5 of the [IT request](#what-to-ask-your-it-department-for).
 
-If a volume later fails to mount with `Required key not available`, that is the
+If a volume later fails to mount with `required key not available`, that is the
 same problem in a different place.
 
 ## The password works but access is refused
@@ -276,8 +276,8 @@ dialect is not what is refusing you.
 
 ## The volume will not mount
 
-`permission denied`, `mount error(112)`, `Host is down`, or
-`Operation not supported` at part 4, after part 3 passed.
+`permission denied`, `host is down`, or `operation not supported` at part 4,
+after part 3 passed.
 
 The checks and the volume ask the server for different versions of the
 file-sharing protocol, and the volume is the fussier of the two. Run it again,

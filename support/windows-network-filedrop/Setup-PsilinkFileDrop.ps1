@@ -1444,6 +1444,12 @@ rm -f .psilink-a.tmp .psilink-b.tmp
         Write-Host ''
         Write-Host $testOut
         Write-Host ''
+        # The message being classified is the one the Docker daemon prints, which
+        # is the mount(2) errno rendered from Go's own table -- lowercase
+        # throughout, where mount.cifs and glibc capitalise the same errors. The
+        # arms are written as the daemon prints them so that the batch script,
+        # whose findstr matches literals rather than a case-insensitive regex, can
+        # carry the same set.
         if ($testOut -match 'invalid argument') {
             Write-Note 'The mount options were malformed. An equals sign or a special'
             Write-Note 'character in the password or the domain is the usual cause.'
@@ -1468,18 +1474,18 @@ rm -f .psilink-a.tmp .psilink-b.tmp
                 Write-Note 'run again with -Dialect SMB3, and if that fails, -Dialect SMB2.'
             }
         }
-        elseif ($testOut -match 'mount error\(112\)|Host is down') {
+        elseif ($testOut -match 'mount error\(112\)|host is down') {
             Write-Note 'The server accepted the connection and then dropped it, which'
             Write-Note 'almost always means it requires a newer SMB dialect than the'
             Write-Note 'mount asked for. Run again with -Dialect SMB3.'
             if ($degraded) { Write-DegradedDialectRetry }
         }
-        elseif ($testOut -match 'Operation not supported') {
+        elseif ($testOut -match 'operation not supported') {
             Write-Note 'The server refused an option the mount asked for -- usually SMB'
             Write-Note 'encryption or signing. Run again with -Dialect SMB3.'
             if ($degraded) { Write-DegradedDialectRetry }
         }
-        elseif ($testOut -match 'Required key not available') {
+        elseif ($testOut -match 'required key not available') {
             Write-Note 'The mount wanted a Kerberos ticket and the Docker VM has none.'
             Write-Note 'The server is refusing password authentication. See the'
             Write-Note 'troubleshooting page, "The share never asks for a password".'
