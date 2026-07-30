@@ -247,9 +247,11 @@ interface Ssh2ClientSocket {
   // WHO ended the transport. `readableEnded` is true once the peer's FIN has been
   // consumed (the peer began the teardown, so what follows is a server-side drop
   // rather than this adapter's release); `writableEnded` is true once this side has
-  // ended it (ssh2's Client.end() calls _sock.end()), which BEFORE the release
-  // drives its own end() means ssh2 answering a partner's SSH_MSG_DISCONNECT. See
-  // releaseForIdle() and sessionTransportEnded().
+  // ended it (ssh2's Client.end() calls _sock.end()), so BEFORE the release drives
+  // its own end() it is a transport ended with no FIN back and not by this release
+  // -- ssh2 answering a partner's SSH_MSG_DISCONNECT is the shape it is read for,
+  // and what the reading establishes is only that the end was not this boundary's.
+  // See releaseForIdle() and sessionTransportEnded().
   readableEnded?: boolean;
   writableEnded?: boolean;
   // net.Socket's own unconditional teardown, which -- unlike end() -- needs nothing
@@ -433,8 +435,9 @@ type SessionTransitionKind =
 // How the session's last completed boundary was reached. `deliberatelyReleased`
 // is the connection-per-poll release having ended a session that was still
 // carrying traffic; `releasedOverEndedTransport` is that same release having
-// closed over a transport a PARTNER-side drop had already ended, so the session's
-// absence is the release's while the LOSS is the partner's. `notReleased` is
+// closed over a transport already ended without it -- a PARTNER-side drop is the
+// shape it exists for -- so the session's absence is the release's while the LOSS
+// is not its doing. `notReleased` is
 // everything else -- including a release that raised, one that walked into the
 // PEER's teardown, and one that could not clear the session it destroyed.
 type SessionBoundary =
@@ -966,10 +969,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * not a lost session: the mode's own boundary, and therefore absent from
    * {@link reconnectCount}. It says nothing about whether a session was ALSO lost
    * at that boundary -- a release closing over a transport a partner's drop had
-   * already ended reaches this same forced close, and that drop is counted and
-   * warned through the recovery path. 0 in every other mode and against a server
-   * that closes on request. A plain operational counter, never a partner-controlled
-   * value.
+   * already ended reaches this same forced close, and where that drop tore an
+   * operation, the recovery path counts and warns the loss; where it tore nothing,
+   * no recovery runs and this count is the only report of that boundary. 0 in every
+   * other mode and against a server that closes on request. A plain operational
+   * counter, never a partner-controlled value.
    */
   get forcedReleaseCount(): number {
     return this.forcedReleases;
@@ -2895,13 +2899,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // operator has to see it counted and warned as one.
     //
     // `writableEnded` without it is this side's half ended with no FIN back, before
-    // this release has driven its own end(), so something else ended it: a partner
-    // that dropped the SFTP session while withholding its connection close, whose
-    // SSH_MSG_DISCONNECT ssh2 answers by ending its own socket (see
-    // sessionTransportEnded). The session is this release's to take, and the
+    // this release has driven its own end(), so something other than this release
+    // ended it -- the shape it is read for is a partner that dropped the SFTP
+    // session while withholding its connection close, whose SSH_MSG_DISCONNECT ssh2
+    // answers by ending its own socket (see sessionTransportEnded). What the reading
+    // establishes is only that the end was not this release's, which is what the
+    // classification turns on. The session is still this release's to take, and the
     // boundary recorded says so for the gate an operation issued after it passes --
-    // but the LOSS an operation torn here suffered is the partner's, so that
-    // boundary exempts nothing.
+    // but the LOSS an operation torn here suffered is not this release's doing, so
+    // that boundary exempts nothing.
     //
     // Neither half ended is the ordinary release, of a session still carrying
     // traffic.
