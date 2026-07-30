@@ -1552,9 +1552,17 @@ finally {
 # ==========================================================================
 # Done
 # ==========================================================================
-Write-Head 'Ready to run an exchange'
-Write-Host "The volume '$VolumeName' is set up and survives reboots. You do not"
-Write-Host 'need to run this script again unless the password changes.'
+if ($degraded) {
+    Write-Head 'Set up, but the checks did not run'
+    Write-Host "The volume '$VolumeName' is created and survives reboots. Run this"
+    Write-Host 'script again once the container can get smbclient: part 3 is what'
+    Write-Host 'tests the share itself.'
+}
+else {
+    Write-Head 'Ready to run an exchange'
+    Write-Host "The volume '$VolumeName' is set up and survives reboots. You do not"
+    Write-Host 'need to run this script again unless the password changes.'
+}
 Write-Host ''
 Write-Host 'Run your exchange like this:' -ForegroundColor Cyan
 Write-Host ''

@@ -502,9 +502,19 @@ if not errorlevel 1 call :good "Exclusive create and rename behave the way psili
 :skip_excl_ok
 
 rem ===================================================================== done
+if defined DEGRADED goto ready_head_degraded
 call :head "Ready to run an exchange"
 echo The volume '%VOLUME_NAME%' is set up and survives reboots. You do not
 echo need to run this script again unless the password changes.
+goto ready_head_done
+
+:ready_head_degraded
+call :head "Set up, but the checks did not run"
+echo The volume '%VOLUME_NAME%' is created and survives reboots. Run this
+echo script again once the container can get smbclient: part 3 is what
+echo tests the share itself.
+
+:ready_head_done
 echo(
 echo Run your exchange like this, on one line:
 echo(
