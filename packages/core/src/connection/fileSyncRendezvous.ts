@@ -357,21 +357,27 @@ export class FileSyncRendezvous {
   // --sweep-exchange-files. Deletes every protocol-grammar file (this party's
   // and the peer's: hellos, locks, joining sentinels, acks, messages) so
   // rendezvous can start against a clean slate -- but only after confirming the
-  // directory is not a retain-mode audit transcript. Retain never deletes its
-  // hellos (I4b), so a retain directory in which a PEER participated always
-  // carries that peer's retain hello (signal b below). The one gap is a
-  // peer-less, self-started retain half-start re-run in delete mode: the body
-  // read covers only PEER hellos, so it is caught only by local retain mode
-  // (signal: options.retainFiles) -- which a delete-mode re-run does not
-  // set. That loses only this operator's own abandoned half-start, not a
-  // two-party transcript. The inspection checks signals with DIFFERENT coverage:
+  // directory is not a retain-mode audit transcript. The only retain-mode
+  // deletion that reaches a hello is the terminal rendezvous failure's rollback
+  // of this party's own artifacts (I4b), and a rendezvous that failed
+  // terminally produced no exchange -- so a retain directory holding a
+  // transcript still carries the hello of the party that wrote it (signal b
+  // below), and a directory whose hello that rollback removed holds nothing the
+  // inspection has to protect. The one gap is a peer-less, self-started retain
+  // half-start whose process died before the rollback ran, re-run in delete mode
+  // under that same peer_id: the body read covers only PEER hellos, so a
+  // leftover SELF hello is caught only by local retain mode (signal:
+  // options.retainFiles) -- which a delete-mode re-run does not set. That loses
+  // only this operator's own abandoned half-start, not a two-party transcript.
+  // The inspection checks signals with DIFFERENT coverage:
   //   (a) a retain-only message ack (isRetainMessageAck) -- a filename-only,
   //       body-free signal. Strictly additive: it does not cover an
   //       early-rendezvous retain peer that has written no message ack yet.
   //   (b) the peer hello's `retain_files` flag, read through the I5a gate. This
-  //       is the load-bearing signal -- a retain directory always carries its
-  //       hello, even mid-rendezvous before any message ack exists. The read is
-  //       bounded (RETAIN_INSPECTION_POLL_CYCLES, never peer_timeout_ms) so a
+  //       is the load-bearing signal -- a retain party carries its hello from
+  //       the moment it writes it, so a live peer is covered mid-rendezvous,
+  //       before any message ack exists. The read is bounded
+  //       (RETAIN_INSPECTION_POLL_CYCLES, never peer_timeout_ms) so a
   //       non-resolving body cannot stall the sweep; an unresolved or
   //       unparseable body is retain-uncertain and refuses the bare flag.
   // Local retain mode is a signal too. When any signal is present the bare flag
