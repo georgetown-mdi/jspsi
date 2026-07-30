@@ -142,6 +142,53 @@ rather than shipping. `image_smoke.yaml` asserts the built image provides
 so a build that resolved the package away fails the pull request rather than an
 operator's setup run.
 
+**What the 45 packages add beyond `smbclient`.** Invocation is not the only cost:
+these libraries sit in the image that runs every exchange, so an advisory against
+any of them applies to that image whether or not an exchange reaches the code,
+and none of them is in the release SBOM either. Measured on the pinned base at
+`aarch64` (`apk list -I` before and after), they are the samba client libraries
+and their record stores (`samba-client-libs`, `samba-common`, `samba-libs`,
+`samba-util-libs`, `libsmbclient`, `libwbclient`, `libauth-samba`, `ldb`,
+`talloc`, `tdb-libs`, `tevent`, `lmdb`, `gdbm`), an authentication and directory
+stack (`linux-pam`, `libldap`, `libsasl`, `utmps-libs`, `skalibs-libs`), a
+TLS/crypto stack (`gnutls`, `nettle`, `gmp`, `libtasn1`, `p11-kit`, `libffi`),
+compression and archive libraries (`libarchive`, `xz-libs`, `zstd-libs`,
+`lz4-libs`, `libbz2`, `brotli-libs`), and a tail of support libraries
+(`readline`, the `ncurses` set, `popt`, `icu-libs`, `icu-data-en`, `libexpat`,
+`jansson`, `libidn2`, `libunistring`, `acl-libs`, `libcap2`). No `smbd`, `nmbd`
+or `winbindd` is installed, so nothing added listens.
+
+`linux-pam` also gives the image its first setgid binary. Measured with
+
+    find / -xdev -type f \( -perm -2000 -o -perm -4000 \) -exec ls -l {} +
+
+which reports nothing on the pinned base digest at either architecture, and on
+the built image reports exactly `-rwxr-sr-x 1 root shadow /usr/sbin/unix_chkpwd`
+and no setuid file at all, beside the PAM helpers `faillock`,
+`mkhomedir_helper`, `pam_namespace_helper`, `pam_timestamp_check` and
+`pwhistory_helper`, none of them setgid. Exploitability rests on two properties
+of this image rather than on the package: it declares no `USER`, so a process in
+it is already uid 0 and a setgid-`shadow` helper grants nothing that opening the
+file would not, and `/etc/shadow` carries no usable hash (`root` is `*`, every
+other account `!`), so `unix_chkpwd` has nothing to verify against. Both would
+need revisiting if the image dropped to a non-root `USER`: at that point the
+helper is a real privilege boundary rather than a redundant one.
+
+**The helper image the setup scripts run the probe in is a mutable tag.** Its
+default is `vdorie/psi-link:latest` in both scripts, overridable with
+`-HelperImage`, and floating it is deliberate: the scripts are downloaded on
+their own rather than shipped with a release, so they cannot name the digest of a
+release they do not know they belong to, and a diagnostic pinned tighter than the
+thing it diagnoses would test an image the exchange will not run. The limit that
+comes with the default is recorded rather than closed. The helper container
+receives the share password in its environment (`--env SMB_PASS`) and, for the
+volume check, a bind of the CIFS volume, so the plaintext credential and
+read/write access to the partner's drop folder go to whatever the tag resolves to
+at pull time -- and that pull happens on exactly the HTTPS-intercepting networks
+the probe exists to diagnose. A digest, or a released version tag, is what would
+make a substituted image detectable there; how a separately downloaded script
+would learn either is the open part.
+
 ## The install-script policy (`allowScripts`)
 
 The root `package.json` carries an `allowScripts` map. It is npm's own install-script policy field (npm 11.16 and later, maintained with `npm approve-scripts`), not a local convention: npm reads it from the `package.json` at the install prefix -- so the root map governs every workspace -- and consults it per installed package before running that package's `preinstall`, `install`, or `postinstall` (and `prepare`, for a non-registry source). A registry package is identified by the name and version parsed out of the lockfile's `resolved` tarball URL, not by the tarball's own manifest, which its publisher controls, and not by its install directory, which for an aliased dependency (`"h3-v2": "npm:h3@2"`) carries a name the registry never published.

@@ -188,9 +188,11 @@ For the interception case there are two ways through, both of which mean running
 the checks yourself -- [setting it up by hand](by-hand.md) -- rather than through
 the script. Mount your organisation's root CA certificate into the container and
 run `update-ca-certificates` before installing the tool, or point `apk` at an
-`http://` mirror. The second trusts nothing extra: `apk` verifies every package
-against signing keys already in the image, so HTTPS is not what makes the install
-safe.
+`http://` mirror. The second adds no new trust: `apk` verifies every package
+against signing keys already in the image, so HTTPS is not what makes the
+installed bytes the real ones. What it gives up is freshness (a signature cannot
+stop someone on the network serving a validly signed older `samba-client`) and
+privacy: the requests themselves show which packages the container installs.
 
 ## The share never asks for a password
 

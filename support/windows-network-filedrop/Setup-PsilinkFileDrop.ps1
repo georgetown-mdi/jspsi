@@ -133,8 +133,6 @@ function Write-DegradedLosses {
     Write-Info 'The checks need smbclient in the image they run in: see the'
     Write-Info 'troubleshooting page, "The container cannot install its tools",'
     Write-Info 'then run this script again.'
-    Write-Host ''
-    Write-Note 'Status 12: set up as far as it went, checks incomplete.'
 }
 
 function Hide-Secret {
@@ -1242,6 +1240,8 @@ try {
             Write-Note 'created because you asked for none. All that was established is'
             Write-Note 'that the server answers on port 445 from inside Docker.'
             Write-DegradedLosses
+            Write-Host ''
+            Write-Note 'Status 12: set up as far as it went, checks incomplete.'
             exit 12
         }
         exit 0
@@ -1412,9 +1412,25 @@ rm -f .psilink-a.tmp .psilink-b.tmp
             Write-Note 'character in the password or the domain is the usual cause.'
         }
         elseif ($testOut -match 'permission denied') {
-            Write-Note 'The kernel refused the mount even though the checks in part 3'
-            Write-Note 'authenticated. The SMB dialect is the most likely difference:'
-            Write-Note 'run again with -Dialect SMB3, and if that fails, -Dialect SMB2.'
+            # With the checks stopped at step 2 this mount is the first thing to
+            # have presented the credentials, so a refusal is the ordinary answer
+            # to a wrong password rather than the dialect mismatch it means when
+            # part 3 authenticated. The -Dialect retries would spend two more
+            # real sign-ins against an account that may be counting them.
+            if ($degraded) {
+                Write-Note 'This mount is the first thing to have tried these credentials at'
+                Write-Note 'all: the checks in part 3 stopped before they reached them.'
+                Write-Note '"permission denied" is what a wrong password and an account that'
+                Write-Note 'is refused this folder both look like, and nothing here can tell'
+                Write-Note 'them apart. The attempt reached the server as a real sign-in, so'
+                Write-Note 'do NOT work through candidate passwords from here.'
+                Write-DegradedLosses
+            }
+            else {
+                Write-Note 'The kernel refused the mount even though the checks in part 3'
+                Write-Note 'authenticated. The SMB dialect is the most likely difference:'
+                Write-Note 'run again with -Dialect SMB3, and if that fails, -Dialect SMB2.'
+            }
         }
         elseif ($testOut -match 'mount error\(112\)|Host is down') {
             Write-Note 'The server accepted the connection and then dropped it, which'
@@ -1509,6 +1525,10 @@ Write-Host "    -v '${VolumeName}:/sync' ``"
 Write-Host "    vdorie/psi-link:latest ``"
 Write-Host "    file:///sync input.csv matches.csv"
 Write-Host ''
+if ($degraded) {
+    Write-Warn 'Before you run that, read "Set up, but not fully checked" below.'
+    Write-Host ''
+}
 Write-Info 'C:\path\to\your\work is a LOCAL folder on this PC holding your input'
 Write-Info 'CSV; results are written back there. It must not be a network path.'
 Write-Info 'input.csv and matches.csv are named relative to that folder. Keep the'
@@ -1569,5 +1589,7 @@ if ($degraded) {
     Write-Info 'in the folder for the volume to find, and that comparison is the'
     Write-Info 'only test of it.'
     Write-DegradedLosses
+    Write-Host ''
+    Write-Note 'Status 12: set up as far as it went, checks incomplete.'
     exit 12
 }

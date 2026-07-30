@@ -510,6 +510,10 @@ echo Run your exchange like this, on one line:
 echo(
 echo   docker run --rm -v "C:\path\to\your\work:/work" -v "%VOLUME_NAME%:/sync" vdorie/psi-link:latest file:///sync input.csv matches.csv
 echo(
+if not defined DEGRADED goto ready_pointer_done
+call :warn "Before you run that, read 'Set up, but not fully checked' below."
+echo(
+:ready_pointer_done
 call :info "C:\path\to\your\work is a LOCAL folder on this PC holding your input"
 call :info "CSV; results are written back there. It must not be a network path."
 call :info "input.csv and matches.csv are named relative to that folder. Keep the"
@@ -583,34 +587,17 @@ call :info "So one thing about the volume is unproven: that it opens the folder"
 call :info "you named rather than a different one. Part 3 normally leaves a file"
 call :info "in the folder for the volume to find, and that comparison is the"
 call :info "only test of it."
-goto degraded_losses
+goto degraded_exit
 
 :degraded_skipped
 call :head "Checks incomplete"
 call :warn "The checks in part 3 did not run past step 2, and no volume was"
 call :note "created because you asked for none. All that was established is"
 call :note "that the server answers on port 445 from inside Docker."
-goto degraded_losses
+goto degraded_exit
 
-:degraded_losses
-call :info ""
-call :info "Nothing was established about the share itself:"
-call :info ""
-call :info "  - Whether the username and password are right, and whether this"
-call :info "    account is allowed into the folder. A mount that fails says"
-call :info "    'permission denied' for either, and they have different fixes:"
-call :info "    a password that works, or rights from whoever administers the"
-call :info "    share. Telling those two apart is what the checks are for."
-call :info "  - So if an exchange cannot reach the folder, do NOT work through"
-call :info "    passwords. Each attempt is a real failed sign-in against the"
-call :info "    account, and a handful of them locks a domain account out. Get"
-call :info "    the checks running first and let them name the reason."
-call :info "  - Free space on the share, and whether the folder already holds"
-call :info "    more than 8192 files, which psilink will not read."
-call :info ""
-call :info "The checks need smbclient in the image they run in: see the"
-call :info "troubleshooting page, 'The container cannot install its tools',"
-call :info "then run this script again."
+:degraded_exit
+call :degraded_losses
 echo(
 call :note "Status 12: set up as far as it went, checks incomplete."
 call :cleanup
@@ -804,11 +791,27 @@ if not errorlevel 1 (
   call :note "character in the password or the domain is the usual cause."
 )
 findstr /c:"permission denied" "%WORK%" >nul 2>&1
-if not errorlevel 1 (
-  call :note "The kernel refused the mount even though the checks in part 3"
-  call :note "authenticated. The SMB dialect is the most likely difference:"
-  call :note "run again with -Dialect SMB3, and if that fails, -Dialect SMB2."
-)
+if errorlevel 1 goto mount_denied_done
+if defined DEGRADED goto mount_denied_untested
+call :note "The kernel refused the mount even though the checks in part 3"
+call :note "authenticated. The SMB dialect is the most likely difference:"
+call :note "run again with -Dialect SMB3, and if that fails, -Dialect SMB2."
+goto mount_denied_done
+
+rem With the checks stopped at step 2 this mount is the first thing to have
+rem presented the credentials, so a refusal is the ordinary answer to a wrong
+rem password rather than the dialect mismatch it means when part 3
+rem authenticated. The -Dialect retries would spend two more real sign-ins
+rem against an account that may be counting them.
+:mount_denied_untested
+call :note "This mount is the first thing to have tried these credentials at"
+call :note "all: the checks in part 3 stopped before they reached them."
+call :note "'permission denied' is what a wrong password and an account that"
+call :note "is refused this folder both look like, and nothing here can tell"
+call :note "them apart. The attempt reached the server as a real sign-in, so"
+call :note "do NOT work through candidate passwords from here."
+call :degraded_losses
+:mount_denied_done
 findstr /c:"Host is down" "%WORK%" >nul 2>&1
 if not errorlevel 1 (
   call :note "The server accepted the connection and then dropped it, which"
@@ -898,6 +901,34 @@ if not errorlevel 1 (
   call :note "(a line naming the mount options was withheld: it contains the"
   call :note "password in the clear)"
 )
+exit /b 0
+
+rem What the operator is owed when the checks could not run. Named rather than
+rem summarised: mount.cifs collapses the server's reasons into one message, so
+rem the split the checks make between a password that is wrong and an account
+rem that is refused cannot be recovered from a failed mount afterwards, and that
+rem split is what decides who has to fix it. A subroutine because the mount
+rem failure that reaches it exits differently from the two paths that set up a
+rem volume.
+:degraded_losses
+call :info ""
+call :info "Nothing was established about the share itself:"
+call :info ""
+call :info "  - Whether the username and password are right, and whether this"
+call :info "    account is allowed into the folder. A mount that fails says"
+call :info "    'permission denied' for either, and they have different fixes:"
+call :info "    a password that works, or rights from whoever administers the"
+call :info "    share. Telling those two apart is what the checks are for."
+call :info "  - So if an exchange cannot reach the folder, do NOT work through"
+call :info "    passwords. Each attempt is a real failed sign-in against the"
+call :info "    account, and a handful of them locks a domain account out. Get"
+call :info "    the checks running first and let them name the reason."
+call :info "  - Free space on the share, and whether the folder already holds"
+call :info "    more than 8192 files, which psilink will not read."
+call :info ""
+call :info "The checks need smbclient in the image they run in: see the"
+call :info "troubleshooting page, 'The container cannot install its tools',"
+call :info "then run this script again."
 exit /b 0
 
 :dialect_opt
