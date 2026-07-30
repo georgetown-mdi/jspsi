@@ -507,10 +507,10 @@ fi
 # here first, and "could not install samba-client" is a far worse description
 # of that than "cannot resolve the name".
 #
-# Exit 11 keeps this apart from the 1-7 verdicts, which all mean the checks ran
-# and the share was refused. This one means they could not run, and the setup
-# script carries on past it -- so nothing here may claim the file drop is
-# unusable, and what happens next is the setup script's to say, not the probe's.
+# Exit 11 keeps this apart from the 2-7 verdicts, which all mean a check ran and
+# returned a verdict. This one means they could not run, and the setup script
+# carries on past it -- so nothing here may claim the file drop is unusable, and
+# what happens next is the setup script's to say, not the probe's.
 if ! command -v smbclient >/dev/null 2>&1; then
   APKOUT=$(apk add --no-cache samba-client 2>&1) || {
     emit ""
@@ -526,20 +526,20 @@ if ! command -v smbclient >/dev/null 2>&1; then
     emit "         the container could not fetch it from the Alpine package"
     emit "         mirror."
     emit ""
-    emit "         The psilink image carries smbclient, so the likeliest cause is"
-    emit "         an older copy of that image on this PC: the helper image is"
-    emit "         fetched only when it is missing, never to refresh one that is"
-    emit "         already here."
+    emit "         If you did not pass -HelperImage, the checks are running in the"
+    emit "         psilink image, which carries smbclient -- so the likely cause"
+    emit "         is an older copy of it on this PC: the helper image is fetched"
+    emit "         only when it is missing, never to refresh one already here."
+    emit "         Run 'docker pull vdorie/psi-link:latest' and try again."
     emit ""
-    emit "         Failing that, the message above names why the mirror could not"
-    emit "         be reached. 'certificate' or 'TLS' means something is"
+    emit "         If you did pass -HelperImage, that image does not carry"
+    emit "         smbclient and had to reach the mirror. The message above names"
+    emit "         why it could not: 'certificate' or 'TLS' means something is"
     emit "         intercepting HTTPS -- a corporate proxy, usually. 'DNS' or"
     emit "         'temporary error' means name resolution inside the Docker VM."
     emit ""
-    emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and run this again to"
-    emit "         get the skipped checks. If the image was already current, see"
-    emit "         the troubleshooting page, 'The container cannot install its"
-    emit "         tools'."
+    emit "ACTION:  see the troubleshooting page, 'The container cannot install its"
+    emit "         tools'. It covers both cases."
     exit 11
   }
 fi
@@ -1224,9 +1224,11 @@ try {
     }
     if ($degraded) {
         Write-Warn 'The checks stopped after step 2, so the share itself has not been'
-        Write-Note 'tested. Carrying on to create the volume anyway: Docker mounts the'
-        Write-Note 'share itself and needs nothing that was missing above. What that'
-        Write-Note 'leaves unchecked is listed at the end.'
+        Write-Note 'tested. What that leaves unchecked is listed at the end.'
+        if (-not $SkipVolumeTest) {
+            Write-Note 'Carrying on to create the volume anyway: Docker mounts the share'
+            Write-Note 'itself and needs nothing that was missing above.'
+        }
     }
     else {
         Write-Good 'The share is reachable, writable, and supports rename.'

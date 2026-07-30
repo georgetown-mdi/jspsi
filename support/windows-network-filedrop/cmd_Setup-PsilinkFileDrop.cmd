@@ -356,9 +356,10 @@ rem carries on and ends at :degraded_summary rather than :done_ok.
 :probe_degraded
 set "DEGRADED=1"
 call :warn "The checks stopped after step 2, so the share itself has not been"
-call :note "tested. Carrying on to create the volume anyway: Docker mounts the"
-call :note "share itself and needs nothing that was missing above. What that"
-call :note "leaves unchecked is listed at the end."
+call :note "tested. What that leaves unchecked is listed at the end."
+if defined SKIP_VOLUME_TEST goto probe_verdict_done
+call :note "Carrying on to create the volume anyway: Docker mounts the share"
+call :note "itself and needs nothing that was missing above."
 
 :probe_verdict_done
 if defined SKIP_VOLUME_TEST (

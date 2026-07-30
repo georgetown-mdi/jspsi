@@ -109,11 +109,14 @@ publishes the image.
 
 It floats: the instruction names no version, so a rebuild takes whatever the
 mirror carries for the pinned base's Alpine release. Measured on the base digest
-pinned here (Alpine 3.24.1): `samba-client-4.23.8-r0` and 62 dependencies, which
-`apk` reports as `OK: 54.2 MiB in 63 packages` on `x86_64` and 63.1 MiB on
-`aarch64`, taking the built `arm64` image from 520,152,837 to 574,778,898 bytes.
-Both release architectures resolve the package, so the multi-arch release build
-is not left short one. An exact version pin was rejected because Alpine carries exactly one
+pinned here (Alpine 3.24.1): `samba-client-4.23.8-r0` and 44 dependencies, 45
+packages newly present and none removed. `apk`'s trailing `OK:` line reports the
+post-install total rather than the increment, so it reads
+`OK: 11.1 MiB in 18 packages` on the bare base and `OK: 63.1 MiB in 63 packages`
+after, on `aarch64`; the built `arm64` image goes from 520,152,837 to
+574,778,898 bytes, an increase of 54,626,061. The same 63 packages resolve on
+`x86_64`, where the post-install total is 54.2 MiB, so the multi-arch release
+build is not left short one. An exact version pin was rejected because Alpine carries exactly one
 version of a package per release branch, so a pin hard-fails the build the moment
 the mirror supersedes it:
 `apk add --no-cache --simulate samba-client=4.23.7-r0` on that base answers
