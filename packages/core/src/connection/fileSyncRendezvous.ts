@@ -699,11 +699,24 @@ export class FileSyncRendezvous {
     // leaves a `<writerId>-abort.json` -- it must persist for the peer to read --
     // so a subsequent exchange reusing the directory would otherwise find it and
     // reject "directory not clean", turning a transient failure into a blocked
-    // directory. Exact-name only: this party's own id, plus any peer id evidenced
-    // by a peer hello present at entry (the sole notion of peer identity here --
-    // peerId is committed later, in the rendezvous below). A foreign
-    // `<other>-abort.json` with no matching hello is therefore NOT swept -- it
-    // stays an ordinary unexpected protocol file under the normal policy.
+    // directory. Both parties retry under FRESH ids, so on the case that matters
+    // the leftover is named by neither of them nor by either hello; the sweep
+    // therefore matches any WELL-FORMED marker, whichever id wrote it -- the
+    // `<id>-abort.json` grammar with a non-empty recovered id, sliced by the same
+    // peerIdFromControlName every other control-name site routes through. A bare
+    // `-abort.json` recovers no id, is attributable to no party, and stays an
+    // unexpected protocol file under the normal policy; a name that fails the
+    // grammar is foreign and is never touched here.
+    //
+    // Sweeping a marker no id in this session names is safe because at entry no
+    // marker can BELONG to this session: a marker is written only post-handshake,
+    // and a party cannot reach post-handshake before its peer has passed this
+    // same entry scan, so a marker visible here is necessarily residue of a prior
+    // session, whose token cannot authenticate under this session's key. The
+    // residual is a directory a live peer is still using in violation of
+    // directory exclusivity: sweeping there costs that peer its fast-fail and
+    // drops it back to the peer-silence timeout, a limit stated in
+    // docs/spec/FILE_SYNC.md.
     //
     // Delete mode only. In retain mode the directory is a durable audit
     // transcript, so auto-sweeping a marker beside it would reintroduce the
@@ -716,22 +729,18 @@ export class FileSyncRendezvous {
     // Best-effort, exactly like the orphaned-temp sweep: safeDelete swallows a
     // transport-level delete failure and the `ignored` add is unconditional, so a
     // marker that fails to delete is left on disk and entry proceeds past it
-    // rather than aborting on a transient hiccup. A persisted leftover is benign
-    // and self-healing -- the next exchange's entry re-runs this sweep -- and it
-    // cannot forge a PeerAbortError in a later session: verifyPeerAbortMarker
-    // authenticates the marker's token against that session's HKDF-derived peer
-    // token, which a stale marker from a prior session's key cannot satisfy.
+    // rather than aborting on a transient hiccup. Such a leftover is benign: the
+    // next exchange's entry re-runs this sweep over it under whatever ids that
+    // exchange draws, and it cannot forge a PeerAbortError in a later session
+    // because verifyPeerAbortMarker authenticates the marker's token against that
+    // session's HKDF-derived peer token, which a stale marker from a prior
+    // session's key cannot satisfy.
     if (!deps.options().retainFiles) {
-      const expectedAbortIds = new Set<string>([deps.id()]);
-      for (const hello of peerHellos) {
-        const pid = peerIdFromControlName(hello.name, HELLO_SUFFIX);
-        if (pid !== undefined) expectedAbortIds.add(pid);
-      }
-      const leftoverAbortFiles = files.filter((file) => {
-        if (ignored.has(file.name)) return false;
-        const id = peerIdFromControlName(file.name, ABORT_SUFFIX);
-        return id !== undefined && expectedAbortIds.has(id);
-      });
+      const leftoverAbortFiles = files.filter(
+        (file) =>
+          !ignored.has(file.name) &&
+          peerIdFromControlName(file.name, ABORT_SUFFIX) !== undefined,
+      );
       if (leftoverAbortFiles.length > 0) {
         deps
           .log()

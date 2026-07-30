@@ -35,6 +35,14 @@ import {
 // party-agnostic (exactly one PeerAbortError, exactly one synthetic fault, one
 // marker).
 //
+// `fault` scopes the injection so a RETRY can be expressed against the same
+// directory: `inject` off makes runExchange wholly real, and `targetIdentity`
+// selects the party that tears by its linkage-terms identity rather than letting
+// the rendezvous race decide which physical party carries the fault. A patched
+// party that ends up the responder throws on its own first send once it has
+// received the peer's terms, so targeting fixes WHO faults without depending on
+// the role either party draws.
+//
 // The override is a plain rejection rather than a faithful terminal-state
 // transition (it does not drive the connection's own fail()/close path): that is
 // sufficient because the fault fires on the faulting party's FIRST operation, so
@@ -45,23 +53,33 @@ import {
 // over the live transport. The connection's own teardown-window race
 // (fail()-driven close racing the marker write) is covered separately and
 // deterministically in core's fileSyncAbortMarker.test.ts.
+const fault = vi.hoisted(() => ({
+  inject: true,
+  targetIdentity: undefined as string | undefined,
+}));
+
 vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
   return {
     ...actual,
     runExchange: ((conn, role, prepared, options) => {
-      const originalSend = conn.send.bind(conn);
-      let firstSendThrown = false;
-      conn.send = (data: unknown): Promise<void> => {
-        if (firstSendThrown) return originalSend(data);
-        firstSendThrown = true;
-        return Promise.reject(
-          new actual.ConnectionError(
-            "synthetic mid-exchange transport fault",
-            "transport",
-          ),
-        );
-      };
+      const targeted =
+        fault.targetIdentity === undefined ||
+        prepared.linkageTerms.identity === fault.targetIdentity;
+      if (fault.inject && targeted) {
+        const originalSend = conn.send.bind(conn);
+        let firstSendThrown = false;
+        conn.send = (data: unknown): Promise<void> => {
+          if (firstSendThrown) return originalSend(data);
+          firstSendThrown = true;
+          return Promise.reject(
+            new actual.ConnectionError(
+              "synthetic mid-exchange transport fault",
+              "transport",
+            ),
+          );
+        };
+      }
       return actual.runExchange(conn, role, prepared, options);
     }) as typeof actual.runExchange,
   };
@@ -76,7 +94,7 @@ import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { runProtocol, type ProtocolConnectionConfig } from "../../src/protocol";
-import { saveKeyFile } from "../../src/keyFile";
+import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import {
   localPath,
   remotePath,
@@ -101,9 +119,10 @@ const INITIAL_SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const PEER_TIMEOUT_MS = 20_000;
 
 // firstName-only terms over a tiny dataset (same approach as
-// authenticatedExchange.test.ts): gives both parties valid, matching terms. The
-// datasets are never actually intersected -- both parties fault before any PSI
-// round -- so the rows only need to make prepareForExchange succeed.
+// authenticatedExchange.test.ts): gives both parties valid, matching terms. An
+// attempt that faults never reaches a PSI round, so for those the rows only need
+// to make prepareForExchange succeed; the retry attempt does intersect them, and
+// its result is what proves the recovered exchange ran whole.
 const baseTerms: Omit<LinkageTerms, "identity"> = {
   version: "1.0.0",
   date: "2026-01-01",
@@ -115,20 +134,30 @@ const baseTerms: Omit<LinkageTerms, "identity"> = {
   linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
 };
 
-function preparedFor(identity: string) {
+// Party A holds fewer rows than Party B, so A is the PSI receiver -- the side
+// that learns the intersection and writes it -- regardless of which party wins
+// the rendezvous.
+const ROWS_A = [{ first_name: "Bob" }, { first_name: "Carol" }];
+const ROWS_B = [
+  { first_name: "Bob" },
+  { first_name: "Carol" },
+  { first_name: "Dave" },
+];
+
+function preparedFor(identity: string, rows: Array<Record<string, string>>) {
   const spec: ExchangeDataSpec = {
     linkageTerms: { ...baseTerms, identity },
   };
-  return prepareForExchange(
-    spec,
-    identity,
-    [{ first_name: "Bob" }],
-    ["first_name"],
-  );
+  return prepareForExchange(spec, identity, rows, ["first_name"]);
 }
 
+const IDENTITY_A = "Party A";
+const IDENTITY_B = "Party B";
+
 interface AbortScenarioOutcome {
-  /** Both parties' rejection reasons (the run always fails on both sides). */
+  /** Each party's settlement, in [A, B] order. */
+  settled: PromiseSettledResult<unknown>[];
+  /** The rejection reasons among those settlements, in the same order. */
   reasons: unknown[];
   /** Count of `<id>-abort.json` files left in the shared directory. */
   markerCount: number;
@@ -136,6 +165,20 @@ interface AbortScenarioOutcome {
    *  intended recovery advisory is asserted rather than leaked to the suite
    *  console (see expectFastPeerAbort). */
   capturedLogs: string[];
+  /** Each party's result-CSV path, written only by a completed exchange. */
+  outputs: { a: string; b: string };
+}
+
+interface AbortScenarioOptions {
+  /** Distinguishes one attempt's output CSVs from the next attempt's. */
+  tag?: string;
+  /**
+   * Runs against the key files exactly as the previous attempt left them --
+   * carrying forward the token it rotated, which is what "retry without
+   * re-inviting" means. A first attempt provisions the pair from
+   * INITIAL_SECRET instead.
+   */
+  reuseKeyFiles?: boolean;
 }
 
 // Drives two real runProtocol parties against a shared directory, lets the
@@ -147,11 +190,21 @@ async function runAbortScenario(
   work: string,
   makeConfig: () => ProtocolConnectionConfig,
   markerDir: string,
+  options: AbortScenarioOptions = {},
 ): Promise<AbortScenarioOutcome> {
   const keyA = path.join(work, "a.key");
   const keyB = path.join(work, "b.key");
-  saveKeyFile(keyA, { sharedSecret: INITIAL_SECRET });
-  saveKeyFile(keyB, { sharedSecret: INITIAL_SECRET });
+  if (!options.reuseKeyFiles) {
+    saveKeyFile(keyA, { sharedSecret: INITIAL_SECRET });
+    saveKeyFile(keyB, { sharedSecret: INITIAL_SECRET });
+  }
+  const secretA = loadKeyFile(keyA)!.sharedSecret;
+  const secretB = loadKeyFile(keyB)!.sharedSecret;
+  const tag = options.tag ?? "";
+  const outputs = {
+    a: path.join(work, `${tag}a-out.csv`),
+    b: path.join(work, `${tag}b-out.csv`),
+  };
 
   // The faulting party's catch emits an ERROR recovery advisory (its token
   // rotated before the fault). Run the parties under withCapturedLogs so that
@@ -163,37 +216,38 @@ async function runAbortScenario(
       Promise.allSettled([
         runProtocol(
           makeConfig(),
-          { sharedSecret: INITIAL_SECRET, keyFilePath: keyA },
-          preparedFor("Party A"),
-          path.join(work, "a-out.csv"),
+          { sharedSecret: secretA, keyFilePath: keyA },
+          preparedFor(IDENTITY_A, ROWS_A),
+          outputs.a,
           -1,
-          "abort-a",
+          `${tag}abort-a`,
         ),
         runProtocol(
           makeConfig(),
-          { sharedSecret: INITIAL_SECRET, keyFilePath: keyB },
-          preparedFor("Party B"),
-          path.join(work, "b-out.csv"),
+          { sharedSecret: secretB, keyFilePath: keyB },
+          preparedFor(IDENTITY_B, ROWS_B),
+          outputs.b,
           -1,
-          "abort-b",
+          `${tag}abort-b`,
         ),
       ]),
     (level) => level === "WARN" || level === "ERROR",
   );
-  const [resA, resB] = settled;
 
-  expect(resA.status).toBe("rejected");
-  expect(resB.status).toBe("rejected");
-  const reasons = [resA, resB].map((r) => (r as PromiseRejectedResult).reason);
+  const reasons = settled.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : [],
+  );
 
   const markerCount = (await fsp.readdir(markerDir)).filter((n) =>
     n.endsWith("-abort.json"),
   ).length;
 
   return {
+    settled,
     reasons,
     markerCount,
     capturedLogs: capturedLogs.map((l) => l.message),
+    outputs,
   };
 }
 
@@ -206,6 +260,8 @@ async function runAbortScenario(
 // and trips the total-count check with a clear wrong-error signal rather than a
 // confusing message mismatch.
 function expectFastPeerAbort(outcome: AbortScenarioOutcome): void {
+  // The attempt fails on both sides, so every settlement carries a reason.
+  expect(outcome.reasons).toHaveLength(outcome.settled.length);
   const peerAborts = outcome.reasons.filter((r) => r instanceof PeerAbortError);
   const injected = outcome.reasons.filter(
     (r) =>
@@ -234,10 +290,46 @@ function expectFastPeerAbort(outcome: AbortScenarioOutcome): void {
   );
 }
 
+// Measures the recovery the faulting party's advisory prescribes: a plain retry
+// in the same directory, no re-invite, both parties carrying the token the
+// failed attempt rotated. Both parties draw fresh ids on the retry, so the
+// marker the failure left is named by neither of them and by neither hello; the
+// entry sweep clears it and the exchange runs to completion.
+async function expectPlainRetryToComplete(
+  makeConfig: () => ProtocolConnectionConfig,
+  markerDir: string,
+): Promise<void> {
+  fault.targetIdentity = IDENTITY_A;
+  const first = await runAbortScenario(work, makeConfig, markerDir, {
+    tag: "first-",
+  });
+  expectFastPeerAbort(first);
+
+  fault.inject = false;
+  const retry = await runAbortScenario(work, makeConfig, markerDir, {
+    tag: "retry-",
+    reuseKeyFiles: true,
+  });
+
+  expect(retry.settled.map((r) => r.status)).toEqual([
+    "fulfilled",
+    "fulfilled",
+  ]);
+  // The leftover marker was swept at entry, and a completed exchange leaves
+  // none of its own.
+  expect(retry.markerCount).toBe(0);
+  // Party A holds the smaller dataset, so it is the receiver and its result CSV
+  // is the intersection: a header plus every row both parties hold.
+  const rows = (await fsp.readFile(retry.outputs.a, "utf8")).trim().split("\n");
+  expect(rows).toHaveLength(1 + ROWS_A.length);
+}
+
 let work: string;
 
 beforeEach(() => {
   work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-abort-integ-"));
+  fault.inject = true;
+  fault.targetIdentity = undefined;
 });
 
 afterEach(() => {
@@ -258,6 +350,17 @@ test("filedrop: a mid-exchange fault writes a real abort marker the waiting peer
 
   expectFastPeerAbort(await runAbortScenario(work, makeConfig, dropDir));
 }, 30_000);
+
+test("filedrop: a plain retry under fresh ids after a mid-exchange fault completes the exchange", async () => {
+  const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
+  const makeConfig = (): ProtocolConnectionConfig => ({
+    channel: "filedrop",
+    path: dropDir,
+    options: { pollIntervalMs: 1, peerTimeoutMs: PEER_TIMEOUT_MS },
+  });
+
+  await expectPlainRetryToComplete(makeConfig, dropDir);
+}, 60_000);
 
 describe("sftp", () => {
   // Distinct namespace from the sibling integration files (authexchange / sftp /
@@ -293,4 +396,21 @@ describe("sftp", () => {
 
     expectFastPeerAbort(await runAbortScenario(work, makeConfig, localDir));
   }, 60_000);
+
+  test("sftp: a plain retry under fresh ids after a mid-exchange fault completes the exchange", async () => {
+    const localDir = await fsp.mkdtemp(path.join(SFTP_LOCAL_ROOT, "run-"));
+    const serverPath = `${SFTP_PATH_ROOT}/${path.basename(localDir)}`;
+    const makeConfig = (): ProtocolConnectionConfig => ({
+      channel: "sftp",
+      server: {
+        host: srv.host,
+        port: srv.port,
+        ...serverAuth(srv.usera),
+        path: serverPath,
+      },
+      options: { pollIntervalMs: 50, peerTimeoutMs: PEER_TIMEOUT_MS },
+    });
+
+    await expectPlainRetryToComplete(makeConfig, localDir);
+  }, 120_000);
 });
