@@ -736,6 +736,7 @@ call :note "then refused this, which is unusual -- the message below is the one"
 call :note "to read."
 echo(
 if exist "%WORK%" type "%WORK%"
+if defined DEGRADED call :degraded_losses
 goto fail_generic
 
 :volume_not_ours
@@ -748,6 +749,7 @@ call :info "Run this script again with -VolumeName set to another name, or"
 call :info "remove that volume yourself if you are certain:"
 call :info ""
 call :info "    docker volume rm %VOLUME_NAME%"
+if defined DEGRADED call :degraded_losses
 goto fail_generic
 
 :volume_rm_failed
@@ -757,6 +759,7 @@ call :show_safely
 echo(
 call :note "A container is probably still using it. Stop any exchange that is"
 call :note "running, then try again: docker ps"
+if defined DEGRADED call :degraded_losses
 goto fail_generic
 
 :volume_create_failed
@@ -764,6 +767,7 @@ set "VOL_OPTS="
 call :bad "Could not create the volume."
 echo(
 call :show_safely
+if defined DEGRADED call :degraded_losses
 goto fail_generic
 
 :volume_not_writable
@@ -777,6 +781,7 @@ call :note "can open the folder but not create files in it, or the share"
 call :note "is out of space."
 call :info ""
 call :info "See the troubleshooting page, 'The folder cannot be written to'."
+if defined DEGRADED call :degraded_partial_losses
 docker volume rm "%VOLUME_NAME%" >nul 2>&1
 goto fail_generic
 
@@ -810,18 +815,19 @@ call :note "'permission denied' is what a wrong password and an account that"
 call :note "is refused this folder both look like, and nothing here can tell"
 call :note "them apart. The attempt reached the server as a real sign-in, so"
 call :note "do NOT work through candidate passwords from here."
-call :degraded_losses
 :mount_denied_done
 findstr /c:"Host is down" "%WORK%" >nul 2>&1
 if not errorlevel 1 (
   call :note "The server accepted the connection and then dropped it, which"
   call :note "almost always means it requires a newer SMB dialect than the"
   call :note "mount asked for. Run again with -Dialect SMB3."
+  if defined DEGRADED call :degraded_dialect_retry
 )
 findstr /c:"Operation not supported" "%WORK%" >nul 2>&1
 if not errorlevel 1 (
   call :note "The server refused an option the mount asked for -- usually SMB"
   call :note "encryption or signing. Run again with -Dialect SMB3."
+  if defined DEGRADED call :degraded_dialect_retry
 )
 findstr /c:"Required key not available" "%WORK%" >nul 2>&1
 if not errorlevel 1 (
@@ -829,6 +835,7 @@ if not errorlevel 1 (
   call :note "The server is refusing password authentication. See the"
   call :note "troubleshooting page, 'The share never asks for a password'."
 )
+if defined DEGRADED call :degraded_losses
 docker volume rm "%VOLUME_NAME%" >nul 2>&1
 goto fail_generic
 
@@ -929,6 +936,42 @@ call :info ""
 call :info "The checks need smbclient in the image they run in: see the"
 call :info "troubleshooting page, 'The container cannot install its tools',"
 call :info "then run this script again."
+exit /b 0
+
+rem What the operator is owed when the checks could not run but the mount then
+rem succeeded. Not :degraded_losses, whose list opens by saying nothing was
+rem established about the share: the mount that reached it established that the
+rem credentials do.
+:degraded_partial_losses
+call :info ""
+call :info "The checks in part 3 did not run, and two things they would have"
+call :info "settled are still open: whether this volume opens the folder you"
+call :info "named rather than a different one -- the file they leave behind"
+call :info "for the volume to find is the only test of that -- and whether"
+call :info "the folder already holds more than 8192 files, which psilink"
+call :info "will not read."
+call :info ""
+call :info "The checks need smbclient in the image they run in: see the"
+call :info "troubleshooting page, 'The container cannot install its tools',"
+call :info "then run this script again."
+exit /b 0
+
+rem What a -Dialect retry means when the checks never reached the credentials.
+rem Measured against Samba 4.21 with authentication auditing on: a mount refused
+rem over the dialect -- 'host is down' from an SMB1-only server, 'operation not
+rem supported' from one either side of the dialect asked for -- produces no
+rem authentication event at all, because the dialect is settled before a
+rem credential is sent. Only an attempt that gets past it reaches session setup,
+rem and that one is a real sign-in.
+:degraded_dialect_retry
+call :info ""
+call :note "Make that retry, but not more than that: the checks in part 3 never"
+call :note "reached the credentials, so nothing here has tried them. A dialect"
+call :note "the server will not take is refused before any password is sent, so"
+call :note "this failure cost the account nothing -- but the first attempt that"
+call :note "gets past the dialect is the first real sign-in against it. If one"
+call :note "comes back 'permission denied', stop there rather than working"
+call :note "through candidate passwords."
 exit /b 0
 
 :dialect_opt

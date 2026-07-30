@@ -135,6 +135,24 @@ function Write-DegradedLosses {
     Write-Info 'then run this script again.'
 }
 
+function Write-DegradedDialectRetry {
+    <#  What a -Dialect retry means when the checks never reached the
+        credentials. Measured against Samba 4.21 with authentication auditing
+        on: a mount refused over the dialect -- "host is down" from an SMB1-only
+        server, "operation not supported" from one either side of the dialect
+        asked for -- produces no authentication event at all, because the
+        dialect is settled before a credential is sent. Only an attempt that
+        gets past it reaches session setup, and that one is a real sign-in. #>
+    Write-Info ''
+    Write-Note 'Make that retry, but not more than that: the checks in part 3 never'
+    Write-Note 'reached the credentials, so nothing here has tried them. A dialect'
+    Write-Note 'the server will not take is refused before any password is sent, so'
+    Write-Note 'this failure cost the account nothing -- but the first attempt that'
+    Write-Note 'gets past the dialect is the first real sign-in against it. If one'
+    Write-Note 'comes back "permission denied", stop there rather than working'
+    Write-Note 'through candidate passwords.'
+}
+
 function Hide-Secret {
     <#  Removes the password from text about to be shown or pasted into a
         ticket. Docker masks "password=" only as far as the next comma, so its
@@ -1297,6 +1315,7 @@ try {
             Write-Info ''
             Write-Info 'Run this script again with -VolumeName <another-name>, or remove'
             Write-Info "that volume yourself if you are certain: docker volume rm $VolumeName"
+            if ($degraded) { Write-DegradedLosses }
             exit 8
         }
         # docker volume create on an existing name exits 0 and silently keeps
@@ -1311,6 +1330,7 @@ try {
             Write-Host ''
             Write-Note 'A container is probably still using it. Stop any exchange that is'
             Write-Note "running, then try again: docker ps"
+            if ($degraded) { Write-DegradedLosses }
             exit 8
         }
         Write-Info "Replaced the existing '$VolumeName' volume."
@@ -1325,6 +1345,7 @@ try {
         Write-Bad 'Could not create the volume.'
         Write-Host ''
         Write-Host (Hide-Secret -Text $create.Output -Secret $plainPass)
+        if ($degraded) { Write-DegradedLosses }
         exit 8
     }
     Write-Good 'Volume created. Docker mounts it the first time it is used.'
@@ -1400,6 +1421,22 @@ rm -f .psilink-a.tmp .psilink-b.tmp
             Write-Note 'is out of space.'
             Write-Info ''
             Write-Info 'See the troubleshooting page, "The folder cannot be written to".'
+            if ($degraded) {
+                # Not Write-DegradedLosses: that list opens by saying nothing was
+                # established about the share, and this mount established that the
+                # credentials reach it.
+                Write-Info ''
+                Write-Info 'The checks in part 3 did not run, and two things they would have'
+                Write-Info 'settled are still open: whether this volume opens the folder you'
+                Write-Info 'named rather than a different one -- the file they leave behind'
+                Write-Info 'for the volume to find is the only test of that -- and whether'
+                Write-Info 'the folder already holds more than 8192 files, which psilink'
+                Write-Info 'will not read.'
+                Write-Info ''
+                Write-Info 'The checks need smbclient in the image they run in: see the'
+                Write-Info 'troubleshooting page, "The container cannot install its tools",'
+                Write-Info 'then run this script again.'
+            }
             Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
             exit 9
         }
@@ -1424,7 +1461,6 @@ rm -f .psilink-a.tmp .psilink-b.tmp
                 Write-Note 'is refused this folder both look like, and nothing here can tell'
                 Write-Note 'them apart. The attempt reached the server as a real sign-in, so'
                 Write-Note 'do NOT work through candidate passwords from here.'
-                Write-DegradedLosses
             }
             else {
                 Write-Note 'The kernel refused the mount even though the checks in part 3'
@@ -1436,16 +1472,19 @@ rm -f .psilink-a.tmp .psilink-b.tmp
             Write-Note 'The server accepted the connection and then dropped it, which'
             Write-Note 'almost always means it requires a newer SMB dialect than the'
             Write-Note 'mount asked for. Run again with -Dialect SMB3.'
+            if ($degraded) { Write-DegradedDialectRetry }
         }
         elseif ($testOut -match 'Operation not supported') {
             Write-Note 'The server refused an option the mount asked for -- usually SMB'
             Write-Note 'encryption or signing. Run again with -Dialect SMB3.'
+            if ($degraded) { Write-DegradedDialectRetry }
         }
         elseif ($testOut -match 'Required key not available') {
             Write-Note 'The mount wanted a Kerberos ticket and the Docker VM has none.'
             Write-Note 'The server is refusing password authentication. See the'
             Write-Note 'troubleshooting page, "The share never asks for a password".'
         }
+        if ($degraded) { Write-DegradedLosses }
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
     }
