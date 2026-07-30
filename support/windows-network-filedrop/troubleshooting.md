@@ -141,19 +141,6 @@ machine. Three things commonly stop *it* while File Explorer keeps working:
 If you are on a VPN, that is almost certainly it. Take items 3 and 5 of the
 [IT request](#what-to-ask-your-it-department-for) to whoever runs the network.
 
-## The container cannot install its tools
-
-The checks stop before step 3 saying `samba-client` could not be installed, and
-print what the package manager said.
-
-Read the error printed underneath; it names the cause:
-
-- **`certificate`, `TLS`, or `not trusted`.** Something is intercepting HTTPS,
-  which on a corporate network is a proxy doing inspection. Docker Desktop
-  needs its certificate: Settings > Resources > Proxies.
-- **`DNS`, `temporary error`, or `could not resolve`.** The hidden Linux
-  computer cannot look up names. Same ground as the section above.
-
 ## The share never asks for a password
 
 The share opens in Explorer without ever prompting you, and the checks report
@@ -176,7 +163,7 @@ Two options, and one dead end:
 - If no account can be made to work, ask for the scheduled mirror instead --
   item 5 of the [IT request](#what-to-ask-your-it-department-for).
 
-If a volume later fails to mount with `Required key not available`, that is the
+If a volume later fails to mount with `required key not available`, that is the
 same problem in a different place.
 
 ## The password works but access is refused
@@ -236,8 +223,8 @@ dialect is not what is refusing you.
 
 ## The volume will not mount
 
-`permission denied`, `mount error(112)`, `Host is down`, or
-`Operation not supported` at part 4, after part 3 passed.
+`permission denied`, `host is down`, or `operation not supported` at part 4,
+after part 3 passed.
 
 The checks and the volume ask the server for different versions of the
 file-sharing protocol, and the volume is the fussier of the two. Run it again,
@@ -266,6 +253,9 @@ subfolder is wrong somewhere -- most often a DFS path.
 
 [Read the real path from Windows](#reading-the-real-path-from-windows) and pass
 it with `-Server`, `-Share` and `-SubPath`.
+
+If instead the script reports a check file it did not itself write, an earlier
+run or another operator left that one, and it settles nothing about this folder.
 
 ## Status codes
 
@@ -418,13 +408,13 @@ Check that it mounts and that the folder is the one you meant:
 **PowerShell:**
 
 ```powershell
-docker run --rm -v 'psilink-sync:/rz' alpine:3.22 ls -la /rz
+docker run --rm -v 'psilink-sync:/rz' --entrypoint sh vdorie/psi-link:latest -c "ls -la /rz"
 ```
 
 **Command Prompt:**
 
 ```text
-docker run --rm -v "psilink-sync:/rz" alpine:3.22 ls -la /rz
+docker run --rm -v "psilink-sync:/rz" --entrypoint sh vdorie/psi-link:latest -c "ls -la /rz"
 ```
 
 This route puts the password on a command line -- in PowerShell, that means your

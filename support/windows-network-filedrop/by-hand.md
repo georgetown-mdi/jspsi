@@ -105,11 +105,11 @@ not running -- start it and wait for the whale to stop animating. If it says
 fail to start: right-click the whale icon in the notification area and choose
 **Switch to Linux containers**.
 
-Then fetch the small Linux image the checks run in, so that a failure to
-download it does not get mistaken later for a problem with your share:
+Then fetch the image the checks run in, so that a failure to download it does
+not get mistaken later for a problem with your share:
 
 ```text
-docker pull alpine:3.22
+docker pull vdorie/psi-link:latest
 ```
 
 Now the account. The username and password you are about to use are the ones
@@ -133,13 +133,13 @@ below. If you just type a username, you have no domain and you can leave every
 Everything in this part happens inside one throwaway container. Start it:
 
 ```text
-docker run --rm -it alpine:3.22 sh
+docker run --rm -it --entrypoint sh vdorie/psi-link:latest
 ```
 
-The prompt changes to `/ #`. You are now typing inside Linux, not Windows.
-**Keep this window open until the end of part 3** -- the tools you install and
-the files you create live only in this container, and leaving it throws them
-away. If you do lose it, start again from here; nothing is left behind.
+The prompt changes to `/work #`. You are now typing inside Linux, not Windows.
+**Keep this window open until the end of part 3** -- the files you create live
+only in this container, and leaving it throws them away. If you do lose it,
+start again from here; nothing is left behind.
 
 `--rm` is what guarantees that: Docker deletes the container the moment you
 leave it.
@@ -173,21 +173,7 @@ like a different machine, so a VPN carrying only Windows' own traffic will do
 exactly this -- and it is the most common cause by far. See
 [the container cannot reach the server](troubleshooting.md#the-container-cannot-reach-the-server).
 
-### Install the file-sharing client
-
-The container is bare. Add the tool the next steps use:
-
-```text
-apk add --no-cache samba-client
-```
-
-This is deliberately after steps 1 and 2: a machine that cannot resolve or
-route to the server fails here too, and "could not install samba-client" is a
-poor description of that. If it fails now, read the error -- `certificate` or
-`TLS` means something is intercepting HTTPS, usually a corporate proxy. See
-[the container cannot install its tools](troubleshooting.md#the-container-cannot-install-its-tools).
-
-While you are here, make the small file that step 6 will send to the share:
+### Make the file step 6 will send
 
 ```text
 echo psilink write probe > /tmp/psilink-probe-check.tmp
@@ -376,7 +362,7 @@ establish anything.
 ### Check it mounts, and opens the right folder
 
 ```text
-docker run --rm -v psilink-sync:/rz alpine:3.22 ls -la /rz
+docker run --rm -v psilink-sync:/rz --entrypoint sh vdorie/psi-link:latest -c "ls -la /rz"
 ```
 
 You are looking for **`psilink-setup-check.tmp`**, the marker you left at the
@@ -389,14 +375,14 @@ end of part 3.
   is wrong somewhere, and a DFS path is the usual reason. Read the real path
   from the folder's Properties, DFS tab, and start again from part 1. See
   [the volume opens the wrong folder](troubleshooting.md#the-volume-opens-the-wrong-folder).
-- **An error instead of a listing** -- `permission denied`, `mount error(112)`,
-  `Host is down`, `Operation not supported`. The volume did not mount at all.
+- **An error instead of a listing** -- `permission denied`, `host is down`,
+  `operation not supported`. The volume did not mount at all.
   The volume asks the server for a different version of the file-sharing
   protocol than smbclient did, and is the fussier of the two. Remove the volume
   and create it again with `,vers=3.1.1` added to the end of the `o=` option;
   if that fails, `,vers=2.1`. See
   [the volume will not mount](troubleshooting.md#the-volume-will-not-mount).
-- **`Required key not available`.** The server is refusing password
+- **`required key not available`.** The server is refusing password
   authentication and wants a Kerberos ticket the container cannot have. See
   [the share never asks for a password](troubleshooting.md#the-share-never-asks-for-a-password).
 
@@ -408,7 +394,7 @@ over the volume rather than through smbclient, which refuses some of these
 whatever the server would have allowed.
 
 ```text
-docker run --rm -it -v psilink-sync:/rz alpine:3.22 sh
+docker run --rm -it -v psilink-sync:/rz --entrypoint sh vdorie/psi-link:latest
 ```
 
 You are inside a container again, with your file drop mounted at `/rz`. Move

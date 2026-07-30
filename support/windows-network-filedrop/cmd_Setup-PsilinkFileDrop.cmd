@@ -27,10 +27,6 @@ rem reports as a wrong password with nothing on screen to explain why.
 
 set "SCRIPT_DIR=%~dp0"
 set "VOLUME_NAME=psilink-sync"
-rem Pinned to alpine:3.22's multi-arch index digest so a run today and a run
-rem next year test the same thing. Override it if your site pulls through a
-rem registry mirror that does not carry the digest.
-set "HELPER_IMAGE=alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce"
 set "MARKER_NAME=psilink-setup-check.tmp"
 set "WORK=%TEMP%\psilink-cmd-%RANDOM%%RANDOM%.txt"
 
@@ -63,7 +59,6 @@ if /i "%ARG%"=="-username"       goto a_username
 if /i "%ARG%"=="-domain"         goto a_domain
 if /i "%ARG%"=="-dialect"        goto a_dialect
 if /i "%ARG%"=="-volumename"     goto a_volumename
-if /i "%ARG%"=="-helperimage"    goto a_helperimage
 echo   FAIL  Unrecognised option "%ARG%".
 echo(
 goto usage
@@ -110,11 +105,6 @@ set "VOLUME_NAME=%~2"
 shift
 shift
 goto parse
-:a_helperimage
-set "HELPER_IMAGE=%~2"
-shift
-shift
-goto parse
 
 :usage
 echo Usage: cmd_Setup-PsilinkFileDrop.cmd [options]
@@ -127,7 +117,6 @@ echo   -Username ^<name^>     the account the container will use
 echo   -Domain ^<name^>       its domain, if it has one
 echo   -Dialect ^<d^>         pin the SMB dialect: SMB3, SMB2, or NT1
 echo   -VolumeName ^<name^>   the Docker volume to create (psilink-sync)
-echo   -HelperImage ^<image^> the image the checks run in
 echo   -SkipConfirm         do not ask you to confirm the server and share
 echo   -SkipVolumeTest      run the checks but do not create the volume
 echo(
@@ -154,14 +143,26 @@ if not defined DOCKER_OS goto no_docker
 if /i "%DOCKER_OS%"=="windows" goto windows_containers
 call :good "Docker engine %DOCKER_VER% is running."
 
+rem The checks run in the same image the exchange itself runs, at the same
+rem floating tag: it carries smbclient, so the checks do not have to fetch it on
+rem a network that may be the reason they are being run. Floating is deliberate
+rem -- this script is downloaded on its own rather than shipped with a release,
+rem so pinning the diagnostic tighter than the thing it diagnoses buys nothing.
+rem
+rem Every docker run below overrides the image entrypoint with sh, because that
+rem image's own entrypoint hands its argument vector to psilink and would read a
+rem helper script passed to it as exchange arguments.
+rem
 rem Pulled here rather than left to the first docker run: an image that cannot
 rem be fetched exits 125, which is indistinguishable from the checks deciding
 rem something about the share, and would be reported as a share problem with no
 rem diagnosis printed above it.
-docker image inspect "%HELPER_IMAGE%" >nul 2>&1
+docker image inspect "vdorie/psi-link:latest" >nul 2>&1
 if errorlevel 1 (
-  echo Fetching the helper image ^(first run only^)...
-  docker pull --quiet "%HELPER_IMAGE%" >"%WORK%" 2>&1
+  echo Fetching the psilink image ^(first run only^). It is a few hundred
+  echo megabytes -- the same image the exchange itself runs -- so this can
+  echo take several minutes with nothing on screen.
+  docker pull --quiet "vdorie/psi-link:latest" >"%WORK%" 2>&1
   if errorlevel 1 goto no_image
 )
 
@@ -281,7 +282,7 @@ echo(
 set "VERDICT="
 set "PWWARN="
 set "TOKEN="
-docker run --rm -i --env SMB_PASS "%HELPER_IMAGE%" sh -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-credcheck.sh" >"%WORK%" 2>nul
+docker run --rm -i --env SMB_PASS --entrypoint sh "vdorie/psi-link:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-credcheck.sh" >"%WORK%" 2>nul
 if errorlevel 1 goto credcheck_failed
 for /f "usebackq tokens=1,* delims==" %%a in ("%WORK%") do (
   if "%%a"=="VERDICT" set "VERDICT=%%b"
@@ -319,7 +320,7 @@ rem reads. It is fed on standard input through "tr -d '\r'" so that a checkout
 rem with core.autocrlf on cannot break it -- sh does not treat a carriage
 rem return as whitespace, and a CRLF copy reaching sh directly dies with an
 rem unterminated if.
-docker run --rm -i --env SMB_SERVER --env SMB_SHARE --env SMB_PATH --env SMB_USER --env SMB_DOMAIN --env SMB_PASS --env SMB_DIALECT --env SMB_MARKER --env SMB_TOKEN "%HELPER_IMAGE%" sh -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-probe.sh"
+docker run --rm -i --env SMB_SERVER --env SMB_SHARE --env SMB_PATH --env SMB_USER --env SMB_DOMAIN --env SMB_PASS --env SMB_DIALECT --env SMB_MARKER --env SMB_TOKEN --entrypoint sh "vdorie/psi-link:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-probe.sh"
 set "PROBE_RC=%errorlevel%"
 
 set "SMB_SERVER="
@@ -335,6 +336,7 @@ if %PROBE_RC% GEQ 125 goto docker_broke
 if not "%PROBE_RC%"=="0" goto probe_failed
 
 call :good "The share is reachable, writable, and supports rename."
+
 if defined SKIP_VOLUME_TEST (
   call :note "Skipping volume creation as requested."
   goto done_ok
@@ -392,7 +394,7 @@ call :good "Volume created. Docker mounts it the first time it is used."
 
 echo Mounting it and testing what psilink needs...
 set "MARKER=%MARKER_NAME%"
-docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN "%HELPER_IMAGE%" sh -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-volcheck.sh" >"%WORK%" 2>&1
+docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN --entrypoint sh "vdorie/psi-link:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-volcheck.sh" >"%WORK%" 2>&1
 set "VOL_RC=%errorlevel%"
 set "MARKER="
 
@@ -416,16 +418,22 @@ findstr /c:"MARKER_MISSING" "%WORK%" >nul 2>&1
 if not errorlevel 1 goto marker_missing
 
 findstr /c:"MARKER_MISMATCH" "%WORK%" >nul 2>&1
-if not errorlevel 1 (
-  call :warn "The check file in the folder is not the one part 3 wrote."
-  call :note "Either someone else is setting up this same share right now, or"
-  call :note "an earlier run of this script left the file behind. The volume"
-  call :note "itself reached the folder either way."
-  call :note "To tell the two apart, delete %MARKER_NAME% from the drop folder"
-  call :note "and run this again: if it comes back, you have company."
-) else (
-  call :good "The volume and the checks agree on which folder this is."
-)
+if errorlevel 1 goto marker_agree
+call :warn "The check file in the folder is not the one part 3 wrote."
+call :note "Either someone else is setting up this same share right now, or"
+call :note "an earlier run of this script left the file behind. The volume"
+call :note "itself reached the folder either way."
+call :note "To tell the two apart, delete %MARKER_NAME% from the drop folder"
+call :note "and run this again: if it comes back, you have company."
+goto marker_done
+
+rem The reassuring line waits for the positive verdict rather than being
+rem inferred from the absence of the other two.
+:marker_agree
+findstr /c:"MARKER_OK" "%WORK%" >nul 2>&1
+if not errorlevel 1 call :good "The volume and the checks agree on which folder this is."
+
+:marker_done
 
 findstr /c:"RENAME_FAIL" "%WORK%" >nul 2>&1
 if not errorlevel 1 (
@@ -546,7 +554,7 @@ call :info "choose 'Switch to Linux containers...', then run this again."
 goto fail_generic
 
 :no_image
-call :bad "Could not fetch the helper image the checks run in."
+call :bad "Could not fetch the psilink image the checks run in."
 echo(
 if exist "%WORK%" type "%WORK%"
 echo(
@@ -555,7 +563,8 @@ call :note "being unable to reach its registry. A corporate proxy intercepting"
 call :note "HTTPS is the usual cause; Docker Desktop needs its certificate under"
 call :note "Settings, then Resources, then Proxies."
 call :info ""
-call :info "If your site runs a registry mirror, pass its copy with -HelperImage."
+call :info "The checks run in the same image as the exchange itself, so nothing"
+call :info "will run until Docker can fetch it."
 goto fail_generic
 
 :is_local
@@ -590,7 +599,7 @@ goto fail_generic
 :credcheck_failed
 call :bad "Could not check the password in a container."
 call :note "Nothing about your file drop has been tested. This is Docker failing"
-call :note "to run the helper image, not a verdict about your share."
+call :note "to run the psilink image, not a verdict about your share."
 echo(
 if exist "%WORK%" type "%WORK%"
 goto fail_generic
@@ -703,34 +712,50 @@ call :bad "The volume could not be mounted."
 echo(
 call :show_safely
 echo(
-findstr /c:"invalid argument" "%WORK%" >nul 2>&1
-if not errorlevel 1 (
-  call :note "The mount options were malformed. An equals sign or a special"
-  call :note "character in the password or the domain is the usual cause."
-)
-findstr /c:"permission denied" "%WORK%" >nul 2>&1
-if not errorlevel 1 (
-  call :note "The kernel refused the mount even though the checks in part 3"
-  call :note "authenticated. The SMB dialect is the most likely difference:"
-  call :note "run again with -Dialect SMB3, and if that fails, -Dialect SMB2."
-)
-findstr /c:"Host is down" "%WORK%" >nul 2>&1
-if not errorlevel 1 (
-  call :note "The server accepted the connection and then dropped it, which"
-  call :note "almost always means it requires a newer SMB dialect than the"
-  call :note "mount asked for. Run again with -Dialect SMB3."
-)
-findstr /c:"Operation not supported" "%WORK%" >nul 2>&1
-if not errorlevel 1 (
-  call :note "The server refused an option the mount asked for -- usually SMB"
-  call :note "encryption or signing. Run again with -Dialect SMB3."
-)
-findstr /c:"Required key not available" "%WORK%" >nul 2>&1
-if not errorlevel 1 (
-  call :note "The mount wanted a Kerberos ticket and the Docker VM has none."
-  call :note "The server is refusing password authentication. See the"
-  call :note "troubleshooting page, 'The share never asks for a password'."
-)
+rem The message being classified is the one the Docker daemon prints, which is
+rem the mount(2) errno rendered from Go's own table -- lowercase throughout,
+rem where mount.cifs and glibc capitalise the same errors. findstr is
+rem case-sensitive unless told otherwise, so every arm below takes /i and
+rem carries the literal as the daemon prints it. The arms are also chained
+rem rather than independent, so that output naming two of these produces one
+rem diagnosis, as it does in the PowerShell script.
+findstr /i /c:"invalid argument" "%WORK%" >nul 2>&1
+if errorlevel 1 goto mount_arm_denied
+call :note "The mount options were malformed. An equals sign or a special"
+call :note "character in the password or the domain is the usual cause."
+goto mount_arms_done
+
+:mount_arm_denied
+findstr /i /c:"permission denied" "%WORK%" >nul 2>&1
+if errorlevel 1 goto mount_arm_dialect
+call :note "The kernel refused the mount even though the checks in part 3"
+call :note "authenticated. The SMB dialect is the most likely difference:"
+call :note "run again with -Dialect SMB3, and if that fails, -Dialect SMB2."
+goto mount_arms_done
+
+:mount_arm_dialect
+findstr /i /c:"host is down" "%WORK%" >nul 2>&1
+if errorlevel 1 goto mount_arm_unsupported
+call :note "The server accepted the connection and then dropped it, which"
+call :note "almost always means it requires a newer SMB dialect than the"
+call :note "mount asked for. Run again with -Dialect SMB3."
+goto mount_arms_done
+
+:mount_arm_unsupported
+findstr /i /c:"operation not supported" "%WORK%" >nul 2>&1
+if errorlevel 1 goto mount_arm_nokey
+call :note "The server refused an option the mount asked for -- usually SMB"
+call :note "encryption or signing. Run again with -Dialect SMB3."
+goto mount_arms_done
+
+:mount_arm_nokey
+findstr /i /c:"required key not available" "%WORK%" >nul 2>&1
+if errorlevel 1 goto mount_arms_done
+call :note "The mount wanted a Kerberos ticket and the Docker VM has none."
+call :note "The server is refusing password authentication. See the"
+call :note "troubleshooting page, 'The share never asks for a password'."
+
+:mount_arms_done
 docker volume rm "%VOLUME_NAME%" >nul 2>&1
 goto fail_generic
 

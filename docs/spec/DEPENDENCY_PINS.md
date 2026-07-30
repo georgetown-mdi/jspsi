@@ -48,8 +48,9 @@ complement -- the premises and the procedure.
 
 ## The Docker image's dependency freeze
 
-The shipped CLI image resolves no dependency at image-build time and installs
-nothing at container runtime. The Dockerfile's builder stage installs with
+The shipped CLI image resolves no npm dependency at image-build time and installs
+nothing at container runtime; one OS package, named below, is fetched from the
+Alpine mirror while the image is built. The Dockerfile's builder stage installs with
 `npm ci` against the committed `package-lock.json` -- which installs exactly the
 locked tree, verifying each registry package against the lockfile's integrity
 hash, and fails the build if a manifest and the lockfile disagree -- then, after
@@ -77,8 +78,8 @@ The structural invariants are enforced by `scripts/dockerfile-freeze.test.mjs`
 (run by `npm run test:scripts`, a CI static check): every install is `npm ci`,
 the lockfile and the root `.npmrc` are copied into the builder before the first
 install, the shipped tree is the `--omit=dev` one, the runtime stage runs no npm
-at all, and the copied layout keeps the workspace links and the PSI worker entry
-where the CLI resolves them.
+at all and installs exactly the one reviewed OS package, and the copied layout
+keeps the workspace links and the PSI worker entry where the CLI resolves them.
 
 The `node:26-alpine` base image is digest-pinned in both stages to its
 multi-arch index digest, so the Node runtime and Alpine userland beneath the
@@ -88,6 +89,107 @@ bumping the base is a deliberate digest update. Pin the multi-arch index digest,
 not a platform-specific one, or the multi-platform release build cannot resolve
 every architecture; obtain it with `docker buildx imagetools inspect
 node:26-alpine`.
+
+**The one OS package the build fetches.** The runtime stage runs
+`apk add --no-cache samba-client`, which is a dependency resolved at image-build
+time and the single exception to the paragraphs above. It is in the image rather
+than fetched when it is used because of what uses it: the Windows file-drop setup
+scripts (`support/windows-network-filedrop/`) run their SMB probe inside this
+image, and the networks that probe exists to diagnose are the ones where a
+container cannot reach the Alpine mirror at all. HTTPS interception there fails
+the fetch with
+
+    error:0A000086:SSL routines:tls_post_process_server_certificate:certificate verify failed
+    ...
+    samba-client (no such package): required by: world[samba-client]
+
+so a probe that has to install the package stops before it has tested anything.
+Installing it while the image is built moves that fetch onto the machine that
+publishes the image.
+
+It floats: the instruction names no version, so a rebuild takes whatever the
+mirror carries for the pinned base's Alpine release. Measured on the base digest
+pinned here (Alpine 3.24.1): `samba-client-4.23.8-r0` and 44 dependencies, 45
+packages newly present and none removed. `apk`'s trailing `OK:` line reports the
+post-install total rather than the increment, so it reads
+`OK: 11.1 MiB in 18 packages` on the bare base and `OK: 63.1 MiB in 63 packages`
+after, on `aarch64`; the built `arm64` image goes from 520,152,837 to
+574,778,898 bytes, an increase of 54,626,061. The same 63 packages resolve on
+`x86_64`, where the post-install total is 54.2 MiB, so the multi-arch release
+build is not left short a package. An exact version pin was rejected because
+Alpine carries exactly one version of a package per release branch, so a pin
+hard-fails the build the moment the mirror supersedes it:
+`apk add --no-cache --simulate samba-client=4.23.7-r0` on that base answers
+
+    ERROR: unable to select packages:
+      samba-client-4.23.8-r0:
+        breaks: world[samba-client=4.23.7-r0]
+
+while `=4.23.8-r0` resolves. A pin would therefore convert every upstream samba
+patch into a red build, costing more than the drift it prevents. What the float
+costs is that two rebuilds of the same commit can ship different `samba-client`
+versions, and that the package is outside the release SBOM, which `npm sbom`
+generates from the npm tree. That is acceptable here in a way it is not for
+`re2js`: nothing in an exchange reaches this package. It is used only by the
+setup-time probe, over a share the operator is testing, never by the CLI or the
+console during a run.
+
+Two checks bound it. `scripts/dockerfile-freeze.test.mjs` holds every
+`apk`/`apt`/`pip` install in the runtime stage to that one instruction by
+literal, the way it holds the `.npmrc` COPY, so a second install or a wider spec
+on that line reddens rather than shipping; a runtime-stage fetch by some other
+route -- curl and extract, or another language's package manager -- is outside
+what it sees. `image_smoke.yaml` asserts the built image provides
+`smbclient` (`docker run --rm --entrypoint sh <image> -c 'command -v smbclient'`),
+so a build that resolved the package away fails the pull request rather than an
+operator's setup run.
+
+**What the 45 packages add beyond `smbclient`.** Invocation is not the only cost:
+these libraries sit in the image that runs every exchange, so an advisory against
+any of them applies to that image whether or not an exchange reaches the code,
+and none of them is in the release SBOM either. Measured on the pinned base at
+`aarch64` (`apk list -I` before and after), they are the samba client libraries
+and their record stores (`samba-client-libs`, `samba-common`, `samba-libs`,
+`samba-util-libs`, `libsmbclient`, `libwbclient`, `libauth-samba`, `ldb`,
+`talloc`, `tdb-libs`, `tevent`, `lmdb`, `gdbm`), an authentication and directory
+stack (`linux-pam`, `libldap`, `libsasl`, `utmps-libs`, `skalibs-libs`), a
+TLS/crypto stack (`gnutls`, `nettle`, `gmp`, `libtasn1`, `p11-kit`, `libffi`),
+compression and archive libraries (`libarchive`, `xz-libs`, `zstd-libs`,
+`lz4-libs`, `libbz2`, `brotli-libs`), and a tail of support libraries
+(`readline`, the `ncurses` set, `popt`, `icu-libs`, `icu-data-en`, `libexpat`,
+`jansson`, `libidn2`, `libunistring`, `acl-libs`, `libcap2`). No `smbd`, `nmbd`
+or `winbindd` is installed, so nothing added listens.
+
+`linux-pam` also gives the image its first setgid binary. Measured with
+
+    find / -xdev -type f \( -perm -2000 -o -perm -4000 \) -exec ls -l {} +
+
+which reports nothing on the pinned base digest at either architecture, and after
+the install reports exactly `-rwxr-sr-x 1 root shadow /usr/sbin/unix_chkpwd` and
+no setuid file at all -- on the built `arm64` image, and at `x86_64` on the
+pinned base plus that one instruction. It sits beside the PAM helpers `faillock`,
+`mkhomedir_helper`, `pam_namespace_helper`, `pam_timestamp_check` and
+`pwhistory_helper`, none of them setgid. Exploitability rests on two properties
+of this image rather than on the package: it declares no `USER`, so a process in
+it is already uid 0 and a setgid-`shadow` helper grants nothing that opening the
+file would not, and `/etc/shadow` carries no usable hash (`root` is `*`, every
+other account `!`), so `unix_chkpwd` has nothing to verify against. Both would
+need revisiting if the image dropped to a non-root `USER`: at that point the
+helper is a real privilege boundary rather than a redundant one.
+
+**The helper image the setup scripts run the probe in is a mutable tag.** It is
+`vdorie/psi-link:latest` in both scripts, and floating it is deliberate: the
+scripts are downloaded on their own rather than shipped with a release, so they
+cannot name the digest of a release they do not know they belong to, and a
+diagnostic pinned tighter than the thing it diagnoses would test an image the
+exchange will not run. The limit that comes with it is recorded rather than
+closed. The helper container receives the share password in its environment
+(`--env SMB_PASS`) and, for the volume check, a bind of the CIFS volume, so the
+plaintext credential and read/write access to the partner's drop folder go to
+whatever the tag resolves to at pull time -- and that pull happens on exactly the
+HTTPS-intercepting networks the probe exists to diagnose. A digest, or a released
+version tag, is what would make a substituted image detectable there; how a
+separately downloaded script would learn either is the open part.
 
 ## The install-script policy (`allowScripts`)
 

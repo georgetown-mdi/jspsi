@@ -171,26 +171,23 @@ else
   exit 3
 fi
 
-# Deliberately after the two checks above, both of which use tools already in
-# the image: a machine that cannot resolve or route to the server would fail
-# here first, and "could not install samba-client" is a far worse description
-# of that than "cannot resolve the name".
-APKOUT=$(apk add --no-cache samba-client 2>&1) || {
+# Exit 11 keeps this apart from the 2-7 verdicts, which all mean a check ran and
+# returned a verdict. This one means they could not run.
+if ! command -v smbclient >/dev/null 2>&1; then
   emit ""
-  emit "FAIL: could not install samba-client inside the container."
+  emit "FAIL: smbclient is not in the image these checks are running in."
   emit ""
-  indent "$APKOUT"
+  emit "SKIP: steps 3 to 6 all need it, so none of them ran. Nothing has been"
+  emit "      established about the credentials, the share, the folder, or"
+  emit "      write access; steps 1 and 2 above stand."
   emit ""
-  emit "MEANING: the Docker VM could not fetch from the Alpine package mirror."
-  emit "         The message above names the reason. 'certificate' or 'TLS'"
-  emit "         means something is intercepting HTTPS -- a corporate proxy,"
-  emit "         usually, and Docker Desktop needs its certificate. 'DNS' or"
-  emit "         'temporary error' means name resolution inside the VM."
+  emit "MEANING: this copy of the psilink image predates the checks. The image"
+  emit "         is fetched only when it is missing, never to refresh one"
+  emit "         already on the PC."
   emit ""
-  emit "ACTION:  see the troubleshooting page, 'The container cannot install"
-  emit "         its tools'."
-  exit 1
-}
+  emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and try again."
+  exit 11
+fi
 
 umask 077
 {

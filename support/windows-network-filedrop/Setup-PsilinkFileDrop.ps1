@@ -72,10 +72,6 @@ param(
     [ValidateSet('', 'SMB3', 'SMB2', 'NT1')]
     [string] $Dialect = '',
     [string] $VolumeName = 'psilink-sync',
-    # Pinned to alpine:3.22's multi-arch index digest so a run today and a run
-    # next year test the same thing. Bumping it is deliberate; override it if
-    # your site pulls through a registry mirror that does not carry the digest.
-    [string] $HelperImage = 'alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce',
     [switch] $SkipVolumeTest,
     [switch] $SkipConfirm
 )
@@ -462,26 +458,23 @@ else
   exit 3
 fi
 
-# Deliberately after the two checks above, both of which use tools already in
-# the image: a machine that cannot resolve or route to the server would fail
-# here first, and "could not install samba-client" is a far worse description
-# of that than "cannot resolve the name".
-APKOUT=$(apk add --no-cache samba-client 2>&1) || {
+# Exit 11 keeps this apart from the 2-7 verdicts, which all mean a check ran and
+# returned a verdict. This one means they could not run.
+if ! command -v smbclient >/dev/null 2>&1; then
   emit ""
-  emit "FAIL: could not install samba-client inside the container."
+  emit "FAIL: smbclient is not in the image these checks are running in."
   emit ""
-  indent "$APKOUT"
+  emit "SKIP: steps 3 to 6 all need it, so none of them ran. Nothing has been"
+  emit "      established about the credentials, the share, the folder, or"
+  emit "      write access; steps 1 and 2 above stand."
   emit ""
-  emit "MEANING: the Docker VM could not fetch from the Alpine package mirror."
-  emit "         The message above names the reason. 'certificate' or 'TLS'"
-  emit "         means something is intercepting HTTPS -- a corporate proxy,"
-  emit "         usually, and Docker Desktop needs its certificate. 'DNS' or"
-  emit "         'temporary error' means name resolution inside the VM."
+  emit "MEANING: this copy of the psilink image predates the checks. The image"
+  emit "         is fetched only when it is missing, never to refresh one"
+  emit "         already on the PC."
   emit ""
-  emit "ACTION:  see the troubleshooting page, 'The container cannot install"
-  emit "         its tools'."
-  exit 1
-}
+  emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and try again."
+  exit 11
+fi
 
 umask 077
 {
@@ -899,16 +892,28 @@ if ($dockerOs -eq 'windows') {
 }
 Write-Good "Docker engine $(($dockerInfo.Output -split '\s+')[1]) is running."
 
+# The checks run in the same image the exchange itself runs, at the same
+# floating tag: it carries smbclient, so the checks do not have to fetch it on a
+# network that may be the reason they are being run. Floating is deliberate --
+# this script is downloaded on its own rather than shipped with a release, so
+# pinning the diagnostic tighter than the thing it diagnoses buys nothing.
+#
+# Every docker run below overrides the image entrypoint with sh, because that
+# image's own entrypoint hands its argument vector to psilink and would read a
+# helper script passed to it as exchange arguments.
+#
 # Pulled here rather than left to the first docker run: an image that cannot be
 # fetched exits 125, which is indistinguishable from the probe deciding
 # something about the share, and would be reported as a share problem with no
 # diagnosis printed above it.
-$imagePresent = Invoke-Docker -DockerArgs @('image', 'inspect', $HelperImage)
+$imagePresent = Invoke-Docker -DockerArgs @('image', 'inspect', 'vdorie/psi-link:latest')
 if ($imagePresent.ExitCode -ne 0) {
-    Write-Host 'Fetching the helper image (first run only)...'
-    $pull = Invoke-Docker -DockerArgs @('pull', '--quiet', $HelperImage)
+    Write-Host 'Fetching the psilink image (first run only). It is a few hundred'
+    Write-Host 'megabytes -- the same image the exchange itself runs -- so this can'
+    Write-Host 'take several minutes with nothing on screen.'
+    $pull = Invoke-Docker -DockerArgs @('pull', '--quiet', 'vdorie/psi-link:latest')
     if ($pull.ExitCode -ne 0) {
-        Write-Bad 'Could not fetch the helper image the checks run in.'
+        Write-Bad 'Could not fetch the psilink image the checks run in.'
         Write-Host ''
         Write-Host $pull.Output
         Write-Host ''
@@ -917,8 +922,8 @@ if ($imagePresent.ExitCode -ne 0) {
         Write-Note 'intercepting HTTPS is the usual cause; Docker Desktop needs its'
         Write-Note 'certificate under Settings > Resources > Proxies.'
         Write-Info ''
-        Write-Info 'If your site runs a registry mirror, pass its copy with'
-        Write-Info '-HelperImage <image>.'
+        Write-Info 'The checks run in the same image as the exchange itself, so'
+        Write-Info 'nothing will run until Docker can fetch it.'
         exit 1
     }
 }
@@ -1127,7 +1132,7 @@ try {
         --env SMB_SERVER --env SMB_SHARE --env SMB_PATH `
         --env SMB_USER --env SMB_DOMAIN --env SMB_PASS --env SMB_DIALECT `
         --env SMB_MARKER --env SMB_TOKEN `
-        $HelperImage sh -c "echo $probeB64 | base64 -d | sh"
+        --entrypoint sh 'vdorie/psi-link:latest' -c "echo $probeB64 | base64 -d | sh"
     $probeExit = $LASTEXITCODE
 
     foreach ($v in 'SMB_SERVER','SMB_SHARE','SMB_PATH','SMB_USER','SMB_DOMAIN',
@@ -1290,8 +1295,8 @@ rm -f .psilink-a.tmp .psilink-b.tmp
     # reproduced in alpine, where it surfaced as "the volume could not be
     # mounted" on a share that was fine and took the volume with it.
     $test = Invoke-Docker -DockerArgs @(
-        'run', '--rm', '-v', "${VolumeName}:/rz", $HelperImage, 'sh', '-c',
-        ($volumeCheck -replace "`r`n", "`n"))
+        'run', '--rm', '-v', "${VolumeName}:/rz", '--entrypoint', 'sh',
+        'vdorie/psi-link:latest', '-c', ($volumeCheck -replace "`r`n", "`n"))
     $testOut = Hide-Secret -Text $test.Output -Secret $plainPass
 
     # "Did not mount" and "mounted, then refused the write" are different
@@ -1318,6 +1323,12 @@ rm -f .psilink-a.tmp .psilink-b.tmp
         Write-Host ''
         Write-Host $testOut
         Write-Host ''
+        # The message being classified is the one the Docker daemon prints, which
+        # is the mount(2) errno rendered from Go's own table -- lowercase
+        # throughout, where mount.cifs and glibc capitalise the same errors. The
+        # arms are written as the daemon prints them so that the batch script,
+        # whose findstr matches literals rather than a case-insensitive regex, can
+        # carry the same set.
         if ($testOut -match 'invalid argument') {
             Write-Note 'The mount options were malformed. An equals sign or a special'
             Write-Note 'character in the password or the domain is the usual cause.'
@@ -1327,16 +1338,16 @@ rm -f .psilink-a.tmp .psilink-b.tmp
             Write-Note 'authenticated. The SMB dialect is the most likely difference:'
             Write-Note 'run again with -Dialect SMB3, and if that fails, -Dialect SMB2.'
         }
-        elseif ($testOut -match 'mount error\(112\)|Host is down') {
+        elseif ($testOut -match 'host is down') {
             Write-Note 'The server accepted the connection and then dropped it, which'
             Write-Note 'almost always means it requires a newer SMB dialect than the'
             Write-Note 'mount asked for. Run again with -Dialect SMB3.'
         }
-        elseif ($testOut -match 'Operation not supported') {
+        elseif ($testOut -match 'operation not supported') {
             Write-Note 'The server refused an option the mount asked for -- usually SMB'
             Write-Note 'encryption or signing. Run again with -Dialect SMB3.'
         }
-        elseif ($testOut -match 'Required key not available') {
+        elseif ($testOut -match 'required key not available') {
             Write-Note 'The mount wanted a Kerberos ticket and the Docker VM has none.'
             Write-Note 'The server is refusing password authentication. See the'
             Write-Note 'troubleshooting page, "The share never asks for a password".'
@@ -1360,7 +1371,7 @@ rm -f .psilink-a.tmp .psilink-b.tmp
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
     }
-    if ($testOut -match 'MARKER_MISMATCH') {
+    elseif ($testOut -match 'MARKER_MISMATCH') {
         Write-Warn 'The check file in the folder is not the one part 3 wrote.'
         Write-Note 'Either someone else is setting up this same share right now,'
         Write-Note 'or an earlier run of this script left the file behind. The'
@@ -1368,7 +1379,9 @@ rm -f .psilink-a.tmp .psilink-b.tmp
         Write-Note "To tell the two apart, delete $MarkerName from the drop folder"
         Write-Note 'and run this again: if it comes back, you have company.'
     }
-    else {
+    elseif ($testOut -match 'MARKER_OK') {
+        # The reassuring line waits for the positive verdict rather than being
+        # inferred from the absence of the other two.
         Write-Good 'The volume and the checks agree on which folder this is.'
     }
 
