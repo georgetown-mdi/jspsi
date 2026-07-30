@@ -599,7 +599,7 @@ goto fail_generic
 :credcheck_failed
 call :bad "Could not check the password in a container."
 call :note "Nothing about your file drop has been tested. This is Docker failing"
-call :note "to run the helper image, not a verdict about your share."
+call :note "to run the psilink image, not a verdict about your share."
 echo(
 if exist "%WORK%" type "%WORK%"
 goto fail_generic
