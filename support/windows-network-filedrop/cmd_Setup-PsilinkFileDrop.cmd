@@ -356,7 +356,7 @@ rem carries on and finishes at 12 rather than 0.
 :probe_degraded
 set "DEGRADED=1"
 call :warn "The checks stopped after step 2, so the share itself has not been"
-call :note "tested. What that leaves unchecked is listed at the end."
+call :note "tested. What that leaves unchecked is on the troubleshooting page."
 if defined SKIP_VOLUME_TEST goto probe_verdict_done
 call :note "Carrying on to create the volume anyway: Docker mounts the share"
 call :note "itself and needs nothing that was missing above."
@@ -602,18 +602,14 @@ goto done_ok
 rem ============================================== set up, checks incomplete
 :degraded_summary
 call :head "Set up, but not fully checked"
-call :warn "The volume is ready and was tested: it mounts, and the writing,"
-call :note "renaming and exclusive create that psilink depends on all work"
-call :note "over it. It is the checks in part 3 that did not run past step 2."
-call :degraded_partial_losses
+call :warn "The volume is created: it mounts, and psilink can write to it."
+call :degraded_checks_not_run
 goto degraded_exit
 
 :degraded_skipped
 call :head "Checks incomplete"
-call :warn "The checks in part 3 did not run past step 2, and no volume was"
-call :note "created because you asked for none. All that was established is"
-call :note "that the server answers on port 445 from inside Docker."
-call :degraded_losses
+call :warn "No volume was created, because you asked for none."
+call :degraded_checks_not_run
 goto degraded_exit
 
 :degraded_exit
@@ -755,7 +751,7 @@ call :note "then refused this, which is unusual -- the message below is the one"
 call :note "to read."
 echo(
 if exist "%WORK%" type "%WORK%"
-if defined DEGRADED call :degraded_losses
+if defined DEGRADED call :degraded_checks_not_run
 goto fail_generic
 
 :volume_not_ours
@@ -768,7 +764,7 @@ call :info "Run this script again with -VolumeName set to another name, or"
 call :info "remove that volume yourself if you are certain:"
 call :info ""
 call :info "    docker volume rm %VOLUME_NAME%"
-if defined DEGRADED call :degraded_losses
+if defined DEGRADED call :degraded_checks_not_run
 goto fail_generic
 
 :volume_rm_failed
@@ -778,7 +774,7 @@ call :show_safely
 echo(
 call :note "A container is probably still using it. Stop any exchange that is"
 call :note "running, then try again: docker ps"
-if defined DEGRADED call :degraded_losses
+if defined DEGRADED call :degraded_checks_not_run
 goto fail_generic
 
 :volume_create_failed
@@ -786,7 +782,7 @@ set "VOL_OPTS="
 call :bad "Could not create the volume."
 echo(
 call :show_safely
-if defined DEGRADED call :degraded_losses
+if defined DEGRADED call :degraded_checks_not_run
 goto fail_generic
 
 :volume_not_writable
@@ -800,7 +796,7 @@ call :note "can open the folder but not create files in it, or the share"
 call :note "is out of space."
 call :info ""
 call :info "See the troubleshooting page, 'The folder cannot be written to'."
-if defined DEGRADED call :degraded_partial_losses
+if defined DEGRADED call :degraded_checks_not_run
 docker volume rm "%VOLUME_NAME%" >nul 2>&1
 goto fail_generic
 
@@ -846,7 +842,7 @@ call :note "do NOT work through candidate passwords from here."
 goto mount_arms_done
 
 :mount_arm_dialect
-findstr /i /c:"mount error(112)" /c:"host is down" "%WORK%" >nul 2>&1
+findstr /i /c:"host is down" "%WORK%" >nul 2>&1
 if errorlevel 1 goto mount_arm_unsupported
 call :note "The server accepted the connection and then dropped it, which"
 call :note "almost always means it requires a newer SMB dialect than the"
@@ -870,7 +866,7 @@ call :note "The server is refusing password authentication. See the"
 call :note "troubleshooting page, 'The share never asks for a password'."
 
 :mount_arms_done
-if defined DEGRADED call :degraded_losses
+if defined DEGRADED call :degraded_checks_not_run
 docker volume rm "%VOLUME_NAME%" >nul 2>&1
 goto fail_generic
 
@@ -945,62 +941,18 @@ if not errorlevel 1 (
 )
 exit /b 0
 
-rem What the operator is owed when the checks could not run. Named rather than
-rem summarised: mount.cifs collapses the server's reasons into one message, so
-rem the split the checks make between a password that is wrong and an account
-rem that is refused cannot be recovered from a failed mount afterwards, and that
-rem split is what decides who has to fix it. A subroutine because the mount
-rem failure that reaches it exits differently from the two paths that set up a
-rem volume.
-:degraded_losses
+rem Emitted at every degraded exit, so nothing here may say what this run
+rem reached: it has to hold whether or not a volume was created and whether or
+rem not it mounted.
+:degraded_checks_not_run
 call :info ""
-call :info "Nothing was established about the share itself:"
+call :info "The checks in part 3 did not run past step 2. What that leaves"
+call :info "unverified, and how to get them running, is on the troubleshooting"
+call :info "page under 'The container cannot install its tools'."
 call :info ""
-call :info "  - Whether the username and password are right, and whether this"
-call :info "    account is allowed into the folder. A mount that fails says"
-call :info "    'permission denied' for either, and they have different fixes:"
-call :info "    a password that works, or rights from whoever administers the"
-call :info "    share. Telling those two apart is what the checks are for."
-call :info "  - So if an exchange cannot reach the folder, do NOT work through"
-call :info "    passwords. Each attempt is a real failed sign-in against the"
-call :info "    account, and a handful of them locks a domain account out. Get"
-call :info "    the checks running first and let them name the reason."
-call :info "  - Free space on the share, and whether the folder already holds"
-call :info "    more than 8192 files, which psilink will not read."
-call :info ""
-call :info "The checks need smbclient in the image they run in: see the"
-call :info "troubleshooting page, 'The container cannot install its tools',"
-call :info "then run this script again."
-exit /b 0
-
-rem What the operator is owed when the checks could not run but the volume then
-rem mounted. Not :degraded_losses, whose list opens by saying nothing was
-rem established about the share: this mount signed in.
-rem
-rem Measured against the Docker Desktop VM kernel with Samba authentication
-rem auditing on. The kernel does reuse an open CIFS session, but only for a
-rem mount presenting the same username and password: a wrong password offered
-rem while a good session is live is sent to the server as its own sign-in and
-rem refused there. So a mount that succeeds is the server having accepted these
-rem credentials, not the cache carrying it.
-:degraded_partial_losses
-call :info ""
-call :info "The mount signed in with the username and password you gave and"
-call :info "opened the folder, so those two are settled: a wrong password, or"
-call :info "an account with no access to the folder at all, is refused here."
-call :info "Three things the checks in part 3 would have settled are open:"
-call :info ""
-call :info "  - Whether the volume opens the folder you named rather than a"
-call :info "    different one. The checks leave a file in the folder for the"
-call :info "    volume to find, and that comparison is the only test of it."
-call :info "  - How much free space the share has. The checks report it, and"
-call :info "    a share with no room left fails an exchange partway through."
-call :info "  - Whether the folder already holds more than 8192 files, which"
-call :info "    psilink will not read."
-call :info ""
-call :info "The checks need smbclient in the image they run in: see the"
-call :info "troubleshooting page, 'The container cannot install its tools',"
-call :info "then run this script again."
+call :info "Do NOT work through candidate passwords: a mount attempt that reaches"
+call :info "the sign-in is a real one against the account, and a handful of"
+call :info "failures locks a domain account out."
 exit /b 0
 
 rem What a -Dialect retry means when the checks never reached the credentials.

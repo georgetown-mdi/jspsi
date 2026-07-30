@@ -146,23 +146,31 @@ If you are on a VPN, that is almost certainly it. Take items 3 and 5 of the
 The checks stop after step 2 saying `samba-client` could not be installed, print
 what the package manager said, and skip steps 3 to 6. The script carries on from
 there: it creates the volume, tests what it can over the real mount, and
-finishes with status 12 and a list of what was left unchecked.
+finishes with status 12.
 
-Read that list. Which of two it is depends on whether the volume mounted.
+This is what steps 3 to 6 settle:
 
-If it mounted, that mount signed in with the username and password you gave and
-opened the folder, so neither of those is in doubt. Three things are, and steps
-3 to 6 are what settle them: whether the volume opens the folder you named
-rather than a different one, how much free space the share has, and whether the
-folder already holds more files than psilink will read.
+- **Whether the username and password are right, and whether the account is
+  allowed into the folder.** A failed mount says `permission denied` for either,
+  and the two have different fixes: a password that works, or rights from
+  whoever administers the share.
+- **Which folder the volume actually opens.** The checks leave a file in the
+  folder for the volume to find; that comparison is the only test of it, and
+  without the file it does not happen at all.
+- **How much free space the share has.** A share with no room left fails an
+  exchange partway through.
+- **Whether the folder already holds more than 8192 files,** which psilink will
+  not read.
 
-If it did not mount, nothing about the share was established. Steps 3 to 6 are
-the only thing that tells a wrong password apart from an account that signs in
-and is then refused the folder -- a failed mount says `permission denied` for
-both -- so if an exchange later cannot reach the folder, **do not work through
-passwords**: each attempt is a real failed sign-in, and a handful of them locks
-a domain account out. Ask whoever administers the share instead, or get the
-checks running and let them name the reason.
+How much of that is left open depends on whether the volume mounted. A mount
+signs in with the username and password you gave and opens the folder, so a run
+that got one has the credentials settled: the server accepted them. A run that
+never got a mount settles nothing about the share.
+
+Either way, **do not work through passwords**. A mount attempt that reaches the
+sign-in is a real one against the account, and a handful of failures locks a
+domain account out. Ask whoever administers the share, or get the checks
+running and let them name the reason.
 
 The image the checks run in is the psilink image, which carries `samba-client`
 already, so this is a fallback path rather than the ordinary one. Reaching it
@@ -186,7 +194,7 @@ underneath names why the mirror could not be reached:
   which on a corporate network is a proxy doing inspection. The container has a
   trust store of its own, and that is what refuses the install. Docker Desktop's
   proxy certificate setting (Settings > Resources > Proxies) governs the engine's
-  own pulls, which worked, or the checks would not have started at all.
+  own pulls, not that trust store.
 - **`DNS`, `temporary error`, or `could not resolve`.** The hidden Linux
   computer cannot look up names. Same ground as the section above.
 

@@ -109,60 +109,18 @@ function Write-Warn { param([string] $T) Write-Host "  WARN  $T" -ForegroundColo
 function Write-Note { param([string] $T) Write-Host "        $T" -ForegroundColor Yellow }
 function Write-Info { param([string] $T) Write-Host "        $T" }
 
-function Write-DegradedLosses {
-    <#  What the operator is owed when the checks could not run. Named rather
-        than summarised: mount.cifs collapses the server's reasons into one
-        message, so the split the checks make between a password that is wrong
-        and an account that is refused cannot be recovered from a failed mount
-        afterwards, and that split is what decides who has to fix it. #>
+function Write-DegradedChecksNotRun {
+    <#  Emitted at every degraded exit, so nothing here may say what this run
+        reached: it has to hold whether or not a volume was created and whether
+        or not it mounted. #>
     Write-Info ''
-    Write-Info 'Nothing was established about the share itself:'
+    Write-Info 'The checks in part 3 did not run past step 2. What that leaves'
+    Write-Info 'unverified, and how to get them running, is on the troubleshooting'
+    Write-Info 'page under "The container cannot install its tools".'
     Write-Info ''
-    Write-Info '  - Whether the username and password are right, and whether this'
-    Write-Info '    account is allowed into the folder. A mount that fails says'
-    Write-Info '    "permission denied" for either, and they have different fixes:'
-    Write-Info '    a password that works, or rights from whoever administers the'
-    Write-Info '    share. Telling those two apart is what the checks are for.'
-    Write-Info '  - So if an exchange cannot reach the folder, do NOT work through'
-    Write-Info '    passwords. Each attempt is a real failed sign-in against the'
-    Write-Info '    account, and a handful of them locks a domain account out. Get'
-    Write-Info '    the checks running first and let them name the reason.'
-    Write-Info '  - Free space on the share, and whether the folder already holds'
-    Write-Info '    more than 8192 files, which psilink will not read.'
-    Write-Info ''
-    Write-Info 'The checks need smbclient in the image they run in: see the'
-    Write-Info 'troubleshooting page, "The container cannot install its tools",'
-    Write-Info 'then run this script again.'
-}
-
-function Write-DegradedPartialLosses {
-    <#  What the operator is owed when the checks could not run but the volume
-        then mounted. Not Write-DegradedLosses, whose list opens by saying
-        nothing was established about the share: this mount signed in.
-
-        Measured against the Docker Desktop VM kernel with Samba authentication
-        auditing on. The kernel does reuse an open CIFS session, but only for a
-        mount presenting the same username and password: a wrong password
-        offered while a good session is live is sent to the server as its own
-        sign-in and refused there. So a mount that succeeds is the server
-        having accepted these credentials, not the cache carrying it. #>
-    Write-Info ''
-    Write-Info 'The mount signed in with the username and password you gave and'
-    Write-Info 'opened the folder, so those two are settled: a wrong password, or'
-    Write-Info 'an account with no access to the folder at all, is refused here.'
-    Write-Info 'Three things the checks in part 3 would have settled are open:'
-    Write-Info ''
-    Write-Info '  - Whether the volume opens the folder you named rather than a'
-    Write-Info '    different one. The checks leave a file in the folder for the'
-    Write-Info '    volume to find, and that comparison is the only test of it.'
-    Write-Info '  - How much free space the share has. The checks report it, and'
-    Write-Info '    a share with no room left fails an exchange partway through.'
-    Write-Info '  - Whether the folder already holds more than 8192 files, which'
-    Write-Info '    psilink will not read.'
-    Write-Info ''
-    Write-Info 'The checks need smbclient in the image they run in: see the'
-    Write-Info 'troubleshooting page, "The container cannot install its tools",'
-    Write-Info 'then run this script again.'
+    Write-Info 'Do NOT work through candidate passwords: a mount attempt that reaches'
+    Write-Info 'the sign-in is a real one against the account, and a handful of'
+    Write-Info 'failures locks a domain account out.'
 }
 
 function Write-DegradedDialectRetry {
@@ -1270,7 +1228,7 @@ try {
     }
     if ($degraded) {
         Write-Warn 'The checks stopped after step 2, so the share itself has not been'
-        Write-Note 'tested. What that leaves unchecked is listed at the end.'
+        Write-Note 'tested. What that leaves unchecked is on the troubleshooting page.'
         if (-not $SkipVolumeTest) {
             Write-Note 'Carrying on to create the volume anyway: Docker mounts the share'
             Write-Note 'itself and needs nothing that was missing above.'
@@ -1284,10 +1242,8 @@ try {
         Write-Note 'Skipping volume creation as requested.'
         if ($degraded) {
             Write-Head 'Checks incomplete'
-            Write-Warn 'The checks in part 3 did not run past step 2, and no volume was'
-            Write-Note 'created because you asked for none. All that was established is'
-            Write-Note 'that the server answers on port 445 from inside Docker.'
-            Write-DegradedLosses
+            Write-Warn 'No volume was created, because you asked for none.'
+            Write-DegradedChecksNotRun
             Write-Host ''
             Write-Note 'Status 12: set up as far as it went, checks incomplete.'
             exit 12
@@ -1345,7 +1301,7 @@ try {
             Write-Info ''
             Write-Info 'Run this script again with -VolumeName <another-name>, or remove'
             Write-Info "that volume yourself if you are certain: docker volume rm $VolumeName"
-            if ($degraded) { Write-DegradedLosses }
+            if ($degraded) { Write-DegradedChecksNotRun }
             exit 8
         }
         # docker volume create on an existing name exits 0 and silently keeps
@@ -1360,7 +1316,7 @@ try {
             Write-Host ''
             Write-Note 'A container is probably still using it. Stop any exchange that is'
             Write-Note "running, then try again: docker ps"
-            if ($degraded) { Write-DegradedLosses }
+            if ($degraded) { Write-DegradedChecksNotRun }
             exit 8
         }
         Write-Info "Replaced the existing '$VolumeName' volume."
@@ -1375,7 +1331,7 @@ try {
         Write-Bad 'Could not create the volume.'
         Write-Host ''
         Write-Host (Hide-Secret -Text $create.Output -Secret $plainPass)
-        if ($degraded) { Write-DegradedLosses }
+        if ($degraded) { Write-DegradedChecksNotRun }
         exit 8
     }
     Write-Good 'Volume created. Docker mounts it the first time it is used.'
@@ -1451,7 +1407,7 @@ rm -f .psilink-a.tmp .psilink-b.tmp
             Write-Note 'is out of space.'
             Write-Info ''
             Write-Info 'See the troubleshooting page, "The folder cannot be written to".'
-            if ($degraded) { Write-DegradedPartialLosses }
+            if ($degraded) { Write-DegradedChecksNotRun }
             Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
             exit 9
         }
@@ -1489,7 +1445,7 @@ rm -f .psilink-a.tmp .psilink-b.tmp
                 Write-Note 'run again with -Dialect SMB3, and if that fails, -Dialect SMB2.'
             }
         }
-        elseif ($testOut -match 'mount error\(112\)|host is down') {
+        elseif ($testOut -match 'host is down') {
             Write-Note 'The server accepted the connection and then dropped it, which'
             Write-Note 'almost always means it requires a newer SMB dialect than the'
             Write-Note 'mount asked for. Run again with -Dialect SMB3.'
@@ -1505,7 +1461,7 @@ rm -f .psilink-a.tmp .psilink-b.tmp
             Write-Note 'The server is refusing password authentication. See the'
             Write-Note 'troubleshooting page, "The share never asks for a password".'
         }
-        if ($degraded) { Write-DegradedLosses }
+        if ($degraded) { Write-DegradedChecksNotRun }
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
     }
@@ -1660,10 +1616,8 @@ Write-Info 'Copy. Nothing you typed as a password is on it.'
 
 if ($degraded) {
     Write-Head 'Set up, but not fully checked'
-    Write-Warn 'The volume is ready and was tested: it mounts, and the writing,'
-    Write-Note 'renaming and exclusive create that psilink depends on all work'
-    Write-Note 'over it. It is the checks in part 3 that did not run past step 2.'
-    Write-DegradedPartialLosses
+    Write-Warn 'The volume is created: it mounts, and psilink can write to it.'
+    Write-DegradedChecksNotRun
     Write-Host ''
     Write-Note 'Status 12: set up as far as it went, checks incomplete.'
     exit 12
