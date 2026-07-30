@@ -352,7 +352,7 @@ rem Exit 11 is the probe saying it could not run the checks, as opposed to
 rem running them and refusing the share: steps 1 and 2 passed and smbclient
 rem could not be had. The volume is still worth creating -- the engine mounts
 rem the share itself and needs nothing the container was missing -- so the run
-rem carries on and ends at :degraded_summary rather than :done_ok.
+rem carries on and finishes at 12 rather than 0.
 :probe_degraded
 set "DEGRADED=1"
 call :warn "The checks stopped after step 2, so the share itself has not been"

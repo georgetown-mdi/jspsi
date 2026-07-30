@@ -116,9 +116,9 @@ post-install total rather than the increment, so it reads
 after, on `aarch64`; the built `arm64` image goes from 520,152,837 to
 574,778,898 bytes, an increase of 54,626,061. The same 63 packages resolve on
 `x86_64`, where the post-install total is 54.2 MiB, so the multi-arch release
-build is not left short one. An exact version pin was rejected because Alpine carries exactly one
-version of a package per release branch, so a pin hard-fails the build the moment
-the mirror supersedes it:
+build is not left short a package. An exact version pin was rejected because
+Alpine carries exactly one version of a package per release branch, so a pin
+hard-fails the build the moment the mirror supersedes it:
 `apk add --no-cache --simulate samba-client=4.23.7-r0` on that base answers
 
     ERROR: unable to select packages:
