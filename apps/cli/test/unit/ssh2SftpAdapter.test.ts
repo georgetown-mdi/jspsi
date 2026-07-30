@@ -4299,13 +4299,27 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const adapterLog = (adapter: SSH2SFTPClientAdapter) => (adapter as any).log;
   // Whether the adapter's recorded session boundary stands as its own deliberate
-  // idle release. Private state with no public surface, read directly by the tests
-  // below whose case -- a release that released nothing, or one during teardown --
-  // leaves no behavior to read it through; each of those also asserts the behavior
-  // wherever one exists.
+  // idle release -- the one reading that exempts a loss from the reconnect counters
+  // and the operator warning, as opposed to merely saying a release took the
+  // session. Private state with no public surface, read directly by the tests below
+  // whose case -- a release that released nothing, one during teardown, or one that
+  // closed over a transport a partner's drop had already ended -- leaves no
+  // behavior, or none of its own, to read it through; each of those also asserts the
+  // behavior wherever one exists.
   const releaseBoundaryStands = (adapter: SSH2SFTPClientAdapter) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ((adapter as any).sessionBoundary as string) === "deliberatelyReleased";
+  // The wider companion: whether the recorded boundary says a release took the
+  // session away at all, which both release readings do -- the reading the
+  // pre-establish gate and the deferred cleanup delete act on. A case whose point
+  // is that the release classified NOTHING asserts this one, so a reading that
+  // answered the session question would fail it rather than pass the narrower
+  // assertion above.
+  const boundarySaysReleaseTookTheSession = (adapter: SSH2SFTPClientAdapter) =>
+    ["deliberatelyReleased", "releasedOverEndedTransport"].includes(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).sessionBoundary as string,
+    );
 
   // The error ssh2-sftp-client's haveConnection() raises once its `sftp` property
   // has been cleared -- what every high-level op below rejects with on a released
@@ -5610,7 +5624,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const release = adapter.releaseForIdle();
     expect(rawClient.end).toHaveBeenCalledOnce();
     expect(client.sftp).not.toBeNull();
-    expect(releaseBoundaryStands(adapter)).toBe(false);
+    expect(boundarySaysReleaseTookTheSession(adapter)).toBe(false);
 
     await expect(adapter.exists("/remote/file.json")).resolves.toBe(true);
     await release;
@@ -5713,7 +5727,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await adapter.releaseForIdle();
 
     expect(rawClient.end).not.toHaveBeenCalled();
-    expect(releaseBoundaryStands(adapter)).toBe(false);
+    expect(boundarySaysReleaseTookTheSession(adapter)).toBe(false);
   });
 
   // Every seam the idle release drives past the public API, and where it lives.
@@ -6096,7 +6110,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("ssh2 changelog"),
       );
-      expect(releaseBoundaryStands(adapter)).toBe(false);
+      expect(boundarySaysReleaseTookTheSession(adapter)).toBe(false);
       expect(state.live).toBe(true);
 
       // The server drops the session the release could not close: a real loss.
@@ -6135,7 +6149,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
     await adapter.releaseForIdle();
 
-    expect(releaseBoundaryStands(adapter)).toBe(false);
+    expect(boundarySaysReleaseTookTheSession(adapter)).toBe(false);
     expect(state.live).toBe(false);
 
     // The next operation observes the cleared session, and it is reported as the
@@ -6179,7 +6193,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       new Promise((resolve) => setTimeout(() => resolve("stalled"), 250)),
     ]);
     expect(outcome).toBe("ran");
-    expect(releaseBoundaryStands(adapter)).toBe(false);
+    expect(boundarySaysReleaseTookTheSession(adapter)).toBe(false);
     // Back to the one persistent transport-lifecycle watch a dial leaves behind:
     // the release's own close wait was dismantled on its way out.
     expect(rawClient.listenerCount("close")).toBe(dialedCloseListeners);
@@ -6537,10 +6551,154 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // taken after that close rather than across it.
     expect(events).toEqual(["release:end", "dial"]);
     expect(state.live).toBe(true);
-    // A boundary of this adapter's stood over the loss by the time the arm read
-    // one, so the re-dial that followed it is exempt from the drop counters and
-    // the operator warning.
+    // The boundary standing over the loss when the arm read one is the release's,
+    // but the transport it closed over had already been ended by the partner, so it
+    // exempts nothing: the loss was the partner's and the re-dial that recovered it
+    // is counted and warned like any other.
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+    expect(adapter.reconnectCount).toBe(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("dropped mid-exchange"),
+    );
+  });
+
+  // Both places a release can land around the recovery arm of an operation a
+  // PARTNER tore, and the one thing the two must agree on. A drop that withheld the
+  // partner's connection close leaves the session property still set, so the release
+  // finds something to close and records a boundary over a loss that was not its
+  // own. Where the release lands decides whether it closes at all -- its own
+  // precondition holds the boundary while an operation is counted, and only the
+  // window ahead of the arm reads that count empty -- but it must not decide whether
+  // the operator sees the drop.
+  test.each([
+    {
+      placement: "in the window ahead of the arm",
+      atTheWindow: true,
+      heldBoundaries: 0,
+    },
+    {
+      placement: "one reading earlier, with the operation still counted",
+      atTheWindow: false,
+      heldBoundaries: 1,
+    },
+  ])(
+    "a partner drop is counted and warned with a release landing $placement",
+    async ({ atTheWindow, heldBoundaries }) => {
+      const { client, state, tearChannelWithholdingClose } =
+        midWireTearClient(wrapperMethods());
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      const warn = vi.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+      const op = adapter.exists("/remote/out.json");
+      tearChannelWithholdingClose();
+      // An idle transition queue is entered in the calling tick, so a release called
+      // at a chosen reading of the count is a release ENTERED at that reading. The
+      // reading is asserted either way, so a case that stopped placing the boundary
+      // where it claims fails rather than quietly measuring the other placement.
+      if (atTheWindow) {
+        while (outstandingOperations(adapter) > 0) await Promise.resolve();
+        expect(outstandingOperations(adapter)).toBe(0);
+      } else expect(outstandingOperations(adapter)).toBeGreaterThan(0);
+      const release = adapter.releaseForIdle();
+
+      await expect(op).resolves.toBe(true);
+      await release;
+
+      expect(state.live).toBe(true);
+      expect(adapter.heldBoundaryCount).toBe(heldBoundaries);
+      // One partner cut, counted once in each metric and warned once, whichever
+      // boundary reading stood over it.
+      expect(adapter.midExchangeReconnectCount).toBe(1);
+      expect(adapter.reconnectCount).toBe(1);
+      expect(
+        warn.mock.calls.filter(([message]) =>
+          String(message).includes("dropped mid-exchange"),
+        ),
+      ).toHaveLength(1);
+    },
+  );
+
+  test("a release that closed over a partner-ended transport still leaves no session for the next operation", async () => {
+    // The release's boundary answers two questions and only one of them is the
+    // arm's. Recording nothing at all here -- rather than a reading that answers the
+    // session question without exempting the loss -- would leave the next operation
+    // to be issued at the session this release took, fail on it, and be recovered as
+    // a SECOND drop: one partner cut reported twice, with a doomed round trip and a
+    // spurious re-dial in between.
+    const { client, connect, state, socket } =
+      ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    // The partner dropped the session and withheld its connection close with nothing
+    // on the wire: ssh2 answered the disconnect by ending its own half of the
+    // transport, and no listener that clears the session has run, so the release
+    // still finds one to close.
+    socket.writableEnded = true;
+    await adapter.releaseForIdle();
+    expect(state.live).toBe(false);
+    // Not the exempting reading -- there was a loss here, and the next operation to
+    // suffer one must not inherit an exemption from it -- while the session question
+    // the same boundary answers is what the gate below acts on.
+    expect(releaseBoundaryStands(adapter)).toBe(false);
+    expect(boundarySaysReleaseTookTheSession(adapter)).toBe(true);
+
+    await expect(adapter.exists("/remote/out.json")).resolves.toBe(true);
+
+    // The one re-establishment is the gate's, ahead of the operation's first
+    // attempt: nothing was issued at the released session, so no drop was reported
+    // for a session this adapter had itself let go.
+    expect(connect).toHaveBeenCalledTimes(2);
     expect(adapter.midExchangeReconnectCount).toBe(0);
+    expect(adapter.reconnectCount).toBe(0);
+    // Scoped to the drop line rather than to the whole log: this stand-in's ssh2
+    // end() closes a transport its caller had already ended, where the real stack
+    // leaves it in half-close until the release's bound expires and the forced
+    // close reports that path's line instead. What an operator sees for this shape
+    // is driven against a real server in
+    // test/integration/ephemeralSessionExchange.test.ts.
+    expect(
+      warn.mock.calls.filter(([message]) =>
+        String(message).includes("dropped mid-exchange"),
+      ),
+    ).toHaveLength(0);
+  });
+
+  test("an ordinary per-poll release counts no reconnection at any boundary", async () => {
+    // The misreport the arm's read order exists to prevent, from the side the mode
+    // spends every cycle on: release, re-dial, and nothing lost. Driven over several
+    // cycles rather than one, because what would fail here is a boundary reading that
+    // reported the mode's own lifecycle as a drop -- which it would do at every poll
+    // interval, filling a long exchange's log and burying a chronic capper.
+    const { client, connect } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      await expect(adapter.exists("/remote/out.json")).resolves.toBe(true);
+      await adapter.releaseForIdle();
+      await expect(adapter.ensureConnected()).resolves.toBe(true);
+    }
+
+    // The first dial plus one per cycle, none of them a recovery re-dial.
+    expect(connect).toHaveBeenCalledTimes(4);
+    expect(adapter.midExchangeReconnectCount).toBe(0);
+    expect(adapter.reconnectCount).toBe(0);
+    expect(adapter.forcedReleaseCount).toBe(0);
+    expect(adapter.heldBoundaryCount).toBe(0);
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -6678,9 +6836,9 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await Promise.all([ready, release, closed]);
 
     // The release drove no ssh2 Client end() of its own: close() owns the final
-    // teardown, and nothing was classified as a deliberate idle release.
+    // teardown, and the release classified nothing at all.
     expect(rawClient.end).not.toHaveBeenCalled();
-    expect(releaseBoundaryStands(adapter)).toBe(false);
+    expect(boundarySaysReleaseTookTheSession(adapter)).toBe(false);
     expect(client.end).toHaveBeenCalledOnce();
   });
 
@@ -8506,7 +8664,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     delete (rawClient._sock as Record<string, unknown>).writableEnded;
     await expect(adapter.ensureConnected()).resolves.toBe(false);
     expect(state.live).toBe(true);
-    expect(releaseBoundaryStands(adapter)).toBe(false);
+    expect(boundarySaysReleaseTookTheSession(adapter)).toBe(false);
 
     // The release that follows drives nothing either: the same absent seam refuses
     // it before it reaches the transport, so it too ends nothing.
@@ -8552,7 +8710,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       "socket already destroyed",
     );
     expect(state.live).toBe(true);
-    expect(releaseBoundaryStands(adapter)).toBe(false);
+    expect(boundarySaysReleaseTookTheSession(adapter)).toBe(false);
 
     // The server drops the session the release could not close.
     state.live = false;

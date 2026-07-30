@@ -247,7 +247,11 @@ interface Ssh2ClientSocket {
   // WHO ended the transport. `readableEnded` is true once the peer's FIN has been
   // consumed (the peer began the teardown, so what follows is a server-side drop
   // rather than this adapter's release); `writableEnded` is true once this side has
-  // ended it (ssh2's Client.end() calls _sock.end()). See releaseForIdle().
+  // ended it (ssh2's Client.end() calls _sock.end()), so BEFORE the release drives
+  // its own end() it is a transport ended with no FIN back and not by this release
+  // -- ssh2 answering a partner's SSH_MSG_DISCONNECT is the shape it is read for,
+  // and what the reading establishes is only that the end was not this boundary's.
+  // See releaseForIdle() and sessionTransportEnded().
   readableEnded?: boolean;
   writableEnded?: boolean;
   // net.Socket's own unconditional teardown, which -- unlike end() -- needs nothing
@@ -429,11 +433,50 @@ type SessionTransitionKind =
   | "teardown";
 
 // How the session's last completed boundary was reached. `deliberatelyReleased`
-// is the connection-per-poll release having ended the session on purpose;
-// everything else -- including a release that raised, one that walked into the
-// PEER's teardown, and one that could not clear the session it destroyed -- is a
-// loss the operator must see counted and warned.
-type SessionBoundary = "deliberatelyReleased" | "notReleased";
+// is the connection-per-poll release having been itself what ended the session;
+// `releasedOverEndedTransport` is that same release having closed over a
+// transport already ended without it -- a PARTNER-side drop is the shape it
+// exists for -- so the session's absence is the release's while the LOSS is not
+// its doing. `notReleased` is everything else -- including a release that raised,
+// one that walked into the PEER's teardown, and one that could not clear the
+// session it destroyed.
+type SessionBoundary =
+  "deliberatelyReleased" | "releasedOverEndedTransport" | "notReleased";
+
+// What a boundary reading answers at each of the two sites that reads one. The
+// two questions are separate, and conflating them is what the middle variant
+// exists to stop: a release that closed over a partner's drop took the session
+// away exactly as any other release did, while the loss an operation suffered at
+// that boundary is the partner's and the operator must see it counted and warned.
+interface SessionBoundaryReadings {
+  // Whether the session is absent because a release of this adapter's took it,
+  // read by the recovery chokepoint's pre-establish gate and by the deferred
+  // cleanup delete (see SSH2SFTPClientAdapter.idleReleaseLeftNoSession). It is
+  // also what no transition may leave standing over a LIVE session (see
+  // SSH2SFTPClientAdapter.runTransition).
+  readonly releaseTookTheSession: boolean;
+  // Whether the loss an operation suffered at this boundary was this adapter's own
+  // doing, and so exempt from the reconnect counters and the operator warning (see
+  // SSH2SFTPClientAdapter.withSessionRecovery).
+  readonly lossWasDeliberate: boolean;
+}
+
+// Exhaustive over the boundary readings, so a fourth cannot be added without
+// stating both answers for it.
+const SESSION_BOUNDARY_READINGS: Record<
+  SessionBoundary,
+  SessionBoundaryReadings
+> = {
+  deliberatelyReleased: {
+    releaseTookTheSession: true,
+    lossWasDeliberate: true,
+  },
+  releasedOverEndedTransport: {
+    releaseTookTheSession: true,
+    lossWasDeliberate: false,
+  },
+  notReleased: { releaseTookTheSession: false, lossWasDeliberate: false },
+};
 
 // Records the boundary a transition reached, at the point inside the transition
 // where it is decided. Handed to each transition by runTransition, which owns the
@@ -633,17 +676,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private transitionInProgress: HeldSessionTransition | undefined;
   // How the session's last completed boundary was reached, written ONLY by
   // runTransition -- through the recorder it hands each transition, by restoring
-  // the previous reading when a transition rejects, and by taking a
-  // deliberate-release reading back from a transition that leaves a session live.
-  // Read by withSessionRecovery's gate (re-establish before the first attempt) and
-  // by its classification: a re-dial following a deliberate lifecycle transition is
-  // exempt from the reconnect counters and the operator warning, exactly as a
-  // teardown re-dial is. Discharged by the dial that re-establishes the session --
-  // the single path every re-establishment goes through -- so a failed dial leaves
-  // it standing and a genuine drop after a completed re-establishment is counted
-  // and warned as one. Outside the release's own close window, `deliberatelyReleased`
-  // stands only where no session is live: over a live one it would exempt that
-  // session's next real drop, the misreport it exists to prevent.
+  // the previous reading when a transition rejects, and by taking a release reading
+  // back from a transition that leaves a session live. Read at two sites, which ask
+  // different questions of it (SESSION_BOUNDARY_READINGS holds both answers per
+  // variant): withSessionRecovery's gate re-establishes before the first attempt of
+  // an operation a release left no session for, and its classification exempts a
+  // re-dial following a deliberate lifecycle transition from the reconnect counters
+  // and the operator warning, exactly as a teardown re-dial is exempt. Discharged
+  // by the dial that re-establishes the session -- the single path every
+  // re-establishment goes through -- so a failed dial leaves it standing and a
+  // genuine drop after a completed re-establishment is counted and warned as one.
+  // Outside the release's own close window, no release reading stands where a
+  // session is live: the exempting one would exempt that session's next real drop,
+  // the misreport it exists to prevent, and the other would send that session's
+  // next operation through a re-establishment it does not need.
   private sessionBoundary: SessionBoundary = "notReleased";
   private log: ReturnType<typeof getLoggerForVerbosity>;
   // The raw SFTPWrapper this adapter has already attached its fatal-'error'
@@ -880,9 +926,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * re-dial (a re-dial that survived a server-side drop is itself a reconnection,
    * and connect()'s own counter does not see one that succeeds on its first
    * attempt). A re-establishment that follows a DELIBERATE lifecycle transition --
-   * the connection-per-poll idle release, or teardown -- is not counted: nothing
-   * was lost, so counting it would report drops a healthy exchange never had. A
-   * plain operational counter, never a partner-controlled value.
+   * teardown, or a connection-per-poll idle release that was itself what ended the
+   * session -- is not counted: nothing was lost, so counting it would report drops
+   * a healthy exchange never had. A release closing over a transport a partner's
+   * drop had already ended is not one of those, and the re-dial that recovers that
+   * drop is counted like any other. A plain operational counter, never a
+   * partner-controlled value.
    */
   get reconnectCount(): number {
     return this.reconnectAttempts;
@@ -916,12 +965,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   /**
    * Idle boundaries at which the partner's SFTP server did not close the
    * connection within the release's bound, so the connection-per-poll release
-   * ended the boundary itself (see {@link releaseForIdle}). NOT a reconnection
-   * and not a lost session: the mode's own boundary, deliberate on both the
-   * release and the dial that follows it, and therefore absent from
-   * {@link reconnectCount}. 0 in every other mode and against a server that
-   * closes on request. A plain operational counter, never a partner-controlled
-   * value.
+   * ended the boundary itself (see {@link releaseForIdle}). NOT a reconnection: the
+   * mode's own boundary, and therefore absent from {@link reconnectCount}. It says
+   * nothing about whether a session was ALSO lost at that boundary -- a release
+   * closing over a transport a partner's drop had already ended reaches this same
+   * forced close, and where that drop tore an operation, the recovery path counts
+   * and warns the loss; where it tore nothing, no recovery runs and this count is
+   * the only report of that boundary. 0 in every other mode and against a server
+   * that closes on request. A plain operational counter, never a
+   * partner-controlled value.
    */
   get forcedReleaseCount(): number {
     return this.forcedReleases;
@@ -1058,20 +1110,23 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         this.sessionBoundary = boundaryOnEntry;
         throw error;
       } finally {
-        // No transition leaves a deliberate-release boundary standing over a live
-        // session: the reading exempts the next drop from the reconnect counters
-        // and the operator warning, and over a session the server can still drop,
-        // that exemption hides a partner-caused failure. Two routes reach that
-        // state -- a release that ended nothing (its own raise takes the reading
-        // back only as far as the one it entered with), and a dial that
-        // established a session and then failed its post-connect verification,
-        // never reaching its own discharge, whose failure the cycle-start
-        // reconnect reports as a cycle to skip rather than a raise. The release's
-        // own close window is no exception: it records the boundary while its
-        // transition still holds, and by the time that transition leaves, the
-        // session it deliberately ended is gone.
+        // No transition leaves a reading that a release took the session standing
+        // over a live session, and each of the two such readings is wrong there for
+        // its own reason: the exempting one exempts the next drop from the reconnect
+        // counters and the operator warning, and over a session the server can still
+        // drop that hides a partner-caused failure, while the other sends that
+        // session's next operation through a re-establishment of a session it
+        // already has. Two routes reach that state -- a release that ended nothing
+        // (its own raise takes the reading back only as far as the one it entered
+        // with), and a dial that established a session and then failed its
+        // post-connect verification, never reaching its own discharge, whose failure
+        // the cycle-start reconnect reports as a cycle to skip rather than a raise.
+        // The release's own close window is no exception: it records the boundary
+        // while its transition still holds, and by the time that transition leaves,
+        // the session it ended is gone.
         if (
-          this.sessionBoundary === "deliberatelyReleased" &&
+          SESSION_BOUNDARY_READINGS[this.sessionBoundary]
+            .releaseTookTheSession &&
           this.hasLiveSession()
         )
           this.sessionBoundary = "notReleased";
@@ -1672,9 +1727,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         // the boundary: reading it afterwards would classify every deliberate release
         // as a drop -- the misreport this exists to stop. The release records the
         // boundary before it drives the close that tears this operation off the wire,
-        // so an operation torn by it reads the boundary that tore it.
+        // so an operation torn by it reads the boundary that tore it. A release that
+        // closed over a transport a partner-side drop had already ended records a
+        // boundary that answers the gate above without exempting this loss, so the
+        // drop it closed over is counted and warned like any other.
         const deliberateRelease =
-          this.sessionBoundary === "deliberatelyReleased";
+          SESSION_BOUNDARY_READINGS[this.sessionBoundary].lossWasDeliberate;
         // Cap the cumulative mid-exchange reconnections in the default held-session
         // mode: once max_reconnect_attempts drops have already been re-dialed this
         // exchange, refuse the next and fail terminally. Gated off in
@@ -1792,7 +1850,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // returns before enqueuing when the mode is off, so the default held-session
   // mode reads false here every time without a mode check of its own. The first
   // covers the close window itself, including a release the PEER began (which
-  // records no boundary); the second covers the gap after a release completed.
+  // records no boundary); the second covers the gap after a release completed, and
+  // asks only whether a release took the session -- WHOSE loss it closed over is
+  // the recovery arm's question, not this one's, and a release that closed over a
+  // partner's drop left no session for this operation exactly as any other did.
   //
   // Read from two places, which is why it is one method rather than two copies of
   // the pair: the recovery chokepoint's gate, which re-establishes before the
@@ -1803,7 +1864,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private idleReleaseLeftNoSession(): boolean {
     return (
       this.transitionInProgress?.kind === "releaseForIdle" ||
-      this.sessionBoundary === "deliberatelyReleased"
+      SESSION_BOUNDARY_READINGS[this.sessionBoundary].releaseTookTheSession
     );
   }
 
@@ -1865,15 +1926,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   //   --connection-per-poll, and the remaining budget is stated so "the exchange
   //   continues" is not read as open-ended (exhausting it is terminal, see
   //   midExchangeReconnectBudgetExhaustedError).
-  //   Connection-per-poll: the mode's own idle release never reaches this warning
-  //   (withSessionRecovery exempts it), but the two remaining causes are not
-  //   distinguishable from inside the adapter -- the per-cycle session lifetime is
-  //   a property of the POLL LOOP, and the rendezvous that precedes it holds one
-  //   session across its waits, so a cap can cut either. Both are named with the
-  //   remedy for each, and the rendezvous case is called out as the mode working
-  //   so an operator who chose it for a capping server is not sent after their
-  //   link. It quotes no budget (the cap does not charge this mode) and names the
-  //   per-operation peer-inactivity ceiling that does bound it.
+  //   Connection-per-poll: every line here reports a loss that was the PARTNER's.
+  //   The mode's own release-and-re-dial lifecycle is exempt -- only a release that
+  //   was itself what ended the session records the boundary withSessionRecovery
+  //   exempts, and a unit case pins an ordinary cycle warning nothing -- while a
+  //   partner drop a release closed over instead (see releaseForIdle) is one of the
+  //   two causes below rather than a third, the release closing only at a poll-cycle
+  //   boundary, so the drop it closed over cut inside a cycle. Which of the two it
+  //   was is not distinguishable from inside the adapter -- the per-cycle session
+  //   lifetime is a property of the POLL LOOP, and the rendezvous that precedes it
+  //   holds one session across its waits, so a cap can cut either. Both are named
+  //   with the remedy for each, and the rendezvous case is called out as the mode
+  //   working so an operator who chose it for a capping server is not sent after
+  //   their link. It quotes no budget (the cap does not charge this mode) and names
+  //   the per-operation peer-inactivity ceiling that does bound it.
   // Nothing beyond that is disclosed.
   private warnSessionRecovered(): void {
     const count = this.midExchangeRedials;
@@ -2817,20 +2883,40 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     const seams = this.resolveTransportCloseSeams(internals);
     if ("missing" in seams) throw this.transportCloseSeamError(seams.missing);
     const { end, once, removeListener, socket } = seams;
-    // The PEER started this teardown: its FIN has already been consumed, so ssh2
-    // has emitted 'end' and the 'close' is on its way, and the end() below closes
-    // nothing. ssh2-sftp-client's global 'end' listener leaves `sftp` set, so the
-    // release runs its course as usual -- but the boundary is not this adapter's,
-    // because what cleared the session was a server-side drop and the operator has
-    // to see it counted and warned as one.
-    const peerEndedTransport = socket.readableEnded === true;
-    // Recorded BEFORE the close is driven: an operation already on the wire is torn
-    // by that close and reaches session recovery while this release is still
-    // running, and the boundary is what tells that recovery the loss was
-    // deliberate. A release that raises below has ended nothing and leaves the
-    // session reading live, which runTransition takes the boundary back over on
-    // the way out, so the next drop stays classifiable as the drop it is.
-    if (!peerEndedTransport) held.recordBoundary("deliberatelyReleased");
+    // WHO ended this transport decides which boundary the release records, and the
+    // three answers are not two. Recorded BEFORE the close is driven: an operation
+    // already on the wire is torn by that close and reaches session recovery while
+    // this release is still running, and the boundary is what tells that recovery
+    // whose loss it suffered. A release that raises below has ended nothing and
+    // leaves the session reading live, which runTransition takes the reading back
+    // over on the way out, so the next drop stays classifiable as the drop it is.
+    //
+    // `readableEnded` is the PEER having started the teardown: its FIN has already
+    // been consumed, so ssh2 has emitted 'end' and the 'close' is on its way, and
+    // the end() below closes nothing. ssh2-sftp-client's global 'end' listener
+    // leaves `sftp` set, so the release runs its course as usual -- but nothing is
+    // recorded, because what cleared the session was a server-side drop and the
+    // operator has to see it counted and warned as one.
+    //
+    // `writableEnded` without it is this side's half ended with no FIN back, before
+    // this release has driven its own end(), so something other than this release
+    // ended it -- the shape it is read for is a partner that dropped the SFTP
+    // session while withholding its connection close, whose SSH_MSG_DISCONNECT ssh2
+    // answers by ending its own socket (see sessionTransportEnded). What the reading
+    // establishes is only that the end was not this release's, which is what the
+    // classification turns on. The session is still this release's to take, and the
+    // boundary recorded says so for the gate an operation issued after it passes --
+    // but the LOSS an operation torn here suffered is not this release's doing, so
+    // that boundary exempts nothing.
+    //
+    // Neither half ended is the ordinary release, whose own end() below is what
+    // ends the transport.
+    if (socket.readableEnded !== true)
+      held.recordBoundary(
+        socket.writableEnded === true
+          ? "releasedOverEndedTransport"
+          : "deliberatelyReleased",
+      );
     await this.awaitClientClose(
       held,
       once,
@@ -2847,10 +2933,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     if (socket.writableEnded === false) {
       // The transport this adapter's end() should have ended is still writable, so
       // this is the one branch where the session may genuinely be live and held
-      // across the idle gap. Take the boundary back: it may only stand over a
-      // session something deliberately ended, and exempting a live session's next
-      // drop from the counters and the operator warning is the misreport it exists
-      // to prevent.
+      // across the idle gap. Take the boundary back: no reading that a release took
+      // the session may stand over one that is still live, and exempting a live
+      // session's next drop from the counters and the operator warning is the
+      // misreport that rule exists to prevent.
       held.recordBoundary("notReleased");
       this.log.warn(
         "The connection-per-poll idle release did not close the SFTP session " +
@@ -2863,9 +2949,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     }
     if (!(await this.forceCloseEndedTransport(held, internals, seams)))
       // Raising takes the release's boundary back with it (the session still reads
-      // live, so runTransition drops the reading on the way out): the boundary may
-      // only stand where something deliberately ended a session, and this one did
-      // not end.
+      // live, so runTransition drops the reading on the way out): a reading that a
+      // release took the session may only stand where a session was in fact ended,
+      // and this one did not end.
       throw new Error(
         `the connection-per-poll idle release destroyed the SFTP session's ` +
           `transport and the session did not clear within ` +
@@ -3089,8 +3175,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // Account for an idle boundary the connection-per-poll release closed itself. A
   // partner that never closes forces one every cycle, so the operator hears it on
   // the cadence a chronic mid-exchange re-dial gets: the first, then every
-  // SFTP_REDIAL_WARN_INTERVAL-th. Nothing was lost and nothing leaks, so pacing it
-  // costs the operator nothing.
+  // SFTP_REDIAL_WARN_INTERVAL-th. Nothing leaks, and a loss suffered at one of
+  // these boundaries is reported by the path that recovered it rather than by this
+  // line, so pacing it costs the operator nothing.
   private countForcedRelease(): void {
     this.forcedReleases += 1;
     const count = this.forcedReleases;

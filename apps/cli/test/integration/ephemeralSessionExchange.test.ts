@@ -98,6 +98,31 @@ const deferredCleanupPaths = (adapter: SSH2SFTPClientAdapter): string[] => [
   ).deferredCleanupDeletes.keys(),
 ];
 
+// Whether the adapter's session property still reads set over a transport whose
+// writable half has ended with no FIN back -- the state a partner's drop leaves
+// while its close is withheld, and the reading the idle release classifies. Both
+// halves are internals (ssh2-sftp-client's session property, and Node's own
+// half-close flags on the socket beneath the ssh2 Client), so a case that needs
+// the state staged waits on the real stack producing it rather than assuming it.
+const sessionOverEndedTransport = (adapter: SSH2SFTPClientAdapter): boolean => {
+  const client = (
+    adapter as unknown as {
+      client: {
+        sftp?: unknown;
+        client?: {
+          _sock?: { writableEnded?: boolean; readableEnded?: boolean };
+        };
+      };
+    }
+  ).client;
+  const socket = client.client?._sock;
+  return (
+    Boolean(client.sftp) &&
+    socket?.writableEnded === true &&
+    socket.readableEnded !== true
+  );
+};
+
 // Count the dials the adapter issues and the dials that settle as failures, so a
 // case can wait on a cycle having tried to dial, or on its attempt having
 // actually failed, rather than on a delay. It wraps the ssh2-sftp-client
@@ -238,6 +263,95 @@ inProcessOnly(
       srv.sessionControls.stopWithholdingCloses();
       await receiver.close().catch(() => {});
       await sender.close().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "a partner drop the idle boundary closes over with nothing on the wire is " +
+    "reported as the forced release alone",
+  async () => {
+    // The same withheld-close drop the recovery path counts, with no operation for
+    // it to tear: the partner drops the session between two poll cycles and the
+    // idle boundary falls afterwards, so nothing reaches session recovery and the
+    // release is the only thing that meets the drop. What the operator gets is
+    // therefore this mode's forced-release line and a `reconnects` that never
+    // moves -- driven against the real server rather than modelled, because what
+    // the release's own end() does to a transport ssh2 has already ended is the
+    // pinned stack's behavior (see docs/spec/DEPENDENCY_PINS.md) and a stand-in
+    // that answered it differently would report a different operator experience.
+    // Driven at the adapter because the poll loop does not stage a drop between
+    // its cycles on demand.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "per-poll-untorn-drop-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    const dials = countDials(adapter);
+
+    try {
+      srv.sessionControls.withholdCloseOnDisconnect = true;
+      await adapter.connect({
+        host: srv.handle.host,
+        port: srv.handle.port,
+        ...serverAuth(srv.handle.usera),
+        maxReconnectAttempts: 0,
+      });
+
+      const [outcome, logs] = await withCapturedLogs(
+        async () => {
+          // The drop lands with the wire empty, so no operation is torn by it.
+          srv.sessionControls.dropActiveAfterMs(1);
+          await waitFor(() => sessionOverEndedTransport(adapter), {
+            what: "the partner's drop leaving a session over an ended transport",
+          });
+          await adapter.releaseForIdle();
+          const dialsAfterRelease = dials.issued();
+          // Issued after the boundary: the gate ahead of it re-establishes, and
+          // this operation is not one the drop could have torn.
+          const exists = await adapter.exists(remote);
+          return {
+            exists,
+            gateDials: dials.issued() - dialsAfterRelease,
+            outstanding: outstandingOperations(adapter),
+          };
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      // The operation ran on a session of its own, established by the one dial the
+      // gate made: a boundary that recorded nothing would have let it be issued at
+      // the session the release took, fail on it, and be recovered as a second drop.
+      expect(outcome.exists).toBe(true);
+      expect(outcome.gateDials).toBe(1);
+      expect(outcome.outstanding).toBe(0);
+      // No operation lost anything, so no re-dial recovered anything and neither
+      // reconnect counter moves. Pinned as the limit the spec states rather than as
+      // a property to rely on: this drop reaches no reconnect counter at all, and
+      // what reports the boundary is the forced release asserted below.
+      expect(adapter.reconnectCount).toBe(0);
+      expect(adapter.midExchangeReconnectCount).toBe(0);
+      expect(
+        logs.filter((entry) => entry.message.includes("dropped mid-exchange")),
+      ).toEqual([]);
+      // What the release met was a transport its own end() could not close, so it
+      // spent its bound and forced the close -- the one boundary this run reports.
+      expect(adapter.forcedReleaseCount).toBe(1);
+      const forced = logs.filter((entry) =>
+        entry.message.includes("did not close the connection"),
+      );
+      expect(forced).toHaveLength(1);
+      expect(forced[0].level).toBe("WARN");
+    } finally {
+      // Disarm before this party disconnects: end() awaits a close a silenced
+      // server never sends.
+      srv.sessionControls.stopWithholdingCloses();
+      srv.sessionControls.dropActiveAfterMs(0);
+      await adapter.end().catch(() => {});
       await fsp.rm(dir, { recursive: true, force: true });
       await srv.stop();
     }

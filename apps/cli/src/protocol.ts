@@ -603,10 +603,12 @@ export async function runProtocol(
     // the same reason: the inline WARN is paced (the first, then every tenth), so a
     // run whose last forced release fell off that cadence states its true total
     // nowhere else. It is deliberately NOT folded into the reconnect line above and
-    // does not reach the metrics event: nothing was lost here, the mode's own
-    // re-dials are deliberate, and a count of them among the reconnections would
-    // report drops the exchange never had. Zero in every other mode and against a
-    // server that closes on request, so the guard keeps a normal exchange quiet.
+    // does not reach the metrics event: closing a boundary from this side is not a
+    // re-establishment at all, so a count of these among the reconnections would
+    // report ones the exchange never made, and a loss suffered at one of them is
+    // already counted there by the path that recovered it. Zero in every other mode
+    // and against a server that closes on request, so the guard keeps a normal
+    // exchange quiet.
     const forcedReleases = client?.forcedReleaseCount ?? 0;
     if (forcedReleases > 0)
       log.info(
