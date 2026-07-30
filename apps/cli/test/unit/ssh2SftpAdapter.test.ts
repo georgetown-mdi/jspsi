@@ -3560,7 +3560,7 @@ describe("session recovery", () => {
     // The rendering boundary, not the raw message: sanitizeErrorForDisplay is the
     // only path a terminal CLI error takes to a terminal, and it caps each link of
     // the cause chain at DEFAULT_MAX_DISPLAY_LENGTH. The sentence the operator
-    // must act on -- that the message MAY have arrived -- has to clear that cap
+    // must act on -- that the publish MAY have arrived -- has to clear that cap
     // even against an ack name long enough to spend the whole budget, since a
     // truncation reaching it would leave prose asserting the opposite.
     const rendered = await renderUndeterminedPublish(
@@ -3568,7 +3568,7 @@ describe("session recovery", () => {
     );
     const [publishLink, ...causeLinks] = rendered.split("\ncaused by: ");
     expect(publishLink).toContain(
-      "the message may or may not have reached the partner",
+      "the publish may or may not have reached the partner",
     );
     // The truncation the cap does impose falls on the destination, which trails
     // the sentence rather than preceding it.
@@ -3595,7 +3595,7 @@ describe("session recovery", () => {
     expect(rendered).toContain("x1b[31mid");
     expect(rendered).toContain("x0a2026-01-01");
     expect(rendered).toContain(
-      "the message may or may not have reached the partner",
+      "the publish may or may not have reached the partner",
     );
   });
 

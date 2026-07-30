@@ -457,7 +457,7 @@ inProcessOnly(
             expect((cause as Error).message).toContain("_rename");
             const rendered = sanitizeErrorForDisplay(taken.error);
             expect(rendered).toContain(
-              "the message may or may not have reached the partner",
+              "the publish may or may not have reached the partner",
             );
             expect(rendered).toContain((cause as Error).message);
             await expect(party.adapter.exists(taken.dest)).resolves.toBe(false);

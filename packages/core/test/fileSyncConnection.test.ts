@@ -7814,7 +7814,7 @@ function undeterminedFirstAck(client: FileTransportClient): () => number {
     renames += 1;
     if (renames > 1) return realRename(from, to);
     throw new TransportPublishIndeterminateError(
-      "the message may or may not have reached the partner",
+      "the publish may or may not have reached the partner",
       { cause: new Error("_rename: No such file or directory") },
     );
   };

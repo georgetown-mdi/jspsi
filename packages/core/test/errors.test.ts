@@ -71,12 +71,31 @@ describe("errors deliberately left without a recovery hint", () => {
     expect(err.message).toBe(message);
   });
 
-  test("TransportPublishIndeterminateError stays untagged and is not a UsageError", () => {
+  test("ConnectionClosedError carries no hint and is not a UsageError", () => {
+    // Judged stepless by the audit: an internal teardown signal that almost
+    // never reaches the exit code, so the generic advisory has nothing to
+    // contradict and it stays a plain Error (CLI exit 69, not 64).
+    const err = new ConnectionClosedError();
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(UsageError);
+    expect(
+      (err as { psilinkRecoveryHintEmitted?: unknown })
+        .psilinkRecoveryHintEmitted,
+    ).toBeUndefined();
+  });
+});
+
+describe("errors whose recovery hint is per instance, not per class", () => {
+  test("TransportPublishIndeterminateError sets no class-level tag and is not a UsageError", () => {
     // Not a UsageError, which the poll loop reads as terminal; what that
     // distinction does and does not buy is measured in fileSyncConnection.test.ts
-    // rather than argued here. Untagged because the generic advisory concerns
-    // token rotation and re-inviting, which an unsettled publish neither
-    // contradicts nor answers.
+    // rather than argued here. The tag is absent from the CLASS because a
+    // transport raises this for several publishes at once -- a message, an ack, a
+    // rendezvous hello, an abort marker -- which share no recovery, so the
+    // transport's own instance carries no next step and suppresses nothing. The
+    // one caller whose recovery is established re-raises the class tagged and
+    // carrying it; that instance is pinned in fileSyncMessageLoop.test.ts, where
+    // the tagging happens.
     const cause = new Error("_rename: No such file or directory");
     const err = new TransportPublishIndeterminateError("publish torn", {
       cause,
@@ -85,19 +104,6 @@ describe("errors deliberately left without a recovery hint", () => {
     expect(err).not.toBeInstanceOf(UsageError);
     expect(err.name).toBe("TransportPublishIndeterminateError");
     expect(err.cause).toBe(cause);
-    expect(
-      (err as { psilinkRecoveryHintEmitted?: unknown })
-        .psilinkRecoveryHintEmitted,
-    ).toBeUndefined();
-  });
-
-  test("ConnectionClosedError carries no hint and is not a UsageError", () => {
-    // Judged stepless by the audit: an internal teardown signal that almost
-    // never reaches the exit code, so the generic advisory has nothing to
-    // contradict and it stays a plain Error (CLI exit 69, not 64).
-    const err = new ConnectionClosedError();
-    expect(err).toBeInstanceOf(Error);
-    expect(err).not.toBeInstanceOf(UsageError);
     expect(
       (err as { psilinkRecoveryHintEmitted?: unknown })
         .psilinkRecoveryHintEmitted,

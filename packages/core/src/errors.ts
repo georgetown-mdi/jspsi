@@ -307,10 +307,17 @@ export class TransportOperationStalledError extends UsageError {
  * exchange with the ack never republished. So the classification buys the loop's
  * own retry, not a surviving exchange.
  *
- * It carries no `psilinkRecoveryHintEmitted` tag, on the same reasoning as
- * {@link BilateralModeMismatchError}: the CLI's generic advisory concerns token
- * rotation and re-inviting, which this condition neither contradicts nor
- * answers.
+ * The `psilinkRecoveryHintEmitted` tag is a per-instance property here, not a
+ * class field, and the class itself sets none. A transport raises it for any of
+ * several publishes -- a message, an ack, a rendezvous hello, an abort marker --
+ * which share no recovery, so the transport's instance names the publish, adds
+ * no next step, and suppresses nothing.
+ * {@link FileSyncMessageLoop}'s send path re-raises the class for the one publish
+ * whose recovery is established, holding the transport's instance as its `cause`;
+ * that instance names the message, carries the recovery, and is tagged, so the
+ * generic advisory -- which prescribes a plain retry -- is suppressed rather than
+ * printed alongside a contradicting step. The convention stays two-state: an
+ * error is tagged exactly when it carries its own next step.
  */
 export class TransportPublishIndeterminateError extends Error {
   constructor(message: string, options: { cause: unknown }) {

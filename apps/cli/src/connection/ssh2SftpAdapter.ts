@@ -4163,12 +4163,19 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // The rejection for a publish whose fate the transport cannot settle: a
   // mid-operation drop tore the rename, and what the recovery could read of the
   // aftermath is the state a landed-then-consumed publish and an unlanded one
-  // share. It stays a rejection -- nothing here reports an unpublished message as
+  // share. It stays a rejection -- nothing here reports an unpublished write as
   // sent.
+  //
+  // Names the publish rather than a message, and prescribes no next step:
+  // rename() is shared machinery, and the four publishes reaching it -- the
+  // message loop's send(), its ack, the rendezvous joining->hello rename, and the
+  // abort marker -- share no remedy, so this carries no recovery-hint tag either.
+  // The one caller whose remedy is established re-raises this as its own tagged
+  // error holding this one as the `cause` (FileSyncMessageLoop's send()).
   //
   // Written to survive the display boundary, which caps each error in a rendered
   // cause chain at DEFAULT_MAX_DISPLAY_LENGTH: the sentence the operator must act
-  // on leads, and the destination -- named because the caller's own message may
+  // on leads, and the destination -- named because what this party published may
   // now be in the peer's hands under it -- comes last, where the cap costs least.
   // The re-issue's own error is carried only as the `cause`, so the SFTP status
   // it names is rendered on its own line under its own cap rather than spending
@@ -4179,8 +4186,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     toPath: string,
   ): TransportPublishIndeterminateError {
     return new TransportPublishIndeterminateError(
-      `the message may or may not have reached the partner: the publish was ` +
-        `cut off mid-operation and could not be confirmed afterwards. ` +
+      `the publish may or may not have reached the partner: it was cut off ` +
+        `mid-operation and could not be confirmed afterwards. ` +
         `Destination: ${sanitizeForDisplay(toPath)}`,
       { cause: error },
     );
