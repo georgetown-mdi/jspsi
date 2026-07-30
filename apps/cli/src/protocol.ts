@@ -12,6 +12,7 @@ import {
   deriveAbortToken,
   PeerAbortError,
   ReceiptVerificationError,
+  isPeerWaitTimeout,
   sanitizeForDisplay,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
@@ -67,6 +68,39 @@ export const PEER_SILENCE_GUIDANCE =
   "next message also cannot record why, so this side cannot name the cause. " +
   "Check the peer's own logs for the underlying error. If the peer is instead " +
   "still working on a large dataset, raise the peer timeout (--peer-timeout).";
+
+/**
+ * Operator guidance for a run that swept the shared folder at entry and then
+ * timed out waiting for the partner.
+ *
+ * `--sweep-exchange-files` asserts that no other session is using the folder,
+ * and the entry guard names the flag to whoever hits it, so both operators tend
+ * to reach for it at once. When they do, the second sweep deletes the first
+ * party's live rendezvous files: one side then waits out its peer timeout for a
+ * partner whose files are gone, and the other's handshake never gets an answer.
+ * Neither run's own error mentions sweeping, so without this line the operator
+ * sees a bare timeout and no reason to suspect the flag they just passed.
+ *
+ * The text is deliberately identical for both parties and prescribes the same
+ * single action to each, so recovering needs no contact between the two
+ * operators and no agreement on who goes first. It hedges ("appear to have")
+ * because only the party that swept first can observe this positively -- its own
+ * live hello vanished -- while the second can only infer it; a run that swept
+ * and then timed out for an unrelated reason (a partner that never started)
+ * reads a plausible suggestion rather than a wrong diagnosis, and the prescribed
+ * retry is correct for that case too.
+ *
+ * Claiming the folder is empty is licensed only for a clean delete-mode
+ * timeout. A sweep that reported it could not delete every file leaves the
+ * folder possibly partly cleared, and a retain-mode run keeps every protocol
+ * file it wrote, so neither reaches this text -- see the gate at the emission
+ * site. Operator-facing description: docs/EXCHANGE_REFERENCE.md
+ * ("Directory exclusivity").
+ */
+export const BOTH_SWEPT_GUIDANCE =
+  "Both sides appear to have cleared the folder at the same time, removing " +
+  "each other's files. The folder should be empty now -- run the exchange " +
+  "again on both sides, without --sweep-exchange-files.";
 
 /**
  * CLI-layer extension of {@link Authentication} that co-locates the path where
@@ -1384,6 +1418,27 @@ export async function runProtocol(
           "(its signing block, certificate mode) before treating this as a " +
           "transport failure.",
       );
+
+    // Core tags the rendezvous peer-wait and key-exchange handshake timeouts
+    // (see markPeerWaitTimeout), so every fact this inference rests on is local
+    // to the run in hand. The tag is also what excludes the sweep's own "may be
+    // partially swept" failure: that error is raised from inside the same
+    // synchronize() call, so "failed during synchronization" does not
+    // distinguish the two, but it is not a peer-wait timeout and is never
+    // tagged.
+    //
+    // Emitted before the generic advisory below rather than instead of it. On
+    // the key-exchange side the `authStarted` advisory also fires; the two are
+    // compatible (both prescribe a retry) and the token-state context it carries
+    // -- the partner may have rotated and saved while this side did not -- is
+    // what the operator needs if the retry then fails authentication. Ordering
+    // puts the specific likely cause first.
+    if (
+      fileSyncRuntime.sweepExchangeFiles === true &&
+      connection.options?.retainFiles !== true &&
+      isPeerWaitTimeout(err)
+    )
+      log.error(BOTH_SWEPT_GUIDANCE);
 
     const hintAlreadyEmitted = isHintTagged(err);
     if (!hintAlreadyEmitted) {

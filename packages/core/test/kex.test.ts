@@ -5,6 +5,7 @@ import { x25519 } from "@noble/curves/ed25519.js";
 
 import { runKex, computeKexKeys, noiseHkdf } from "../src/kex";
 import { toBase64Url, fromBase64Url } from "../src/utils/crypto";
+import { isPeerWaitTimeout } from "../src/errors";
 import {
   ConnectionError,
   createMessagePipe,
@@ -246,6 +247,9 @@ test("the handshake times out if the peer never responds", async () => {
   // verdict, so it deliberately does NOT carry the security classification the
   // generic authentication failure does.
   expect(err).not.toBeInstanceOf(ConnectionError);
+  // Tagged as a peer-wait timeout so a consumer that also knows the run swept
+  // the shared folder at entry can offer that as the likely cause.
+  expect(isPeerWaitTimeout(err)).toBe(true);
 });
 
 test("runKex rejects when the psk is not 32 bytes", async () => {

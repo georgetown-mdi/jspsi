@@ -15,6 +15,7 @@ import {
   ConnectionError,
   type MessageConnection,
 } from "./connection/messageConnection.js";
+import { markPeerWaitTimeout } from "./errors.js";
 
 // Authenticated key exchange that replaces SPAKE2 as the source of the exchange
 // session key. It is an ephemeral X25519 Diffie-Hellman pinned to the Noise
@@ -415,7 +416,7 @@ async function receiveHandshake(conn: MessageConnection): Promise<unknown> {
     return await conn.receive(HANDSHAKE_TIMEOUT_MS);
   } catch (e) {
     if (e instanceof ConnectionError && e.kind === "transport") {
-      throw new Error(TIMEOUT_FAILURE, { cause: e });
+      throw markPeerWaitTimeout(new Error(TIMEOUT_FAILURE, { cause: e }));
     }
     throw e;
   }

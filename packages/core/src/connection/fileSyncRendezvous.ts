@@ -39,7 +39,11 @@ import {
 } from "../utils/boundedJson";
 import type { getLoggerForVerbosity } from "../utils/logger";
 import type { HandshakeRole } from "../types";
-import { UsageError, BilateralModeMismatchError } from "../errors";
+import {
+  UsageError,
+  BilateralModeMismatchError,
+  markPeerWaitTimeout,
+} from "../errors";
 import {
   ADVERTISE_HELLO_RETRY_ATTEMPTS,
   cancellableDelay,
@@ -1348,7 +1352,7 @@ export class FileSyncRendezvous {
         // genuinely indeterminate here, so emit no `[role]` prefix (unlike
         // the lock timeout below, which is reachable only as the lone
         // starter).
-        throw new Error("synchronization has timed out");
+        throw markPeerWaitTimeout(new Error("synchronization has timed out"));
       }
 
       // Lock path.
@@ -1857,7 +1861,9 @@ export class FileSyncRendezvous {
             "hello. Retry the exchange.",
         );
       }
-      throw new Error("[starter] synchronization has timed out");
+      throw markPeerWaitTimeout(
+        new Error("[starter] synchronization has timed out"),
+      );
     };
     try {
       await waitForPeer();

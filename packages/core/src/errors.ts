@@ -407,3 +407,47 @@ export class PeerAbortError extends ConnectionError {
     this.name = "PeerAbortError";
   }
 }
+
+/** The property {@link markPeerWaitTimeout} sets and {@link isPeerWaitTimeout} reads. */
+const PEER_WAIT_TIMEOUT_TAG = "psilinkPeerWaitTimedOut";
+
+/**
+ * Tags an error as "this party waited its full budget for the partner and the
+ * partner never came": the rendezvous peer-wait timeouts and the key-exchange
+ * handshake timeout. It is a property tag rather than a subclass so it adds a
+ * machine-readable identity without changing either error's message (both are
+ * pinned exactly by existing tests) or its `instanceof` classification, which
+ * the CLI's 64-vs-69 exit-code split reads.
+ *
+ * It is deliberately NOT {@link PeerAbortError}'s `psilinkRecoveryHintEmitted`,
+ * whose meaning is the unrelated "suppress the CLI's generic advisory". A tagged
+ * error asserts only the local fact that the wait expired, never a reason for
+ * the partner's absence. A consumer that knows more about the run (the CLI knows
+ * whether this run swept the shared folder at entry) combines that with this tag
+ * to offer a likely cause; the tag alone never carries one.
+ *
+ * Not applied to the joiner-sentinel timeout, which is a different failure --
+ * the partner did arrive and then stalled mid-arrival -- already carrying its own
+ * specific diagnosis and next step.
+ */
+export function markPeerWaitTimeout<E extends object>(error: E): E {
+  return Object.assign(error, { [PEER_WAIT_TIMEOUT_TAG]: true });
+}
+
+/**
+ * Whether `error`, or anything in its `cause` chain, carries the
+ * {@link markPeerWaitTimeout} tag. The walk matters because the key-exchange
+ * timeout wraps the underlying transport error as its `cause` and a caller may
+ * wrap it again; a seen-set guards against a pathological `cause` cycle.
+ */
+export function isPeerWaitTimeout(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let cursor: unknown = error;
+  while (typeof cursor === "object" && cursor !== null && !seen.has(cursor)) {
+    seen.add(cursor);
+    if ((cursor as Record<string, unknown>)[PEER_WAIT_TIMEOUT_TAG] === true)
+      return true;
+    cursor = (cursor as { cause?: unknown }).cause;
+  }
+  return false;
+}

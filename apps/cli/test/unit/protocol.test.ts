@@ -231,6 +231,7 @@ import {
   authenticateConnection,
   generateSigningIdentity,
   ReceiptVerificationError,
+  isPeerWaitTimeout,
   MESSAGE_ENVELOPE_VERSION,
   MESSAGE_TYPE_BINARY,
   MESSAGE_HEADER_BYTES,
@@ -240,6 +241,7 @@ import type { ExchangeRecord, VerificationKeys } from "@psilink/core";
 import {
   runProtocol,
   PEER_SILENCE_GUIDANCE,
+  BOTH_SWEPT_GUIDANCE,
   type RunProtocolResult,
   type SigningPersist,
 } from "../../src/protocol";
@@ -986,6 +988,167 @@ test("runProtocol writes no key when SIGINT cancels before the handshake complet
   } finally {
     exitSpy.mockRestore();
   }
+});
+
+// --- Both-parties-swept retry advice -----------------------------------------
+
+// Runs a lone party against the shared folder with no partner ever arriving.
+// Given a clean folder it reaches the rendezvous peer-wait timeout, which is
+// the failure the second party to sweep observes.
+async function runLonePartyWithNoPartner(
+  fileSyncRuntime: { sweepExchangeFiles?: boolean } = {},
+): Promise<unknown> {
+  const [result] = await Promise.allSettled([
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1, peerTimeoutMs: 200 },
+      },
+      { sharedSecret: TOKEN_A, keyFilePath: path.join(tmpDir, "a.key") },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+      undefined,
+      undefined,
+      undefined,
+      fileSyncRuntime,
+    ),
+  ]);
+  expect(result.status).toBe("rejected");
+  return (result as PromiseRejectedResult).reason;
+}
+
+// Runs a party whose partner completes the rendezvous and then never answers
+// the handshake -- the failure the first party to sweep observes, its own live
+// hello having been taken by the second party's sweep. The partner is a bare
+// connection that rendezvouses and then stays silent, because the point of
+// departure has to be after the rendezvous and before the first handshake
+// message. The surviving party is started first so its own entry sweep runs
+// against an empty folder and cannot itself remove the partner's files.
+async function runPartyToKeyExchangeTimeout(
+  fileSyncRuntime: {
+    sweepExchangeFiles?: boolean;
+    forceRetainSweep?: boolean;
+  } = {},
+  connectionOptions: {
+    retainFiles?: boolean;
+    timestampInFilename?: boolean;
+    locklessRendezvous?: boolean;
+  } = {},
+): Promise<unknown> {
+  const surviving = runProtocol(
+    {
+      channel: "filedrop",
+      path: dropDir,
+      options: {
+        pollIntervalMs: 1,
+        peerTimeoutMs: 1_500,
+        ...connectionOptions,
+      },
+    },
+    { sharedSecret: TOKEN_A, keyFilePath: path.join(tmpDir, "a.key") },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-a",
+    undefined,
+    undefined,
+    undefined,
+    fileSyncRuntime,
+  );
+  await vi.waitFor(
+    () => expect(fs.readdirSync(dropDir).length).toBeGreaterThan(0),
+    { timeout: 5_000 },
+  );
+  const silentPartner = new FileSyncConnection(new LocalFSClient(), {
+    verbose: -1,
+    pollingFrequency: 1,
+  });
+  let result: PromiseSettledResult<RunProtocolResult>;
+  try {
+    // The peer runs the same bilateral flags: retain_files and
+    // lockless_rendezvous must match on both sides or the rendezvous fast-fails
+    // with a mismatch instead of reaching the handshake.
+    await silentPartner.open({
+      channel: "filedrop",
+      path: dropDir,
+      options: { pollIntervalMs: 1, ...connectionOptions },
+    });
+    await silentPartner.synchronize();
+    [result] = await Promise.allSettled([surviving]);
+  } finally {
+    await silentPartner.close().catch(() => {});
+  }
+  expect(result.status).toBe("rejected");
+  return (result as PromiseRejectedResult).reason;
+}
+
+test("the both-swept advice appears on a flagged run that fails waiting for the partner", async () => {
+  const err = await runLonePartyWithNoPartner({
+    sweepExchangeFiles: true,
+  });
+  expect((err as Error).message).toContain("synchronization has timed out");
+  expect(mockState.errors).toContain(BOTH_SWEPT_GUIDANCE);
+});
+
+test("the both-swept advice appears on a flagged run that fails in the key exchange", async () => {
+  const err = await runPartyToKeyExchangeTimeout({ sweepExchangeFiles: true });
+  expect((err as Error).message).toBe("key exchange handshake timed out");
+  expect(mockState.errors).toContain(BOTH_SWEPT_GUIDANCE);
+});
+
+test("the both-swept advice is absent from an unflagged run that fails the same two ways", async () => {
+  const waitErr = await runLonePartyWithNoPartner();
+  expect((waitErr as Error).message).toContain("synchronization has timed out");
+  expect(mockState.errors).not.toContain(BOTH_SWEPT_GUIDANCE);
+
+  fs.rmSync(dropDir, { recursive: true, force: true });
+  fs.mkdirSync(dropDir);
+  mockState.errors.length = 0;
+
+  const kexErr = await runPartyToKeyExchangeTimeout();
+  expect((kexErr as Error).message).toBe("key exchange handshake timed out");
+  expect(mockState.errors).not.toContain(BOTH_SWEPT_GUIDANCE);
+});
+
+test("the both-swept advice is absent when the sweep could not delete every file", async () => {
+  // The claim that the folder is now empty is unfounded when the sweep itself
+  // failed part-way, so this run keeps its own error and nothing else. The
+  // transport delete is stubbed to fail because a leftover the process cannot
+  // unlink is not constructible from within the test's own directory.
+  fs.writeFileSync(path.join(dropDir, "leftover-peer-lock.json"), "{}");
+  const deleteSpy = vi
+    .spyOn(LocalFSClient.prototype, "delete")
+    .mockRejectedValue(new Error("simulated delete failure"));
+  try {
+    const err = await runLonePartyWithNoPartner({
+      sweepExchangeFiles: true,
+    });
+    expect((err as Error).message).toContain("may be partially swept");
+    expect(mockState.errors).not.toContain(BOTH_SWEPT_GUIDANCE);
+  } finally {
+    deleteSpy.mockRestore();
+  }
+});
+
+test("the both-swept advice is absent from a flagged retain-mode run", async () => {
+  // Retain mode keeps the transcript -- cleanup() deletes nothing -- so the
+  // folder this run leaves behind still holds the rendezvous files, and the
+  // advice's premise that it is now empty (and so its "run it again" recovery,
+  // which the next run's entry guard rejects) does not hold. Retain mode is
+  // itself a retain signal, so the sweep needs --force-retain-sweep too.
+  const err = await runPartyToKeyExchangeTimeout(
+    { sweepExchangeFiles: true, forceRetainSweep: true },
+    { retainFiles: true, timestampInFilename: true, locklessRendezvous: true },
+  );
+  expect((err as Error).message).toBe("key exchange handshake timed out");
+  // The very failure the advice is gated on, so its absence below is the
+  // retain-mode exclusion and not some other error arriving first.
+  expect(isPeerWaitTimeout(err)).toBe(true);
+  expect(fs.readdirSync(dropDir).length).toBeGreaterThan(0);
+  expect(mockState.errors).not.toContain(BOTH_SWEPT_GUIDANCE);
 });
 
 // --- Token rotation via runProtocol ------------------------------------------
