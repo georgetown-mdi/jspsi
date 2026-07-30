@@ -134,10 +134,12 @@ generates from the npm tree. That is acceptable here in a way it is not for
 setup-time probe, over a share the operator is testing, never by the CLI or the
 console during a run.
 
-Two checks bound it. `scripts/dockerfile-freeze.test.mjs` holds the runtime
-stage's whole OS-package surface to that one instruction by literal, the way it
-holds the `.npmrc` COPY, so a second install or a wider spec on that line reddens
-rather than shipping. `image_smoke.yaml` asserts the built image provides
+Two checks bound it. `scripts/dockerfile-freeze.test.mjs` holds every
+`apk`/`apt`/`pip` install in the runtime stage to that one instruction by
+literal, the way it holds the `.npmrc` COPY, so a second install or a wider spec
+on that line reddens rather than shipping; a runtime-stage fetch by some other
+route -- curl and extract, or another language's package manager -- is outside
+what it sees. `image_smoke.yaml` asserts the built image provides
 `smbclient` (`docker run --rm --entrypoint sh <image> -c 'command -v smbclient'`),
 so a build that resolved the package away fails the pull request rather than an
 operator's setup run.
