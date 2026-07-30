@@ -408,13 +408,13 @@ Check that it mounts and that the folder is the one you meant:
 **PowerShell:**
 
 ```powershell
-docker run --rm -v 'psilink-sync:/rz' alpine:3.22 ls -la /rz
+docker run --rm -v 'psilink-sync:/rz' --entrypoint sh vdorie/psi-link:latest -c "ls -la /rz"
 ```
 
 **Command Prompt:**
 
 ```text
-docker run --rm -v "psilink-sync:/rz" alpine:3.22 ls -la /rz
+docker run --rm -v "psilink-sync:/rz" --entrypoint sh vdorie/psi-link:latest -c "ls -la /rz"
 ```
 
 This route puts the password on a command line -- in PowerShell, that means your
