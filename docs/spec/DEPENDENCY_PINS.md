@@ -162,9 +162,10 @@ or `winbindd` is installed, so nothing added listens.
 
     find / -xdev -type f \( -perm -2000 -o -perm -4000 \) -exec ls -l {} +
 
-which reports nothing on the pinned base digest at either architecture, and on
-the built image reports exactly `-rwxr-sr-x 1 root shadow /usr/sbin/unix_chkpwd`
-and no setuid file at all, beside the PAM helpers `faillock`,
+which reports nothing on the pinned base digest at either architecture, and after
+the install reports exactly `-rwxr-sr-x 1 root shadow /usr/sbin/unix_chkpwd` and
+no setuid file at all -- on the built `arm64` image, and at `x86_64` on the
+pinned base plus that one instruction. It sits beside the PAM helpers `faillock`,
 `mkhomedir_helper`, `pam_namespace_helper`, `pam_timestamp_check` and
 `pwhistory_helper`, none of them setgid. Exploitability rests on two properties
 of this image rather than on the package: it declares no `USER`, so a process in
