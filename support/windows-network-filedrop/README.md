@@ -122,6 +122,12 @@ A good run ends with a heading reading **Ready to run an exchange**, followed by
 the command to copy. Anything in red before that is a failure, and the script
 says underneath what to do about it.
 
+One run in between the two is possible: the volume is set up and usable, but the
+container could not get the tool the share checks need, so those checks did not
+run. That run ends with a further heading, **Set up, but not fully checked**,
+listing what was left untested and what to do if the exchange cannot reach the
+folder.
+
 ## When it finishes
 
 It prints the `docker run` command for an exchange with your volume name already

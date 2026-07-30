@@ -179,12 +179,21 @@ fi
 # the image: a machine that cannot resolve or route to the server would fail
 # here first, and "could not install samba-client" is a far worse description
 # of that than "cannot resolve the name".
+#
+# Exit 11 keeps this apart from the 1-7 verdicts, which all mean the checks ran
+# and the share was refused. This one means they could not run, and the setup
+# script carries on past it -- so nothing here may claim the file drop is
+# unusable, and what happens next is the setup script's to say, not the probe's.
 if ! command -v smbclient >/dev/null 2>&1; then
   APKOUT=$(apk add --no-cache samba-client 2>&1) || {
     emit ""
-    emit "FAIL: could not install samba-client inside the container."
+    emit "WARN: could not install samba-client inside the container."
     emit ""
     indent "$APKOUT"
+    emit ""
+    emit "SKIP: steps 3 to 6 all need smbclient, so none of them ran. Nothing"
+    emit "      has been established about the credentials, the share, the"
+    emit "      folder, or write access; steps 1 and 2 above stand."
     emit ""
     emit "MEANING: smbclient is not in the image the checks are running in, and"
     emit "         the container could not fetch it from the Alpine package"
@@ -200,10 +209,11 @@ if ! command -v smbclient >/dev/null 2>&1; then
     emit "         intercepting HTTPS -- a corporate proxy, usually. 'DNS' or"
     emit "         'temporary error' means name resolution inside the Docker VM."
     emit ""
-    emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and try again. If the"
-    emit "         image was already current, see the troubleshooting page, 'The"
-    emit "         container cannot install its tools'."
-    exit 1
+    emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and run this again to"
+    emit "         get the skipped checks. If the image was already current, see"
+    emit "         the troubleshooting page, 'The container cannot install its"
+    emit "         tools'."
+    exit 11
   }
 fi
 

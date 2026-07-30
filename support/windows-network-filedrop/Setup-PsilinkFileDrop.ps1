@@ -109,6 +109,34 @@ function Write-Warn { param([string] $T) Write-Host "  WARN  $T" -ForegroundColo
 function Write-Note { param([string] $T) Write-Host "        $T" -ForegroundColor Yellow }
 function Write-Info { param([string] $T) Write-Host "        $T" }
 
+function Write-DegradedLosses {
+    <#  What the operator is owed when the checks could not run. Named rather
+        than summarised: mount.cifs collapses the server's reasons into one
+        message, so the split the checks make between a password that is wrong
+        and an account that is refused cannot be recovered from a failed mount
+        afterwards, and that split is what decides who has to fix it. #>
+    Write-Info ''
+    Write-Info 'Nothing was established about the share itself:'
+    Write-Info ''
+    Write-Info '  - Whether the username and password are right, and whether this'
+    Write-Info '    account is allowed into the folder. A mount that fails says'
+    Write-Info '    "permission denied" for either, and they have different fixes:'
+    Write-Info '    a password that works, or rights from whoever administers the'
+    Write-Info '    share. Telling those two apart is what the checks are for.'
+    Write-Info '  - So if an exchange cannot reach the folder, do NOT work through'
+    Write-Info '    passwords. Each attempt is a real failed sign-in against the'
+    Write-Info '    account, and a handful of them locks a domain account out. Get'
+    Write-Info '    the checks running first and let them name the reason.'
+    Write-Info '  - Free space on the share, and whether the folder already holds'
+    Write-Info '    more than 8192 files, which psilink will not read.'
+    Write-Info ''
+    Write-Info 'The checks need smbclient in the image they run in: see the'
+    Write-Info 'troubleshooting page, "The container cannot install its tools",'
+    Write-Info 'then run this script again.'
+    Write-Host ''
+    Write-Note 'Status 12: set up as far as it went, checks incomplete.'
+}
+
 function Hide-Secret {
     <#  Removes the password from text about to be shown or pasted into a
         ticket. Docker masks "password=" only as far as the next comma, so its
@@ -478,12 +506,21 @@ fi
 # the image: a machine that cannot resolve or route to the server would fail
 # here first, and "could not install samba-client" is a far worse description
 # of that than "cannot resolve the name".
+#
+# Exit 11 keeps this apart from the 1-7 verdicts, which all mean the checks ran
+# and the share was refused. This one means they could not run, and the setup
+# script carries on past it -- so nothing here may claim the file drop is
+# unusable, and what happens next is the setup script's to say, not the probe's.
 if ! command -v smbclient >/dev/null 2>&1; then
   APKOUT=$(apk add --no-cache samba-client 2>&1) || {
     emit ""
-    emit "FAIL: could not install samba-client inside the container."
+    emit "WARN: could not install samba-client inside the container."
     emit ""
     indent "$APKOUT"
+    emit ""
+    emit "SKIP: steps 3 to 6 all need smbclient, so none of them ran. Nothing"
+    emit "      has been established about the credentials, the share, the"
+    emit "      folder, or write access; steps 1 and 2 above stand."
     emit ""
     emit "MEANING: smbclient is not in the image the checks are running in, and"
     emit "         the container could not fetch it from the Alpine package"
@@ -499,10 +536,11 @@ if ! command -v smbclient >/dev/null 2>&1; then
     emit "         intercepting HTTPS -- a corporate proxy, usually. 'DNS' or"
     emit "         'temporary error' means name resolution inside the Docker VM."
     emit ""
-    emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and try again. If the"
-    emit "         image was already current, see the troubleshooting page, 'The"
-    emit "         container cannot install its tools'."
-    exit 1
+    emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and run this again to"
+    emit "         get the skipped checks. If the image was already current, see"
+    emit "         the troubleshooting page, 'The container cannot install its"
+    emit "         tools'."
+    exit 11
   }
 fi
 
@@ -1170,7 +1208,13 @@ try {
         Write-Note 'The message Docker printed is the one to read.'
         exit $probeExit
     }
-    if ($probeExit -ne 0) {
+    # Exit 11 is the probe saying it could not run the checks, as opposed to
+    # running them and refusing the share: steps 1 and 2 passed and smbclient
+    # could not be had. The volume is still worth creating -- the engine mounts
+    # the share itself and needs nothing the container was missing -- so the run
+    # carries on and finishes at 12 rather than here.
+    $degraded = ($probeExit -eq 11)
+    if ($probeExit -ne 0 -and -not $degraded) {
         Write-Head 'Not ready yet'
         Write-Bad 'The file drop is not usable from Docker. Follow the ACTION above.'
         Write-Info ''
@@ -1178,10 +1222,26 @@ try {
         Write-Info 'https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md'
         exit $probeExit
     }
-    Write-Good 'The share is reachable, writable, and supports rename.'
+    if ($degraded) {
+        Write-Warn 'The checks stopped after step 2, so the share itself has not been'
+        Write-Note 'tested. Carrying on to create the volume anyway: Docker mounts the'
+        Write-Note 'share itself and needs nothing that was missing above. What that'
+        Write-Note 'leaves unchecked is listed at the end.'
+    }
+    else {
+        Write-Good 'The share is reachable, writable, and supports rename.'
+    }
 
     if ($SkipVolumeTest) {
         Write-Note 'Skipping volume creation as requested.'
+        if ($degraded) {
+            Write-Head 'Checks incomplete'
+            Write-Warn 'The checks in part 3 did not run past step 2, and no volume was'
+            Write-Note 'created because you asked for none. All that was established is'
+            Write-Note 'that the server answers on port 445 from inside Docker.'
+            Write-DegradedLosses
+            exit 12
+        }
         exit 0
     }
 
@@ -1374,20 +1434,25 @@ rm -f .psilink-a.tmp .psilink-b.tmp
     Write-Good 'The volume mounts and psilink can write to it.'
 
     if ($testOut -match 'MARKER_MISSING') {
-        Write-Bad 'The volume is not mounting the folder that was just tested.'
-        Write-Note 'A file left in the folder by part 3 is not visible through the'
-        Write-Note 'volume, so the two are pointing at different directories. The'
-        Write-Note 'server, share, or subfolder is wrong somewhere -- a DFS path is'
-        Write-Note 'the usual reason, because the namespace and the real location can'
-        Write-Note 'differ in all three.'
-        Write-Info ''
-        Write-Info 'Read the real path from the folder Properties, DFS tab, and run'
-        Write-Info 'again with -Server, -Share and -SubPath. See the'
-        Write-Info 'troubleshooting page, "Reading the real path from Windows".'
-        Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
-        exit 9
+        if (-not $degraded) {
+            Write-Bad 'The volume is not mounting the folder that was just tested.'
+            Write-Note 'A file left in the folder by part 3 is not visible through the'
+            Write-Note 'volume, so the two are pointing at different directories. The'
+            Write-Note 'server, share, or subfolder is wrong somewhere -- a DFS path is'
+            Write-Note 'the usual reason, because the namespace and the real location can'
+            Write-Note 'differ in all three.'
+            Write-Info ''
+            Write-Info 'Read the real path from the folder Properties, DFS tab, and run'
+            Write-Info 'again with -Server, -Share and -SubPath. See the'
+            Write-Info 'troubleshooting page, "Reading the real path from Windows".'
+            Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
+            exit 9
+        }
+        Write-Warn 'Nothing has checked that the volume opens the folder you named.'
+        Write-Note 'That test is a file the checks leave in the folder for the volume'
+        Write-Note 'to find, and they did not get that far.'
     }
-    if ($testOut -match 'MARKER_MISMATCH') {
+    elseif ($testOut -match 'MARKER_MISMATCH') {
         Write-Warn 'The check file in the folder is not the one part 3 wrote.'
         Write-Note 'Either someone else is setting up this same share right now,'
         Write-Note 'or an earlier run of this script left the file behind. The'
@@ -1395,7 +1460,11 @@ rm -f .psilink-a.tmp .psilink-b.tmp
         Write-Note "To tell the two apart, delete $MarkerName from the drop folder"
         Write-Note 'and run this again: if it comes back, you have company.'
     }
-    else {
+    elseif ($testOut -match 'MARKER_OK') {
+        # The reassuring line waits for the positive verdict rather than being
+        # inferred from the absence of the other two: with the checks stopped at
+        # step 2 there is no marker to find, and "the volume and the checks
+        # agree" would then be a claim nothing established.
         Write-Good 'The volume and the checks agree on which folder this is.'
     }
 
@@ -1486,3 +1555,17 @@ Write-Host ''
 Write-Info 'To send this output to whoever is helping you, copy it out of this'
 Write-Info 'window: right-click the title bar, then Edit > Select All, Edit >'
 Write-Info 'Copy. Nothing you typed as a password is on it.'
+
+if ($degraded) {
+    Write-Head 'Set up, but not fully checked'
+    Write-Warn 'The volume is ready and was tested: it mounts, and the writing,'
+    Write-Note 'renaming and exclusive create that psilink depends on all work'
+    Write-Note 'over it. It is the checks in part 3 that did not run past step 2.'
+    Write-Info ''
+    Write-Info 'So one thing about the volume is unproven: that it opens the folder'
+    Write-Info 'you named rather than a different one. Part 3 normally leaves a file'
+    Write-Info 'in the folder for the volume to find, and that comparison is the'
+    Write-Info 'only test of it.'
+    Write-DegradedLosses
+    exit 12
+}

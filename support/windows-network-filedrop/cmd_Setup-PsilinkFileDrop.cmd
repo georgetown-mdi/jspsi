@@ -52,6 +52,7 @@ set "DOMAIN_GIVEN="
 set "DIALECT="
 set "SKIP_CONFIRM="
 set "SKIP_VOLUME_TEST="
+set "DEGRADED="
 
 rem ---------------------------------------------------------------- arguments
 :parse
@@ -341,12 +342,28 @@ set "SMB_MARKER="
 set "SMB_TOKEN="
 
 if %PROBE_RC% GEQ 125 goto docker_broke
+if "%PROBE_RC%"=="11" goto probe_degraded
 if not "%PROBE_RC%"=="0" goto probe_failed
 
 call :good "The share is reachable, writable, and supports rename."
+goto probe_verdict_done
+
+rem Exit 11 is the probe saying it could not run the checks, as opposed to
+rem running them and refusing the share: steps 1 and 2 passed and smbclient
+rem could not be had. The volume is still worth creating -- the engine mounts
+rem the share itself and needs nothing the container was missing -- so the run
+rem carries on and ends at :degraded_summary rather than :done_ok.
+:probe_degraded
+set "DEGRADED=1"
+call :warn "The checks stopped after step 2, so the share itself has not been"
+call :note "tested. Carrying on to create the volume anyway: Docker mounts the"
+call :note "share itself and needs nothing that was missing above. What that"
+call :note "leaves unchecked is listed at the end."
+
+:probe_verdict_done
 if defined SKIP_VOLUME_TEST (
   call :note "Skipping volume creation as requested."
-  goto done_ok
+  goto volume_test_skipped
 )
 
 rem =========================================== part 4: create the volume
@@ -422,7 +439,7 @@ if not "%VOL_RC%"=="0" goto volume_mount_failed
 call :good "The volume mounts and psilink can write to it."
 
 findstr /c:"MARKER_MISSING" "%WORK%" >nul 2>&1
-if not errorlevel 1 goto marker_missing
+if not errorlevel 1 goto marker_absent
 
 findstr /c:"MARKER_MISMATCH" "%WORK%" >nul 2>&1
 if not errorlevel 1 (
@@ -432,9 +449,24 @@ if not errorlevel 1 (
   call :note "itself reached the folder either way."
   call :note "To tell the two apart, delete %MARKER_NAME% from the drop folder"
   call :note "and run this again: if it comes back, you have company."
-) else (
-  call :good "The volume and the checks agree on which folder this is."
+  goto marker_done
 )
+
+rem The reassuring line waits for the positive verdict rather than being
+rem inferred from the absence of the other two. With the checks stopped at
+rem step 2 there is no marker to find, and "the volume and the checks agree"
+rem would then be a claim nothing established.
+findstr /c:"MARKER_OK" "%WORK%" >nul 2>&1
+if not errorlevel 1 call :good "The volume and the checks agree on which folder this is."
+goto marker_done
+
+:marker_absent
+if not defined DEGRADED goto marker_missing
+call :warn "Nothing has checked that the volume opens the folder you named."
+call :note "That test is a file the checks leave in the folder for the volume"
+call :note "to find, and they did not get that far."
+
+:marker_done
 
 findstr /c:"RENAME_FAIL" "%WORK%" >nul 2>&1
 if not errorlevel 1 (
@@ -528,10 +560,61 @@ call :info ""
 call :info "Start the selection below the Password: line. Command Prompt"
 call :info "cannot hide typing, so what you typed there is still on screen."
 
+if defined DEGRADED goto degraded_summary
+
 :done_ok
 call :cleanup
 endlocal
 exit /b 0
+
+:volume_test_skipped
+if defined DEGRADED goto degraded_skipped
+goto done_ok
+
+rem ============================================== set up, checks incomplete
+:degraded_summary
+call :head "Set up, but not fully checked"
+call :warn "The volume is ready and was tested: it mounts, and the writing,"
+call :note "renaming and exclusive create that psilink depends on all work"
+call :note "over it. It is the checks in part 3 that did not run past step 2."
+call :info ""
+call :info "So one thing about the volume is unproven: that it opens the folder"
+call :info "you named rather than a different one. Part 3 normally leaves a file"
+call :info "in the folder for the volume to find, and that comparison is the"
+call :info "only test of it."
+goto degraded_losses
+
+:degraded_skipped
+call :head "Checks incomplete"
+call :warn "The checks in part 3 did not run past step 2, and no volume was"
+call :note "created because you asked for none. All that was established is"
+call :note "that the server answers on port 445 from inside Docker."
+goto degraded_losses
+
+:degraded_losses
+call :info ""
+call :info "Nothing was established about the share itself:"
+call :info ""
+call :info "  - Whether the username and password are right, and whether this"
+call :info "    account is allowed into the folder. A mount that fails says"
+call :info "    'permission denied' for either, and they have different fixes:"
+call :info "    a password that works, or rights from whoever administers the"
+call :info "    share. Telling those two apart is what the checks are for."
+call :info "  - So if an exchange cannot reach the folder, do NOT work through"
+call :info "    passwords. Each attempt is a real failed sign-in against the"
+call :info "    account, and a handful of them locks a domain account out. Get"
+call :info "    the checks running first and let them name the reason."
+call :info "  - Free space on the share, and whether the folder already holds"
+call :info "    more than 8192 files, which psilink will not read."
+call :info ""
+call :info "The checks need smbclient in the image they run in: see the"
+call :info "troubleshooting page, 'The container cannot install its tools',"
+call :info "then run this script again."
+echo(
+call :note "Status 12: set up as far as it went, checks incomplete."
+call :cleanup
+endlocal
+exit /b 12
 
 rem ================================================================= failures
 :no_docker
