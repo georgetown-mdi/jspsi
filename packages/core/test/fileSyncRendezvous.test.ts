@@ -32,6 +32,7 @@ import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
 import { cancellableDelay } from "../src/connection/fileSyncConstants";
 import {
   UsageError,
+  isPeerWaitTimeout,
   BilateralModeMismatchError,
   ConnectionClosedError,
 } from "../src/errors";
@@ -1024,6 +1025,10 @@ describe("FileSyncRendezvous entry scan and sweep contract", () => {
     expect((err as Error).message).toContain(
       "--sweep-exchange-files failed to delete",
     );
+    // Not a peer-wait timeout, so a consumer cannot offer the both-parties-swept
+    // retry advice here: this directory may be only partly cleared, so the
+    // advice's premise -- that it is now empty -- does not hold.
+    expect(isPeerWaitTimeout(err)).toBe(false);
   });
 });
 

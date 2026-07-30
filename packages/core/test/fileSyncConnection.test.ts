@@ -31,6 +31,7 @@ import {
   FrameSizeExceededError,
   TransportOperationStalledError,
   TransportPublishIndeterminateError,
+  isPeerWaitTimeout,
 } from "../src/errors";
 import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
 import { computeHostKeyFingerprint } from "../src/utils/sshHostKey";
@@ -3844,6 +3845,10 @@ test("synchronize() lock starter: a sentinel visible when the TTL expires yields
   );
   // NOT the generic bare timeout the pre-fix path produced.
   expect((err as Error).message).not.toMatch(/synchronization has timed out/);
+  // Not a peer-wait timeout either: the peer did arrive and then stalled, and
+  // this error already carries its own diagnosis and next step, so a consumer
+  // must not layer a second, contradicting likely cause onto it.
+  expect(isPeerWaitTimeout(err)).toBe(false);
 });
 
 test("synchronize() lock starter: a sentinel that vanishes and reappears gets a fresh recovery window", async () => {
@@ -3945,6 +3950,9 @@ test("synchronize() lock starter: TTL expiry with no joiner produces the bare [s
   expect((err as Error).message).toBe(
     "[starter] synchronization has timed out",
   );
+  // Tagged as a peer-wait timeout so a consumer that also knows the run swept
+  // the shared folder at entry can offer that as the likely cause.
+  expect(isPeerWaitTimeout(err)).toBe(true);
 });
 
 // --- synchronize(): empty-id hello/joining sentinels are rejected in the
@@ -5004,6 +5012,9 @@ test("synchronize() lockless timeout message carries no role prefix", async () =
   expect(err).toBeInstanceOf(Error);
   expect(err).not.toBeInstanceOf(UsageError);
   expect((err as Error).message).toBe("synchronization has timed out");
+  // Tagged as a peer-wait timeout so a consumer that also knows the run swept
+  // the shared folder at entry can offer that as the likely cause.
+  expect(isPeerWaitTimeout(err)).toBe(true);
 });
 
 test("synchronize() lockless mode throws when more than one peer hello is detected during the poll loop", async () => {
