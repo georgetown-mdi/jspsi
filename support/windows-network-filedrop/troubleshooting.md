@@ -148,15 +148,21 @@ what the package manager said, and skip steps 3 to 6. The script carries on from
 there: it creates the volume, tests what it can over the real mount, and
 finishes with status 12 and a list of what was left unchecked.
 
-Read that list. Steps 3 to 6 are the only thing that tells a wrong password
-apart from an account that signs in and is then refused the folder -- a failed
-mount says `permission denied` for both -- so if an exchange later cannot reach
-the folder, **do not work through passwords**: each attempt is a real failed
-sign-in, and a handful of them locks a domain account out. Ask whoever
-administers the share instead, or get the checks running and let them name the
-reason. They are also what compares the folder the volume opens with the folder
-you named, what reports the free space, and what warns when the folder already
-holds more files than psilink will read.
+Read that list. Which of two it is depends on whether the volume mounted.
+
+If it mounted, that mount signed in with the username and password you gave and
+opened the folder, so neither of those is in doubt. Three things are, and steps
+3 to 6 are what settle them: whether the volume opens the folder you named
+rather than a different one, how much free space the share has, and whether the
+folder already holds more files than psilink will read.
+
+If it did not mount, nothing about the share was established. Steps 3 to 6 are
+the only thing that tells a wrong password apart from an account that signs in
+and is then refused the folder -- a failed mount says `permission denied` for
+both -- so if an exchange later cannot reach the folder, **do not work through
+passwords**: each attempt is a real failed sign-in, and a handful of them locks
+a domain account out. Ask whoever administers the share instead, or get the
+checks running and let them name the reason.
 
 The image the checks run in is the psilink image, which carries `samba-client`
 already, so this is a fallback path rather than the ordinary one. Reaching it
@@ -309,7 +315,9 @@ it with `-Server`, `-Share` and `-SubPath`.
 
 If instead the script says nothing has checked which folder the volume opens,
 that comparison did not happen rather than failing: steps 3 to 6 did not run, so
-there was no file left for the volume to find. See
+there was no file left for the volume to find. The same holds when it reports a
+check file it did not itself write -- an earlier run or another operator left
+that one, and it settles nothing about this folder either. See
 [The container cannot install its tools](#the-container-cannot-install-its-tools).
 
 ## The three ways the script can end
@@ -321,12 +329,12 @@ one:
 - **`0`.** Nothing is wrong. Either the volume was created and every check
   passed, or there was nothing to do -- the folder turned out to be local, you
   answered `n` at the confirmation, or you passed `-SkipVolumeTest`.
-- **`12`.** The checks that need `smbclient` could not run, so the share itself
-  was not tested. The volume was created and tested as far as it could be, and
-  what is left unknown is under
+- **`12`.** The checks that need `smbclient` could not run. The volume was
+  created and tested as far as mounting it can test, and what that leaves
+  unknown is under
   [The container cannot install its tools](#the-container-cannot-install-its-tools).
-  With `-SkipVolumeTest` there is no volume, and 12 says the same thing about the
-  checks.
+  With `-SkipVolumeTest` there is no volume and nothing about the share was
+  tested at all; 12 says the same thing about the checks.
 - **anything else.** The run stopped and set nothing up. The `FAIL` line above
   says why, and this page has a section for it.
 

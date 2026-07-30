@@ -443,20 +443,33 @@ findstr /c:"MARKER_MISSING" "%WORK%" >nul 2>&1
 if not errorlevel 1 goto marker_absent
 
 findstr /c:"MARKER_MISMATCH" "%WORK%" >nul 2>&1
-if not errorlevel 1 (
-  call :warn "The check file in the folder is not the one part 3 wrote."
-  call :note "Either someone else is setting up this same share right now, or"
-  call :note "an earlier run of this script left the file behind. The volume"
-  call :note "itself reached the folder either way."
-  call :note "To tell the two apart, delete %MARKER_NAME% from the drop folder"
-  call :note "and run this again: if it comes back, you have company."
-  goto marker_done
-)
+if errorlevel 1 goto marker_agree
+if defined DEGRADED goto marker_mismatch_untested
+call :warn "The check file in the folder is not the one part 3 wrote."
+call :note "Either someone else is setting up this same share right now, or"
+call :note "an earlier run of this script left the file behind. The volume"
+call :note "itself reached the folder either way."
+call :note "To tell the two apart, delete %MARKER_NAME% from the drop folder"
+call :note "and run this again: if it comes back, you have company."
+goto marker_done
+
+:marker_mismatch_untested
+call :warn "There is a check file in that folder, and it is not one this"
+call :note "run left: part 3 writes it at the end, and it stopped at step"
+call :note "2. An earlier run, or someone else setting up this same share,"
+call :note "put it there. It settles nothing about which folder this is."
+call :note "Delete %MARKER_NAME% from the drop folder before the run that"
+call :note "does reach part 3, so that comparison starts clean."
+goto marker_done
 
 rem The reassuring line waits for the positive verdict rather than being
-rem inferred from the absence of the other two. With the checks stopped at
-rem step 2 there is no marker to find, and "the volume and the checks agree"
-rem would then be a claim nothing established.
+rem inferred from the absence of the other two, and is refused outright to a
+rem degraded run: the checks write the marker at the end, so one that stopped
+rem at step 2 wrote none, and any file the volume finds is some other run's.
+rem "The volume and the checks agree" would then be a claim nothing
+rem established.
+:marker_agree
+if defined DEGRADED goto marker_done
 findstr /c:"MARKER_OK" "%WORK%" >nul 2>&1
 if not errorlevel 1 call :good "The volume and the checks agree on which folder this is."
 goto marker_done
@@ -592,11 +605,7 @@ call :head "Set up, but not fully checked"
 call :warn "The volume is ready and was tested: it mounts, and the writing,"
 call :note "renaming and exclusive create that psilink depends on all work"
 call :note "over it. It is the checks in part 3 that did not run past step 2."
-call :info ""
-call :info "So one thing about the volume is unproven: that it opens the folder"
-call :info "you named rather than a different one. Part 3 normally leaves a file"
-call :info "in the folder for the volume to find, and that comparison is the"
-call :info "only test of it."
+call :degraded_partial_losses
 goto degraded_exit
 
 :degraded_skipped
@@ -604,10 +613,10 @@ call :head "Checks incomplete"
 call :warn "The checks in part 3 did not run past step 2, and no volume was"
 call :note "created because you asked for none. All that was established is"
 call :note "that the server answers on port 445 from inside Docker."
+call :degraded_losses
 goto degraded_exit
 
 :degraded_exit
-call :degraded_losses
 echo(
 call :note "Status 12: set up as far as it went, checks incomplete."
 call :cleanup
@@ -964,18 +973,30 @@ call :info "troubleshooting page, 'The container cannot install its tools',"
 call :info "then run this script again."
 exit /b 0
 
-rem What the operator is owed when the checks could not run but the mount then
-rem succeeded. Not :degraded_losses, whose list opens by saying nothing was
-rem established about the share: the mount that reached it established that the
-rem credentials do.
+rem What the operator is owed when the checks could not run but the volume then
+rem mounted. Not :degraded_losses, whose list opens by saying nothing was
+rem established about the share: this mount signed in.
+rem
+rem Measured against the Docker Desktop VM kernel with Samba authentication
+rem auditing on. The kernel does reuse an open CIFS session, but only for a
+rem mount presenting the same username and password: a wrong password offered
+rem while a good session is live is sent to the server as its own sign-in and
+rem refused there. So a mount that succeeds is the server having accepted these
+rem credentials, not the cache carrying it.
 :degraded_partial_losses
 call :info ""
-call :info "The checks in part 3 did not run, and two things they would have"
-call :info "settled are still open: whether this volume opens the folder you"
-call :info "named rather than a different one -- the file they leave behind"
-call :info "for the volume to find is the only test of that -- and whether"
-call :info "the folder already holds more than 8192 files, which psilink"
-call :info "will not read."
+call :info "The mount signed in with the username and password you gave and"
+call :info "opened the folder, so those two are settled: a wrong password, or"
+call :info "an account with no access to the folder at all, is refused here."
+call :info "Three things the checks in part 3 would have settled are open:"
+call :info ""
+call :info "  - Whether the volume opens the folder you named rather than a"
+call :info "    different one. The checks leave a file in the folder for the"
+call :info "    volume to find, and that comparison is the only test of it."
+call :info "  - How much free space the share has. The checks report it, and"
+call :info "    a share with no room left fails an exchange partway through."
+call :info "  - Whether the folder already holds more than 8192 files, which"
+call :info "    psilink will not read."
 call :info ""
 call :info "The checks need smbclient in the image they run in: see the"
 call :info "troubleshooting page, 'The container cannot install its tools',"

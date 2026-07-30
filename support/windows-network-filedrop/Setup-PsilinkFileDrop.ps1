@@ -135,6 +135,36 @@ function Write-DegradedLosses {
     Write-Info 'then run this script again.'
 }
 
+function Write-DegradedPartialLosses {
+    <#  What the operator is owed when the checks could not run but the volume
+        then mounted. Not Write-DegradedLosses, whose list opens by saying
+        nothing was established about the share: this mount signed in.
+
+        Measured against the Docker Desktop VM kernel with Samba authentication
+        auditing on. The kernel does reuse an open CIFS session, but only for a
+        mount presenting the same username and password: a wrong password
+        offered while a good session is live is sent to the server as its own
+        sign-in and refused there. So a mount that succeeds is the server
+        having accepted these credentials, not the cache carrying it. #>
+    Write-Info ''
+    Write-Info 'The mount signed in with the username and password you gave and'
+    Write-Info 'opened the folder, so those two are settled: a wrong password, or'
+    Write-Info 'an account with no access to the folder at all, is refused here.'
+    Write-Info 'Three things the checks in part 3 would have settled are open:'
+    Write-Info ''
+    Write-Info '  - Whether the volume opens the folder you named rather than a'
+    Write-Info '    different one. The checks leave a file in the folder for the'
+    Write-Info '    volume to find, and that comparison is the only test of it.'
+    Write-Info '  - How much free space the share has. The checks report it, and'
+    Write-Info '    a share with no room left fails an exchange partway through.'
+    Write-Info '  - Whether the folder already holds more than 8192 files, which'
+    Write-Info '    psilink will not read.'
+    Write-Info ''
+    Write-Info 'The checks need smbclient in the image they run in: see the'
+    Write-Info 'troubleshooting page, "The container cannot install its tools",'
+    Write-Info 'then run this script again.'
+}
+
 function Write-DegradedDialectRetry {
     <#  What a -Dialect retry means when the checks never reached the
         credentials. Measured against Samba 4.21 with authentication auditing
@@ -1421,22 +1451,7 @@ rm -f .psilink-a.tmp .psilink-b.tmp
             Write-Note 'is out of space.'
             Write-Info ''
             Write-Info 'See the troubleshooting page, "The folder cannot be written to".'
-            if ($degraded) {
-                # Not Write-DegradedLosses: that list opens by saying nothing was
-                # established about the share, and this mount established that the
-                # credentials reach it.
-                Write-Info ''
-                Write-Info 'The checks in part 3 did not run, and two things they would have'
-                Write-Info 'settled are still open: whether this volume opens the folder you'
-                Write-Info 'named rather than a different one -- the file they leave behind'
-                Write-Info 'for the volume to find is the only test of that -- and whether'
-                Write-Info 'the folder already holds more than 8192 files, which psilink'
-                Write-Info 'will not read.'
-                Write-Info ''
-                Write-Info 'The checks need smbclient in the image they run in: see the'
-                Write-Info 'troubleshooting page, "The container cannot install its tools",'
-                Write-Info 'then run this script again.'
-            }
+            if ($degraded) { Write-DegradedPartialLosses }
             Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
             exit 9
         }
@@ -1516,18 +1531,30 @@ rm -f .psilink-a.tmp .psilink-b.tmp
         Write-Note 'to find, and they did not get that far.'
     }
     elseif ($testOut -match 'MARKER_MISMATCH') {
-        Write-Warn 'The check file in the folder is not the one part 3 wrote.'
-        Write-Note 'Either someone else is setting up this same share right now,'
-        Write-Note 'or an earlier run of this script left the file behind. The'
-        Write-Note 'volume itself reached the folder either way.'
-        Write-Note "To tell the two apart, delete $MarkerName from the drop folder"
-        Write-Note 'and run this again: if it comes back, you have company.'
+        if ($degraded) {
+            Write-Warn 'There is a check file in that folder, and it is not one this'
+            Write-Note 'run left: part 3 writes it at the end, and it stopped at step'
+            Write-Note '2. An earlier run, or someone else setting up this same share,'
+            Write-Note 'put it there. It settles nothing about which folder this is.'
+            Write-Note "Delete $MarkerName from the drop folder before the run that"
+            Write-Note 'does reach part 3, so that comparison starts clean.'
+        }
+        else {
+            Write-Warn 'The check file in the folder is not the one part 3 wrote.'
+            Write-Note 'Either someone else is setting up this same share right now,'
+            Write-Note 'or an earlier run of this script left the file behind. The'
+            Write-Note 'volume itself reached the folder either way.'
+            Write-Note "To tell the two apart, delete $MarkerName from the drop folder"
+            Write-Note 'and run this again: if it comes back, you have company.'
+        }
     }
-    elseif ($testOut -match 'MARKER_OK') {
+    elseif (-not $degraded -and $testOut -match 'MARKER_OK') {
         # The reassuring line waits for the positive verdict rather than being
-        # inferred from the absence of the other two: with the checks stopped at
-        # step 2 there is no marker to find, and "the volume and the checks
-        # agree" would then be a claim nothing established.
+        # inferred from the absence of the other two, and is refused outright to
+        # a degraded run: the checks write the marker at the end, so one that
+        # stopped at step 2 wrote none, and any file the volume finds is some
+        # other run's. "The volume and the checks agree" would then be a claim
+        # nothing established.
         Write-Good 'The volume and the checks agree on which folder this is.'
     }
 
@@ -1636,12 +1663,7 @@ if ($degraded) {
     Write-Warn 'The volume is ready and was tested: it mounts, and the writing,'
     Write-Note 'renaming and exclusive create that psilink depends on all work'
     Write-Note 'over it. It is the checks in part 3 that did not run past step 2.'
-    Write-Info ''
-    Write-Info 'So one thing about the volume is unproven: that it opens the folder'
-    Write-Info 'you named rather than a different one. Part 3 normally leaves a file'
-    Write-Info 'in the folder for the volume to find, and that comparison is the'
-    Write-Info 'only test of it.'
-    Write-DegradedLosses
+    Write-DegradedPartialLosses
     Write-Host ''
     Write-Note 'Status 12: set up as far as it went, checks incomplete.'
     exit 12
