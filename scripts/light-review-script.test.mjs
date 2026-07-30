@@ -27,7 +27,16 @@ function compileScript() {
 
 const script = compileScript();
 const parallel = (thunks) => Promise.all(thunks.map((thunk) => thunk()));
-const run = (args, respond) => script(args, respond, parallel);
+const runner = (deliver) => (args, respond) =>
+  script(deliver(args), respond, parallel);
+
+// The harness may deliver the arguments as JSON text rather than as the object
+// the caller passed, so every case below runs under both shapes: a script that
+// reads only one of them selects the wrong branch under the other.
+const SHAPES = [
+  { shape: "object", deliver: (args) => args },
+  { shape: "string", deliver: (args) => JSON.stringify(args) },
+];
 
 const roleArgs = (claims, role = "adversarial-verifier") => ({
   docs: [],
@@ -48,7 +57,9 @@ const roleReply = (claims, summary = "the round") => ({
   summary,
 });
 
-describe("light-review role mode", () => {
+describe.each(SHAPES)("light-review role mode ($shape args)", ({ deliver }) => {
+  const run = runner(deliver);
+
   it("refuses a role that is not one of the two contract roles", async () => {
     await expect(
       run(roleArgs(["a claim"], "ux-reviewer"), () => {
@@ -123,6 +134,28 @@ describe("light-review role mode", () => {
     expect(result.gate).toBe(false);
   });
 
+  it("spawns the role it was given and gives it the docs to read", async () => {
+    let options = null;
+    let asked = null;
+    await run(
+      {
+        docs: ["docs/spec/FILE_SYNC.md"],
+        role: "security-reviewer",
+        claims: ["a claim"],
+      },
+      (prompt, spawn) => {
+        asked = prompt;
+        options = spawn;
+        return roleReply([verdict("a claim")]);
+      },
+    );
+    expect(options.agentType).toBe("security-reviewer");
+    expect(options.label).toBe("security-reviewer");
+    expect(asked).toContain(
+      "First read these docs for design context: docs/spec/FILE_SYNC.md",
+    );
+  });
+
   it("records the contract's own text, not the model's echo of it", async () => {
     const result = await run(roleArgs(["a claim"]), () =>
       roleReply([verdict("1. a claim")]),
@@ -168,7 +201,8 @@ describe("light-review role mode", () => {
   });
 });
 
-describe("light-review lens mode", () => {
+describe.each(SHAPES)("light-review lens mode ($shape args)", ({ deliver }) => {
+  const run = runner(deliver);
   const lensArgs = { docs: [], role: null, claims: [] };
   const review = {
     findings: [{ name: "n", description: "d", severity: "nit", file: "a.ts" }],
@@ -207,6 +241,20 @@ describe("light-review lens mode", () => {
     );
     expect(result.reviewerCount).toBe(3);
     expect(result.clusters).toEqual(clusters.clusters);
+  });
+
+  it("gives every agent it spawns the docs to read", async () => {
+    const asked = [];
+    await run({ ...lensArgs, docs: ["docs/DESIGN.md"] }, (prompt, options) => {
+      asked.push(prompt);
+      return options.label === "consolidator" ? clusters : review;
+    });
+    expect(asked).toHaveLength(4);
+    for (const prompt of asked) {
+      expect(prompt).toContain(
+        "First read these docs for design context: docs/DESIGN.md",
+      );
+    }
   });
 
   it("throws a salvage path when every reviewer is lost", async () => {

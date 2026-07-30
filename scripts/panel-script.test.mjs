@@ -1,0 +1,116 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { jsBlocks } from "./check-workflow-agent-models.mjs";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const COMMAND = ".claude/commands/panel.md";
+
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+
+// The command file carries the Workflow script an orchestrator pastes verbatim,
+// so the block in the file IS the artifact under test. Compile it into a function
+// of the three names the Workflow runtime injects; `export const meta` is the one
+// module-only spelling in it, and the top-level `return` is legal in a function
+// body.
+function compileScript() {
+  const blocks = jsBlocks(readFileSync(resolve(root, COMMAND), "utf8"));
+  if (blocks.length !== 1) {
+    throw new Error(
+      `expected exactly one fenced js block in ${COMMAND}, found ${blocks.length}`,
+    );
+  }
+  const body = blocks[0].code.replace(/^export const meta =/m, "const meta =");
+  return new AsyncFunction("args", "agent", "parallel", body);
+}
+
+const script = compileScript();
+const parallel = (thunks) => Promise.all(thunks.map((thunk) => thunk()));
+const runner = (deliver) => (args, respond) =>
+  script(deliver(args), respond, parallel);
+
+// The harness may deliver the arguments as JSON text rather than as the object
+// the caller passed, so every case below runs under both shapes: a script that
+// reads only one of them convenes the panel on the literal text "undefined".
+const SHAPES = [
+  { shape: "object", deliver: (args) => args },
+  { shape: "string", deliver: (args) => JSON.stringify(args) },
+];
+
+const QUESTION = "Should the adapter retry a stalled transfer or fail closed?";
+const answer = (position) => ({
+  position,
+  rationale: "what the code showed",
+  keyRisk: "the other reading",
+});
+
+describe.each(SHAPES)("panel ($shape args)", ({ deliver }) => {
+  const run = runner(deliver);
+
+  it("asks every panelist the question it was convened on", async () => {
+    const asked = [];
+    const verdicts = await run({ question: QUESTION, docs: [] }, (prompt) => {
+      asked.push(prompt);
+      return answer("fail closed");
+    });
+    expect(asked).toHaveLength(3);
+    for (const prompt of asked) {
+      expect(prompt).toContain(QUESTION);
+      expect(prompt).not.toContain("undefined");
+    }
+    expect(verdicts).toHaveLength(3);
+  });
+
+  it("weighs each panelist through its own lens", async () => {
+    const lenses = [];
+    await run({ question: QUESTION, docs: [] }, (prompt, options) => {
+      lenses.push(options.label);
+      return answer("fail closed");
+    });
+    expect(lenses).toEqual([
+      "panelist: failure modes",
+      "panelist: architecture",
+      "panelist: pragmatics",
+    ]);
+  });
+
+  it("points the docs it was given at the panel base checkout", async () => {
+    const asked = [];
+    await run(
+      {
+        question: QUESTION,
+        docs: ["docs/spec/FILE_SYNC.md", "docs/DESIGN.md"],
+      },
+      (prompt) => {
+        asked.push(prompt);
+        return answer("fail closed");
+      },
+    );
+    for (const prompt of asked) {
+      expect(prompt).toContain(
+        "Read these first for context: /tmp/panel-base/docs/spec/FILE_SYNC.md, /tmp/panel-base/docs/DESIGN.md",
+      );
+    }
+  });
+
+  it("says nothing about docs when it was given none", async () => {
+    const asked = [];
+    await run({ question: QUESTION, docs: [] }, (prompt) => {
+      asked.push(prompt);
+      return answer("fail closed");
+    });
+    for (const prompt of asked) {
+      expect(prompt).not.toContain("Read these first for context");
+    }
+  });
+
+  it("drops a panelist that exhausted its schema retries", async () => {
+    const verdicts = await run(
+      { question: QUESTION, docs: [] },
+      (prompt, options) =>
+        options.label === "panelist: pragmatics" ? null : answer("fail closed"),
+    );
+    expect(verdicts).toHaveLength(2);
+  });
+});
