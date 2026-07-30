@@ -163,7 +163,7 @@ Deleting them is correct in retain mode, where every other deletion is reserved 
 
 The one carve-out is a `BilateralModeMismatchError`, whose advertised hello is deliberately kept as the directory's terminal state in both modes (see [Bilateral configuration](#bilateral-configuration-detect-and-fail-never-negotiate)).
 
-The rollback is issued through `safeDelete`, which swallows a transport-level delete failure, and it runs in-process: a hard kill (SIGKILL, OOM, power loss) leaves the artifacts for the next run's entry guard to refuse, exactly as it leaves a delete-mode session's `responsibleFiles` unswept.
+The rollback is issued through `safeDelete`, which swallows a transport-level delete failure, and it runs in-process: a hard kill (SIGKILL, OOM, power loss) leaves the artifacts behind, exactly as it leaves a delete-mode session's `responsibleFiles` unswept. What the next run makes of that residue turns on its shape -- a leftover ack, or a leftover hello under a configured `peer_id`, is refused by the entry guard ([I0](#invariants)); a lone hello under the default fresh id per run is instead the abandoned-hello case the second reason above describes, adopted as a peer and polled against to the timeout. Crash residue is this rollback's stated limit, not a case it covers.
 
 ### Phase 2 -- message loop, delete mode
 
