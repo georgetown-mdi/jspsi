@@ -433,13 +433,13 @@ type SessionTransitionKind =
   | "teardown";
 
 // How the session's last completed boundary was reached. `deliberatelyReleased`
-// is the connection-per-poll release having ended a session that was still
-// carrying traffic; `releasedOverEndedTransport` is that same release having
-// closed over a transport already ended without it -- a PARTNER-side drop is the
-// shape it exists for -- so the session's absence is the release's while the LOSS
-// is not its doing. `notReleased` is
-// everything else -- including a release that raised, one that walked into the
-// PEER's teardown, and one that could not clear the session it destroyed.
+// is the connection-per-poll release having been itself what ended the session;
+// `releasedOverEndedTransport` is that same release having closed over a
+// transport already ended without it -- a PARTNER-side drop is the shape it
+// exists for -- so the session's absence is the release's while the LOSS is not
+// its doing. `notReleased` is everything else -- including a release that raised,
+// one that walked into the PEER's teardown, and one that could not clear the
+// session it destroyed.
 type SessionBoundary =
   "deliberatelyReleased" | "releasedOverEndedTransport" | "notReleased";
 
@@ -926,8 +926,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * re-dial (a re-dial that survived a server-side drop is itself a reconnection,
    * and connect()'s own counter does not see one that succeeds on its first
    * attempt). A re-establishment that follows a DELIBERATE lifecycle transition --
-   * teardown, or a connection-per-poll idle release of a session still carrying
-   * traffic -- is not counted: nothing was lost, so counting it would report drops
+   * teardown, or a connection-per-poll idle release that was itself what ended the
+   * session -- is not counted: nothing was lost, so counting it would report drops
    * a healthy exchange never had. A release closing over a transport a partner's
    * drop had already ended is not one of those, and the re-dial that recovers that
    * drop is counted like any other. A plain operational counter, never a
@@ -965,15 +965,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   /**
    * Idle boundaries at which the partner's SFTP server did not close the
    * connection within the release's bound, so the connection-per-poll release
-   * ended the boundary itself (see {@link releaseForIdle}). NOT a reconnection and
-   * not a lost session: the mode's own boundary, and therefore absent from
-   * {@link reconnectCount}. It says nothing about whether a session was ALSO lost
-   * at that boundary -- a release closing over a transport a partner's drop had
-   * already ended reaches this same forced close, and where that drop tore an
-   * operation, the recovery path counts and warns the loss; where it tore nothing,
-   * no recovery runs and this count is the only report of that boundary. 0 in every
-   * other mode and against a server that closes on request. A plain operational
-   * counter, never a partner-controlled value.
+   * ended the boundary itself (see {@link releaseForIdle}). NOT a reconnection: the
+   * mode's own boundary, and therefore absent from {@link reconnectCount}. It says
+   * nothing about whether a session was ALSO lost at that boundary -- a release
+   * closing over a transport a partner's drop had already ended reaches this same
+   * forced close, and where that drop tore an operation, the recovery path counts
+   * and warns the loss; where it tore nothing, no recovery runs and this count is
+   * the only report of that boundary. 0 in every other mode and against a server
+   * that closes on request. A plain operational counter, never a
+   * partner-controlled value.
    */
   get forcedReleaseCount(): number {
     return this.forcedReleases;
@@ -1927,8 +1927,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   //   continues" is not read as open-ended (exhausting it is terminal, see
   //   midExchangeReconnectBudgetExhaustedError).
   //   Connection-per-poll: every line here reports a loss that was the PARTNER's.
-  //   The mode's own release-and-re-dial lifecycle is exempt -- only a release of a
-  //   session still carrying traffic records the boundary withSessionRecovery
+  //   The mode's own release-and-re-dial lifecycle is exempt -- only a release that
+  //   was itself what ended the session records the boundary withSessionRecovery
   //   exempts, and a unit case pins an ordinary cycle warning nothing -- while a
   //   partner drop a release closed over instead (see releaseForIdle) is one of the
   //   two causes below rather than a third, the release closing only at a poll-cycle
@@ -2909,8 +2909,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // but the LOSS an operation torn here suffered is not this release's doing, so
     // that boundary exempts nothing.
     //
-    // Neither half ended is the ordinary release, of a session still carrying
-    // traffic.
+    // Neither half ended is the ordinary release, whose own end() below is what
+    // ends the transport.
     if (socket.readableEnded !== true)
       held.recordBoundary(
         socket.writableEnded === true
@@ -3175,8 +3175,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // Account for an idle boundary the connection-per-poll release closed itself. A
   // partner that never closes forces one every cycle, so the operator hears it on
   // the cadence a chronic mid-exchange re-dial gets: the first, then every
-  // SFTP_REDIAL_WARN_INTERVAL-th. Nothing was lost and nothing leaks, so pacing it
-  // costs the operator nothing.
+  // SFTP_REDIAL_WARN_INTERVAL-th. Nothing leaks, and a loss suffered at one of
+  // these boundaries is reported by the path that recovered it rather than by this
+  // line, so pacing it costs the operator nothing.
   private countForcedRelease(): void {
     this.forcedReleases += 1;
     const count = this.forcedReleases;
