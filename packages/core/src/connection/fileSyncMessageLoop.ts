@@ -68,6 +68,17 @@ import type { FileInfo, FileTransportClient } from "./fileSyncConnection";
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
 
+// The single remedy for a message publish the transport could not settle, shared
+// by the two places send() prescribes it -- the publish's own rejection and the
+// refusal of the next send() over the seq slot it spent -- so the two cannot
+// drift into prescribing different recoveries for one condition. Both messages
+// are tagged, which suppresses the CLI's generic post-handshake advisory, so this
+// sentence is the only next step an operator reaching either one gets and has to
+// clear the display boundary's per-error cap.
+const CLEAN_DIRECTORY_RESTART_REMEDY =
+  "Re-run the exchange in a clean directory; both parties must start the new " +
+  "exchange fresh.";
+
 // Builds an outgoing message filename. The byte count is always the final
 // `-`-delimited segment before `.json` so the receiver can extract it with a
 // right-anchored parse (see parseMessageByteCount). When timestampInFilename
@@ -416,8 +427,8 @@ export class FileSyncMessageLoop {
         new UsageError(
           `cannot send: sequence number ${this.indeterminatePublish.seq} was ` +
             `spent on a publish the transport could not confirm, so the partner ` +
-            `may already hold a message under it. Re-run the exchange in a ` +
-            `clean directory; both parties must start the new exchange fresh.`,
+            `may already hold a message under it. ` +
+            CLEAN_DIRECTORY_RESTART_REMEDY,
         ),
         {
           cause: this.indeterminatePublish.error,
@@ -578,11 +589,27 @@ export class FileSyncMessageLoop {
       try {
         await deps.client().rename(tempPath, outPath);
       } catch (renameErr: unknown) {
+        if (!(renameErr instanceof TransportPublishIndeterminateError))
+          throw renameErr;
         // The counter does not advance below, but this seq is spent all the same
         // -- see the refusal at send() entry for what that costs.
-        if (renameErr instanceof TransportPublishIndeterminateError)
-          this.indeterminatePublish = { seq, error: renameErr };
-        throw renameErr;
+        this.indeterminatePublish = { seq, error: renameErr };
+        // The transport's own rejection is caller-neutral: it names a publish and
+        // prescribes nothing, because the several publishes reaching it share no
+        // remedy. This one does have one, so it is restated here for the message
+        // -- the only publish whose failure can leave the peer holding what this
+        // party wrote -- and tagged, which suppresses the CLI's generic advisory.
+        // The transport's error stays as the `cause`, so its destination and
+        // status still render on their own lines under their own caps.
+        throw Object.assign(
+          new TransportPublishIndeterminateError(
+            `the message may or may not have reached the partner: the publish ` +
+              `was cut off mid-operation and could not be confirmed ` +
+              `afterwards. ${CLEAN_DIRECTORY_RESTART_REMEDY}`,
+            { cause: renameErr },
+          ),
+          { psilinkRecoveryHintEmitted: true },
+        );
       }
       if (!deps.options().retainFiles) deps.responsibleFiles.add(outName);
       this.lastSentFile = outName;

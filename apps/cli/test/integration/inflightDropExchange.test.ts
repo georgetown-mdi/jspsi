@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { expect, test } from "vitest";
 import {
+  DISPLAY_TRUNCATION_MARKER,
   FileSyncConnection,
   TransportPublishIndeterminateError,
   UsageError,
@@ -259,6 +260,13 @@ inProcessOnly(
   TEST_TIMEOUT_MS,
 );
 
+// The recovery both of the divergence's messages prescribe: the publish's own
+// rejection and the refusal of the next send() over the slot it spent. Asserted
+// against this one literal in both places, so a drift between them fails here.
+const REMEDY =
+  "Re-run the exchange in a clean directory; both parties must start the new " +
+  "exchange fresh.";
+
 // How many times the divergence is driven. It is staged rather than swept -- the
 // tear cuts inside the RENAME handler once its filesystem work has landed, and the
 // sender's landed-confirmation probe of that destination is held until the
@@ -316,26 +324,37 @@ inProcessOnly(
         );
         expect((outcome.sendRejection as Error).cause).toBeInstanceOf(Error);
         const rendered = sanitizeErrorForDisplay(outcome.sendRejection);
-        expect(rendered).toContain(
+        const [publishLink, ...causeLinks] = rendered.split("\ncaused by: ");
+        expect(publishLink).toContain(
           "the message may or may not have reached the partner",
         );
-        expect(rendered).toContain("_rename");
+        // The rejection carries the recovery, and is tagged so the CLI's generic
+        // advisory does not print a contradicting one beside it -- which makes
+        // this the only next step the operator gets, and its survival of the cap
+        // load-bearing.
+        expect(
+          (outcome.sendRejection as { psilinkRecoveryHintEmitted?: unknown })
+            .psilinkRecoveryHintEmitted,
+        ).toBe(true);
+        expect(publishLink).toContain(REMEDY);
+        expect(publishLink).not.toContain(DISPLAY_TRUNCATION_MARKER);
+        // The transport's own error keeps its own link and its own budget: the
+        // destination it names is not spent out of the sentence above.
+        expect(causeLinks.join("\n")).toContain("_rename");
+        expect(causeLinks.join("\n")).toContain("Destination:");
       }
 
       // And what it costs the session: the rejected publish spent its sequence
       // number, because the partner has already delivered a message under it. A
       // send() that reused it would be read as a second message rather than as a
       // retry of the first, so the next send() is refused instead. That refusal
-      // suppresses the CLI's generic advisory, so its own remedy is the only next
-      // step the operator gets and has to clear the same cap.
+      // suppresses the CLI's generic advisory too, and prescribes the SAME
+      // recovery as the rejection above -- one condition, one remedy.
       for (const outcome of outcomes) {
         expect(outcome.retryRejection).toBeInstanceOf(UsageError);
         const rendered = sanitizeErrorForDisplay(outcome.retryRejection);
         expect(rendered).toContain("cannot send: sequence number");
-        expect(rendered).toContain(
-          "Re-run the exchange in a clean directory; both parties must start " +
-            "the new exchange fresh.",
-        );
+        expect(rendered.split("\ncaused by: ")[0]).toContain(REMEDY);
       }
     } finally {
       await srv.stop();

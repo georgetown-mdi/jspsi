@@ -457,6 +457,14 @@ describe("FileSyncMessageLoop emit routing", () => {
   });
 });
 
+// The one recovery send() prescribes for a publish the transport could not
+// settle. Spelled out here rather than imported so an edit to the module constant
+// has to be made deliberately in both places; the two messages that carry it are
+// asserted against this single literal, so they cannot silently diverge.
+const REMEDY =
+  "Re-run the exchange in a clean directory; both parties must start the new " +
+  "exchange fresh.";
+
 describe("FileSyncMessageLoop counter commit points", () => {
   test("seq advances only after the durable rename", async () => {
     const okFiles = new Map<string, Buffer>();
@@ -495,23 +503,55 @@ describe("FileSyncMessageLoop counter commit points", () => {
       // from a publish that never landed at all.
       await realRename(from, to);
       files.delete(to);
+      // Caller-neutral, as the transport raises it: it names a publish, prescribes
+      // no step, and carries no tag.
       throw new TransportPublishIndeterminateError(
-        `the message may or may not have reached the partner: the publish was ` +
-          `cut off mid-operation and could not be confirmed afterwards. ` +
+        `the publish may or may not have reached the partner: it was cut off ` +
+          `mid-operation and could not be confirmed afterwards. ` +
           `Destination: ${to}`,
         { cause: new Error("_rename: No such file or directory") },
       );
     };
 
-    await expect(f.loop.send({ a: 1 })).rejects.toBeInstanceOf(
-      TransportPublishIndeterminateError,
+    const rejected = await f.loop.send({ a: 1 }).then(
+      () => undefined,
+      (e: unknown) => e,
     );
+    expect(rejected).toBeInstanceOf(TransportPublishIndeterminateError);
     // The mechanical state after a rejected send is unchanged: the counter did
     // not advance, nothing was recorded as sent, and the temp was swept.
     expect(f.loop.seq).toBe(0);
     expect(f.loop.lastSentFile).toBeUndefined();
     expect([...f.responsibleFiles]).toEqual([]);
     expect([...files.keys()].filter((p) => p.endsWith(".tmp"))).toEqual([]);
+
+    // What the caller is told, read where the operator reads it. send() is the one
+    // publish reaching this class whose recovery is established, so it restates the
+    // transport's neutral rejection as one that names the MESSAGE and carries that
+    // recovery -- and tags it, which is what makes the length load-bearing: the tag
+    // suppresses the CLI's generic "retry without re-inviting" advisory, so this
+    // remedy is the only next step printed and has to end inside the renderer's
+    // per-link cap.
+    expect(
+      (rejected as { psilinkRecoveryHintEmitted?: unknown })
+        .psilinkRecoveryHintEmitted,
+    ).toBe(true);
+    const publishRender = sanitizeErrorForDisplay(rejected);
+    const [publishLink, ...publishCauseLinks] =
+      publishRender.split("\ncaused by: ");
+    expect(publishLink).toContain(
+      "the message may or may not have reached the partner",
+    );
+    expect(publishLink).toContain(REMEDY);
+    expect(publishLink).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    // The transport's own rejection stays as the cause, so the destination and the
+    // status it names render on their own lines under their own caps.
+    expect(publishCauseLinks.join("\n")).toContain(
+      `Destination: ${DIR}/${SELF}-${objectMessage({ a: 1 }).length}.json`,
+    );
+    expect(publishCauseLinks.join("\n")).toContain(
+      "_rename: No such file or directory",
+    );
 
     // What the counter's position does NOT license is reusing the slot: the peer
     // may already have consumed a message under that seq and delivered it, so a
@@ -537,10 +577,9 @@ describe("FileSyncMessageLoop counter commit points", () => {
     const rendered = sanitizeErrorForDisplay(refused);
     const [refusalLink, ...causeLinks] = rendered.split("\ncaused by: ");
     expect(refusalLink).toContain("cannot send: sequence number 0 was spent");
-    expect(refusalLink).toContain(
-      "Re-run the exchange in a clean directory; both parties must start the " +
-        "new exchange fresh.",
-    );
+    // The SAME remedy the publish's own rejection above gave: one condition, one
+    // recovery, so an operator who reads both is not told two different things.
+    expect(refusalLink).toContain(REMEDY);
     expect(refusalLink).not.toContain(DISPLAY_TRUNCATION_MARKER);
     // The publish itself is identified by the transport's own error, which the
     // refusal hangs off `cause` so it renders under its own cap.
