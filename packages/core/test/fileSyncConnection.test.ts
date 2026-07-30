@@ -2175,8 +2175,8 @@ test("synchronize() cleans up hello and lock files when createExclusive() throws
 test("synchronize() recognize-and-sweeps leftover abort markers (own and peer) at entry in delete mode", async () => {
   // Every authenticated terminal failure leaves a `<writerId>-abort.json`, so a
   // directory reused for a later exchange would otherwise reject "directory not
-  // clean". The entry guard sweeps this party's own leftover marker and any
-  // peer marker whose id is evidenced by a peer hello present at entry.
+  // clean". The entry guard sweeps any well-formed marker, whichever party's id
+  // names it.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
