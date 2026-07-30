@@ -50,6 +50,13 @@ script's own guidance text.
 
 ## State
 
+The most recent full pass covers both scripts together and is written up once,
+under "Verification pass on staging, 30 July 2026" in
+[`windows-network-filedrop.md`](windows-network-filedrop.md). It confirms this
+script end to end against the psilink image, records that the rewritten closing
+block emits no redirection character, and states what it does not cover. What
+follows here is the older, script-specific record.
+
 **Verified end to end against a real Samba server**, driven from `cmd.exe` on
 Windows 11 with Docker Desktop 28.3.2, against a Samba 4.21.9 container on the
 Docker bridge. The share password used throughout was `Pa!ss&w%rd^1`, chosen
