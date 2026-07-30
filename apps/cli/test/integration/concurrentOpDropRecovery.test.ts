@@ -6,6 +6,7 @@ import { expect, test } from "vitest";
 import {
   FileSyncConnection,
   TransportOperationStalledError,
+  UsageError,
 } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
@@ -139,6 +140,7 @@ async function connectParty(options: {
   maxReconnectAttempts: number;
   stallDeadlineMs?: number;
   withholdCloseOnDisconnect?: boolean;
+  ephemeralSessions?: boolean;
 }): Promise<Party> {
   const srv = await startInProcessSftpServer();
   // Every case calls this outside its own try, so nothing else owns what is
@@ -154,7 +156,7 @@ async function connectParty(options: {
     allocatedDir = localDir;
     const remote = `${srv.handle.remoteRoot}/${path.basename(localDir)}`;
     const adapter = new SSH2SFTPClientAdapter({
-      ephemeralSessions: false,
+      ephemeralSessions: options.ephemeralSessions ?? false,
       ...(options.stallDeadlineMs === undefined
         ? {}
         : { stallDeadlineMs: options.stallDeadlineMs }),
@@ -233,13 +235,37 @@ async function plantListing(party: Party): Promise<string> {
 }
 
 async function plantFanOut(party: Party): Promise<string[]> {
+  return plantDeletables(party, "victim", FAN_OUT_FILES);
+}
+
+// `width` files a delete fan can be aimed at, named off `prefix` so successive
+// fans in one case cannot collide: a delete leaves the name free again, and a
+// re-issue that answered from the delete-absent relaxation would then be
+// indistinguishable from one that landed.
+async function plantDeletables(
+  party: Party,
+  prefix: string,
+  width: number,
+): Promise<string[]> {
   const targets: string[] = [];
-  for (let index = 0; index < FAN_OUT_FILES; index += 1) {
-    const name = `victim-${index}.json`;
+  for (let index = 0; index < width; index += 1) {
+    const name = `${prefix}-${index}.json`;
     await fsp.writeFile(path.join(party.localDir, name), "{}");
     targets.push(`${party.remote}/${name}`);
   }
   return targets;
+}
+
+// Every operator-facing line reporting a transparently recovered mid-exchange
+// drop, in either mode and at either cadence: the first re-dial's wording and the
+// running-total wording share this fragment, so a case counting them cannot pass
+// by matching only the shape it expected.
+function recoveryWarnings(
+  logs: readonly { readonly message: string }[],
+): readonly string[] {
+  return logs
+    .map((entry) => entry.message)
+    .filter((message) => message.includes("transparently re-dial"));
 }
 
 // What a settled operation is asserted on. The rejection reason is carried as the
@@ -418,6 +444,402 @@ inProcessOnly(
       expect(party.dials.filter((dial) => dial.settled === "rejected")).toEqual(
         [],
       );
+    } finally {
+      await party.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+// What the drop COST, against what the operator is told it cost. The dial is
+// coalesced by the transition queue whatever the fan's width -- the case above
+// pins that -- so the server serves one handshake per drop, and the counters, the
+// budget, and the warning stream are held to the same unit here. The server's own
+// handshake tally is the ground truth on the left-hand side of every comparison:
+// the adapter's bookkeeping is the thing under test and cannot also be the
+// reference for it.
+for (const [shape, width] of [
+  ["a single operation", 1],
+  ["a fan-out of concurrent operations", FAN_OUT_FILES],
+] as const)
+  inProcessOnly(
+    `one clean drop tearing ${shape} is one re-dial in the counters and one ` +
+      `warning to the operator`,
+    async () => {
+      const party = await connectParty({
+        maxReconnectAttempts: 6,
+        stallDeadlineMs: STALL_DEADLINE_MS,
+      });
+      try {
+        raiseListenerCeiling(party.adapter);
+        const targets = await plantDeletables(party, "counted", width);
+        const controls = party.srv.sessionControls;
+        controls.resetHandshakeCount();
+
+        const [settled, logs] = await withCapturedLogs(
+          async () => {
+            controls.dropActiveAfterOps(1);
+            return Promise.allSettled(
+              targets.map((target) => party.adapter.delete(target)),
+            );
+          },
+          (level) => level === "WARN" || level === "ERROR",
+        );
+
+        // The invariant every assertion below rests on: whatever the accounting
+        // says, each member of the fan resolved on its own result and the deletes
+        // landed. A fix that bought truthful counters by failing the members past
+        // the first would satisfy the rest of this case and break the exchange.
+        expect(settled.filter(stalled)).toEqual([]);
+        expect(settled.map(describeSettlement)).toEqual(
+          targets.map(() => ({ status: "fulfilled", detail: "undefined" })),
+        );
+        expect(
+          (await fsp.readdir(party.localDir)).filter((name) =>
+            name.startsWith("counted-"),
+          ),
+        ).toEqual([]);
+
+        // One drop, one handshake served, and one re-dial in each counter: the
+        // operator's budget is charged for the drop rather than for the operations
+        // it happened to tear.
+        expect(controls.handshakeCount()).toBe(1);
+        expect(party.dials).toHaveLength(1);
+        expect(party.adapter.midExchangeReconnectCount).toBe(
+          controls.handshakeCount(),
+        );
+        expect(party.adapter.reconnectCount).toBe(controls.handshakeCount());
+        // And the operator hears about the drop exactly once. The warn cadence
+        // reads the same counter, so a per-member count would repeat this line
+        // several times over for the one drop it describes.
+        expect(recoveryWarnings(logs)).toHaveLength(1);
+      } finally {
+        await party.stop();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+// The budget of drops the operator configured, spent at a fan-out width well
+// above it. The last drop the budget permits is deliberately the wide fan, so the
+// boundary is reached with a fan-out tearing at it: an accounting that charged per
+// torn operation would refuse the exchange partway through this sequence rather
+// than at its end.
+const SPENDABLE_DROPS = 3;
+
+for (const [shape, width] of [
+  ["a single operation", 1],
+  ["a fan-out of concurrent operations", FAN_OUT_FILES],
+] as const)
+  inProcessOnly(
+    `a mid-exchange reconnect budget of ${SPENDABLE_DROPS} survives ` +
+      `${SPENDABLE_DROPS} drops tearing ${shape} and refuses the next`,
+    async () => {
+      const party = await connectParty({
+        maxReconnectAttempts: SPENDABLE_DROPS,
+        stallDeadlineMs: STALL_DEADLINE_MS,
+      });
+      try {
+        raiseListenerCeiling(party.adapter);
+        const controls = party.srv.sessionControls;
+        controls.resetHandshakeCount();
+
+        const [progress, logs] = await withCapturedLogs(
+          async () => {
+            const spent: { counted: number; handshakes: number }[] = [];
+            // Alternating widths, so the budget is spent by drops of both shapes
+            // and the LAST one it permits is the wide fan: the boundary is reached
+            // by the number of drops rather than by any one drop's width.
+            for (const [stage, stageWidth] of [width, 1, width].entries()) {
+              const targets = await plantDeletables(
+                party,
+                `stage${stage}`,
+                stageWidth,
+              );
+              controls.dropActiveAfterOps(1);
+              const settled = await Promise.allSettled(
+                targets.map((target) => party.adapter.delete(target)),
+              );
+              expect(settled.map(describeSettlement)).toEqual(
+                targets.map(() => ({
+                  status: "fulfilled",
+                  detail: "undefined",
+                })),
+              );
+              spent.push({
+                counted: party.adapter.midExchangeReconnectCount,
+                handshakes: controls.handshakeCount(),
+              });
+            }
+            return spent;
+          },
+          (level) => level === "WARN" || level === "ERROR",
+        );
+
+        // Each drop spent exactly one unit, and each unit bought exactly one
+        // handshake.
+        expect(progress).toEqual([
+          { counted: 1, handshakes: 1 },
+          { counted: 2, handshakes: 2 },
+          { counted: 3, handshakes: 3 },
+        ]);
+        // Paced, as the cadence intends: the first re-dial and the last one the
+        // budget permits, the every-tenth escalation never firing at a budget this
+        // small. Charging per torn operation instead would reach the last-allowed
+        // line on the first drop and then repeat it for every further member.
+        expect(recoveryWarnings(logs)).toHaveLength(2);
+        expect(
+          recoveryWarnings(logs).filter((message) =>
+            message.includes("was the last re-dial allowed"),
+          ),
+        ).toHaveLength(1);
+
+        // With the budget spent, the next drop is terminal -- on the budget,
+        // naming it and its remedies, rather than on a dial or a stall.
+        const [beyond] = await plantDeletables(party, "beyond", 1);
+        controls.dropActiveAfterOps(1);
+        const refused = await withCapturedLogs(
+          async () =>
+            party.adapter.delete(beyond).then(
+              () => undefined,
+              (error: unknown) => error,
+            ),
+          (level) => level === "WARN" || level === "ERROR",
+        ).then(([result]) => result);
+
+        expect(refused).toBeInstanceOf(UsageError);
+        expect((refused as Error).message).toContain(
+          `max_reconnect_attempts=${SPENDABLE_DROPS}`,
+        );
+        expect((refused as Error).message).toContain("--connection-per-poll");
+        // Refused rather than dialed: the budget bought no handshake past the
+        // ones it allowed.
+        expect(controls.handshakeCount()).toBe(SPENDABLE_DROPS);
+        expect(party.dials).toHaveLength(SPENDABLE_DROPS);
+        expect(party.adapter.midExchangeReconnectCount).toBe(SPENDABLE_DROPS);
+      } finally {
+        await party.stop();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+inProcessOnly(
+  "a fan-out against a server that drops every session it opens spends no more " +
+    "of the budget than the handshakes it served",
+  async () => {
+    // The other side of the accounting. Every arm of the fan reads the budget
+    // before the first of them has spent any of it, so what stops the fan from
+    // dialing past the cap is not that reading but the coalescing: the arms drain
+    // the transition queue in one microtask cascade behind the one dial, with no
+    // window for a further drop to land between them. Driven against the partner
+    // that would exploit any such window -- a standing cap that drops EVERY session
+    // after its first operation -- so the bound is measured rather than reasoned
+    // about. How many members complete against such a server is not the subject and
+    // is left unasserted; what is asserted is that the budget bought no more
+    // handshakes than it allowed.
+    const budget = 1;
+    const party = await connectParty({
+      maxReconnectAttempts: budget,
+      stallDeadlineMs: STALL_DEADLINE_MS,
+    });
+    try {
+      raiseListenerCeiling(party.adapter);
+      const targets = await plantDeletables(party, "capped", FAN_OUT_FILES);
+      const controls = party.srv.sessionControls;
+      controls.resetHandshakeCount();
+
+      const settled = await withCapturedLogs(
+        async () => {
+          controls.maxOps = 1;
+          return Promise.allSettled(
+            targets.map((target) => party.adapter.delete(target)),
+          );
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      ).then(([result]) => result);
+
+      // Each member was settled by its own tear rather than left for the liveness
+      // deadline, which is what says the recovery arms all ran.
+      expect(settled.filter(stalled)).toEqual([]);
+      // One handshake per re-dial, and no more re-dials than the budget allowed.
+      expect(controls.handshakeCount()).toBe(party.dials.length);
+      expect(party.adapter.midExchangeReconnectCount).toBe(
+        controls.handshakeCount(),
+      );
+      expect(party.adapter.midExchangeReconnectCount).toBeLessThanOrEqual(
+        budget,
+      );
+      expect(party.adapter.midExchangeReconnectCount).toBeGreaterThan(0);
+    } finally {
+      await party.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "in connection-per-poll mode a torn fan-out counts one re-dial and the drops " +
+    "past the budget are still recovered",
+  async () => {
+    // The same fan-out in the other mode, where the budget gate is deliberately
+    // not applied at all: the mode's own lifecycle re-dials once per poll cycle,
+    // so charging it a cumulative cap would end healthy exchanges. The counters
+    // still have to be truthful there -- they are what an operator reads to tell a
+    // chronic capper from a healthy run -- and the absence of the refusal is driven
+    // rather than assumed, by taking more drops than the configured budget.
+    const budget = 2;
+    const dropsPastTheBudget = 3;
+    const party = await connectParty({
+      maxReconnectAttempts: budget,
+      stallDeadlineMs: STALL_DEADLINE_MS,
+      ephemeralSessions: true,
+    });
+    try {
+      raiseListenerCeiling(party.adapter);
+      const controls = party.srv.sessionControls;
+      controls.resetHandshakeCount();
+
+      const outcome = await withCapturedLogs(
+        async () => {
+          const fan = await plantDeletables(party, "perpoll", FAN_OUT_FILES);
+          controls.dropActiveAfterOps(1);
+          const settledFan = await Promise.allSettled(
+            fan.map((target) => party.adapter.delete(target)),
+          );
+          const afterTheFan = {
+            counted: party.adapter.midExchangeReconnectCount,
+            handshakes: controls.handshakeCount(),
+          };
+          // Genuinely separate drops, each tearing one operation, taken past the
+          // point a held-session exchange would have been refused.
+          const beyond = await plantDeletables(
+            party,
+            "beyond",
+            dropsPastTheBudget,
+          );
+          const settledBeyond: PromiseSettledResult<void>[] = [];
+          for (const target of beyond) {
+            controls.dropActiveAfterOps(1);
+            settledBeyond.push(
+              ...(await Promise.allSettled([party.adapter.delete(target)])),
+            );
+          }
+          return { settledFan, afterTheFan, settledBeyond };
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      ).then(([result]) => result);
+
+      expect(outcome.settledFan.filter(stalled)).toEqual([]);
+      expect(
+        outcome.settledFan.filter((member) => member.status === "rejected"),
+      ).toEqual([]);
+      // One drop, one counted re-dial, one handshake -- as in the default mode.
+      expect(outcome.afterTheFan).toEqual({ counted: 1, handshakes: 1 });
+      // Every later drop recovered too: nothing in this mode refuses on the
+      // cumulative budget, so the run passes the configured 2 without a refusal.
+      expect(outcome.settledBeyond.map(describeSettlement)).toEqual(
+        Array.from({ length: dropsPastTheBudget }, () => ({
+          status: "fulfilled" as const,
+          detail: "undefined",
+        })),
+      );
+      const drops = 1 + dropsPastTheBudget;
+      expect(drops).toBeGreaterThan(budget);
+      expect(controls.handshakeCount()).toBe(drops);
+      expect(party.adapter.midExchangeReconnectCount).toBe(
+        controls.handshakeCount(),
+      );
+      expect(party.adapter.reconnectCount).toBe(controls.handshakeCount());
+    } finally {
+      await party.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "an idle boundary around a torn fan-out leaves the drop counted once and the " +
+    "deliberate release counted not at all",
+  async () => {
+    // Where this accounting meets the connection-per-poll session lifecycle. Two
+    // boundaries in sequence, each meeting a wide fan of deletes:
+    //   - one reached while the fan is outstanding, which keeps its session rather
+    //     than cutting the fan off the wire, so the partner's drop is still the
+    //     only loss and is counted once;
+    //   - one reached with the wire empty, which ends the session itself, after
+    //     which a fresh fan re-establishes through the gate ahead of it -- a
+    //     lifecycle transition rather than a survived drop, counted nowhere.
+    // Driven at the adapter rather than through a poll loop because neither
+    // boundary falls on demand from inside one.
+    const party = await connectParty({
+      maxReconnectAttempts: 4,
+      stallDeadlineMs: STALL_DEADLINE_MS,
+      ephemeralSessions: true,
+    });
+    try {
+      raiseListenerCeiling(party.adapter);
+      const controls = party.srv.sessionControls;
+      controls.resetHandshakeCount();
+
+      const [outcome, logs] = await withCapturedLogs(
+        async () => {
+          const torn = await plantDeletables(party, "straddle", FAN_OUT_FILES);
+          controls.dropActiveAfterOps(1);
+          // Issued, then the boundary, in one turn: the release reaches the front
+          // of an idle transition queue in this same tick and reads the fan
+          // outstanding, so it is the held-boundary placement rather than a close.
+          const settledTorn = Promise.allSettled(
+            torn.map((target) => party.adapter.delete(target)),
+          );
+          const held = party.adapter.releaseForIdle();
+          const tornOutcomes = await settledTorn;
+          await held;
+          const afterTheTornFan = {
+            counted: party.adapter.midExchangeReconnectCount,
+            handshakes: controls.handshakeCount(),
+            heldBoundaries: party.adapter.heldBoundaryCount,
+          };
+
+          // With the wire empty, this boundary is the release's own to close.
+          await party.adapter.releaseForIdle();
+          const fresh = await plantDeletables(
+            party,
+            "afterIdle",
+            FAN_OUT_FILES,
+          );
+          const settledFresh = await Promise.allSettled(
+            fresh.map((target) => party.adapter.delete(target)),
+          );
+          return { tornOutcomes, afterTheTornFan, settledFresh };
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      expect(outcome.tornOutcomes.filter(stalled)).toEqual([]);
+      expect(
+        outcome.tornOutcomes.filter((member) => member.status === "rejected"),
+      ).toEqual([]);
+      // The boundary kept its session for the fan, so the only loss was the
+      // partner's and it is counted once against the one handshake it cost.
+      expect(outcome.afterTheTornFan).toEqual({
+        counted: 1,
+        handshakes: 1,
+        heldBoundaries: 1,
+      });
+
+      // The fan issued after the deliberate release re-establishes once through
+      // the gate ahead of it and every member resolves on that session.
+      expect(
+        outcome.settledFresh.filter((member) => member.status === "rejected"),
+      ).toEqual([]);
+      expect(controls.handshakeCount()).toBe(2);
+      // Neither counter moved for the release's own re-establishment, and the
+      // whole run reported the one partner drop once.
+      expect(party.adapter.midExchangeReconnectCount).toBe(1);
+      expect(party.adapter.reconnectCount).toBe(1);
+      expect(party.adapter.forcedReleaseCount).toBe(0);
+      expect(recoveryWarnings(logs)).toHaveLength(1);
     } finally {
       await party.stop();
     }

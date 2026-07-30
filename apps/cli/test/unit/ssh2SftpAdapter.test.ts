@@ -4493,7 +4493,15 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   // as an "Unexpected close event".
   function midWireTearClient(wrapper: ReturnType<typeof wrapperMethods>) {
     const state = { live: true, ending: false };
-    let failInFlight: ((error: unknown) => void) | undefined;
+    // Every operation on the wire, not one: a drop tears the whole set, which is
+    // what a fan-out case needs and what the real stack does (one cut, every
+    // outstanding request failed). A single-operation case is the one-member set.
+    const inFlight = new Set<(error: unknown) => void>();
+    const failEveryInFlight = (error: unknown) => {
+      const torn = [...inFlight];
+      inFlight.clear();
+      for (const fail of torn) fail(error);
+    };
     const rawClient = new EventEmitter() as EventEmitter &
       Record<string, unknown>;
     // destroy() needs nothing from the peer, and the ssh2 Client's 'close' that
@@ -4514,8 +4522,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       end: vi.fn(() => {
         state.ending = true;
         state.live = false;
-        failInFlight?.(notConnected("exists"));
-        failInFlight = undefined;
+        failEveryInFlight(notConnected("exists"));
         setTimeout(() => {
           state.ending = false;
           rawClient.emit("close");
@@ -4547,26 +4554,29 @@ describe("ephemeral session mode (connection-per-poll)", () => {
               reject(notConnected("exists"));
               return;
             }
-            const answer = setTimeout(() => resolve(true), 0);
-            failInFlight = (error: unknown) => {
+            const fail = (error: unknown) => {
               clearTimeout(answer);
               reject(error);
             };
+            const answer = setTimeout(() => {
+              inFlight.delete(fail);
+              resolve(true);
+            }, 0);
+            inFlight.add(fail);
           }),
       ),
     };
-    // The PARTNER dropping the session with an operation on the wire: ssh2-sftp-
-    // client's per-operation listener clears the session and rejects the operation,
+    // The PARTNER dropping the session with operations on the wire: ssh2-sftp-
+    // client's per-operation listener clears the session and rejects each of them,
     // with no end() of this side's. The idle release no longer produces this state
     // -- it keeps a boundary reached with an operation outstanding -- so a
     // partner-side drop is what still reaches it.
     const tearFromServer = () => {
       state.live = false;
-      failInFlight?.(notConnected("exists"));
-      failInFlight = undefined;
+      failEveryInFlight(notConnected("exists"));
     };
     // The same drop from a partner that withholds its CONNECTION close: only the
-    // SFTP channel goes, so the operation is rejected over a transport ssh2 has
+    // SFTP channel goes, so the operations are rejected over a transport ssh2 has
     // ended while neither ssh2-sftp-client listener that clears `sftp` has run.
     // The session property therefore still reads live, which is what leaves a
     // release something to close (see shouldRecoverFromSessionLoss for why the
@@ -4574,8 +4584,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // application failure).
     const tearChannelWithholdingClose = () => {
       socket.writableEnded = true;
-      failInFlight?.(new Error("exists: channel is closed"));
-      failInFlight = undefined;
+      failEveryInFlight(new Error("exists: channel is closed"));
     };
     return {
       client,
@@ -6563,28 +6572,36 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   });
 
   // Both places a release can land around the recovery arm of an operation a
-  // PARTNER tore, and the one thing the two must agree on. A drop that withheld the
-  // partner's connection close leaves the session property still set, so the release
-  // finds something to close and records a boundary over a loss that was not its
-  // own. Where the release lands decides whether it closes at all -- its own
-  // precondition holds the boundary while an operation is counted, and only the
-  // window ahead of the arm reads that count empty -- but it must not decide whether
-  // the operator sees the drop.
-  test.each([
-    {
-      placement: "in the window ahead of the arm",
-      atTheWindow: true,
-      heldBoundaries: 0,
-    },
-    {
-      placement: "one reading earlier, with the operation still counted",
-      atTheWindow: false,
-      heldBoundaries: 1,
-    },
-  ])(
-    "a partner drop is counted and warned with a release landing $placement",
-    async ({ atTheWindow, heldBoundaries }) => {
-      const { client, state, tearChannelWithholdingClose } =
+  // PARTNER tore, at both widths a cut can land on, and the one thing all four must
+  // agree on. A drop that withheld the partner's connection close leaves the session
+  // property still set, so the release finds something to close and records a
+  // boundary over a loss that was not its own. Where the release lands decides
+  // whether it closes at all -- its own precondition holds the boundary while an
+  // operation is counted, and only the window ahead of the arm reads that count
+  // empty -- and the width decides how many arms recover from the cut; neither may
+  // decide how many drops the operator is told about. The wide arms are what put a
+  // release next to a whole fan-out of recovery arms, which is the interleaving the
+  // narrow ones cannot reach.
+  test.each(
+    [1, 3].flatMap((width) => [
+      {
+        placement: "in the window ahead of the arm",
+        width,
+        atTheWindow: true,
+        heldBoundaries: 0,
+      },
+      {
+        placement: "one reading earlier, with the operations still counted",
+        width,
+        atTheWindow: false,
+        heldBoundaries: 1,
+      },
+    ]),
+  )(
+    "one partner drop tearing $width is counted and warned once with a release " +
+      "landing $placement",
+    async ({ width, atTheWindow, heldBoundaries }) => {
+      const { client, connect, state, tearChannelWithholdingClose } =
         midWireTearClient(wrapperMethods());
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       const warn = vi.fn();
@@ -6593,8 +6610,13 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      const dialsBeforeTheDrop = connect.mock.calls.length;
 
-      const op = adapter.exists("/remote/out.json");
+      // Issued in one turn, so the cut lands on the whole set rather than on
+      // whichever member was left.
+      const ops = Array.from({ length: width }, () =>
+        adapter.exists("/remote/out.json"),
+      );
       tearChannelWithholdingClose();
       // An idle transition queue is entered in the calling tick, so a release called
       // at a chosen reading of the count is a release ENTERED at that reading. The
@@ -6606,13 +6628,16 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       } else expect(outstandingOperations(adapter)).toBeGreaterThan(0);
       const release = adapter.releaseForIdle();
 
-      await expect(op).resolves.toBe(true);
+      // Every torn operation recovers on its own result, whichever of them dialed.
+      expect(await Promise.all(ops)).toEqual(ops.map(() => true));
       await release;
 
       expect(state.live).toBe(true);
       expect(adapter.heldBoundaryCount).toBe(heldBoundaries);
-      // One partner cut, counted once in each metric and warned once, whichever
-      // boundary reading stood over it.
+      // One partner cut, one dial to recover it, counted once in each metric and
+      // warned once, whichever boundary reading stood over it and however many
+      // operations it tore.
+      expect(connect.mock.calls.length - dialsBeforeTheDrop).toBe(1);
       expect(adapter.midExchangeReconnectCount).toBe(1);
       expect(adapter.reconnectCount).toBe(1);
       expect(

@@ -392,15 +392,18 @@ type BoundedTeardownOutcome =
 // What one mid-exchange recovery re-dial leaves its caller to do with the
 // operation it was recovering (see
 // SSH2SFTPClientAdapter.redialForRecovery). `sessionLive` is the only one that
-// counts as a survived drop. The rest all mean nothing was dialed, and are kept
-// apart because the re-issue is right in one and wrong in the others: over a
-// CLEARED session the re-issue rejects at once with the real loss, while over a
-// session that still reads live on an ended transport it cannot complete and
-// would ride the per-operation liveness deadline a second time before failing as
-// it would have anyway. `unretiredTransport` is the third state and a different
-// one again: the session HAS cleared, but the transport under it still owes the
-// ssh2 Client a lifecycle event, and a dial issued into that window is the one
-// this adapter must never make (see
+// leaves a session to re-issue onto, and so the only one that can count as a
+// survived drop -- whether this arm dialed it or found it already established
+// (which one it was does not decide the accounting; see
+// SSH2SFTPClientAdapter.withSessionRecovery). The rest all mean nothing was
+// dialed, and are kept apart because the re-issue is right in one and wrong in the
+// others: over a CLEARED session the re-issue rejects at once with the real loss,
+// while over a session that still reads live on an ended transport it cannot
+// complete and would ride the per-operation liveness deadline a second time before
+// failing as it would have anyway. `unretiredTransport` is the third state and a
+// different one again: the session HAS cleared, but the transport under it still
+// owes the ssh2 Client a lifecycle event, and a dial issued into that window is
+// the one this adapter must never make (see
 // SSH2SFTPClientAdapter.retireTransportForRedial).
 type RecoveryRedialOutcome =
   "sessionLive" | "noSession" | "deadSessionHeld" | "unretiredTransport";
@@ -743,8 +746,27 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // drive the operator warn cadence (SFTP_REDIAL_WARN_INTERVAL), the cumulative
   // mid-exchange reconnection cap (max_reconnect_attempts; see withSessionRecovery),
   // and the end-of-run summary's mid-exchange sub-count (midExchangeReconnectCount).
-  // A plain operational counter, never a partner-controlled value.
+  // Bumped once per session LOST, not once per operation the loss tore (see
+  // sessionGenerations). A plain operational counter, never a partner-controlled
+  // value.
   private midExchangeRedials = 0;
+  // Sessions this adapter has established, counted so a loss can be attributed to
+  // the session that suffered it: every successful dial advances it, and an
+  // operation carries the generation it was ISSUED on into its recovery arm.
+  // Identity is what the accounting needs and neither the count of dials nor the
+  // count of arms supplies it -- one drop tears every operation on the wire, so a
+  // fan-out of them enters recovery together, and the session they lost is the one
+  // thing they have in common.
+  private sessionGenerations = 0;
+  // The newest generation whose loss has been ACCOUNTED for -- charged to the
+  // reconnect counters and the operator warning, or found exempt from both (a
+  // teardown re-dial, or this adapter's own idle release). Monotonic, so the first
+  // recovery arm to reach the accounting for a given loss is the only one that
+  // reaches it: the rest of that loss's fan carries an older generation and passes
+  // through silently. Advanced on the exempt path too, so an exemption the first arm
+  // was granted is not re-decided by a sibling reading a boundary the first arm's own
+  // re-dial has since discharged.
+  private lastAccountedSessionLoss = 0;
   // Idle-boundary releases this adapter forced closed itself, and the session
   // cleared, because the partner withheld its close past the release's bound (see
   // releaseForIdle). Drives that path's warn cadence (SFTP_REDIAL_WARN_INTERVAL):
@@ -942,9 +964,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * re-dials -- a server dropping a live session mid-exchange, which the adapter
    * transparently re-dialed and re-issued the interrupted operation on. Surfaced
    * apart from the merged reconnect total so the end-of-run summary can
-   * distinguish chronic mid-exchange drops from benign connect-time retries. It
-   * carries the same deliberate-transition exemption as {@link reconnectCount}, so
-   * in connection-per-poll mode it counts a within-cycle drop that an OPERATION
+   * distinguish chronic mid-exchange drops from benign connect-time retries. One
+   * per session LOST, not per operation the loss tore: a drop that tears several
+   * concurrent operations is recovered over one re-established session and moves
+   * this by one. It carries the same deliberate-transition exemption as
+   * {@link reconnectCount}, so in connection-per-poll mode it counts a
+   * within-cycle drop that an OPERATION
    * observed: a drop in the tail of a cycle is absorbed by the next cycle-start
    * re-establishment, which is a dial rather than a recovery re-dial and bumps
    * neither counter. A plain operational counter, never a partner-controlled value.
@@ -1656,8 +1681,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // no re-prompt) and re-running the operation.
   //
   // ONE round per op invocation, never a loop: if the re-issued op ALSO hits a
-  // clean loss it rejects terminally. In the default held-session mode the
-  // cumulative number of mid-exchange re-dials is bounded by max_reconnect_attempts
+  // clean loss it rejects terminally. The unit of that accounting is one LOST
+  // SESSION, not one recovered operation: a drop tears every operation on the wire,
+  // so a fan-out of any width enters this arm once per member, and the members past
+  // the first to account for that loss are neither counted nor warned nor charged.
+  // In the default held-session mode the cumulative number of mid-exchange re-dials
+  // is bounded by max_reconnect_attempts
   // -- a budget SEPARATE from, and the same size as, the per-connect dialing-retry
   // loop inside connect(): once that many drops have been re-dialed this exchange,
   // the next drop fails terminally with an actionable message rather than
@@ -1699,7 +1728,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     reissue: (op: () => Promise<T>) => Promise<T> = (run) => run(),
   ): Promise<T> {
     const gate = this.reestablishAfterIdleRelease();
-    const first = gate === undefined ? op() : gate.then(op);
+    // The session this attempt runs on, which is the session a loss it suffers is a
+    // loss OF (see the `sessionGenerations` field). Read at the ISSUE and not in the
+    // catch below, because a dial can land between the two -- a sibling arm's
+    // recovery re-dial, or a cycle-start dial -- and a loss read off the session
+    // that REPLACED the lost one would charge the replacement's generation, so the
+    // replacement's own later loss would then go uncharged. Re-read inside `attempt`
+    // rather than once here: the gate re-establishes when a release has intervened,
+    // and the attempt runs on whatever session that left.
+    let issuedOnGeneration = this.sessionGenerations;
+    const attempt = (): Promise<T> => {
+      issuedOnGeneration = this.sessionGenerations;
+      return op();
+    };
+    const first = gate === undefined ? attempt() : gate.then(attempt);
     return first.catch(async (error: unknown) => {
       if (!this.shouldRecoverFromSessionLoss(error)) throw error;
       // The operation is unsettled for the whole of this arm -- its first
@@ -1776,16 +1818,35 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         // recovered from when it recovered from nothing, and warn the operator about
         // a re-dial that never ran. The re-issue below still runs and rejects with
         // the real session-loss cause.
-        if (redial === "sessionLive" && !teardown && !deliberateRelease) {
-          // The re-dial re-established the dropped session: count it as a
-          // reconnection so the operator's metrics show the exchange survived a
-          // server-side drop. connect()'s own counter only bumps on an internal
-          // retry past the first, so a re-dial that succeeds on its first attempt
-          // registers zero without this. A teardown re-dial is counted in neither
-          // metric -- it is teardown mechanics, not a survived mid-exchange drop.
-          this.reconnectAttempts += 1;
-          this.midExchangeRedials += 1;
-          this.warnSessionRecovered();
+        //
+        // Past that, what is accounted is the LOSS and not this arm: one drop tears
+        // every operation on the wire, so a fan-out of them arrives here together,
+        // each having lost the same session and each with a live session to re-issue
+        // onto -- one because its own re-dial established it, the rest because they
+        // found that re-dial's. Charging every arm would spend the operator's budget,
+        // and report their counters and warning stream, once per torn operation
+        // against the one handshake the drop cost. So the first arm to reach the
+        // accounting for a given lost session takes it and the rest of that fan
+        // passes through, whichever of them dialed: WHICH arm re-established the
+        // session is not the question, because a cycle-start dial landing alongside
+        // the fan can be what re-established it, and the drop is the partner's and
+        // owed to the operator either way.
+        if (redial === "sessionLive") {
+          const firstArmForThisLoss =
+            issuedOnGeneration > this.lastAccountedSessionLoss;
+          if (firstArmForThisLoss)
+            this.lastAccountedSessionLoss = issuedOnGeneration;
+          if (firstArmForThisLoss && !teardown && !deliberateRelease) {
+            // The session dropped mid-exchange and is re-established: count it as a
+            // reconnection so the operator's metrics show the exchange survived a
+            // server-side drop. connect()'s own counter only bumps on an internal
+            // retry past the first, so a re-dial that succeeds on its first attempt
+            // registers zero without this. A teardown re-dial is counted in neither
+            // metric -- it is teardown mechanics, not a survived mid-exchange drop.
+            this.reconnectAttempts += 1;
+            this.midExchangeRedials += 1;
+            this.warnSessionRecovered();
+          }
         }
         return await reissue(op);
       } finally {
@@ -2374,6 +2435,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         return !(err instanceof Error && err.message.includes("Host denied"));
       },
     );
+
+    // A different session is in place, whatever dialed it -- the first connect, a
+    // cycle start, a recovery re-dial, a teardown's (see the `sessionGenerations`
+    // field). Advanced where the session becomes LIVE rather than at the end of the
+    // sequence below, unlike the boundary discharge that runs last: a dial whose
+    // post-connect verification then fails leaves a live session behind that
+    // operations are issued against and a drop can take, and one whose loss carried
+    // the generation of the session it replaced would go unreported.
+    this.sessionGenerations += 1;
 
     const internals = this.client as unknown as Ssh2SftpClientInternals;
 
