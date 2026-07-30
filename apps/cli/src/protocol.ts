@@ -90,10 +90,11 @@ export const PEER_SILENCE_GUIDANCE =
  * reads a plausible suggestion rather than a wrong diagnosis, and the prescribed
  * retry is correct for that case too.
  *
- * Claiming the folder is empty is licensed only for a clean timeout. A sweep
- * that reported it could not delete every file leaves the folder possibly
- * partly cleared, so that run must not reach this text -- see the gate at the
- * emission site. Operator-facing description: docs/EXCHANGE_REFERENCE.md
+ * Claiming the folder is empty is licensed only for a clean delete-mode
+ * timeout. A sweep that reported it could not delete every file leaves the
+ * folder possibly partly cleared, and a retain-mode run keeps every protocol
+ * file it wrote, so neither reaches this text -- see the gate at the emission
+ * site. Operator-facing description: docs/EXCHANGE_REFERENCE.md
  * ("Directory exclusivity").
  */
 export const BOTH_SWEPT_GUIDANCE =
@@ -1419,7 +1420,7 @@ export async function runProtocol(
       );
 
     // Core tags the rendezvous peer-wait and key-exchange handshake timeouts
-    // (see markPeerWaitTimeout), so both facts this inference rests on are local
+    // (see markPeerWaitTimeout), so every fact this inference rests on is local
     // to the run in hand. The tag is also what excludes the sweep's own "may be
     // partially swept" failure: that error is raised from inside the same
     // synchronize() call, so "failed during synchronization" does not
@@ -1432,7 +1433,11 @@ export async function runProtocol(
     // -- the partner may have rotated and saved while this side did not -- is
     // what the operator needs if the retry then fails authentication. Ordering
     // puts the specific likely cause first.
-    if (fileSyncRuntime.sweepExchangeFiles === true && isPeerWaitTimeout(err))
+    if (
+      fileSyncRuntime.sweepExchangeFiles === true &&
+      connection.options?.retainFiles !== true &&
+      isPeerWaitTimeout(err)
+    )
       log.error(BOTH_SWEPT_GUIDANCE);
 
     const hintAlreadyEmitted = isHintTagged(err);
