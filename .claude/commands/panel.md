@@ -60,8 +60,12 @@ const SCHEMA = {
   },
 }
 
-const docsClause = args.docs && args.docs.length
-  ? `Read these first for context: ${args.docs.map((d) => '/tmp/panel-base/' + d).join(', ')}.\n\n`
+// The harness may hand a script its arguments as JSON text rather than as the
+// object the caller passed.
+const input = typeof args === 'string' ? JSON.parse(args) : args
+
+const docsClause = input.docs && input.docs.length
+  ? `Read these first for context: ${input.docs.map((d) => '/tmp/panel-base/' + d).join(', ')}.\n\n`
   : ''
 
 const prompt = (lens) => `You are an independent expert panelist. Read ONLY under /tmp/panel-base, a clean checkout of the project's mainline: do not read, cd into, or search /workspace, and do not run builds or tests (the tree has no node_modules). You are one of several panelists and must not coordinate; answer from your own read.
@@ -69,7 +73,7 @@ const prompt = (lens) => `You are an independent expert panelist. Read ONLY unde
 ${docsClause}Weigh the question primarily through the lens of ${lens}, then answer it directly -- an answer, not a survey of options.
 
 The question:
-${args.question}`
+${input.question}`
 
 return (await parallel([
   () => agent(prompt('correctness and failure modes'), { label: 'panelist: failure modes', phase: 'Panel', schema: SCHEMA, model: 'opus' }),

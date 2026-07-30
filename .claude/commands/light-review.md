@@ -65,7 +65,7 @@ raises it.
 Invoke the Workflow tool with `args` set to
 `{"docs": [<the DOCS list, possibly empty>], "role": <the role name or null>, "claims": [<CLAIMS, or an empty list in lens mode>]}`
 and the script below VERBATIM -- do not paraphrase it, do not edit it to pick a branch
-(the script branches on `args.role` itself), and do not spawn the reviewers with the
+(the script branches on the role in `args` itself), and do not spawn the reviewers with the
 Agent tool instead: plain agents cannot have their output format enforced, and the schema
 is the point (prompt-side "return only JSON" instructions have a long failure record
 here).
@@ -162,8 +162,12 @@ const ROLE_SCHEMA = {
   },
 }
 
-const docsClause = args.docs && args.docs.length
-  ? 'First read these docs for design context: ' + args.docs.join(', ') + '. When an issue could be a deliberate design decision, check whether these docs justify it before flagging it.\n\n'
+// The harness may hand a script its arguments as JSON text rather than as the
+// object the caller passed.
+const input = typeof args === 'string' ? JSON.parse(args) : args
+
+const docsClause = input.docs && input.docs.length
+  ? 'First read these docs for design context: ' + input.docs.join(', ') + '. When an issue could be a deliberate design decision, check whether these docs justify it before flagging it.\n\n'
   : ''
 
 const diffScope = `Generate the diff yourself with git diff "origin/staging...HEAD" -- the ref and the three-dot form are both deliberate and non-negotiable: it shows ONLY what this branch added since it forked from staging, and it excludes every commit staging gained after the fork. That diff is the complete and exclusive scope of your review. Never widen it: do not run a two-dot git diff origin/staging HEAD, do not substitute a local staging ref (it goes stale and drags in merged work), do not diff against HEAD~N, the tip of staging, or any other base.
@@ -174,20 +178,20 @@ const salvage = (who) => `${who} returned no structured result -- the structured
 
 // Presence, not truthiness: a role of "" is a mis-invocation for the allowlist below to
 // reject, not a lens round that silently drops the claims it was handed.
-if (args.role !== undefined && args.role !== null) {
+if (input.role !== undefined && input.role !== null) {
   // The contract is matched on this form, so a list marker the caller left on a line and
   // an enumeration the model echoed back both pair with the claim as written. A marker
   // with nothing after it strips to empty, so a blank bullet cannot pass as a claim.
   const normalizeClaim = (claim) => claim.trim().replace(/^([-*+]|\d+[.)])(\s+|$)/, '').trim()
   const ROLES = ['security-reviewer', 'adversarial-verifier']
-  if (!ROLES.includes(args.role)) {
-    throw new Error(`role must be ${ROLES.join(' or ')}, not "${args.role}"; no other agent runs under a refutation contract.`)
+  if (!ROLES.includes(input.role)) {
+    throw new Error(`role must be ${ROLES.join(' or ')}, not "${input.role}"; no other agent runs under a refutation contract.`)
   }
-  if (!Array.isArray(args.claims) || args.claims.length === 0) {
+  if (!Array.isArray(input.claims) || input.claims.length === 0) {
     throw new Error('a role round needs a non-empty claims array: with nothing to refute it would return a CLEAR artifact for a round that tested nothing.')
   }
   const claims = []
-  for (const raw of args.claims) {
+  for (const raw of input.claims) {
     if (typeof raw !== 'string' || normalizeClaim(raw).length === 0) {
       throw new Error(`every claim must be a non-empty string with text beyond a list marker; got ${JSON.stringify(raw)}.`)
     }
@@ -206,12 +210,12 @@ ${claims.map((claim, i) => `${i + 1}. ${claim}`).join('\n')}
 Anything else you find in this diff that is worth the caller knowing goes in findings, separate from the claims -- do not stretch a claim to cover it, and do not invent a claim you were not given.`
 
   const result = await agent(rolePrompt, {
-    label: args.role, phase: 'Review', agentType: args.role, schema: ROLE_SCHEMA, model: 'opus',
+    label: input.role, phase: 'Review', agentType: input.role, schema: ROLE_SCHEMA, model: 'opus',
   })
-  if (!result) throw new Error(salvage(args.role))
+  if (!result) throw new Error(salvage(input.role))
 
   const answered = result.claims.map((entry) => normalizeClaim(String(entry.claim ?? '')))
-  const unpairable = (detail) => new Error(`${args.role} ${detail}\nIts verdicts in full, so the completed analysis is not lost with the round:\n${JSON.stringify(result.claims, null, 1)}`)
+  const unpairable = (detail) => new Error(`${input.role} ${detail}\nIts verdicts in full, so the completed analysis is not lost with the round:\n${JSON.stringify(result.claims, null, 1)}`)
   const paired = []
   for (const claim of claims) {
     const matches = result.claims.filter((entry, i) => answered[i] === claim)
@@ -234,7 +238,7 @@ Anything else you find in this diff that is worth the caller knowing goes in fin
   }
 }
 
-if (args.claims !== undefined && args.claims !== null && !(Array.isArray(args.claims) && args.claims.length === 0)) {
+if (input.claims !== undefined && input.claims !== null && !(Array.isArray(input.claims) && input.claims.length === 0)) {
   throw new Error('claims were passed without a role: a lens round has no refutation contract to run them under, so it would drop them and review nothing they name. Pass --role security-reviewer or --role adversarial-verifier, or drop the claims.')
 }
 
