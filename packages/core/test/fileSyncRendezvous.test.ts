@@ -783,6 +783,71 @@ describe("FileSyncRendezvous mismatch skip-sweep", () => {
   });
 });
 
+// Retain mode's rollback of a terminally failed rendezvous. These assert what
+// is left ON DISK by name: responsibleFiles is retain-aware already and stays
+// empty either way, so an assertion on it would pass whether or not the files
+// were removed.
+describe("FileSyncRendezvous terminal-failure rollback in retain mode", () => {
+  const retainFlags = { locklessRendezvous: true, retainFiles: true };
+  const shortDeadline = () => ({
+    timeToLive: new Date(Date.now() + 40),
+    pollingFrequency: 10,
+  });
+
+  test("a peer-wait timeout with no peer removes this party's own hello", async () => {
+    const files = new Map<string, Buffer>();
+    const p = makeParty("aaa", { ...retainFlags, ...shortDeadline() }, files);
+
+    await expect(p.rdv.run(p.scope)).rejects.toMatchObject({
+      message: expect.stringContaining("synchronization has timed out"),
+    });
+    expect(files.has(`${DIR}/${helloName("aaa")}`)).toBe(false);
+    // The whole attempt is rolled back, so the next entrant finds a clean
+    // directory rather than a hello no party is behind.
+    expect([...files.keys()]).toEqual([]);
+  });
+
+  test("a failure after the peer hello was acked removes this party's hello and ack", async () => {
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, "zzz", retainFlags);
+    const p = makeParty("aaa", { ...retainFlags, ...shortDeadline() }, files);
+
+    // The peer hello is present from the first poll, so this party acks it and
+    // then polls for a return ack that never arrives.
+    await expect(p.rdv.run(p.scope)).rejects.toMatchObject({
+      message: expect.stringContaining("synchronization has timed out"),
+    });
+    expect(files.has(`${DIR}/${helloName("aaa")}`)).toBe(false);
+    expect(files.has(`${DIR}/${ackMarkerName("aaa", helloStem("zzz"))}`)).toBe(
+      false,
+    );
+    // Only this party's own artifacts are rolled back; the peer's hello is the
+    // peer's to remove.
+    expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
+  });
+
+  test("a bilateral mismatch keeps this party's own hello", async () => {
+    const files = new Map<string, Buffer>();
+    // The peer runs lockless without retain, so the retain_files flags differ.
+    placePeerHello(files, "zzz", {
+      locklessRendezvous: true,
+      retainFiles: false,
+    });
+    const p = makeParty("aaa", retainFlags, files);
+
+    await expect(p.rdv.run(p.scope)).rejects.toBeInstanceOf(
+      BilateralModeMismatchError,
+    );
+    // The carve-out holds in retain mode too: the advertised hello is the
+    // directory's terminal state, which is how the peer reaches the same
+    // verdict.
+    expect(files.has(`${DIR}/${helloName("aaa")}`)).toBe(true);
+    expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
+    // The mismatch is detected before the ack write, so there is none to keep.
+    expect([...files.keys()].some((k) => k.includes("-ack.json"))).toBe(false);
+  });
+});
+
 describe("FileSyncRendezvous joiner-recovery window", () => {
   test("fires after joinerRecoveryMs, not at the peer timeout", async () => {
     // The joining sentinel appears only after the entry scan (call >= 1) and
