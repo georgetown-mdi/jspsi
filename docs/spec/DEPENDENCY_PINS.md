@@ -48,8 +48,9 @@ complement -- the premises and the procedure.
 
 ## The Docker image's dependency freeze
 
-The shipped CLI image resolves no dependency at image-build time and installs
-nothing at container runtime. The Dockerfile's builder stage installs with
+The shipped CLI image resolves no npm dependency at image-build time and installs
+nothing at container runtime; one OS package, named below, is fetched from the
+Alpine mirror while the image is built. The Dockerfile's builder stage installs with
 `npm ci` against the committed `package-lock.json` -- which installs exactly the
 locked tree, verifying each registry package against the lockfile's integrity
 hash, and fails the build if a manifest and the lockfile disagree -- then, after
@@ -77,8 +78,8 @@ The structural invariants are enforced by `scripts/dockerfile-freeze.test.mjs`
 (run by `npm run test:scripts`, a CI static check): every install is `npm ci`,
 the lockfile and the root `.npmrc` are copied into the builder before the first
 install, the shipped tree is the `--omit=dev` one, the runtime stage runs no npm
-at all, and the copied layout keeps the workspace links and the PSI worker entry
-where the CLI resolves them.
+at all and installs exactly the one reviewed OS package, and the copied layout
+keeps the workspace links and the PSI worker entry where the CLI resolves them.
 
 The `node:26-alpine` base image is digest-pinned in both stages to its
 multi-arch index digest, so the Node runtime and Alpine userland beneath the
@@ -88,6 +89,55 @@ bumping the base is a deliberate digest update. Pin the multi-arch index digest,
 not a platform-specific one, or the multi-platform release build cannot resolve
 every architecture; obtain it with `docker buildx imagetools inspect
 node:26-alpine`.
+
+**The one OS package the build fetches.** The runtime stage runs
+`apk add --no-cache samba-client`, which is a dependency resolved at image-build
+time and the single exception to the paragraphs above. It is in the image rather
+than fetched when it is used because of what uses it: the Windows file-drop setup
+scripts (`support/windows-network-filedrop/`) run their SMB probe inside this
+image, and the networks that probe exists to diagnose are the ones where a
+container cannot reach the Alpine mirror at all. HTTPS interception there fails
+the fetch with
+
+    error:0A000086:SSL routines:tls_post_process_server_certificate:certificate verify failed
+    ...
+    samba-client (no such package): required by: world[samba-client]
+
+so a probe that has to install the package stops before it has tested anything.
+Installing it while the image is built moves that fetch onto the machine that
+publishes the image.
+
+It floats: the instruction names no version, so a rebuild takes whatever the
+mirror carries for the pinned base's Alpine release. Measured on the base digest
+pinned here (Alpine 3.24.1): `samba-client-4.23.8-r0` and 62 dependencies, which
+`apk` reports as `OK: 54.2 MiB in 63 packages` on `x86_64` and 63.1 MiB on
+`aarch64`, taking the built `arm64` image from 520,152,837 to 574,778,898 bytes.
+Both release architectures resolve the package, so the multi-arch release build
+is not left short one. An exact version pin was rejected because Alpine carries exactly one
+version of a package per release branch, so a pin hard-fails the build the moment
+the mirror supersedes it:
+`apk add --no-cache --simulate samba-client=4.23.7-r0` on that base answers
+
+    ERROR: unable to select packages:
+      samba-client-4.23.8-r0:
+        breaks: world[samba-client=4.23.7-r0]
+
+while `=4.23.8-r0` resolves. A pin would therefore convert every upstream samba
+patch into a red build, costing more than the drift it prevents. What the float
+costs is that two rebuilds of the same commit can ship different `samba-client`
+versions, and that the package is outside the release SBOM, which `npm sbom`
+generates from the npm tree. That is acceptable here in a way it is not for
+`re2js`: nothing in an exchange reaches this package. It is used only by the
+setup-time probe, over a share the operator is testing, never by the CLI or the
+console during a run.
+
+Two checks bound it. `scripts/dockerfile-freeze.test.mjs` holds the runtime
+stage's whole OS-package surface to that one instruction by literal, the way it
+holds the `.npmrc` COPY, so a second install or a wider spec on that line reddens
+rather than shipping. `image_smoke.yaml` asserts the built image provides
+`smbclient` (`docker run --rm --entrypoint sh <image> -c 'command -v smbclient'`),
+so a build that resolved the package away fails the pull request rather than an
+operator's setup run.
 
 ## The install-script policy (`allowScripts`)
 

@@ -65,13 +65,24 @@ RUN --mount=type=cache,target=/root/.npm \
 
 FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66
 
-# The runtime stage performs no dependency resolution: it copies the builder's
+# The runtime stage resolves no npm dependency: it copies the builder's
 # production node_modules and mirrors the workspace layout around it so the
 # node_modules/@psilink/core and node_modules/psilink workspace links resolve.
 # Every runtime dependency and transitive is thereby frozen to the committed
 # package-lock.json -- re2js in particular runs partner-supplied transform
 # regexes and must behave byte-identically on both parties or PSI keys silently
-# mismatch. Rationale and residual float: docs/spec/DEPENDENCY_PINS.md.
+# mismatch.
+#
+# Exactly one OS package is fetched from the Alpine mirror while this stage
+# builds, at whatever version that mirror carries: samba-client, for the Windows
+# file-drop setup scripts (support/windows-network-filedrop/), which run their
+# SMB probe inside this image. The networks that probe exists to diagnose are the
+# ones where a container cannot reach the Alpine mirror at all, so the tool has
+# to be in the image rather than fetched when the probe runs. Why it floats
+# rather than being version-pinned, and what the float costs:
+# docs/spec/DEPENDENCY_PINS.md, which also holds the residual npm float.
+RUN apk add --no-cache samba-client
+
 WORKDIR /app
 COPY --from=builder /build/node_modules node_modules
 COPY --from=builder /build/packages/core/package.json packages/core/

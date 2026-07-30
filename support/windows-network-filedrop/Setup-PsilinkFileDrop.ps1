@@ -72,10 +72,18 @@ param(
     [ValidateSet('', 'SMB3', 'SMB2', 'NT1')]
     [string] $Dialect = '',
     [string] $VolumeName = 'psilink-sync',
-    # Pinned to alpine:3.22's multi-arch index digest so a run today and a run
-    # next year test the same thing. Bumping it is deliberate; override it if
-    # your site pulls through a registry mirror that does not carry the digest.
-    [string] $HelperImage = 'alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce',
+    # The checks run in the same image the exchange itself runs, at the same
+    # floating tag: it carries smbclient, so the checks do not have to fetch it
+    # on a network that may be the reason they are being run. Floating is
+    # deliberate -- this script is downloaded on its own rather than shipped with
+    # a release, so pinning the diagnostic tighter than the thing it diagnoses
+    # buys nothing.
+    #
+    # Every docker run below overrides the image entrypoint with sh. That image's
+    # own entrypoint hands its argument vector to psilink, so a helper script
+    # passed to it would be read as exchange arguments; a stock Alpine passed
+    # here takes the same override without caring.
+    [string] $HelperImage = 'vdorie/psi-link:latest',
     [switch] $SkipVolumeTest,
     [switch] $SkipConfirm
 )
@@ -462,26 +470,41 @@ else
   exit 3
 fi
 
+# The psilink image carries smbclient, so on the default helper image nothing is
+# fetched here at all. The install is the fallback for a stock-Alpine
+# -HelperImage, or for a copy of the psilink image predating the package.
+#
 # Deliberately after the two checks above, both of which use tools already in
 # the image: a machine that cannot resolve or route to the server would fail
 # here first, and "could not install samba-client" is a far worse description
 # of that than "cannot resolve the name".
-APKOUT=$(apk add --no-cache samba-client 2>&1) || {
-  emit ""
-  emit "FAIL: could not install samba-client inside the container."
-  emit ""
-  indent "$APKOUT"
-  emit ""
-  emit "MEANING: the Docker VM could not fetch from the Alpine package mirror."
-  emit "         The message above names the reason. 'certificate' or 'TLS'"
-  emit "         means something is intercepting HTTPS -- a corporate proxy,"
-  emit "         usually, and Docker Desktop needs its certificate. 'DNS' or"
-  emit "         'temporary error' means name resolution inside the VM."
-  emit ""
-  emit "ACTION:  see the troubleshooting page, 'The container cannot install"
-  emit "         its tools'."
-  exit 1
-}
+if ! command -v smbclient >/dev/null 2>&1; then
+  APKOUT=$(apk add --no-cache samba-client 2>&1) || {
+    emit ""
+    emit "FAIL: could not install samba-client inside the container."
+    emit ""
+    indent "$APKOUT"
+    emit ""
+    emit "MEANING: smbclient is not in the image the checks are running in, and"
+    emit "         the container could not fetch it from the Alpine package"
+    emit "         mirror."
+    emit ""
+    emit "         The psilink image carries smbclient, so the likeliest cause is"
+    emit "         an older copy of that image on this PC: the helper image is"
+    emit "         fetched only when it is missing, never to refresh one that is"
+    emit "         already here."
+    emit ""
+    emit "         Failing that, the message above names why the mirror could not"
+    emit "         be reached. 'certificate' or 'TLS' means something is"
+    emit "         intercepting HTTPS -- a corporate proxy, usually. 'DNS' or"
+    emit "         'temporary error' means name resolution inside the Docker VM."
+    emit ""
+    emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and try again. If the"
+    emit "         image was already current, see the troubleshooting page, 'The"
+    emit "         container cannot install its tools'."
+    exit 1
+  }
+fi
 
 umask 077
 {
@@ -905,7 +928,9 @@ Write-Good "Docker engine $(($dockerInfo.Output -split '\s+')[1]) is running."
 # diagnosis printed above it.
 $imagePresent = Invoke-Docker -DockerArgs @('image', 'inspect', $HelperImage)
 if ($imagePresent.ExitCode -ne 0) {
-    Write-Host 'Fetching the helper image (first run only)...'
+    Write-Host 'Fetching the psilink image (first run only). It is a few hundred'
+    Write-Host 'megabytes -- the same image the exchange itself runs -- so this can'
+    Write-Host 'take several minutes with nothing on screen.'
     $pull = Invoke-Docker -DockerArgs @('pull', '--quiet', $HelperImage)
     if ($pull.ExitCode -ne 0) {
         Write-Bad 'Could not fetch the helper image the checks run in.'
@@ -917,7 +942,9 @@ if ($imagePresent.ExitCode -ne 0) {
         Write-Note 'intercepting HTTPS is the usual cause; Docker Desktop needs its'
         Write-Note 'certificate under Settings > Resources > Proxies.'
         Write-Info ''
-        Write-Info 'If your site runs a registry mirror, pass its copy with'
+        Write-Info 'The checks run in the same image as the exchange itself, so'
+        Write-Info 'nothing will run until Docker can fetch it. If your site keeps'
+        Write-Info 'its own copy of the psilink image, name that copy with'
         Write-Info '-HelperImage <image>.'
         exit 1
     }
@@ -1127,7 +1154,7 @@ try {
         --env SMB_SERVER --env SMB_SHARE --env SMB_PATH `
         --env SMB_USER --env SMB_DOMAIN --env SMB_PASS --env SMB_DIALECT `
         --env SMB_MARKER --env SMB_TOKEN `
-        $HelperImage sh -c "echo $probeB64 | base64 -d | sh"
+        --entrypoint sh $HelperImage -c "echo $probeB64 | base64 -d | sh"
     $probeExit = $LASTEXITCODE
 
     foreach ($v in 'SMB_SERVER','SMB_SHARE','SMB_PATH','SMB_USER','SMB_DOMAIN',
@@ -1290,8 +1317,8 @@ rm -f .psilink-a.tmp .psilink-b.tmp
     # reproduced in alpine, where it surfaced as "the volume could not be
     # mounted" on a share that was fine and took the volume with it.
     $test = Invoke-Docker -DockerArgs @(
-        'run', '--rm', '-v', "${VolumeName}:/rz", $HelperImage, 'sh', '-c',
-        ($volumeCheck -replace "`r`n", "`n"))
+        'run', '--rm', '-v', "${VolumeName}:/rz", '--entrypoint', 'sh',
+        $HelperImage, '-c', ($volumeCheck -replace "`r`n", "`n"))
     $testOut = Hide-Secret -Text $test.Output -Secret $plainPass
 
     # "Did not mount" and "mounted, then refused the write" are different

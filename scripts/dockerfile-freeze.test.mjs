@@ -81,6 +81,18 @@ const npmrcCopies = instructions
   .filter(({ inst, rest }) => inst === "COPY" && /\.npmrc/.test(rest))
   .map(({ rest }) => `COPY ${normalize(rest)}`);
 
+// The runtime stage's whole OS-package surface, frozen by literal the way the
+// .npmrc COPY above is. The npm tree is copied from the builder and resolves
+// nothing, so this one install is the only dependency the image build fetches --
+// which is the claim docs/spec/DEPENDENCY_PINS.md records as a single named
+// exception, and a claim prose cannot hold: a second package, or a wider spec on
+// this line, ships unreviewed while the sentence still reads as one package.
+const EXPECTED_OS_INSTALL = "RUN apk add --no-cache samba-client";
+const OS_PACKAGE_MANAGER = /\b(apk|apt|apt-get|pip|pip3)\b/;
+const runtimeRuns = runtime
+  .filter(({ inst }) => inst === "RUN")
+  .map(({ rest }) => rest);
+
 describe("Dockerfile dependency freeze", () => {
   it("installs only with npm ci, never npm install", () => {
     expect(dockerfile).not.toMatch(/\bnpm\s+install\b/);
@@ -118,11 +130,16 @@ describe("Dockerfile dependency freeze", () => {
     expect(npmRuns[npmRuns.length - 1]).toMatch(/\bnpm ci\b.*--omit=dev/);
   });
 
-  it("performs no dependency resolution in the runtime stage", () => {
-    const runtimeRuns = runtime
-      .filter(({ inst }) => inst === "RUN")
-      .map(({ rest }) => rest);
+  it("runs no npm in the runtime stage, so the copied tree is what ships", () => {
     expect(runtimeRuns.filter((run) => /\bnpm\b/.test(run))).toEqual([]);
+  });
+
+  it("installs one OS package in the runtime stage, the reviewed one", () => {
+    expect(
+      runtimeRuns
+        .filter((run) => OS_PACKAGE_MANAGER.test(run))
+        .map((run) => `RUN ${normalize(run)}`),
+    ).toEqual([EXPECTED_OS_INSTALL]);
   });
 
   it("copies the builder's node_modules into the runtime stage", () => {

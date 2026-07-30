@@ -146,13 +146,39 @@ If you are on a VPN, that is almost certainly it. Take items 3 and 5 of the
 The checks stop before step 3 saying `samba-client` could not be installed, and
 print what the package manager said.
 
-Read the error printed underneath; it names the cause:
+The image the checks run in is the psilink image, which carries `samba-client`
+already, so this is a fallback path rather than the ordinary one. Reaching it
+means the checks ran in an image without the tool. Two ways that happens:
+
+- **An older copy of the psilink image on this PC.** The script fetches the
+  helper image only when it is missing, so a copy already here is never
+  refreshed. Update it and run the script again:
+
+  ```text
+  docker pull vdorie/psi-link:latest
+  ```
+
+- **An image of your own,** passed with `-HelperImage`. A stock `alpine` has to
+  install the tool, so it needs a reachable package mirror.
+
+If the image is current, or you passed one of your own, the error printed
+underneath names why the mirror could not be reached:
 
 - **`certificate`, `TLS`, or `not trusted`.** Something is intercepting HTTPS,
-  which on a corporate network is a proxy doing inspection. Docker Desktop
-  needs its certificate: Settings > Resources > Proxies.
+  which on a corporate network is a proxy doing inspection. The container has a
+  trust store of its own, and that is what refuses the install. Docker Desktop's
+  proxy certificate setting (Settings > Resources > Proxies) governs the engine's
+  own pulls, which worked, or the checks would not have started at all.
 - **`DNS`, `temporary error`, or `could not resolve`.** The hidden Linux
   computer cannot look up names. Same ground as the section above.
+
+For the interception case there are two ways through, both of which mean running
+the checks yourself -- [setting it up by hand](by-hand.md) -- rather than through
+the script. Mount your organisation's root CA certificate into the container and
+run `update-ca-certificates` before installing the tool, or point `apk` at an
+`http://` mirror. The second trusts nothing extra: `apk` verifies every package
+against signing keys already in the image, so HTTPS is not what makes the install
+safe.
 
 ## The share never asks for a password
 

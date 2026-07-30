@@ -103,3 +103,14 @@ jobs:
           fi
 
           docker rm -f "$cid" >/dev/null 2>&1 || true
+
+      # The Windows file-drop setup scripts default their helper image to this
+      # one and run their SMB probe inside it, so the smbclient the runtime stage
+      # installs is load-bearing for that setup path: without it the probe falls
+      # back to fetching the package from the Alpine mirror, which is exactly
+      # what fails on the networks the probe exists to diagnose. `command -v`
+      # resolves it from PATH and needs no network and no server. The entrypoint
+      # is overridden because it dispatches its argv to the CLI, as the setup
+      # scripts override it for the same reason.
+      - name: Smoke the file-drop probe tooling
+        run: docker run --rm --entrypoint sh psi-link:smoke -c 'command -v smbclient'

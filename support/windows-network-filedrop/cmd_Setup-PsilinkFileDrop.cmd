@@ -27,10 +27,17 @@ rem reports as a wrong password with nothing on screen to explain why.
 
 set "SCRIPT_DIR=%~dp0"
 set "VOLUME_NAME=psilink-sync"
-rem Pinned to alpine:3.22's multi-arch index digest so a run today and a run
-rem next year test the same thing. Override it if your site pulls through a
-rem registry mirror that does not carry the digest.
-set "HELPER_IMAGE=alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce"
+rem The checks run in the same image the exchange itself runs, at the same
+rem floating tag: it carries smbclient, so the checks do not have to fetch it on
+rem a network that may be the reason they are being run. Floating is deliberate
+rem -- this script is downloaded on its own rather than shipped with a release,
+rem so pinning the diagnostic tighter than the thing it diagnoses buys nothing.
+rem
+rem Every docker run below overrides the image entrypoint with sh. That image's
+rem own entrypoint hands its argument vector to psilink, so a helper script
+rem passed to it would be read as exchange arguments; a stock Alpine passed with
+rem -HelperImage takes the same override without caring.
+set "HELPER_IMAGE=vdorie/psi-link:latest"
 set "MARKER_NAME=psilink-setup-check.tmp"
 set "WORK=%TEMP%\psilink-cmd-%RANDOM%%RANDOM%.txt"
 
@@ -160,7 +167,9 @@ rem something about the share, and would be reported as a share problem with no
 rem diagnosis printed above it.
 docker image inspect "%HELPER_IMAGE%" >nul 2>&1
 if errorlevel 1 (
-  echo Fetching the helper image ^(first run only^)...
+  echo Fetching the psilink image ^(first run only^). It is a few hundred
+  echo megabytes -- the same image the exchange itself runs -- so this can
+  echo take several minutes with nothing on screen.
   docker pull --quiet "%HELPER_IMAGE%" >"%WORK%" 2>&1
   if errorlevel 1 goto no_image
 )
@@ -281,7 +290,7 @@ echo(
 set "VERDICT="
 set "PWWARN="
 set "TOKEN="
-docker run --rm -i --env SMB_PASS "%HELPER_IMAGE%" sh -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-credcheck.sh" >"%WORK%" 2>nul
+docker run --rm -i --env SMB_PASS --entrypoint sh "%HELPER_IMAGE%" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-credcheck.sh" >"%WORK%" 2>nul
 if errorlevel 1 goto credcheck_failed
 for /f "usebackq tokens=1,* delims==" %%a in ("%WORK%") do (
   if "%%a"=="VERDICT" set "VERDICT=%%b"
@@ -319,7 +328,7 @@ rem reads. It is fed on standard input through "tr -d '\r'" so that a checkout
 rem with core.autocrlf on cannot break it -- sh does not treat a carriage
 rem return as whitespace, and a CRLF copy reaching sh directly dies with an
 rem unterminated if.
-docker run --rm -i --env SMB_SERVER --env SMB_SHARE --env SMB_PATH --env SMB_USER --env SMB_DOMAIN --env SMB_PASS --env SMB_DIALECT --env SMB_MARKER --env SMB_TOKEN "%HELPER_IMAGE%" sh -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-probe.sh"
+docker run --rm -i --env SMB_SERVER --env SMB_SHARE --env SMB_PATH --env SMB_USER --env SMB_DOMAIN --env SMB_PASS --env SMB_DIALECT --env SMB_MARKER --env SMB_TOKEN --entrypoint sh "%HELPER_IMAGE%" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-probe.sh"
 set "PROBE_RC=%errorlevel%"
 
 set "SMB_SERVER="
@@ -392,7 +401,7 @@ call :good "Volume created. Docker mounts it the first time it is used."
 
 echo Mounting it and testing what psilink needs...
 set "MARKER=%MARKER_NAME%"
-docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN "%HELPER_IMAGE%" sh -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-volcheck.sh" >"%WORK%" 2>&1
+docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN --entrypoint sh "%HELPER_IMAGE%" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-volcheck.sh" >"%WORK%" 2>&1
 set "VOL_RC=%errorlevel%"
 set "MARKER="
 
@@ -555,7 +564,9 @@ call :note "being unable to reach its registry. A corporate proxy intercepting"
 call :note "HTTPS is the usual cause; Docker Desktop needs its certificate under"
 call :note "Settings, then Resources, then Proxies."
 call :info ""
-call :info "If your site runs a registry mirror, pass its copy with -HelperImage."
+call :info "The checks run in the same image as the exchange itself, so nothing"
+call :info "will run until Docker can fetch it. If your site keeps its own copy"
+call :info "of the psilink image, name that copy with -HelperImage."
 goto fail_generic
 
 :is_local

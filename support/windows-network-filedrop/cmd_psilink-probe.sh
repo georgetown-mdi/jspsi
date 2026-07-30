@@ -171,26 +171,41 @@ else
   exit 3
 fi
 
+# The psilink image carries smbclient, so on the default helper image nothing is
+# fetched here at all. The install is the fallback for a stock-Alpine
+# -HelperImage, or for a copy of the psilink image predating the package.
+#
 # Deliberately after the two checks above, both of which use tools already in
 # the image: a machine that cannot resolve or route to the server would fail
 # here first, and "could not install samba-client" is a far worse description
 # of that than "cannot resolve the name".
-APKOUT=$(apk add --no-cache samba-client 2>&1) || {
-  emit ""
-  emit "FAIL: could not install samba-client inside the container."
-  emit ""
-  indent "$APKOUT"
-  emit ""
-  emit "MEANING: the Docker VM could not fetch from the Alpine package mirror."
-  emit "         The message above names the reason. 'certificate' or 'TLS'"
-  emit "         means something is intercepting HTTPS -- a corporate proxy,"
-  emit "         usually, and Docker Desktop needs its certificate. 'DNS' or"
-  emit "         'temporary error' means name resolution inside the VM."
-  emit ""
-  emit "ACTION:  see the troubleshooting page, 'The container cannot install"
-  emit "         its tools'."
-  exit 1
-}
+if ! command -v smbclient >/dev/null 2>&1; then
+  APKOUT=$(apk add --no-cache samba-client 2>&1) || {
+    emit ""
+    emit "FAIL: could not install samba-client inside the container."
+    emit ""
+    indent "$APKOUT"
+    emit ""
+    emit "MEANING: smbclient is not in the image the checks are running in, and"
+    emit "         the container could not fetch it from the Alpine package"
+    emit "         mirror."
+    emit ""
+    emit "         The psilink image carries smbclient, so the likeliest cause is"
+    emit "         an older copy of that image on this PC: the helper image is"
+    emit "         fetched only when it is missing, never to refresh one that is"
+    emit "         already here."
+    emit ""
+    emit "         Failing that, the message above names why the mirror could not"
+    emit "         be reached. 'certificate' or 'TLS' means something is"
+    emit "         intercepting HTTPS -- a corporate proxy, usually. 'DNS' or"
+    emit "         'temporary error' means name resolution inside the Docker VM."
+    emit ""
+    emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and try again. If the"
+    emit "         image was already current, see the troubleshooting page, 'The"
+    emit "         container cannot install its tools'."
+    exit 1
+  }
+fi
 
 umask 077
 {
