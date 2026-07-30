@@ -923,9 +923,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * re-dial (a re-dial that survived a server-side drop is itself a reconnection,
    * and connect()'s own counter does not see one that succeeds on its first
    * attempt). A re-establishment that follows a DELIBERATE lifecycle transition --
-   * the connection-per-poll idle release, or teardown -- is not counted: nothing
-   * was lost, so counting it would report drops a healthy exchange never had. A
-   * plain operational counter, never a partner-controlled value.
+   * teardown, or a connection-per-poll idle release of a session still carrying
+   * traffic -- is not counted: nothing was lost, so counting it would report drops
+   * a healthy exchange never had. A release closing over a transport a partner's
+   * drop had already ended is not one of those, and the re-dial that recovers that
+   * drop is counted like any other. A plain operational counter, never a
+   * partner-controlled value.
    */
   get reconnectCount(): number {
     return this.reconnectAttempts;
@@ -1919,15 +1922,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   //   --connection-per-poll, and the remaining budget is stated so "the exchange
   //   continues" is not read as open-ended (exhausting it is terminal, see
   //   midExchangeReconnectBudgetExhaustedError).
-  //   Connection-per-poll: the mode's own idle release never reaches this warning
-  //   (withSessionRecovery exempts it), but the two remaining causes are not
-  //   distinguishable from inside the adapter -- the per-cycle session lifetime is
-  //   a property of the POLL LOOP, and the rendezvous that precedes it holds one
-  //   session across its waits, so a cap can cut either. Both are named with the
-  //   remedy for each, and the rendezvous case is called out as the mode working
-  //   so an operator who chose it for a capping server is not sent after their
-  //   link. It quotes no budget (the cap does not charge this mode) and names the
-  //   per-operation peer-inactivity ceiling that does bound it.
+  //   Connection-per-poll: every line here reports a loss that was the PARTNER's.
+  //   The mode's own release-and-re-dial lifecycle is exempt -- only a release of a
+  //   session still carrying traffic records the boundary withSessionRecovery
+  //   exempts, and a unit case pins an ordinary cycle warning nothing -- while a
+  //   partner drop a release closed over instead (see releaseForIdle) is one of the
+  //   two causes below rather than a third, the release closing only at a poll-cycle
+  //   boundary, so the drop it closed over cut inside a cycle. Which of the two it
+  //   was is not distinguishable from inside the adapter -- the per-cycle session
+  //   lifetime is a property of the POLL LOOP, and the rendezvous that precedes it
+  //   holds one session across its waits, so a cap can cut either. Both are named
+  //   with the remedy for each, and the rendezvous case is called out as the mode
+  //   working so an operator who chose it for a capping server is not sent after
+  //   their link. It quotes no budget (the cap does not charge this mode) and names
+  //   the per-operation peer-inactivity ceiling that does bound it.
   // Nothing beyond that is disclosed.
   private warnSessionRecovered(): void {
     const count = this.midExchangeRedials;
