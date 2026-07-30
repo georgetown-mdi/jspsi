@@ -72,18 +72,6 @@ param(
     [ValidateSet('', 'SMB3', 'SMB2', 'NT1')]
     [string] $Dialect = '',
     [string] $VolumeName = 'psilink-sync',
-    # The checks run in the same image the exchange itself runs, at the same
-    # floating tag: it carries smbclient, so the checks do not have to fetch it
-    # on a network that may be the reason they are being run. Floating is
-    # deliberate -- this script is downloaded on its own rather than shipped with
-    # a release, so pinning the diagnostic tighter than the thing it diagnoses
-    # buys nothing.
-    #
-    # Every docker run below overrides the image entrypoint with sh. That image's
-    # own entrypoint hands its argument vector to psilink, so a helper script
-    # passed to it would be read as exchange arguments; a stock Alpine passed
-    # here takes the same override without caring.
-    [string] $HelperImage = 'vdorie/psi-link:latest',
     [switch] $SkipVolumeTest,
     [switch] $SkipConfirm
 )
@@ -108,38 +96,6 @@ function Write-Bad  { param([string] $T) Write-Host "  FAIL  $T" -ForegroundColo
 function Write-Warn { param([string] $T) Write-Host "  WARN  $T" -ForegroundColor Yellow }
 function Write-Note { param([string] $T) Write-Host "        $T" -ForegroundColor Yellow }
 function Write-Info { param([string] $T) Write-Host "        $T" }
-
-function Write-DegradedChecksNotRun {
-    <#  Emitted at every degraded exit, so nothing here may say what this run
-        reached: it has to hold whether or not a volume was created and whether
-        or not it mounted. #>
-    Write-Info ''
-    Write-Info 'The checks in part 3 did not run past step 2. What that leaves'
-    Write-Info 'unverified, and how to get them running, is on the troubleshooting'
-    Write-Info 'page under "The container cannot install its tools".'
-    Write-Info ''
-    Write-Info 'Do NOT work through candidate passwords: a mount attempt that reaches'
-    Write-Info 'the sign-in is a real one against the account, and a handful of'
-    Write-Info 'failures locks a domain account out.'
-}
-
-function Write-DegradedDialectRetry {
-    <#  What a -Dialect retry means when the checks never reached the
-        credentials. Measured against Samba 4.21 with authentication auditing
-        on: a mount refused over the dialect -- "host is down" from an SMB1-only
-        server, "operation not supported" from one either side of the dialect
-        asked for -- produces no authentication event at all, because the
-        dialect is settled before a credential is sent. Only an attempt that
-        gets past it reaches session setup, and that one is a real sign-in. #>
-    Write-Info ''
-    Write-Note 'Make that retry, but not more than that: the checks in part 3 never'
-    Write-Note 'reached the credentials, so nothing here has tried them. A dialect'
-    Write-Note 'the server will not take is refused before any password is sent, so'
-    Write-Note 'this failure cost the account nothing -- but the first attempt that'
-    Write-Note 'gets past the dialect is the first real sign-in against it. If one'
-    Write-Note 'comes back "permission denied", stop there rather than working'
-    Write-Note 'through candidate passwords.'
-}
 
 function Hide-Secret {
     <#  Removes the password from text about to be shown or pasted into a
@@ -502,50 +458,22 @@ else
   exit 3
 fi
 
-# The psilink image carries smbclient, so on the default helper image nothing is
-# fetched here at all. The install is the fallback for a stock-Alpine
-# -HelperImage, or for a copy of the psilink image predating the package.
-#
-# Deliberately after the two checks above, both of which use tools already in
-# the image: a machine that cannot resolve or route to the server would fail
-# here first, and "could not install samba-client" is a far worse description
-# of that than "cannot resolve the name".
-#
 # Exit 11 keeps this apart from the 2-7 verdicts, which all mean a check ran and
-# returned a verdict. This one means they could not run, and the setup script
-# carries on past it -- so nothing here may claim the file drop is unusable, and
-# what happens next is the setup script's to say, not the probe's.
+# returned a verdict. This one means they could not run.
 if ! command -v smbclient >/dev/null 2>&1; then
-  APKOUT=$(apk add --no-cache samba-client 2>&1) || {
-    emit ""
-    emit "WARN: could not install samba-client inside the container."
-    emit ""
-    indent "$APKOUT"
-    emit ""
-    emit "SKIP: steps 3 to 6 all need smbclient, so none of them ran. Nothing"
-    emit "      has been established about the credentials, the share, the"
-    emit "      folder, or write access; steps 1 and 2 above stand."
-    emit ""
-    emit "MEANING: smbclient is not in the image the checks are running in, and"
-    emit "         the container could not fetch it from the Alpine package"
-    emit "         mirror."
-    emit ""
-    emit "         If you did not pass -HelperImage, the checks are running in the"
-    emit "         psilink image, which carries smbclient -- so the likely cause"
-    emit "         is an older copy of it on this PC: the helper image is fetched"
-    emit "         only when it is missing, never to refresh one already here."
-    emit "         Run 'docker pull vdorie/psi-link:latest' and try again."
-    emit ""
-    emit "         If you did pass -HelperImage, that image does not carry"
-    emit "         smbclient and had to reach the mirror. The message above names"
-    emit "         why it could not: 'certificate' or 'TLS' means something is"
-    emit "         intercepting HTTPS -- a corporate proxy, usually. 'DNS' or"
-    emit "         'temporary error' means name resolution inside the Docker VM."
-    emit ""
-    emit "ACTION:  see the troubleshooting page, 'The container cannot install its"
-    emit "         tools'. It covers both cases."
-    exit 11
-  }
+  emit ""
+  emit "FAIL: smbclient is not in the image these checks are running in."
+  emit ""
+  emit "SKIP: steps 3 to 6 all need it, so none of them ran. Nothing has been"
+  emit "      established about the credentials, the share, the folder, or"
+  emit "      write access; steps 1 and 2 above stand."
+  emit ""
+  emit "MEANING: this copy of the psilink image predates the checks. The image"
+  emit "         is fetched only when it is missing, never to refresh one"
+  emit "         already on the PC."
+  emit ""
+  emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and try again."
+  exit 11
 fi
 
 umask 077
@@ -964,18 +892,28 @@ if ($dockerOs -eq 'windows') {
 }
 Write-Good "Docker engine $(($dockerInfo.Output -split '\s+')[1]) is running."
 
+# The checks run in the same image the exchange itself runs, at the same
+# floating tag: it carries smbclient, so the checks do not have to fetch it on a
+# network that may be the reason they are being run. Floating is deliberate --
+# this script is downloaded on its own rather than shipped with a release, so
+# pinning the diagnostic tighter than the thing it diagnoses buys nothing.
+#
+# Every docker run below overrides the image entrypoint with sh, because that
+# image's own entrypoint hands its argument vector to psilink and would read a
+# helper script passed to it as exchange arguments.
+#
 # Pulled here rather than left to the first docker run: an image that cannot be
 # fetched exits 125, which is indistinguishable from the probe deciding
 # something about the share, and would be reported as a share problem with no
 # diagnosis printed above it.
-$imagePresent = Invoke-Docker -DockerArgs @('image', 'inspect', $HelperImage)
+$imagePresent = Invoke-Docker -DockerArgs @('image', 'inspect', 'vdorie/psi-link:latest')
 if ($imagePresent.ExitCode -ne 0) {
     Write-Host 'Fetching the psilink image (first run only). It is a few hundred'
     Write-Host 'megabytes -- the same image the exchange itself runs -- so this can'
     Write-Host 'take several minutes with nothing on screen.'
-    $pull = Invoke-Docker -DockerArgs @('pull', '--quiet', $HelperImage)
+    $pull = Invoke-Docker -DockerArgs @('pull', '--quiet', 'vdorie/psi-link:latest')
     if ($pull.ExitCode -ne 0) {
-        Write-Bad 'Could not fetch the helper image the checks run in.'
+        Write-Bad 'Could not fetch the psilink image the checks run in.'
         Write-Host ''
         Write-Host $pull.Output
         Write-Host ''
@@ -985,9 +923,7 @@ if ($imagePresent.ExitCode -ne 0) {
         Write-Note 'certificate under Settings > Resources > Proxies.'
         Write-Info ''
         Write-Info 'The checks run in the same image as the exchange itself, so'
-        Write-Info 'nothing will run until Docker can fetch it. If your site keeps'
-        Write-Info 'its own copy of the psilink image, name that copy with'
-        Write-Info '-HelperImage <image>.'
+        Write-Info 'nothing will run until Docker can fetch it.'
         exit 1
     }
 }
@@ -1196,7 +1132,7 @@ try {
         --env SMB_SERVER --env SMB_SHARE --env SMB_PATH `
         --env SMB_USER --env SMB_DOMAIN --env SMB_PASS --env SMB_DIALECT `
         --env SMB_MARKER --env SMB_TOKEN `
-        --entrypoint sh $HelperImage -c "echo $probeB64 | base64 -d | sh"
+        --entrypoint sh 'vdorie/psi-link:latest' -c "echo $probeB64 | base64 -d | sh"
     $probeExit = $LASTEXITCODE
 
     foreach ($v in 'SMB_SERVER','SMB_SHARE','SMB_PATH','SMB_USER','SMB_DOMAIN',
@@ -1212,13 +1148,7 @@ try {
         Write-Note 'The message Docker printed is the one to read.'
         exit $probeExit
     }
-    # Exit 11 is the probe saying it could not run the checks, as opposed to
-    # running them and refusing the share: steps 1 and 2 passed and smbclient
-    # could not be had. The volume is still worth creating -- the engine mounts
-    # the share itself and needs nothing the container was missing -- so the run
-    # carries on and finishes at 12 rather than here.
-    $degraded = ($probeExit -eq 11)
-    if ($probeExit -ne 0 -and -not $degraded) {
+    if ($probeExit -ne 0) {
         Write-Head 'Not ready yet'
         Write-Bad 'The file drop is not usable from Docker. Follow the ACTION above.'
         Write-Info ''
@@ -1226,28 +1156,10 @@ try {
         Write-Info 'https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md'
         exit $probeExit
     }
-    if ($degraded) {
-        Write-Warn 'The checks stopped after step 2, so the share itself has not been'
-        Write-Note 'tested. What that leaves unchecked is on the troubleshooting page.'
-        if (-not $SkipVolumeTest) {
-            Write-Note 'Carrying on to create the volume anyway: Docker mounts the share'
-            Write-Note 'itself and needs nothing that was missing above.'
-        }
-    }
-    else {
-        Write-Good 'The share is reachable, writable, and supports rename.'
-    }
+    Write-Good 'The share is reachable, writable, and supports rename.'
 
     if ($SkipVolumeTest) {
         Write-Note 'Skipping volume creation as requested.'
-        if ($degraded) {
-            Write-Head 'Checks incomplete'
-            Write-Warn 'No volume was created, because you asked for none.'
-            Write-DegradedChecksNotRun
-            Write-Host ''
-            Write-Note 'Status 12: set up as far as it went, checks incomplete.'
-            exit 12
-        }
         exit 0
     }
 
@@ -1301,7 +1213,6 @@ try {
             Write-Info ''
             Write-Info 'Run this script again with -VolumeName <another-name>, or remove'
             Write-Info "that volume yourself if you are certain: docker volume rm $VolumeName"
-            if ($degraded) { Write-DegradedChecksNotRun }
             exit 8
         }
         # docker volume create on an existing name exits 0 and silently keeps
@@ -1316,7 +1227,6 @@ try {
             Write-Host ''
             Write-Note 'A container is probably still using it. Stop any exchange that is'
             Write-Note "running, then try again: docker ps"
-            if ($degraded) { Write-DegradedChecksNotRun }
             exit 8
         }
         Write-Info "Replaced the existing '$VolumeName' volume."
@@ -1331,7 +1241,6 @@ try {
         Write-Bad 'Could not create the volume.'
         Write-Host ''
         Write-Host (Hide-Secret -Text $create.Output -Secret $plainPass)
-        if ($degraded) { Write-DegradedChecksNotRun }
         exit 8
     }
     Write-Good 'Volume created. Docker mounts it the first time it is used.'
@@ -1387,7 +1296,7 @@ rm -f .psilink-a.tmp .psilink-b.tmp
     # mounted" on a share that was fine and took the volume with it.
     $test = Invoke-Docker -DockerArgs @(
         'run', '--rm', '-v', "${VolumeName}:/rz", '--entrypoint', 'sh',
-        $HelperImage, '-c', ($volumeCheck -replace "`r`n", "`n"))
+        'vdorie/psi-link:latest', '-c', ($volumeCheck -replace "`r`n", "`n"))
     $testOut = Hide-Secret -Text $test.Output -Secret $plainPass
 
     # "Did not mount" and "mounted, then refused the write" are different
@@ -1407,7 +1316,6 @@ rm -f .psilink-a.tmp .psilink-b.tmp
             Write-Note 'is out of space.'
             Write-Info ''
             Write-Info 'See the troubleshooting page, "The folder cannot be written to".'
-            if ($degraded) { Write-DegradedChecksNotRun }
             Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
             exit 9
         }
@@ -1426,91 +1334,54 @@ rm -f .psilink-a.tmp .psilink-b.tmp
             Write-Note 'character in the password or the domain is the usual cause.'
         }
         elseif ($testOut -match 'permission denied') {
-            # With the checks stopped at step 2 this mount is the first thing to
-            # have presented the credentials, so a refusal is the ordinary answer
-            # to a wrong password rather than the dialect mismatch it means when
-            # part 3 authenticated. The -Dialect retries would spend two more
-            # real sign-ins against an account that may be counting them.
-            if ($degraded) {
-                Write-Note 'This mount is the first thing to have tried these credentials at'
-                Write-Note 'all: the checks in part 3 stopped before they reached them.'
-                Write-Note '"permission denied" is what a wrong password and an account that'
-                Write-Note 'is refused this folder both look like, and nothing here can tell'
-                Write-Note 'them apart. The attempt reached the server as a real sign-in, so'
-                Write-Note 'do NOT work through candidate passwords from here.'
-            }
-            else {
-                Write-Note 'The kernel refused the mount even though the checks in part 3'
-                Write-Note 'authenticated. The SMB dialect is the most likely difference:'
-                Write-Note 'run again with -Dialect SMB3, and if that fails, -Dialect SMB2.'
-            }
+            Write-Note 'The kernel refused the mount even though the checks in part 3'
+            Write-Note 'authenticated. The SMB dialect is the most likely difference:'
+            Write-Note 'run again with -Dialect SMB3, and if that fails, -Dialect SMB2.'
         }
         elseif ($testOut -match 'host is down') {
             Write-Note 'The server accepted the connection and then dropped it, which'
             Write-Note 'almost always means it requires a newer SMB dialect than the'
             Write-Note 'mount asked for. Run again with -Dialect SMB3.'
-            if ($degraded) { Write-DegradedDialectRetry }
         }
         elseif ($testOut -match 'operation not supported') {
             Write-Note 'The server refused an option the mount asked for -- usually SMB'
             Write-Note 'encryption or signing. Run again with -Dialect SMB3.'
-            if ($degraded) { Write-DegradedDialectRetry }
         }
         elseif ($testOut -match 'required key not available') {
             Write-Note 'The mount wanted a Kerberos ticket and the Docker VM has none.'
             Write-Note 'The server is refusing password authentication. See the'
             Write-Note 'troubleshooting page, "The share never asks for a password".'
         }
-        if ($degraded) { Write-DegradedChecksNotRun }
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
     }
     Write-Good 'The volume mounts and psilink can write to it.'
 
     if ($testOut -match 'MARKER_MISSING') {
-        if (-not $degraded) {
-            Write-Bad 'The volume is not mounting the folder that was just tested.'
-            Write-Note 'A file left in the folder by part 3 is not visible through the'
-            Write-Note 'volume, so the two are pointing at different directories. The'
-            Write-Note 'server, share, or subfolder is wrong somewhere -- a DFS path is'
-            Write-Note 'the usual reason, because the namespace and the real location can'
-            Write-Note 'differ in all three.'
-            Write-Info ''
-            Write-Info 'Read the real path from the folder Properties, DFS tab, and run'
-            Write-Info 'again with -Server, -Share and -SubPath. See the'
-            Write-Info 'troubleshooting page, "Reading the real path from Windows".'
-            Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
-            exit 9
-        }
-        Write-Warn 'Nothing has checked that the volume opens the folder you named.'
-        Write-Note 'That test is a file the checks leave in the folder for the volume'
-        Write-Note 'to find, and they did not get that far.'
+        Write-Bad 'The volume is not mounting the folder that was just tested.'
+        Write-Note 'A file left in the folder by part 3 is not visible through the'
+        Write-Note 'volume, so the two are pointing at different directories. The'
+        Write-Note 'server, share, or subfolder is wrong somewhere -- a DFS path is'
+        Write-Note 'the usual reason, because the namespace and the real location can'
+        Write-Note 'differ in all three.'
+        Write-Info ''
+        Write-Info 'Read the real path from the folder Properties, DFS tab, and run'
+        Write-Info 'again with -Server, -Share and -SubPath. See the'
+        Write-Info 'troubleshooting page, "Reading the real path from Windows".'
+        Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
+        exit 9
     }
     elseif ($testOut -match 'MARKER_MISMATCH') {
-        if ($degraded) {
-            Write-Warn 'There is a check file in that folder, and it is not one this'
-            Write-Note 'run left: part 3 writes it at the end, and it stopped at step'
-            Write-Note '2. An earlier run, or someone else setting up this same share,'
-            Write-Note 'put it there. It settles nothing about which folder this is.'
-            Write-Note "Delete $MarkerName from the drop folder before the run that"
-            Write-Note 'does reach part 3, so that comparison starts clean.'
-        }
-        else {
-            Write-Warn 'The check file in the folder is not the one part 3 wrote.'
-            Write-Note 'Either someone else is setting up this same share right now,'
-            Write-Note 'or an earlier run of this script left the file behind. The'
-            Write-Note 'volume itself reached the folder either way.'
-            Write-Note "To tell the two apart, delete $MarkerName from the drop folder"
-            Write-Note 'and run this again: if it comes back, you have company.'
-        }
+        Write-Warn 'The check file in the folder is not the one part 3 wrote.'
+        Write-Note 'Either someone else is setting up this same share right now,'
+        Write-Note 'or an earlier run of this script left the file behind. The'
+        Write-Note 'volume itself reached the folder either way.'
+        Write-Note "To tell the two apart, delete $MarkerName from the drop folder"
+        Write-Note 'and run this again: if it comes back, you have company.'
     }
-    elseif (-not $degraded -and $testOut -match 'MARKER_OK') {
+    elseif ($testOut -match 'MARKER_OK') {
         # The reassuring line waits for the positive verdict rather than being
-        # inferred from the absence of the other two, and is refused outright to
-        # a degraded run: the checks write the marker at the end, so one that
-        # stopped at step 2 wrote none, and any file the volume finds is some
-        # other run's. "The volume and the checks agree" would then be a claim
-        # nothing established.
+        # inferred from the absence of the other two.
         Write-Good 'The volume and the checks agree on which folder this is.'
     }
 
@@ -1541,17 +1412,9 @@ finally {
 # ==========================================================================
 # Done
 # ==========================================================================
-if ($degraded) {
-    Write-Head 'Set up, but the checks did not run'
-    Write-Host "The volume '$VolumeName' is created and survives reboots. Run this"
-    Write-Host 'script again once the container can get smbclient: part 3 is what'
-    Write-Host 'tests the share itself.'
-}
-else {
-    Write-Head 'Ready to run an exchange'
-    Write-Host "The volume '$VolumeName' is set up and survives reboots. You do not"
-    Write-Host 'need to run this script again unless the password changes.'
-}
+Write-Head 'Ready to run an exchange'
+Write-Host "The volume '$VolumeName' is set up and survives reboots. You do not"
+Write-Host 'need to run this script again unless the password changes.'
 Write-Host ''
 Write-Host 'Run your exchange like this:' -ForegroundColor Cyan
 Write-Host ''
@@ -1561,10 +1424,6 @@ Write-Host "    -v '${VolumeName}:/sync' ``"
 Write-Host "    vdorie/psi-link:latest ``"
 Write-Host "    file:///sync input.csv matches.csv"
 Write-Host ''
-if ($degraded) {
-    Write-Warn 'Before you run that, read "Set up, but not fully checked" below.'
-    Write-Host ''
-}
 Write-Info 'C:\path\to\your\work is a LOCAL folder on this PC holding your input'
 Write-Info 'CSV; results are written back there. It must not be a network path.'
 Write-Info 'input.csv and matches.csv are named relative to that folder. Keep the'
@@ -1613,12 +1472,3 @@ Write-Host ''
 Write-Info 'To send this output to whoever is helping you, copy it out of this'
 Write-Info 'window: right-click the title bar, then Edit > Select All, Edit >'
 Write-Info 'Copy. Nothing you typed as a password is on it.'
-
-if ($degraded) {
-    Write-Head 'Set up, but not fully checked'
-    Write-Warn 'The volume is created: it mounts, and psilink can write to it.'
-    Write-DegradedChecksNotRun
-    Write-Host ''
-    Write-Note 'Status 12: set up as far as it went, checks incomplete.'
-    exit 12
-}

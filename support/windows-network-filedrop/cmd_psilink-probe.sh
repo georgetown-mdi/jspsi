@@ -171,50 +171,22 @@ else
   exit 3
 fi
 
-# The psilink image carries smbclient, so on the default helper image nothing is
-# fetched here at all. The install is the fallback for a stock-Alpine
-# -HelperImage, or for a copy of the psilink image predating the package.
-#
-# Deliberately after the two checks above, both of which use tools already in
-# the image: a machine that cannot resolve or route to the server would fail
-# here first, and "could not install samba-client" is a far worse description
-# of that than "cannot resolve the name".
-#
 # Exit 11 keeps this apart from the 2-7 verdicts, which all mean a check ran and
-# returned a verdict. This one means they could not run, and the setup script
-# carries on past it -- so nothing here may claim the file drop is unusable, and
-# what happens next is the setup script's to say, not the probe's.
+# returned a verdict. This one means they could not run.
 if ! command -v smbclient >/dev/null 2>&1; then
-  APKOUT=$(apk add --no-cache samba-client 2>&1) || {
-    emit ""
-    emit "WARN: could not install samba-client inside the container."
-    emit ""
-    indent "$APKOUT"
-    emit ""
-    emit "SKIP: steps 3 to 6 all need smbclient, so none of them ran. Nothing"
-    emit "      has been established about the credentials, the share, the"
-    emit "      folder, or write access; steps 1 and 2 above stand."
-    emit ""
-    emit "MEANING: smbclient is not in the image the checks are running in, and"
-    emit "         the container could not fetch it from the Alpine package"
-    emit "         mirror."
-    emit ""
-    emit "         If you did not pass -HelperImage, the checks are running in the"
-    emit "         psilink image, which carries smbclient -- so the likely cause"
-    emit "         is an older copy of it on this PC: the helper image is fetched"
-    emit "         only when it is missing, never to refresh one already here."
-    emit "         Run 'docker pull vdorie/psi-link:latest' and try again."
-    emit ""
-    emit "         If you did pass -HelperImage, that image does not carry"
-    emit "         smbclient and had to reach the mirror. The message above names"
-    emit "         why it could not: 'certificate' or 'TLS' means something is"
-    emit "         intercepting HTTPS -- a corporate proxy, usually. 'DNS' or"
-    emit "         'temporary error' means name resolution inside the Docker VM."
-    emit ""
-    emit "ACTION:  see the troubleshooting page, 'The container cannot install its"
-    emit "         tools'. It covers both cases."
-    exit 11
-  }
+  emit ""
+  emit "FAIL: smbclient is not in the image these checks are running in."
+  emit ""
+  emit "SKIP: steps 3 to 6 all need it, so none of them ran. Nothing has been"
+  emit "      established about the credentials, the share, the folder, or"
+  emit "      write access; steps 1 and 2 above stand."
+  emit ""
+  emit "MEANING: this copy of the psilink image predates the checks. The image"
+  emit "         is fetched only when it is missing, never to refresh one"
+  emit "         already on the PC."
+  emit ""
+  emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and try again."
+  exit 11
 fi
 
 umask 077

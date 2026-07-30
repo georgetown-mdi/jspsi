@@ -143,52 +143,22 @@ If you are on a VPN, that is almost certainly it. Take items 3 and 5 of the
 
 ## The container cannot install its tools
 
-The checks stop after step 2 saying `samba-client` could not be installed, print
-what the package manager said, and skip steps 3 to 6. The script carries on from
-there: it creates the volume, tests what it can over the real mount, and
-finishes with status 12.
+Two routes reach this, and they have different fixes.
 
-This is what steps 3 to 6 settle:
+**Through the script.** The checks stop after step 2 saying `smbclient` is not
+in the image they are running in, and the run stops there having set nothing up.
+That image is the psilink image, which carries the tool, so reaching this means
+the copy on this PC predates it. The script fetches the image only when it is
+missing, so a copy already here is never refreshed. Update it and run the script
+again:
 
-- **Whether the username and password are right, and whether the account is
-  allowed into the folder.** A failed mount says `permission denied` for either,
-  and the two have different fixes: a password that works, or rights from
-  whoever administers the share.
-- **Which folder the volume actually opens.** The checks leave a file in the
-  folder for the volume to find; that comparison is the only test of it, and
-  without the file it does not happen at all.
-- **How much free space the share has.** A share with no room left fails an
-  exchange partway through.
-- **Whether the folder already holds more than 8192 files,** which psilink will
-  not read.
+```text
+docker pull vdorie/psi-link:latest
+```
 
-How much of that is left open depends on whether the volume mounted. A mount
-signs in with the username and password you gave and opens the folder, so a run
-that got one has the credentials settled: the server accepted them. A run that
-never got a mount settles nothing about the share.
-
-Either way, **do not work through passwords**. A mount attempt that reaches the
-sign-in is a real one against the account, and a handful of failures locks a
-domain account out. Ask whoever administers the share, or get the checks
-running and let them name the reason.
-
-The image the checks run in is the psilink image, which carries `samba-client`
-already, so this is a fallback path rather than the ordinary one. Reaching it
-means the checks ran in an image without the tool. Two ways that happens:
-
-- **An older copy of the psilink image on this PC.** The script fetches the
-  helper image only when it is missing, so a copy already here is never
-  refreshed. Update it and run the script again:
-
-  ```text
-  docker pull vdorie/psi-link:latest
-  ```
-
-- **An image of your own,** passed with `-HelperImage`. A stock `alpine` has to
-  install the tool, so it needs a reachable package mirror.
-
-If the image is current, or you passed one of your own, the error printed
-underneath names why the mirror could not be reached:
+**By hand.** [Setting it up by hand](by-hand.md) starts from a stock `alpine`
+and installs the tool itself, so it needs a reachable package mirror. The error
+printed underneath names why the mirror could not be reached:
 
 - **`certificate`, `TLS`, or `not trusted`.** Something is intercepting HTTPS,
   which on a corporate network is a proxy doing inspection. The container has a
@@ -198,15 +168,14 @@ underneath names why the mirror could not be reached:
 - **`DNS`, `temporary error`, or `could not resolve`.** The hidden Linux
   computer cannot look up names. Same ground as the section above.
 
-For the interception case there are two ways through, both of which mean running
-the checks yourself -- [setting it up by hand](by-hand.md) -- rather than through
-the script. Mount your organisation's root CA certificate into the container and
-run `update-ca-certificates` before installing the tool, or point `apk` at an
-`http://` mirror. The second adds no new trust: `apk` verifies every package
-against signing keys already in the image, so HTTPS is not what makes the
-installed bytes the real ones. What it gives up is freshness (a signature cannot
-stop someone on the network serving a validly signed older `samba-client`) and
-privacy: the requests themselves show which packages the container installs.
+For the interception case there are two ways through. Mount your organisation's
+root CA certificate into the container and run `update-ca-certificates` before
+installing the tool, or point `apk` at an `http://` mirror. The second adds no
+new trust: `apk` verifies every package against signing keys already in the
+image, so HTTPS is not what makes the installed bytes the real ones. What it
+gives up is freshness (a signature cannot stop someone on the network serving a
+validly signed older `samba-client`) and privacy: the requests themselves show
+which packages the container installs.
 
 ## The share never asks for a password
 
@@ -321,28 +290,18 @@ subfolder is wrong somewhere -- most often a DFS path.
 [Read the real path from Windows](#reading-the-real-path-from-windows) and pass
 it with `-Server`, `-Share` and `-SubPath`.
 
-If instead the script says nothing has checked which folder the volume opens,
-that comparison did not happen rather than failing: steps 3 to 6 did not run, so
-there was no file left for the volume to find. The same holds when it reports a
-check file it did not itself write -- an earlier run or another operator left
-that one, and it settles nothing about this folder either. See
-[The container cannot install its tools](#the-container-cannot-install-its-tools).
+If instead the script reports a check file it did not itself write, an earlier
+run or another operator left that one, and it settles nothing about this folder.
 
-## The three ways the script can end
+## The two ways the script can end
 
-Every run ends in one of three states, and the last thing printed says which.
+Every run ends in one of two states, and the last thing printed says which.
 The same answer is in the exit status, for anyone driving the script from another
 one:
 
 - **`0`.** Nothing is wrong. Either the volume was created and every check
   passed, or there was nothing to do -- the folder turned out to be local, you
   answered `n` at the confirmation, or you passed `-SkipVolumeTest`.
-- **`12`.** The checks that need `smbclient` could not run. The volume was
-  created and tested as far as mounting it can test, and what that leaves
-  unknown is under
-  [The container cannot install its tools](#the-container-cannot-install-its-tools).
-  With `-SkipVolumeTest` there is no volume and nothing about the share was
-  tested at all; 12 says the same thing about the checks.
 - **anything else.** The run stopped and set nothing up. The `FAIL` line above
   says why, and this page has a section for it.
 

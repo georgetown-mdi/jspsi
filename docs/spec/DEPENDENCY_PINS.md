@@ -177,20 +177,19 @@ other account `!`), so `unix_chkpwd` has nothing to verify against. Both would
 need revisiting if the image dropped to a non-root `USER`: at that point the
 helper is a real privilege boundary rather than a redundant one.
 
-**The helper image the setup scripts run the probe in is a mutable tag.** Its
-default is `vdorie/psi-link:latest` in both scripts, overridable with
-`-HelperImage`, and floating it is deliberate: the scripts are downloaded on
-their own rather than shipped with a release, so they cannot name the digest of a
-release they do not know they belong to, and a diagnostic pinned tighter than the
-thing it diagnoses would test an image the exchange will not run. The limit that
-comes with the default is recorded rather than closed. The helper container
-receives the share password in its environment (`--env SMB_PASS`) and, for the
-volume check, a bind of the CIFS volume, so the plaintext credential and
-read/write access to the partner's drop folder go to whatever the tag resolves to
-at pull time -- and that pull happens on exactly the HTTPS-intercepting networks
-the probe exists to diagnose. A digest, or a released version tag, is what would
-make a substituted image detectable there; how a separately downloaded script
-would learn either is the open part.
+**The helper image the setup scripts run the probe in is a mutable tag.** It is
+`vdorie/psi-link:latest` in both scripts, and floating it is deliberate: the
+scripts are downloaded on their own rather than shipped with a release, so they
+cannot name the digest of a release they do not know they belong to, and a
+diagnostic pinned tighter than the thing it diagnoses would test an image the
+exchange will not run. The limit that comes with it is recorded rather than
+closed. The helper container receives the share password in its environment
+(`--env SMB_PASS`) and, for the volume check, a bind of the CIFS volume, so the
+plaintext credential and read/write access to the partner's drop folder go to
+whatever the tag resolves to at pull time -- and that pull happens on exactly the
+HTTPS-intercepting networks the probe exists to diagnose. A digest, or a released
+version tag, is what would make a substituted image detectable there; how a
+separately downloaded script would learn either is the open part.
 
 ## The install-script policy (`allowScripts`)
 
