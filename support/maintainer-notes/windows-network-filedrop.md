@@ -181,6 +181,81 @@ mounted, and then removed by the marker branch. The template is now quote-free
 and existence is established from `docker volume ls`, so an inspection that
 cannot run refuses rather than proceeds.
 
+## Verification pass on staging, 30 July 2026
+
+Run against `d530f47`, the commit that moved the checks into the psilink image,
+because that change had not been exercised from Windows in that form. The rig
+was a Samba 4.21.9 container on the Docker bridge, Windows 11, Docker Desktop
+28.3.2. The share password throughout was `Pa!ss&w%rd^1`, which carries every
+character Command Prompt is known to mangle.
+
+**Both scripts completed, exit 0.** Each was run with no options, answering its
+prompts: a UNC path, `Y` to the confirmation, a username, a blank domain, the
+password. Each reached a mounted CIFS volume and reported the same four
+results -- the volume mounts and is writable, the volume and the checks agree
+on the folder, exclusive create and rename behave, and all six checks passed.
+
+**The image change works.** `vdorie/psi-link:latest` pulled (575 MB) and step 3
+authenticated with the `smbclient` now shipped in it; no `apk add` remains in
+either probe. The section that used to cover a failed package install is gone
+from the troubleshooting page, and nothing still cites it -- checked across both
+scripts and the probe, so there is no dead reference for an operator to chase.
+
+**The closing block emits no redirection character.** The Command Prompt run
+was made from an empty directory so that a `>` escaping into text passed to
+`:info` would leave a file behind rather than merely losing a line. Nothing was
+created. This is worth repeating whenever that block is rewritten, because the
+failure is silent on screen.
+
+**Every section name the scripts print in quotes resolves to a real heading**,
+across all four pages including the new `by-hand.md`. Citations that wrap across
+two printed lines have to be rejoined before checking or they read as missing;
+a checker that does not rejoin them also swallows the region after a line that
+mixes quote styles, and can hide a real mismatch inside it. The two citations
+inside that region were confirmed by hand.
+
+Line endings on the checkout were as they must be: the `.cmd` CRLF, the three
+`.sh` files LF.
+
+Two shell behaviours were measured during the same session. They concern `cmd`,
+PowerShell and Docker rather than any version of these scripts, so they hold
+here, but they were driven against the branch's copies rather than staging's:
+
+- `Read-Host` writes its prompt through the host, not down the success stream.
+  Measured with a script emitting distinct markers from `Write-Host` and
+  `Read-Host` under `6>&1 | Tee-Object`: the `Write-Host` marker reached the
+  file and, while the process sat blocked at the prompt, the `Read-Host` marker
+  did not. A logged PowerShell run still shows its questions. `set /p` is the
+  opposite -- its prompts go to standard output, so `1> log.txt 2>&1` puts every
+  question in the file and leaves a blank screen, confirmed by a full run that
+  displayed nothing at all.
+- At a command line, `%` only expands in pairs naming a variable that exists.
+  `one%two` and `pa%NOSUCHVAR%ss` reached Docker intact; `pa%USERNAME%ss` was
+  stored as the account name with `pa` and `ss` around it, silently. The scripts
+  are immune either way -- `set /p` does not parse what it reads and the single
+  expansion at volume-create time is not rescanned -- confirmed by a full run
+  authenticating with `pa%USERNAME%ss` and storing it back verbatim.
+
+**What this pass does not cover, and should be read as the limit of it:**
+
+- **Nothing was made to fail.** Every run was a working share. The MEANING and
+  ACTION text for every failure -- `LOGON_FAILURE`, the transport-failure path,
+  the dialect messages, the write/rename/delete split -- is untested against the
+  psilink image, and the troubleshooting page says as much to the operator. A
+  wrong password is the cheapest of these to provoke and the one an operator is
+  likeliest to meet first.
+- **`by-hand.md` was not walked.** It is a new page of roughly five hundred
+  lines giving the whole setup as individual commands. Only the two Command
+  Prompt commands that were in the old "Doing it by hand" section were run --
+  `docker volume create` and the mount check -- and both worked. The rest of
+  that page has not been executed in order.
+- **The PowerShell run used the `Read-Host` shim** described under "If you pick
+  this up", because the script cannot be driven from a non-interactive session.
+  The console reads themselves, including the masked `-AsSecureString` entry,
+  were not exercised.
+- **No DFS namespace, and no SMB-served mapped drive letter.** Both remain
+  untestable here for the reasons given above and below.
+
 ## Decisions worth not relitigating
 
 **Automatic DFS resolution was removed.** `Resolve-RealServer` read the SMB
