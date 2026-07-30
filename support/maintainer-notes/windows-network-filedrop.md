@@ -399,9 +399,10 @@ Everything else runs on one machine with Docker and no special rights:
   `-SkipConfirm` suppresses the confirmation prompt but not the credential
   ones.
 - **The container checks on their own.** Extract the `$probe` here-string and
-  run it in `alpine` with `SMB_SERVER`, `SMB_SHARE`, `SMB_PATH`, `SMB_USER`,
-  `SMB_PASS`, `SMB_DOMAIN`, `SMB_DIALECT`, `SMB_MARKER` and `SMB_TOKEN` set.
-  That is how the container half above was verified.
+  run it in `vdorie/psi-link:latest` under `--entrypoint sh` with `SMB_SERVER`,
+  `SMB_SHARE`, `SMB_PATH`, `SMB_USER`, `SMB_PASS`, `SMB_DOMAIN`, `SMB_DIALECT`,
+  `SMB_MARKER` and `SMB_TOKEN` set. That is how the container half above was
+  verified.
 
 ## Field notes: the DFS mock attempt, 28 July 2026
 

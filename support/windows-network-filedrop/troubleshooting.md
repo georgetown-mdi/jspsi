@@ -141,42 +141,6 @@ machine. Three things commonly stop *it* while File Explorer keeps working:
 If you are on a VPN, that is almost certainly it. Take items 3 and 5 of the
 [IT request](#what-to-ask-your-it-department-for) to whoever runs the network.
 
-## The container cannot install its tools
-
-Two routes reach this, and they have different fixes.
-
-**Through the script.** The checks stop after step 2 saying `smbclient` is not
-in the image they are running in, and the run stops there having set nothing up.
-That image is the psilink image, which carries the tool, so reaching this means
-the copy on this PC predates it. The script fetches the image only when it is
-missing, so a copy already here is never refreshed. Update it and run the script
-again:
-
-```text
-docker pull vdorie/psi-link:latest
-```
-
-**By hand.** [Setting it up by hand](by-hand.md) starts from a stock `alpine`
-and installs the tool itself, so it needs a reachable package mirror. The error
-printed underneath names why the mirror could not be reached:
-
-- **`certificate`, `TLS`, or `not trusted`.** Something is intercepting HTTPS,
-  which on a corporate network is a proxy doing inspection. The container has a
-  trust store of its own, and that is what refuses the install. Docker Desktop's
-  proxy certificate setting (Settings > Resources > Proxies) governs the engine's
-  own pulls, not that trust store.
-- **`DNS`, `temporary error`, or `could not resolve`.** The hidden Linux
-  computer cannot look up names. Same ground as the section above.
-
-For the interception case there are two ways through. Mount your organisation's
-root CA certificate into the container and run `update-ca-certificates` before
-installing the tool, or point `apk` at an `http://` mirror. The second adds no
-new trust: `apk` verifies every package against signing keys already in the
-image, so HTTPS is not what makes the installed bytes the real ones. What it
-gives up is freshness (a signature cannot stop someone on the network serving a
-validly signed older `samba-client`) and privacy: the requests themselves show
-which packages the container installs.
-
 ## The share never asks for a password
 
 The share opens in Explorer without ever prompting you, and the checks report
@@ -292,21 +256,6 @@ it with `-Server`, `-Share` and `-SubPath`.
 
 If instead the script reports a check file it did not itself write, an earlier
 run or another operator left that one, and it settles nothing about this folder.
-
-## The two ways the script can end
-
-Every run ends in one of two states, and the last thing printed says which.
-The same answer is in the exit status, for anyone driving the script from another
-one:
-
-- **`0`.** Nothing is wrong. Either the volume was created and every check
-  passed, or there was nothing to do -- the folder turned out to be local, you
-  answered `n` at the confirmation, or you passed `-SkipVolumeTest`.
-- **anything else.** The run stopped and set nothing up. The `FAIL` line above
-  says why, and this page has a section for it.
-
-`echo %ERRORLEVEL%` prints it in the Command Prompt, `$LASTEXITCODE` in
-PowerShell.
 
 ## Status codes
 
