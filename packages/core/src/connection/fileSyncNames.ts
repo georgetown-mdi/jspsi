@@ -22,7 +22,11 @@
 // isExpectedAbortName, re-exported from fileSyncConnection.ts (which IS
 // barrelled), and isProtocolTempName, named individually by main.ts.
 
-import { validate as uuidValidate, version as uuidVersion } from "uuid";
+import {
+  v4 as uuidv4,
+  validate as uuidValidate,
+  version as uuidVersion,
+} from "uuid";
 
 // Suffix shared by all hello files.
 export const HELLO_SUFFIX = "-hello.json";
@@ -127,18 +131,62 @@ export const peerIdFromControlName = (
   return id.length > 0 ? id : undefined;
 };
 
+// Prefix of the generic in-flight temp name send() and writeAck() write.
+const TEMP_PREFIX = "temp-";
+
+// Prefix of the rendezvous hello's in-flight temp name. A distinct prefix, not a
+// distinct extension, so a hello temp is still recognized by isProtocolTempName
+// (and therefore by the protocol grammar, the mid-loop recognizer, and the SFTP
+// adapter's deferred cleanup) while the entry sweep can tell it apart from the
+// message/ack temps whose orphan-by-construction premise it does not share.
+const HELLO_TEMP_PREFIX = "temp-hello-";
+
+// Accepts only the canonical lowercase v4 UUID uuidv4() emits. The uuid
+// package's validate() carries the /i flag, so without the case guard a foreign
+// temp-<UPPERCASE-but-valid-v4>.tmp would be accepted and swept -- a residual
+// slice of the very namespace-collision data loss the stem validation removes.
+// uuidv4() (uuid v14) always emits lowercase, so this rejects no name this
+// protocol's own writes produce. toLowerCase() is locale-independent for a
+// UUID's ASCII hex/hyphen, so there is no Turkish-I hazard. uuidVersion()
+// throws on a non-UUID stem, so the uuidValidate() short-circuit must precede it.
+const isUuidV4Stem = (stem: string): boolean => {
+  if (stem !== stem.toLowerCase()) return false;
+  return uuidValidate(stem) && uuidVersion(stem) === 4;
+};
+
+// Builds the in-flight temp name for a rendezvous hello publish:
+// `temp-hello-<uuidv4()>.tmp`. The single producer of the shape isHelloTempName
+// recognizes, so the publish sites and the entry sweep's exclusion cannot drift.
+/** @internal */
+export const helloTempName = (): string =>
+  `${HELLO_TEMP_PREFIX}${uuidv4()}.tmp`;
+
+// True only for a rendezvous hello's in-flight temp write, the shape
+// helloTempName builds. The entry sweep uses it to exclude hello temps from its
+// unconditional delete, because the orphan-by-construction premise that licenses
+// deleting a message or ack temp does not extend to them: writing either of
+// those requires having seen this party's hello, whereas publishing a hello
+// requires nothing from this party, so a peer starting at the same instant can
+// have one in flight while this party scans and deleting it would break that
+// peer's rename.
+/** @internal */
+export const isHelloTempName = (name: string): boolean =>
+  name.startsWith(HELLO_TEMP_PREFIX) &&
+  name.endsWith(".tmp") &&
+  isUuidV4Stem(name.slice(HELLO_TEMP_PREFIX.length, -".tmp".length));
+
 /**
- * True only for the protocol's OWN in-flight temp file: `temp-<uuidv4()>.tmp`,
+ * True only for the protocol's OWN in-flight temp files: `temp-<uuidv4()>.tmp`,
  * the exact shape `send()` and `writeAck()` write (`temp-${uuidv4()}.tmp`,
- * independent of any id).
+ * independent of any id), and `temp-hello-<uuidv4()>.tmp`, the shape a
+ * rendezvous hello publish writes ({@link helloTempName}).
  *
  * Validating the stem as a v4 UUID is what lets every other `temp-*.tmp` -- a
  * foreign `temp-export.tmp`, an unrelated sync-tool scratch file -- fall through
  * to the foreign-file policy (tolerated) rather than being deleted by the entry
  * sweep. Matching any `temp-`/`.tmp` name would destroy such a foreign file in a
  * namespace collision; the v4-UUID validation keeps the two notions of "foreign"
- * (here and the foreign-file snapshot) in agreement. `uuidVersion()` throws on a
- * non-UUID stem, so the `uuidValidate()` short-circuit must precede it.
+ * (here and the foreign-file snapshot) in agreement.
  *
  * Public because a `FileTransportClient` implementation may need to decide
  * whether a path it was handed names this protocol's own in-flight write rather
@@ -149,17 +197,9 @@ export const peerIdFromControlName = (
  * from the sweeps that produce and remove these files.
  */
 export const isProtocolTempName = (name: string): boolean => {
-  if (!name.startsWith("temp-") || !name.endsWith(".tmp")) return false;
-  const stem = name.slice("temp-".length, -".tmp".length);
-  // Match ONLY the canonical lowercase form uuidv4() emits. The uuid package's
-  // validate() carries the /i flag, so without this guard a foreign
-  // temp-<UPPERCASE-but-valid-v4>.tmp would be accepted and swept -- a residual
-  // slice of the very namespace-collision data loss this narrowing removes.
-  // uuidv4() (uuid v14) always emits lowercase, so this rejects no name our own
-  // send()/writeAck() writes. toLowerCase() is locale-independent for a UUID's
-  // ASCII hex/hyphen, so there is no Turkish-I hazard.
-  if (stem !== stem.toLowerCase()) return false;
-  return uuidValidate(stem) && uuidVersion(stem) === 4;
+  if (isHelloTempName(name)) return true;
+  if (!name.startsWith(TEMP_PREFIX) || !name.endsWith(".tmp")) return false;
+  return isUuidV4Stem(name.slice(TEMP_PREFIX.length, -".tmp".length));
 };
 
 /**

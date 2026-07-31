@@ -34,6 +34,7 @@ import {
   isPeerWaitTimeout,
 } from "../src/errors";
 import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
+import { isHelloTempName } from "../src/connection/fileSyncNames";
 import { computeHostKeyFingerprint } from "../src/utils/sshHostKey";
 import {
   fromEventConnection,
@@ -5218,8 +5219,10 @@ test("synchronize() throws UsageError for multiple concurrent sessions detected 
       { name: "peer-bbb-hello.json", modifyTime: 0, size: 0 },
     ];
   };
-  // put() must succeed (writing our hello); delete/safeDelete are no-ops.
+  // The hello publish must succeed (put then rename, neither reflected into the
+  // store the stubbed list() above bypasses); delete/safeDelete are no-ops.
   client.put = async () => {};
+  client.rename = async () => {};
   client.safeDelete = async () => {};
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
 });
@@ -5246,7 +5249,10 @@ test("synchronize() throws UsageError for more than one joining sentinel in the 
       { name: "peer-bbb-joining.json", modifyTime: 0, size: 0 },
     ];
   };
+  // The hello publish must succeed (put then rename, neither reflected into the
+  // store the stubbed list() above bypasses).
   client.put = async () => {};
+  client.rename = async () => {};
   client.safeDelete = async () => {};
   const err = await conn.synchronize().catch((e: unknown) => e);
   expect(err).toBeInstanceOf(UsageError);
@@ -5835,12 +5841,14 @@ test("(c) lock joiner fast-path retries a transient advertise-hello write, then 
 
   // Fail the advertise-hello put on every attempt but the last in the budget,
   // then delegate to the in-memory store so the final attempt lands. Scoped to
-  // the hello path: on a mismatch this branch issues no other put.
+  // the hello publish's in-flight temp (the hello is published temp-then-rename,
+  // so its final name never appears under a failing write); on a mismatch this
+  // branch issues no other put.
   const helloPath = `${conn.path}/${conn.id}-hello.json`;
   const originalPut = client.put;
   let helloPutAttempts = 0;
   client.put = async (src, dest, options) => {
-    if (dest === helloPath) {
+    if (isHelloTempName(dest.slice(`${conn.path}/`.length))) {
       helloPutAttempts++;
       if (helloPutAttempts < ADVERTISE_HELLO_RETRY_ATTEMPTS)
         throw new Error(`synthetic transient put failure #${helloPutAttempts}`);
@@ -5889,7 +5897,7 @@ test("(c) lock joiner fast-path degrades to log-and-throw once the advertise-hel
   const originalPut = client.put;
   let helloPutAttempts = 0;
   client.put = async (src, dest, options) => {
-    if (dest === helloPath) {
+    if (isHelloTempName(dest.slice(`${conn.path}/`.length))) {
       helloPutAttempts++;
       throw new Error("synthetic persistent put failure");
     }
@@ -7329,9 +7337,14 @@ test.each(entryPreconditionCells)(
       expect(err).toBeInstanceOf(UsageError);
     } else {
       // Proceeds past the guard: it either completes rendezvous (the delete-mode
-      // joiner fast-path with one peer hello) or enters the rendezvous wait and
-      // times out with a transport Error -- never the precondition UsageError.
-      expect(err).not.toBeInstanceOf(UsageError);
+      // joiner fast-path with one peer hello), enters the rendezvous wait and
+      // times out with a transport Error, or -- lockless with a peer hello
+      // already present at entry -- fails on the bounded entry-hello window.
+      // What it must never be is the precondition rejection, so that message,
+      // not the shared UsageError class, is the discriminator.
+      expect(err instanceof Error ? err.message : "").not.toContain(
+        "must be empty except for a single peer hello",
+      );
     }
   },
 );
@@ -10406,4 +10419,66 @@ describe("connection-per-poll idle-boundary signal", () => {
     expect(trace.indexOf("release")).toBeGreaterThan(ackRename);
     expect(trace.filter((entry) => entry === "dial").length).toBeGreaterThan(1);
   });
+});
+
+// --- unconfirmed entry-present peer hello ------------------------------------
+//
+// The lock joiner fast path consumes an entry-present hello and commits
+// role/peerId with no observation attributable to a live peer, so a consumer
+// that later attributes silence to "the peer" would be asserting a fact this
+// side never established. The connection exposes exactly what it does hold.
+
+test("unconfirmedEntryPeerHello names a hello the lock joiner consumed but nothing confirmed", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = ID_HIGH;
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+
+  await conn.synchronize();
+
+  // Rendezvous completed and committed a peer id, yet nothing the peer did was
+  // ever observed: the hello it read is exactly what an interrupted prior run in
+  // this same directory leaves behind.
+  expect(conn.peerId).toBe(ID_LOW);
+  expect(conn.unconfirmedEntryPeerHello).toBe(peerHelloName);
+});
+
+test("unconfirmedEntryPeerHello is undefined when no peer hello predated the run", async () => {
+  const { connA, connB } = makeRendezvousPair(
+    ID_LOW,
+    { locklessRendezvous: true },
+    ID_HIGH,
+    { locklessRendezvous: true },
+  );
+
+  await Promise.all([connA.synchronize(), connB.synchronize()]);
+
+  // Whichever party saw the other's hello saw it appear AFTER its own entry
+  // scan, and each observed the other's ack of its own hello besides.
+  expect(connA.unconfirmedEntryPeerHello).toBeUndefined();
+  expect(connB.unconfirmedEntryPeerHello).toBeUndefined();
+});
+
+test("a delivered peer message clears unconfirmedEntryPeerHello", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = ID_HIGH;
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+  await conn.synchronize();
+  expect(conn.unconfirmedEntryPeerHello).toBe(peerHelloName);
+
+  // A peer message reaching the application is an observation attributable to a
+  // live peer, so the entry-time hello counts as confirmed from then on.
+  const payload = objectMessage({ hello: "world" });
+  files.set(`${conn.path}/${ID_LOW}-${payload.length}.json`, payload);
+  const received = new Promise<unknown>((resolve) =>
+    conn.once("data", resolve),
+  );
+  conn.start();
+  await received;
+  conn.stop();
+
+  expect(conn.unconfirmedEntryPeerHello).toBeUndefined();
 });

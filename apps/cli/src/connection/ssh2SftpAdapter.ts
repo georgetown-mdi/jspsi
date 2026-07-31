@@ -3926,18 +3926,24 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // discipline -- the same reason the recovery-wrapped operations' session gate is
   // owned here (see reestablishAfterIdleRelease).
   //
-  // ONLY the protocol's own in-flight write, temp-<uuidv4()>.tmp, is admitted.
-  // safeDelete is handed durable protocol files too -- the shared rendezvous lock,
-  // and names read back from a listing of the directory the PEER writes into -- and
-  // a record is keyed on a PATH re-issued at an arbitrary later point, so admitting
-  // one of those would let a transiently-failed delete remove whatever has since
-  // come to occupy that name (a fresh authenticated abort marker the peer wrote in
-  // the interim, say). The temp shape is what makes the deferral sound: its name
-  // carries a per-file v4 UUID, so the path a re-issue reaches is the file it was
-  // issued for or nothing. Every other path keeps the plain best-effort behavior --
-  // issued once and never recorded. The grammar is core's own recognizer rather
-  // than a copy of it here, so the transport cannot drift from the sweeps that
-  // produce and remove these files.
+  // ONLY the protocol's own in-flight writes are admitted: temp-<uuidv4()>.tmp,
+  // the message and ack shape, and temp-hello-<uuidv4()>.tmp, the rendezvous
+  // hello publish's -- both of them isProtocolTempName. safeDelete is handed
+  // durable protocol files too -- the shared rendezvous lock, and names read back
+  // from a listing of the directory the PEER writes into -- and a record is keyed
+  // on a PATH re-issued at an arbitrary later point, so admitting one of those
+  // would let a transiently-failed delete remove whatever has since come to
+  // occupy that name (a fresh authenticated abort marker the peer wrote in the
+  // interim, say). The temp shapes are what make the deferral sound: each name
+  // carries its own per-file v4 UUID, so the path a re-issue reaches is the file
+  // it was issued for or nothing. That holds for the hello shape as much as the
+  // message one, and the only hello temp reaching this record is one this party
+  // wrote itself, from the publish's own failure path -- the entry sweep applies
+  // a narrower predicate and never hands a listed hello temp to safeDelete (see
+  // docs/spec/CHANNEL_SECURITY.md). Every other path keeps the plain best-effort
+  // behavior -- issued once and never recorded. The grammar is core's own
+  // recognizer rather than a copy of it here, so the transport cannot drift from
+  // the sweeps that produce and remove these files.
   //
   // Refusing past the cap rather than evicting is deliberate; see
   // MAX_DEFERRED_CLEANUP_DELETES.

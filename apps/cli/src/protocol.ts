@@ -70,6 +70,37 @@ export const PEER_SILENCE_GUIDANCE =
   "still working on a large dataset, raise the peer timeout (--peer-timeout).";
 
 /**
+ * Operator guidance replacing {@link PEER_SILENCE_GUIDANCE} when the peer hello
+ * this run rendezvoused against was already in the folder at entry and nothing
+ * has confirmed a live peer behind it since (`unconfirmedEntryPeerHello`).
+ *
+ * The default text asserts that the peer completed the rendezvous and points at
+ * the peer's side. On this path the code established neither: an entry-present
+ * hello is byte-identical whether a partner wrote it or an interrupted run in
+ * this same folder left it behind, and the lock joiner fast path consumes one
+ * and commits without an answer from anyone. Sending the operator to their
+ * partner on that basis accuses the wrong party in a two-organisation workflow,
+ * so this names the fact the run does hold and prescribes the local recovery.
+ *
+ * It hedges ("may be") because the two cases genuinely cannot be told apart from
+ * here, and it prescribes the re-run before the removal, conditioning the
+ * removal on surviving one: the same shape is what a partner that arrived first
+ * and then died mid-handshake leaves, and a partner that is merely slow
+ * completes the re-run.
+ *
+ * Kept short, with the filename LAST, because this line rides behind the core
+ * layer's own peer-silence sentence inside a single cause-chain link and the
+ * rendered boundary truncates each link: every character of fixed text here is
+ * one the filename does not get. The budget it leaves is pinned by a test rather
+ * than asserted here -- a prose claim about how long a name has to be before it
+ * is cut cannot fail when the text grows.
+ */
+export const entryHelloResidueGuidance = (helloName: string): string =>
+  "No peer was confirmed; the hello present at start may be residue. " +
+  "Re-run; remove only if it persists: " +
+  sanitizeForDisplay(helloName);
+
+/**
  * Operator guidance for a run that swept the shared folder at entry and then
  * timed out waiting for the partner.
  *
@@ -491,9 +522,22 @@ export async function runProtocol(
     // operator guidance: the receiver names its own cause locally, but the sender
     // only sees the inactivity timeout, so it points at the likely receiver-side
     // causes and the peer's own logs (see PEER_SILENCE_GUIDANCE).
+    //
+    // Supplied as a function because which guidance is true depends on what the
+    // rendezvous observed, which happens after this bridge is built: the default
+    // text asserts the peer completed the rendezvous, and a run holding an
+    // unconfirmed entry-present hello has established no such thing. Reading the
+    // connection inside the closure is what defers the choice to the moment the
+    // deadline fires.
+    const fileSyncConn = conn;
     mc = fromEventConnection(conn, {
       inactivityTimeoutMs: peerBudgetMs,
-      inactivityHint: PEER_SILENCE_GUIDANCE,
+      inactivityHint: () => {
+        const leftover = fileSyncConn.unconfirmedEntryPeerHello;
+        return leftover === undefined
+          ? PEER_SILENCE_GUIDANCE
+          : entryHelloResidueGuidance(leftover);
+      },
     });
   } catch (err) {
     emitMetrics();

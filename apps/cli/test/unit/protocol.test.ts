@@ -236,12 +236,15 @@ import {
   MESSAGE_TYPE_BINARY,
   MESSAGE_HEADER_BYTES,
   AEAD_ENVELOPE_VERSION,
+  sanitizeErrorForDisplay,
+  DISPLAY_TRUNCATION_MARKER,
 } from "@psilink/core";
 import type { ExchangeRecord, VerificationKeys } from "@psilink/core";
 import {
   runProtocol,
   PEER_SILENCE_GUIDANCE,
   BOTH_SWEPT_GUIDANCE,
+  entryHelloResidueGuidance,
   type RunProtocolResult,
   type SigningPersist,
 } from "../../src/protocol";
@@ -988,6 +991,102 @@ test("runProtocol writes no key when SIGINT cancels before the handshake complet
   } finally {
     exitSpy.mockRestore();
   }
+});
+
+// --- Entry-present hello attribution -----------------------------------------
+
+// Runs a lone party into a folder already holding a leftover peer hello under a
+// foreign id -- exactly what a hard kill during a prior rendezvous leaves when
+// the party id is a fresh uuid per run. In the default lock mode the run takes
+// the joiner fast path, consumes the leftover, commits a peer id, and then
+// stalls in the key exchange against a party that does not exist.
+async function runIntoLeftoverPeerHello(
+  leftoverId: string = LEFTOVER_HELLO_ID,
+): Promise<unknown> {
+  fs.writeFileSync(
+    path.join(dropDir, `${leftoverId}-hello.json`),
+    JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
+  );
+  const [result] = await Promise.allSettled([
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1, peerTimeoutMs: 300 },
+      },
+      { sharedSecret: TOKEN_A, keyFilePath: path.join(tmpDir, "a.key") },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+    ),
+  ]);
+  expect(result.status).toBe("rejected");
+  return (result as PromiseRejectedResult).reason;
+}
+
+const LEFTOVER_HELLO_ID = "2f1c9a04-3b7e-4f6a-9d21-88ca0e6b5477";
+
+test("a run against an unconfirmed entry-present hello blames the leftover, not the peer", async () => {
+  const err = await runIntoLeftoverPeerHello();
+
+  const rendered = sanitizeErrorForDisplay(err);
+  // The claim the code cannot support is gone: nothing here established that a
+  // peer completed the rendezvous, so the operator is not sent to their partner.
+  expect(rendered).not.toContain("The peer completed the rendezvous");
+  expect(rendered).not.toContain("cause is on the peer's side");
+  // Replaced by the fact the run does hold, the leftover named, and the local
+  // recovery step -- asserted through the rendering path, where each cause-chain
+  // link is truncated, not on the raw message.
+  expect(rendered).toContain("No peer was confirmed");
+  expect(rendered).toContain(`${LEFTOVER_HELLO_ID}-hello.json`);
+  // The re-run leads and the removal is conditioned on surviving it: from here
+  // a leftover and a partner that arrived first and then stalled are the same
+  // shape, and a partner that is merely slow completes the re-run.
+  expect(rendered).toContain("Re-run");
+  expect(rendered).toContain("remove only if it persists");
+  expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+});
+
+test("a run whose partner completed the rendezvous keeps the peer-side guidance", async () => {
+  // The partner's hello appears AFTER this party's entry scan and it acks this
+  // party's own hello, so nothing about it is unconfirmed residue: the default
+  // attribution is the true one and must be preserved.
+  const err = await runPartyToKeyExchangeTimeout();
+
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).toContain("The peer completed the rendezvous");
+  expect(rendered).not.toContain("No peer was confirmed");
+});
+
+test("entryHelloResidueGuidance leads with the diagnosis and recovery, filename last", () => {
+  const line = entryHelloResidueGuidance(`${LEFTOVER_HELLO_ID}-hello.json`);
+  expect(line.indexOf("Re-run")).toBeLessThan(line.indexOf(LEFTOVER_HELLO_ID));
+  const long = entryHelloResidueGuidance(`${"x".repeat(400)}-hello.json`);
+  const rendered = sanitizeErrorForDisplay(new Error(long));
+  expect(rendered).toContain("No peer was confirmed");
+  expect(rendered).toContain("remove only if it persists");
+});
+
+// A configured peer_id is not bounded to a uuid's 36 characters, and this
+// clause shares one 256-character cause-chain link with the core layer's own
+// peer-silence sentence -- so the budget the fixed text leaves for the filename
+// is small, and every word of it is one the operator does not get to read. This
+// drives the real composite through the real renderer at a name half again a
+// uuid's length: a text that grows past the budget truncates the very filename
+// the recovery step names, which is a measurement, not something a comment can
+// promise.
+test("the residue guidance renders in full for a configured peer_id longer than a uuid", async () => {
+  const err = await runIntoLeftoverPeerHello(
+    "acme-health-2026-partner-exchange-north-region-01",
+  );
+
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  expect(rendered).toContain(
+    "acme-health-2026-partner-exchange-north-region-01-hello.json",
+  );
+  expect(rendered).toContain("remove only if it persists");
 });
 
 // --- Both-parties-swept retry advice -----------------------------------------

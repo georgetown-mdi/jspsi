@@ -257,8 +257,11 @@ export class QueuedMessageConnection implements MessageConnection {
   // stays transport-agnostic: a caller that knows the transport supplies
   // guidance about likely causes (the file-sync CLI names probable
   // receiver-side faults), while a caller that supplies none -- e.g. the WebRTC
-  // transport -- gets the bare diagnostic unchanged.
-  private readonly inactivityHint: string | undefined;
+  // transport -- gets the bare diagnostic unchanged. A function form is resolved
+  // when the deadline FIRES, so guidance may depend on facts the transport
+  // establishes after construction (the file-sync CLI decides between two
+  // attributions on what the rendezvous observed).
+  private readonly inactivityHint: string | (() => string) | undefined;
   private readonly hooks: TransportHooks;
   // Single source of truth for the terminal lifecycle; undefined means open.
   // Every transition into a terminal state runs transport teardown exactly
@@ -281,7 +284,7 @@ export class QueuedMessageConnection implements MessageConnection {
     options?: {
       capacity?: number;
       inactivityTimeoutMs?: number;
-      inactivityHint?: string;
+      inactivityHint?: string | (() => string);
     },
   ) {
     this.capacity = options?.capacity ?? DEFAULT_CAPACITY;
@@ -313,15 +316,29 @@ export class QueuedMessageConnection implements MessageConnection {
     if (ms === undefined) return;
     this.idleTimer = setTimeout(() => {
       this.idleTimer = undefined;
+      // Resolve the transport's guidance here, at the moment of failure, so a
+      // function form sees the transport's final state rather than its state at
+      // construction. Guarded because this runs in a timer callback with no
+      // caller to catch it: a hint that throws must cost the operator its
+      // sentence, not the fail() below -- an escaping exception would leave the
+      // parked receive() unresolved for the life of the process, turning a
+      // decorative sentence into a hang at the last-resort failure boundary.
+      let hint: string | undefined;
+      try {
+        hint =
+          typeof this.inactivityHint === "function"
+            ? this.inactivityHint()
+            : this.inactivityHint;
+      } catch {
+        hint = undefined;
+      }
       this.fail(
         new ConnectionError(
           `no message received within ${ms}ms; the peer appears to have ` +
             "gone silent" +
             // Append the transport's guidance, if any, as a trailing sentence;
             // a caller that supplies none gets the bare diagnostic unchanged.
-            (this.inactivityHint !== undefined
-              ? `. ${this.inactivityHint}`
-              : ""),
+            (hint !== undefined ? `. ${hint}` : ""),
           "transport",
         ),
       );
@@ -611,14 +628,17 @@ export class QueuedMessageConnection implements MessageConnection {
  * peer-silence error. The bridge is transport-agnostic, so it carries no
  * guidance of its own; a caller that knows the transport (e.g. the file-sync
  * CLI naming likely receiver-side causes) supplies one, and a caller that omits
- * it gets the bare diagnostic.
+ * it gets the bare diagnostic. Supply a FUNCTION when the guidance depends on
+ * something the transport only learns after this bridge is built -- it is
+ * resolved when the deadline fires, not here, and a function that throws costs
+ * only its own sentence: the peer-silence failure still lands.
  */
 export function fromEventConnection(
   conn: Connection,
   options?: {
     capacity?: number;
     inactivityTimeoutMs?: number;
-    inactivityHint?: string;
+    inactivityHint?: string | (() => string);
   },
 ): MessageConnection {
   return new QueuedMessageConnection(
