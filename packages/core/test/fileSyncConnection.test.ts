@@ -34,6 +34,7 @@ import {
   isPeerWaitTimeout,
 } from "../src/errors";
 import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
+import { isHelloTempName } from "../src/connection/fileSyncNames";
 import { computeHostKeyFingerprint } from "../src/utils/sshHostKey";
 import {
   fromEventConnection,
@@ -5218,8 +5219,10 @@ test("synchronize() throws UsageError for multiple concurrent sessions detected 
       { name: "peer-bbb-hello.json", modifyTime: 0, size: 0 },
     ];
   };
-  // put() must succeed (writing our hello); delete/safeDelete are no-ops.
+  // The hello publish must succeed (put then rename, neither reflected into the
+  // store the stubbed list() above bypasses); delete/safeDelete are no-ops.
   client.put = async () => {};
+  client.rename = async () => {};
   client.safeDelete = async () => {};
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
 });
@@ -5246,7 +5249,10 @@ test("synchronize() throws UsageError for more than one joining sentinel in the 
       { name: "peer-bbb-joining.json", modifyTime: 0, size: 0 },
     ];
   };
+  // The hello publish must succeed (put then rename, neither reflected into the
+  // store the stubbed list() above bypasses).
   client.put = async () => {};
+  client.rename = async () => {};
   client.safeDelete = async () => {};
   const err = await conn.synchronize().catch((e: unknown) => e);
   expect(err).toBeInstanceOf(UsageError);
@@ -5835,12 +5841,14 @@ test("(c) lock joiner fast-path retries a transient advertise-hello write, then 
 
   // Fail the advertise-hello put on every attempt but the last in the budget,
   // then delegate to the in-memory store so the final attempt lands. Scoped to
-  // the hello path: on a mismatch this branch issues no other put.
+  // the hello publish's in-flight temp (the hello is published temp-then-rename,
+  // so its final name never appears under a failing write); on a mismatch this
+  // branch issues no other put.
   const helloPath = `${conn.path}/${conn.id}-hello.json`;
   const originalPut = client.put;
   let helloPutAttempts = 0;
   client.put = async (src, dest, options) => {
-    if (dest === helloPath) {
+    if (isHelloTempName(dest.slice(`${conn.path}/`.length))) {
       helloPutAttempts++;
       if (helloPutAttempts < ADVERTISE_HELLO_RETRY_ATTEMPTS)
         throw new Error(`synthetic transient put failure #${helloPutAttempts}`);
@@ -5889,7 +5897,7 @@ test("(c) lock joiner fast-path degrades to log-and-throw once the advertise-hel
   const originalPut = client.put;
   let helloPutAttempts = 0;
   client.put = async (src, dest, options) => {
-    if (dest === helloPath) {
+    if (isHelloTempName(dest.slice(`${conn.path}/`.length))) {
       helloPutAttempts++;
       throw new Error("synthetic persistent put failure");
     }

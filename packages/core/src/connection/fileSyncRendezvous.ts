@@ -56,6 +56,8 @@ import {
   ABORT_SUFFIX,
   ackMarkerName,
   peerIdFromControlName,
+  helloTempName,
+  isHelloTempName,
   isProtocolTempName,
   isProtocolGrammarName,
   isRetainMessageAck,
@@ -173,8 +175,18 @@ export async function readControlFileWithGate(
     }
     return result.data;
   } while (Date.now() <= timeToLive.getTime());
+  // Deliberately a plain Error, not a UsageError: the pre-sweep retain
+  // inspection classifies a UsageError from this gate as terminal (I5b) and
+  // anything else as retain-uncertain, so promoting this exhausted-budget throw
+  // would turn its bounded read into a hard refusal.
+  //
+  // Leads with the operative sentence and the recovery step, trailing the path,
+  // because each cause-chain link is truncated at the rendered boundary (see
+  // sanitizeForDisplay).
   throw new Error(
-    `timed out waiting for ${sanitizeForDisplay(filePath)} to fully sync`,
+    "peer hello never became readable; most likely residue from an " +
+      "interrupted run, not a peer still syncing. Remove it after confirming " +
+      `no other session uses this path: ${sanitizeForDisplay(filePath)}`,
   );
 }
 
@@ -259,6 +271,35 @@ export function isPeerJoiningName(name: string, selfId: string): boolean {
 // bandwidth-bound. Expressed as poll cycles rather than a raw millisecond
 // magic constant so it tracks the configured cadence.
 const RETAIN_INSPECTION_POLL_CYCLES = 2;
+
+// Bounds every RENDEZVOUS-time peer-hello read through the same I5a gate, for
+// the same reason the inspection bounds its own: the gate retries a body it
+// cannot resolve until its deadline, so handing it the full peer timeout lets a
+// single unresolvable hello -- a torn or empty leftover from a crashed prior run
+// -- hold the entire budget in every mode.
+//
+// Three times the inspection's cycles, because this read races a peer that is
+// actively publishing rather than inspecting a stale directory, so it must
+// absorb a full publish propagation on a sync-mediated transport and not merely
+// flush jitter. It is not larger still because the hello is published
+// temp-then-rename: the final name appears only at the atomic rename, so the
+// body is complete before the name is visible and what remains is propagation,
+// never a write in progress. At the default cadence this is 30 s, the same
+// magnitude as the lock path's joiner-recovery window, which bounds the
+// analogous "the peer's publish is mid-flight" wait.
+const RENDEZVOUS_HELLO_READ_POLL_CYCLES = 6;
+
+// The near-future deadline a rendezvous-time hello read is given, capped at the
+// remaining peer budget so it is never longer than the operator asked for.
+// open() sets timeToLive before synchronize() runs, so the non-null assertion is
+// safe at every call site.
+const helloReadDeadline = (options: RendezvousOptions): Date =>
+  new Date(
+    Math.min(
+      Date.now() + RENDEZVOUS_HELLO_READ_POLL_CYCLES * options.pollingFrequency,
+      options.timeToLive!.getTime(),
+    ),
+  );
 
 // The rendezvous-relevant subset of the connection's Options, read live through
 // the deps `options` accessor. The connection's full Options is a superset, so
@@ -350,6 +391,36 @@ export class FileSyncRendezvous {
       await this.rendezvousAsLockJoiner(scope, peerHellos[0], helloPath);
     } else {
       await this.rendezvousViaHelloExchange(scope, helloPath);
+    }
+  }
+
+  // Publishes this party's hello temp-then-rename, the discipline every other
+  // payload-bearing publish already follows (the message write in send(), the
+  // ack in writeAck(), and the joiner's own sentinel): the final
+  // `<id>-hello.json` appears only at the atomic rename, so no reader can ever
+  // observe it torn. A hard kill mid-write then leaves a `temp-hello-<uuid>.tmp`
+  // -- inert, and tolerated by the next entry scan -- rather than an empty or
+  // half-written hello under its final name, which the I5a read gate would
+  // retry against for its whole budget in every mode.
+  //
+  // The in-flight temp is swept inline on failure (best-effort safeDelete),
+  // never tracked in responsibleFiles, matching send()/writeAck(). The CALLER
+  // tracks the final name immediately after this resolves, with no throwable
+  // statement between it and the rename (I4a).
+  private async publishHello(dir: string, helloPath: string): Promise<void> {
+    const { deps } = this;
+    const tempPath = `${dir}/${helloTempName()}`;
+    try {
+      await deps
+        .client()
+        .put(serializeEnvelope(helloEnvelope(deps.options())), tempPath, {
+          flags: "w",
+          encoding: "utf-8",
+        });
+      await deps.client().rename(tempPath, helloPath);
+    } catch (err: unknown) {
+      await deps.client().safeDelete(tempPath);
+      throw err instanceof Error ? err : new Error(errMessage(err));
     }
   }
 
@@ -634,15 +705,14 @@ export class FileSyncRendezvous {
     //     --force-retain-sweep guard.
     //
     // The one kind that legitimately pre-exists and is NOT rejected is an
-    // orphaned temp-*.tmp -- a send()/writeAck() in-flight write whose process
-    // was hard-killed between the temp put() and the rename to <id>.json. At
-    // entry the message loop has not started, so any such file is necessarily
-    // orphaned (no live in-flight write can race it); it is swept just below
-    // (safeDelete then added to `ignored`) so a prior crash's temp artifact is
-    // cleaned up rather than left as litter and entry is not aborted on its
-    // account. `ignored` is the sanctioned extension point for kinds that may
-    // legitimately pre-exist as the protocol grows; the foreign-file snapshot
-    // below is a sibling tolerance mechanism for grammar-failing names.
+    // in-flight temp-*.tmp -- a write hard-killed between the temp put() and the
+    // rename to its final name. Both temp shapes land in `ignored` below and so
+    // never abort entry, but they are disposed of differently: a message or ack
+    // temp (temp-<uuid>.tmp) is swept, a hello temp (temp-hello-<uuid>.tmp) is
+    // left alone. See the two blocks below for why the sweep does not extend to
+    // the hello shape. `ignored` is the sanctioned extension point for kinds
+    // that may legitimately pre-exist as the protocol grows; the foreign-file
+    // snapshot below is a sibling tolerance mechanism for grammar-failing names.
     // A peer hello is `<peerId>-hello.json` with a non-empty id that is not our
     // own (isPeerHelloName). A bare `-hello.json` slices to an empty id and is
     // therefore NOT a peer hello: it still matches the grammar
@@ -653,16 +723,21 @@ export class FileSyncRendezvous {
     const ignored = new Set<string>();
 
     // Sweep orphaned in-flight temp writes left by a prior crashed exchange.
-    // Match ONLY the protocol's own temp shape, temp-<uuidv4()>.tmp
-    // (isProtocolTempName), which send()/writeAck() produce -- never a final
-    // <id>.json message (in retain mode the directory is intentionally full of
-    // *.json (the transcript), which can never match `.tmp`), and never a
-    // FOREIGN temp-*.tmp whose stem is not a v4 UUID (a user/sync-tool
-    // `temp-export.tmp`), which falls through to the foreign-file snapshot below
-    // and is tolerated rather than destroyed in a namespace collision. Delete
-    // each with the non-throwing safeDelete, then add its name to `ignored` so
-    // the already-taken `files` snapshot does not re-trip the guard below on a
-    // name we just removed.
+    // Match ONLY the protocol's own message/ack temp shape, temp-<uuidv4()>.tmp
+    // (isProtocolTempName minus isHelloTempName), which send()/writeAck()
+    // produce -- never a final <id>.json message (in retain mode the directory is
+    // intentionally full of *.json (the transcript), which can never match
+    // `.tmp`), and never a FOREIGN temp-*.tmp whose stem is not a v4 UUID (a
+    // user/sync-tool `temp-export.tmp`), which falls through to the foreign-file
+    // snapshot below and is tolerated rather than destroyed in a namespace
+    // collision. Delete each with the non-throwing safeDelete, then add its name
+    // to `ignored` so the already-taken `files` snapshot does not re-trip the
+    // guard below on a name we just removed.
+    //
+    // Sweeping unconditionally is licensed by these two shapes being orphaned by
+    // construction: writing either requires having already seen this party's
+    // hello, which is published only after this scan (the ordering is pinned by
+    // a test), so no live in-flight write of either can race this delete.
     //
     // The delete is best-effort and the `ignored` add is unconditional (it does
     // not branch on the delete's outcome): a safeDelete that silently fails (a
@@ -672,8 +747,8 @@ export class FileSyncRendezvous {
     // permanent. Tracking the orphan in `responsibleFiles` would not help: its
     // writer already died, so that process's cleanup() never runs -- which is the
     // whole reason this rendezvous-time sweep exists.
-    const orphanedTempFiles = files.filter((file) =>
-      isProtocolTempName(file.name),
+    const orphanedTempFiles = files.filter(
+      (file) => isProtocolTempName(file.name) && !isHelloTempName(file.name),
     );
     if (orphanedTempFiles.length > 0) {
       // Single breadcrumb: a process died mid-write here. Entry is not aborted
@@ -693,6 +768,32 @@ export class FileSyncRendezvous {
         ),
       );
       orphanedTempFiles.forEach((file) => ignored.add(file.name));
+    }
+
+    // A hello temp is tolerated in place, never swept: publishing a hello
+    // requires nothing from this party, so a peer that started at the same
+    // instant can have one in flight in this very listing, and deleting it would
+    // break that peer's rename and fail its exchange. This party's own crash
+    // residue takes the same disposition -- the two are indistinguishable by
+    // name -- so a hello temp survives entry as inert litter: it matches the
+    // grammar (so it is never counted as a foreign file), the mid-loop scan
+    // recognizes it, and no reader ever opens it. `--sweep-exchange-files` does
+    // not reach it either: the flag clears protocol files whose deletion the
+    // operator's no-concurrent-session assertion covers, and a temp is not one
+    // of the durable protocol files that assertion is about.
+    const helloTempFiles = files.filter((file) => isHelloTempName(file.name));
+    if (helloTempFiles.length > 0) {
+      deps
+        .log()
+        .info(
+          `[${deps.id()}] tolerating ${helloTempFiles.length} in-flight hello ` +
+            "publish(es) left in place (a concurrently starting peer's write, " +
+            "or residue from a prior crashed publish): " +
+            `${helloTempFiles
+              .map((f) => sanitizeForDisplay(f.name))
+              .join(", ")}`,
+        );
+      helloTempFiles.forEach((file) => ignored.add(file.name));
     }
 
     // All three classifications exclude `ignored`, kept symmetric with the two
@@ -814,11 +915,13 @@ export class FileSyncRendezvous {
     // self message or ack here would otherwise corrupt the send/ack gate). Peer
     // files never land in outbound (the peer writes to its own outbound, which
     // is THIS party's inbound), so every protocol-grammar file is this party's
-    // own leftover from a crashed prior session: an orphaned temp is swept like
-    // the inbound one (best-effort safeDelete), a foreign file is snapshotted
-    // and tolerated, and any other protocol file is collected as unexpected
-    // (rejected by the clean-start guard, or swept under --sweep-exchange-files)
-    // exactly as on the inbound side.
+    // own leftover from a crashed prior session: an orphaned temp is swept
+    // (best-effort safeDelete), a foreign file is snapshotted and tolerated, and
+    // any other protocol file is collected as unexpected (rejected by the
+    // clean-start guard, or swept under --sweep-exchange-files) exactly as on the
+    // inbound side. That same "no peer file lands here" routing rule is why the
+    // sweep covers BOTH temp shapes here while the inbound one exempts the hello
+    // shape: a hello temp in this directory can only be this party's own.
     if (split) {
       const outFiles = await deps.client().list(outboundPath);
       const outOrphans = outFiles.filter((file) =>
@@ -949,12 +1052,13 @@ export class FileSyncRendezvous {
       );
 
     // I5: read the peer hello body through the partial-sync gate before
-    // deleting it, validating the two required bilateral flags. open() sets
-    // timeToLive before synchronize() runs, so the non-null assertion is safe.
+    // deleting it, validating the two required bilateral flags. Bounded by
+    // helloReadDeadline, so a hello that never resolves fails here instead of
+    // holding the peer budget.
     const peerEnvelope = await readControlFileWithGate(
       deps.client(),
       otherPath,
-      deps.options().timeToLive!,
+      helloReadDeadline(deps.options()),
       deps.options().pollingFrequency,
       HelloEnvelopeSchema,
       deps.signal(),
@@ -996,12 +1100,7 @@ export class FileSyncRendezvous {
         attempt++
       ) {
         try {
-          await deps
-            .client()
-            .put(serializeEnvelope(helloEnvelope(deps.options())), helloPath, {
-              flags: "w",
-              encoding: "utf-8",
-            });
+          await this.publishHello(scope.outboundPath, helloPath);
           break;
         } catch (writeErr: unknown) {
           // Label is the literal `joiner`, not `this.role`: the handshake role
@@ -1189,12 +1288,11 @@ export class FileSyncRendezvous {
     deps
       .log()
       .debug(`[${deps.role()}] creating initial ${deps.id()}${HELLO_SUFFIX}`);
-    await deps
-      .client()
-      .put(serializeEnvelope(helloEnvelope(deps.options())), helloPath, {
-        flags: "w",
-        encoding: "utf-8",
-      });
+    await this.publishHello(outboundPath, helloPath);
+    // Tracked after the durable rename (delete mode only), with no throwable
+    // statement between it and the rename inside publishHello, exactly as the
+    // ack write does: the final name only appears at that atomic step, so there
+    // is no orphan window a pre-track would cover (I4a).
     if (!deps.options().retainFiles)
       deps.responsibleFiles.add(`${deps.id()}${HELLO_SUFFIX}`);
     let lockPath: string | undefined;
@@ -1254,7 +1352,7 @@ export class FileSyncRendezvous {
             const peerEnvelope = await readControlFileWithGate(
               deps.client(),
               `${scope.inboundPath}/${peerHello.name}`,
-              deps.options().timeToLive!,
+              helloReadDeadline(deps.options()),
               deps.options().pollingFrequency,
               HelloEnvelopeSchema,
               deps.signal(),
@@ -1586,7 +1684,7 @@ export class FileSyncRendezvous {
           const peerEnvelope = await readControlFileWithGate(
             deps.client(),
             `${scope.inboundPath}/${otherFile.name}`,
-            deps.options().timeToLive!,
+            helloReadDeadline(deps.options()),
             deps.options().pollingFrequency,
             HelloEnvelopeSchema,
             deps.signal(),
@@ -1666,7 +1764,7 @@ export class FileSyncRendezvous {
           const peerEnvelope = await readControlFileWithGate(
             deps.client(),
             otherPath,
-            deps.options().timeToLive!,
+            helloReadDeadline(deps.options()),
             deps.options().pollingFrequency,
             HelloEnvelopeSchema,
             deps.signal(),
@@ -1732,7 +1830,7 @@ export class FileSyncRendezvous {
           const peerEnvelope = await readControlFileWithGate(
             deps.client(),
             `${scope.inboundPath}/${otherFile.name}`,
-            deps.options().timeToLive!,
+            helloReadDeadline(deps.options()),
             deps.options().pollingFrequency,
             HelloEnvelopeSchema,
             deps.signal(),
