@@ -213,6 +213,7 @@ describe("readControlFileWithGate", () => {
         future(),
         1,
         HelloEnvelopeSchema,
+        "presentAtEntry",
         signal(),
       ),
     ).rejects.toBe(terminal);
@@ -232,6 +233,7 @@ describe("readControlFileWithGate", () => {
       future(),
       1,
       HelloEnvelopeSchema,
+      "presentAtEntry",
       signal(),
     );
     expect(envelope).toEqual({ locklessRendezvous: false, retainFiles: true });
@@ -253,6 +255,7 @@ describe("readControlFileWithGate", () => {
         future(),
         1,
         HelloEnvelopeSchema,
+        "presentAtEntry",
         signal(),
       ),
     ).rejects.toMatchObject({
@@ -276,6 +279,7 @@ describe("readControlFileWithGate", () => {
         new Date(Date.now() - 1),
         1,
         HelloEnvelopeSchema,
+        "presentAtEntry",
         signal(),
       );
     } catch (err) {
@@ -292,31 +296,64 @@ describe("readControlFileWithGate", () => {
     expect((thrown as Error).message).toContain("in/peer-hello.json");
   });
 
-  test("the whole terminal message survives the display boundary for a realistic path", async () => {
-    // Every cause-chain link is truncated at DEFAULT_MAX_DISPLAY_LENGTH where it
-    // is rendered, so the operative sentence, the recovery step, AND a
-    // realistically long path must all fit inside one link.
-    const filePath =
-      "/srv/exchange/partner-drop/2f1c9a04-3b7e-4f6a-9d21-88ca0e6b5477-hello.json";
+  test("attributes no residue to a hello that appeared during the run", async () => {
     const client = stubClient(async () => {
       throw new Error("still syncing");
     });
     const thrown = await readControlFileWithGate(
       client,
-      filePath,
+      "in/peer-hello.json",
       new Date(Date.now() - 1),
       1,
       HelloEnvelopeSchema,
+      "appearedAfterEntry",
       signal(),
     ).then(
       () => undefined,
       (err: unknown) => err,
     );
-    const rendered = sanitizeErrorForDisplay(thrown);
-    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
-    expect(rendered).toContain("Remove it after confirming");
-    expect(rendered).toContain(filePath);
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBeInstanceOf(UsageError);
+    // A peer that published after this run's entry scan may simply still be
+    // landing, so the message must not send the operator to delete its file.
+    expect((thrown as Error).message).not.toContain("residue");
+    expect((thrown as Error).message).toContain("appeared during this run");
+    expect((thrown as Error).message).toContain("Re-run");
+    expect((thrown as Error).message).toContain("in/peer-hello.json");
   });
+
+  test.each([
+    ["presentAtEntry", "Remove it after confirming"],
+    ["appearedAfterEntry", "Re-run; remove it only if it persists"],
+  ] as const)(
+    "the whole %s terminal message survives the display boundary for a realistic path",
+    async (provenance, recoveryStep) => {
+      // Every cause-chain link is truncated at DEFAULT_MAX_DISPLAY_LENGTH where
+      // it is rendered, so the operative sentence, the recovery step, AND a
+      // realistically long path must all fit inside one link.
+      const filePath =
+        "/srv/exchange/partner-drop/2f1c9a04-3b7e-4f6a-9d21-88ca0e6b5477-hello.json";
+      const client = stubClient(async () => {
+        throw new Error("still syncing");
+      });
+      const thrown = await readControlFileWithGate(
+        client,
+        filePath,
+        new Date(Date.now() - 1),
+        1,
+        HelloEnvelopeSchema,
+        provenance,
+        signal(),
+      ).then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+      const rendered = sanitizeErrorForDisplay(thrown);
+      expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+      expect(rendered).toContain(recoveryStep);
+      expect(rendered).toContain(filePath);
+    },
+  );
 });
 
 // --- FileSyncRendezvous coordinator ------------------------------------------
@@ -1859,6 +1896,40 @@ describe("FileSyncRendezvous bounded hello read", () => {
     // This party's own artifacts are still rolled back by the terminal path.
     expect(files.has(`${DIR}/${helloName("aaa")}`)).toBe(false);
   });
+
+  // The same unresolvable hello, arriving after the entry scan instead of
+  // predating it: the run watched it appear, so a peer whose publish is still
+  // landing explains it as well as a leftover does, and the terminal message
+  // must not tell the operator to remove a live partner's file.
+  test.each([
+    ["lock", false],
+    ["lockless", true],
+  ] as const)(
+    "a hello that appears after entry is not attributed to residue (%s)",
+    async (_name, locklessRendezvous) => {
+      const files = new Map<string, Buffer>();
+      files.set(`${DIR}/${helloName("zzz")}`, Buffer.alloc(0));
+      const p = makeParty(
+        "aaa",
+        { locklessRendezvous, ...longBudget() },
+        files,
+        { hideAtEntry: [helloName("zzz")] },
+      );
+
+      const started = Date.now();
+      const err = await p.rdv.run(p.scope).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+
+      expect((err as Error).message).not.toContain("residue");
+      expect((err as Error).message).toContain("appeared during this run");
+      expect((err as Error).message).toContain(helloName("zzz"));
+      // Still bounded by the read window, not the peer budget.
+      expect(Date.now() - started).toBeLessThan(2000);
+      expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
+    },
+  );
 
   test("a hello still syncing within the bound is waited for, and rendezvous completes", async () => {
     const files = new Map<string, Buffer>();

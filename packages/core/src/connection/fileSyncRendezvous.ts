@@ -89,6 +89,15 @@ export interface RendezvousScope {
   dirsDisplay: string;
 }
 
+// What a caller of the read gate knows about the hello it is asking for: whether
+// it was in the directory when this run scanned it, or appeared afterwards. The
+// same distinction the bounded ack window is armed on, and for the same reason:
+// the entry-present hello is the only one an interrupted run in this directory
+// can have left behind, so it is the only one an operator-facing message may
+// attribute to residue.
+/** @internal */
+export type PeerHelloProvenance = "presentAtEntry" | "appearedAfterEntry";
+
 // Reads the hello control file through the I5 partial-sync gate. Retries on a
 // transient get() failure or a JSON parse failure (indicating the sync tool has
 // not finished writing the file) until timeToLive expires, then throws a
@@ -113,6 +122,7 @@ export async function readControlFileWithGate(
   timeToLive: Date,
   pollingFrequency: number,
   schema: z.ZodType<HelloEnvelope>,
+  provenance: PeerHelloProvenance,
   signal: AbortSignal,
 ): Promise<HelloEnvelope> {
   // do-while guarantees at least one read attempt even when timeToLive has
@@ -183,10 +193,20 @@ export async function readControlFileWithGate(
   // Leads with the operative sentence and the recovery step, trailing the path,
   // because each cause-chain link is truncated at the rendered boundary (see
   // sanitizeForDisplay).
+  //
+  // Only the entry-present read earns the residue attribution: a hello that
+  // appeared after this run's entry scan was written or propagated while the run
+  // was watching, so a peer whose publish is still landing is as good an
+  // explanation as a leftover, and naming residue there would send the operator
+  // to delete a live partner's file.
   throw new Error(
-    "peer hello never became readable; most likely residue from an " +
-      "interrupted run, not a peer still syncing. Remove it after confirming " +
-      `no other session uses this path: ${sanitizeForDisplay(filePath)}`,
+    provenance === "presentAtEntry"
+      ? "peer hello never became readable; most likely residue from an " +
+          "interrupted run, not a peer still syncing. Remove it after " +
+          `confirming no other session uses this path: ${sanitizeForDisplay(filePath)}`
+      : "peer hello never became readable; it appeared during this run and " +
+          "may be a peer still publishing. Re-run; remove it only if it " +
+          `persists and no other session uses this path: ${sanitizeForDisplay(filePath)}`,
   );
 }
 
@@ -300,6 +320,17 @@ const helloReadDeadline = (options: RendezvousOptions): Date =>
       options.timeToLive!.getTime(),
     ),
   );
+
+// Classifies the hello a rendezvous-time read is about against the at-most-one
+// hello the entry scan found, so no call site has to reason about which of its
+// branches a leftover can reach: a site the entry-present hello cannot reach
+// passes an undefined entryPeerHello and classifies as appearedAfterEntry by
+// the comparison rather than by an assertion in a comment.
+const peerHelloProvenance = (
+  name: string,
+  entryPeerHello: string | undefined,
+): PeerHelloProvenance =>
+  name === entryPeerHello ? "presentAtEntry" : "appearedAfterEntry";
 
 // How long a peer hello that was ALREADY PRESENT at entry gets to acknowledge
 // this party's hello before rendezvous fails terminally, as a fraction of the
@@ -573,6 +604,8 @@ export class FileSyncRendezvous {
             inspectionDeadline,
             deps.options().pollingFrequency,
             HelloEnvelopeSchema,
+            // These hellos are the entry scan's own listing.
+            "presentAtEntry",
             deps.signal(),
           );
           if (envelope.retainFiles) {
@@ -1112,6 +1145,8 @@ export class FileSyncRendezvous {
       helloReadDeadline(deps.options()),
       deps.options().pollingFrequency,
       HelloEnvelopeSchema,
+      // This fast path exists only for the hello the entry scan found.
+      "presentAtEntry",
       deps.signal(),
     );
 
@@ -1417,6 +1452,7 @@ export class FileSyncRendezvous {
               helloReadDeadline(deps.options()),
               deps.options().pollingFrequency,
               HelloEnvelopeSchema,
+              peerHelloProvenance(peerHello.name, entryPeerHello),
               deps.signal(),
             );
 
@@ -1775,6 +1811,7 @@ export class FileSyncRendezvous {
             helloReadDeadline(deps.options()),
             deps.options().pollingFrequency,
             HelloEnvelopeSchema,
+            peerHelloProvenance(otherFile.name, entryPeerHello),
             deps.signal(),
           );
 
@@ -1855,6 +1892,7 @@ export class FileSyncRendezvous {
             helloReadDeadline(deps.options()),
             deps.options().pollingFrequency,
             HelloEnvelopeSchema,
+            peerHelloProvenance(otherFile.name, entryPeerHello),
             deps.signal(),
           );
 
@@ -1921,6 +1959,7 @@ export class FileSyncRendezvous {
             helloReadDeadline(deps.options()),
             deps.options().pollingFrequency,
             HelloEnvelopeSchema,
+            peerHelloProvenance(otherFile.name, entryPeerHello),
             deps.signal(),
           );
           const mismatch = bilateralMismatch(peerEnvelope, deps.options());
