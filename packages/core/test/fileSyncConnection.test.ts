@@ -36,6 +36,8 @@ import {
 import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
 import { isHelloTempName } from "../src/connection/fileSyncNames";
 import { computeHostKeyFingerprint } from "../src/utils/sshHostKey";
+import { DISPLAY_TRUNCATION_MARKER } from "../src/utils/sanitizeForDisplay";
+import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import {
   fromEventConnection,
   ConnectionError,
@@ -4170,8 +4172,9 @@ test("synchronize() preexisting-file guard rejects a leftover joining sentinel a
   const err = await conn.synchronize().catch((e: unknown) => e);
 
   expect(err).toBeInstanceOf(UsageError);
-  expect((err as Error).message).toContain(staleName);
-  expect((err as Error).message).toContain("joining sentinel");
+  // The name is what the operator acts on, so it is asserted where they read
+  // it: the display boundary truncates each cause-chain link.
+  expect(sanitizeErrorForDisplay(err)).toContain(staleName);
   // Not swept by the guard: the operator clears the directory after confirming
   // no live session is using it.
   expect(files.has(`${conn.path}/${staleName}`)).toBe(true);
@@ -9213,8 +9216,13 @@ test("synchronize() default: an unexpected protocol file is exit-64 and points a
     (e: unknown) => e,
   );
   expect(err).toBeInstanceOf(UsageError);
-  expect((err as Error).message).toContain("old-peer-old-hello-ack.json");
-  expect((err as Error).message).toContain("--sweep-exchange-files");
+  // Asserted on the rendered string, not the raw message: the display boundary
+  // truncates each cause-chain link, so a raw-message assertion passes on text
+  // the operator is never shown.
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  expect(rendered).toContain("old-peer-old-hello-ack.json");
+  expect(rendered).toContain("--sweep-exchange-files");
   // Rejected, not swept: the file is untouched.
   expect(files.has("/test/old-peer-old-hello-ack.json")).toBe(true);
 });
@@ -9233,7 +9241,7 @@ test("synchronize() default: a message-shaped <id>-<digits>.json is rejected at 
     (e: unknown) => e,
   );
   expect(err).toBeInstanceOf(UsageError);
-  expect((err as Error).message).toContain("peer-12345.json");
+  expect(sanitizeErrorForDisplay(err)).toContain("peer-12345.json");
   // Grammar-matching names are never recorded in the foreign snapshot.
   const snapshot = (conn as unknown as { foreignFileSnapshot: Set<string> })
     .foreignFileSnapshot;

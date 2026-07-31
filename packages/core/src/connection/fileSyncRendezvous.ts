@@ -32,7 +32,10 @@
 
 import * as z from "zod";
 
-import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
+import {
+  sanitizeForDisplay,
+  DEFAULT_MAX_DISPLAY_LENGTH,
+} from "../utils/sanitizeForDisplay";
 import {
   parseBoundedJson,
   JsonStructureBoundError,
@@ -394,6 +397,59 @@ const entryHelloAckWindowMs = (options: RendezvousOptions): number => {
       remaining * ENTRY_HELLO_ACK_WINDOW_FRACTION,
     ),
   );
+};
+
+// Composes a strict-empty entry-guard refusal: `refusalAndRecovery` -- the
+// sentence naming what is wrong and the step that clears it -- becomes the
+// error's own message, and the directory scope plus the offending filenames
+// become a `cause` link of its own. Both refusals are built here so the shape
+// they share cannot drift.
+//
+// The split is what the display boundary forces. sanitizeErrorForDisplay caps
+// EACH link of a rendered cause chain at DEFAULT_MAX_DISPLAY_LENGTH, and it
+// truncates before the links are joined, so one link would have to carry the
+// refusal, the recovery step, an operator-chosen directory path, and a list of
+// filenames inside a single budget -- with the path and the names, the two parts
+// nothing here bounds, competing against the two the operator has to read.
+// Giving the detail its own link gives it a second budget, and leaves the first
+// carrying only fixed text. What each message actually measures at the rendered
+// boundary is pinned by a test rather than claimed here.
+//
+// The enumeration is bounded by that budget rather than by a count: a protocol
+// filename runs from roughly 47 characters (a uuid-id hello) to 107 (a retain
+// message ack), so any fixed count either spends less of the budget than it
+// could or overruns it, and a name the cap chopped reads like a whole name the
+// operator could go and delete. At least one name is always listed.
+const entryGuardRefusal = (
+  refusalAndRecovery: string,
+  kindPlural: string,
+  dirsDisplay: string,
+  names: string[],
+): UsageError => {
+  const prefix = `${names.length} ${kindPlural} in ${dirsDisplay}: `;
+  let listed = "";
+  let shown = 0;
+  for (const name of names) {
+    const candidate = shown === 0 ? name : `${listed}, ${name}`;
+    const remaining = names.length - shown - 1;
+    const suffix = remaining > 0 ? ` (and ${remaining} more)` : "";
+    if (
+      shown > 0 &&
+      prefix.length + candidate.length + suffix.length >
+        DEFAULT_MAX_DISPLAY_LENGTH
+    )
+      break;
+    listed = candidate;
+    shown += 1;
+  }
+  const omitted = names.length - shown;
+  return new UsageError(refusalAndRecovery, {
+    cause: new Error(
+      omitted > 0
+        ? `${prefix}${listed} (and ${omitted} more)`
+        : `${prefix}${listed}`,
+    ),
+  });
 };
 
 // The rendezvous-relevant subset of the connection's Options, read live through
@@ -1094,39 +1150,29 @@ export class FileSyncRendezvous {
     } else {
       // Default strict-empty entry guard: only a single peer hello and the
       // snapshotted foreign files are tolerated; any other protocol file is a
-      // terminal usage error that now also points at the opt-in sweep.
+      // terminal usage error pointing at the opt-in sweep.
       if (unexpectedProtocol.length > 0)
-        throw new UsageError(
+        throw entryGuardRefusal(
+          "the exchange directory must be empty except for a single peer " +
+            "hello, but holds unexpected protocol files. Remove them after " +
+            "confirming no other session is using this path, or re-run with " +
+            "--sweep-exchange-files to clear every protocol file.",
+          "unexpected protocol file(s)",
           // dirsDisplay names both halves in split mode: unexpectedProtocol can
           // carry outbound leftovers as well as inbound ones, so directing the
           // operator at the inbound path alone would mislead.
-          `path ${dirsDisplay} must be empty except for a ` +
-            "single peer hello at " +
-            "the start of the protocol, but contains " +
-            `${unexpectedProtocol.length} unexpected protocol file(s): ` +
-            `${unexpectedProtocol
-              .map((e) => sanitizeForDisplay(e.file.name))
-              .join(", ")}. A pre-existing ` +
-            "lock file (-lock.json), ack marker (-ack.json), joining sentinel " +
-            "(-joining.json), message, or self-hello usually means a previous " +
-            "exchange was terminated by SIGKILL/OOM/power loss before its " +
-            "cleanup ran, or -- in retain mode, which never deletes -- that " +
-            "this directory was reused for a second exchange. Remove the listed " +
-            "files after confirming no other session is using this path, or " +
-            "re-run with --sweep-exchange-files to clear all protocol files " +
-            "automatically. An ack marker specifically indicates a crashed " +
-            "lockless rendezvous or a reused retain-mode directory; if a live " +
-            "lockless peer is mid-rendezvous, wait for it to complete or time " +
-            "out before retrying.",
+          dirsDisplay,
+          unexpectedProtocol.map((e) => sanitizeForDisplay(e.file.name)),
         );
 
       if (peerHellos.length > 1)
-        throw new UsageError(
-          `path ${sanitizeForDisplay(scope.inboundPath)} contains ${peerHellos.length} peer hello files ` +
-            `(${peerHellos.map((f) => sanitizeForDisplay(f.name)).join(", ")}); ` +
-            `only one peer may ` +
-            "share a rendezvous directory -- are there other sessions using " +
-            "this path?",
+        throw entryGuardRefusal(
+          "only one peer may share a rendezvous directory, but multiple peer " +
+            "hello files are present -- are there other sessions using this " +
+            "path?",
+          "peer hello files",
+          sanitizeForDisplay(scope.inboundPath),
+          peerHellos.map((f) => sanitizeForDisplay(f.name)),
         );
     }
 

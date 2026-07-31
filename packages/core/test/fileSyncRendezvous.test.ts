@@ -525,6 +525,10 @@ function makeParty(
   overrides: Partial<RendezvousOptions> = {},
   files: Map<string, Buffer> = new Map(),
   clientOpts: MemClientOptions = {},
+  // The rendezvous directory. DIR is two characters, which suits every test
+  // that cares about protocol behavior and none that measures a message
+  // against the display boundary -- there the path is part of what has to fit.
+  dir: string = DIR,
 ): Party {
   const options: RendezvousOptions = { ...baseOptions(), ...overrides };
   const state: PartyState = {
@@ -597,10 +601,10 @@ function makeParty(
     files,
     rdv: new FileSyncRendezvous(deps),
     scope: {
-      inboundPath: DIR,
-      outboundPath: DIR,
+      inboundPath: dir,
+      outboundPath: dir,
       split: false,
-      dirsDisplay: sanitizeForDisplay(DIR),
+      dirsDisplay: sanitizeForDisplay(dir),
     },
   };
 }
@@ -1212,6 +1216,125 @@ describe("FileSyncRendezvous entry scan and sweep contract", () => {
     // retry advice here: this directory may be only partly cleared, so the
     // advice's premise -- that it is now empty -- does not hold.
     expect(isPeerWaitTimeout(err)).toBe(false);
+  });
+});
+
+// --- entry-guard refusals at the rendered display boundary --------------------
+//
+// Both strict-empty refusals are what an operator acts on, and both name a
+// directory path and a list of filenames whose lengths nothing in the protocol
+// bounds. sanitizeErrorForDisplay caps EACH cause-chain link before joining
+// them, so a refusal whose recovery step sits behind that detail loses exactly
+// the part that says what to do. Asserting on the raw `.message` cannot see
+// that, so every assertion below runs on the rendered string.
+
+describe("FileSyncRendezvous entry-guard refusals at the display boundary", () => {
+  // A path an operator would really configure. The rest of this suite runs on
+  // the two-character DIR, which is precisely the wrong measurement here: the
+  // path shares one rendered link with the filenames.
+  const REAL_DIR = "/srv/exchange/partner-drop";
+  const flags = { locklessRendezvous: false, retainFiles: false };
+
+  // The names the detail link actually shows, plus the count it says it
+  // omitted. A shown name is compared against the directory's real contents, so
+  // a name the cap chopped -- a partial name that reads like a whole one -- is
+  // caught rather than passing as "the file was named".
+  function listedNames(rendered: string): {
+    shown: string[];
+    omitted: number;
+  } {
+    const marker = `${REAL_DIR}: `;
+    const list = rendered.slice(rendered.indexOf(marker) + marker.length);
+    const more = / \(and (\d+) more\)$/.exec(list);
+    return {
+      shown: (more ? list.slice(0, more.index) : list).split(", "),
+      omitted: more ? Number(more[1]) : 0,
+    };
+  }
+
+  test("the unexpected-protocol-file refusal still carries the recovery step once rendered", async () => {
+    const files = new Map<string, Buffer>();
+    // Retain-mode message acks: the longest protocol filename shape there is,
+    // and twelve of them, so the raw enumeration alone is several times the
+    // per-link cap.
+    const stems = Array.from(
+      { length: 12 },
+      (_, i) =>
+        `7c3d15be-9a02-4e88-b6f1-0d4a2739ec55-20260731T1011${String(i).padStart(2, "0")}-003-4096`,
+    );
+    for (const stem of stems)
+      files.set(
+        `${REAL_DIR}/${ackMarkerName("2f1c9a04-3b7e-4f6a-9d21-88ca0e6b5477", stem)}`,
+        Buffer.alloc(0),
+      );
+    const p = makeParty("aaa", flags, files, {}, REAL_DIR);
+
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    // The refusal and the step that clears it, which is what the operator is
+    // here for, and the sweep pointer the step ends on.
+    expect(rendered).toContain("must be empty except for a single peer hello");
+    expect(rendered).toContain(
+      "Remove them after confirming no other session is using this path",
+    );
+    expect(rendered).toContain("--sweep-exchange-files");
+    // The refusal alone -- what an operator sees if only the leading link
+    // reaches them -- has to stand on its own inside one link's budget.
+    expect((err as Error).message.length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+    // The detail: the directory, the true total, and whole filenames.
+    expect(rendered).toContain(REAL_DIR);
+    expect(rendered).toContain("12 unexpected protocol file(s)");
+    const { shown, omitted } = listedNames(rendered);
+    expect(shown.length).toBeGreaterThanOrEqual(1);
+    for (const name of shown)
+      expect(files.has(`${REAL_DIR}/${name}`)).toBe(true);
+    expect(shown.length + omitted).toBe(12);
+  });
+
+  test("the peer-hello refusal's operative sentence survives rendering at a peer_id longer than a uuid", async () => {
+    // A configured peer_id is not bounded to a uuid's 36 characters, and three
+    // hellos is what a bilateral mismatch or a crashed run leaves behind. The
+    // filenames alone are most of a link's budget, so the operative clause and
+    // its closing question survive only by not riding behind them.
+    const files = new Map<string, Buffer>();
+    const peers = [
+      "acme-health-2026-partner-exchange-north-region-01",
+      "acme-health-2026-partner-exchange-south-region-02",
+      "acme-health-2026-partner-exchange-west-region-03",
+    ];
+    for (const peer of peers)
+      files.set(`${REAL_DIR}/${helloName(peer)}`, serializeEnvelope(flags));
+    const p = makeParty("site-a", flags, files, {}, REAL_DIR);
+
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(rendered).toContain(
+      "only one peer may share a rendezvous directory",
+    );
+    expect(rendered).toContain("are there other sessions using this path?");
+    expect((err as Error).message.length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+    expect(rendered).toContain(REAL_DIR);
+    expect(rendered).toContain("3 peer hello files");
+    const { shown, omitted } = listedNames(rendered);
+    for (const name of shown)
+      expect(files.has(`${REAL_DIR}/${name}`)).toBe(true);
+    expect(shown.length + omitted).toBe(3);
   });
 });
 
