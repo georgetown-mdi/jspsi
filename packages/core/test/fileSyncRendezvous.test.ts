@@ -29,6 +29,8 @@ import type {
   FileInfo,
   FileTransportClient,
 } from "../src/connection/fileSyncConnection";
+import { messageFilename } from "../src/connection/fileSyncMessageLoop";
+import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
 import type { HandshakeRole } from "../src/types";
 import { getLoggerForVerbosity } from "../src/utils/logger";
 import {
@@ -1235,6 +1237,36 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
   const REAL_DIR = "/srv/exchange/partner-drop";
   const flags = { locklessRendezvous: false, retainFiles: false };
 
+  // Two paths of the length an operator really mounts, in the split shape
+  // validateSynchronizeEntry composes: the scope alone is then most of a link's
+  // budget, which is the case the enumeration has to survive.
+  const SPLIT_INBOUND =
+    "/mnt/partner-sync/acme-health/2026/exchange-north/inbound-drop";
+  const SPLIT_OUTBOUND =
+    "/mnt/partner-sync/acme-health/2026/exchange-north/outbound-drop";
+  const splitScope = (): RendezvousScope => ({
+    inboundPath: SPLIT_INBOUND,
+    outboundPath: SPLIT_OUTBOUND,
+    split: true,
+    dirsDisplay:
+      `${sanitizeForDisplay(SPLIT_INBOUND)} (inbound) and ` +
+      `${sanitizeForDisplay(SPLIT_OUTBOUND)} (outbound)`,
+  });
+
+  // The cause link carrying the scope and the filenames. The renderer caps it
+  // independently of the leading refusal, so it is the string the budget
+  // arithmetic has to land inside.
+  const detailLink = (rendered: string): string =>
+    rendered.split("\ncaused by: ")[1];
+
+  // The enumeration itself, after the `<count> <kind> in <scope>: ` prefix. The
+  // scope may carry the truncation marker (it is fitted last); a filename never
+  // may, which is what this slice lets a test assert.
+  const enumeration = (rendered: string): string => {
+    const detail = detailLink(rendered);
+    return detail.slice(detail.indexOf(": ") + 2);
+  };
+
   // The names the detail link actually shows, plus the count it says it
   // omitted. A shown name is compared against the directory's real contents, so
   // a name the cap chopped -- a partial name that reads like a whole one -- is
@@ -1243,8 +1275,7 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     shown: string[];
     omitted: number;
   } {
-    const marker = `${REAL_DIR}: `;
-    const list = rendered.slice(rendered.indexOf(marker) + marker.length);
+    const list = enumeration(rendered);
     const more = / \(and (\d+) more\)$/.exec(list);
     return {
       shown: (more ? list.slice(0, more.index) : list).split(", "),
@@ -1335,6 +1366,124 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     for (const name of shown)
       expect(files.has(`${REAL_DIR}/${name}`)).toBe(true);
     expect(shown.length + omitted).toBe(3);
+  });
+
+  test("a split-mode scope is trimmed to make room for the names, not the other way round", async () => {
+    const files = new Map<string, Buffer>();
+    // Lock files under two uuid ids: an ordinary crash leftover, and long
+    // enough that the scope and the enumeration cannot both be shown whole.
+    const locks = Array.from(
+      { length: 3 },
+      () => `${uuidv4()}-${uuidv4()}${LOCK_SUFFIX}`,
+    );
+    for (const name of locks)
+      files.set(`${SPLIT_INBOUND}/${name}`, Buffer.alloc(0));
+    const p = makeParty("aaa", flags, files);
+
+    const err = await p.rdv.run(splitScope()).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(detailLink(rendered).length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+    // The scope is what gives way, and the inbound directory -- where these
+    // files are -- survives it.
+    expect(detailLink(rendered)).toContain(SPLIT_INBOUND);
+    expect(enumeration(rendered)).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(detailLink(rendered)).toContain("3 unexpected protocol file(s)");
+    const { shown, omitted } = listedNames(rendered);
+    expect(shown.length).toBeGreaterThanOrEqual(1);
+    for (const name of shown)
+      expect(files.has(`${SPLIT_INBOUND}/${name}`)).toBe(true);
+    expect(shown.length + omitted).toBe(3);
+  });
+
+  test("the longest name the protocol's constructors build is shown whole in that same scope", async () => {
+    const files = new Map<string, Buffer>();
+    // A retain-mode message ack over a timestamped message at the maximum frame
+    // size: the longest filename these constructors produce for uuid
+    // identities, and what the reserved name budget is sized against.
+    const longest = ackMarkerName(
+      uuidv4(),
+      messageFilename({
+        id: uuidv4(),
+        timestampInFilename: true,
+        byteCount: MAX_FRAME_SIZE_BYTES,
+        seq: 999,
+        ts: Date.UTC(2026, 6, 31, 10, 11, 0),
+      }).slice(0, -".json".length),
+    );
+    files.set(`${SPLIT_INBOUND}/${longest}`, Buffer.alloc(0));
+    const p = makeParty("aaa", flags, files);
+
+    const err = await p.rdv.run(splitScope()).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(detailLink(rendered).length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+    expect(enumeration(rendered)).toBe(longest);
+  });
+
+  test("a name whose escapes grow it at render time is counted, not cap-chopped", async () => {
+    const files = new Map<string, Buffer>();
+    // sanitizeForDisplay runs twice over this name -- once at the call site,
+    // once when the link is rendered -- and it doubles a backslash, so its cost
+    // in the rendered link exceeds its length going in. Measured on the way in
+    // it fits behind the lock file; measured as rendered it does not.
+    const lock = `${uuidv4()}${LOCK_SUFFIX}`;
+    const escaped = `${"你".repeat(20)}\\-hello-ack.json`;
+    files.set(`${REAL_DIR}/${lock}`, Buffer.alloc(0));
+    files.set(`${REAL_DIR}/${escaped}`, Buffer.alloc(0));
+    const p = makeParty("aaa", flags, files, {}, REAL_DIR);
+
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(detailLink(rendered).length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+    const { shown, omitted } = listedNames(rendered);
+    expect(shown).toEqual([lock]);
+    expect(omitted).toBe(1);
+  });
+
+  test("a name too long for the whole budget is counted with no name shown at all", async () => {
+    const files = new Map<string, Buffer>();
+    // A configured peer_id has no length bound, so no reservation makes every
+    // name fit. What the refusal must not do is show part of one.
+    const overlong = `${"north-region-partner-".repeat(15)}hello-ack.json`;
+    files.set(`${REAL_DIR}/${overlong}`, Buffer.alloc(0));
+    const p = makeParty("aaa", flags, files, {}, REAL_DIR);
+
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(detailLink(rendered).length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+    expect(detailLink(rendered)).toContain("1 unexpected protocol file(s)");
+    expect(detailLink(rendered)).toContain(REAL_DIR);
+    expect(enumeration(rendered)).toBe("name(s) too long to display");
+    expect(rendered).not.toContain(overlong.slice(0, 30));
   });
 });
 

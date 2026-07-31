@@ -35,6 +35,7 @@ import * as z from "zod";
 import {
   sanitizeForDisplay,
   DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
 } from "../utils/sanitizeForDisplay";
 import {
   parseBoundedJson,
@@ -399,6 +400,46 @@ const entryHelloAckWindowMs = (options: RendezvousOptions): number => {
   );
 };
 
+// What a fragment costs in the RENDERED detail link, which is not its own
+// length: the call sites sanitize the directory scope and each filename, and
+// sanitizeErrorForDisplay sanitizes the composed link again when it shows it.
+// sanitizeForDisplay doubles a literal backslash, so that second pass is not a
+// no-op and an arithmetic done on raw lengths under-counts.
+const renderedDisplayCost = (fragment: string): number =>
+  sanitizeForDisplay(fragment, { maxLength: Infinity }).length;
+
+// The longest filename the protocol's own constructors build from UUID
+// identities: a retain-mode message ack over a timestamped message at the
+// maximum frame size, `<uuid>-<uuid>-<YYYYMMDDTHHMMSS>-<NNN>-<byteCount>-ack.json`
+// with a three-digit counter. Reserved out of the detail link's budget for the
+// enumeration before the directory scope is fitted, so an operator-chosen path
+// cannot crowd the names out. A name built from a longer identity -- a
+// configured `peer_id`, or a session past message 999 -- may still not fit; it
+// is then counted rather than shown. The sizing is pinned by a test that builds
+// the shape from those constructors.
+const ENTRY_GUARD_NAME_BUDGET_FLOOR = 112;
+
+const andMoreSuffix = (count: number): string => ` (and ${count} more)`;
+
+// Longest prefix of `value` whose rendered cost fits `budget`, with the
+// truncation marker appended -- and paid for out of that same budget -- when
+// anything was dropped. sanitizeForDisplay's own maxLength does not serve here:
+// it appends the marker ON TOP of the cap, and it would escape an
+// already-sanitized value a second time.
+const clipToRenderedCost = (value: string, budget: number): string => {
+  if (renderedDisplayCost(value) <= budget) return value;
+  const room = budget - DISPLAY_TRUNCATION_MARKER.length;
+  let kept = "";
+  let cost = 0;
+  for (const ch of value) {
+    const next = cost + renderedDisplayCost(ch);
+    if (next > room) break;
+    kept += ch;
+    cost = next;
+  }
+  return `${kept}${DISPLAY_TRUNCATION_MARKER}`;
+};
+
 // Composes a strict-empty entry-guard refusal: `refusalAndRecovery` -- the
 // sentence naming what is wrong and the step that clears it -- becomes the
 // error's own message, and the directory scope plus the offending filenames
@@ -416,38 +457,58 @@ const entryHelloAckWindowMs = (options: RendezvousOptions): number => {
 // boundary is pinned by a test rather than claimed here.
 //
 // The enumeration is bounded by that budget rather than by a count: a protocol
-// filename runs from roughly 47 characters (a uuid-id hello) to 107 (a retain
-// message ack), so any fixed count either spends less of the budget than it
-// could or overruns it, and a name the cap chopped reads like a whole name the
-// operator could go and delete. At least one name is always listed.
+// filename runs from roughly 47 characters (a uuid-id hello) to
+// ENTRY_GUARD_NAME_BUDGET_FLOOR, so any fixed count either spends less of the
+// budget than it could or overruns it. Every name is fit-checked, the first
+// included: a name the cap chopped reads like a whole name the operator could go
+// and delete, so a name that does not fit is counted rather than shown, and a
+// refusal whose names all overrun reports the count alone.
 const entryGuardRefusal = (
   refusalAndRecovery: string,
   kindPlural: string,
   dirsDisplay: string,
   names: string[],
 ): UsageError => {
-  const prefix = `${names.length} ${kindPlural} in ${dirsDisplay}: `;
+  const head = `${names.length} ${kindPlural} in `;
+  // The floor plus the widest count suffix the enumeration can end on, held
+  // back before the directory scope is fitted.
+  const namesFloor =
+    ENTRY_GUARD_NAME_BUDGET_FLOOR +
+    (names.length > 1
+      ? renderedDisplayCost(andMoreSuffix(names.length - 1))
+      : 0);
+  const dirs = clipToRenderedCost(
+    dirsDisplay,
+    DEFAULT_MAX_DISPLAY_LENGTH -
+      renderedDisplayCost(head) -
+      renderedDisplayCost(": ") -
+      namesFloor,
+  );
+  const prefix = `${head}${dirs}: `;
+  const namesBudget = DEFAULT_MAX_DISPLAY_LENGTH - renderedDisplayCost(prefix);
   let listed = "";
+  let listedCost = 0;
   let shown = 0;
   for (const name of names) {
-    const candidate = shown === 0 ? name : `${listed}, ${name}`;
+    const candidate = shown === 0 ? name : `, ${name}`;
     const remaining = names.length - shown - 1;
-    const suffix = remaining > 0 ? ` (and ${remaining} more)` : "";
-    if (
-      shown > 0 &&
-      prefix.length + candidate.length + suffix.length >
-        DEFAULT_MAX_DISPLAY_LENGTH
-    )
-      break;
-    listed = candidate;
+    const cost =
+      listedCost +
+      renderedDisplayCost(candidate) +
+      (remaining > 0 ? renderedDisplayCost(andMoreSuffix(remaining)) : 0);
+    if (cost > namesBudget) break;
+    listed += candidate;
+    listedCost += renderedDisplayCost(candidate);
     shown += 1;
   }
   const omitted = names.length - shown;
   return new UsageError(refusalAndRecovery, {
     cause: new Error(
-      omitted > 0
-        ? `${prefix}${listed} (and ${omitted} more)`
-        : `${prefix}${listed}`,
+      shown === 0
+        ? `${prefix}name(s) too long to display`
+        : omitted > 0
+          ? `${prefix}${listed}${andMoreSuffix(omitted)}`
+          : `${prefix}${listed}`,
     ),
   });
 };
