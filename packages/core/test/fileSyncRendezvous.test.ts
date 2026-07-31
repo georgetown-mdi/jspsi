@@ -34,6 +34,7 @@ import { getLoggerForVerbosity } from "../src/utils/logger";
 import {
   sanitizeForDisplay,
   DISPLAY_TRUNCATION_MARKER,
+  DEFAULT_MAX_DISPLAY_LENGTH,
 } from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { cancellableDelay } from "../src/connection/fileSyncConstants";
@@ -292,7 +293,11 @@ describe("readControlFileWithGate", () => {
     // bounded read into a hard refusal.
     expect(thrown).not.toBeInstanceOf(UsageError);
     expect((thrown as Error).message).toContain("residue");
-    expect((thrown as Error).message).toContain("Remove it");
+    // The re-run comes first and the removal is conditioned: the window is
+    // wall-clock, so a partner slower than it is alive and mid-answer, and an
+    // unconditional "remove it" would point the operator at that partner's file.
+    expect((thrown as Error).message).toContain("Re-run");
+    expect((thrown as Error).message).toContain("remove only if it persists");
     expect((thrown as Error).message).toContain("in/peer-hello.json");
   });
 
@@ -323,8 +328,8 @@ describe("readControlFileWithGate", () => {
   });
 
   test.each([
-    ["presentAtEntry", "Remove it after confirming"],
-    ["appearedAfterEntry", "Re-run; remove it only if it persists"],
+    ["presentAtEntry", "remove only if it persists and no session shares"],
+    ["appearedAfterEntry", "Re-run; remove only if it persists"],
   ] as const)(
     "the whole %s terminal message survives the display boundary for a realistic path",
     async (provenance, recoveryStep) => {
@@ -352,6 +357,40 @@ describe("readControlFileWithGate", () => {
       expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
       expect(rendered).toContain(recoveryStep);
       expect(rendered).toContain(filePath);
+    },
+  );
+
+  // The path budget is what the fixed text leaves inside one 256-character
+  // cause-chain link, and it is the whole reason both texts are terse. Measured
+  // rather than asserted in a comment: a text that grows past the budget cuts
+  // the tail of the very path the recovery step tells the operator to act on,
+  // and prose saying "only a pathologically long path can be cut" cannot fail
+  // when that stops being true. The floor is set well above a realistic
+  // rendezvous path (the ~92 characters of the case above) so ordinary
+  // directory layouts have margin, and any edit that eats into it reddens here.
+  const MIN_PATH_BUDGET = 100;
+  test.each(["presentAtEntry", "appearedAfterEntry"] as const)(
+    "the %s message leaves a usable path budget inside one rendered link",
+    async (provenance) => {
+      const client = stubClient(async () => {
+        throw new Error("still syncing");
+      });
+      const thrown = await readControlFileWithGate(
+        client,
+        "",
+        new Date(Date.now() - 1),
+        1,
+        HelloEnvelopeSchema,
+        provenance,
+        signal(),
+      ).then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+      const fixedTextLength = (thrown as Error).message.length;
+      expect(
+        DEFAULT_MAX_DISPLAY_LENGTH - fixedTextLength,
+      ).toBeGreaterThanOrEqual(MIN_PATH_BUDGET);
     },
   );
 });
@@ -1843,9 +1882,15 @@ function withPartialSyncedHello(
 }
 
 describe("FileSyncRendezvous bounded hello read", () => {
+  // joinerRecoveryMs floors every rendezvous bound (rendezvousBoundMs), so a
+  // test that wants the read bound to expire must model a transport on which a
+  // peer's publish-and-rename lands fast. At the shipped default (30 s) the
+  // floor exceeds this budget and the read runs to the peer timeout instead --
+  // which is the point of the floor, and is pinned separately below.
   const longBudget = () => ({
     timeToLive: new Date(Date.now() + 5000),
     pollingFrequency: 10,
+    joinerRecoveryMs: 60,
   });
 
   test("a torn leftover hello fails inside the read bound, not at the peer timeout (lock)", async () => {
@@ -1931,6 +1976,35 @@ describe("FileSyncRendezvous bounded hello read", () => {
     },
   );
 
+  // rendezvousBoundMs floors the read bound at joinerRecoveryMs, so six cycles
+  // of a fast poll no longer abandons a hello that a slow transport has simply
+  // not finished propagating -- six cycles at 10 ms is 60 ms, which is not a
+  // round trip anywhere. The floor is still capped at the peer budget, so the
+  // run ends there rather than running past what the operator asked for.
+  test("the read bound is floored at joinerRecoveryMs and still capped by the budget", async () => {
+    const files = new Map<string, Buffer>();
+    files.set(`${DIR}/${helloName("zzz")}`, Buffer.alloc(0));
+    // Shipped joinerRecoveryMs from baseOptions, not the fast-transport
+    // override longBudget() applies above.
+    const p = makeParty(
+      "aaa",
+      {
+        locklessRendezvous: false,
+        timeToLive: new Date(Date.now() + 1500),
+        pollingFrequency: 10,
+      },
+      files,
+    );
+
+    const started = Date.now();
+    await expect(p.rdv.run(p.scope)).rejects.toThrow();
+    const elapsed = Date.now() - started;
+
+    expect(elapsed).toBeGreaterThanOrEqual(1000);
+    expect(elapsed).toBeLessThan(4000);
+    expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
+  });
+
   test("a hello still syncing within the bound is waited for, and rendezvous completes", async () => {
     const files = new Map<string, Buffer>();
     const flags = { locklessRendezvous: false, retainFiles: false };
@@ -1957,11 +2031,15 @@ describe("FileSyncRendezvous bounded hello read", () => {
 describe("FileSyncRendezvous entry-present peer hello window", () => {
   const flags = { locklessRendezvous: true, retainFiles: false };
   const LEFTOVER_ID = "2f1c9a04-3b7e-4f6a-9d21-88ca0e6b5477";
-  // Window = max(6 poll cycles, budget/8) capped at the budget: 6 * 20 = 120 ms
-  // here, comfortably inside the 3 s budget it replaces.
+  // Window = max(6 poll cycles, joinerRecoveryMs, budget/8) capped at the
+  // budget: 120 ms here, comfortably inside the 3 s budget it replaces. The
+  // small joinerRecoveryMs models a transport whose round trip is short enough
+  // for the window to mean anything; at the shipped default the floor swallows
+  // this budget whole and the window never fires early (pinned below).
   const budget = () => ({
     timeToLive: new Date(Date.now() + 3000),
     pollingFrequency: 20,
+    joinerRecoveryMs: 60,
   });
 
   test("fails terminally within the window instead of polling to the peer timeout", async () => {
@@ -1989,7 +2067,12 @@ describe("FileSyncRendezvous entry-present peer hello window", () => {
     // link: the diagnosis, the recovery step, and the filename all survive it.
     const rendered = sanitizeErrorForDisplay(err);
     expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
-    expect(rendered).toContain("Remove it after confirming");
+    // The re-run leads and the removal is conditioned on surviving it: the
+    // window is wall-clock, so a partner slower than it is alive and mid-answer.
+    expect(rendered).toContain("Re-run");
+    expect(rendered).toContain(
+      "remove only if it persists and no session shares",
+    );
     expect(rendered).toContain(helloName(LEFTOVER_ID));
   });
 
@@ -2103,6 +2186,39 @@ describe("FileSyncRendezvous entry-present peer hello window", () => {
 
     // Nothing attributable to a live peer was ever observed, so the fact stands.
     expect(p.state.entryPeerHello).toBe(helloName("zzz"));
+  });
+
+  // The floor rendezvousBoundMs puts under the window. A budget this small
+  // cannot hold a round trip at the shipped joinerRecoveryMs, so the window must
+  // not fire at all: the run reports the ordinary peer-wait timeout instead of
+  // naming a hello a live-but-slow partner may own. Driving two real
+  // connections over a latency-asymmetric transport, the unfloored window
+  // aborted such a partner in ~650 ms and prescribed removing its hello.
+  test("does not fire on a budget too small to hold a round trip", async () => {
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, "zzz", flags);
+    const p = makeParty(
+      "aaa",
+      {
+        ...flags,
+        timeToLive: new Date(Date.now() + 1500),
+        pollingFrequency: 20,
+      },
+      files,
+    );
+
+    const started = Date.now();
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    const elapsed = Date.now() - started;
+
+    expect(isPeerWaitTimeout(err)).toBe(true);
+    expect((err as Error).message).not.toContain("residue");
+    // Capped at the operator's budget: the floor never extends a wait past it.
+    expect(elapsed).toBeLessThan(3000);
+    expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
   });
 
   test("records nothing when no peer hello predated the run", async () => {

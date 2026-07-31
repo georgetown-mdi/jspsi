@@ -192,21 +192,26 @@ export async function readControlFileWithGate(
   //
   // Leads with the operative sentence and the recovery step, trailing the path,
   // because each cause-chain link is truncated at the rendered boundary (see
-  // sanitizeForDisplay).
+  // sanitizeForDisplay). Both texts are kept short deliberately: the fixed text
+  // and the path share one 256-character link, so every character here is one
+  // the path does not get, and the path is what the recovery step acts on. The
+  // budget each leaves is pinned by a test, not asserted here.
   //
-  // Only the entry-present read earns the residue attribution: a hello that
+  // Neither text asserts which of the two indistinguishable causes it is
+  // looking at, because from here they are indistinguishable: the recovery step
+  // is a re-run in both, with removal conditioned on surviving it. Only the
+  // entry-present read names residue as the likelier reading -- a hello that
   // appeared after this run's entry scan was written or propagated while the run
-  // was watching, so a peer whose publish is still landing is as good an
-  // explanation as a leftover, and naming residue there would send the operator
-  // to delete a live partner's file.
+  // was watching, so a peer whose publish is still landing explains it at least
+  // as well as a leftover does.
   throw new Error(
     provenance === "presentAtEntry"
-      ? "peer hello never became readable; most likely residue from an " +
-          "interrupted run, not a peer still syncing. Remove it after " +
-          `confirming no other session uses this path: ${sanitizeForDisplay(filePath)}`
-      : "peer hello never became readable; it appeared during this run and " +
-          "may be a peer still publishing. Re-run; remove it only if it " +
-          `persists and no other session uses this path: ${sanitizeForDisplay(filePath)}`,
+      ? "peer hello never became readable; it predates this run and may be " +
+          "residue. Re-run; remove only if it persists and no session shares " +
+          `this path: ${sanitizeForDisplay(filePath)}`
+      : "peer hello never became readable; it appeared during this run, so a " +
+          "peer may still be publishing. Re-run; remove only if it persists: " +
+          `${sanitizeForDisplay(filePath)}`,
   );
 }
 
@@ -304,10 +309,32 @@ const RETAIN_INSPECTION_POLL_CYCLES = 2;
 // flush jitter. It is not larger still because the hello is published
 // temp-then-rename: the final name appears only at the atomic rename, so the
 // body is complete before the name is visible and what remains is propagation,
-// never a write in progress. At the default cadence this is 30 s, the same
-// magnitude as the lock path's joiner-recovery window, which bounds the
-// analogous "the peer's publish is mid-flight" wait.
+// never a write in progress.
 const RENDEZVOUS_HELLO_READ_POLL_CYCLES = 6;
+
+// Floor under every rendezvous-time bound this module derives from poll cycles.
+//
+// The poll interval is how often this party LOOKS; it says nothing about how
+// long the transport takes to ANSWER, and the two are independent. An operator
+// polling a high-latency server every 20 ms has a cadence three orders of
+// magnitude below its round trip, and a bound counted purely in cycles then
+// expires inside a single one: measured against two live connections, a 6-cycle
+// bound aborted a genuinely live partner mid-round-trip in under a second and
+// prescribed deleting its hello. This party cannot measure the round trip
+// itself either -- the slow side is the PARTNER, whose operations it never
+// observes -- so the floor is wall-clock, not adaptive.
+//
+// joinerRecoveryMs is that wall-clock quantity, already: it is what the lock
+// path allows for a peer's publish-and-rename to land on this transport, which
+// is the same wait these bounds are absorbing. Reusing it keeps one knob for one
+// question rather than a second constant to tune, and both bounds below stay
+// capped by the remaining peer budget -- on a budget too small to hold the
+// floor, the ordinary peer timeout fires instead, with its ordinary message.
+const rendezvousBoundMs = (
+  options: RendezvousOptions,
+  pollCycles: number,
+): number =>
+  Math.max(pollCycles * options.pollingFrequency, options.joinerRecoveryMs);
 
 // The near-future deadline a rendezvous-time hello read is given, capped at the
 // remaining peer budget so it is never longer than the operator asked for.
@@ -316,7 +343,8 @@ const RENDEZVOUS_HELLO_READ_POLL_CYCLES = 6;
 const helloReadDeadline = (options: RendezvousOptions): Date =>
   new Date(
     Math.min(
-      Date.now() + RENDEZVOUS_HELLO_READ_POLL_CYCLES * options.pollingFrequency,
+      Date.now() +
+        rendezvousBoundMs(options, RENDEZVOUS_HELLO_READ_POLL_CYCLES),
       options.timeToLive!.getTime(),
     ),
   );
@@ -342,15 +370,17 @@ const peerHelloProvenance = (
 // default one-hour budget, against the full hour this replaces on every
 // invocation of an unattended re-run.
 //
-// This is the one bound the design left to be tuned; it and the floor below are
-// the only two places to change it.
+// This is the one bound the design left to be tuned. It, the cycle count below,
+// and the wall-clock floor rendezvousBoundMs applies are the only three places
+// to change it.
 const ENTRY_HELLO_ACK_WINDOW_FRACTION = 1 / 8;
 
 // Floor under that window, in poll cycles, so a fast transport (or a small
 // configured budget) cannot abort inside a single round trip: this party's hello
 // must reach the peer and the peer's ack must come back, each at the configured
-// cadence. Six cycles is 30 s at the default cadence, the same magnitude as the
-// joiner-recovery window and the rendezvous hello read bound above.
+// cadence. Carried through rendezvousBoundMs, so the wall-clock floor documented
+// there applies to this window too -- which is what stops it aborting a live
+// partner whose round trip outruns the poll cadence.
 const ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES = 6;
 
 // The window in milliseconds, capped at the remaining budget so it can never
@@ -360,7 +390,7 @@ const entryHelloAckWindowMs = (options: RendezvousOptions): number => {
   return Math.min(
     remaining,
     Math.max(
-      ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES * options.pollingFrequency,
+      rendezvousBoundMs(options, ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES),
       remaining * ENTRY_HELLO_ACK_WINDOW_FRACTION,
     ),
   );
@@ -1520,22 +1550,28 @@ export class FileSyncRendezvous {
             // run (see run()). Its writer has already demonstrated one
             // propagation leg, so a live peer answers within a round trip; one
             // that has not answered within the operator's own derived window is
-            // residue of an interrupted run in this directory, and waiting the
-            // remaining budget only defers the same failure. A hello that
-            // appeared after entry is an ordinary peer arriving and is never
-            // timed here. The leftover is NOT deleted: this party cannot prove
-            // it is its own, and --sweep-exchange-files remains the operator's
-            // assertion that no concurrent session is using the path.
+            // more likely residue of an interrupted run in this directory, and
+            // waiting the remaining budget only defers the same failure. A hello
+            // that appeared after entry is an ordinary peer arriving and is
+            // never timed here. The leftover is NOT deleted: this party cannot
+            // prove it is its own, and --sweep-exchange-files remains the
+            // operator's assertion that no concurrent session is using the path.
+            //
+            // "More likely", not "is": the window is wall-clock, and a partner
+            // whose transport round trip outruns it is alive and mid-answer.
+            // rendezvousBoundMs floors the window so that stays improbable, but
+            // it cannot be excluded, so the text names residue as a reading
+            // rather than a finding and puts the re-run ahead of the removal.
             if (
               entryHelloDeadline !== undefined &&
               peerHello.name === entryPeerHello &&
               Date.now() > entryHelloDeadline
             )
               throw new UsageError(
-                "the peer hello present when this run started never " +
-                  "answered; most likely residue from an interrupted run, " +
-                  "not a live peer. Remove it after confirming no other " +
-                  `session uses this path: ${sanitizeForDisplay(peerHello.name)}`,
+                "peer hello present at start never answered; it may be " +
+                  "residue, not a live peer. Re-run; remove only if it " +
+                  "persists and no session shares this path: " +
+                  `${sanitizeForDisplay(peerHello.name)}`,
               );
             deps
               .log()

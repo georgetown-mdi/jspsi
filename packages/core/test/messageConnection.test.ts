@@ -309,6 +309,22 @@ test("fromEventConnection: a function inactivityHint is resolved when the deadli
   expect(err.message).not.toContain("construction-time guidance");
 });
 
+test("fromEventConnection: a throwing inactivityHint still fails the connection", async () => {
+  const [, eventB] = makeEventConnections();
+  // The hint is resolved inside the timer callback, where nothing is left to
+  // catch it: an escaping exception would abandon the parked receive() for the
+  // life of the process. A hint that throws must cost only its own sentence.
+  const connB = fromEventConnection(eventB, {
+    inactivityTimeoutMs: 20,
+    inactivityHint: () => {
+      throw new Error("hint blew up");
+    },
+  });
+  const err = await expectRejectionKind(connB.receive(), "transport");
+  expect(err.message).toContain("gone silent");
+  expect(err.message).not.toContain("hint blew up");
+});
+
 test("fromEventConnection: the silence error carries no clause when no hint is supplied", async () => {
   const [, eventB] = makeEventConnections();
   // No hint: the bare diagnostic, unchanged. This pins that a transport which

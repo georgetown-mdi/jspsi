@@ -83,16 +83,21 @@ export const PEER_SILENCE_GUIDANCE =
  * so this names the fact the run does hold and prescribes the local recovery.
  *
  * It hedges ("may be") because the two cases genuinely cannot be told apart from
- * here, and it conditions the removal on no other session using the folder,
- * because the same shape is what a partner that arrived first and then died
- * mid-handshake leaves. Kept short, with the filename LAST: the rendered
- * boundary truncates each cause-chain link, and this line rides behind the core
- * layer's own peer-silence sentence, so only a pathologically long filename can
- * be cut and the diagnosis and recovery step always survive.
+ * here, and it prescribes the re-run before the removal, conditioning the
+ * removal on surviving one: the same shape is what a partner that arrived first
+ * and then died mid-handshake leaves, and a partner that is merely slow
+ * completes the re-run.
+ *
+ * Kept short, with the filename LAST, because this line rides behind the core
+ * layer's own peer-silence sentence inside a single cause-chain link and the
+ * rendered boundary truncates each link: every character of fixed text here is
+ * one the filename does not get. The budget it leaves is pinned by a test rather
+ * than asserted here -- a prose claim about how long a name has to be before it
+ * is cut cannot fail when the text grows.
  */
 export const entryHelloResidueGuidance = (helloName: string): string =>
-  "No peer was confirmed: the hello here at start may be residue, not a " +
-  "partner. Remove it if no other session uses this folder: " +
+  "No peer was confirmed; the hello present at start may be residue. " +
+  "Re-run; remove only if it persists: " +
   sanitizeForDisplay(helloName);
 
 /**

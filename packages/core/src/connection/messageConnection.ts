@@ -318,11 +318,20 @@ export class QueuedMessageConnection implements MessageConnection {
       this.idleTimer = undefined;
       // Resolve the transport's guidance here, at the moment of failure, so a
       // function form sees the transport's final state rather than its state at
-      // construction.
-      const hint =
-        typeof this.inactivityHint === "function"
-          ? this.inactivityHint()
-          : this.inactivityHint;
+      // construction. Guarded because this runs in a timer callback with no
+      // caller to catch it: a hint that throws must cost the operator its
+      // sentence, not the fail() below -- an escaping exception would leave the
+      // parked receive() unresolved for the life of the process, turning a
+      // decorative sentence into a hang at the last-resort failure boundary.
+      let hint: string | undefined;
+      try {
+        hint =
+          typeof this.inactivityHint === "function"
+            ? this.inactivityHint()
+            : this.inactivityHint;
+      } catch {
+        hint = undefined;
+      }
       this.fail(
         new ConnectionError(
           `no message received within ${ms}ms; the peer appears to have ` +
@@ -621,7 +630,8 @@ export class QueuedMessageConnection implements MessageConnection {
  * CLI naming likely receiver-side causes) supplies one, and a caller that omits
  * it gets the bare diagnostic. Supply a FUNCTION when the guidance depends on
  * something the transport only learns after this bridge is built -- it is
- * resolved when the deadline fires, not here.
+ * resolved when the deadline fires, not here, and a function that throws costs
+ * only its own sentence: the peer-silence failure still lands.
  */
 export function fromEventConnection(
   conn: Connection,
