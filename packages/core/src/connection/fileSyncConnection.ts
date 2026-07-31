@@ -217,16 +217,33 @@ export const CONNECTION_CLOSE_TIMEOUT_MS = 1000 * 30;
 export const DEFAULT_POLLING_FREQUENCY_MS = 5000;
 const DEFAULT_VERBOSITY = 1;
 
-// Bounded window the lock-path peer waits for a joiner that has begun arriving
-// (its `<id>-joining.json` sentinel is visible) to finish renaming the sentinel
-// to its hello. The joiner's remaining work is one delete plus one rename --
-// milliseconds on a direct transport, seconds on a sync-mediated one -- so a
-// window well under peerTimeoutMs distinguishes a slow-but-live joiner from a
-// crashed one without making the peer wait the full inactivity budget. This is
+// One wall-clock allowance for a peer's publish-and-rename to land on this
+// transport, read at two places.
+//
+// (1) The bounded window the lock-path peer waits for a joiner that has begun
+// arriving (its `<id>-joining.json` sentinel is visible) to finish renaming the
+// sentinel to its hello. The joiner's remaining work is one delete plus one
+// rename -- milliseconds on a direct transport, seconds on a sync-mediated one
+// -- so a window well under peerTimeoutMs distinguishes a slow-but-live joiner
+// from a crashed one without making the peer wait the full inactivity budget:
 // the timing heuristic the sentinel narrows to a short, well-defined window
-// rather than the full hour. Internal-only (not a user-facing config option):
-// the default suits both transport classes and the value only matters when a
-// joiner fails mid-arrival, which a correct peer never causes.
+// rather than the full hour.
+//
+// (2) The wall-clock FLOOR under every rendezvous bound derived from poll cycles
+// (rendezvousBoundMs in fileSyncRendezvous.ts): it governs the I5a peer-hello
+// read and the entry-present-hello ack window on EVERY rendezvous, in both
+// modes, with no joiner failure anywhere. A poll interval says how often a party
+// LOOKS, not how long the transport takes to ANSWER, so a bound counted purely
+// in cycles expires inside a single round trip whenever the configured cadence
+// sits below the transport's latency. LOWERING this value tightens both of those
+// bounds and can abort a live partner mid-round-trip; the full reasoning is at
+// rendezvousBoundMs.
+//
+// Internal-only (not a user-facing config option): one value serves both roles
+// on both transport classes, and every use is capped at the remaining
+// peerTimeoutMs budget. What a transport whose round trip exceeds it costs is a
+// stated limit (docs/spec/FILE_SYNC.md, "the window remains a wall-clock
+// heuristic").
 const DEFAULT_JOINER_RECOVERY_MS = 1000 * 30;
 
 interface Events {
@@ -265,10 +282,13 @@ interface Options {
   // shows a retain signal (a durable audit transcript). Meaningless without
   // sweepExchangeFiles, which the CLI enforces by rejecting it on its own.
   forceRetainSweep: boolean;
-  // How long the lock-path peer waits for a mid-arrival joiner (a visible
-  // `<id>-joining.json` sentinel) to finish before treating it as crashed. Not
-  // surfaced in the public config; defaults to DEFAULT_JOINER_RECOVERY_MS.
-  // Tests lower it to exercise the abort path without a real-time wait.
+  // The wall-clock allowance for a peer's publish-and-rename on this transport:
+  // how long the lock-path peer waits for a mid-arrival joiner (a visible
+  // `<id>-joining.json` sentinel) to finish before treating it as crashed, AND
+  // the floor under every rendezvous-time bound, so lowering it tightens those
+  // too (see DEFAULT_JOINER_RECOVERY_MS and rendezvousBoundMs). Not surfaced in
+  // the public config; defaults to DEFAULT_JOINER_RECOVERY_MS. Tests lower it to
+  // exercise the abort path without a real-time wait.
   joinerRecoveryMs: number;
 }
 
