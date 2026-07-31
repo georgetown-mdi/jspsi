@@ -301,6 +301,40 @@ const helloReadDeadline = (options: RendezvousOptions): Date =>
     ),
   );
 
+// How long a peer hello that was ALREADY PRESENT at entry gets to acknowledge
+// this party's hello before rendezvous fails terminally, as a fraction of the
+// operator's own remaining peer budget (with the floor below). Deriving it from
+// that budget rather than fixing a constant keeps it never longer than the
+// operator asked for and scales it with the transport they configured. An eighth
+// leaves seven eighths of the budget for the exchange proper and is still orders
+// of magnitude above any plausible rendezvous round trip: 7 m 30 s at the
+// default one-hour budget, against the full hour this replaces on every
+// invocation of an unattended re-run.
+//
+// This is the one bound the design left to be tuned; it and the floor below are
+// the only two places to change it.
+const ENTRY_HELLO_ACK_WINDOW_FRACTION = 1 / 8;
+
+// Floor under that window, in poll cycles, so a fast transport (or a small
+// configured budget) cannot abort inside a single round trip: this party's hello
+// must reach the peer and the peer's ack must come back, each at the configured
+// cadence. Six cycles is 30 s at the default cadence, the same magnitude as the
+// joiner-recovery window and the rendezvous hello read bound above.
+const ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES = 6;
+
+// The window in milliseconds, capped at the remaining budget so it can never
+// outlast the peer timeout itself (where the ordinary timeout fires instead).
+const entryHelloAckWindowMs = (options: RendezvousOptions): number => {
+  const remaining = options.timeToLive!.getTime() - Date.now();
+  return Math.min(
+    remaining,
+    Math.max(
+      ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES * options.pollingFrequency,
+      remaining * ENTRY_HELLO_ACK_WINDOW_FRACTION,
+    ),
+  );
+};
+
 // The rendezvous-relevant subset of the connection's Options, read live through
 // the deps `options` accessor. The connection's full Options is a superset, so
 // `() => this.options` satisfies this; naming only what the coordinator reads
@@ -346,6 +380,13 @@ export interface RendezvousDeps {
   setRole: (role: string) => void;
   setPeerId: (peerId: string | undefined) => void;
   setHandshakeRole: (role: HandshakeRole | undefined) => void;
+  // Records the peer hello found in the directory at entry, and clears it (with
+  // undefined) at the first observation attributable to a LIVE peer. The
+  // connection exposes the surviving value so a consumer can distinguish "a peer
+  // completed the rendezvous and then went silent" from "this run rendezvoused
+  // against a hello nothing has confirmed", which the entry-time directory
+  // contents are the only local evidence for.
+  setEntryPeerHello: (name: string | undefined) => void;
   resetSessionState: () => void;
   clearAbortMarker: () => void;
   writeAck: (dir: string, originalName: string) => Promise<string>;
@@ -387,10 +428,20 @@ export class FileSyncRendezvous {
     // requires lockless), so routing it through outbound is correct there too.
     const helloPath = `${scope.outboundPath}/${deps.id()}${HELLO_SUFFIX}`;
 
+    // The at-most-one peer hello that PREDATED this run. It is the only hello
+    // whose writer has already demonstrated a propagation leg, and equally the
+    // only one that can be residue of an interrupted run in this directory --
+    // the two are indistinguishable on disk, which is why both the bounded
+    // window below and the connection's unconfirmed-hello fact are armed on this
+    // case alone. A hello that appears AFTER entry is an ordinary peer arriving.
+    const entryPeerHello =
+      peerHellos.length === 1 ? peerHellos[0].name : undefined;
+    deps.setEntryPeerHello(entryPeerHello);
+
     if (peerHellos.length === 1 && !deps.options().locklessRendezvous) {
       await this.rendezvousAsLockJoiner(scope, peerHellos[0], helloPath);
     } else {
-      await this.rendezvousViaHelloExchange(scope, helloPath);
+      await this.rendezvousViaHelloExchange(scope, helloPath, entryPeerHello);
     }
   }
 
@@ -1281,6 +1332,7 @@ export class FileSyncRendezvous {
   private async rendezvousViaHelloExchange(
     scope: RendezvousScope,
     helloPath: string,
+    entryPeerHello: string | undefined,
   ): Promise<void> {
     const { deps } = this;
     const { outboundPath } = scope;
@@ -1297,6 +1349,16 @@ export class FileSyncRendezvous {
       deps.responsibleFiles.add(`${deps.id()}${HELLO_SUFFIX}`);
     let lockPath: string | undefined;
     let ackPath: string | undefined;
+
+    // Deadline for the bounded recovery window on an entry-present peer hello,
+    // armed only when one predated this run (see run()). Measured from here, the
+    // instant this party's own hello is on disk: before that there is nothing
+    // for a live peer to acknowledge, so an earlier start would charge the peer
+    // for this party's own publish.
+    const entryHelloDeadline =
+      entryPeerHello === undefined
+        ? undefined
+        : Date.now() + entryHelloAckWindowMs(deps.options());
 
     const waitForPeer = async () => {
       if (deps.options().locklessRendezvous) {
@@ -1418,6 +1480,27 @@ export class FileSyncRendezvous {
           );
 
           if (!hasPeerAck) {
+            // Bounded recovery window, armed only when THIS hello predated the
+            // run (see run()). Its writer has already demonstrated one
+            // propagation leg, so a live peer answers within a round trip; one
+            // that has not answered within the operator's own derived window is
+            // residue of an interrupted run in this directory, and waiting the
+            // remaining budget only defers the same failure. A hello that
+            // appeared after entry is an ordinary peer arriving and is never
+            // timed here. The leftover is NOT deleted: this party cannot prove
+            // it is its own, and --sweep-exchange-files remains the operator's
+            // assertion that no concurrent session is using the path.
+            if (
+              entryHelloDeadline !== undefined &&
+              peerHello.name === entryPeerHello &&
+              Date.now() > entryHelloDeadline
+            )
+              throw new UsageError(
+                "the peer hello present when this run started never " +
+                  "answered; most likely residue from an interrupted run, " +
+                  "not a live peer. Remove it after confirming no other " +
+                  `session uses this path: ${sanitizeForDisplay(peerHello.name)}`,
+              );
             deps
               .log()
               .trace(
@@ -1427,6 +1510,11 @@ export class FileSyncRendezvous {
             await deps.wait(deps.options().pollingFrequency);
             continue;
           }
+
+          // The peer's ack of a hello this party published after its own entry
+          // scan: an observation attributable to a LIVE peer, which is what
+          // clears an entry-present hello from the unconfirmed-residue case.
+          deps.setEntryPeerHello(undefined);
 
           // Peer ack confirmed -- commit roles and peerId as the last step,
           // the same invariant as the joiner path (see above): if the ack

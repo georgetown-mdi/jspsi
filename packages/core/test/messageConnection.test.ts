@@ -291,6 +291,24 @@ test("fromEventConnection: a supplied inactivityHint is appended to the silence 
   expect(err.message).toContain("check the peer's own logs");
 });
 
+test("fromEventConnection: a function inactivityHint is resolved when the deadline fires", async () => {
+  const [, eventB] = makeEventConnections();
+  // A caller whose guidance depends on a fact the transport only establishes
+  // after this bridge is built (the file-sync CLI, which chooses between two
+  // attributions on what the rendezvous observed) supplies a function. It must
+  // be read at failure time, not at construction: the value below changes after
+  // the connection exists.
+  let guidance = "construction-time guidance";
+  const connB = fromEventConnection(eventB, {
+    inactivityTimeoutMs: 20,
+    inactivityHint: () => guidance,
+  });
+  guidance = "failure-time guidance";
+  const err = await expectRejectionKind(connB.receive(), "transport");
+  expect(err.message).toContain("failure-time guidance");
+  expect(err.message).not.toContain("construction-time guidance");
+});
+
 test("fromEventConnection: the silence error carries no clause when no hint is supplied", async () => {
   const [, eventB] = makeEventConnections();
   // No hint: the bare diagnostic, unchanged. This pins that a transport which

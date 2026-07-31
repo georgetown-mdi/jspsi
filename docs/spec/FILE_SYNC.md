@@ -168,12 +168,35 @@ A rendezvous that fails terminally rolls back **this party's own rendezvous arti
 Deleting them is correct in retain mode, where every other deletion is reserved for an explicit operator escalation, for three reasons:
 
 - **There is no transcript.** A terminal rendezvous failure means the message loop was never entered, so what is on disk is the failed attempt's own scaffolding -- a hello carrying two booleans, and a zero-length ack -- not the durable record retain mode exists to preserve. Retain's no-delete contract governs an exchange; this attempt produced none.
-- **The artifacts are indistinguishable from a live peer's.** The directory carries no entry-time liveness signal ([I1](#invariants)), so an abandoned hello reads to the next entrant exactly as a peer that arrived first: it is acked, the entrant then polls for a reply to its full `peer_timeout_ms`, and the real partner's later arrival trips the at-most-one-peer-hello guard -- attributing the operator's own residue to a third session.
+- **The artifacts are indistinguishable from a live peer's.** The directory carries no entry-time liveness signal ([I1](#invariants)), so an abandoned hello reads to the next entrant exactly as a peer that arrived first, and the real partner's later arrival trips the at-most-one-peer-hello guard -- attributing the operator's own residue to a third session. What the entrant then does with it is mode-dependent (see *Entry-present peer hello* below); in neither mode does it produce an exchange.
 - **It is retain mode's only rollback.** `responsibleFiles` is never populated in retain mode (every `add` is guarded -- see [I4a](#invariants)) and `cleanup()` returns before deleting, so nothing downstream removes these files. Without this site the mode with the strictest entry precondition ([Fresh directory in retain mode](#preconditions-for-a-correct-exchange)) would have no unwind at all, and every failed attempt would block the next one.
 
 The one carve-out is a `BilateralModeMismatchError`, whose advertised hello is deliberately kept as the directory's terminal state in both modes (see [Bilateral configuration](#bilateral-configuration-detect-and-fail-never-negotiate)).
 
-The rollback is issued through `safeDelete`, which swallows a transport-level delete failure, and it runs in-process: a hard kill (SIGKILL, OOM, power loss) leaves the artifacts behind, exactly as it leaves a delete-mode session's `responsibleFiles` unswept. What the next run makes of that residue turns on its shape -- a leftover ack, or a leftover hello under a configured `peer_id`, is refused by the entry guard ([I0](#invariants)); a lone hello under the default fresh id per run is instead the abandoned-hello case the second reason above describes, adopted as a peer and polled against to the timeout. Crash residue is this rollback's stated limit, not a case it covers.
+The rollback is issued through `safeDelete`, which swallows a transport-level delete failure, and it runs in-process: a hard kill (SIGKILL, OOM, power loss) leaves the artifacts behind, exactly as it leaves a delete-mode session's `responsibleFiles` unswept. Crash residue is this rollback's stated limit, not a case it covers; what the NEXT run makes of it is the entry-present peer hello case below.
+
+### Phase 1 -- entry-present peer hello
+
+A peer hello already in the inbound directory when a run scans it is the one protocol file [I0](#invariants) tolerates, and the only one whose writer has demonstrated a propagation leg. It is also exactly what an interrupted run in this directory leaves behind, and the two are indistinguishable on disk. What the entrant does with it turns on the mode:
+
+- **Lock rendezvous (the default).** The joiner fast path consumes it: it reads the body, deletes the hello, renames its own sentinel into place, and commits role/peerId -- against a party that may not exist. Nothing in the rendezvous waits, so the stall lands in the key exchange instead, which fails after the send-side wait plus the handshake timeout. The directory is left holding nothing of the leftover, so a second run starts clean: the failure is self-limiting after one run.
+- **Lockless rendezvous (and therefore retain).** Both hellos coexist; the entrant writes its ack of the leftover and waits for an ack of its own that no one will write. Its own terminal rollback then removes exactly what it wrote, returning the directory to the same single leftover -- so without a bound this repeats on every invocation for as long as the directory is reused.
+
+**The bounded window.** That repetition is why the lockless barrier bounds the wait when the peer hello was present AT ENTRY: if it has not acknowledged this party's hello within the window, the rendezvous fails terminally (a `UsageError`, naming the file and the recovery step) instead of polling to `peer_timeout_ms`. It is armed on the entry-present case alone -- a hello that appears after entry is an ordinary peer arriving and is never timed -- and the leftover is **not** deleted: a hello this party cannot prove is its own is not its to remove, and `--sweep-exchange-files` remains the operator's assertion that no concurrent session is using the path. The terminal rollback of this party's own artifacts is unchanged.
+
+The window is derived from the operator's own remaining budget rather than fixed, so it is never longer than they asked for and scales with the transport they configured:
+
+```
+window = min(remaining budget,
+             max(ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES * poll interval,
+                 remaining budget * ENTRY_HELLO_ACK_WINDOW_FRACTION))
+```
+
+with `ENTRY_HELLO_ACK_WINDOW_FRACTION` = 1/8 and `ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES` = 6 (`fileSyncRendezvous.ts`, the only place either is set). At the defaults that is 7 m 30 s, against the full hour it replaces on every invocation; the floor is what keeps a fast transport or a small configured budget from aborting inside a single round trip, since this party's hello must reach the peer and its ack must come back, each at the configured cadence. The measurement is taken from the moment this party's own hello is on disk: before that there is nothing for a live peer to acknowledge.
+
+**Attribution.** Because the lock path commits role/peerId with no observation attributable to a live peer, the connection carries the fact it does hold: `unconfirmedEntryPeerHello` names the entry-present hello until the first such observation clears it (the peer's ack of this party's own hello, or a peer message delivered to the application). A consumer that would otherwise attribute a later silence to the peer -- the CLI's peer-silence guidance -- reads it first and names the leftover and the local recovery instead, rather than sending the operator to a partner that may never have been there.
+
+**A configured `peer_id` sidesteps all of this**, and is the recommended setting for unattended and scheduled runs: the leftover then carries this party's own id, so it is a self-hello that the entry guard refuses immediately (exit 64) naming the file, before any wait. Being filename-based, that refusal is unaffected by a torn body.
 
 ### Phase 2 -- message loop, delete mode
 

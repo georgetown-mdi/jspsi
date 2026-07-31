@@ -416,6 +416,7 @@ interface PartyState {
   role: string;
   peerId: string | undefined;
   handshakeRole: HandshakeRole | undefined;
+  entryPeerHello: string | undefined;
   resetCount: number;
   clearCount: number;
   responsibleFiles: Set<string>;
@@ -454,6 +455,7 @@ function makeParty(
     role: "unknown role",
     peerId: undefined,
     handshakeRole: undefined,
+    entryPeerHello: undefined,
     resetCount: 0,
     clearCount: 0,
     responsibleFiles: new Set<string>(),
@@ -483,6 +485,9 @@ function makeParty(
     },
     setHandshakeRole: (role) => {
       state.handshakeRole = role;
+    },
+    setEntryPeerHello: (name) => {
+      state.entryPeerHello = name;
     },
     resetSessionState: () => {
       state.resetCount += 1;
@@ -1867,5 +1872,181 @@ describe("FileSyncRendezvous bounded hello read", () => {
 
     expect(p.state.peerId).toBe("zzz");
     expect(p.state.role).toBe("joiner");
+  });
+});
+
+// --- entry-present peer hello ------------------------------------------------
+//
+// A hello already in the directory when a run starts is the only one whose
+// writer has demonstrated a propagation leg, and equally the only one that can
+// be residue of an interrupted run here. Two behaviors are armed on that case
+// and on no other: the bounded window below, and the unconfirmed-hello fact the
+// connection exposes for attribution.
+
+describe("FileSyncRendezvous entry-present peer hello window", () => {
+  const flags = { locklessRendezvous: true, retainFiles: false };
+  const LEFTOVER_ID = "2f1c9a04-3b7e-4f6a-9d21-88ca0e6b5477";
+  // Window = max(6 poll cycles, budget/8) capped at the budget: 6 * 20 = 120 ms
+  // here, comfortably inside the 3 s budget it replaces.
+  const budget = () => ({
+    timeToLive: new Date(Date.now() + 3000),
+    pollingFrequency: 20,
+  });
+
+  test("fails terminally within the window instead of polling to the peer timeout", async () => {
+    const files = new Map<string, Buffer>();
+    // A uuid peer id, the shape a default-configured run leaves behind, so the
+    // rendering assertion below measures a realistic message length.
+    placePeerHello(files, LEFTOVER_ID, flags);
+    const p = makeParty("aaa", { ...flags, ...budget() }, files);
+
+    const started = Date.now();
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    const elapsed = Date.now() - started;
+
+    expect(err).toBeInstanceOf(UsageError);
+    expect((err as Error).message).toContain("never answered");
+    expect((err as Error).message).toContain(helloName(LEFTOVER_ID));
+    expect(elapsed).toBeLessThan(2000);
+    // Not a peer-wait timeout: this party did not wait its full budget, so a
+    // consumer must not offer the advice that failure carries.
+    expect(isPeerWaitTimeout(err)).toBe(false);
+    // Asserted through the rendering path, which truncates each cause-chain
+    // link: the diagnosis, the recovery step, and the filename all survive it.
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(rendered).toContain("Remove it after confirming");
+    expect(rendered).toContain(helloName(LEFTOVER_ID));
+  });
+
+  test("never deletes the leftover, and still rolls back this party's own files", async () => {
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, "zzz", flags);
+    const p = makeParty("aaa", { ...flags, ...budget() }, files);
+
+    await expect(p.rdv.run(p.scope)).rejects.toBeInstanceOf(UsageError);
+
+    // A hello this party cannot prove is its own is not its to remove.
+    expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
+    // The terminal rollback is untouched: own hello and own ack are gone.
+    expect(files.has(`${DIR}/${helloName("aaa")}`)).toBe(false);
+    expect(files.has(`${DIR}/${ackMarkerName("aaa", helloStem("zzz"))}`)).toBe(
+      false,
+    );
+  });
+
+  test("is armed in retain mode too", async () => {
+    const retain = { locklessRendezvous: true, retainFiles: true };
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, "zzz", retain);
+    const p = makeParty("aaa", { ...retain, ...budget() }, files);
+
+    const started = Date.now();
+    await expect(p.rdv.run(p.scope)).rejects.toBeInstanceOf(UsageError);
+
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
+  });
+
+  test("is not armed for a peer hello that appears after entry", async () => {
+    // An ordinary peer arriving: it publishes its hello only after this party's
+    // entry scan, so it is never timed by the window and gets the full budget.
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, "zzz", flags);
+    const p = makeParty("aaa", { ...flags, ...budget() }, files, {
+      hideAtEntry: [helloName("zzz")],
+    });
+
+    const started = Date.now();
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    // Waited the whole 3 s budget and failed with the ordinary timeout.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(3000);
+    expect((err as Error).message).toContain("synchronization has timed out");
+    expect(isPeerWaitTimeout(err)).toBe(true);
+  });
+
+  test("a live peer that acks inside the window completes normally", async () => {
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, "zzz", flags);
+    placePeerAckOf(files, "zzz", "aaa");
+    const p = makeParty("aaa", { ...flags, ...budget() }, files, {
+      hideAtEntry: [ackMarkerName("zzz", helloStem("aaa"))],
+    });
+
+    await p.rdv.run(p.scope);
+
+    expect(p.state.peerId).toBe("zzz");
+    // The peer's ack of a hello published after entry confirms a live peer, so
+    // the unconfirmed-hello fact is cleared for the attribution consumer.
+    expect(p.state.entryPeerHello).toBeUndefined();
+  });
+
+  test("a configured peer_id keeps its immediate entry-guard refusal", async () => {
+    // The leftover carries this party's OWN id, so it is a self-hello: an
+    // unexpected protocol file the entry guard refuses before any window or
+    // wait, exactly as before.
+    const files = new Map<string, Buffer>();
+    files.set(
+      `${DIR}/${helloName("site-a")}`,
+      serializeEnvelope({ locklessRendezvous: true, retainFiles: false }),
+    );
+    const p = makeParty("site-a", { ...flags, ...budget() }, files);
+
+    const started = Date.now();
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(UsageError);
+    expect((err as Error).message).toContain("unexpected protocol file");
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(files.has(`${DIR}/${helloName("site-a")}`)).toBe(true);
+  });
+
+  test("two leftover peer hellos are still refused at entry", async () => {
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, "zzz", flags);
+    placePeerHello(files, "yyy", flags);
+    const p = makeParty("aaa", { ...flags, ...budget() }, files);
+
+    await expect(p.rdv.run(p.scope)).rejects.toMatchObject({
+      name: "UsageError",
+      message: expect.stringContaining("peer hello files"),
+    });
+  });
+
+  test("records the entry-present hello for attribution and leaves it set on failure", async () => {
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, "zzz", flags);
+    const p = makeParty("aaa", { ...flags, ...budget() }, files);
+
+    await expect(p.rdv.run(p.scope)).rejects.toBeInstanceOf(UsageError);
+
+    // Nothing attributable to a live peer was ever observed, so the fact stands.
+    expect(p.state.entryPeerHello).toBe(helloName("zzz"));
+  });
+
+  test("records nothing when no peer hello predated the run", async () => {
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, "zzz", flags);
+    placePeerAckOf(files, "zzz", "aaa");
+    // Both the peer hello and its ack are published only after this party's
+    // entry scan, so the run enters against an empty directory.
+    const p = makeParty("aaa", { ...flags, ...budget() }, files, {
+      hideAtEntry: [helloName("zzz"), ackMarkerName("zzz", helloStem("aaa"))],
+    });
+
+    await p.rdv.run(p.scope);
+
+    expect(p.state.peerId).toBe("zzz");
+    expect(p.state.entryPeerHello).toBeUndefined();
   });
 });

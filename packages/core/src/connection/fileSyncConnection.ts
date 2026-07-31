@@ -495,6 +495,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // NOT cleared in resetSessionState, whose mid-rendezvous recovery resets would
   // otherwise wipe a snapshot taken before the rendezvous loop.
   private foreignFileSnapshot = new Set<string>();
+  // Backing field for unconfirmedEntryPeerHello. Written by the rendezvous
+  // coordinator at both ends of its lifetime (set at the entry scan, cleared on
+  // the peer's ack) and cleared here on the first delivered peer message; see
+  // the getter for what it means and why it is not simply "a hello was present".
+  private entryPeerHello: string | undefined;
   // An `error` emitted while no listener is registered is held here so the
   // next protocol-layer receive can detect failures that arrived in the gap
   // between listener-registration cycles. Reading clears the value; only the
@@ -570,6 +575,27 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // sequencing is unchanged.
   private get lastSentFile(): string | undefined {
     return this.messageLoop.lastSentFile;
+  }
+
+  /**
+   * The peer hello that was already in the inbound directory when this session's
+   * `synchronize()` scanned it, for as long as nothing has confirmed a live peer
+   * behind it -- `undefined` when no peer hello predated the run, and cleared
+   * for good at the first such confirmation (the peer's ack of this party's own
+   * hello, or a peer message delivered to the application).
+   *
+   * It is the local evidence for a distinction the transport cannot otherwise
+   * make. A hello found at entry is byte-identical whether a partner wrote it a
+   * moment ago or an interrupted run in this same directory left it behind, so a
+   * rendezvous that completed against one -- the lock joiner fast path in
+   * particular, which consumes it and commits with no answer from anyone -- has
+   * established nothing about a peer. A consumer that would otherwise attribute
+   * a later silence to the peer reads this first: while it is set, the run has
+   * never observed the peer at all, and the leftover named here is a likelier
+   * cause than a partner-side fault.
+   */
+  get unconfirmedEntryPeerHello(): string | undefined {
+    return this.entryPeerHello;
   }
 
   // The rendezvous path escaped for operator-facing logs and thrown errors. On an
@@ -664,6 +690,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       setHandshakeRole: (role) => {
         this.handshakeRole = role;
       },
+      setEntryPeerHello: (name) => {
+        this.entryPeerHello = name;
+      },
       resetSessionState: () => this.resetSessionState(),
       clearAbortMarker: () => this.abortMarker.clear(),
       writeAck: (dir, originalName) => this.writeAck(dir, originalName),
@@ -706,6 +735,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     event: E,
     ...args: Parameters<Events[E]>
   ): boolean {
+    // A delivered peer message is an observation attributable to a live peer, so
+    // whatever hello was present at entry is confirmed from here on. Cleared at
+    // this single funnel rather than in the poll loop so no delivery path can
+    // bypass it.
+    if (event === "data") this.entryPeerHello = undefined;
     const hadListeners = super.emit(event, ...args);
     if (event === "error" && !hadListeners) {
       // Only the most recent unhandled error is retained because a subsequent

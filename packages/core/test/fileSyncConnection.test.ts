@@ -7337,9 +7337,14 @@ test.each(entryPreconditionCells)(
       expect(err).toBeInstanceOf(UsageError);
     } else {
       // Proceeds past the guard: it either completes rendezvous (the delete-mode
-      // joiner fast-path with one peer hello) or enters the rendezvous wait and
-      // times out with a transport Error -- never the precondition UsageError.
-      expect(err).not.toBeInstanceOf(UsageError);
+      // joiner fast-path with one peer hello), enters the rendezvous wait and
+      // times out with a transport Error, or -- lockless with a peer hello
+      // already present at entry -- fails on the bounded entry-hello window.
+      // What it must never be is the precondition rejection, so that message,
+      // not the shared UsageError class, is the discriminator.
+      expect(err instanceof Error ? err.message : "").not.toContain(
+        "must be empty except for a single peer hello",
+      );
     }
   },
 );
@@ -10414,4 +10419,66 @@ describe("connection-per-poll idle-boundary signal", () => {
     expect(trace.indexOf("release")).toBeGreaterThan(ackRename);
     expect(trace.filter((entry) => entry === "dial").length).toBeGreaterThan(1);
   });
+});
+
+// --- unconfirmed entry-present peer hello ------------------------------------
+//
+// The lock joiner fast path consumes an entry-present hello and commits
+// role/peerId with no observation attributable to a live peer, so a consumer
+// that later attributes silence to "the peer" would be asserting a fact this
+// side never established. The connection exposes exactly what it does hold.
+
+test("unconfirmedEntryPeerHello names a hello the lock joiner consumed but nothing confirmed", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = ID_HIGH;
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+
+  await conn.synchronize();
+
+  // Rendezvous completed and committed a peer id, yet nothing the peer did was
+  // ever observed: the hello it read is exactly what an interrupted prior run in
+  // this same directory leaves behind.
+  expect(conn.peerId).toBe(ID_LOW);
+  expect(conn.unconfirmedEntryPeerHello).toBe(peerHelloName);
+});
+
+test("unconfirmedEntryPeerHello is undefined when no peer hello predated the run", async () => {
+  const { connA, connB } = makeRendezvousPair(
+    ID_LOW,
+    { locklessRendezvous: true },
+    ID_HIGH,
+    { locklessRendezvous: true },
+  );
+
+  await Promise.all([connA.synchronize(), connB.synchronize()]);
+
+  // Whichever party saw the other's hello saw it appear AFTER its own entry
+  // scan, and each observed the other's ack of its own hello besides.
+  expect(connA.unconfirmedEntryPeerHello).toBeUndefined();
+  expect(connB.unconfirmedEntryPeerHello).toBeUndefined();
+});
+
+test("a delivered peer message clears unconfirmedEntryPeerHello", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = ID_HIGH;
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+  await conn.synchronize();
+  expect(conn.unconfirmedEntryPeerHello).toBe(peerHelloName);
+
+  // A peer message reaching the application is an observation attributable to a
+  // live peer, so the entry-time hello counts as confirmed from then on.
+  const payload = objectMessage({ hello: "world" });
+  files.set(`${conn.path}/${ID_LOW}-${payload.length}.json`, payload);
+  const received = new Promise<unknown>((resolve) =>
+    conn.once("data", resolve),
+  );
+  conn.start();
+  await received;
+  conn.stop();
+
+  expect(conn.unconfirmedEntryPeerHello).toBeUndefined();
 });
