@@ -10,6 +10,7 @@ import { withCapturedLogs } from "@psilink/core/testing";
 
 import { MAX_DIRECTORY_ENTRIES } from "../../src/connection/listingGuard";
 import {
+  CONCURRENT_OPERATIONS_BESIDE_A_FAN,
   MAX_DEFERRED_CLEANUP_DELETES,
   SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS,
   SSH2SFTPClientAdapter,
@@ -24,8 +25,8 @@ import { serverAuth, sftpServer } from "../sftpServer/testContext";
 // really issues -- core's per-entry sweeps of a directory listing, and the
 // connection-per-poll cleanup drain's re-issue -- run far past Node's default
 // ceiling of 10. The adapter raises that ceiling at construction to
-// SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS; the cases here hold the two halves of
-// what that is only acceptable under.
+// SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS; the cases here hold the three things
+// that value rests on.
 //
 // One: an operator never sees the MaxListenersExceededWarning the fan used to
 // print. Node emits it through process.emitWarning rather than console, so it
@@ -41,6 +42,13 @@ import { serverAuth, sftpServer } from "../sftpServer/testContext";
 // count is EXACTLY those persistent listeners again on every event name. The
 // leaking-shape case drives that same check red, since a check nobody has seen
 // fail is not evidence.
+//
+// Three: the terms the value is derived from mean at runtime what the derivation
+// reads them as. Node's ceiling warns only strictly above itself, which is why
+// the ceiling can be seated AT the enumerated peak; and what the derivation
+// allows for beside a fan is a best-effort backstop over driven exchanges rather
+// than a proof, so the exchanges are driven and the headroom they spend is held
+// within it.
 //
 // Only the in-process backend can be reached this way (see
 // test/sftpServer/types.ts), so these run there.
@@ -146,6 +154,23 @@ function probeListeners(adapter: SSH2SFTPClientAdapter): Probe {
   return probe;
 }
 
+// The most listeners any one event name carried above what the client held when
+// the probe was installed: the headroom a fan, or anything running beside one,
+// spends out of the ceiling. Taken over every event name the emitter has carried
+// rather than the trio alone, since the ceiling applies per event name.
+function peakAboveBaseline(probe: Probe): number {
+  let peak = 0;
+  for (const event of new Set([
+    ...Object.keys(probe.baseline),
+    ...Object.keys(probe.peaks),
+  ]))
+    peak = Math.max(
+      peak,
+      (probe.peaks[event] ?? 0) - (probe.baseline[event] ?? 0),
+    );
+  return peak;
+}
+
 // Every way the per-operation accounting on a fan of `width` can be wrong, as
 // messages rather than a bare boolean, so the leaking-shape case can name what it
 // caught. The peak is held EXACTLY: too low means the fan never was concurrent
@@ -199,6 +224,22 @@ function watchForListenerWarnings(): WarningWatch {
 // more after the fan itself has settled.
 async function letWarningsLand(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 50));
+}
+
+// Node's own stderr printer for warnings is an ordinary 'warning' listener, so
+// the one case that provokes a warning on purpose detaches it for its duration
+// and this suite's output carries no line that reads like a failure. It is not
+// what that case measures: the watch above sees the warning through a listener
+// of its own either way.
+function withoutDefaultWarningPrinter(): { restore: () => void } {
+  const installed = process.listeners("warning");
+  process.removeAllListeners("warning");
+  return {
+    restore: () => {
+      process.removeAllListeners("warning");
+      for (const listener of installed) process.on("warning", listener);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +335,105 @@ async function fanSafeDelete(party: Party, targets: string[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// A whole two-party exchange, for the term that counts what runs BESIDE a fan.
+// ---------------------------------------------------------------------------
+
+// Messages the exchange carries. Enough that the poll loop cycles repeatedly
+// with a send landing in it, which is the overlap the term enumerates.
+const EXCHANGE_MESSAGES = 5;
+
+async function waitFor(predicate: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`waitFor: ${what} not met within timeout`);
+}
+
+// Runs a rendezvous, a polled message exchange and both teardowns between two
+// parties in one directory, with a probe on each party's shared client from the
+// moment it is connected. Returns the widest headroom either client spent, and
+// what crossed, so a run that carried nothing cannot pass on silence.
+async function driveExchange(receiverOptions: {
+  ephemeralSessions: boolean;
+}): Promise<{ peak: number; delivered: unknown[]; failures: unknown[] }> {
+  const localDir = await fsp.mkdtemp(path.join(srv.backingDir, "exchange-"));
+  const remote = `${srv.remoteRoot}/${path.basename(localDir)}`;
+  const senderAdapter = new SSH2SFTPClientAdapter({ verbosity: -1 });
+  const receiverAdapter = new SSH2SFTPClientAdapter({
+    verbosity: -1,
+    ephemeralSessions: receiverOptions.ephemeralSessions,
+  });
+  const sender = new FileSyncConnection(senderAdapter, {
+    verbose: -1,
+    pollingFrequency: 10,
+  });
+  const receiver = new FileSyncConnection(receiverAdapter, {
+    verbose: -1,
+    pollingFrequency: 10,
+  });
+  const failures: unknown[] = [];
+  const delivered: unknown[] = [];
+  sender.on("error", (error: unknown) => failures.push(error));
+  receiver.on("error", (error: unknown) => failures.push(error));
+  receiver.on("data", (message: unknown) => delivered.push(message));
+
+  const probes: Probe[] = [];
+  try {
+    await withCapturedLogs(
+      async () => {
+        for (const [conn, cred] of [
+          [sender, srv.usera],
+          [receiver, srv.userb],
+        ] as const)
+          await conn.open({
+            channel: "sftp",
+            server: {
+              host: srv.host,
+              port: srv.port,
+              ...serverAuth(cred),
+              path: remote,
+            },
+          });
+        // Installed on both connected clients, so each baseline is that party's
+        // persistent set and everything the exchange itself adds is measured.
+        probes.push(
+          probeListeners(senderAdapter),
+          probeListeners(receiverAdapter),
+        );
+
+        await Promise.all([sender.synchronize(), receiver.synchronize()]);
+        receiver.start();
+        for (let index = 0; index < EXCHANGE_MESSAGES; index += 1)
+          await sender.send({ message: index });
+        await waitFor(
+          () => delivered.length === EXCHANGE_MESSAGES,
+          "every message to arrive",
+        );
+        receiver.stop();
+        // Teardown is inside the window deliberately: close() drains the cleanup
+        // records and then waits out ssh2-sftp-client's end(), which parks
+        // listeners of its own on the same client.
+        await receiver.close();
+        await sender.close();
+      },
+      () => true,
+    );
+    await letWarningsLand();
+  } finally {
+    await receiver.close().catch(() => {});
+    await sender.close().catch(() => {});
+    await fsp.rm(localDir, { recursive: true, force: true });
+  }
+  return {
+    peak: Math.max(...probes.map(peakAboveBaseline)),
+    delivered,
+    failures,
+  };
+}
+
+// ---------------------------------------------------------------------------
 
 inProcessOnly(
   "the derived ceiling is seated on the shared client and clears every fan bound",
@@ -302,17 +442,52 @@ inProcessOnly(
     expect(sharedClient(adapter).getMaxListeners()).toBe(
       SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS,
     );
-    // A raise, not a lowering, and with room above each bound that admits a fan
-    // onto this emitter -- the two terms the derivation is built from.
+    // A raise, not a lowering.
     expect(SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS).toBeGreaterThan(
       nodeEvents.defaultMaxListeners,
     );
+    // Both fan bounds at once, not the wider of the two: core's entry sweep
+    // merges an inbound and an outbound listing into ONE delete fan, so a split
+    // scope feeds it two separately-refused listings, and the deletes it issues
+    // reach the same chokepoint that sets the cleanup drain running. Written out
+    // here rather than imported so a derivation that dropped either term -- back
+    // to one listing, or to a max() -- reddens this line.
     expect(SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS).toBeGreaterThan(
-      MAX_DIRECTORY_ENTRIES,
+      2 * MAX_DIRECTORY_ENTRIES + MAX_DEFERRED_CLEANUP_DELETES,
     );
-    expect(SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS).toBeGreaterThan(
-      MAX_DEFERRED_CLEANUP_DELETES,
-    );
+  },
+);
+
+inProcessOnly(
+  "the ceiling is the highest count Node leaves unwarned, not the lowest it warns at",
+  async () => {
+    // Node's warning is strictly ABOVE the ceiling, which is what lets the
+    // adapter seat the ceiling AT the peak its derivation enumerates rather than
+    // one past it. Driven against a bare emitter at that same value: the whole
+    // enumerated peak is silent, and the first listener beyond it warns. Node's
+    // behavior rather than this project's, so it is measured here rather than
+    // reasoned about at the constant.
+    const quiet = withoutDefaultWarningPrinter();
+    const watch = watchForListenerWarnings();
+    try {
+      const emitter = new nodeEvents.EventEmitter();
+      emitter.setMaxListeners(SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS);
+      for (let i = 0; i < SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS; i += 1)
+        emitter.on("end", () => {});
+      await letWarningsLand();
+      expect(watch.seen).toEqual([]);
+
+      emitter.on("end", () => {});
+      await letWarningsLand();
+      expect(watch.seen).toHaveLength(1);
+      expect(watch.seen[0]).toContain(
+        `MaxListeners is ${SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS}`,
+      );
+      emitter.removeAllListeners("end");
+    } finally {
+      watch.stop();
+      quiet.restore();
+    }
   },
 );
 
@@ -498,3 +673,31 @@ inProcessOnly(
   },
   TEST_TIMEOUT_MS,
 );
+
+for (const ephemeralSessions of [false, true])
+  inProcessOnly(
+    `a whole exchange puts no more beside a fan than the term allows ` +
+      `(ephemeralSessions=${ephemeralSessions})`,
+    async () => {
+      // What holds CONCURRENT_OPERATIONS_BESIDE_A_FAN up. Nothing constrains core
+      // to the concurrency that term enumerates, so it is measured instead: a
+      // rendezvous, a polled exchange and both teardowns are driven in each
+      // session mode, and the headroom either client spends is held within the
+      // term. A best-effort backstop over the shapes driven rather than a proof
+      // that no shape exceeds it -- and what an excess would cost is one spurious
+      // stderr line, since nothing reads this value for control flow.
+      const outcome = await driveExchange({ ephemeralSessions });
+
+      expect(outcome.failures).toEqual([]);
+      expect(outcome.delivered).toEqual(
+        Array.from({ length: EXCHANGE_MESSAGES }, (_, i) => ({ message: i })),
+      );
+      // A run whose probe never saw the count move measured nothing at all, and
+      // would pass the bound below on silence.
+      expect(outcome.peak).toBeGreaterThan(0);
+      expect(outcome.peak).toBeLessThanOrEqual(
+        CONCURRENT_OPERATIONS_BESIDE_A_FAN,
+      );
+    },
+    TEST_TIMEOUT_MS,
+  );

@@ -198,13 +198,39 @@ export const MAX_DEFERRED_CLEANUP_DELETES = 64;
 export const MAX_DEFERRED_CLEANUP_REISSUES = 3;
 
 /**
- * Operations that can be on the shared ssh2 `Client` BESIDE the widest fan,
- * counted into {@link SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS}: the application
- * heartbeat's `realPath(".")` beat, the poll loop's own operation, and a
- * `send()` resuming from the protocol continuation alongside that loop. Core
- * puts no further concurrency on one connection.
+ * Deletes core's rendezvous entry sweep can put on the shared ssh2 `Client` in
+ * one fan, counted into {@link SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS}.
+ *
+ * Twice {@link MAX_DIRECTORY_ENTRIES} because the sweep is scoped to a party's
+ * DIRECTORIES rather than to one listing: it merges the inbound listing's peer
+ * hellos and unexpected protocol files with the outbound listing's own leftovers
+ * into a single array and fans one delete per element of it. Under a split
+ * inbound/outbound scope those are two listings, each refused separately at
+ * {@link MAX_DIRECTORY_ENTRIES}, so the fan is bounded by their union; under a
+ * shared scope the two collapse to one listing and the term is slack.
  */
-const CONCURRENT_OPERATIONS_BESIDE_A_FAN = 3;
+const MAX_SPLIT_SCOPE_ENTRY_SWEEP_DELETES = 2 * MAX_DIRECTORY_ENTRIES;
+
+/**
+ * Listeners the shared ssh2 `Client` can carry on one event name for work
+ * running BESIDE the widest fan, counted into
+ * {@link SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS}.
+ *
+ * Its basis is what this transport puts on one connection outside a fan: the
+ * application heartbeat's `realPath(".")` beat, the poll loop's own operation, a
+ * `send()` resuming from the protocol continuation alongside that loop, and the
+ * pair of `'close'` listeners ssh2-sftp-client's `end()` parks while it waits out
+ * a teardown. Nothing constrains core to that set, so the term is a best-effort
+ * backstop held to evidence rather than an exhaustive count: an ordinary
+ * two-party exchange and its connection-per-poll variant are driven with a
+ * listener probe on this emitter and their peak above the idle baseline is
+ * asserted to stay within this term (`sharedClientListenerCeiling.test.ts`; both
+ * shapes peak at 2 of the 3). Under-counting it costs one spurious
+ * `MaxListenersExceededWarning` line on stderr and nothing else.
+ *
+ * @internal exported for the adapter's own tests
+ */
+export const CONCURRENT_OPERATIONS_BESIDE_A_FAN = 3;
 
 /**
  * Listeners the shared ssh2 `Client` carries on its busiest event name with
@@ -217,6 +243,31 @@ const CONCURRENT_OPERATIONS_BESIDE_A_FAN = 3;
  * per-operation listener, so both stand under every fan.
  */
 const PERSISTENT_SHARED_CLIENT_LISTENERS_PER_EVENT = 2;
+
+/**
+ * Listeners the shared ssh2 `Client` can carry at once on one event name, with
+ * every fan that reaches it at its own bound simultaneously.
+ *
+ * The terms are SUMMED rather than maxed, so nothing here rests on two fans
+ * being unable to overlap: core's rendezvous entry sweep
+ * ({@link MAX_SPLIT_SCOPE_ENTRY_SWEEP_DELETES}) issues its deletes through the
+ * same recovery chokepoint that can set the connection-per-poll cleanup drain
+ * ({@link MAX_DEFERRED_CLEANUP_DELETES}) running, and both stack on what runs
+ * beside them ({@link CONCURRENT_OPERATIONS_BESIDE_A_FAN}) above what the client
+ * holds when idle ({@link PERSISTENT_SHARED_CLIENT_LISTENERS_PER_EVENT}).
+ *
+ * The one fan with no cap of its own -- the connection cleanup's sweep of this
+ * party's own unconsumed writes -- is not a term here: it rests on the entry
+ * sweep's, those writes being entries of a directory this party's own poll
+ * listing enumerates and that listing's refusal governs. An assumption rather
+ * than an enforced cap, and the only one, which is affordable because crossing
+ * this number costs a stderr line and nothing else.
+ */
+const PEAK_SHARED_CLIENT_LISTENERS_PER_EVENT =
+  MAX_SPLIT_SCOPE_ENTRY_SWEEP_DELETES +
+  MAX_DEFERRED_CLEANUP_DELETES +
+  CONCURRENT_OPERATIONS_BESIDE_A_FAN +
+  PERSISTENT_SHARED_CLIENT_LISTENERS_PER_EVENT;
 
 /**
  * Ceiling this adapter raises on its shared ssh2 `Client`'s per-event listener
@@ -236,32 +287,24 @@ const PERSISTENT_SHARED_CLIENT_LISTENERS_PER_EVENT = 2;
  * instead -- a peak at the fan's width plus the persistent listeners, and an
  * exact return to those persistent listeners once the fan settles.
  *
- * DERIVED from the bounds that admit a fan onto this emitter, so it moves when
- * they move rather than being a hand-picked number to revisit. The widest fan is
- * a per-entry sweep over a directory listing -- core fans a delete out of the
- * rendezvous entry scan and out of the connection cleanup -- and the listing
- * feeding it is refused above {@link MAX_DIRECTORY_ENTRIES}; the adapter's own
- * widest is the connection-per-poll cleanup drain's concurrent re-issue, capped
- * at {@link MAX_DEFERRED_CLEANUP_DELETES}. On top of the wider of those go what
- * can sit beside a fan ({@link CONCURRENT_OPERATIONS_BESIDE_A_FAN}) and what the
- * client holds when idle
- * ({@link PERSISTENT_SHARED_CLIENT_LISTENERS_PER_EVENT}).
+ * Seated AT {@link PEAK_SHARED_CLIENT_LISTENERS_PER_EVENT} rather than one above
+ * it, because Node warns only STRICTLY above a ceiling: an emitter whose maximum
+ * is `n` is silent at `n` listeners and warns on the `n + 1`th. So every fan the
+ * derivation enumerates, all of them at their bounds at once, is silent, and the
+ * first listener past the enumeration is what warns. That boundary is Node's
+ * behavior rather than this project's, so it is driven as a check
+ * (`sharedClientListenerCeiling.test.ts`) rather than assumed here.
  *
- * Crossing it costs a spurious warning and nothing else, so it is a diagnostic
- * threshold rather than a bound anything rests on. That is what lets the one fan
- * with no cap of its own -- the connection cleanup's sweep of this party's own
- * unconsumed writes -- rest on the listing term: those writes are entries of the
- * same directory this party's poll listing enumerates and that listing's refusal
- * governs, an assumption rather than an enforced cap. The measured behavior
- * behind all of this, and what an `ssh2` / `ssh2-sftp-client` bump re-confirms,
- * are in docs/spec/DEPENDENCY_PINS.md.
+ * DERIVED, so it moves when the bounds it is built from move rather than being a
+ * hand-picked number to revisit. Crossing it costs a spurious warning and nothing
+ * else, so it is a diagnostic threshold rather than a bound anything rests on.
+ * The measured behavior behind all of this, and what an `ssh2` /
+ * `ssh2-sftp-client` bump re-confirms, are in docs/spec/DEPENDENCY_PINS.md.
  *
  * @internal exported for the adapter's own tests
  */
 export const SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS =
-  Math.max(MAX_DIRECTORY_ENTRIES, MAX_DEFERRED_CLEANUP_DELETES) +
-  CONCURRENT_OPERATIONS_BESIDE_A_FAN +
-  PERSISTENT_SHARED_CLIENT_LISTENERS_PER_EVENT;
+  PEAK_SHARED_CLIENT_LISTENERS_PER_EVENT;
 
 /**
  * Per-operation deadline (ms) a drain re-issue is held to
