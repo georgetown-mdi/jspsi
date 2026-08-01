@@ -21,6 +21,7 @@
     "check:egress-claims": "node scripts/check-egress-claims.mjs",
     "check:workflow-agent-models": "node scripts/check-workflow-agent-models.mjs",
     "check:action-pin-drift": "node scripts/check-action-pin-drift.mjs",
+    "check:routetree": "node scripts/check-routetree-fresh.mjs",
     "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p apps/cli/tsconfig.test.json && tsc -p apps/web/tsconfig.json",
     "test": "npm run test -w packages/core -w apps/cli -w apps/web",
     "test:scripts": "vitest run --project scripts --project repo-scripts --project hooks",
