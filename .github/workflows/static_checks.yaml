@@ -101,9 +101,9 @@ jobs:
       # copy that has drifted behind the pinned generator reappears as an
       # unrelated modification in a branch that touched no route. This
       # regenerates with the pinned generator and compares, so a refresh lands
-      # as its own commit instead of riding along in someone else's. It moves
-      # the file aside and fails closed if nothing is generated, and restores
-      # the working-tree copy either way.
+      # as its own commit instead of riding along in someone else's. It marks
+      # the copy it hands the codegen with a probe line and fails closed if that
+      # line survives, and restores the working-tree copy either way.
       - name: Route tree freshness
         run: npm run check:routetree
       # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
