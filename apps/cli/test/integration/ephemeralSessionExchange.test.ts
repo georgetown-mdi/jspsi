@@ -14,6 +14,7 @@ import {
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import {
+  MAX_DEFERRED_CLEANUP_DELETES,
   MAX_DEFERRED_CLEANUP_REISSUES,
   SSH2SFTPClientAdapter,
 } from "../../src/connection/ssh2SftpAdapter";
@@ -1570,6 +1571,103 @@ inProcessOnly(
       // Giving up costs the mode nothing else: every boundary still closed.
       expect(srv.sessionControls.handshakeCount()).toBe(REISSUE_CYCLES);
       expect(adapter.heldBoundaryCount).toBe(0);
+    } finally {
+      await adapter.end().catch(() => {});
+      await fsp.chmod(sealed, 0o755).catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  BOUNDARY_TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "a record filled by temps the partner's server refuses admits the send " +
+    "path's own cleanup again within the re-issue budget",
+  async () => {
+    // The one input a peer influences here is how many undeletable temps the
+    // record can take: core's entry sweep hands this side every orphaned
+    // protocol temp it lists, the peer's own among them, and a temp under a
+    // directory this party may not write is a delete that can never succeed. A
+    // full record refuses a send-path cleanup, so what that refusal costs turns
+    // on how long such a fill stands -- which the per-recording budget bounds
+    // rather than the cap. Driven at the cap against a server whose own unlink
+    // refuses for real, because the answer is a property of the drain's
+    // clear-before-issue order meeting real failures rather than of any one
+    // guard, and it is what the spec's second stated limit rests on.
+    const srv = await startInProcessSftpServer();
+    const dir = await fsp.mkdtemp(
+      path.join(srv.handle.backingDir, "per-poll-crowded-record-"),
+    );
+    const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+    const sealed = path.join(dir, "sealed");
+    await fsp.mkdir(sealed);
+    const peerTemps: string[] = [];
+    for (let index = 0; index < MAX_DEFERRED_CLEANUP_DELETES; index += 1) {
+      const name = `temp-${randomUUID()}.tmp`;
+      await fsp.writeFile(path.join(sealed, name), "a peer's in-flight write");
+      peerTemps.push(`${remote}/sealed/${name}`);
+    }
+    await fsp.chmod(sealed, 0o555);
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+
+    try {
+      await adapter.connect({
+        host: srv.handle.host,
+        port: srv.handle.port,
+        ...serverAuth(srv.handle.usera),
+        maxReconnectAttempts: 0,
+      });
+
+      await adapter.releaseForIdle();
+      for (const temp of peerTemps)
+        await expect(adapter.safeDelete(temp)).resolves.toBe(undefined);
+      expect(deferredCleanupPaths(adapter)).toHaveLength(
+        MAX_DEFERRED_CLEANUP_DELETES,
+      );
+
+      // One re-establishment past the point the budget gives up, so the record
+      // is seen to STAY open rather than to open for a single cycle.
+      const drains = MAX_DEFERRED_CLEANUP_REISSUES + 1;
+      const observed: {
+        drain: number;
+        recorded: number;
+        sendPathCleanupAdmitted: boolean;
+      }[] = [];
+      for (let drain = 1; drain <= drains; drain += 1) {
+        await adapter.ensureConnected();
+        const recorded = deferredCleanupPaths(adapter).length;
+        await adapter.releaseForIdle();
+        // A fresh probe path per drain, and one that was never created: an
+        // ADMITTED probe takes a slot, so a reused path would itself crowd the
+        // record this case is measuring, and an absent file lets the next
+        // drain's re-issue clear the slot instead of spending a budget on it.
+        const probe = `${remote}/temp-${randomUUID()}.tmp`;
+        await expect(adapter.safeDelete(probe)).resolves.toBe(undefined);
+        observed.push({
+          drain,
+          recorded,
+          sendPathCleanupAdmitted:
+            deferredCleanupPaths(adapter).includes(probe),
+        });
+      }
+
+      expect(observed).toEqual(
+        Array.from({ length: drains }, (_entry, index) => {
+          const drain = index + 1;
+          const givenUp = drain >= MAX_DEFERRED_CLEANUP_REISSUES;
+          return {
+            drain,
+            recorded: givenUp ? 0 : MAX_DEFERRED_CLEANUP_DELETES,
+            sendPathCleanupAdmitted: givenUp,
+          };
+        }),
+      );
+      // The refusals were the server's and they stand, so the record emptied on
+      // its budget rather than because the deletes started landing.
+      expect(await fsp.readdir(sealed)).toHaveLength(
+        MAX_DEFERRED_CLEANUP_DELETES,
+      );
     } finally {
       await adapter.end().catch(() => {});
       await fsp.chmod(sealed, 0o755).catch(() => {});
