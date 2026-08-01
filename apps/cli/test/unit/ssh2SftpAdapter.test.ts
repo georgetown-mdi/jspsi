@@ -2321,9 +2321,10 @@ describe("fatal wrapper-error guard", () => {
     };
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
-    // Idempotent on the same wrapper instance: no second listener (which would
-    // eventually trip MaxListenersExceeded), because the wrapper identity is
-    // unchanged.
+    // Idempotent on the same wrapper instance: no second listener, because the
+    // wrapper identity is unchanged. Accumulation would climb against the
+    // WRAPPER's own default ceiling; the raise the constructor applies is on the
+    // shared ssh2 Client, a different emitter.
     expect(wrapper.listenerCount("error")).toBe(1);
   });
 
