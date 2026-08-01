@@ -198,6 +198,132 @@ export const MAX_DEFERRED_CLEANUP_DELETES = 64;
 export const MAX_DEFERRED_CLEANUP_REISSUES = 3;
 
 /**
+ * Deletes core's rendezvous entry sweep can put on the shared ssh2 `Client` in
+ * one fan, counted into {@link SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS}.
+ *
+ * Twice {@link MAX_DIRECTORY_ENTRIES} because the sweep is scoped to a party's
+ * DIRECTORIES rather than to one listing: it merges the inbound listing's peer
+ * hellos and unexpected protocol files with the outbound listing's own leftovers
+ * into a single array and fans one delete per element of it. Under a split
+ * inbound/outbound scope those are two listings, each refused separately at
+ * {@link MAX_DIRECTORY_ENTRIES}, so the fan is bounded by their union; under a
+ * shared scope the two collapse to one listing and the term is slack.
+ *
+ * The same term covers the three narrower delete fans core's entry scan issues
+ * ahead of that sweep -- the orphaned-temp sweep and the leftover-abort-marker
+ * sweep over the inbound listing, and the split-mode outbound-orphan sweep over
+ * the outbound one. Each fans one delete per element of a SUBSET of a single
+ * listing, so each is at most {@link MAX_DIRECTORY_ENTRIES}, half this term; and
+ * each is awaited to completion before the next is issued and before the sweep,
+ * so none of them stacks on another or on it and the widest fan the entry scan
+ * puts on this client at any instant is the sweep's own.
+ */
+const MAX_SPLIT_SCOPE_ENTRY_SWEEP_DELETES = 2 * MAX_DIRECTORY_ENTRIES;
+
+/**
+ * Listeners the shared ssh2 `Client` can carry on one event name for work
+ * running BESIDE the widest fan, counted into
+ * {@link SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS}.
+ *
+ * MEASURED rather than summed. Nothing constrains core to a fixed set of work
+ * beside a fan, so this is a best-effort backstop held to evidence rather than
+ * an exhaustive count, and the concurrency named below is what it is meant to
+ * COVER rather than a list of addends. What holds it up: an ordinary two-party
+ * exchange and its connection-per-poll variant are driven with a listener probe
+ * on this emitter, and the widest headroom either party spends above its idle
+ * baseline is asserted to stay within this term
+ * (`sharedClientListenerCeiling.test.ts`). Both shapes spend 2 of the 3, on
+ * `'close'` and at teardown: the pair ssh2-sftp-client's `end()` parks while it
+ * waits the close out -- its own close handler, plus the per-operation `'close'`
+ * bracket the `end()` call itself takes.
+ *
+ * What the term is meant to cover is that teardown pair together with the
+ * application heartbeat's `realPath(".")` beat, the poll loop's own operation,
+ * and a `send()` resuming from the protocol continuation alongside that loop.
+ * Which of those can be in flight together is core's business rather than this
+ * adapter's, which is why the term rests on the driven shapes instead of on that
+ * list. Under-counting it costs one spurious `MaxListenersExceededWarning` line
+ * on stderr and nothing else.
+ *
+ * @internal exported for the adapter's own tests
+ */
+export const CONCURRENT_OPERATIONS_BESIDE_A_FAN = 3;
+
+/**
+ * Listeners the shared ssh2 `Client` carries on its busiest event name with
+ * nothing in flight, counted into
+ * {@link SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS}: ssh2-sftp-client's
+ * constructor `globalListener` (one each on `'error'`, `'end'` and `'close'`)
+ * plus this adapter's own persistent transport-lifecycle watch (one each on
+ * `'end'` and `'close'`; see
+ * {@link SSH2SFTPClientAdapter.watchTransportLifecycle}). Neither is a
+ * per-operation listener, so both stand under every fan.
+ */
+const PERSISTENT_SHARED_CLIENT_LISTENERS_PER_EVENT = 2;
+
+/**
+ * Listeners the shared ssh2 `Client` can carry at once on one event name, with
+ * every fan that reaches it at its own bound simultaneously.
+ *
+ * The terms are SUMMED rather than maxed, so nothing here rests on two fans
+ * being unable to overlap: core's rendezvous entry sweep
+ * ({@link MAX_SPLIT_SCOPE_ENTRY_SWEEP_DELETES}) issues its deletes through the
+ * same recovery chokepoint that can set the connection-per-poll cleanup drain
+ * ({@link MAX_DEFERRED_CLEANUP_DELETES}) running, and both stack on what runs
+ * beside them ({@link CONCURRENT_OPERATIONS_BESIDE_A_FAN}) above what the client
+ * holds when idle ({@link PERSISTENT_SHARED_CLIENT_LISTENERS_PER_EVENT}).
+ *
+ * The one fan with no cap of its own -- the connection cleanup's sweep of this
+ * party's own unconsumed writes -- is not a term here: it rests on the entry
+ * sweep's, those writes being entries of a directory this party's own poll
+ * listing enumerates and that listing's refusal governs. An assumption rather
+ * than an enforced cap, and the only one, which is affordable because crossing
+ * this number costs a stderr line and nothing else.
+ */
+const PEAK_SHARED_CLIENT_LISTENERS_PER_EVENT =
+  MAX_SPLIT_SCOPE_ENTRY_SWEEP_DELETES +
+  MAX_DEFERRED_CLEANUP_DELETES +
+  CONCURRENT_OPERATIONS_BESIDE_A_FAN +
+  PERSISTENT_SHARED_CLIENT_LISTENERS_PER_EVENT;
+
+/**
+ * Ceiling this adapter raises on its shared ssh2 `Client`'s per-event listener
+ * count, in place of Node's default of 10.
+ *
+ * ssh2-sftp-client brackets each operation it issues with one `'end'`, one
+ * `'close'` and one `'error'` listener on the ONE `Client` it holds for this
+ * adapter's whole life, and removes the three when that operation settles, so
+ * concurrent operations stack them linearly and a fan of nine crosses the
+ * default. What Node prints then is a `MaxListenersExceededWarning` -- emitted
+ * through `process.emitWarning` and so landing on stderr past this project's
+ * logger and past every verbosity control an operator has -- announcing a
+ * "possible EventEmitter memory leak" about a fan that is bounded and comes back
+ * off. The ceiling was never what would catch a real leak here either: it fires
+ * at most once per emitter and event name and says nothing about whether the
+ * listeners came off again, so the accounting itself is pinned as a check
+ * instead -- a peak at the fan's width plus the persistent listeners, and an
+ * exact return to those persistent listeners once the fan settles.
+ *
+ * Seated AT {@link PEAK_SHARED_CLIENT_LISTENERS_PER_EVENT} rather than one above
+ * it, because Node warns only STRICTLY above a ceiling: an emitter whose maximum
+ * is `n` is silent at `n` listeners and warns on the `n + 1`th. So every fan the
+ * derivation enumerates, all of them at their bounds at once, is silent, and the
+ * first listener past the enumeration is what warns. That boundary is Node's
+ * behavior rather than this project's, so it is driven as a check
+ * (`sharedClientListenerCeiling.test.ts`) rather than assumed here.
+ *
+ * DERIVED, so it moves when the bounds it is built from move rather than being a
+ * hand-picked number to revisit. Crossing it costs a spurious warning and nothing
+ * else, so it is a diagnostic threshold rather than a bound anything rests on.
+ * The measured behavior behind all of this, and what an `ssh2` /
+ * `ssh2-sftp-client` bump re-confirms, are in docs/spec/DEPENDENCY_PINS.md.
+ *
+ * @internal exported for the adapter's own tests
+ */
+export const SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS =
+  PEAK_SHARED_CLIENT_LISTENERS_PER_EVENT;
+
+/**
  * Per-operation deadline (ms) a drain re-issue is held to
  * ({@link SSH2SFTPClientAdapter.reissueCleanupDelete}) in place of the
  * {@link SFTP_STALL_DEADLINE_MS} every other round trip carries, and so -- the
@@ -311,6 +437,11 @@ interface Ssh2SftpClientInternals {
     // See resolveTransportCloseSeams().
     once?(event: "close", listener: () => void): void;
     removeListener?(event: "close", listener: () => void): void;
+    // Node's own EventEmitter ceiling control, driven once at construction to
+    // seat {@link SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS}. Optional on the same
+    // terms as the members above: an upgrade that relocates the Client warns
+    // rather than failing a dial over a diagnostic threshold.
+    setMaxListeners?(n: number): void;
     end?(): void;
   };
   sftp: {
@@ -934,6 +1065,22 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       close: () =>
         this.log.trace("ssh2 client connection closed outside an operation"),
     });
+    // ssh2-sftp-client constructs its ssh2 Client eagerly and keeps that one
+    // instance for every dial, so the ceiling is seated here rather than per
+    // connect; that the emitter each operation attaches to is this one, and
+    // survives a re-dial, is pinned by the integration suite rather than
+    // asserted here.
+    const constructed = this.client as unknown as Ssh2SftpClientInternals;
+    if (typeof constructed.client?.setMaxListeners === "function")
+      constructed.client.setMaxListeners(
+        SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS,
+      );
+    else
+      this.log.warn(
+        "ssh2's client is not reachable to raise its event-listener ceiling; " +
+          "a wide concurrent sweep may print a spurious Node memory-leak " +
+          "warning to stderr",
+      );
     this.stallDeadlineMs = options.stallDeadlineMs ?? SFTP_STALL_DEADLINE_MS;
     this.ephemeralSessions = options.ephemeralSessions ?? false;
     this.heartbeat = new SftpHeartbeat({

@@ -1,4 +1,3 @@
-import type { EventEmitter } from "node:events";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
@@ -70,24 +69,6 @@ const LISTING_ENTRIES = 200;
 // `Promise.allSettled` over `delete`, and the connection cleanup's `Promise.all`
 // over the never-reject `safeDelete`.
 const FAN_OUT_FILES = 40;
-
-// ssh2-sftp-client adds an 'end'/'close'/'error' listener trio to the shared ssh2
-// Client for the duration of each operation, so a fan this wide crosses Node's
-// default ceiling of 10 and prints a MaxListenersExceededWarning -- written
-// straight to stderr rather than through console, so the suite's console sentinel
-// does not gate it. Raised only far enough that the bounded fan fits (measured at a
-// peak of 42 on a fan of 40): growth that is genuinely unbounded still trips the
-// warning.
-const FAN_OUT_LISTENER_CEILING = FAN_OUT_FILES + 20;
-
-// The ssh2 Client ssh2-sftp-client constructs once and reuses across every dial,
-// reached through the adapter's own client field the way the listener-accounting
-// case in sftpConnection.test.ts reaches it.
-function raiseListenerCeiling(adapter: SSH2SFTPClientAdapter): void {
-  (
-    adapter as unknown as { client: { client: EventEmitter } }
-  ).client.client.setMaxListeners(FAN_OUT_LISTENER_CEILING);
-}
 
 // How a dial the adapter issued ended. A dial failed by a stale lifecycle event
 // leaves the handshake it started running unowned at the server, so a case that
@@ -406,7 +387,6 @@ inProcessOnly(
       stallDeadlineMs: STALL_DEADLINE_MS,
     });
     try {
-      raiseListenerCeiling(party.adapter);
       const targets = await plantFanOut(party);
       const controls = party.srv.sessionControls;
       controls.resetHandshakeCount();
@@ -471,7 +451,6 @@ for (const [shape, width] of [
         stallDeadlineMs: STALL_DEADLINE_MS,
       });
       try {
-        raiseListenerCeiling(party.adapter);
         const targets = await plantDeletables(party, "counted", width);
         const controls = party.srv.sessionControls;
         controls.resetHandshakeCount();
@@ -540,7 +519,6 @@ for (const [shape, width] of [
         stallDeadlineMs: STALL_DEADLINE_MS,
       });
       try {
-        raiseListenerCeiling(party.adapter);
         const controls = party.srv.sessionControls;
         controls.resetHandshakeCount();
 
@@ -644,7 +622,6 @@ inProcessOnly(
       stallDeadlineMs: STALL_DEADLINE_MS,
     });
     try {
-      raiseListenerCeiling(party.adapter);
       const targets = await plantDeletables(party, "capped", FAN_OUT_FILES);
       const controls = party.srv.sessionControls;
       controls.resetHandshakeCount();
@@ -696,7 +673,6 @@ inProcessOnly(
       ephemeralSessions: true,
     });
     try {
-      raiseListenerCeiling(party.adapter);
       const controls = party.srv.sessionControls;
       controls.resetHandshakeCount();
 
@@ -778,7 +754,6 @@ inProcessOnly(
       ephemeralSessions: true,
     });
     try {
-      raiseListenerCeiling(party.adapter);
       const controls = party.srv.sessionControls;
       controls.resetHandshakeCount();
 
@@ -859,7 +834,6 @@ inProcessOnly(
       stallDeadlineMs: STALL_DEADLINE_MS,
     });
     try {
-      raiseListenerCeiling(party.adapter);
       const targets = await plantFanOut(party);
       const controls = party.srv.sessionControls;
       controls.resetHandshakeCount();
