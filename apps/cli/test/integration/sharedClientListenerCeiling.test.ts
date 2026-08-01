@@ -232,15 +232,51 @@ async function letWarningsLand(): Promise<void> {
 // what that case measures: the watch above sees the warning through a listener
 // of its own either way.
 function withoutDefaultWarningPrinter(): { restore: () => void } {
-  const installed = process.listeners("warning");
-  process.removeAllListeners("warning");
+  const installed = process.rawListeners("warning");
+  for (const listener of installed) process.off("warning", listener);
   return {
     restore: () => {
-      process.removeAllListeners("warning");
       for (const listener of installed) process.on("warning", listener);
     },
   };
 }
+
+test("a 'warning' listener attached while the printer is silenced survives the restore", () => {
+  const attachedWhileSilenced = (): void => {};
+  try {
+    const quiet = withoutDefaultWarningPrinter();
+    try {
+      process.on("warning", attachedWhileSilenced);
+    } finally {
+      quiet.restore();
+    }
+    expect(process.rawListeners("warning")).toContain(attachedWhileSilenced);
+  } finally {
+    process.off("warning", attachedWhileSilenced);
+  }
+});
+
+test("silencing and restoring leaves the same 'warning' listeners, one-shot wrappers included, in the same order", () => {
+  const persistentListener = (): void => {};
+  const oneShotListener = (): void => {};
+  process.on("warning", persistentListener);
+  process.once("warning", oneShotListener);
+  const installed = process.rawListeners("warning");
+  try {
+    const quiet = withoutDefaultWarningPrinter();
+    let silenced: unknown[];
+    try {
+      silenced = process.rawListeners("warning");
+    } finally {
+      quiet.restore();
+    }
+    expect(silenced).toEqual([]);
+    expect(process.rawListeners("warning")).toEqual(installed);
+  } finally {
+    process.off("warning", persistentListener);
+    process.off("warning", oneShotListener);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // One connected party, constructed as apps/cli/src/protocol.ts constructs the
