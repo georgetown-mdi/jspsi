@@ -31,6 +31,7 @@
 // identity/config/Set deps the coordinator negotiates over.
 
 import * as z from "zod";
+import { NIL as NIL_UUID } from "uuid";
 
 import {
   sanitizeForDisplay,
@@ -66,6 +67,7 @@ import {
   isProtocolGrammarName,
   isRetainMessageAck,
 } from "./fileSyncNames";
+import { messageFilename } from "./fileSyncMessageLoop";
 import {
   HelloEnvelopeSchema,
   serializeEnvelope,
@@ -410,14 +412,30 @@ const renderedDisplayCost = (fragment: string): number =>
 
 // The longest filename the protocol's own constructors build from UUID
 // identities: a retain-mode message ack over a timestamped message at the
-// maximum frame size, `<uuid>-<uuid>-<YYYYMMDDTHHMMSS>-<NNN>-<byteCount>-ack.json`
-// with a three-digit counter. Reserved out of the detail link's budget for the
-// enumeration before the directory scope is fitted, so an operator-chosen path
-// cannot crowd the names out. A name built from a longer identity -- a
-// configured `peer_id`, or a session past message 999 -- may still not fit; it
-// is then counted rather than shown. The sizing is pinned by a test that builds
-// the shape from those constructors.
-const ENTRY_GUARD_NAME_BUDGET_FLOOR = 112;
+// maximum frame size, with a three-digit counter. Computed by calling those two
+// constructors, so it follows a change to either name shape instead of
+// restating one. The nil UUID stands in for the two identities: only their
+// length reaches this arithmetic, and it carries the canonical UUID text length
+// without drawing randomness at module load.
+//
+// Reserved out of the detail link's budget for the enumeration before the
+// directory scope is fitted, so an operator-chosen path cannot crowd the names
+// out. A name built from a longer identity -- a configured `peer_id`, or a
+// session past message 999 -- may still not fit; it is then counted rather than
+// shown. That the reservation really does show a constructor-built name whole is
+// pinned by a test that builds the shape from those same constructors.
+const ENTRY_GUARD_NAME_BUDGET_FLOOR = renderedDisplayCost(
+  ackMarkerName(
+    NIL_UUID,
+    messageFilename({
+      id: NIL_UUID,
+      timestampInFilename: true,
+      byteCount: MAX_FRAME_SIZE_BYTES,
+      seq: 999,
+      ts: 0,
+    }).slice(0, -".json".length),
+  ),
+);
 
 const andMoreSuffix = (count: number): string => ` (and ${count} more)`;
 
@@ -426,6 +444,13 @@ const andMoreSuffix = (count: number): string => ` (and ${count} more)`;
 // anything was dropped. sanitizeForDisplay's own maxLength does not serve here:
 // it appends the marker ON TOP of the cap, and it would escape an
 // already-sanitized value a second time.
+//
+// Stated limit: `value` arrives already escaped, so an escape sequence in it is
+// several characters this walks one at a time, and a clip can land inside one --
+// a trimmed path can end `...\u4f6...[truncated]`, or on a lone backslash. The
+// output is still printable ASCII inside `budget`, and this cuts only the
+// operator's own directory scope; splitting the value back into whole escapes
+// would mean parsing the escape grammar out of an already-escaped string.
 const clipToRenderedCost = (value: string, budget: number): string => {
   if (renderedDisplayCost(value) <= budget) return value;
   const room = budget - DISPLAY_TRUNCATION_MARKER.length;
@@ -459,10 +484,18 @@ const clipToRenderedCost = (value: string, budget: number): string => {
 // The enumeration is bounded by that budget rather than by a count: a protocol
 // filename runs from roughly 47 characters (a uuid-id hello) to
 // ENTRY_GUARD_NAME_BUDGET_FLOOR, so any fixed count either spends less of the
-// budget than it could or overruns it. Every name is fit-checked, the first
-// included: a name the cap chopped reads like a whole name the operator could go
-// and delete, so a name that does not fit is counted rather than shown, and a
-// refusal whose names all overrun reports the count alone.
+// budget than it could or overruns it. Each name is fit-checked on its own and
+// in listing order; one that does not fit is skipped and the next is tested, so
+// a single long name cannot suppress the shorter ones behind it. A name that
+// does not fit is counted rather than shown, because a name the cap chopped
+// reads like a whole name the operator could go and delete.
+//
+// Stated limit: the enumeration is suppressible by name shape as well as by
+// length. sanitizeErrorForDisplay redacts before it caps, and its dangling-BEGIN
+// rule replaces from the marker to the end of the string, so one filename shaped
+// like a PEM private-key header takes the rest of this link with it -- that name
+// and every name after it. The refusal and the recovery step ride in the other
+// link, out of that rule's reach.
 const entryGuardRefusal = (
   refusalAndRecovery: string,
   kindPlural: string,
@@ -489,6 +522,10 @@ const entryGuardRefusal = (
   let listed = "";
   let listedCost = 0;
   let shown = 0;
+  // `remaining` is what the count suffix would say if this name were the last
+  // one shown, so the width reserved on the iteration that admits the final name
+  // is exactly the width the enumeration ends on, and every earlier iteration
+  // reserves at least it -- skipping a name only lowers the final count.
   for (const name of names) {
     const candidate = shown === 0 ? name : `, ${name}`;
     const remaining = names.length - shown - 1;
@@ -496,7 +533,7 @@ const entryGuardRefusal = (
       listedCost +
       renderedDisplayCost(candidate) +
       (remaining > 0 ? renderedDisplayCost(andMoreSuffix(remaining)) : 0);
-    if (cost > namesBudget) break;
+    if (cost > namesBudget) continue;
     listed += candidate;
     listedCost += renderedDisplayCost(candidate);
     shown += 1;

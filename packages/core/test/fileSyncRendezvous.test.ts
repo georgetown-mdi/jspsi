@@ -1461,6 +1461,42 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     expect(omitted).toBe(1);
   });
 
+  test("a name that does not fit is skipped, not a stop on the names behind it", async () => {
+    const files = new Map<string, Buffer>();
+    // A lock file under a long configured peer_id, listed FIRST -- the order a
+    // directory listing can hand it over, and the order a partner planting one
+    // would choose. Sized inside the transport's per-name listing bound
+    // (MAX_FILENAME_LENGTH, apps/cli/src/connection/listingGuard.ts), asserted
+    // below, so it is a name that really reaches this guard, and still far past
+    // what the enumeration's budget holds.
+    const longPeerId = `${"acme-health-2026-partner-exchange-north-region-".repeat(4)}01`;
+    const overlong = `${longPeerId}-${uuidv4()}${LOCK_SUFFIX}`;
+    expect(overlong.length).toBeLessThanOrEqual(255);
+    // The ordinary crash leftovers behind it: each fits on its own, and each
+    // names a file the operator can go and delete.
+    const locks = Array.from({ length: 3 }, () => `${uuidv4()}${LOCK_SUFFIX}`);
+    files.set(`${REAL_DIR}/${overlong}`, Buffer.alloc(0));
+    for (const name of locks) files.set(`${REAL_DIR}/${name}`, Buffer.alloc(0));
+    const p = makeParty("aaa", flags, files, {}, REAL_DIR);
+
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(detailLink(rendered).length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+    expect(detailLink(rendered)).toContain("4 unexpected protocol file(s)");
+    const { shown, omitted } = listedNames(rendered);
+    expect(shown).toEqual(locks);
+    expect(omitted).toBe(1);
+    expect(rendered).not.toContain(longPeerId.slice(0, 60));
+  });
+
   test("a name too long for the whole budget is counted with no name shown at all", async () => {
     const files = new Map<string, Buffer>();
     // A configured peer_id has no length bound, so no reservation makes every
