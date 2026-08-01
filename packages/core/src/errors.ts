@@ -18,10 +18,15 @@ import { ConnectionError } from "./connection/messageConnection";
  * with 64 (EX_USAGE) rather than 69 (EX_UNAVAILABLE). Future throw sites
  * added to `synchronize()` or `send()` should throw this class rather
  * than a plain `Error` with `{ cause: "usage" }`.
+ *
+ * `options.cause` is forwarded to `Error`, so a refusal whose detail does not
+ * fit the display boundary's per-link cap can carry that detail as a `cause`
+ * link of its own rather than spending the budget its operative sentence and
+ * recovery step need (see `sanitizeErrorForDisplay`).
  */
 export class UsageError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "UsageError";
   }
 }
