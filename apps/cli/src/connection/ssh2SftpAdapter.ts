@@ -208,6 +208,15 @@ export const MAX_DEFERRED_CLEANUP_REISSUES = 3;
  * inbound/outbound scope those are two listings, each refused separately at
  * {@link MAX_DIRECTORY_ENTRIES}, so the fan is bounded by their union; under a
  * shared scope the two collapse to one listing and the term is slack.
+ *
+ * The same term covers the three narrower delete fans core's entry scan issues
+ * ahead of that sweep -- the orphaned-temp sweep and the leftover-abort-marker
+ * sweep over the inbound listing, and the split-mode outbound-orphan sweep over
+ * the outbound one. Each fans one delete per element of a SUBSET of a single
+ * listing, so each is at most {@link MAX_DIRECTORY_ENTRIES}, half this term; and
+ * each is awaited to completion before the next is issued and before the sweep,
+ * so none of them stacks on another or on it and the widest fan the entry scan
+ * puts on this client at any instant is the sweep's own.
  */
 const MAX_SPLIT_SCOPE_ENTRY_SWEEP_DELETES = 2 * MAX_DIRECTORY_ENTRIES;
 
@@ -216,17 +225,25 @@ const MAX_SPLIT_SCOPE_ENTRY_SWEEP_DELETES = 2 * MAX_DIRECTORY_ENTRIES;
  * running BESIDE the widest fan, counted into
  * {@link SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS}.
  *
- * Its basis is what this transport puts on one connection outside a fan: the
- * application heartbeat's `realPath(".")` beat, the poll loop's own operation, a
- * `send()` resuming from the protocol continuation alongside that loop, and the
- * pair of `'close'` listeners ssh2-sftp-client's `end()` parks while it waits out
- * a teardown. Nothing constrains core to that set, so the term is a best-effort
- * backstop held to evidence rather than an exhaustive count: an ordinary
- * two-party exchange and its connection-per-poll variant are driven with a
- * listener probe on this emitter and their peak above the idle baseline is
- * asserted to stay within this term (`sharedClientListenerCeiling.test.ts`; both
- * shapes peak at 2 of the 3). Under-counting it costs one spurious
- * `MaxListenersExceededWarning` line on stderr and nothing else.
+ * MEASURED rather than summed. Nothing constrains core to a fixed set of work
+ * beside a fan, so this is a best-effort backstop held to evidence rather than
+ * an exhaustive count, and the concurrency named below is what it is meant to
+ * COVER rather than a list of addends. What holds it up: an ordinary two-party
+ * exchange and its connection-per-poll variant are driven with a listener probe
+ * on this emitter, and the widest headroom either party spends above its idle
+ * baseline is asserted to stay within this term
+ * (`sharedClientListenerCeiling.test.ts`). Both shapes spend 2 of the 3, on
+ * `'close'` and at teardown: the pair ssh2-sftp-client's `end()` parks while it
+ * waits the close out -- its own close handler, plus the per-operation `'close'`
+ * bracket the `end()` call itself takes.
+ *
+ * What the term is meant to cover is that teardown pair together with the
+ * application heartbeat's `realPath(".")` beat, the poll loop's own operation,
+ * and a `send()` resuming from the protocol continuation alongside that loop.
+ * Which of those can be in flight together is core's business rather than this
+ * adapter's, which is why the term rests on the driven shapes instead of on that
+ * list. Under-counting it costs one spurious `MaxListenersExceededWarning` line
+ * on stderr and nothing else.
  *
  * @internal exported for the adapter's own tests
  */
