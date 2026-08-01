@@ -9,57 +9,42 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as VerifyRouteImport } from './routes/verify'
-import { Route as QuickRouteImport } from './routes/quick'
-import { Route as ExchangeRouteImport } from './routes/exchange'
-import { Route as DirectRouteImport } from './routes/direct'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as AcceptRouteImport } from './routes/accept'
 import { Route as BenchRouteRouteImport } from './routes/bench/route'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as SavedIndexRouteImport } from './routes/saved.index'
+import { Route as DirectRouteImport } from './routes/direct'
+import { Route as ExchangeRouteImport } from './routes/exchange'
+import { Route as QuickRouteImport } from './routes/quick'
+import { Route as VerifyRouteImport } from './routes/verify'
 import { Route as BenchIndexRouteImport } from './routes/bench/index'
-import { Route as SavedIdRouteImport } from './routes/saved.$id'
-import { Route as BenchVerifyRouteImport } from './routes/bench/verify'
-import { Route as BenchExchangeRouteImport } from './routes/bench/exchange'
 import { Route as BenchAcceptRouteImport } from './routes/bench/accept'
-import { Route as ApiPeerjsIndexRouteImport } from './routes/api/peerjs/index'
+import { Route as BenchExchangeRouteImport } from './routes/bench/exchange'
+import { Route as BenchVerifyRouteImport } from './routes/bench/verify'
+import { Route as SavedIndexRouteImport } from './routes/saved.index'
+import { Route as SavedIdRouteImport } from './routes/saved.$id'
 import { Route as ApiJobsIndexRouteImport } from './routes/api/jobs/index'
-import { Route as ApiPeerjsIdRouteImport } from './routes/api/peerjs/id'
-import { Route as ApiJobsSlotRouteImport } from './routes/api/jobs/slot'
 import { Route as ApiJobsRendezvousRouteImport } from './routes/api/jobs/rendezvous'
-import { Route as ApiJobsSftpIndexRouteImport } from './routes/api/jobs/sftp/index'
-import { Route as ApiJobsInputsIndexRouteImport } from './routes/api/jobs/inputs/index'
+import { Route as ApiJobsSlotRouteImport } from './routes/api/jobs/slot'
+import { Route as ApiPeerjsIndexRouteImport } from './routes/api/peerjs/index'
+import { Route as ApiPeerjsIdRouteImport } from './routes/api/peerjs/id'
 import { Route as ApiJobsJobIdIndexRouteImport } from './routes/api/jobs/$jobId/index'
-import { Route as ApiPeerjsKeyPeersRouteImport } from './routes/api/peerjs/$key/peers'
-import { Route as ApiJobsSftpProbeRouteImport } from './routes/api/jobs/sftp/probe'
-import { Route as ApiJobsInputsProfileRouteImport } from './routes/api/jobs/inputs/profile'
-import { Route as ApiJobsInputsCoverageRouteImport } from './routes/api/jobs/inputs/coverage'
-import { Route as ApiJobsJobIdResultRouteImport } from './routes/api/jobs/$jobId/result'
-import { Route as ApiJobsJobIdRecordRouteImport } from './routes/api/jobs/$jobId/record'
-import { Route as ApiJobsJobIdKeysRouteImport } from './routes/api/jobs/$jobId/keys'
-import { Route as ApiJobsJobIdHandoffRouteImport } from './routes/api/jobs/$jobId/handoff'
-import { Route as ApiJobsJobIdEventsRouteImport } from './routes/api/jobs/$jobId/events'
 import { Route as ApiJobsJobIdCancelRouteImport } from './routes/api/jobs/$jobId/cancel'
+import { Route as ApiJobsJobIdEventsRouteImport } from './routes/api/jobs/$jobId/events'
+import { Route as ApiJobsJobIdHandoffRouteImport } from './routes/api/jobs/$jobId/handoff'
+import { Route as ApiJobsJobIdKeysRouteImport } from './routes/api/jobs/$jobId/keys'
+import { Route as ApiJobsJobIdRecordRouteImport } from './routes/api/jobs/$jobId/record'
+import { Route as ApiJobsJobIdResultRouteImport } from './routes/api/jobs/$jobId/result'
+import { Route as ApiJobsInputsIndexRouteImport } from './routes/api/jobs/inputs/index'
+import { Route as ApiJobsInputsCoverageRouteImport } from './routes/api/jobs/inputs/coverage'
+import { Route as ApiJobsInputsProfileRouteImport } from './routes/api/jobs/inputs/profile'
+import { Route as ApiJobsSftpIndexRouteImport } from './routes/api/jobs/sftp/index'
+import { Route as ApiJobsSftpProbeRouteImport } from './routes/api/jobs/sftp/probe'
+import { Route as ApiPeerjsKeyPeersRouteImport } from './routes/api/peerjs/$key/peers'
 import { Route as ApiJobsMountsSecretsEntriesRouteImport } from './routes/api/jobs/mounts/secrets/entries'
 
-const VerifyRoute = VerifyRouteImport.update({
-  id: '/verify',
-  path: '/verify',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const QuickRoute = QuickRouteImport.update({
-  id: '/quick',
-  path: '/quick',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ExchangeRoute = ExchangeRouteImport.update({
-  id: '/exchange',
-  path: '/exchange',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DirectRoute = DirectRouteImport.update({
-  id: '/direct',
-  path: '/direct',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AcceptRoute = AcceptRouteImport.update({
@@ -72,14 +57,24 @@ const BenchRouteRoute = BenchRouteRouteImport.update({
   path: '/bench',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const DirectRoute = DirectRouteImport.update({
+  id: '/direct',
+  path: '/direct',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SavedIndexRoute = SavedIndexRouteImport.update({
-  id: '/saved/',
-  path: '/saved/',
+const ExchangeRoute = ExchangeRouteImport.update({
+  id: '/exchange',
+  path: '/exchange',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuickRoute = QuickRouteImport.update({
+  id: '/quick',
+  path: '/quick',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VerifyRoute = VerifyRouteImport.update({
+  id: '/verify',
+  path: '/verify',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BenchIndexRoute = BenchIndexRouteImport.update({
@@ -87,14 +82,9 @@ const BenchIndexRoute = BenchIndexRouteImport.update({
   path: '/',
   getParentRoute: () => BenchRouteRoute,
 } as any)
-const SavedIdRoute = SavedIdRouteImport.update({
-  id: '/saved/$id',
-  path: '/saved/$id',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BenchVerifyRoute = BenchVerifyRouteImport.update({
-  id: '/verify',
-  path: '/verify',
+const BenchAcceptRoute = BenchAcceptRouteImport.update({
+  id: '/accept',
+  path: '/accept',
   getParentRoute: () => BenchRouteRoute,
 } as any)
 const BenchExchangeRoute = BenchExchangeRouteImport.update({
@@ -102,14 +92,19 @@ const BenchExchangeRoute = BenchExchangeRouteImport.update({
   path: '/exchange',
   getParentRoute: () => BenchRouteRoute,
 } as any)
-const BenchAcceptRoute = BenchAcceptRouteImport.update({
-  id: '/accept',
-  path: '/accept',
+const BenchVerifyRoute = BenchVerifyRouteImport.update({
+  id: '/verify',
+  path: '/verify',
   getParentRoute: () => BenchRouteRoute,
 } as any)
-const ApiPeerjsIndexRoute = ApiPeerjsIndexRouteImport.update({
-  id: '/api/peerjs/',
-  path: '/api/peerjs/',
+const SavedIndexRoute = SavedIndexRouteImport.update({
+  id: '/saved/',
+  path: '/saved/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SavedIdRoute = SavedIdRouteImport.update({
+  id: '/saved/$id',
+  path: '/saved/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiJobsIndexRoute = ApiJobsIndexRouteImport.update({
@@ -117,9 +112,9 @@ const ApiJobsIndexRoute = ApiJobsIndexRouteImport.update({
   path: '/api/jobs/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPeerjsIdRoute = ApiPeerjsIdRouteImport.update({
-  id: '/api/peerjs/id',
-  path: '/api/peerjs/id',
+const ApiJobsRendezvousRoute = ApiJobsRendezvousRouteImport.update({
+  id: '/api/jobs/rendezvous',
+  path: '/api/jobs/rendezvous',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiJobsSlotRoute = ApiJobsSlotRouteImport.update({
@@ -127,19 +122,14 @@ const ApiJobsSlotRoute = ApiJobsSlotRouteImport.update({
   path: '/api/jobs/slot',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiJobsRendezvousRoute = ApiJobsRendezvousRouteImport.update({
-  id: '/api/jobs/rendezvous',
-  path: '/api/jobs/rendezvous',
+const ApiPeerjsIndexRoute = ApiPeerjsIndexRouteImport.update({
+  id: '/api/peerjs/',
+  path: '/api/peerjs/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiJobsSftpIndexRoute = ApiJobsSftpIndexRouteImport.update({
-  id: '/api/jobs/sftp/',
-  path: '/api/jobs/sftp/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiJobsInputsIndexRoute = ApiJobsInputsIndexRouteImport.update({
-  id: '/api/jobs/inputs/',
-  path: '/api/jobs/inputs/',
+const ApiPeerjsIdRoute = ApiPeerjsIdRouteImport.update({
+  id: '/api/peerjs/id',
+  path: '/api/peerjs/id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiJobsJobIdIndexRoute = ApiJobsJobIdIndexRouteImport.update({
@@ -147,44 +137,9 @@ const ApiJobsJobIdIndexRoute = ApiJobsJobIdIndexRouteImport.update({
   path: '/api/jobs/$jobId/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPeerjsKeyPeersRoute = ApiPeerjsKeyPeersRouteImport.update({
-  id: '/api/peerjs/$key/peers',
-  path: '/api/peerjs/$key/peers',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiJobsSftpProbeRoute = ApiJobsSftpProbeRouteImport.update({
-  id: '/api/jobs/sftp/probe',
-  path: '/api/jobs/sftp/probe',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiJobsInputsProfileRoute = ApiJobsInputsProfileRouteImport.update({
-  id: '/api/jobs/inputs/profile',
-  path: '/api/jobs/inputs/profile',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiJobsInputsCoverageRoute = ApiJobsInputsCoverageRouteImport.update({
-  id: '/api/jobs/inputs/coverage',
-  path: '/api/jobs/inputs/coverage',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiJobsJobIdResultRoute = ApiJobsJobIdResultRouteImport.update({
-  id: '/api/jobs/$jobId/result',
-  path: '/api/jobs/$jobId/result',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiJobsJobIdRecordRoute = ApiJobsJobIdRecordRouteImport.update({
-  id: '/api/jobs/$jobId/record',
-  path: '/api/jobs/$jobId/record',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiJobsJobIdKeysRoute = ApiJobsJobIdKeysRouteImport.update({
-  id: '/api/jobs/$jobId/keys',
-  path: '/api/jobs/$jobId/keys',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiJobsJobIdHandoffRoute = ApiJobsJobIdHandoffRouteImport.update({
-  id: '/api/jobs/$jobId/handoff',
-  path: '/api/jobs/$jobId/handoff',
+const ApiJobsJobIdCancelRoute = ApiJobsJobIdCancelRouteImport.update({
+  id: '/api/jobs/$jobId/cancel',
+  path: '/api/jobs/$jobId/cancel',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiJobsJobIdEventsRoute = ApiJobsJobIdEventsRouteImport.update({
@@ -192,9 +147,54 @@ const ApiJobsJobIdEventsRoute = ApiJobsJobIdEventsRouteImport.update({
   path: '/api/jobs/$jobId/events',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiJobsJobIdCancelRoute = ApiJobsJobIdCancelRouteImport.update({
-  id: '/api/jobs/$jobId/cancel',
-  path: '/api/jobs/$jobId/cancel',
+const ApiJobsJobIdHandoffRoute = ApiJobsJobIdHandoffRouteImport.update({
+  id: '/api/jobs/$jobId/handoff',
+  path: '/api/jobs/$jobId/handoff',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsJobIdKeysRoute = ApiJobsJobIdKeysRouteImport.update({
+  id: '/api/jobs/$jobId/keys',
+  path: '/api/jobs/$jobId/keys',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsJobIdRecordRoute = ApiJobsJobIdRecordRouteImport.update({
+  id: '/api/jobs/$jobId/record',
+  path: '/api/jobs/$jobId/record',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsJobIdResultRoute = ApiJobsJobIdResultRouteImport.update({
+  id: '/api/jobs/$jobId/result',
+  path: '/api/jobs/$jobId/result',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsInputsIndexRoute = ApiJobsInputsIndexRouteImport.update({
+  id: '/api/jobs/inputs/',
+  path: '/api/jobs/inputs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsInputsCoverageRoute = ApiJobsInputsCoverageRouteImport.update({
+  id: '/api/jobs/inputs/coverage',
+  path: '/api/jobs/inputs/coverage',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsInputsProfileRoute = ApiJobsInputsProfileRouteImport.update({
+  id: '/api/jobs/inputs/profile',
+  path: '/api/jobs/inputs/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsSftpIndexRoute = ApiJobsSftpIndexRouteImport.update({
+  id: '/api/jobs/sftp/',
+  path: '/api/jobs/sftp/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsSftpProbeRoute = ApiJobsSftpProbeRouteImport.update({
+  id: '/api/jobs/sftp/probe',
+  path: '/api/jobs/sftp/probe',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPeerjsKeyPeersRoute = ApiPeerjsKeyPeersRouteImport.update({
+  id: '/api/peerjs/$key/peers',
+  path: '/api/peerjs/$key/peers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiJobsMountsSecretsEntriesRoute =
@@ -443,32 +443,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/verify': {
-      id: '/verify'
-      path: '/verify'
-      fullPath: '/verify'
-      preLoaderRoute: typeof VerifyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/quick': {
-      id: '/quick'
-      path: '/quick'
-      fullPath: '/quick'
-      preLoaderRoute: typeof QuickRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/exchange': {
-      id: '/exchange'
-      path: '/exchange'
-      fullPath: '/exchange'
-      preLoaderRoute: typeof ExchangeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/direct': {
-      id: '/direct'
-      path: '/direct'
-      fullPath: '/direct'
-      preLoaderRoute: typeof DirectRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/accept': {
@@ -485,18 +464,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BenchRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/direct': {
+      id: '/direct'
+      path: '/direct'
+      fullPath: '/direct'
+      preLoaderRoute: typeof DirectRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/saved/': {
-      id: '/saved/'
-      path: '/saved'
-      fullPath: '/saved/'
-      preLoaderRoute: typeof SavedIndexRouteImport
+    '/exchange': {
+      id: '/exchange'
+      path: '/exchange'
+      fullPath: '/exchange'
+      preLoaderRoute: typeof ExchangeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quick': {
+      id: '/quick'
+      path: '/quick'
+      fullPath: '/quick'
+      preLoaderRoute: typeof QuickRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/verify': {
+      id: '/verify'
+      path: '/verify'
+      fullPath: '/verify'
+      preLoaderRoute: typeof VerifyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/bench/': {
@@ -506,18 +499,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BenchIndexRouteImport
       parentRoute: typeof BenchRouteRoute
     }
-    '/saved/$id': {
-      id: '/saved/$id'
-      path: '/saved/$id'
-      fullPath: '/saved/$id'
-      preLoaderRoute: typeof SavedIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/bench/verify': {
-      id: '/bench/verify'
-      path: '/verify'
-      fullPath: '/bench/verify'
-      preLoaderRoute: typeof BenchVerifyRouteImport
+    '/bench/accept': {
+      id: '/bench/accept'
+      path: '/accept'
+      fullPath: '/bench/accept'
+      preLoaderRoute: typeof BenchAcceptRouteImport
       parentRoute: typeof BenchRouteRoute
     }
     '/bench/exchange': {
@@ -527,18 +513,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BenchExchangeRouteImport
       parentRoute: typeof BenchRouteRoute
     }
-    '/bench/accept': {
-      id: '/bench/accept'
-      path: '/accept'
-      fullPath: '/bench/accept'
-      preLoaderRoute: typeof BenchAcceptRouteImport
+    '/bench/verify': {
+      id: '/bench/verify'
+      path: '/verify'
+      fullPath: '/bench/verify'
+      preLoaderRoute: typeof BenchVerifyRouteImport
       parentRoute: typeof BenchRouteRoute
     }
-    '/api/peerjs/': {
-      id: '/api/peerjs/'
-      path: '/api/peerjs'
-      fullPath: '/api/peerjs/'
-      preLoaderRoute: typeof ApiPeerjsIndexRouteImport
+    '/saved/': {
+      id: '/saved/'
+      path: '/saved'
+      fullPath: '/saved/'
+      preLoaderRoute: typeof SavedIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/saved/$id': {
+      id: '/saved/$id'
+      path: '/saved/$id'
+      fullPath: '/saved/$id'
+      preLoaderRoute: typeof SavedIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/jobs/': {
@@ -548,11 +541,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiJobsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/peerjs/id': {
-      id: '/api/peerjs/id'
-      path: '/api/peerjs/id'
-      fullPath: '/api/peerjs/id'
-      preLoaderRoute: typeof ApiPeerjsIdRouteImport
+    '/api/jobs/rendezvous': {
+      id: '/api/jobs/rendezvous'
+      path: '/api/jobs/rendezvous'
+      fullPath: '/api/jobs/rendezvous'
+      preLoaderRoute: typeof ApiJobsRendezvousRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/jobs/slot': {
@@ -562,25 +555,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiJobsSlotRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/jobs/rendezvous': {
-      id: '/api/jobs/rendezvous'
-      path: '/api/jobs/rendezvous'
-      fullPath: '/api/jobs/rendezvous'
-      preLoaderRoute: typeof ApiJobsRendezvousRouteImport
+    '/api/peerjs/': {
+      id: '/api/peerjs/'
+      path: '/api/peerjs'
+      fullPath: '/api/peerjs/'
+      preLoaderRoute: typeof ApiPeerjsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/jobs/sftp/': {
-      id: '/api/jobs/sftp/'
-      path: '/api/jobs/sftp'
-      fullPath: '/api/jobs/sftp/'
-      preLoaderRoute: typeof ApiJobsSftpIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/jobs/inputs/': {
-      id: '/api/jobs/inputs/'
-      path: '/api/jobs/inputs'
-      fullPath: '/api/jobs/inputs/'
-      preLoaderRoute: typeof ApiJobsInputsIndexRouteImport
+    '/api/peerjs/id': {
+      id: '/api/peerjs/id'
+      path: '/api/peerjs/id'
+      fullPath: '/api/peerjs/id'
+      preLoaderRoute: typeof ApiPeerjsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/jobs/$jobId/': {
@@ -590,60 +576,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiJobsJobIdIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/peerjs/$key/peers': {
-      id: '/api/peerjs/$key/peers'
-      path: '/api/peerjs/$key/peers'
-      fullPath: '/api/peerjs/$key/peers'
-      preLoaderRoute: typeof ApiPeerjsKeyPeersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/jobs/sftp/probe': {
-      id: '/api/jobs/sftp/probe'
-      path: '/api/jobs/sftp/probe'
-      fullPath: '/api/jobs/sftp/probe'
-      preLoaderRoute: typeof ApiJobsSftpProbeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/jobs/inputs/profile': {
-      id: '/api/jobs/inputs/profile'
-      path: '/api/jobs/inputs/profile'
-      fullPath: '/api/jobs/inputs/profile'
-      preLoaderRoute: typeof ApiJobsInputsProfileRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/jobs/inputs/coverage': {
-      id: '/api/jobs/inputs/coverage'
-      path: '/api/jobs/inputs/coverage'
-      fullPath: '/api/jobs/inputs/coverage'
-      preLoaderRoute: typeof ApiJobsInputsCoverageRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/jobs/$jobId/result': {
-      id: '/api/jobs/$jobId/result'
-      path: '/api/jobs/$jobId/result'
-      fullPath: '/api/jobs/$jobId/result'
-      preLoaderRoute: typeof ApiJobsJobIdResultRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/jobs/$jobId/record': {
-      id: '/api/jobs/$jobId/record'
-      path: '/api/jobs/$jobId/record'
-      fullPath: '/api/jobs/$jobId/record'
-      preLoaderRoute: typeof ApiJobsJobIdRecordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/jobs/$jobId/keys': {
-      id: '/api/jobs/$jobId/keys'
-      path: '/api/jobs/$jobId/keys'
-      fullPath: '/api/jobs/$jobId/keys'
-      preLoaderRoute: typeof ApiJobsJobIdKeysRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/jobs/$jobId/handoff': {
-      id: '/api/jobs/$jobId/handoff'
-      path: '/api/jobs/$jobId/handoff'
-      fullPath: '/api/jobs/$jobId/handoff'
-      preLoaderRoute: typeof ApiJobsJobIdHandoffRouteImport
+    '/api/jobs/$jobId/cancel': {
+      id: '/api/jobs/$jobId/cancel'
+      path: '/api/jobs/$jobId/cancel'
+      fullPath: '/api/jobs/$jobId/cancel'
+      preLoaderRoute: typeof ApiJobsJobIdCancelRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/jobs/$jobId/events': {
@@ -653,11 +590,74 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiJobsJobIdEventsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/jobs/$jobId/cancel': {
-      id: '/api/jobs/$jobId/cancel'
-      path: '/api/jobs/$jobId/cancel'
-      fullPath: '/api/jobs/$jobId/cancel'
-      preLoaderRoute: typeof ApiJobsJobIdCancelRouteImport
+    '/api/jobs/$jobId/handoff': {
+      id: '/api/jobs/$jobId/handoff'
+      path: '/api/jobs/$jobId/handoff'
+      fullPath: '/api/jobs/$jobId/handoff'
+      preLoaderRoute: typeof ApiJobsJobIdHandoffRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/$jobId/keys': {
+      id: '/api/jobs/$jobId/keys'
+      path: '/api/jobs/$jobId/keys'
+      fullPath: '/api/jobs/$jobId/keys'
+      preLoaderRoute: typeof ApiJobsJobIdKeysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/$jobId/record': {
+      id: '/api/jobs/$jobId/record'
+      path: '/api/jobs/$jobId/record'
+      fullPath: '/api/jobs/$jobId/record'
+      preLoaderRoute: typeof ApiJobsJobIdRecordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/$jobId/result': {
+      id: '/api/jobs/$jobId/result'
+      path: '/api/jobs/$jobId/result'
+      fullPath: '/api/jobs/$jobId/result'
+      preLoaderRoute: typeof ApiJobsJobIdResultRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/inputs/': {
+      id: '/api/jobs/inputs/'
+      path: '/api/jobs/inputs'
+      fullPath: '/api/jobs/inputs/'
+      preLoaderRoute: typeof ApiJobsInputsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/inputs/coverage': {
+      id: '/api/jobs/inputs/coverage'
+      path: '/api/jobs/inputs/coverage'
+      fullPath: '/api/jobs/inputs/coverage'
+      preLoaderRoute: typeof ApiJobsInputsCoverageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/inputs/profile': {
+      id: '/api/jobs/inputs/profile'
+      path: '/api/jobs/inputs/profile'
+      fullPath: '/api/jobs/inputs/profile'
+      preLoaderRoute: typeof ApiJobsInputsProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/sftp/': {
+      id: '/api/jobs/sftp/'
+      path: '/api/jobs/sftp'
+      fullPath: '/api/jobs/sftp/'
+      preLoaderRoute: typeof ApiJobsSftpIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/sftp/probe': {
+      id: '/api/jobs/sftp/probe'
+      path: '/api/jobs/sftp/probe'
+      fullPath: '/api/jobs/sftp/probe'
+      preLoaderRoute: typeof ApiJobsSftpProbeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/peerjs/$key/peers': {
+      id: '/api/peerjs/$key/peers'
+      path: '/api/peerjs/$key/peers'
+      fullPath: '/api/peerjs/$key/peers'
+      preLoaderRoute: typeof ApiPeerjsKeyPeersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/jobs/mounts/secrets/entries': {

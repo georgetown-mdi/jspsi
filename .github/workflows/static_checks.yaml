@@ -95,6 +95,17 @@ jobs:
       # workflow alone. A composite pin no workflow mirrors fails closed.
       - name: Action pin drift
         run: npm run check:action-pin-drift
+      # apps/web/src/routeTree.gen.ts is generated but checked in, so a fresh
+      # clone can typecheck, lint, build, and test the web app with no
+      # generation step. The cost is that every web-tooling run rewrites it: a
+      # copy that has drifted behind the pinned generator reappears as an
+      # unrelated modification in a branch that touched no route. This
+      # regenerates with the pinned generator and compares, so a refresh lands
+      # as its own commit instead of riding along in someone else's. It moves
+      # the file aside and fails closed if nothing is generated, and restores
+      # the working-tree copy either way.
+      - name: Route tree freshness
+        run: npm run check:routetree
       # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
       # .mjs with no server or Docker dependency, so a stock runner suffices. This
       # is the repo-wide non-path-filtered gate that guarantees the suite is always
