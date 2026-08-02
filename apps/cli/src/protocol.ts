@@ -677,70 +677,81 @@ export async function runProtocol(
           : summary,
       );
     }
-    // The companion count for connection-per-poll mode, on the same terms and for
-    // the same reason: the inline WARN is paced (the first, then every tenth), so a
-    // run whose last forced release fell off that cadence states its true total
-    // nowhere else. It is deliberately NOT folded into the reconnect line above and
-    // does not reach the metrics event: closing a boundary from this side is not a
-    // re-establishment at all, so a count of these among the reconnections would
-    // report ones the exchange never made, and a loss suffered at one of them is
-    // already counted there by the path that recovered it. Zero in every other mode
-    // and against a server that closes on request, so the guard keeps a normal
+    // Connection-per-poll's per-cycle outcomes, each its own line on its own
+    // count. What they share is the argument for stating them at all and for
+    // stating them apart: every inline WARN they have is paced (the first, then
+    // every tenth) or absent, so a run whose last occurrence fell off that cadence
+    // states its true total nowhere else, and an operator who left the run
+    // unattended could not tell afterwards how the partner's server behaved. None
+    // of them is summed into another or into the reconnect line above, and none
+    // reaches the metrics event: they report mutually exclusive outcomes of the
+    // same boundary -- one the partner closed, one this side closed itself, ones
+    // that closed nothing at all -- and a session that was never lost is not a
+    // reconnection, so folding any of them in would report drops the exchange
+    // never had. All are 0 in every other mode, so the guards keep a normal
     // exchange quiet.
-    const forcedReleases = client?.forcedReleaseCount ?? 0;
-    if (forcedReleases > 0)
-      log.info(
-        `the connection did not close when released at ${forcedReleases} idle ` +
-          `${forcedReleases === 1 ? "boundary" : "boundaries"} during this ` +
-          `exchange (not a dropped session), so it was closed from this side`,
-      );
-    // The mode's other per-cycle count, paced inline for the same reason and
-    // totalled here on the same terms. It states the opposite outcome to the line
-    // above -- that boundary ended, this one closed nothing -- so the two are
-    // separate lines and neither is summed into the other. Like the forced total it
-    // stays out of the reconnect line and the metrics event: a session that was
-    // never closed is not a drop, and folding it in would report losses the
-    // exchange never had. Zero in every other mode, so the guard keeps a normal
-    // exchange quiet.
-    const declinedReleases = client?.declinedReleaseCount ?? 0;
-    if (declinedReleases > 0)
-      log.info(
-        `the connection-per-poll release did not close the session at ` +
-          `${declinedReleases} idle ` +
-          `${declinedReleases === 1 ? "boundary" : "boundaries"} during this ` +
-          `exchange (not a dropped session): another session transition on this ` +
-          `connection did not complete within the release's wait, so the session ` +
-          `stayed live across ` +
-          `${declinedReleases === 1 ? "that idle gap" : "those idle gaps"}`,
-      );
-    // The mode's third per-cycle outcome, and the only one with no inline line at
-    // all: a boundary held for an operation this side had issued is ordinary, so
-    // warning per occurrence would report an anomaly where there is none. The run
-    // total still matters, because the case that is NOT ordinary looks the same
-    // from here -- an operation with no bound of its own holds every remaining
-    // boundary, and the mode has then stopped delivering the per-cycle sessions it
-    // exists for with nothing else saying so. The stretch sub-count is what tells
-    // the two apart, and is stated only when it says something the boundary count
-    // does not. Like both lines above it stays out of the reconnect line and the
-    // metrics event: nothing was closed, so nothing was lost. Zero in every other
-    // mode, so the guard keeps a normal exchange quiet.
     const heldBoundaries = client?.heldBoundaryCount ?? 0;
     const heldStretches = client?.heldBoundaryStretchCount ?? 0;
-    if (heldBoundaries > 0) {
-      const summary =
-        `the connection-per-poll release held the SFTP session at ` +
-        `${heldBoundaries} idle ` +
-        `${heldBoundaries === 1 ? "boundary" : "boundaries"} during this ` +
-        `exchange (not a dropped session): an operation this side had issued was ` +
-        `still unsettled, so the session stayed live across ` +
-        `${heldBoundaries === 1 ? "that idle gap" : "those idle gaps"}`;
-      log.info(
-        heldStretches < heldBoundaries
-          ? `${summary}, in ${heldStretches} unbroken ` +
-              `${heldStretches === 1 ? "stretch" : "stretches"}`
-          : summary,
-      );
-    }
+    const perCycleOutcomes: {
+      count: number;
+      line: (count: number) => string;
+    }[] = [
+      {
+        count: client?.releasedBoundaryCount ?? 0,
+        line: (count) =>
+          `the connection-per-poll release closed the SFTP session at ` +
+          `${count} idle ${count === 1 ? "boundary" : "boundaries"} during ` +
+          `this exchange, each re-dialed at the start of the next poll cycle`,
+      },
+      {
+        count: client?.forcedReleaseCount ?? 0,
+        line: (count) =>
+          `the connection did not close when released at ${count} idle ` +
+          `${count === 1 ? "boundary" : "boundaries"} during this exchange ` +
+          `(not a dropped session), so it was closed from this side`,
+      },
+      {
+        count: client?.declinedReleaseCount ?? 0,
+        line: (count) =>
+          `the connection-per-poll release did not close the session at ` +
+          `${count} idle ${count === 1 ? "boundary" : "boundaries"} during ` +
+          `this exchange (not a dropped session): another session transition ` +
+          `on this connection did not complete within the release's wait, so ` +
+          `the session stayed live across ` +
+          `${count === 1 ? "that idle gap" : "those idle gaps"}`,
+      },
+      {
+        count: client?.declinedCycleRedialCount ?? 0,
+        line: (count) =>
+          `the connection-per-poll re-dial skipped ${count} poll ` +
+          `${count === 1 ? "cycle" : "cycles"} during this exchange (not a ` +
+          `dropped session): another session transition on this connection ` +
+          `did not complete within the re-dial's wait, so ` +
+          `${count === 1 ? "that cycle" : "those cycles"} carried no session`,
+      },
+      {
+        // The stretch sub-count is what tells one operation holding twenty
+        // boundaries from twenty operations each holding one -- the difference
+        // between a mode that has stopped delivering per-cycle sessions and one
+        // that is working -- and is stated only when it says something the
+        // boundary count does not.
+        count: heldBoundaries,
+        line: (count) => {
+          const summary =
+            `the connection-per-poll release held the SFTP session at ` +
+            `${count} idle ${count === 1 ? "boundary" : "boundaries"} during ` +
+            `this exchange (not a dropped session): an operation this side ` +
+            `had issued was still unsettled, so the session stayed live ` +
+            `across ${count === 1 ? "that idle gap" : "those idle gaps"}`;
+          return heldStretches < count
+            ? `${summary}, in ${heldStretches} unbroken ` +
+                `${heldStretches === 1 ? "stretch" : "stretches"}`
+            : summary;
+        },
+      },
+    ];
+    for (const { count, line } of perCycleOutcomes)
+      if (count > 0) log.info(line(count));
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
     // Undo our own contribution to the max-listeners threshold rather than

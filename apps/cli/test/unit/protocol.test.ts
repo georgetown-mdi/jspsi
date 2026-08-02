@@ -3918,6 +3918,116 @@ test("summarizes the declined idle releases as a line apart from the forced ones
   );
 });
 
+test("summarizes the boundaries the partner closed on request as the forced total's denominator", async () => {
+  // The mode's ordinary outcome has no inline line at all -- nothing anomalous
+  // happens when a server closes on request -- so the teardown summary is where an
+  // operator learns it worked, and how often. Read beside the forced total it is
+  // the denominator for: 3 forced out of 3 boundaries is a server that never
+  // closes, 3 out of 60 is a server that occasionally lags, and the forced count
+  // alone cannot tell them apart. Separate lines on separate counts, neither
+  // summed into the other.
+  const releasedSpy = vi
+    .spyOn(LocalFSClient.prototype, "releasedBoundaryCount", "get")
+    .mockReturnValue(57);
+  const forcedSpy = vi
+    .spyOn(LocalFSClient.prototype, "forcedReleaseCount", "get")
+    .mockReturnValue(3);
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    releasedSpy.mockRestore();
+    forcedSpy.mockRestore();
+  }
+
+  const released = mockState.infos.find((line) =>
+    line.includes("closed the SFTP session at 57 idle boundaries"),
+  );
+  expect(released).toBeDefined();
+  expect(released).toContain("re-dialed at the start of the next poll cycle");
+  // The mode working is not a session this side had to close itself, and not a
+  // drop: neither the forced line nor the reconnect line absorbs it.
+  expect(released).not.toContain("closed from this side");
+  expect(
+    mockState.infos.some((line) =>
+      line.includes("did not close when released at 3 idle boundaries"),
+    ),
+  ).toBe(true);
+  expect(mockState.infos.some((line) => line.includes("60 idle"))).toBe(false);
+  expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
+    false,
+  );
+});
+
+test("summarizes the poll cycles a declined cycle-start re-dial skipped", async () => {
+  // The dialing half of what the declined release reports for the releasing half:
+  // one stuck transition declines both signals of the same cycle, and a cycle that
+  // carried no session at all is what the operator needs to see. Its inline WARN is
+  // paced like every other, so the run total is stated nowhere else. Distinct
+  // totals here, so neither line can be reporting the other's count.
+  const skippedSpy = vi
+    .spyOn(LocalFSClient.prototype, "declinedCycleRedialCount", "get")
+    .mockReturnValue(4);
+  const declinedSpy = vi
+    .spyOn(LocalFSClient.prototype, "declinedReleaseCount", "get")
+    .mockReturnValue(6);
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    skippedSpy.mockRestore();
+    declinedSpy.mockRestore();
+  }
+
+  const skipped = mockState.infos.find((line) =>
+    line.includes("re-dial skipped 4 poll cycles"),
+  );
+  expect(skipped).toBeDefined();
+  expect(skipped).toContain("not a dropped session");
+  expect(skipped).toContain("those cycles carried no session");
+  expect(
+    mockState.infos.some((line) =>
+      line.includes("did not close the session at 6 idle boundaries"),
+    ),
+  ).toBe(true);
+  expect(mockState.infos.some((line) => line.includes("10 poll"))).toBe(false);
+  expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
+    false,
+  );
+});
+
 test("a declined release with no session drop leaves the reconnect total and the metrics event untouched", async () => {
   // A run can decline releases without ever losing a session: nothing was closed,
   // so nothing was lost. The reconnect total therefore stays what it would have
@@ -4206,7 +4316,7 @@ test("a held boundary with no session drop leaves the reconnect total and the me
   expect(JSON.stringify(metrics)).not.toContain("11");
 });
 
-test("logs no reconnect, forced-release, declined-release, or held-boundary summary on a clean run", async () => {
+test("logs no reconnect or per-cycle boundary summary of any kind on a clean run", async () => {
   // The teardown summary is guarded on a non-zero count, so a normal exchange
   // stays quiet.
   await Promise.all([
@@ -4240,6 +4350,12 @@ test("logs no reconnect, forced-release, declined-release, or held-boundary summ
   expect(
     mockState.infos.some((line) => line.includes("held the SFTP session")),
   ).toBe(false);
+  expect(
+    mockState.infos.some((line) => line.includes("closed the SFTP session")),
+  ).toBe(false);
+  expect(mockState.infos.some((line) => line.includes("poll cycle"))).toBe(
+    false,
+  );
 });
 
 test("an aborted run under --event-stream reports metrics then the classified reason", async () => {

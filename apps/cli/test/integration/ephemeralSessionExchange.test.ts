@@ -18,6 +18,7 @@ import {
   MAX_DEFERRED_CLEANUP_REISSUES,
   SSH2SFTPClientAdapter,
 } from "../../src/connection/ssh2SftpAdapter";
+import { SftpAdapterLedger } from "../../src/connection/sftpAdapterLedger";
 import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 
@@ -87,7 +88,7 @@ function countDeletes(
 // outside is the consequence (a boundary that closed nothing), and these cases
 // assert that too.
 const outstandingOperations = (adapter: SSH2SFTPClientAdapter): number =>
-  (adapter as unknown as { outstandingOperations: number })
+  (adapter as unknown as { ledger: SftpAdapterLedger }).ledger
     .outstandingOperations;
 
 // The cleanup deletes still recorded for re-issue. Private for the same reason:
