@@ -4,15 +4,16 @@ title: "Connection-per-poll SFTP, and the reconnect posture beneath it"
 
 # Connection-per-poll SFTP, and the reconnect posture beneath it
 
-*Status: design settled, awaiting implementation. This note records the direction
-chosen for a slow-peer SFTP transport mode and, underneath it, the mid-exchange
-reconnect posture the mode depends on. The direction was reached by an independent
-four-lens expert panel and its load-bearing claims were adversarially verified
-against the tree; see [How this was decided](#how-this-was-decided). The normative
-mechanism will be folded into [FILE_SYNC.md](../spec/FILE_SYNC.md) and
-[CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md) when it ships, and surfaced to
-operators through [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md); until then this
-note is the design of record. See [docs/notes/README.md](README.md).*
+*Status: shipped. This note records the direction chosen for a slow-peer SFTP
+transport mode and, underneath it, the mid-exchange reconnect posture the mode
+depends on. The direction was reached by an independent four-lens expert panel
+and its load-bearing claims were adversarially verified against the tree; see
+[How this was decided](#how-this-was-decided). The normative mechanism is
+specified in [FILE_SYNC.md](../spec/FILE_SYNC.md) and
+[CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md), and the operator-facing
+description lives in [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md); this note
+is kept for the reasoning behind that direction. See
+[docs/notes/README.md](README.md).*
 
 ## The scenario
 
@@ -122,9 +123,9 @@ observable. Three properties define the default:
   session lifetime would exhaust any held-session budget, so raising
   `max_reconnect_attempts` is the answer only for a transiently flaky link. The
   structural fix is connection-per-poll (below): its poll loop holds no session
-  across the idle gap, so the loop never reaches the cap, and its recovery re-dials
-  are uncapped in every phase -- bounded instead by the peer-inactivity ceiling --
-  which is what carries a rendezvous the cap does cut.
+  across the idle gap, so the loop ordinarily does not reach the cap, and its
+  recovery re-dials are uncapped in every phase -- bounded instead by the
+  peer-inactivity ceiling -- which is what carries a rendezvous the cap does cut.
 
 The recoverable-versus-terminal taxonomy stays exactly as it is: it keys on the
 session's post-drop state, not on message matching, and it is sound. This posture
@@ -138,11 +139,11 @@ For the slow-asymmetric-peer case, the structural fix is to stop holding a sessi
 across the idle gap at all. In the mode, each poll cycle dials a fresh SFTP
 connection, runs that cycle's batch of ops, and releases the connection before the
 loop goes idle again. A cycle's session then need only survive that cycle's seconds,
-so the poll loop never reaches the server's duration or idle cap; there is no
-held-but-secretly-dead window and no heartbeat to churn keepalives against a corpse.
-The failure it does have -- a dial that fails -- fails loudly at one well-understood
-seam and is handled by the ordinary connect-error path, rather than silently on the
-next op against a cleared session.
+so the poll loop ordinarily does not reach the server's duration or idle cap; there
+is no held-but-secretly-dead window and no heartbeat to churn keepalives against a
+corpse. The failure it does have -- a dial that fails -- fails loudly at one
+well-understood seam and is handled by the ordinary connect-error path, rather than
+silently on the next op against a cleared session.
 
 The per-cycle lifetime is the **poll loop's** property, not the mode's as a whole.
 The rendezvous that runs before the loop -- this party waiting for the partner to
@@ -639,9 +640,9 @@ identification string; one that answers it and then stalls mid-key-exchange is a
 different, unmeasured shape. And it is in-process only -- a native sshd cannot be
 told to stall its handshake.
 
-## The work that follows
+## How the work was sliced
 
-The downstream slices:
+The slices this direction was broken into:
 
 - **Reconnect posture first.** Observability (a first-drop warning, a
   rate-escalated cadence after it, a warning on the last re-dial the budget
@@ -699,7 +700,7 @@ were then adversarially verified against the tree as it stood.
 
 - [FILE_SYNC.md](../spec/FILE_SYNC.md) -- the file-sync transport state model whose
   rendezvous, drain, abort-marker, and retain invariants this mode must preserve;
-  the normative lifecycle detail lands there when the mode ships.
+  the normative session-lifetime detail is specified there.
 - [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md) -- the authenticated abort
   marker and the transport liveness/memory bounds this mode reconnects around.
 - [COMMUNICATION.md](../spec/COMMUNICATION.md) -- the connection-lifecycle contract
