@@ -38,16 +38,13 @@ with a leading list marker (`- `, `* `, `1. `) stripped. Call this list CLAIMS.
 
 Hold each claim to the contract-language rules before running the round. A claim states
 a measured bound, never totality: "no bypass among the following measured deliveries",
-with the remainder a stated limit -- not "cannot be bypassed", which turns every future
-counterexample into a gate instead of a doc line. After a deliberate narrowing of a
-control, a no-regression claim covers what the kept checks are for, never the union of
-everything any prior head caught -- union coverage makes narrowing impossible.
-
-A claim asserting totality ("cannot be bypassed", "no way to", "genuinely binds"), or a
-post-narrowing no-regression claim scoped to prior heads' union coverage, is a defective
-contract: stop and rewrite it first. A round run on a totality claim can only gate,
-because the reviewer's job is to find the counterexample the claim's own wording
-promises does not exist.
+with the remainder a stated limit. After a deliberate narrowing of a control, a
+no-regression claim covers what the kept checks are for, never the union of everything
+any prior head caught -- union coverage makes narrowing impossible. A claim that breaks
+either rule ("cannot be bypassed", "no way to", "genuinely binds", or a post-narrowing
+claim scoped to prior heads' union coverage) is a defective contract: stop and rewrite
+it first. A round run on a totality claim can only gate, because the reviewer's job is
+to find the counterexample the claim's own wording promises does not exist.
 
 A plan-stage contract -- claims about a design rather than the code -- must include
 the premise claim, that the plan solves the right problem, among CLAIMS; commit the
