@@ -6,22 +6,20 @@ import { jsBlocks } from "./check-workflow-agent-models.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const COMMAND = ".claude/commands/light-review.md";
+const SCRIPT = "scripts/light-review-workflow.mjs";
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
-// The command file carries the Workflow script an orchestrator pastes verbatim,
-// so the block in the file IS the artifact under test. Compile it into a function
-// of the three names the Workflow runtime injects; `export const meta` is the one
-// module-only spelling in it, and the top-level `return` of the role branch is
-// legal in a function body.
+// The checked-in script the command invokes by path IS the artifact under test.
+// It is a Workflow script body rather than a module, so compile it into a
+// function of the three names the Workflow runtime injects; `export const meta`
+// is the one module-only spelling in it, and the top-level `return` of the role
+// branch is legal in a function body.
 function compileScript() {
-  const blocks = jsBlocks(readFileSync(resolve(root, COMMAND), "utf8"));
-  if (blocks.length !== 1) {
-    throw new Error(
-      `expected exactly one fenced js block in ${COMMAND}, found ${blocks.length}`,
-    );
-  }
-  const body = blocks[0].code.replace(/^export const meta =/m, "const meta =");
+  const body = readFileSync(resolve(root, SCRIPT), "utf8").replace(
+    /^export const meta =/m,
+    "const meta =",
+  );
   return new AsyncFunction("args", "agent", "parallel", body);
 }
 
@@ -37,6 +35,14 @@ const SHAPES = [
   { shape: "object", deliver: (args) => args },
   { shape: "string", deliver: (args) => JSON.stringify(args) },
 ];
+
+describe("light-review command wiring", () => {
+  it("invokes the script this file tests, and carries no script of its own", () => {
+    const command = readFileSync(resolve(root, COMMAND), "utf8");
+    expect(command).toContain(SCRIPT);
+    expect(jsBlocks(command)).toEqual([]);
+  });
+});
 
 const roleArgs = (claims, role = "adversarial-verifier") => ({
   docs: [],

@@ -42,6 +42,12 @@ export default tseslint.config(
       "scratch/**",
       ".claude/worktrees/**",
       "**/.rollup.cache/**",
+      // A checked-in Workflow script is a script BODY the harness runs with
+      // `args`, `agent`, and `parallel` injected, ending in a top-level return
+      // that no ES module parser accepts. Prettier formats these files; their
+      // agent() model pins are checked by `npm run check:workflow-agent-models`
+      // and both are executed as function bodies by their colocated tests.
+      "scripts/*-workflow.mjs",
     ],
   },
   {

@@ -10,13 +10,14 @@ import {
   modelViolations,
   pinnedModels,
   sourceFiles,
+  workflowScriptFiles,
 } from "./check-workflow-agent-models.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 
 const readSources = () =>
-  sourceFiles(root).map((file) => ({
+  [...sourceFiles(root), ...workflowScriptFiles(root)].map((file) => ({
     file,
     source: readFileSync(resolve(root, file), "utf8"),
   }));
@@ -26,7 +27,7 @@ const block = (code, fence = `${FENCE}js`, close = FENCE) =>
   `text before\n${fence}\n${code}\n${close}\ntext after\n`;
 
 describe("workflow agent model check", () => {
-  it("passes on the real scanned command, agent, and skill files", () => {
+  it("passes on the real scanned command, agent, skill, and script files", () => {
     for (const { file, source } of readSources()) {
       expect(modelViolations(file, source)).toEqual([]);
     }
@@ -34,7 +35,7 @@ describe("workflow agent model check", () => {
 
   it("finds the real agent() calls, so the pattern has not rotted", () => {
     const total = readSources().reduce(
-      (sum, { source }) => sum + agentCallCount(source),
+      (sum, { file, source }) => sum + agentCallCount(file, source),
       0,
     );
     expect(total).toBeGreaterThanOrEqual(3);
@@ -45,6 +46,22 @@ describe("workflow agent model check", () => {
     expect(files).toContain(".claude/commands/light-review.md");
     expect(files.some((f) => f.startsWith(".claude/agents/"))).toBe(true);
     expect(files.some((f) => f.startsWith(".claude/skills/"))).toBe(true);
+  });
+
+  it("scans the checked-in Workflow scripts the commands invoke by path", () => {
+    const files = workflowScriptFiles(root);
+    expect(files).toContain("scripts/light-review-workflow.mjs");
+    expect(files).toContain("scripts/panel-workflow.mjs");
+    expect(files.every((f) => f.endsWith("-workflow.mjs"))).toBe(true);
+  });
+
+  it("reads a Workflow script whole, with no fence to open a block", () => {
+    const source = "const a = 1\nagent(prompt, { label: 'x' })\n";
+    expect(agentCallCount("scripts/x-workflow.mjs", source)).toBe(1);
+    const violations = modelViolations("scripts/x-workflow.mjs", source);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].line).toBe(2);
+    expect(violations[0].problem).toContain("no literal `model:`");
   });
 
   it("reads only js fences, and reports their line numbers", () => {
@@ -71,7 +88,7 @@ describe("workflow agent model check", () => {
 
   it("reads an unclosed js fence to the end of the file", () => {
     const source = `${FENCE}js\nagent(prompt, { label: 'x' })\n`;
-    expect(agentCallCount(source)).toBe(1);
+    expect(agentCallCount("cmd.md", source)).toBe(1);
     expect(modelViolations("cmd.md", source)).toHaveLength(1);
   });
 
@@ -185,7 +202,7 @@ describe("workflow agent model check", () => {
   it("ignores an agent() call outside a js fence", () => {
     const source = `${FENCE}sh\nagent(prompt, {})\n${FENCE}\n`;
     expect(modelViolations("cmd.md", source)).toEqual([]);
-    expect(agentCallCount(source)).toBe(0);
+    expect(agentCallCount("cmd.md", source)).toBe(0);
   });
 
   it("does not read a pin out of a string, template, or comment", () => {

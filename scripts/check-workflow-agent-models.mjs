@@ -9,8 +9,11 @@
 //
 // The PreToolUse hooks that gate the Agent tool see none of this: the model lives
 // inside a script string, not a top-level tool input. So the pin is encoded as a
-// check over the committed scripts -- every `agent(` call in a fenced js block
-// under .claude/commands/, .claude/agents/, or .claude/skills/ must pass a literal
+// check over the committed scripts. Those come in two shapes, both scanned here:
+// a fenced js block under .claude/commands/, .claude/agents/, or .claude/skills/,
+// and a checked-in Workflow script a command invokes by path (scripts/*-workflow.mjs,
+// whose whole file is the block -- it is a script body, not a module, so it is not
+// linted and cannot be imported). Every `agent(` call in either must pass a literal
 // `model:` from the tier set in its own options object, and Fable (which requires
 // the owner's per-spawn approval and is never inherited) may not be pinned in a
 // committed script at all. That options object is spelled out in the call: a
@@ -36,8 +39,8 @@
 //   - a js fence nested inside another fence. The outer fence's info string decides
 //     the block, so js nested in a markdown block -- documentation whose examples
 //     are themselves Workflow scripts -- is not scanned at all.
-//   - a script that is not a fenced js block under a scanned directory: an ad-hoc
-//     inline Workflow script, or one passed by scriptPath. The
+//   - a script that is neither shape: an ad-hoc inline Workflow script, or a file
+//     passed by scriptPath from outside scripts/*-workflow.mjs. The
 //     require-workflow-fable-approval.mjs hook covers the inline form for Fable.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -45,6 +48,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SOURCE_DIRS = [".claude/commands", ".claude/agents", ".claude/skills"];
+const SCRIPT_DIR = "scripts";
+const SCRIPT_SUFFIX = "-workflow.mjs";
 const ALLOWED_TIERS = ["opus", "sonnet", "haiku"];
 const JS_LANGUAGES = new Set(["js", "javascript", "mjs"]);
 const SUMMARY_LENGTH = 100;
@@ -434,12 +439,23 @@ export function pinnedModels(callText) {
 }
 
 /**
+ * The blocks of JavaScript a scanned file carries: the fenced js blocks of a
+ * Markdown source, or the whole of a checked-in Workflow script, which is one
+ * unfenced block of script body from its first line.
+ */
+export function codeBlocks(file, source) {
+  return file.endsWith(".mjs")
+    ? [{ code: source, startLine: 1 }]
+    : jsBlocks(source);
+}
+
+/**
  * Every way a source file's Workflow agent spawns can be off the tiering rule,
  * as `{file, line, problem}` triples. Empty means every call pins a literal tier.
  */
 export function modelViolations(file, source) {
   const violations = [];
-  for (const block of jsBlocks(source)) {
+  for (const block of codeBlocks(file, source)) {
     for (const use of agentUses(block.code)) {
       const line = block.startLine + use.line - 1;
       const where = `${file}:${line}`;
@@ -484,8 +500,8 @@ export function modelViolations(file, source) {
 }
 
 /** Count the `agent(` calls a source carries, for the pattern-rot guard. */
-export function agentCallCount(source) {
-  return jsBlocks(source).reduce(
+export function agentCallCount(file, source) {
+  return codeBlocks(file, source).reduce(
     (total, block) => total + agentCalls(block.code).length,
     0,
   );
@@ -507,21 +523,31 @@ export function sourceFiles(root, dirs = SOURCE_DIRS) {
   return files;
 }
 
+/** Every checked-in Workflow script, as repo-relative paths. */
+export function workflowScriptFiles(root, dir = SCRIPT_DIR) {
+  const absolute = resolve(root, dir);
+  if (!existsSync(absolute)) return [];
+  return readdirSync(absolute)
+    .filter((entry) => entry.endsWith(SCRIPT_SUFFIX))
+    .map((entry) => `${dir}/${entry}`);
+}
+
 // CLI entry: only runs when invoked directly, so the test can import the pure
 // functions without the process.exit.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const files = sourceFiles(root);
+  const files = [...sourceFiles(root), ...workflowScriptFiles(root)];
+  const scanned = `${SOURCE_DIRS.join(", ")}, ${SCRIPT_DIR}/*${SCRIPT_SUFFIX}`;
   const violations = [];
   let calls = 0;
   for (const file of files) {
     const source = readFileSync(resolve(root, file), "utf8");
-    calls += agentCallCount(source);
+    calls += agentCallCount(file, source);
     violations.push(...modelViolations(file, source));
   }
   if (calls === 0) {
     console.error(
-      `${SOURCE_DIRS.join(", ")}: no \`agent(\` calls matched in any fenced js block -- the extraction pattern rotted; fix scripts/check-workflow-agent-models.mjs`,
+      `${scanned}: no \`agent(\` calls matched in any scanned block -- the extraction pattern rotted; fix scripts/check-workflow-agent-models.mjs`,
     );
     process.exit(1);
   }
@@ -530,6 +556,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   console.log(
-    `Workflow agent model check passed: ${calls} agent() calls across ${files.length} Markdown files in ${SOURCE_DIRS.join(", ")} each pin a literal ${ALLOWED_TIERS.join("/")} model.`,
+    `Workflow agent model check passed: ${calls} agent() calls across ${files.length} files in ${scanned} each pin a literal ${ALLOWED_TIERS.join("/")} model.`,
   );
 }

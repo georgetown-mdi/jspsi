@@ -39,48 +39,14 @@ than read is out of this command's scope -- measure it yourself first instead.
 
 ## Step 2 -- Run the panel Workflow
 
-Invoke the Workflow tool with `args` set to
-`{"question": "<the question>", "docs": [<DOCS, possibly empty>]}` and this
-script VERBATIM:
+Invoke the Workflow tool with `scriptPath` set to `scripts/panel-workflow.mjs`
+and `args` set to
+`{"question": "<the question>", "docs": [<DOCS, possibly empty>]}`.
 
-```js
-export const meta = {
-  name: 'panel',
-  description: 'Three independent schema-forced panelists on one design question',
-  phases: [{ title: 'Panel' }],
-}
-
-const SCHEMA = {
-  type: 'object',
-  required: ['position', 'rationale', 'keyRisk'],
-  properties: {
-    position: { type: 'string', description: 'Your answer to the question in one or two sentences.' },
-    rationale: { type: 'string', description: 'Why, grounded in what you read. Compact prose.' },
-    keyRisk: { type: 'string', description: 'The strongest consideration against your own position.' },
-  },
-}
-
-// The harness may hand a script its arguments as JSON text rather than as the
-// object the caller passed.
-const input = typeof args === 'string' ? JSON.parse(args) : args
-
-const docsClause = input.docs && input.docs.length
-  ? `Read these first for context: ${input.docs.map((d) => '/tmp/panel-base/' + d).join(', ')}.\n\n`
-  : ''
-
-const prompt = (lens) => `You are an independent expert panelist. Read ONLY under /tmp/panel-base, a clean checkout of the project's mainline: do not read, cd into, or search /workspace, and do not run builds or tests (the tree has no node_modules). You are one of several panelists and must not coordinate; answer from your own read.
-
-${docsClause}Weigh the question primarily through the lens of ${lens}, then answer it directly -- an answer, not a survey of options.
-
-The question:
-${input.question}`
-
-return (await parallel([
-  () => agent(prompt('correctness and failure modes'), { label: 'panelist: failure modes', phase: 'Panel', schema: SCHEMA, model: 'opus' }),
-  () => agent(prompt('architecture and maintenance cost'), { label: 'panelist: architecture', phase: 'Panel', schema: SCHEMA, model: 'opus' }),
-  () => agent(prompt('operational and cost pragmatics'), { label: 'panelist: pragmatics', phase: 'Panel', schema: SCHEMA, model: 'sonnet' }),
-])).filter(Boolean)
-```
+The script is checked in and passed by path: do not paste its text into the call
+and do not copy it out to edit it -- it spawns the three panelists on the tiers
+`scripts/panel-script.test.mjs` pins. It returns the panelists that answered,
+each `{position, rationale, keyRisk}`.
 
 ## Step 3 -- Read the verdicts and close
 
