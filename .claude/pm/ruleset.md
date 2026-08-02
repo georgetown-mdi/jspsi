@@ -24,8 +24,33 @@ contributor) can pick up and implement without coming back to you for context.
 
 ## Task template
 
-Every task uses this structure. Use Markdown. Use `-` not `*` for bullets.
-Lines wrap softly.
+Two tiers; pick by the size of the work, not by habit. Both use Markdown, `-`
+not `*` for bullets, and soft line wrapping.
+
+**Light -- the default.** A task whose expected diff is under roughly 100 lines
+and adds no new behavior: a correction, a sweep, a test pin, a doc or spec line,
+a deferred review finding. Its whole body is under 20 lines -- one summary
+sentence, one to three acceptance bullets, the affected file or area -- with no
+implementation notes and no open questions. A body longer than the diff it asks
+for is a defect, not thoroughness.
+
+```markdown
+## Summary
+
+One sentence: what is wrong or missing, and what done looks like.
+
+## Acceptance criteria
+
+- One to three concrete, checkable statements.
+
+## Affected areas
+
+- The file or area, one line.
+```
+
+**Full.** Reserved for genuine capability work -- a new module, protocol step,
+command, or config surface, something a contributor cannot pick up from three
+bullets. A deferred review finding is a light item, never this one.
 
 ```markdown
 ## Summary
@@ -151,6 +176,19 @@ the URL), fetch just that item with `node .claude/scripts/fetch-issues.mjs
 <PROJECT_NUMBER> <itemId>` instead of pulling the whole list.
 
 ## Filing and updating items
+
+Filing is cheap and closing is not, so a new item is the last sink tried, not
+the first. In order:
+
+- A review finding's default sink is a limits line in the governing `docs/spec/`
+  file, written on the branch that raised it. Recommend that and file nothing.
+- A finding that belongs on the board but matches a standing sweep item (a
+  coverage sweep, an accounting settle-up) is APPENDED to that item -- name the
+  item and add the finding to its criteria rather than creating a sibling.
+- Declining to file is a legitimate outcome. Say what the concern is worth and
+  where it should live instead.
+- At most one item is filed autonomously per session. Past that, draft the rest
+  and hand them to the caller for the owner's word.
 
 The repo is `georgetown-mdi/jspsi`; the owner for both projects is
 `georgetown-mdi`.

@@ -78,7 +78,10 @@ For each finding: verify it if it merits verification (read the specific
 hunks/files it names, not the whole diff), then decide.
 
 - **Default to fixing.** Drive-by corrections are welcome -- you do not need
-  permission to fix something small and clearly right.
+  permission to fix something small and clearly right. A fix under roughly 20
+  lines is made HERE, by you, in this pass: a fresh implementer spawn to carry
+  twenty lines costs more than the whole finding, and it re-reads the branch
+  you already have in context.
 - **Contest by measurement before fixing for it.** A finding or refuted claim
   about an external tool's behavior that rests on reading rather than running
   is still open: reproduce the claimed behavior against the real tool first.
@@ -114,17 +117,27 @@ hunks/files it names, not the whole diff), then decide.
   options and a recommendation; do NOT use the question tool.
 - **Leave it** only when it is truly out of scope for this branch, genuinely
   not worth the change, or best taken as a documented limit per CLAUDE.md's
-  three-disposition rule -- for that last, state the limit in the matching spec
-  section in the same pass and propose the remedy as a follow-on in Step 4's
-  table. Do NOT file a board issue for anything -- no automated filings; an
-  unaddressed finding is recorded in Step 4, not on the board, and a follow-on
-  is filed only on the owner's word.
+  three-disposition rule -- for that last, write the limits line into the
+  governing `docs/spec/` file in the same pass and propose the remedy as a
+  follow-on in Step 4's table. Do NOT file a board issue for anything -- no
+  automated filings; an unaddressed finding is recorded in Step 4, not on the
+  board, and a follow-on is filed only on the owner's word.
 
 Apply the fixes. If you changed anything, verify before committing: build core
 if you touched it (`npm run build -w packages/core`), then `npm run typecheck &&
 npm run lint`, and run the tests covering what you changed. Commit to the branch
 -- never staging or main -- following CONTRIBUTING.md's commit conventions (no
 markdown, no top-level lists, no self-attribution). Report what you ran.
+
+Then record what you decided. The round's row in
+`scratch/review-rounds/<branch>.jsonl` carries a `dispositions` entry per
+confirmed cluster, gating claim, and out-of-claim finding, each written `open`
+by the round that raised it. Rewrite each in place to the disposition you took:
+`fixed`, `contested` (you measured the disputed behavior first-hand and it did
+not hold), `narrowed` (the limits line is on the branch), or `deferred` (it has
+a row in Step 4's table). An entry left `open` says nobody decided that finding,
+so leave none behind -- and a round whose entries are all still `open` is a
+round that was read and not triaged.
 
 ## Step 4 -- Report what you left, and readiness
 
