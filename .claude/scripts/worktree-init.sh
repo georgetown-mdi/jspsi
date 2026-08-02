@@ -17,9 +17,18 @@
 # not hoist everything (apps/web keeps its own @mantine), so each workspace's own
 # node_modules is mirrored too. Build caches are skipped so the worktree starts cold.
 # Idempotent: safe to re-run (it refreshes the core build).
+#
+# Sharing an install means inheriting its state, so what is mirrored is checked
+# against the worktree's own package-lock.json before anything is built: a primary
+# that has fallen behind its lockfile otherwise hands every worktree the wrong
+# package versions with no signal at all. check-node-modules-drift.mjs runs npm to
+# decide that, and this script stops on its verdict rather than building on top of
+# it. The check adds about two seconds; a per-worktree `npm install` costs minutes,
+# which is the whole reason for the mirror.
 set -euo pipefail
 shopt -s dotglob nullglob
 
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKTREE="$(git rev-parse --show-toplevel)"
 PRIMARY="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)"
 
@@ -30,8 +39,11 @@ fi
 
 # Mirror one node_modules tree from the primary into the worktree. A symlink (a
 # workspace package's relative link) is copied verbatim so it resolves to the
-# worktree's own copy; a scope dir (@foo) is recursed one level so its own workspace
-# links get the same treatment; every other real dep is shared by absolute symlink.
+# worktree's own copy; a scope dir (@foo) and .bin are recursed so their own
+# entries get the same treatment -- .bin holds relative shim links, and copying
+# them verbatim makes `npm run` resolve binaries through THIS tree's packages
+# instead of executing the primary's; every other real dep is shared by absolute
+# symlink.
 mirror_node_modules() {
   local src="$1" dest="$2" entry name target
   [ -d "$src" ] || return 0
@@ -43,7 +55,7 @@ mirror_node_modules() {
     if [ -e "$target" ] || [ -L "$target" ]; then continue; fi
     if [ -L "$entry" ]; then
       cp -P "$entry" "$target"
-    elif [[ "$name" == @* ]] && [ -d "$entry" ]; then
+    elif [[ "$name" == @* || "$name" == .bin ]] && [ -d "$entry" ]; then
       mirror_node_modules "$entry" "$target"
     else
       ln -s "$entry" "$target"
@@ -62,6 +74,17 @@ for pkgdir in "$PRIMARY"/apps/*/ "$PRIMARY"/packages/*/; do
   mirror_node_modules "${pkgdir}node_modules" "$WORKTREE/${rel}node_modules"
 done
 
-echo "worktree-init: node_modules provisioned; building @psilink/core ..."
+echo "worktree-init: node_modules provisioned; checking it against package-lock.json ..."
+check_status=0
+node "$SCRIPTS/check-node-modules-drift.mjs" "$WORKTREE" --shared-from "$PRIMARY" || check_status=$?
+if [ "$check_status" -eq 2 ]; then
+  echo "worktree-init: stopping before the @psilink/core build -- the check could not verify these deps against package-lock.json, so nothing vouches for a build and test run on them." >&2
+  exit 1
+elif [ "$check_status" -ne 0 ]; then
+  echo "worktree-init: stopping before the @psilink/core build -- a build and test run against these deps would not be this branch's." >&2
+  exit 1
+fi
+
+echo "worktree-init: building @psilink/core ..."
 npm run build -w packages/core >/dev/null
 echo "worktree-init: done. @psilink/core resolves to $WORKTREE/packages/core."
