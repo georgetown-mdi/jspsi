@@ -191,8 +191,8 @@ export function formatDrift(dir, drift, sharedFrom = null, limit = LISTED) {
   ];
   const width = Math.max(
     1,
-    ...[...drift.wrongVersion, ...drift.missing].map((item) =>
-      Math.min(item.name.length, 34),
+    ...[...drift.wrongVersion, ...drift.missing].map(
+      (item) => item.name.length,
     ),
   );
   const listed = [

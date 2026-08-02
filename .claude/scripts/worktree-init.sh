@@ -75,7 +75,12 @@ for pkgdir in "$PRIMARY"/apps/*/ "$PRIMARY"/packages/*/; do
 done
 
 echo "worktree-init: node_modules provisioned; checking it against package-lock.json ..."
-if ! node "$SCRIPTS/check-node-modules-drift.mjs" "$WORKTREE" --shared-from "$PRIMARY"; then
+check_status=0
+node "$SCRIPTS/check-node-modules-drift.mjs" "$WORKTREE" --shared-from "$PRIMARY" || check_status=$?
+if [ "$check_status" -eq 2 ]; then
+  echo "worktree-init: stopping before the @psilink/core build -- the check could not verify these deps against package-lock.json, so nothing vouches for a build and test run on them." >&2
+  exit 1
+elif [ "$check_status" -ne 0 ]; then
   echo "worktree-init: stopping before the @psilink/core build -- a build and test run against these deps would not be this branch's." >&2
   exit 1
 fi
