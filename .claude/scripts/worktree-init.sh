@@ -39,8 +39,11 @@ fi
 
 # Mirror one node_modules tree from the primary into the worktree. A symlink (a
 # workspace package's relative link) is copied verbatim so it resolves to the
-# worktree's own copy; a scope dir (@foo) is recursed one level so its own workspace
-# links get the same treatment; every other real dep is shared by absolute symlink.
+# worktree's own copy; a scope dir (@foo) and .bin are recursed so their own
+# entries get the same treatment -- .bin holds relative shim links, and copying
+# them verbatim makes `npm run` resolve binaries through THIS tree's packages
+# instead of executing the primary's; every other real dep is shared by absolute
+# symlink.
 mirror_node_modules() {
   local src="$1" dest="$2" entry name target
   [ -d "$src" ] || return 0
@@ -52,7 +55,7 @@ mirror_node_modules() {
     if [ -e "$target" ] || [ -L "$target" ]; then continue; fi
     if [ -L "$entry" ]; then
       cp -P "$entry" "$target"
-    elif [[ "$name" == @* ]] && [ -d "$entry" ]; then
+    elif [[ "$name" == @* || "$name" == .bin ]] && [ -d "$entry" ]; then
       mirror_node_modules "$entry" "$target"
     else
       ln -s "$entry" "$target"
