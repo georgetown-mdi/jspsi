@@ -77,6 +77,18 @@ another blind whole-branch round.
 For each finding: verify it if it merits verification (read the specific
 hunks/files it names, not the whole diff), then decide.
 
+A gated claim or confirmed review finding has three dispositions, not one: fix
+it; contest it by measuring the disputed behavior first-hand (a verdict reached
+by reading alone is still open until a run decides it); or narrow the claim to
+what is measured, recording the remainder as a limits line in the governing
+`docs/spec/` file, written on the branch in the same pass. That line is the
+whole of the narrow exit by default. A follow-on board item is the escalation
+above it, taken only when the remainder itself needs a runtime change, and no
+session files more than one such item autonomously -- past that, the rest are
+proposals in the report for the owner to scope. The third disposition is the
+cheap one, not a failure -- a true finding whose fix would grow the guarded
+surface is often best narrowed.
+
 - **Default to fixing.** Drive-by corrections are welcome -- you do not need
   permission to fix something small and clearly right. A fix under roughly 20
   lines is made HERE, by you, in this pass: a fresh implementer spawn to carry
@@ -92,7 +104,8 @@ hunks/files it names, not the whole diff), then decide.
   contest, and documented limit on a gated `security-reviewer` or
   `adversarial-verifier` round is the adjudication CLAUDE.md's model-tier rule
   reserves Fable for -- a one-shot, owner-approved consult on the choice, never
-  a Fable fix round.
+  a Fable fix round. It is the highest-judgment call in the loop, and a consult
+  on it is cheaper than the fix-and-attest round it can replace.
 - **A fix that adds behavior gets a test.** When a fix introduces new branching
   or a new code path (error handling, a guard, a fallback), pin its guarantees
   with a test in the same pass. No later round re-reviews a fix: another round
@@ -116,8 +129,8 @@ hunks/files it names, not the whole diff), then decide.
   dependency, a shared convention, or the branch's scope. Ask in prose with the
   options and a recommendation; do NOT use the question tool.
 - **Leave it** only when it is truly out of scope for this branch, genuinely
-  not worth the change, or best taken as a documented limit per CLAUDE.md's
-  three-disposition rule -- for that last, write the limits line into the
+  not worth the change, or best taken as a documented limit per the
+  three-disposition rule above -- for that last, write the limits line into the
   governing `docs/spec/` file in the same pass and propose the remedy as a
   follow-on in Step 4's table. Do NOT file a board issue for anything -- no
   automated filings; an unaddressed finding is recorded in Step 4, not on the
@@ -156,6 +169,41 @@ churning), no unaddressed finding touches a security-relevant surface (one taken
 as a documented limit stops gating readiness once the owner ratifies that
 disposition), brittle areas are shored up or independently assessed, and
 typecheck/lint/tests are green. When it is ready, say so.
+
+**Re-attestation.** A fix committed here moves the head, so a Security review
+line already attesting an earlier sha goes stale. The mechanical paths below are
+the DEFAULT here, not the fallback: batch the round's open findings into one fix
+pass, run the verifier
+(`node .claude/scripts/verify-nonexecutable-delta.mjs <attested-sha> <head-sha>`)
+before scheduling anything, and re-attest once for the batch rather than once per
+finding. A fresh full round is what the verifier's answer buys -- it runs when
+the verifier reports an executable delta that the narrowing path does not cover,
+never as the reflex the act of fixing triggers.
+
+Each path is recorded on the checklist line naming both shas:
+
+- **An n/a line.** Re-run the security-scope enumeration against the new head's
+  diff -- a scan, not a review round.
+- **Narrowing.** A head whose diff against the attested sha only deletes guarded
+  surface or strictly narrows it -- no new or changed enforcement, no new input
+  reached -- is re-attested by verifying exactly that property of the diff,
+  recorded as a narrowing verification. Anything added or changed voids this
+  path and takes a full round.
+- **No executable delta.** A head whose diff against the attested sha changes no
+  executable line -- comments and markdown only -- is likewise re-attested by
+  verifying exactly that property, recorded as a non-executable-delta
+  verification. That property is verified mechanically or not at all, and a
+  reading of the diff is never the verification: every changed source file must
+  be identical at the two shas once comments are removed, compared by parsing
+  each to a source file and printing it back with comments suppressed. The
+  checked-in verifier does exactly that, and fails closed on any changed path it
+  cannot parse. Both cheaper primitives are measured wrong and neither is to be
+  reached for again -- the compiler's emit erases types along with comments, so
+  a type-only edit compares identical under it, and a raw scanner has no parser
+  context, so a backtick inside a comment puts it in template state and it
+  reports comment-only edits as changes. A single executable line voids this
+  path and takes a full round, as does a delta that only a reviewer could judge
+  harmless.
 
 ## Step 5 -- Clean up
 

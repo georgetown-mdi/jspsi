@@ -19,24 +19,32 @@ trajectory, and write a file.
   `docs/spec/FILE_SYNC.md`). These are the remaining tokens in `$ARGUMENTS` after the
   flags above; call this list DOCS. There may be none.
 
+## The refutation contract
+
 Role mode requires the contract. If `--role` is given and `--claims` is missing, its
 file is unreadable, or it yields no claims, stop and say the round belongs to the plain
-`/light-review` lens form or a lens-scoped `general-purpose` reviewer. Quote the
-refutation-contract bullet in CLAUDE.md's Agent conventions as the reason -- these two
-roles run only under a named list of claims to refute -- and do not restate it as a rule
-of your own.
+`/light-review` lens form or a lens-scoped `general-purpose` reviewer. The requirement
+is CLAUDE.md's, not this command's: quote its refutation-contract bullet in Agent
+conventions as the reason -- these two roles run only under a named list of claims to
+refute -- rather than presenting the stop as a rule of your own.
 
-In role mode, read the claims file in the main thread: every non-empty line is one
-claim, trimmed, with a leading list marker (`- `, `* `, `1. `) stripped. Call this list
-CLAIMS.
+Role mode also requires adversary-reachable surface in the branch diff: production code
+handling remote, partner, or browser-delivered input, key material, or a protocol
+invariant. A diff that is test-only, docs-only, or support-script-only takes the lens
+round only, whatever its size.
 
-Hold each claim to the contract-language rules in CLAUDE.md's refutation-contract
-bullet before running the round. A claim asserting totality ("cannot be bypassed",
-"no way to", "genuinely binds") rather than a measured bound, or a post-narrowing
-no-regression claim scoped to prior heads' union coverage rather than to what the
-kept checks are for, is a defective contract: stop and rewrite it first. A round run
-on a totality claim can only gate, because the reviewer's job is to find the
-counterexample the claim's own wording promises does not exist.
+Read the claims file in the main thread: every non-empty line is one claim, trimmed,
+with a leading list marker (`- `, `* `, `1. `) stripped. Call this list CLAIMS.
+
+Hold each claim to the contract-language rules before running the round. A claim states
+a measured bound, never totality: "no bypass among the following measured deliveries",
+with the remainder a stated limit. After a deliberate narrowing of a control, a
+no-regression claim covers what the kept checks are for, never the union of everything
+any prior head caught -- union coverage makes narrowing impossible. A claim that breaks
+either rule ("cannot be bypassed", "no way to", "genuinely binds", or a post-narrowing
+claim scoped to prior heads' union coverage) is a defective contract: stop and rewrite
+it first. A round run on a totality claim can only gate, because the reviewer's job is
+to find the counterexample the claim's own wording promises does not exist.
 
 A plan-stage contract -- claims about a design rather than the code -- must include
 the premise claim, that the plan solves the right problem, among CLAIMS; commit the
