@@ -77,6 +77,18 @@ another blind whole-branch round.
 For each finding: verify it if it merits verification (read the specific
 hunks/files it names, not the whole diff), then decide.
 
+A gated claim or confirmed review finding has three dispositions, not one: fix
+it; contest it by measuring the disputed behavior first-hand (a verdict reached
+by reading alone is still open until a run decides it); or narrow the claim to
+what is measured, recording the remainder as a limits line in the governing
+`docs/spec/` file, written on the branch in the same pass. That line is the
+whole of the narrow exit by default. A follow-on board item is the escalation
+above it, taken only when the remainder itself needs a runtime change, and no
+session files more than one such item autonomously -- past that, the rest are
+proposals in the report for the owner to scope. The third disposition is the
+cheap one, not a failure -- a true finding whose fix would grow the guarded
+surface is often best narrowed.
+
 - **Default to fixing.** Drive-by corrections are welcome -- you do not need
   permission to fix something small and clearly right. A fix under roughly 20
   lines is made HERE, by you, in this pass: a fresh implementer spawn to carry
@@ -116,8 +128,8 @@ hunks/files it names, not the whole diff), then decide.
   dependency, a shared convention, or the branch's scope. Ask in prose with the
   options and a recommendation; do NOT use the question tool.
 - **Leave it** only when it is truly out of scope for this branch, genuinely
-  not worth the change, or best taken as a documented limit per CLAUDE.md's
-  three-disposition rule -- for that last, write the limits line into the
+  not worth the change, or best taken as a documented limit per the
+  three-disposition rule above -- for that last, write the limits line into the
   governing `docs/spec/` file in the same pass and propose the remedy as a
   follow-on in Step 4's table. Do NOT file a board issue for anything -- no
   automated filings; an unaddressed finding is recorded in Step 4, not on the
