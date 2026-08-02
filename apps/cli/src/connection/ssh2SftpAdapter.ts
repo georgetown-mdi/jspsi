@@ -25,6 +25,7 @@ import {
 } from "@psilink/core";
 
 import { createCappedSink } from "./frameSizeGuard";
+import { SftpAdapterLedger } from "./sftpAdapterLedger";
 import {
   MAX_DIRECTORY_ENTRIES,
   MAX_FILENAME_LENGTH,
@@ -721,18 +722,6 @@ const SFTP_SESSION_CLOSED_MESSAGE =
   "successful connect (typically a server idle or session-time-limit " +
   "policy, or a network drop), so this operation cannot run.";
 
-/**
- * Warn cadence for transparently-recovered mid-exchange session drops. The
- * adapter warns the operator on the FIRST successful mid-exchange re-dial, then
- * again only once every `SFTP_REDIAL_WARN_INTERVAL`-th re-dial, so a partner
- * whose server chronically caps session lifetime stays visible without a warn
- * line on every poll cycle. This is an observability cadence only, independent of
- * the mid-exchange reconnection cap that bounds how many re-dials the default mode
- * performs before failing terminally (see
- * {@link SSH2SFTPClientAdapter.withSessionRecovery}).
- */
-export const SFTP_REDIAL_WARN_INTERVAL = 10;
-
 // The final segment of a remote path. SFTP paths are POSIX-separated on the wire
 // whatever either end's platform is, so a backslash is an ordinary character in a
 // remote filename here and must not be read as a separator. A path with no
@@ -898,73 +887,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // was granted is not re-decided by a sibling reading a boundary the first arm's own
   // re-dial has since discharged.
   private lastAccountedSessionLoss = 0;
-  // Idle-boundary releases this adapter forced closed itself, and the session
-  // cleared, because the partner withheld its close past the release's bound (see
-  // releaseForIdle). Drives that path's warn cadence (SFTP_REDIAL_WARN_INTERVAL):
-  // a partner that never closes forces one every cycle, so an unpaced warning
-  // would fill an hours-long exchange's log. A plain operational counter, never a
-  // partner-controlled value.
-  private forcedReleases = 0;
-  // Idle-boundary releases that closed NOTHING because they gave up their wait for
-  // the transition ahead of them (see warnIdleReleaseDeclined). Kept apart from
-  // forcedReleases, which counts a boundary this adapter did close: rolling the two
-  // together would report a closed boundary the adapter never reached, in the one
-  // metric that tells the operator the mode is working. Paces this path's warning
-  // and carries its own end-of-run total (declinedReleaseCount), the two being
-  // separate statements about the mode: how often it closed a boundary itself, and
-  // how often it could not close one at all.
-  private declinedReleases = 0;
-  // Idle boundaries that closed NOTHING because an operation this adapter had
-  // ISSUED was still unsettled (see recordHeldBoundary). Kept apart from both
-  // release counters above because the cause differs and so does the remedy:
-  // neither a boundary this adapter closed nor a transition it gave up waiting on,
-  // but a session deliberately kept up for the operation on it. Carries an
-  // end-of-run total (heldBoundaryCount) and no warning of its own -- a held
-  // boundary is ordinary rather than anomalous.
-  private heldBoundaries = 0;
-  // Unbroken stretches of held boundaries: one is opened by a held boundary with
-  // none open, and closed when outstandingOperations next reaches zero. Reported
-  // beside heldBoundaries so one operation holding twenty boundaries does not read
-  // like twenty operations each holding one, which is the difference between a
-  // mode still delivering per-cycle sessions and one that has stopped. It measures
-  // unbroken hold rather than operations, so operations that overlap continuously
-  // are one stretch however many of them there were.
-  private heldBoundaryStretches = 0;
-  // Whether a held-boundary stretch is currently open. Not derivable from the two
-  // counters above: what closes a stretch is the outstanding count emptying, which
-  // leaves no trace in either.
-  private holdStretchOpen = false;
-  // Cycle-start re-dials that dialed NOTHING because they gave up their wait for the
-  // transition ahead of them (see warnCycleRedialDeclined). Paces that path's
-  // warning and nothing else; kept apart from the release counter above because a
-  // single stuck transition declines both signals of the same cycle, and one counter
-  // would then pace each line on the other's occurrences.
-  private declinedCycleRedials = 0;
-  private transportRetries = 0;
-  // Server-driven operations this adapter has ISSUED and not yet settled,
-  // counted at the bracket they pass through, save the two round trips issued
-  // outside it that tracked() names, and kept open across a recovery arm by the
-  // second span countOutstandingOperation describes -- which nests around the
-  // attempts' own brackets, so one operation inside its recovery reads as more
-  // than one. Nothing reads this as a quantity; the release's precondition is a
-  // non-zero test. Issued-and-unsettled is not the set that is on the wire, and
-  // departs from it in both directions: an adapter bound that expires settles
-  // the operation here while the library request it raced is still outstanding
-  // at the server, and an operation the server never answers is never settled
-  // from this side at all, core's whole-exchange budget being a race that
-  // abandons rather than a cancellation.
-  // Read by runTransition as the idle-boundary release's precondition: a boundary
-  // reached with an operation outstanding closes nothing, because the close would
-  // tear that operation off the wire. So what bounds the hold is the operation's
-  // own settlement -- its per-operation deadline where it carries one, and nothing
-  // on this side where it does not (a put from a string or stream source, and a
-  // progress-reset window a trickling server re-arms rather than trips), in which
-  // case the session stays held for the rest of the exchange. Owned here rather
-  // than read off the heartbeat's own in-flight count, which is no reading the
-  // release could take: releaseSessionForIdle stops the heartbeat as its first
-  // statement and stop() zeroes that count, and the heartbeat is not armed at all
-  // in the mode the precondition serves.
-  private outstandingOperations = 0;
+  // This adapter's operator-facing counters and the cadence its repeating
+  // warnings share (see ./sftpAdapterLedger). The warn sink is a closure rather
+  // than the logger itself so the ledger stays free of the log's type and reads
+  // the adapter's log at the moment a line is due.
+  private readonly ledger = new SftpAdapterLedger({
+    warn: (message: string) => this.log.warn(message),
+  });
   // The per-operation liveness bound (ms) every server-driven op is held to. See
   // the constructor's stallDeadlineMs doc for the test-seam and
   // not-operator-configurable rationale.
@@ -981,8 +910,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // at the start of the next cycle (ensureConnected), so a session a server's
   // max-session/idle cap would drop is not held across an idle gap -- save a
   // boundary kept for an operation still outstanding (see runTransition). Off by
-  // default (the whole-exchange single-session model). Internal-only; the
-  // CLI/config surface and the flag name are a separate item. See
+  // default (the whole-exchange single-session model). See
   // docs/notes/connection-per-poll-sftp.md.
   private readonly ephemeralSessions: boolean;
   // Paths of the protocol's own in-flight temp writes whose cleanup delete was
@@ -1131,7 +1059,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * A plain operational counter, never a partner-controlled value.
    */
   get transportRetryCount(): number {
-    return this.transportRetries;
+    return this.ledger.transportRetryCount;
   }
 
   /**
@@ -1148,7 +1076,23 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * partner-controlled value.
    */
   get forcedReleaseCount(): number {
-    return this.forcedReleases;
+    return this.ledger.forcedReleaseCount;
+  }
+
+  /**
+   * Idle boundaries at which the connection-per-poll release closed the session
+   * the way the mode intends: this side drove the close and the partner's server
+   * answered it within the release's bound, neither half of the transport having
+   * ended first. It is {@link forcedReleaseCount}'s denominator -- the two are
+   * the same boundary reached two ways, so a forced total alone cannot tell an
+   * exchange whose every cycle was forced from one where a handful were -- and
+   * the two are never summed into a third. NOT a reconnection and not a lost
+   * session: the mode's own boundary, deliberately ended, so it is absent from
+   * {@link reconnectCount}. 0 in every other mode. A plain operational counter,
+   * never a partner-controlled value.
+   */
+  get releasedBoundaryCount(): number {
+    return this.ledger.releasedBoundaryCount;
   }
 
   /**
@@ -1163,7 +1107,22 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * operational counter, never a partner-controlled value.
    */
   get declinedReleaseCount(): number {
-    return this.declinedReleases;
+    return this.ledger.declinedReleaseCount;
+  }
+
+  /**
+   * Poll cycles the connection-per-poll cycle-START re-dial skipped, having
+   * given up its bounded wait for the session transition ahead of it (see
+   * {@link ensureConnected}). The cycle carried no session and the poll loop
+   * skipped it, so it is the dialing half of what {@link declinedReleaseCount}
+   * reports for the releasing half: one stuck transition declines both signals
+   * of the same cycle, and the two are counted apart so neither line's total is
+   * the other's occurrences. NOT a reconnection and not a lost session: nothing
+   * was dialed and nothing was closed. 0 in every other mode. A plain
+   * operational counter, never a partner-controlled value.
+   */
+  get declinedCycleRedialCount(): number {
+    return this.ledger.declinedCycleRedialCount;
   }
 
   /**
@@ -1180,7 +1139,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * partner-controlled value.
    */
   get heldBoundaryCount(): number {
-    return this.heldBoundaries;
+    return this.ledger.heldBoundaryCount;
   }
 
   /**
@@ -1196,7 +1155,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * A plain operational counter, never a partner-controlled value.
    */
   get heldBoundaryStretchCount(): number {
-    return this.heldBoundaryStretches;
+    return this.ledger.heldBoundaryStretchCount;
   }
 
   // Acquire this adapter's one session-transition lock and run `transition` under
@@ -1256,8 +1215,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // The idle release is the one transition with a data-plane precondition: an
       // operation already on the wire when the boundary falls would be torn by the
       // close, so the release keeps the session up and the first boundary past that
-      // operation's SETTLEMENT ends it. What bounds the wait for that settlement --
-      // which for some operations is nothing at all -- is at outstandingOperations.
+      // operation's SETTLEMENT ends it. What bounds that hold is the operation's
+      // own settlement -- its per-operation deadline where it carries one, and
+      // nothing on this side where it does not (a put from a string or stream
+      // source, and a progress-reset window a trickling server re-arms rather than
+      // trips), in which case the session stays held for the rest of the exchange.
       // Read here, with the queue held and nothing yet driven, so an operation
       // issued while this release was still QUEUED behind another transition is
       // covered as well. The release gains no wait from this: it returns rather
@@ -1267,7 +1229,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // class of operation that drove it, and neither dial has a session to keep.
       if (
         transition.kind === "releaseForIdle" &&
-        this.outstandingOperations > 0
+        this.ledger.outstandingOperations > 0
       )
         return transition.heldForOutstandingOperation();
       const boundaryOnEntry = this.sessionBoundary;
@@ -1451,9 +1413,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
 
   /**
    * Wrap {@link retryPromise} for a data operation so each re-attempt (every
-   * invocation of `fn` past the first) bumps {@link transportRetries}. Surfaces
-   * how often an operation was re-issued over the run for the metrics summary,
-   * reusing the operation's own retry loop rather than adding parallel state.
+   * invocation of `fn` past the first) bumps {@link transportRetryCount}.
+   * Surfaces how often an operation was re-issued over the run for the metrics
+   * summary, reusing the operation's own retry loop rather than adding parallel
+   * state.
    */
   private countedOperationRetry<T>(
     fn: () => Promise<T>,
@@ -1464,7 +1427,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     let attempted = false;
     return retryPromise(
       () => {
-        if (attempted) this.transportRetries += 1;
+        if (attempted) this.ledger.countTransportRetry();
         attempted = true;
         return fn();
       },
@@ -1516,9 +1479,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // countOutstandingOperation and taking no epoch: it counts operations this
   // adapter issued and has not settled, whatever session they went out on, which
   // is neither more nor less than what the idle-boundary release's precondition
-  // reads (see outstandingOperations for how that set differs from the wire, and
-  // what it leaves the hold bounded by, and countOutstandingOperation for the one
-  // other span that keeps it). The two operations the recovery gate does not reach
+  // reads. Issued-and-unsettled is not the set that is on the wire, and departs
+  // from it in both directions: an adapter bound that expires settles the
+  // operation here while the library request it raced is still outstanding at the
+  // server, and an operation the server never answers is never settled from this
+  // side at all, core's whole-exchange budget being a race that abandons rather
+  // than a cancellation. The two operations the recovery gate does not reach
   // (the never-reject cleanup delete, and a put whose source cannot be re-issued)
   // do pass through here, so the precondition covers those as well -- for each of
   // them, from the moment it is ISSUED. A cleanup delete issued after the boundary
@@ -1546,9 +1512,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     });
   }
 
-  // Count one operation as outstanding, returning the call that ends it. The
-  // maintenance of the idle-boundary release's precondition, and of the held-
-  // boundary stretch that rides on it, lives here alone so its two spans keep it
+  // Open one operation's outstanding span on the ledger, returning the call that
+  // ends it. Both spans reach the ledger through here so they keep the count
   // identically: the bracket above, and the recovery arm between an operation's
   // failed attempt and its re-issued one (see withSessionRecovery), which is the
   // same operation still unsettled and so has to read as one.
@@ -1562,14 +1527,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // zeroes the in-flight count), so a beat suppressed across the arm would be
   // suppressed by a count the re-dial discards.
   private countOutstandingOperation(): () => void {
-    this.outstandingOperations += 1;
-    return () => {
-      this.outstandingOperations -= 1;
-      // An empty wire ends whatever stretch of held boundaries was open: the next
-      // held boundary begins a new one. Read after the decrement, so the operation
-      // settling here is not counted as still holding.
-      if (this.outstandingOperations === 0) this.holdStretchOpen = false;
-    };
+    return this.ledger.openOperation();
   }
 
   // Layers the non-fatal slow-operation warning (observability) over an in-flight
@@ -2122,14 +2080,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // Surface a transparently-recovered mid-exchange session drop to the operator at
   // default verbosity: silent recovery would hide a partner whose SFTP server
   // chronically caps session lifetime, exactly the case this feature exists for.
-  // Warn on the FIRST re-dial and on every SFTP_REDIAL_WARN_INTERVAL-th after it,
-  // so a chronic capper stays visible without a warn line every poll cycle; in the
-  // default mode also warn on the LAST re-dial the budget permits, because with a
-  // budget below that interval (the default 3 is) the escalation step never fires
-  // and the operator would otherwise go from one early warning straight to the
-  // terminal error. Each message then reads the re-dial in the mode the operator is
-  // running -- the two differ in likely cause, remedy, and bound, so one blended
-  // line would misdescribe both:
+  // Paced like every other repeating condition here (see the ledger's pacedWarn);
+  // in the default mode the LAST re-dial the budget permits is also due a line,
+  // because with a budget below that cadence's interval (the default 3 is) the
+  // escalation step never fires and the operator would otherwise go from one early
+  // warning straight to the terminal error. Each message then reads the re-dial in
+  // the mode the operator is running -- the two differ in likely cause, remedy, and
+  // bound, so one blended line would misdescribe both:
   //   Default: the drop is the classic partner-side session cap, the remedy is
   //   --connection-per-poll, and the remaining budget is stated so "the exchange
   //   continues" is not read as open-ended (exhausting it is terminal, see
@@ -2152,10 +2109,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private warnSessionRecovered(): void {
     const count = this.midExchangeRedials;
     if (this.ephemeralSessions) {
-      if (count !== 1 && count % SFTP_REDIAL_WARN_INTERVAL !== 0) return;
-      this.log.warn(
-        `The SFTP session dropped mid-exchange and was transparently re-dialed ` +
-          `(${count} so far this exchange); the exchange continues. ` +
+      this.ledger.pacedWarn(
+        count,
+        () =>
+          `The SFTP session dropped mid-exchange and was transparently ` +
+          `re-dialed (${count} so far this exchange); the exchange continues. ` +
           "Connection-per-poll dials a fresh session per poll cycle, so this is " +
           "either a drop within a poll cycle -- the link or the partner's server " +
           "faulting mid-cycle, which is what to investigate -- or a rendezvous " +
@@ -2172,36 +2130,36 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     }
     const budget = this.operativeMaxReconnectAttempts();
     const remaining = Math.max(budget - count, 0);
-    if (
-      count !== 1 &&
-      remaining !== 0 &&
-      count % SFTP_REDIAL_WARN_INTERVAL !== 0
-    )
-      return;
-    const recovered =
-      count === 1
-        ? "The SFTP session dropped mid-exchange and was transparently " +
-          "re-dialed; the exchange continues."
-        : `The SFTP session has now dropped and been transparently re-dialed ` +
-          `${count} times this exchange; each drop was recovered and the ` +
-          `exchange continues.`;
-    const budgetLeft =
-      remaining === 0
-        ? `That was the last re-dial allowed by ` +
-          `max_reconnect_attempts=${budget}: the next mid-exchange drop ends ` +
-          `the exchange.`
-        : `${remaining} further mid-exchange re-dial` +
-          `${remaining === 1 ? " is" : "s are"} allowed by ` +
-          `max_reconnect_attempts=${budget} before the exchange fails.`;
-    this.log.warn(
-      `${recovered} This is typically the partner's SFTP server enforcing a ` +
-        `session-duration or idle limit you cannot change. Because the default ` +
-        `mode holds one SFTP session open for the whole exchange, it will keep ` +
-        `recurring regardless of your settings; --connection-per-poll, which ` +
-        `dials a fresh session each poll cycle instead of holding one, is the ` +
-        `real fix for that case, and a longer poll interval ` +
-        `(--polling-frequency) helps only if the server is instead reacting to ` +
-        `how often this exchange queries it. ${budgetLeft}`,
+    this.ledger.pacedWarn(
+      count,
+      () => {
+        const recovered =
+          count === 1
+            ? "The SFTP session dropped mid-exchange and was transparently " +
+              "re-dialed; the exchange continues."
+            : `The SFTP session has now dropped and been transparently ` +
+              `re-dialed ${count} times this exchange; each drop was recovered ` +
+              `and the exchange continues.`;
+        const budgetLeft =
+          remaining === 0
+            ? `That was the last re-dial allowed by ` +
+              `max_reconnect_attempts=${budget}: the next mid-exchange drop ends ` +
+              `the exchange.`
+            : `${remaining} further mid-exchange re-dial` +
+              `${remaining === 1 ? " is" : "s are"} allowed by ` +
+              `max_reconnect_attempts=${budget} before the exchange fails.`;
+        return (
+          `${recovered} This is typically the partner's SFTP server enforcing a ` +
+          `session-duration or idle limit you cannot change. Because the default ` +
+          `mode holds one SFTP session open for the whole exchange, it will keep ` +
+          `recurring regardless of your settings; --connection-per-poll, which ` +
+          `dials a fresh session each poll cycle instead of holding one, is the ` +
+          `real fix for that case, and a longer poll interval ` +
+          `(--polling-frequency) helps only if the server is instead reacting to ` +
+          `how often this exchange queries it. ${budgetLeft}`
+        );
+      },
+      remaining === 0,
     );
   }
 
@@ -3028,8 +2986,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * hold, not a drain: the release returns instead of awaiting the operation, so
    * nothing above it waits any longer than it would have. An operation carrying no
    * adapter-side deadline holds every boundary until the exchange ends; the hold's
-   * bound is the operation's, and {@link outstandingOperations} states which have
-   * one.
+   * bound is the operation's, and {@link runTransition} states which have one.
    */
   releaseForIdle(): Promise<void> {
     if (!this.ephemeralSessions) return Promise.resolve();
@@ -3037,40 +2994,31 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       kind: "releaseForIdle",
       skipped: () => undefined,
       abandoned: () => this.warnIdleReleaseDeclined(),
-      heldForOutstandingOperation: () => this.recordHeldBoundary(),
+      // The release kept the session for an operation this side had issued rather
+      // than cutting that operation off the wire. Accounted and NOT warned, unlike
+      // its two sibling outcomes: an operation straddling a boundary is ordinary,
+      // so a per-occurrence line -- paced or not -- would report an anomaly where
+      // there is none. What the run total is for is the case that is not ordinary:
+      // an operation with no bound of its own holds every remaining boundary, and
+      // the mode's per-cycle session lifetime has then lapsed for that run with
+      // nothing else saying so.
+      heldForOutstandingOperation: () => this.ledger.countHeldBoundary(),
       run: (held) => this.releaseSessionForIdle(held),
     });
-  }
-
-  // The idle release kept the session for an operation this side had issued rather
-  // than cutting that operation off the wire. Accounted and NOT warned, unlike its
-  // two sibling outcomes: an operation straddling a boundary is ordinary, so a
-  // per-occurrence line -- paced or not -- would report an anomaly where there is
-  // none. What the run total is for is the case that is not ordinary: an operation
-  // with no bound of its own holds every remaining boundary, and the mode's
-  // per-cycle session lifetime has then lapsed for that run with nothing else
-  // saying so.
-  private recordHeldBoundary(): void {
-    this.heldBoundaries += 1;
-    if (this.holdStretchOpen) return;
-    this.holdStretchOpen = true;
-    this.heldBoundaryStretches += 1;
   }
 
   // The idle release gave up its wait for the transition ahead of it: it released
   // nothing, so a session that is live is held across this idle gap -- the one
   // thing the mode exists to prevent -- while the alternative, parking the poll
   // loop until the hour-scale peer-inactivity ceiling misreports it as peer
-  // silence, is worse. Paced exactly like the forced release's warning
-  // (SFTP_REDIAL_WARN_INTERVAL) and for the same reason: whatever holds a
-  // transition long enough to do this once tends to do it every cycle, and an
-  // unpaced line would fill an hours-long exchange's log.
+  // silence, is worse. Whatever holds a transition long enough to do this once
+  // tends to do it every cycle, so the line takes the shared warn cadence.
   private warnIdleReleaseDeclined(): void {
-    this.declinedReleases += 1;
-    const count = this.declinedReleases;
-    if (count !== 1 && count % SFTP_REDIAL_WARN_INTERVAL !== 0) return;
-    this.log.warn(
-      `The connection-per-poll idle release did not close the SFTP session: ` +
+    const count = this.ledger.countDeclinedRelease();
+    this.ledger.pacedWarn(
+      count,
+      () =>
+        `The connection-per-poll idle release did not close the SFTP session: ` +
         `another session transition on this connection -- typically a dial ` +
         `against an unresponsive server -- did not complete within the ` +
         `release's ${TRANSITION_ACQUIRE_TIMEOUT_MS} ms wait, and closing the ` +
@@ -3128,12 +3076,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     //
     // Neither half ended is the ordinary release, whose own end() below is what
     // ends the transport.
-    if (socket.readableEnded !== true)
-      held.recordBoundary(
-        socket.writableEnded === true
+    const boundary =
+      socket.readableEnded === true
+        ? undefined
+        : socket.writableEnded === true
           ? "releasedOverEndedTransport"
-          : "deliberatelyReleased",
-      );
+          : "deliberatelyReleased";
+    if (boundary !== undefined) held.recordBoundary(boundary);
     await this.awaitClientClose(
       held,
       once,
@@ -3142,7 +3091,18 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       end,
       false,
     );
-    if (!internals.sftp) return;
+    if (!internals.sftp) {
+      // The mode working: this release drove the close and the partner's server
+      // answered it within the bound. Read off the boundary the release itself
+      // classified rather than the socket, whose flags past this close are the
+      // close's own and answer a different question from who ended the transport.
+      // Counted so the forced total below has a denominator -- the same boundary
+      // reached the other way -- and so a run against a server that closes on
+      // request says so rather than reporting nothing at all.
+      if (boundary === "deliberatelyReleased")
+        this.ledger.countReleasedBoundary();
+      return;
+    }
     // ssh2-sftp-client's global 'close' listener has not run, so the backstop
     // settled that wait rather than the ssh2 Client's 'close'. Which state that is
     // turns on whether the transport was ended, so it is a branch on the socket
@@ -3390,24 +3350,23 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   // Account for an idle boundary the connection-per-poll release closed itself. A
-  // partner that never closes forces one every cycle, so the operator hears it on
-  // the cadence a chronic mid-exchange re-dial gets: the first, then every
-  // SFTP_REDIAL_WARN_INTERVAL-th. Nothing leaks, and a loss suffered at one of
-  // these boundaries is reported by the path that recovered it rather than by this
-  // line, so pacing it costs the operator nothing.
+  // partner that never closes forces one every cycle, so the line takes the shared
+  // warn cadence. Nothing leaks, and a loss suffered at one of these boundaries is
+  // reported by the path that recovered it rather than by this line, so pacing it
+  // costs the operator nothing.
   private countForcedRelease(): void {
-    this.forcedReleases += 1;
-    const count = this.forcedReleases;
-    if (count === 1 || count % SFTP_REDIAL_WARN_INTERVAL === 0)
-      this.log.warn(
+    const count = this.ledger.countForcedRelease();
+    this.ledger.pacedWarn(
+      count,
+      () =>
         `The partner's SFTP server did not close the connection within the ` +
-          `connection-per-poll idle release's bound -- a server that leaves ` +
-          `connections half-open, or one merely slower to answer than the ` +
-          `bound allows for. The release closed it from this side and the next ` +
-          `poll cycle dials a fresh session; the exchange continues (${count} ` +
-          `idle ${count === 1 ? "boundary" : "boundaries"} closed this way so ` +
-          `far this exchange).`,
-      );
+        `connection-per-poll idle release's bound -- a server that leaves ` +
+        `connections half-open, or one merely slower to answer than the ` +
+        `bound allows for. The release closed it from this side and the next ` +
+        `poll cycle dials a fresh session; the exchange continues (${count} ` +
+        `idle ${count === 1 ? "boundary" : "boundaries"} closed this way so ` +
+        `far this exchange).`,
+    );
   }
 
   /**
@@ -3507,16 +3466,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
 
   // The cycle-start re-dial gave up its wait for the transition ahead of it: it
   // dialed nothing, so this cycle carries no session and the poll loop skips it.
-  // Paced exactly like the idle release's decline (warnIdleReleaseDeclined) and for
-  // the same reason: core drives both signals once per poll cycle, and whatever
-  // holds a transition long enough to decline one tends to hold it every cycle, so
-  // an unpaced line would fill an hours-long exchange's log.
+  // Counted apart from the idle release's decline (warnIdleReleaseDeclined) though
+  // core drives both signals once per poll cycle: one stuck transition declines
+  // both, and a shared count would pace each line on the other's occurrences and
+  // misstate both numbers.
   private warnCycleRedialDeclined(): void {
-    this.declinedCycleRedials += 1;
-    const count = this.declinedCycleRedials;
-    if (count !== 1 && count % SFTP_REDIAL_WARN_INTERVAL !== 0) return;
-    this.log.warn(
-      `ephemeral SFTP re-dial declined: another session transition on this ` +
+    const count = this.ledger.countDeclinedCycleRedial();
+    this.ledger.pacedWarn(
+      count,
+      () =>
+        `ephemeral SFTP re-dial declined: another session transition on this ` +
         `connection did not complete within the re-dial's ` +
         `${TRANSITION_ACQUIRE_TIMEOUT_MS} ms wait, and dialing alongside it ` +
         `would corrupt the one shared client; skipping this poll cycle and ` +

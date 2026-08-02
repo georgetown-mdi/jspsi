@@ -90,61 +90,50 @@ export class LocalFSClient implements FileTransportClient {
   }
 
   /**
-   * Transport data-operation retries over this client's life. Always 0 for the
-   * filedrop transport: its per-operation resilience is the poll-read loop in
-   * {@link FileSyncConnection}, not a re-issue of the operation, so there is no
-   * operation-retry loop to count here. Present so both file-transport clients
-   * expose the same metrics surface.
+   * The session and retry counters the SFTP adapter reports, each fixed at 0
+   * here. The filedrop transport opens no connection and holds no session: its
+   * per-operation resilience is the poll-read loop in
+   * {@link FileSyncConnection} rather than a re-issue, there is nothing to drop
+   * mid-exchange, and no idle boundary to release, decline, force or hold. They
+   * are load-bearing rather than decorative -- the end-of-run summary and the
+   * metrics event read one union of the two client types, so a metric absent
+   * here would not compile there.
    */
   get transportRetryCount(): number {
     return 0;
   }
 
-  /**
-   * Mid-exchange session-recovery re-dials over this client's life. Always 0 for
-   * the filedrop transport: it holds no long-lived session to drop mid-exchange,
-   * so there is nothing to re-dial. Present so both file-transport clients expose
-   * the same metrics surface.
-   */
+  /** See {@link transportRetryCount}. */
   get midExchangeReconnectCount(): number {
     return 0;
   }
 
-  /**
-   * Idle boundaries whose connection this client had to close itself. Always 0 for
-   * the filedrop transport: it opens no connection, so it has none to release at a
-   * poll boundary. Present so both file-transport clients expose the same metrics
-   * surface.
-   */
+  /** See {@link transportRetryCount}. */
   get forcedReleaseCount(): number {
     return 0;
   }
 
-  /**
-   * Idle boundaries at which a release closed nothing. Always 0 for the filedrop
-   * transport: it opens no connection, so it releases none at a poll boundary and
-   * has no session transition to give up waiting on. Present so both
-   * file-transport clients expose the same metrics surface.
-   */
+  /** See {@link transportRetryCount}. */
+  get releasedBoundaryCount(): number {
+    return 0;
+  }
+
+  /** See {@link transportRetryCount}. */
   get declinedReleaseCount(): number {
     return 0;
   }
 
-  /**
-   * Idle boundaries held for an operation this client had issued. Always 0 for the
-   * filedrop transport: it opens no connection, so it has no session to keep for
-   * an operation and no poll boundary to keep it across. Present so both
-   * file-transport clients expose the same metrics surface.
-   */
+  /** See {@link transportRetryCount}. */
+  get declinedCycleRedialCount(): number {
+    return 0;
+  }
+
+  /** See {@link transportRetryCount}. */
   get heldBoundaryCount(): number {
     return 0;
   }
 
-  /**
-   * Unbroken stretches of held idle boundaries. Always 0 for the filedrop
-   * transport, which holds no boundary to open a stretch at. Present so both
-   * file-transport clients expose the same metrics surface.
-   */
+  /** See {@link transportRetryCount}. */
   get heldBoundaryStretchCount(): number {
     return 0;
   }

@@ -18,8 +18,11 @@ import {
   MAX_DEFERRED_CLEANUP_DELETES,
   MAX_DEFERRED_CLEANUP_REISSUES,
   SSH2SFTPClientAdapter,
-  SFTP_REDIAL_WARN_INTERVAL,
 } from "../../src/connection/ssh2SftpAdapter";
+import {
+  SFTP_REDIAL_WARN_INTERVAL,
+  SftpAdapterLedger,
+} from "../../src/connection/sftpAdapterLedger";
 import {
   MAX_DIRECTORY_ENTRIES,
   MAX_FILENAME_LENGTH,
@@ -4956,6 +4959,42 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(connect).toHaveBeenCalledTimes(7);
   });
 
+  test("an ordinary release is totalled, warns nothing, and needs a session to count", async () => {
+    // The outcome the mode exists for: this side drove the close, the partner's
+    // server answered it within the bound, and the next cycle dialed a fresh
+    // session. Nothing anomalous happened, so no occurrence draws a line and the
+    // run total is the only thing telling an unattended operator the mode
+    // delivered per-cycle sessions at all -- and the only denominator the forced
+    // total has. A release that finds no session to close is not one of them: it
+    // ended no boundary, so counting it would inflate that denominator with
+    // boundaries the partner never answered.
+    const { client } = ephemeralClient(wrapperMethods());
+    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+      await expect(adapter.ensureConnected()).resolves.toBe(true);
+    }
+    await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+    await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
+
+    expect(adapter.releasedBoundaryCount).toBe(4);
+    // Each of the mode's other per-cycle outcomes is its own count, and none of
+    // them happened here.
+    expect(adapter.forcedReleaseCount).toBe(0);
+    expect(adapter.declinedReleaseCount).toBe(0);
+    expect(adapter.declinedCycleRedialCount).toBe(0);
+    expect(adapter.heldBoundaryCount).toBe(0);
+    // Nothing was lost, so no boundary reaches the reconnect counters, and the
+    // operator hears nothing at all about an ordinary cycle.
+    expect(adapter.reconnectCount).toBe(0);
+    expect(adapter.midExchangeReconnectCount).toBe(0);
+    expect(adapterLog(adapter).warn).not.toHaveBeenCalled();
+  });
+
   test("an op after the idle release re-establishes, uncounted and unwarned", async () => {
     // The poll cycle releases the session at its idle boundary and a send driven
     // by the protocol continuation resumes into that gap, ahead of the next
@@ -5201,8 +5240,10 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const reestablishing = adapter.ensureConnected();
     await waitUntil(() => calls.length === 2);
     expect(state.live).toBe(true);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((adapter as any).outstandingOperations).toBe(0);
+    expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((adapter as any).ledger as SftpAdapterLedger).outstandingOperations,
+    ).toBe(0);
 
     await adapter.releaseForIdle();
     expect(state.live).toBe(false);
@@ -5952,7 +5993,9 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // A partner that never closes forces one of these EVERY cycle, so an unpaced
     // line would fill an hours-long exchange's log. It follows the cadence a
     // chronic mid-exchange re-dial already gets: the first, then every
-    // SFTP_REDIAL_WARN_INTERVAL-th.
+    // SFTP_REDIAL_WARN_INTERVAL-th. Driven past two intervals rather than one, so
+    // what is pinned is the repeating cadence and not merely its first escalation:
+    // an off-by-one in either term would still produce one line at the interval.
     vi.useFakeTimers();
     try {
       const { client, sock, rawClient } = withheldCloseClient(wrapperMethods());
@@ -5964,7 +6007,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
       const dialedCloseListeners = rawClient.listenerCount("close");
-      const cycles = SFTP_REDIAL_WARN_INTERVAL + 2;
+      const cycles = SFTP_REDIAL_WARN_INTERVAL * 2 + 1;
       for (let cycle = 0; cycle < cycles; cycle += 1) {
         const release = adapter.releaseForIdle();
         await vi.advanceTimersByTimeAsync(5_000);
@@ -5975,11 +6018,23 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       expect(sock.destroy).toHaveBeenCalledTimes(cycles);
       // Every cycle re-dialed, and none of them was reported as a drop.
       expect(adapter.reconnectCount).toBe(0);
-      expect(warn).toHaveBeenCalledTimes(2);
-      // The number in the line is the number of boundaries the sentence describes,
-      // which is the end-of-run summary's total.
+      // A boundary the partner never closed is not one it closed on request, so
+      // the ordinary-release total this one is read against stays empty.
+      expect(adapter.forcedReleaseCount).toBe(cycles);
+      expect(adapter.releasedBoundaryCount).toBe(0);
+      expect(warn).toHaveBeenCalledTimes(3);
+      // The number in each line is the number of boundaries the sentence
+      // describes, which is the end-of-run summary's total: the first occurrence
+      // and every interval-th after it, with the trailing occurrences past the
+      // last one silent.
+      expect(warn.mock.calls[0][0]).toContain(
+        "1 idle boundary closed this way so far",
+      );
       expect(warn.mock.calls[1][0]).toContain(
         `${SFTP_REDIAL_WARN_INTERVAL} idle boundaries closed this way so far`,
+      );
+      expect(warn.mock.calls[2][0]).toContain(
+        `${SFTP_REDIAL_WARN_INTERVAL * 2} idle boundaries closed this way so far`,
       );
       // Each cycle's release installs and consumes its own close wait, so nothing
       // accumulates on the ssh2 Client the library keeps across reconnects: the
@@ -6677,6 +6732,10 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // the same boundary answers is what the gate below acts on.
     expect(releaseBoundaryStands(adapter)).toBe(false);
     expect(boundarySaysReleaseTookTheSession(adapter)).toBe(true);
+    // Nor the ordinary-release total: what ended this transport was the partner's
+    // drop, so counting it beside the boundaries a server closed on request would
+    // credit that server with a close it never made.
+    expect(adapter.releasedBoundaryCount).toBe(0);
 
     await expect(adapter.exists("/remote/out.json")).resolves.toBe(true);
 
@@ -8360,6 +8419,8 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(rawClient.end).not.toHaveBeenCalled();
     expect(adapter.declinedReleaseCount).toBe(0);
     expect(adapter.forcedReleaseCount).toBe(0);
+    // Nor a boundary the partner closed on request: a hold closed nothing at all.
+    expect(adapter.releasedBoundaryCount).toBe(0);
     expect(adapter.heldBoundaryCount).toBe(2);
     expect(adapter.heldBoundaryStretchCount).toBe(1);
     // Accounted, never warned: the operator hears about the run's total at the end
@@ -8467,7 +8528,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   // named point inside the recovery arm.
   const outstandingOperations = (adapter: SSH2SFTPClientAdapter) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).outstandingOperations as number;
+    ((adapter as any).ledger as SftpAdapterLedger).outstandingOperations;
 
   // Transitions holding or waiting on the session lock. Read only to place a
   // boundary: a recovery re-dial that has left this count is one whose session is
@@ -9511,10 +9572,14 @@ describe("ephemeral session mode (connection-per-poll)", () => {
         `${SFTP_REDIAL_WARN_INTERVAL} idle boundaries released nothing this way`,
       );
       // What the end-of-run summary reports is every occurrence, not the paced
-      // subset the log carries. A decline closed nothing, so it is not a forced
-      // release and the two totals never share a tally.
+      // subset the log carries -- and the two signals total separately there too,
+      // the release having declined once more than the cycle-start dial did. A
+      // decline closed nothing, so it is neither a forced release nor a boundary
+      // the partner closed on request, and none of the totals share a tally.
       expect(adapter.declinedReleaseCount).toBe(cycles + 1);
+      expect(adapter.declinedCycleRedialCount).toBe(cycles);
       expect(adapter.forcedReleaseCount).toBe(0);
+      expect(adapter.releasedBoundaryCount).toBe(0);
     } finally {
       vi.useRealTimers();
     }
