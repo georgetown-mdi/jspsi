@@ -662,12 +662,13 @@ Waiting on such a server would leave a run that had already fully succeeded -- f
 
 psilink bounds that wait.
 When the partner's server has not closed the connection within a short teardown bound -- seconds, fixed and not configurable -- psilink closes it from this side and the command finishes normally.
-The same happens when the close fails outright rather than going quiet: whatever left the connection open, psilink closes it.
+The same happens when the close fails outright rather than going quiet.
 This applies in **both session modes**, the default held session and [`connection_per_poll`](#sftp-only-options), because a connection's final close is common to both.
 
 What you see when it happens:
 
 - One informational line at the default log level, naming what left the connection open -- a partner's server that did not close it, or a close that failed -- and stating that this side closed it. It is not an error, and it is no verdict on the run: this close is the last step of teardown, so it changes neither the results nor the exit code. A run that failed for some other reason draws the same line, and it neither caused that failure nor reports it.
+- A warning in place of that line when this side could not close it either -- either the means of closing it was not available, or the connection did not close when it was used. The connection is then left to the operating system, it may stay half-open, and the command may not exit on its own. The warning names what could not be done and where to check what changed. Like the informational line, it is no verdict on the run: the results and the exit code are whatever the exchange produced.
 - Nothing at all against a server that closes normally. That close is awaited and returns promptly, with no added wait.
 
 This is distinct from the per-cycle release warning `connection_per_poll` can draw from the same class of server: that one names an idle boundary in the *middle* of an exchange, is paced, and is totalled in the end-of-run summary.
