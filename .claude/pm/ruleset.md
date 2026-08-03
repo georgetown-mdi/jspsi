@@ -180,6 +180,10 @@ the URL), fetch just that item with `node .claude/scripts/fetch-issues.mjs
 Filing is cheap and closing is not, so a new item is the last sink tried, not
 the first. In order:
 
+- A concern that is design-record material -- rationale, a correction to the
+  model a mechanism rests on, an alternative weighed and set aside -- amends the
+  surface's model note under `docs/notes/` on the branch that raised it, rather
+  than being filed or written into the spec. Recommend that and file nothing.
 - A review finding's default sink is a limits line in the governing `docs/spec/`
   file, written on the branch that raised it. Recommend that and file nothing.
 - A finding that belongs on the board but matches a standing sweep item (a
@@ -188,7 +192,10 @@ the first. In order:
 - Declining to file is a legitimate outcome. Say what the concern is worth and
   where it should live instead.
 - At most one item is filed autonomously per session. Past that, draft the rest
-  and hand them to the caller for the owner's word.
+  and hand them to the caller for the owner's word. The cap counts AUTONOMOUS
+  filings: an owner delegation the caller relays, quoted verbatim in the spawn
+  prompt, licenses the batch it covers, and the report names the delegation it
+  filed under.
 
 The repo is `georgetown-mdi/jspsi`; the owner for both projects is
 `georgetown-mdi`.

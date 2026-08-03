@@ -110,10 +110,11 @@ npm run format
 
 ## Documentation
 
-PSI-Link documentation is two-tier:
+PSI-Link documentation is three-tier:
 
 - `docs/` (overview) - conceptual and operational documents for program officers, security reviewers, compliance officers, IT staff, and contributors.
 - `docs/spec/` - the technical specification tier: wire formats, byte encodings, normative constant values, protocol internals, and implementation-level design, for implementors and auditors. See [`docs/spec/README.md`](docs/spec/README.md) for the index and routing guide.
+- `docs/notes/` - tracked, citeable design records and explorations: the model behind a mechanism, the options weighed, and the decisions taken. Non-normative - nothing here binds an implementation, and a note points at the spec for the normative rows rather than restating them. Indexed by [`docs/notes/README.md`](docs/notes/README.md), which carries the maturity ladder from `scratch/` up to the formal tiers.
 
 When behavior changes, update the matching tier:
 
