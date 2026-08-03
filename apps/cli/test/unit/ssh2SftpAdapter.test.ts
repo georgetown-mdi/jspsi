@@ -10861,6 +10861,28 @@ describe("SFTP adapter session accounting", () => {
     expect(adapter.midExchangeReconnectCount).toBe(0);
   });
 
+  test("a repeat connect() over a live session charges the replaced generation as deliberate", async () => {
+    const { client } = accountingClient();
+    const adapter = new SSH2SFTPClientAdapter();
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+    const accounting = adapter.sessionAccounting;
+    expect(accounting.losses).toEqual({
+      partner: 0,
+      deliberate: 1,
+      teardown: 0,
+      fatal: 0,
+    });
+    expect(accounting.generationsEnded).toBe(1);
+    // Replacing a session this side still held is this side's doing, so nothing
+    // an operator reads as a drop.
+    expect(adapter.reconnectCount).toBe(0);
+    expect(adapter.midExchangeReconnectCount).toBe(0);
+  });
+
   test("a drop the exhausted budget refuses is charged like every other", async () => {
     // The budget bounds sessions LOST rather than re-dials made, so the drop it
     // refuses is recorded exactly as the ones it allowed: the generation ended,

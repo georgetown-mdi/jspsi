@@ -182,15 +182,16 @@ Every trigger that ends a session or drives a re-dial, and what each does to the
 | partner drop absorbed at an idle boundary, nothing torn | yes | yes | no | paced | `releasedOverEndedTransport` |
 | peer FIN observed at an idle boundary | yes | yes | no | paced | `notReleased` |
 | session already cleared at idle-release entry | yes | yes | no | paced | `notReleased` |
-| partner drop absorbed by the next cycle-start dial | yes | yes | no | paced | -- |
+| partner drop absorbed by the next cycle-start dial | yes | yes | no | paced | `notReleased`, on the dial's success |
 | deliberate idle release, then the next cycle's dial | yes | no | no | no | `deliberatelyReleased` |
 | forced idle release (close withheld past the bound) | yes | as its entry classification above | as its entry classification above | paced | the entry classification, unchanged |
-| teardown re-dial (abort marker / terminal drain) | yes | no | no (teardown exemption) | no | -- |
+| teardown re-dial (abort marker / terminal drain) | yes | no | no (teardown exemption) | no | `notReleased`, on the dial's success |
 | the connection's terminal close | yes | no | no | no | -- |
 | a fatal SFTP protocol error | yes | no | no | no | -- |
 | connect-time dialing retry past the first | no | yes | its own per-`connect()` loop | no | -- |
 | idle release or cycle re-dial that declined its acquire | no | no | no | paced | unchanged |
 | idle boundary held for an outstanding operation | no | no | no | no | unchanged |
+| idle boundary over a generation already ended and charged | no | no | no | no | unchanged |
 
 The boundary column answers a question the counting does not: whether the session's absence is a release's doing. An operation issued after a boundary reads it to decide between re-establishing through the cycle-start dial and being issued at a session that is gone; `deliberatelyReleased` and `releasedOverEndedTransport` both say a release took the session, and only the first says the release also ENDED it. No reading that a release took the session may stand over a session that is still live, and a transition that raises leaves the reading it found - so a release that ended nothing, and a dial that established a session and then failed its own post-connect verification (whose failure the cycle-start reconnect reports as a skipped cycle rather than a raise), both leave the next drop classifiable as the drop it is. A forced release leaves the entry classification standing, because the forcing says how the boundary concluded rather than who ended the transport beneath it -- so a boundary forced over a drop the partner had already delivered is counted and warned as that drop, while one forced over an ordinary release is counted nowhere, and the forced total spans both.
 
