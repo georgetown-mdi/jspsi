@@ -1,3 +1,27 @@
+declare const displayableBrand: unique symbol;
+
+/**
+ * A string that has passed through the display boundary: what
+ * {@link sanitizeForDisplay} returns and what {@link displayText} composes.
+ * Declaring an operator-facing display field as `Displayable` rather than
+ * `string` makes omitting the sanitize call a compile error instead of a review
+ * catch -- a plain `string` (any partner-controlled value) is not assignable to
+ * it. The brand is transparent in the other direction: a `Displayable` IS a
+ * `string`, so renderers, logs, JSX text, and concatenation consume it with no
+ * cast or unwrapping.
+ *
+ * The brand is a phantom property keyed by a module-private `unique symbol`, so
+ * nothing outside this module satisfies it structurally: the two functions here
+ * are the only way to obtain one, short of a deliberate `as Displayable`
+ * assertion. It exists only in the type system -- no value carries the property
+ * at runtime, and the branded string is byte-identical to the unbranded one.
+ *
+ * The brand marks a value as safe to SHOW, never as the value to use: the
+ * display form is lossy and escaped, so a comparison, storage, or hashing site
+ * still takes the raw string (see {@link sanitizeForDisplay}).
+ */
+export type Displayable = string & { readonly [displayableBrand]: true };
+
 /**
  * Marker appended by {@link sanitizeForDisplay} when a value is truncated. Plain
  * ASCII so the marker itself can never reintroduce a control or deceptive-Unicode
@@ -57,7 +81,7 @@ export interface SanitizeForDisplayOptions {
 export function sanitizeForDisplay(
   value: string,
   options?: SanitizeForDisplayOptions,
-): string {
+): Displayable {
   const maxLength = options?.maxLength ?? DEFAULT_MAX_DISPLAY_LENGTH;
 
   // Iterate by code point (string iteration, not UTF-16 unit) so an astral
@@ -91,5 +115,36 @@ export function sanitizeForDisplay(
     out += piece;
   }
 
-  return truncated ? out + DISPLAY_TRUNCATION_MARKER : out;
+  return (truncated ? out + DISPLAY_TRUNCATION_MARKER : out) as Displayable;
+}
+
+/**
+ * Compose fixed first-party copy with already-sanitized values into a
+ * {@link Displayable}, as a tagged template:
+ * ``displayText`${fieldLabel} (${marker})` ``. Its result is exactly the string
+ * the same template literal would have produced -- the tag adds no bytes -- so it
+ * is the way to keep the brand across a composition, which plain concatenation
+ * and interpolation drop (both yield `string`).
+ *
+ * What it will accept is what makes it a guarantee rather than a cast: the fixed
+ * spans are the call site's own literal text, since only the compiler produces a
+ * `TemplateStringsArray`, and every interpolated value is either a
+ * {@link Displayable} or a `number` (whose string form is always printable
+ * ASCII). No partner-controlled string reaches the output without having gone
+ * through {@link sanitizeForDisplay} first.
+ *
+ * The bound is the tagged-template call shape, not a proof about every caller: a
+ * hand-built `TemplateStringsArray` passed as an ordinary argument bypasses it,
+ * as an `as Displayable` assertion bypasses the brand itself. Both are
+ * deliberate acts a reviewer sees, which is the class of misuse this does not
+ * try to stop; the accidental omission is.
+ */
+export function displayText(
+  fixedSpans: TemplateStringsArray,
+  ...values: Array<Displayable | number>
+): Displayable {
+  let composed = fixedSpans[0];
+  for (let index = 0; index < values.length; index += 1)
+    composed += String(values[index]) + fixedSpans[index + 1];
+  return composed as Displayable;
 }
