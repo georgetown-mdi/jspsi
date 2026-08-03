@@ -24,7 +24,9 @@ import type { LinkageTerms } from "../src/config/linkageTerms";
 import {
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
+  sanitizeForDisplay,
 } from "../src/utils/sanitizeForDisplay";
+import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
 import {
   MAX_NODE_COUNT,
@@ -1288,6 +1290,35 @@ test("date mismatch produces a warning, not an error", () => {
   expect(warnings[0]).toMatch(/date mismatch/);
 });
 
+test("every value a warning can carry is already escape-stable", () => {
+  // The CLI escapes a warning again at its log line and its event stream, so a
+  // warning makes two passes on that route (recorded as a limit in
+  // CHANNEL_SECURITY.md). That second pass is unobservable only while every
+  // value interpolated into a warning is constrained to a shape the escape does
+  // not rewrite. This pins that premise where it actually holds -- the schema --
+  // so a future warning carrying free text fails here rather than silently
+  // reaching an operator double-escaped.
+  const { warnings } = validateCompatibility(termsA, {
+    ...termsB,
+    date: "2025-06-01",
+  });
+  expect(warnings).toHaveLength(1);
+  for (const warning of warnings) {
+    expect(sanitizeForDisplay(warning)).toBe(warning);
+  }
+
+  for (const hostile of [
+    "2025-01-0\\",
+    "2025-01-01\x1b[31m",
+    "2025-01-0‮",
+    "2025-01-01\n",
+  ]) {
+    expect(safeParseLinkageTerms({ ...termsA, date: hostile }).success).toBe(
+      false,
+    );
+  }
+});
+
 test("version mismatch is an error", () => {
   const { errors } = validateCompatibility(termsA, {
     ...termsB,
@@ -1801,9 +1832,17 @@ test("payload comparison is element-wise: a comma in a column name does not alia
 
 // --- validateCompatibility: partner-string sanitization ----------------------
 // A mismatch echoes a partner-supplied value into operator-facing output; these
-// pin that every such value is routed through sanitizeForDisplay (control/ANSI
-// and deceptive Unicode neutralized, over-long values truncated) while ordinary
-// values and the mismatch detection itself are unaffected.
+// pin that every such value is neutralized (control/ANSI and deceptive Unicode
+// escaped, over-long values truncated) while ordinary values and the mismatch
+// detection itself are unaffected.
+//
+// Asserted at the RENDERED boundary, never on the raw error string: an error is
+// composed from raw fragments and escaped once where it is shown, so a raw
+// assertion would pin the wrong altitude -- it would pass just as well on a value
+// that reaches the operator escaped twice, which is the defect this convention
+// exists to catch.
+const rendered = (message: string): string =>
+  sanitizeErrorForDisplay(new Error(message));
 
 const withAgreement = (
   terms: LinkageTerms,
@@ -1824,10 +1863,10 @@ test("a partner reference with an ANSI/control sequence is neutralized", () => {
   );
   expect(msg).toBeDefined();
   // The raw ESC is gone (no terminal injection); it survives only as visible text.
-  expect(msg).not.toContain("\x1b");
-  expect(msg).toContain("\\x1b");
+  expect(rendered(msg!)).not.toContain("\x1b");
+  expect(rendered(msg!)).toContain("\\x1b");
   // The trusted local value is intact and the mismatch is still reported.
-  expect(msg).toContain('"MOU-001"');
+  expect(rendered(msg!)).toContain('"MOU-001"');
 });
 
 test("a partner value with bidi-override / zero-width characters is neutralized", () => {
@@ -1839,10 +1878,10 @@ test("a partner value with bidi-override / zero-width characters is neutralized"
     e.includes("legal agreement purpose mismatch"),
   );
   expect(msg).toBeDefined();
-  expect(msg).not.toContain("\u200b");
-  expect(msg).not.toContain("\u202e");
-  expect(msg).toContain("\\u200b");
-  expect(msg).toContain("\\u202e");
+  expect(rendered(msg!)).not.toContain("\u200b");
+  expect(rendered(msg!)).not.toContain("\u202e");
+  expect(rendered(msg!)).toContain("\\u200b");
+  expect(rendered(msg!)).toContain("\\u202e");
 });
 
 test("an over-long partner value is truncated with the marker", () => {
@@ -1855,8 +1894,8 @@ test("an over-long partner value is truncated with the marker", () => {
     e.includes("legal agreement reference mismatch"),
   );
   expect(msg).toBeDefined();
-  expect(msg).not.toContain(hostile);
-  expect(msg).toContain(DISPLAY_TRUNCATION_MARKER);
+  expect(rendered(msg!)).not.toContain(hostile);
+  expect(rendered(msg!)).toContain(DISPLAY_TRUNCATION_MARKER);
 });
 
 test("an ordinary partner value passes through the error unchanged", () => {
@@ -1887,8 +1926,8 @@ test("a partner payload column name with a control sequence is neutralized", () 
   );
   const msg = errors.find((e) => e.includes("payload mismatch"));
   expect(msg).toBeDefined();
-  expect(msg).not.toContain("\x1b");
-  expect(msg).toContain("\\x1b");
+  expect(rendered(msg!)).not.toContain("\x1b");
+  expect(rendered(msg!)).toContain("\\x1b");
 });
 
 test("the empty-receive diagnostic neutralizes a partner-supplied send column name", () => {
@@ -1905,8 +1944,8 @@ test("the empty-receive diagnostic neutralizes a partner-supplied send column na
   const msg = errors.find((e) => e.includes("payload mismatch"));
   expect(msg).toBeDefined();
   expect(msg).toContain("local declared an empty payload.receive");
-  expect(msg).not.toContain("\x1b");
-  expect(msg).toContain("\\x1b");
+  expect(rendered(msg!)).not.toContain("\x1b");
+  expect(rendered(msg!)).toContain("\\x1b");
 });
 
 // --- deduplicate: no cross-party consistency check ---------------------------

@@ -437,7 +437,7 @@ export function configureLogFile(logFilePath: string): LogSink {
         try {
           process.stderr.write(
             `log file ${normalized} write error: ` +
-              (err instanceof Error ? err.message : String(err)) +
+              sanitizeErrorForDisplay(err) +
               "\n",
           );
         } catch {

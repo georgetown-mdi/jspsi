@@ -4457,7 +4457,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return new TransportPublishIndeterminateError(
       `the publish may or may not have reached the partner: it was cut off ` +
         `mid-operation and could not be confirmed afterwards. ` +
-        `Destination: ${sanitizeForDisplay(toPath)}`,
+        `Destination: ${toPath}`,
       { cause: error },
     );
   }

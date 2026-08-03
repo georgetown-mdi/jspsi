@@ -606,7 +606,7 @@ function makeParty(
       inboundPath: dir,
       outboundPath: dir,
       split: false,
-      dirsDisplay: sanitizeForDisplay(dir),
+      dirsDisplay: dir,
     },
   };
 }
@@ -1248,9 +1248,7 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     inboundPath: SPLIT_INBOUND,
     outboundPath: SPLIT_OUTBOUND,
     split: true,
-    dirsDisplay:
-      `${sanitizeForDisplay(SPLIT_INBOUND)} (inbound) and ` +
-      `${sanitizeForDisplay(SPLIT_OUTBOUND)} (outbound)`,
+    dirsDisplay: `${SPLIT_INBOUND} (inbound) and ${SPLIT_OUTBOUND} (outbound)`,
   });
 
   // The cause link carrying the scope and the filenames. The renderer caps it
@@ -1435,12 +1433,12 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
 
   test("a name whose escapes grow it at render time is counted, not cap-chopped", async () => {
     const files = new Map<string, Buffer>();
-    // sanitizeForDisplay runs twice over this name -- once at the call site,
-    // once when the link is rendered -- and it doubles a backslash, so its cost
-    // in the rendered link exceeds its length going in. Measured on the way in
-    // it fits behind the lock file; measured as rendered it does not.
+    // Each of these code points escapes to six characters and the backslash
+    // doubles, so the name's cost in the rendered link is several times its
+    // length going in. Measured on the way in it fits behind the lock file;
+    // measured as rendered it does not.
     const lock = `${uuidv4()}${LOCK_SUFFIX}`;
-    const escaped = `${"你".repeat(20)}\\-hello-ack.json`;
+    const escaped = `${"你".repeat(24)}\\-hello-ack.json`;
     files.set(`${REAL_DIR}/${lock}`, Buffer.alloc(0));
     files.set(`${REAL_DIR}/${escaped}`, Buffer.alloc(0));
     const p = makeParty("aaa", flags, files, {}, REAL_DIR);
@@ -1520,6 +1518,74 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     expect(detailLink(rendered)).toContain(REAL_DIR);
     expect(enumeration(rendered)).toBe("name(s) too long to display");
     expect(rendered).not.toContain(overlong.slice(0, 30));
+  });
+
+  // Escaping happens at ONE altitude, so an escapable byte in a partner filename
+  // survives to the operator escaped exactly once. Twice is not a cosmetic
+  // defect: one literal backslash in a filename reaches the operator as four, so
+  // the name they are told to delete is not the name on disk. Each case asserts
+  // both halves -- the once-escaped form present, the twice-escaped form absent
+  // -- because the presence check alone passes on the doubled output too.
+  test.each([
+    ["a literal backslash", "back\\slash"],
+    ["a non-ASCII code point", "你好"],
+    ["a control byte", "\x1b[31mred"],
+    ["an astral code point", "\u{1f600}"],
+  ])("a filename carrying %s is escaped once, not twice", async (_, stem) => {
+    const files = new Map<string, Buffer>();
+    const hostile = `${stem}-lock.json`;
+    files.set(`${REAL_DIR}/${hostile}`, Buffer.alloc(0));
+    const p = makeParty("aaa", flags, files, {}, REAL_DIR);
+
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(err);
+    const once = sanitizeForDisplay(hostile);
+    expect(enumeration(rendered)).toBe(once);
+    expect(rendered).not.toContain(sanitizeForDisplay(once));
+  });
+
+  // The scope is the one fragment the entry guard clips itself, and it is clipped
+  // BEFORE the display boundary escapes it. Clipping a raw value on a code-point
+  // boundary is what keeps the escape whole; clipping an already-escaped one
+  // could leave a trailing `\u4f6` or a lone backslash on the operator's screen.
+  test("a clipped directory scope never ends inside a partial escape", async () => {
+    // A path long enough in RENDERED cost that the scope must be clipped: each
+    // code point escapes to six characters, so 120 of them cost 720 against the
+    // 256-character link.
+    const hostileDir = `/${"你".repeat(120)}`;
+    const files = new Map<string, Buffer>();
+    files.set(`${hostileDir}/${uuidv4()}${LOCK_SUFFIX}`, Buffer.alloc(0));
+    const p = makeParty("aaa", flags, files, {}, hostileDir);
+
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(UsageError);
+    const detail = detailLink(sanitizeErrorForDisplay(err));
+    expect(detail).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(detail.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
+    // The scope runs from the ` in ` that opens it to the marker that closes it.
+    const scopeShown = detail.slice(
+      detail.indexOf(" in ") + " in ".length,
+      detail.indexOf(DISPLAY_TRUNCATION_MARKER),
+    );
+    // What the operator sees is the escaping of a WHOLE code-point prefix of the
+    // real path. That is stronger than "the escapes look well formed": a clip
+    // taken on the ESCAPED value renders as well-formed escapes too (the sink
+    // just escapes the stray backslash), but it is the escaping of no prefix of
+    // anything, so an operator reading it back cannot match it to the directory.
+    const codePoints = [...hostileDir];
+    const wholePrefixes = codePoints.map((_, i) =>
+      sanitizeForDisplay(codePoints.slice(0, i + 1).join("")),
+    );
+    expect(wholePrefixes).toContain(scopeShown);
   });
 });
 

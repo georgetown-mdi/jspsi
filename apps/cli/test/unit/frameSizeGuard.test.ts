@@ -3,6 +3,7 @@ import { Readable } from "node:stream";
 import { describe, expect, test, vi } from "vitest";
 import {
   FrameSizeExceededError,
+  sanitizeErrorForDisplay,
   TransportOperationStalledError,
   UsageError,
 } from "@psilink/core";
@@ -46,27 +47,27 @@ describe("frameSizeExceededError", () => {
 
   test("escapes control/ANSI characters in the path", () => {
     const err = frameSizeExceededError("/drop/\x1b[2J\x1b[31mEVIL.json", 100);
-    expect(err.message).not.toContain("\x1b");
-    expect(err.message).toContain("\\x1b");
+    expect(sanitizeErrorForDisplay(err)).not.toContain("\x1b");
+    expect(sanitizeErrorForDisplay(err)).toContain("\\x1b");
   });
 
   test("escapes a newline so the path cannot spoof a log line", () => {
     const err = frameSizeExceededError("/drop/ok.json\nFAKE: clear", 100);
-    expect(err.message).not.toContain("\n");
-    expect(err.message).toContain("\\x0a");
+    expect(sanitizeErrorForDisplay(err)).not.toContain("\n");
+    expect(sanitizeErrorForDisplay(err)).toContain("\\x0a");
   });
 
   test("neutralizes deceptive Unicode (bidi-override) in the path", () => {
     const err = frameSizeExceededError("/drop/file\u202eEVIL.json", 100);
-    expect(err.message).not.toContain("\u202e");
-    expect(err.message).toContain("\\u202e");
+    expect(sanitizeErrorForDisplay(err)).not.toContain("\u202e");
+    expect(sanitizeErrorForDisplay(err)).toContain("\\u202e");
   });
 
   test("neutralizes a homoglyph / confusable in the path", () => {
     // U+0430 (Cyrillic small a) renders identically to ASCII "a".
     const err = frameSizeExceededError("/drop/c\u0430fe.json", 100);
-    expect(err.message).not.toContain("\u0430");
-    expect(err.message).toContain("\\u0430");
+    expect(sanitizeErrorForDisplay(err)).not.toContain("\u0430");
+    expect(sanitizeErrorForDisplay(err)).toContain("\\u0430");
   });
 });
 

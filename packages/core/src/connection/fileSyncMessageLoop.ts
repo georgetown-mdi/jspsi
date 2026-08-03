@@ -509,8 +509,8 @@ export class FileSyncMessageLoop {
             if (await ackForLastSentPresent(expectedAck)) break;
             if (Date.now() > deps.options().timeToLive!.getTime()) {
               throw new UsageError(
-                `timed out waiting for ack ${sanitizeForDisplay(expectedAck)} ` +
-                  `from ${sanitizeForDisplay(deps.peerId()!)}`,
+                `timed out waiting for ack ${expectedAck} from ` +
+                  `${deps.peerId()!}`,
               );
             }
             await deps.wait(deps.options().pollingFrequency);
@@ -638,8 +638,8 @@ export class FileSyncMessageLoop {
     if (policy === "ignore") return;
     if (policy === "error")
       throw new UsageError(
-        `unexpected file(s) appeared in ${sanitizeForDisplay(path)} during the exchange: ` +
-          `${names.map((n) => sanitizeForDisplay(n)).join(", ")}. The ` +
+        `unexpected file(s) appeared in ${path} during the exchange: ` +
+          `${names.join(", ")}. The ` +
           `directory must be dedicated to a single ` +
           'exchange between exactly two parties (see EXCHANGE_REFERENCE.md "Directory ' +
           'exclusivity"); a foreign file usually means another process or ' +
@@ -785,8 +785,7 @@ export class FileSyncMessageLoop {
                 // handleUnexpectedFiles. The message flags the possibility
                 // rather than listing them.
                 throw new UsageError(
-                  `message file ${sanitizeForDisplay(name)} from ` +
-                    `${sanitizeForDisplay(peerId)} in ${sanitizeForDisplay(path)} has a ` +
+                  `message file ${name} from ${peerId} in ${path} has a ` +
                     "byte-count terminal segment but no parseable NNN segment; " +
                     "a correctly configured retain-mode peer cannot produce " +
                     "this name, so the file is corrupt or does not belong to " +
@@ -871,15 +870,13 @@ export class FileSyncMessageLoop {
           // directory reuse, not necessarily a separate session.
           throw new UsageError(
             `more than one message file with NNN=${this.recvSeq} from ` +
-              `${sanitizeForDisplay(peerId)} in ${sanitizeForDisplay(path)} - possible ` +
-              `duplicate-NNN or directory reuse`,
+              `${peerId} in ${path} - possible duplicate-NNN or directory reuse`,
           );
         }
         // Delete mode keeps at most one outstanding message per direction (I9),
         // so two peer messages means a concurrent session or a protocol bug.
         throw new UsageError(
-          `more than one message file from ${sanitizeForDisplay(peerId)} in ` +
-            `${sanitizeForDisplay(path)} - are there ` +
+          `more than one message file from ${peerId} in ${path} - are there ` +
             "other sessions using this path?",
         );
       }
@@ -910,8 +907,7 @@ export class FileSyncMessageLoop {
         const frameCap = this.inboundFrameCap ?? MAX_FRAME_SIZE_BYTES;
         if (declaredSize > frameCap || messageFile.size > frameCap) {
           throw new FrameSizeExceededError(
-            `message file ${sanitizeForDisplay(messageFile.name)} from ` +
-              `${sanitizeForDisplay(peerId)} in ${sanitizeForDisplay(path)} ` +
+            `message file ${messageFile.name} from ${peerId} in ${path} ` +
               `declares ${declaredSize} byte(s) (on disk: ${messageFile.size}), ` +
               `exceeding the maximum inbound frame size of ` +
               `${frameCap} bytes; refusing to read it into memory`,
@@ -984,27 +980,22 @@ export class FileSyncMessageLoop {
               // pre-envelope peer leads with '{', and a future envelope bump
               // raises the byte), so name that real cause instead of the raw
               // "malformed envelope" text -- turning a cryptic frame-parse
-              // failure into one obvious log line. foundVersion and
-              // MESSAGE_ENVELOPE_VERSION are small header numbers, not partner
-              // text; name and peerId stay sanitized as before.
+              // failure into one obvious log line.
               if (parseErr instanceof IncompatibleEnvelopeVersionError)
                 throw new UsageError(
-                  `message file ${sanitizeForDisplay(messageFile.name)} from ` +
-                    `${sanitizeForDisplay(peerId)} has an unrecognized wire ` +
+                  `message file ${messageFile.name} from ${peerId} has an ` +
+                    `unrecognized wire ` +
                     `format (envelope version byte ${parseErr.foundVersion}, ` +
                     `not this build's ${MESSAGE_ENVELOPE_VERSION}); the partner ` +
                     `is likely running an incompatible psilink version, and ` +
                     `both parties must run the same version`,
                 );
               // Any other envelope failure (truncation, unknown type, out-of-
-              // range seq) is genuine corruption from a same-version peer. The
-              // error carries only fixed text and small header numbers, but route
-              // it through the same escape as the sibling throws below for
-              // uniformity.
+              // range seq) is genuine corruption from a same-version peer.
               throw new UsageError(
-                `message file ${sanitizeForDisplay(messageFile.name)} from ` +
-                  `${sanitizeForDisplay(peerId)} is fully synced but has a ` +
-                  `malformed envelope: ${sanitizeForDisplay(errMessage(parseErr))}`,
+                `message file ${messageFile.name} from ${peerId} is fully ` +
+                  `synced but has a malformed envelope: ` +
+                  `${errMessage(parseErr)}`,
               );
             }
             if (envelope.type === MESSAGE_TYPE_BINARY)
@@ -1016,17 +1007,16 @@ export class FileSyncMessageLoop {
             let value: unknown;
             try {
               // parseBoundedJson takes the raw payload bytes and structurally
-              // bounds them before JSON.parse. Its message is sanitized too:
-              // V8's JSON.parse error quotes a span of the offending input
-              // (`Unexpected token 'x', "...." is not valid JSON`), so the whole
-              // error string can carry the peer's raw bytes -- the same
-              // control/ANSI/Unicode injection vector as the filename.
+              // bounds them before JSON.parse. V8's JSON.parse error quotes a
+              // span of the offending input (`Unexpected token 'x', "...." is
+              // not valid JSON`), so the whole error string can carry the peer's
+              // raw bytes -- the same control/ANSI/Unicode injection vector as
+              // the filename, and neutralized at the same display boundary.
               value = parseBoundedJson(envelope.payload);
             } catch (parseErr: unknown) {
               throw new UsageError(
-                `message file ${sanitizeForDisplay(messageFile.name)} from ` +
-                  `${sanitizeForDisplay(peerId)} is fully synced but is not ` +
-                  `valid JSON: ${sanitizeForDisplay(errMessage(parseErr))}`,
+                `message file ${messageFile.name} from ${peerId} is fully ` +
+                  `synced but is not valid JSON: ${errMessage(parseErr)}`,
               );
             }
             return { seq: envelope.seq, type: envelope.type, data: value };

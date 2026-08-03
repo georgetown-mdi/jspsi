@@ -334,10 +334,9 @@ export interface ExchangeRecordGovernance {
  * byte-exact cross-party validation and the canonical encoding a record is hashed
  * over. A party can place terminal control/ANSI sequences or deceptive Unicode
  * (bidi-override, zero-width, homoglyph) in these fields. No viewer or exporter
- * renders a record to a person today; when one is built, it MUST route each such
- * field through `sanitizeForDisplay` (the helper `validateCompatibility` uses) at
- * the display boundary -- never mutate the stored value, which must stay
- * byte-exact.
+ * renders a record to a person today; when one is built, it MUST escape each such
+ * field at its display sink -- `sanitizeForDisplay` where the value is shown --
+ * never mutating the stored value, which must stay byte-exact.
  */
 export interface ExchangeRecord {
   /** Single recognized format version for v1; readers reject anything else. */

@@ -2,7 +2,7 @@ import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { parentPort, workerData } from "node:worker_threads";
 
-import { servePsiWorker } from "@psilink/core";
+import { sanitizeErrorForDisplay, servePsiWorker } from "@psilink/core";
 import type {
   PsiWorkerInit,
   PsiWorkerRequest,
@@ -53,6 +53,8 @@ void main().catch((error: unknown) => {
   // The backend failed to load; there is nothing to serve. Report and exit non-zero
   // so the host's Worker 'exit' handler fails the exchange rather than leaving it to
   // hang on a dead worker.
-  process.stderr.write(`PSI worker failed to start: ${String(error)}\n`);
+  process.stderr.write(
+    `PSI worker failed to start: ${sanitizeErrorForDisplay(error)}\n`,
+  );
   process.exit(1);
 });

@@ -1653,10 +1653,11 @@ export class StandardizedKeyIterable {
  *
  * Returns a list of error messages; an empty array means the standardization
  * spec is consistent with these terms. The output and function names embedded in
- * each message are routed through {@link sanitizeForDisplay} at the point of
- * interpolation -- consistent with the sibling `assertPayloadSendDisclosed` /
- * `validateCompatibility` guards -- so a caller that surfaces a message is safe
- * without re-sanitizing, rather than relying on every call site to do so.
+ * each message are interpolated raw -- consistent with the sibling
+ * `assertPayloadSendDisclosed` / `validateCompatibility` guards -- because the
+ * in-repo caller composes them into a {@link StandardizationTermsError}, where
+ * the display boundary escapes them once. A caller that instead renders a
+ * message directly owns that escape.
  */
 export function validateStandardizationAgainstTerms(
   standardization: Standardization,
@@ -1666,10 +1667,9 @@ export function validateStandardizationAgainstTerms(
   const fieldNames = new Set(terms.linkageFields.map((f) => f.name));
 
   for (const t of standardization) {
-    const output = sanitizeForDisplay(t.output);
     if (!fieldNames.has(t.output)) {
       errors.push(
-        `standardization output "${output}" does not match any linkage ` +
+        `standardization output "${t.output}" does not match any linkage ` +
           "field name",
       );
     }
@@ -1677,8 +1677,8 @@ export function validateStandardizationAgainstTerms(
       if (!STANDARDIZATION_FUNCTION_NAMES.includes(step.function)) {
         errors.push(
           `unknown standardization function ` +
-            `"${sanitizeForDisplay(step.function)}" in transformation for ` +
-            `"${output}"`,
+            `"${step.function}" in transformation for ` +
+            `"${t.output}"`,
         );
       }
     }

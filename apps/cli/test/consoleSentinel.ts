@@ -17,11 +17,23 @@
  * complements -- it does not replace -- the per-test `withCapturedLogs`
  * capture-and-assert.
  *
+ * It also gates the BYTES of every recorded line, allowlisted or not: operator-
+ * facing text is escaped at its display sink, and an escaped line is printable
+ * ASCII plus the newline `sanitizeErrorForDisplay` frames a cause chain with, so
+ * anything else is a sink that was reached unescaped. That check is deliberately
+ * independent of the allowlist -- a matcher accepts a line by its intended text,
+ * which says nothing about the bytes an interpolated partner value smuggled into
+ * it. It is the runtime half of the lint ban on rendering a raw error at a sink
+ * (`eslint.config.mjs`), which sees call shapes in first-party source and cannot
+ * see what a value carries at runtime.
+ *
  * Known limitations (accepted): it gates the three `console` methods, not raw
  * `process.stdout`/`process.stderr.write`, so a library that writes a file
- * descriptor directly is not seen; and output that lands after the file-level
- * afterAll flush settles is not caught (see {@link flushPendingConsole}). Both
- * are out of scope unless a real offender appears.
+ * descriptor directly is not seen -- and neither ban reaches such a write, so
+ * neither is a totality claim about what lands on the operator's terminal; and
+ * output that lands after the file-level afterAll flush settles is not caught
+ * (see {@link flushPendingConsole}). Both are out of scope unless a real
+ * offender appears.
  *
  * @internal -- test infrastructure, used by the integration setup file and the
  * sentinel's own unit tests.
@@ -69,6 +81,26 @@ const ALL_LEVELS: readonly ConsoleLevel[] = ["log", "warn", "error"];
 // Cap how many offending lines the assertion error enumerates, so a test that
 // spams output produces a readable failure rather than a wall of text.
 const MAX_REPORTED_VIOLATIONS = 20;
+
+// A byte an escaped operator-facing line cannot contain. sanitizeForDisplay
+// rewrites every code point outside printable ASCII (U+0020-U+007E) to a visible
+// escape, so a recorded line holding anything else reached the console without
+// passing a display sink. Matched on the joined line, not per argument, because
+// the prefix, the separator and the payload all land in the same string.
+const UNESCAPED_DISPLAY_BYTE = /[^\x20-\x7e]/;
+
+// The one control sequence the display boundary itself emits: the separator
+// sanitizeErrorForDisplay joins a cause chain with. It is removed before the
+// byte test rather than exempted from it, because exempting the bare newline
+// would let a forged log line -- printable ASCII plus LF, one of the threats
+// this gate exists to catch -- pass unnoticed.
+//
+// Stated limit: the removal is literal and carries no notion of who emitted the
+// sequence, so a line whose UNESCAPED payload itself contains `\ncaused by: `
+// survives the strip and passes the byte test. Distinguishing the renderer's
+// own framing from a payload that imitates it needs provenance this sees
+// nothing of -- it receives a flat joined line.
+const RENDERER_FRAMING = /\ncaused by: /g;
 
 // Join console arguments into one matchable line. Strings pass through verbatim
 // (so a matcher reads the literal logged text); a non-string is inspected rather
@@ -226,6 +258,17 @@ export class ConsoleSentinel {
     return this.evaluate().violations;
   }
 
+  /**
+   * Recorded lines carrying a byte no escaped display text can hold (see
+   * {@link UNESCAPED_DISPLAY_BYTE}). Evaluated over every recorded line,
+   * allowlisted or not.
+   */
+  unescapedLines(): RecordedConsoleLine[] {
+    return this.recorded.filter((line) =>
+      UNESCAPED_DISPLAY_BYTE.test(line.message.replace(RENDERER_FRAMING, " ")),
+    );
+  }
+
   /** Allowlist ids matched by at least one recorded line (for aggregation). */
   matchedAllowlistIds(): string[] {
     return [...this.evaluate().matchedIds];
@@ -239,30 +282,49 @@ export class ConsoleSentinel {
       .map((entry) => entry.id);
   }
 
-  /** Throws if any recorded line is un-allowlisted; no-op otherwise. */
+  /**
+   * Throws if any recorded line carries an unescaped byte, or if any is
+   * un-allowlisted; no-op otherwise. The byte check runs first because an
+   * allowlisted line can still fail it, and because it is the one that means a
+   * display sink was reached unescaped rather than merely noisily.
+   */
   assertClean(): void {
+    const unescaped = this.unescapedLines();
+    if (unescaped.length > 0) {
+      throw new Error(
+        `Console sentinel: ${unescaped.length} console line(s) carried a byte ` +
+          `outside printable ASCII and the renderer's framing newline, so they ` +
+          `reached the console without passing a display sink. Route the value ` +
+          `through sanitizeErrorForDisplay (an error) or sanitizeForDisplay (a ` +
+          `string) at the sink:\n${this.report(unescaped)}`,
+      );
+    }
     const { violations } = this.evaluate();
     if (violations.length === 0) return;
-    const shown = violations.slice(0, MAX_REPORTED_VIOLATIONS);
-    // Escape each line at this display boundary: a recorded line is whatever
-    // reached the console, which can carry a server- or partner-controlled string
-    // (ssh2 surfaces an SSH_MSG_DISCONNECT description on err.message, for one).
-    // Rendering it raw into the thrown error -- which lands in the CI log -- would
-    // let control bytes (ANSI/bidi/newline) ride in as log injection. The raw
-    // message stays untouched for matching (sanitize only at display, never the
-    // compared value). This mirrors the production sinks' sanitizeErrorForDisplay.
-    const lines = shown.map(
-      (v) => `  [${v.level}] ${sanitizeForDisplay(v.message)}`,
-    );
-    if (violations.length > shown.length) {
-      lines.push(`  ... and ${violations.length - shown.length} more`);
-    }
     throw new Error(
       `Console sentinel: ${violations.length} un-allowlisted console line(s) ` +
         `emitted during this test file. Eliminate each at the source, or -- if ` +
         `genuinely intended -- accept it with a matcher in the integration ` +
-        `console allowlist (a visible, reviewable edit):\n${lines.join("\n")}`,
+        `console allowlist (a visible, reviewable edit):\n${this.report(violations)}`,
     );
+  }
+
+  // Escape each line at this display boundary: a recorded line is whatever
+  // reached the console, which can carry a server- or partner-controlled string
+  // (ssh2 surfaces an SSH_MSG_DISCONNECT description on err.message, for one).
+  // Rendering it raw into the thrown error -- which lands in the CI log -- would
+  // let control bytes (ANSI/bidi/newline) ride in as log injection. The raw
+  // message stays untouched for matching (sanitize only at display, never the
+  // compared value). This mirrors the production sinks' sanitizeErrorForDisplay.
+  private report(offenders: RecordedConsoleLine[]): string {
+    const shown = offenders.slice(0, MAX_REPORTED_VIOLATIONS);
+    const lines = shown.map(
+      (v) => `  [${v.level}] ${sanitizeForDisplay(v.message)}`,
+    );
+    if (offenders.length > shown.length) {
+      lines.push(`  ... and ${offenders.length - shown.length} more`);
+    }
+    return lines.join("\n");
   }
 }
 

@@ -7,6 +7,7 @@ import {
   computeCertificateFingerprint,
   generateSigningIdentity,
   getLogger,
+  sanitizeErrorForDisplay,
   serializeCertificate,
   UsageError,
 } from "@psilink/core";
@@ -177,7 +178,7 @@ export function resolveSigningIdentity(input: ResolveSigningIdentityInput): {
     if (!input.force) throw err;
     input.log.warn(
       `the existing signing identity at ${input.identityPath} could not be ` +
-        `read (${err instanceof Error ? err.message : String(err)}); --force ` +
+        `read (${sanitizeErrorForDisplay(err)}); --force ` +
         "regenerates it.",
     );
     replacingUnreadable = true;

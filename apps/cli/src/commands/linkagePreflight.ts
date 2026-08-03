@@ -78,19 +78,19 @@ export function checkLinkageSatisfiability(
   // collapse. satisfiableKeyCount accounts for both.
   if (satisfiableKeyCount === terms.linkageKeys.length) return;
 
-  // f.type is a schema-validated enum literal, but sanitize it like f.name so
-  // every partner-sourced token in the message crosses the display boundary. The
-  // detail is omitted when no DECLARED field is unproducible (the keys are
-  // unsatisfiable only by referencing undeclared fields), leaving the block/warn
-  // itself as the signal.
-  const detail =
+  // The enumeration reaches the operator down two routes with different escape
+  // points, so each branch below builds it with the escape its own route needs:
+  // raw for the UsageError, whose display boundary escapes the rendered message
+  // once, and escaped for the log.warn, whose call site is the sink. f.type is a
+  // schema-validated enum literal but takes the same path as f.name, so no future
+  // edit leaves a raw token beside an escaped one. The detail is omitted when no
+  // DECLARED field is unproducible (the keys are unsatisfiable only by
+  // referencing undeclared fields), leaving the block/warn itself as the signal.
+  const detail = (shown: (token: string) => string): string =>
     unsatisfied.length > 0
       ? " (unsatisfied fields: " +
         unsatisfied
-          .map(
-            (f) =>
-              `${sanitizeForDisplay(f.name)} (${sanitizeForDisplay(f.type)})`,
-          )
+          .map((f) => `${shown(f.name)} (${shown(f.type)})`)
           .join(", ") +
         ")"
       : "";
@@ -98,7 +98,7 @@ export function checkLinkageSatisfiability(
   if (satisfiableKeyCount === 0)
     throw new UsageError(
       `the CSV cannot satisfy any of the ${messaging.source}'s linkage keys` +
-        detail +
+        detail((token) => token) +
         "; running would produce a silent empty result. Provide a CSV that " +
         "covers the required field types, " +
         messaging.blockRemedy,
@@ -106,7 +106,7 @@ export function checkLinkageSatisfiability(
 
   log.warn(
     `the CSV cannot satisfy all of the ${messaging.source}'s linkage fields` +
-      detail +
+      detail((token) => sanitizeForDisplay(token)) +
       "; keys that require those fields will be inactive for this exchange.",
   );
 }

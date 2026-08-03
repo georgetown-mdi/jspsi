@@ -200,6 +200,48 @@ describe("sanitizeErrorForDisplay", () => {
     ).toBe("outer\ncaused by: [object Object]");
   });
 
+  // The guarantee the sink carries ALONE. Composition sites interpolate partner
+  // and server bytes raw, so nothing between the wire and here escapes anything:
+  // if this renderer let a byte through, it would reach the operator's terminal
+  // as that byte. Stated as a property over every position a hostile value can
+  // occupy in a cause chain rather than as a case per position, because the
+  // property is what the composition sites are allowed to rely on.
+  //
+  // The one control character permitted is the newline this module itself emits
+  // between links (CAUSE_SEPARATOR); every other byte outside printable ASCII is
+  // a leak. The CLI integration console sentinel enforces the same predicate on
+  // what actually reaches the console at runtime.
+  test("renders only printable ASCII plus its own framing newline", () => {
+    const hostile = [
+      "\x1b[2J\x1b[31mANSI",
+      "line\nbreak\r\ninjection",
+      "bidi\u202eEVIL\u200bzero-width",
+      "homoglyph \u0430\u0435\u043e",
+      "astral \u{1f600}\u{10ffff}",
+      "nul\u0000and\u0007bell",
+      "lone surrogate \ud800",
+      "c1 control \u0085\u009b",
+    ];
+    for (const value of hostile) {
+      const deep = new Error(`outer ${value}`, {
+        cause: new Error(`middle ${value}`, {
+          cause: { toString: () => `leaf ${value}` },
+        }),
+      });
+      for (const err of [
+        new Error(value),
+        value,
+        deep,
+        new Error("fixed", { cause: value }),
+      ]) {
+        const rendered = sanitizeErrorForDisplay(err);
+        expect(rendered).not.toMatch(/[^\x20-\x7e\n]/);
+        // Not vacuous: the escaped form of the hostile value is really there.
+        expect(rendered).toContain(sanitizeForDisplay(value));
+      }
+    }
+  });
+
   describe("private-key redaction backstop", () => {
     const KEY_BODY = "MIIByteslookingsecret0123456789ABCDEFabcdef+/wEHEHE";
 

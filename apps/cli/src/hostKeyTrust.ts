@@ -110,7 +110,13 @@ export async function establishHostKeyTrust(
 
   const { verbosity, loggerName, persistence } = options;
   const log = getLogger(loggerName);
-  const host = sanitizeForDisplay(connection.server.host);
+  // The host is partner-reachable on an offline-accept-seeded config, and it
+  // reaches the operator down two routes with different escape points: a
+  // UsageError, composed raw because the display boundary escapes the rendered
+  // message once, and the log/prompt lines below, whose call sites are
+  // themselves that value's display sink.
+  const host = connection.server.host;
+  const hostDisplay = sanitizeForDisplay(host);
   // The config the operator would pin into / where the pin will be saved; absent
   // for an ephemeral (one-off, no --save) run, which the messages adapt to.
   const configPath =
@@ -148,16 +154,16 @@ export async function establishHostKeyTrust(
   // presented.keyType is decoded straight from the server-controlled key blob,
   // so escape it before it reaches the operator's terminal/log (the same
   // treatment fileSyncConnection's verifiers give keyTypeFromBlob). The
-  // fingerprint is base64 and the host is already escaped above.
+  // fingerprint is base64.
   log.warn(
-    `The authenticity of host ${host} cannot be established: no ` +
+    `The authenticity of host ${hostDisplay} cannot be established: no ` +
       `host_key_fingerprint is pinned. It presented a ` +
       `${sanitizeForDisplay(presented.keyType)} host key with fingerprint ` +
       `${presented.fingerprint}. Verify this matches the server's published ` +
       `fingerprint out-of-band if you can; confirming pins it for this ` +
       `connection.`,
   );
-  const trusted = await deps.confirm(`Trust this host key for ${host}?`);
+  const trusted = await deps.confirm(`Trust this host key for ${hostDisplay}?`);
   if (!trusted)
     throw new UsageError(
       `host key for ${host} was not trusted; no connection was made and ` +
@@ -174,7 +180,7 @@ export async function establishHostKeyTrust(
       // write the pin in place now; future runs enforce it without prompting.
       persistHostKeyFingerprint(persistence.configPath, presented.fingerprint);
       log.info(
-        `pinned ${host}'s host key (${presented.fingerprint}) to ` +
+        `pinned ${hostDisplay}'s host key (${presented.fingerprint}) to ` +
           `${persistence.configPath}; future connections will verify it ` +
           `automatically.`,
       );
@@ -183,14 +189,16 @@ export async function establishHostKeyTrust(
       // The command writes the connection (now carrying the pin) to its config
       // after the handshake; no separate write here.
       log.info(
-        `trusted ${host}'s host key (${presented.fingerprint}); it will be ` +
+        `trusted ${hostDisplay}'s host key (${presented.fingerprint}); it ` +
+          `will be ` +
           `saved to ${persistence.configPath} and verified automatically on ` +
           `future connections.`,
       );
       break;
     case "ephemeral":
       log.info(
-        `trusting ${host}'s host key (${presented.fingerprint}) for this ` +
+        `trusting ${hostDisplay}'s host key (${presented.fingerprint}) for ` +
+          `this ` +
           `exchange only; it is not saved. Use a saved configuration ` +
           `(psilink invite/accept, or --save) to pin it for future runs.`,
       );

@@ -1,4 +1,8 @@
-import { getLogger, serializeDualSignedRecord } from "@psilink/core";
+import {
+  getLogger,
+  sanitizeErrorForDisplay,
+  serializeDualSignedRecord,
+} from "@psilink/core";
 import type { DualSignedRecord } from "@psilink/core";
 
 import { writeFileOwnerOnly } from "./fileUtils";
@@ -93,7 +97,7 @@ export function writeDualSignedRecord(
   } catch (err) {
     log.warn(
       "the exchange and signature swap succeeded but the dual-signed record " +
-        `could not be written (${err instanceof Error ? err.message : String(err)}); ` +
+        `could not be written (${sanitizeErrorForDisplay(err)}); ` +
         "the results above are unaffected and the exchange need not be re-run",
     );
   }

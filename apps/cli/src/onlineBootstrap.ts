@@ -14,6 +14,7 @@ import {
   PLACEHOLDER_SFTP_HOST,
   PLACEHOLDER_SSH_USERNAME,
   safeParseConnectionConfig,
+  sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -891,7 +892,7 @@ export async function runOnlineBootstrap(params: {
               "recording the observed received-payload columns for fail-closed " +
               "recurring enforcement failed; the next 'psilink exchange' will " +
               "reconcile the received payload lazily: " +
-              (err instanceof Error ? err.message : String(err)),
+              sanitizeErrorForDisplay(err),
           );
         }
       }

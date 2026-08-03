@@ -2,7 +2,10 @@ import { Readable } from "node:stream";
 
 import { describe, expect, test, vi } from "vitest";
 
-import { TransportOperationStalledError } from "@psilink/core";
+import {
+  sanitizeErrorForDisplay,
+  TransportOperationStalledError,
+} from "@psilink/core";
 
 import {
   SFTP_PUT_PROGRESS_CHUNK_BYTES,
@@ -274,8 +277,8 @@ describe("transportOperationStalledError", () => {
       "/drop/\x1b[2J\x1b[31mEVIL.json",
       "received no data",
     );
-    expect(err.message).not.toContain("\x1b");
-    expect(err.message).toContain("\\x1b");
+    expect(sanitizeErrorForDisplay(err)).not.toContain("\x1b");
+    expect(sanitizeErrorForDisplay(err)).toContain("\\x1b");
   });
 
   test("escapes a newline so the path cannot spoof a log line", () => {
@@ -284,8 +287,8 @@ describe("transportOperationStalledError", () => {
       "/drop/ok.json\nFAKE: clear",
       "no progress",
     );
-    expect(err.message).not.toContain("\n");
-    expect(err.message).toContain("\\x0a");
+    expect(sanitizeErrorForDisplay(err)).not.toContain("\n");
+    expect(sanitizeErrorForDisplay(err)).toContain("\\x0a");
   });
 
   test("neutralizes deceptive Unicode (bidi-override) in the path", () => {
@@ -294,8 +297,8 @@ describe("transportOperationStalledError", () => {
       "/drop/file\u202eEVIL.json",
       "received no data",
     );
-    expect(err.message).not.toContain("\u202e");
-    expect(err.message).toContain("\\u202e");
+    expect(sanitizeErrorForDisplay(err)).not.toContain("\u202e");
+    expect(sanitizeErrorForDisplay(err)).toContain("\\u202e");
   });
 
   test("neutralizes a homoglyph / confusable in the path", () => {
@@ -305,7 +308,7 @@ describe("transportOperationStalledError", () => {
       "/drop/c\u0430fe.json",
       "received no data",
     );
-    expect(err.message).not.toContain("\u0430");
-    expect(err.message).toContain("\\u0430");
+    expect(sanitizeErrorForDisplay(err)).not.toContain("\u0430");
+    expect(sanitizeErrorForDisplay(err)).toContain("\\u0430");
   });
 });
