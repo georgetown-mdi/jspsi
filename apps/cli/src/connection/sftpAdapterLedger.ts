@@ -9,7 +9,7 @@
  * adapter's own integers, never a partner-controlled value, so the whole of it
  * can be read back by the summary and the machine metrics event without a
  * disclosure question. See {@link ./ssh2SftpAdapter} for the events that drive
- * it.
+ * it, and docs/notes/sftp-adapter-state-machine.md for the model they belong to.
  */
 
 /**
