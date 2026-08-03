@@ -85,9 +85,14 @@ const IDLE_BOUNDARY_OUTCOMES = [
 ] as const;
 
 /**
- * The whole of one adapter's session accounting, as the invariant over it is
- * asserted: no generation leaves the live state without exactly one recorded
- * loss cause, so `generationsEnded` equals the sum of {@link losses}.
+ * The whole of one adapter's session accounting. The invariant -- no
+ * generation leaves the live state without exactly one recorded loss cause --
+ * is held structurally rather than asserted: every dial charges any
+ * still-pending end before advancing, and {@link SftpAdapterLedger.dialSucceeded}
+ * raises on one that slipped through. The sum identity this implies
+ * (`generationsEnded` equals the sum of {@link losses}) is an identity of the
+ * ledger itself, so no test asserts it; tests pin WHICH cause each driven end
+ * charged.
  *
  * @internal
  */
