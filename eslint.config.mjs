@@ -79,9 +79,8 @@ const SINK_VALUE_POSITIONS = [
 // omission there is silent: a partner-controlled error message carries the
 // server's or the peer's bytes, so `log.warn(err.message)` puts ANSI, CR/LF,
 // bidi overrides and confusables straight on the operator's terminal or into a
-// --log-file. Before the escaping moved to the sink a miss printed
-// double-escaped text; now it prints the raw bytes, so the miss has to be
-// impossible by construction rather than by review.
+// --log-file. The miss has to be impossible by construction rather than by
+// review.
 //
 // Coverage is first-party source only. A dependency that writes the file
 // descriptor itself -- ssh2-sftp-client's "Global ... listener" console lines --
