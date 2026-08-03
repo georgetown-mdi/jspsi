@@ -263,11 +263,14 @@ robustly, and dissolves three defects of that arrangement at once:
 | the budget is read before the re-dial and spent after | what holds the cap is the transition queue's coalescing rather than the check | the read and the charge live in one critical section under the transition lock, in `chargeRecoveredSessionLoss` |
 | a failed recovery re-dial charges nothing | the budget bounds successful recoveries | the LOSS is charged, so a re-dial that fails spends its unit like any other -- which is what the exhaustion message already tells the operator |
 
-The operator-visible consequence of the third row is stated for what it is: at
-`max_reconnect_attempts=3`, a fourth drop whose re-dial fails spends a unit that
-a budget bounding successful re-dials would not have charged, so a later drop
-gets no further chance. That is the smallest arrangement under which the budget
-means what its own message says.
+The operator-visible consequence of the third row is stated for what it is: the
+budget bounds sessions lost, so a drop whose attempted re-dial fails spends a
+unit, and at `max_reconnect_attempts=3` a fourth drop is refused outright --
+`chargeRecoveredSessionLoss` charges the loss and raises the exhaustion error
+before any dial is attempted, which the cap-boundary unit case pins as no
+further connect call. A budget bounding successful re-dials would have left
+that fourth drop one more attempt. This is the smallest arrangement under
+which the budget means what its own message says.
 
 The public getters are projections over those rows, and the ones that predate the
 ledger are kept verbatim, which is what kept the blast radius near zero: the
