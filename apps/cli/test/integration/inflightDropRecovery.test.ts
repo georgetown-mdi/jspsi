@@ -330,7 +330,8 @@ inProcessOnly(
       // No re-dial was attempted, so no session was left behind by one either.
       expect(party.dials).toEqual([]);
       expect(controls.handshakeCount()).toBe(0);
-      expect(party.adapter.midExchangeReconnectCount).toBe(0);
+      // The session was lost all the same, and the budget bounds the losses.
+      expect(party.adapter.midExchangeReconnectCount).toBe(1);
     } finally {
       await party.stop();
     }
@@ -373,7 +374,9 @@ inProcessOnly(
       expect(error).toBeInstanceOf(UsageError);
       expect((error as Error).message).toContain("max_reconnect_attempts=1");
       expect((error as Error).message).toContain("--connection-per-poll");
-      expect(party.adapter.midExchangeReconnectCount).toBe(1);
+      // Two sessions lost: the one the budget's single re-dial recovered and the
+      // one it refused.
+      expect(party.adapter.midExchangeReconnectCount).toBe(2);
       // The re-dial the budget did allow, and no dial beyond it.
       expect(controls.handshakeCount()).toBe(1);
       expect(party.dials).toHaveLength(1);

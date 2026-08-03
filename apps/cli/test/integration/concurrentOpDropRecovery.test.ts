@@ -499,6 +499,73 @@ for (const [shape, width] of [
     TEST_TIMEOUT_MS,
   );
 
+inProcessOnly(
+  "two drops of two successive sessions report two, once each",
+  async () => {
+    // The other direction from the once-per-loss cases above, and the one an
+    // accounting keyed to a high-water mark gets wrong: two GENUINE losses, of two
+    // different sessions, must report as two. A charge gated on "newer than the
+    // newest loss already accounted for" drops the second wherever an arm carries
+    // a generation the gate has passed, and the failure looks exactly like the
+    // once-per-loss property working. Driven with a fan at each drop, so an arm of
+    // the first drop's fan and an arm of the second's are both in play.
+    const party = await connectParty({
+      maxReconnectAttempts: 6,
+      stallDeadlineMs: STALL_DEADLINE_MS,
+    });
+    try {
+      const controls = party.srv.sessionControls;
+      controls.resetHandshakeCount();
+
+      const [progress, logs] = await withCapturedLogs(
+        async () => {
+          const spent: { counted: number; handshakes: number }[] = [];
+          for (const drop of [0, 1]) {
+            const targets = await plantDeletables(
+              party,
+              `generation${drop}`,
+              FAN_OUT_FILES,
+            );
+            controls.dropActiveAfterOps(1);
+            const settled = await Promise.allSettled(
+              targets.map((target) => party.adapter.delete(target)),
+            );
+            expect(settled.filter(stalled)).toEqual([]);
+            expect(settled.map(describeSettlement)).toEqual(
+              targets.map(() => ({
+                status: "fulfilled",
+                detail: "undefined",
+              })),
+            );
+            spent.push({
+              counted: party.adapter.midExchangeReconnectCount,
+              handshakes: controls.handshakeCount(),
+            });
+          }
+          return spent;
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      // Each drop moved both by exactly one: two sessions lost, two handshakes
+      // served, neither drop swallowed by the other and neither counted twice.
+      expect(progress).toEqual([
+        { counted: 1, handshakes: 1 },
+        { counted: 2, handshakes: 2 },
+      ]);
+      expect(party.dials).toHaveLength(2);
+      expect(party.adapter.reconnectCount).toBe(2);
+      // One line, not one per torn operation: the second drop falls inside the
+      // shared warn cadence (the first, then every tenth) and the run total the
+      // teardown summary carries is what reports it.
+      expect(recoveryWarnings(logs)).toHaveLength(1);
+    } finally {
+      await party.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
 // The budget of drops the operator configured, spent at a fan-out width well
 // above it. The last drop the budget permits is deliberately the wide fan, so the
 // boundary is reached with a fan-out tearing at it: an accounting that charged per
@@ -591,10 +658,14 @@ for (const [shape, width] of [
         );
         expect((refused as Error).message).toContain("--connection-per-poll");
         // Refused rather than dialed: the budget bought no handshake past the
-        // ones it allowed.
+        // ones it allowed. The refused drop is still counted -- the budget bounds
+        // sessions LOST rather than re-dials made -- so the counter runs one
+        // ahead of the handshakes at exactly the point of refusal.
         expect(controls.handshakeCount()).toBe(SPENDABLE_DROPS);
         expect(party.dials).toHaveLength(SPENDABLE_DROPS);
-        expect(party.adapter.midExchangeReconnectCount).toBe(SPENDABLE_DROPS);
+        expect(party.adapter.midExchangeReconnectCount).toBe(
+          SPENDABLE_DROPS + 1,
+        );
       } finally {
         await party.stop();
       }
@@ -640,14 +711,15 @@ inProcessOnly(
       // deadline, which is what says the recovery arms all ran.
       expect(settled.filter(stalled)).toEqual([]);
       // One handshake per re-dial, and no more re-dials than the budget allowed.
+      // The bound is read on the HANDSHAKES rather than on the counter: against a
+      // server that drops every session it opens, the sessions lost exceed the
+      // re-dials the budget bought, and it is the re-dials the budget bounds.
       expect(controls.handshakeCount()).toBe(party.dials.length);
-      expect(party.adapter.midExchangeReconnectCount).toBe(
+      expect(controls.handshakeCount()).toBeLessThanOrEqual(budget);
+      expect(controls.handshakeCount()).toBeGreaterThan(0);
+      expect(party.adapter.midExchangeReconnectCount).toBeGreaterThanOrEqual(
         controls.handshakeCount(),
       );
-      expect(party.adapter.midExchangeReconnectCount).toBeLessThanOrEqual(
-        budget,
-      );
-      expect(party.adapter.midExchangeReconnectCount).toBeGreaterThan(0);
     } finally {
       await party.stop();
     }

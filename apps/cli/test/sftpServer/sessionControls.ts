@@ -198,6 +198,8 @@ export function createSftpSessionControls(): SftpSessionControlHub {
     tearBeforeRenameLands: false,
     consumeDestinationAtTear: false,
     holdProbeUntilDestinationConsumed: false,
+    refuseProbeOfTornDestination: false,
+    preserveTornDestinationOnRemove: false,
     tornDestination: undefined,
 
     noteTorn(virtualPath: string): void {
@@ -221,6 +223,8 @@ export function createSftpSessionControls(): SftpSessionControlHub {
       renameTear.tearBeforeRenameLands = false;
       renameTear.consumeDestinationAtTear = false;
       renameTear.holdProbeUntilDestinationConsumed = false;
+      renameTear.refuseProbeOfTornDestination = false;
+      renameTear.preserveTornDestinationOnRemove = false;
       renameTear.tornDestination = undefined;
       tornDestinationConsumed = false;
       releaseProbes();

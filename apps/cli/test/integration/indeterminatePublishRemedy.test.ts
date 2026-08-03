@@ -329,11 +329,10 @@ inProcessOnly(
       // That success does not make a retry the recovery to prescribe: the
       // publishing party cannot tell this shape from the one where its message
       // landed and was NOT consumed, which leaves that message in the directory
-      // for the clean-entry guard to refuse (the marker sweep does not touch a
-      // message-shaped name -- core's fileSyncConnection.test.ts pins its
-      // rejection at entry). So the remedy names a clean directory, which works
-      // whichever shape the publish was in: both parties fresh, carrying the same
-      // key files forward.
+      // for the clean-entry guard to refuse. That arm is the sibling case below,
+      // driven rather than argued. So the remedy names a clean directory, which
+      // works whichever shape the publish was in: both parties fresh, carrying
+      // the same key files forward.
       const clean = "undetermined-publish-clean";
       await fsp.mkdir(path.join(srv.handle.backingDir, clean), {
         recursive: true,
@@ -376,3 +375,132 @@ function causeChain(error: unknown): Error[] {
   }
   return chain;
 }
+
+inProcessOnly(
+  "a torn publish left UNCONSUMED is refused at entry by a plain retry, and a " +
+    "clean directory runs",
+  async () => {
+    // The other arm of the same indeterminate publish, and the one the
+    // clean-directory remedy exists for. Here the publish landed and was NOT
+    // consumed, so its message file is still in the directory: the entry guard
+    // refuses it on both sides -- the widened abort-marker sweep matches only the
+    // control grammar, so a leftover MESSAGE is untouched by it -- which is why a
+    // plain retry is not the remedy and a restart in a clean directory is.
+    const srv = await startInProcessSftpServer();
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-unconsumed-"));
+    try {
+      const keyFiles = {
+        receiver: path.join(work, "receiver.key"),
+        sender: path.join(work, "sender.key"),
+      };
+      saveKeyFile(keyFiles.receiver, { sharedSecret: INITIAL_SECRET });
+      saveKeyFile(keyFiles.sender, { sharedSecret: INITIAL_SECRET });
+
+      const shared = "unconsumed-publish";
+      await fsp.mkdir(path.join(srv.handle.backingDir, shared), {
+        recursive: true,
+      });
+
+      const first = await runAttempt({
+        srv,
+        remoteDir: `${srv.handle.remoteRoot}/${shared}`,
+        work,
+        tag: "first",
+        keyFiles,
+        stageOnceAuthenticated: (server) => {
+          const tear = server.sessionControls.renameTear;
+          tear.reset();
+          // The publish lands durably, the connection goes before its reply, and
+          // the landed-confirmation probe of that same destination cannot settle
+          // it either way -- the state a probe torn, expired, or refused on a
+          // dead session reaches, staged deterministically here.
+          tear.tearAfterRenameLands = true;
+          tear.refuseProbeOfTornDestination = true;
+          // ... and the partner's consume-delete of that destination is
+          // acknowledged without being performed, so the message it read is left
+          // where a run whose abort marker beat the partner's next poll would
+          // have left it.
+          tear.preserveTornDestinationOnRemove = true;
+        },
+      });
+
+      // The staging produced the condition on a MESSAGE publish, and the
+      // publishing party got the undetermined outcome rather than a determined
+      // failure.
+      expect(first.tornDestination).toMatch(/-\d+\.json$/);
+      const publisher = first.parties.find((party) =>
+        causeChain(party.error).some(
+          (link) => link instanceof TransportPublishIndeterminateError,
+        ),
+      );
+      expect(publisher).toBeDefined();
+      expect(publisher!.exitCode).toBe(69);
+      expect(publisher!.rendered).toContain(REMEDY);
+
+      // The residue this arm leaves, asserted BEFORE the retry so that retry is
+      // measured against a known directory: the message file the publish landed,
+      // plus whatever abort marker the failing party wrote.
+      const tornName = first.tornDestination!.split("/").pop()!;
+      const residue = await fsp.readdir(
+        path.join(srv.handle.backingDir, shared),
+      );
+      expect(residue).toContain(tornName);
+      expect(residue.filter((name) => !name.endsWith("-abort.json"))).toEqual([
+        tornName,
+      ]);
+
+      // The plain retry the generic advisory would have prescribed: refused at
+      // entry by BOTH parties, terminally and with the leftover message named.
+      const retry = await runAttempt({
+        srv,
+        remoteDir: `${srv.handle.remoteRoot}/${shared}`,
+        work,
+        tag: "retry",
+        keyFiles,
+      });
+      expect(retry.parties.map((party) => party.exitCode)).toEqual([64, 64]);
+      for (const party of retry.parties) {
+        // Rendered through the real renderer, which walks the cause chain: the
+        // refusal sentence and its recovery step are the UsageError's own
+        // message and the offending filenames are a link below it, so an
+        // assertion against `.message` alone would not find the name.
+        expect(party.rendered).toContain(tornName);
+        expect(party.rendered).toContain("--sweep-exchange-files");
+      }
+      // The directory is untouched by the refusal, so the operator still has the
+      // file the message went into.
+      expect(
+        await fsp.readdir(path.join(srv.handle.backingDir, shared)),
+      ).toContain(tornName);
+
+      // And the remedy the publish actually prescribed works: both parties
+      // fresh in a clean directory, carrying the same key files forward.
+      const clean = "unconsumed-publish-clean";
+      await fsp.mkdir(path.join(srv.handle.backingDir, clean), {
+        recursive: true,
+      });
+      const restart = await runAttempt({
+        srv,
+        remoteDir: `${srv.handle.remoteRoot}/${clean}`,
+        work,
+        tag: "restart",
+        keyFiles,
+      });
+      expect(restart.parties.filter((party) => !party.ok)).toEqual([]);
+      expect(
+        (
+          await fsp.readFile(
+            path.join(work, "restart-receiver-out.csv"),
+            "utf8",
+          )
+        )
+          .trim()
+          .split("\n"),
+      ).toHaveLength(1 + RECEIVER_ROWS.length);
+    } finally {
+      fs.rmSync(work, { recursive: true, force: true });
+      await srv.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
