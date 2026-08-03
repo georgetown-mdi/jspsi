@@ -1095,7 +1095,11 @@ export function loadConfigLinkageSource(
             // decode-error formatting. The path is relative to linkage_terms.
             const at =
               i.path.length > 0
-                ? `${i.path.map((p) => String(p)).join(".")}: `
+                ? // A Zod issue path is PropertyKey[], and Array.join throws a
+                  // TypeError on a symbol segment where String() renders it, so
+                  // this map is a guard rather than a redundant coercion: an
+                  // error-formatting path must not fail while reporting.
+                  `${i.path.map((p) => String(p)).join(".")}: `
                 : "";
             return `${at}${i.message}`;
           })
@@ -1117,7 +1121,11 @@ export function loadConfigLinkageSource(
             .map((i) => {
               const at =
                 i.path.length > 0
-                  ? `${i.path.map((p) => String(p)).join(".")}: `
+                  ? // A Zod issue path is PropertyKey[], and Array.join throws a
+                    // TypeError on a symbol segment where String() renders it, so
+                    // this map is a guard rather than a redundant coercion: an
+                    // error-formatting path must not fail while reporting.
+                    `${i.path.map((p) => String(p)).join(".")}: `
                   : "";
               return `${at}${i.message}`;
             })
@@ -1142,7 +1150,11 @@ export function loadConfigLinkageSource(
             .map((i) => {
               const at =
                 i.path.length > 0
-                  ? `${i.path.map((p) => String(p)).join(".")}: `
+                  ? // A Zod issue path is PropertyKey[], and Array.join throws a
+                    // TypeError on a symbol segment where String() renders it, so
+                    // this map is a guard rather than a redundant coercion: an
+                    // error-formatting path must not fail while reporting.
+                    `${i.path.map((p) => String(p)).join(".")}: `
                   : "";
               return `${at}${i.message}`;
             })

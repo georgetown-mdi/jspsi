@@ -24,6 +24,7 @@ import type { LinkageTerms } from "../src/config/linkageTerms";
 import {
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
+  sanitizeForDisplay,
 } from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
@@ -1287,6 +1288,35 @@ test("date mismatch produces a warning, not an error", () => {
   expect(errors).toHaveLength(0);
   expect(warnings).toHaveLength(1);
   expect(warnings[0]).toMatch(/date mismatch/);
+});
+
+test("every value a warning can carry is already escape-stable", () => {
+  // The CLI escapes a warning again at its log line and its event stream, so a
+  // warning makes two passes on that route (recorded as a limit in
+  // CHANNEL_SECURITY.md). That second pass is unobservable only while every
+  // value interpolated into a warning is constrained to a shape the escape does
+  // not rewrite. This pins that premise where it actually holds -- the schema --
+  // so a future warning carrying free text fails here rather than silently
+  // reaching an operator double-escaped.
+  const { warnings } = validateCompatibility(termsA, {
+    ...termsB,
+    date: "2025-06-01",
+  });
+  expect(warnings).toHaveLength(1);
+  for (const warning of warnings) {
+    expect(sanitizeForDisplay(warning)).toBe(warning);
+  }
+
+  for (const hostile of [
+    "2025-01-0\\",
+    "2025-01-01\x1b[31m",
+    "2025-01-0‮",
+    "2025-01-01\n",
+  ]) {
+    expect(safeParseLinkageTerms({ ...termsA, date: hostile }).success).toBe(
+      false,
+    );
+  }
 });
 
 test("version mismatch is an error", () => {

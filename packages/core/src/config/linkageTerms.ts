@@ -1341,8 +1341,12 @@ export function validateCompatibility(
   // renders at its own display boundary; an error is escaped once by
   // sanitizeErrorForDisplay where it is shown, so these values are interpolated
   // RAW. `warnings` is handed to the caller as display text (runExchange's
-  // onWarning slot), so this composition IS that value's display sink and it
-  // escapes here.
+  // onWarning slot) with no error to carry it, so it is escaped here. The CLI
+  // escapes each warning again as it reaches a log line and the event stream,
+  // so a warning makes two passes on that route; every value interpolated below
+  // is schema-constrained to a shape the escape does not rewrite, which is what
+  // keeps the second pass unobservable. CHANNEL_SECURITY.md records why neither
+  // pass is removed.
   //
   // The equality CHECKS always compare the RAW values either way -- escaping is
   // display-only and lossy (it truncates), so comparing escaped forms could mask

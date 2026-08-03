@@ -79,8 +79,17 @@ const SINK_VALUE_POSITIONS = [
 // omission there is silent: a partner-controlled error message carries the
 // server's or the peer's bytes, so `log.warn(err.message)` puts ANSI, CR/LF,
 // bidi overrides and confusables straight on the operator's terminal or into a
-// --log-file. The miss has to be impossible by construction rather than by
-// review.
+// --log-file.
+//
+// The selectors match the raw error where it sits directly in a sink argument:
+// a `.message` read, a `String`/`errorMessage`/`errMessage` call, or a bare
+// error-named identifier, each also inside a template literal, a ternary branch,
+// or an arrow-function body. They do NOT follow a value through an intermediate
+// local (`const m = errorMessage(err); log.warn(m)`), a method call on the
+// message, or a container the sink unpacks -- a check that did would need the
+// taint analysis TypeScript has no way to run. This bans the shapes a
+// contributor writes by habit; it is not a proof that no raw error can reach a
+// sink.
 //
 // Coverage is first-party source only. A dependency that writes the file
 // descriptor itself -- ssh2-sftp-client's "Global ... listener" console lines --

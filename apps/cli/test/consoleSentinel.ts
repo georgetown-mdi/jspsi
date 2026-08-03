@@ -84,12 +84,17 @@ const MAX_REPORTED_VIOLATIONS = 20;
 
 // A byte an escaped operator-facing line cannot contain. sanitizeForDisplay
 // rewrites every code point outside printable ASCII (U+0020-U+007E) to a visible
-// escape, and the one control character the display boundary itself emits is the
-// newline sanitizeErrorForDisplay joins a cause chain with -- so a recorded line
-// holding anything else reached the console without passing a display sink.
-// Matched on the joined line, not per argument, because the prefix, the
-// separator and the payload all land in the same string.
-const UNESCAPED_DISPLAY_BYTE = /[^\x20-\x7e\n]/;
+// escape, so a recorded line holding anything else reached the console without
+// passing a display sink. Matched on the joined line, not per argument, because
+// the prefix, the separator and the payload all land in the same string.
+const UNESCAPED_DISPLAY_BYTE = /[^\x20-\x7e]/;
+
+// The one control sequence the display boundary itself emits: the separator
+// sanitizeErrorForDisplay joins a cause chain with. It is removed before the
+// byte test rather than exempted from it, because exempting the bare newline
+// would let a forged log line -- printable ASCII plus LF, one of the threats
+// this gate exists to catch -- pass unnoticed.
+const RENDERER_FRAMING = /\ncaused by: /g;
 
 // Join console arguments into one matchable line. Strings pass through verbatim
 // (so a matcher reads the literal logged text); a non-string is inspected rather
@@ -254,7 +259,7 @@ export class ConsoleSentinel {
    */
   unescapedLines(): RecordedConsoleLine[] {
     return this.recorded.filter((line) =>
-      UNESCAPED_DISPLAY_BYTE.test(line.message),
+      UNESCAPED_DISPLAY_BYTE.test(line.message.replace(RENDERER_FRAMING, " ")),
     );
   }
 

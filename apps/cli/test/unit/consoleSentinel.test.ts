@@ -392,10 +392,37 @@ describe("ConsoleSentinel", () => {
     sentinel.restore();
   });
 
+  it("fails a forged log line whose bytes are printable ASCII plus a bare newline", () => {
+    // A partner value of printable ASCII and a newline carries no byte the
+    // escape rewrites, so only the framing-aware gate catches it: the renderer
+    // emits `\ncaused by: ` and nothing else, and a bare newline outside that
+    // sequence is the log-line spoofing this backstop exists to catch.
+    const allowlist: ConsoleAllowEntry[] = [
+      {
+        id: "intended",
+        levels: ["error"],
+        match: /^failed/,
+        reason: "intended diagnostic",
+      },
+    ];
+    const fake = fakeConsole();
+    const sentinel = new ConsoleSentinel(allowlist);
+    sentinel.install(fake);
+
+    fake.error("failed: ok\nFAKE: all clear");
+
+    expect(sentinel.violations()).toEqual([]);
+    expect(sentinel.unescapedLines()).toHaveLength(1);
+    expect(() => sentinel.assertClean()).toThrowError(
+      /without passing a display sink/,
+    );
+    sentinel.restore();
+  });
+
   it("passes a line escaped the way a display sink escapes it", () => {
     // sanitizeForDisplay's output is printable ASCII, and the one control
-    // character the display boundary itself emits is the newline
-    // sanitizeErrorForDisplay joins a cause chain with; neither may fail the gate.
+    // sequence the display boundary itself emits is the `\ncaused by: ` join
+    // sanitizeErrorForDisplay frames a cause chain with; neither may fail the gate.
     const allowlist: ConsoleAllowEntry[] = [
       {
         id: "intended",
