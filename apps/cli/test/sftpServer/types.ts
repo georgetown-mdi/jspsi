@@ -145,6 +145,25 @@ export interface SftpRenameTearControls {
    * partner never consumes does not park the probe for the run.
    */
   holdProbeUntilDestinationConsumed: boolean;
+  /**
+   * Fail any STAT/LSTAT of {@link tornDestination} with a generic error, which
+   * is a different answer from "the server reported it absent": the publishing
+   * party's landed-confirmation probe cannot settle the publish either way, so
+   * the publish stays undetermined with its message file still on the server.
+   * Deterministic where the real shape of that state is a race -- a probe torn,
+   * expired, or refused on a dead session -- and it is the arm the
+   * clean-directory remedy exists for.
+   */
+  refuseProbeOfTornDestination: boolean;
+  /**
+   * Acknowledge any REMOVE of {@link tornDestination} without performing it, so
+   * the partner's consume-delete leaves the torn publish's message file on the
+   * server. It stages the residue rather than a server behaviour: a real run
+   * reaches the same state when the publishing party's abort marker reaches the
+   * partner before that partner's next poll, which is a race a case must not
+   * tune a sleep to.
+   */
+  preserveTornDestinationOnRemove: boolean;
   /** The destination path of the torn RENAME, as the client named it. */
   tornDestination: string | undefined;
   /** Disarm every flag, forget the torn destination, and release parked probes. */

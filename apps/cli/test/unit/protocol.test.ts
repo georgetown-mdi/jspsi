@@ -3754,12 +3754,12 @@ test("summarizes the reconnect count at normal verbosity when the session was re
         line.includes("during this exchange"),
     ),
   ).toBe(true);
-  // No mid-exchange re-dials occurred, so the "of which ... mid-exchange session
-  // re-dials" clause -- and its session terminology, which does not apply to a
-  // file-drop channel -- must not appear.
-  expect(
-    mockState.infos.some((line) => line.includes("mid-exchange session")),
-  ).toBe(false);
+  // No session was lost mid-exchange, so the "of which ... mid-exchange" clause
+  // -- and its session terminology, which does not apply to a file-drop channel
+  // -- must not appear.
+  expect(mockState.infos.some((line) => line.includes("mid-exchange"))).toBe(
+    false,
+  );
   expect(mockState.infos.some((line) => line.includes("of which"))).toBe(false);
 });
 
@@ -3767,7 +3767,7 @@ test("summary reports the mid-exchange sub-count apart from the total", async ()
   // A single merged reconnect number cannot tell benign startup retries from
   // chronic mid-exchange session drops. The summary reports the mid-exchange
   // sub-count distinctly so the operator sees the signal that matters. Force a
-  // total of 4 with 3 of them mid-exchange re-dials on the (real) file-drop
+  // total of 4 with 3 of them sessions lost mid-exchange on the (real) file-drop
   // client via its metric getters.
   const reconnectSpy = vi
     .spyOn(LocalFSClient.prototype, "reconnectCount", "get")
@@ -3803,7 +3803,7 @@ test("summary reports the mid-exchange sub-count apart from the total", async ()
     mockState.infos.some(
       (line) =>
         line.includes("re-established 4 times") &&
-        line.includes("of which 3 were mid-exchange session re-dials"),
+        line.includes("of which 3 were sessions lost mid-exchange"),
     ),
   ).toBe(true);
 });
@@ -3846,10 +3846,14 @@ test("summarizes the forced idle-boundary releases apart from the reconnects", a
     line.includes("did not close when released at 7 idle boundaries"),
   );
   expect(summary).toBeDefined();
-  expect(summary).toContain("not a dropped session");
   expect(summary).toContain("so it was closed from this side");
-  // The mode's own boundaries are not reconnections, so nothing about them may
-  // reach the reconnect summary.
+  // The forced close is a mechanism rather than a verdict on who ended the
+  // session -- a release forced over a transport a partner's drop had already
+  // ended reaches it too -- so this line says nothing about whether a session was
+  // lost, and must not tell the operator none was.
+  expect(summary).not.toContain("not a dropped session");
+  // Whether a session was lost at one of these boundaries is the reconnect
+  // summary's to report, and this run staged none.
   expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
     false,
   );

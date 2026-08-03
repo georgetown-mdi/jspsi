@@ -5,14 +5,18 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 // Every server round trip the SFTP adapter issues must pass through its
-// tracked() bracket, which is what keeps the outstanding-operation count -- the
-// idle-boundary release's precondition (a boundary reached with a counted
-// operation outstanding closes nothing, because the close would tear that
-// operation off the wire). A round trip issued outside the bracket is invisible
-// to that precondition, so a release falls while it is on the wire and tears it;
-// the same bracket is where the heartbeat's in-flight state is kept, so an
-// unbracketed round trip can also draw a concurrent keepalive onto a client that
-// permits one operation at a time.
+// tracked() bracket, which is where the heartbeat's in-flight state is kept: an
+// unbracketed round trip can draw a concurrent keepalive onto a client that
+// permits one operation at a time, and it leaves the idle window un-reset on real
+// traffic.
+//
+// What this check is NOT. The outstanding-operation count -- the idle-boundary
+// release's precondition -- is opened one layer up, by runOperation, and spans an
+// operation from issue to final settlement; every tracked() bracket in the
+// adapter is one ATTEMPT inside such a span. That nesting is a property of the
+// private *Once layer being reached only through runOperation, which this
+// analysis does not verify: it checks bracket coverage and nothing about the span
+// above it.
 //
 // docs/spec/CHANNEL_SECURITY.md states which round trips are excluded, and prose
 // asserting a code fact rots silently: the exclusion set has been wrong before
@@ -95,7 +99,8 @@ const NON_REQUEST_MEMBERS = new Set([
 
 // The round trips deliberately issued outside the bracket, matched by the method
 // they are issued from and the callee they issue. Each reason states why the
-// count must not include it.
+// bracket must not cover it, and each is outside the outstanding-operation span
+// as well.
 const ALLOWED_OUTSIDE_THE_BRACKET = [
   {
     enclosingMethod: "sendKeepalive",
@@ -119,13 +124,14 @@ const ALLOWED_OUTSIDE_THE_BRACKET = [
     callee: "delete",
     reason:
       "the drain's re-issue of a recorded cleanup delete, the one UNSETTLED " +
-      "round trip an idle release MAY tear: the tear rejects it, which records " +
-      "the path " +
-      "again for the next re-establishment, so the release defers the work " +
-      "rather than losing it -- while counting it would let a server that " +
-      "accepts DELETE and withholds its callback hold every boundary and so " +
-      "revert connection-per-poll to a held session. The bracket's other duty " +
-      "does not reach it either: the record and the drain exist only in " +
+      "round trip an idle release MAY tear: it is issued from the drain rather " +
+      "than from an operation, so no outstanding span covers it either. The " +
+      "tear rejects it, which records the path again for the next " +
+      "re-establishment, so the release defers the work rather than losing it " +
+      "-- while counting it would let a server that accepts DELETE and " +
+      "withholds its callback hold every boundary and so revert " +
+      "connection-per-poll to a held session. The bracket's own duty does not " +
+      "reach it either: the record and the drain exist only in " +
       "connection-per-poll mode, which arms no heartbeat, so there is no " +
       "keepalive to draw alongside it",
   },
@@ -504,12 +510,13 @@ describe("SFTP adapter round trips are bracketed by tracked()", () => {
     expect(
       unexplained,
       `${unexplained.length} SFTP round trip(s) are issued outside the ` +
-        `tracked() bracket and are not named exceptions, so an idle-boundary ` +
-        `release can tear them off the wire and the heartbeat can post a ` +
-        `keepalive alongside them. Route each through the bracket (the ` +
-        `private *Once layer of the matching operation), or add it to ` +
+        `tracked() bracket and are not named exceptions, so the heartbeat can ` +
+        `post a keepalive alongside them on a client that permits one ` +
+        `operation at a time. Route each through the bracket (the private ` +
+        `*Once layer of the matching operation, which runOperation's ` +
+        `outstanding span encloses), or add it to ` +
         `ALLOWED_OUTSIDE_THE_BRACKET in ${SELF} with the reason it must not ` +
-        `be counted, and update the enumeration in ` +
+        `be bracketed, and update the enumeration in ` +
         `docs/spec/CHANNEL_SECURITY.md.`,
     ).toEqual([]);
   });

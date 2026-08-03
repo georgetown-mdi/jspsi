@@ -628,6 +628,14 @@ function attachSftpHandlers(
         void renameTear.waitForConsumption().then(() => answer(reqid, p));
         return;
       }
+      // A generic failure rather than NO_SUCH_FILE: what the probe must not be
+      // able to conclude is that the destination is absent, so the publish stays
+      // undetermined instead of being settled either way.
+      if (
+        renameTear.refuseProbeOfTornDestination &&
+        renameTear.tornDestination === p
+      )
+        return sftp.status(reqid, STATUS_CODE.FAILURE);
       answer(reqid, p);
     };
   };
@@ -636,6 +644,13 @@ function attachSftpHandlers(
 
   sftp.on("REMOVE", (reqid: number, p: string) => {
     if (inject.withholdOn === "REMOVE") return;
+    // Acknowledged, not performed: the torn publish's message file stays on the
+    // server, which is the residue a plain retry then meets.
+    if (
+      renameTear.preserveTornDestinationOnRemove &&
+      renameTear.tornDestination === p
+    )
+      return sftp.status(reqid, STATUS_CODE.OK);
     fs.unlink(resolve(p), (err) => {
       if (!err) renameTear.noteRemoved(p);
       if (err && err.code === "ENOENT")

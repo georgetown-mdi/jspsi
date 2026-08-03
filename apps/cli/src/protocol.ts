@@ -656,23 +656,24 @@ export async function runProtocol(
     // server that repeatedly dropped and was re-dialed even without --event-stream
     // (which carries the total as a machine metric). The per-drop WARN in the SFTP
     // adapter already flags each recovery burst; this is the one end-of-run
-    // summary. The total counts connect-time retries plus mid-exchange session
-    // re-dials (SFTP only); the mid-exchange sub-count is reported apart from it so
-    // the operator can tell benign startup retries from chronic mid-exchange
-    // drops. Zero on a clean run, so the guard keeps a normal exchange quiet.
+    // summary. The total counts connect-time retries plus the sessions lost
+    // mid-exchange (SFTP only); the mid-exchange sub-count is reported apart from
+    // it so the operator can tell benign startup retries from chronic
+    // mid-exchange drops. Zero on a clean run, so the guard keeps a normal
+    // exchange quiet.
     const reconnects = client?.reconnectCount ?? 0;
-    const midExchangeRedials = client?.midExchangeReconnectCount ?? 0;
+    const midExchangeLosses = client?.midExchangeReconnectCount ?? 0;
     if (reconnects > 0) {
       const summary =
         `the connection was re-established ${reconnects} ` +
         `time${reconnects === 1 ? "" : "s"} during this exchange`;
       log.info(
-        midExchangeRedials > 0
-          ? `${summary}, of which ${midExchangeRedials} ` +
+        midExchangeLosses > 0
+          ? `${summary}, of which ${midExchangeLosses} ` +
               `${
-                midExchangeRedials === 1
-                  ? "was a mid-exchange session re-dial"
-                  : "were mid-exchange session re-dials"
+                midExchangeLosses === 1
+                  ? "was a session lost mid-exchange"
+                  : "were sessions lost mid-exchange"
               }`
           : summary,
       );
@@ -683,13 +684,17 @@ export async function runProtocol(
     // every tenth) or absent, so a run whose last occurrence fell off that cadence
     // states its true total nowhere else, and an operator who left the run
     // unattended could not tell afterwards how the partner's server behaved. None
-    // of them is summed into another or into the reconnect line above, and none
-    // reaches the metrics event: they report mutually exclusive outcomes of the
-    // same boundary -- one the partner closed, one this side closed itself, ones
-    // that closed nothing at all -- and a session that was never lost is not a
-    // reconnection, so folding any of them in would report drops the exchange
-    // never had. All are 0 in every other mode, so the guards keep a normal
-    // exchange quiet.
+    // of them reaches the metrics event, and none is folded into the reconnect
+    // line above, which counts SESSIONS LOST where these count BOUNDARIES: the
+    // two overlap without either containing the other -- a boundary that closed
+    // over a drop the partner had already delivered is in both, an ordinary
+    // release in only these -- so folding any of them in would report the mode's
+    // own lifecycle as drops and count that overlap twice. The first two are the
+    // same boundary reached two ways --
+    // the released total is every boundary that ended a session, and the forced
+    // one the subset the partner never answered -- and are stated together for
+    // that reason; the rest closed nothing at all. All are 0 in every other mode,
+    // so the guards keep a normal exchange quiet.
     const heldBoundaries = client?.heldBoundaryCount ?? 0;
     const heldStretches = client?.heldBoundaryStretchCount ?? 0;
     const perCycleOutcomes: {
@@ -707,8 +712,8 @@ export async function runProtocol(
         count: client?.forcedReleaseCount ?? 0,
         line: (count) =>
           `the connection did not close when released at ${count} idle ` +
-          `${count === 1 ? "boundary" : "boundaries"} during this exchange ` +
-          `(not a dropped session), so it was closed from this side`,
+          `${count === 1 ? "boundary" : "boundaries"} during this exchange, ` +
+          `so it was closed from this side`,
       },
       {
         count: client?.declinedReleaseCount ?? 0,

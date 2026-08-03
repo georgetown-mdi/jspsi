@@ -274,14 +274,15 @@ inProcessOnly(
 
 inProcessOnly(
   "a partner drop the idle boundary closes over with nothing on the wire is " +
-    "reported as the forced release alone",
+    "counted as the lost session it is",
   async () => {
     // The same withheld-close drop the recovery path counts, with no operation for
     // it to tear: the partner drops the session between two poll cycles and the
     // idle boundary falls afterwards, so nothing reaches session recovery and the
-    // release is the only thing that meets the drop. What the operator gets is
-    // therefore this mode's forced-release line and a `reconnects` that never
-    // moves -- driven against the real server rather than modelled, because what
+    // release is the only thing that meets the drop. The boundary is what charges
+    // it, so `reconnects` reports the session the partner took whether or not an
+    // operation happened to be on the wire when it went -- driven against the real
+    // server rather than modelled, because what
     // the release's own end() does to a transport ssh2 has already ended is the
     // pinned stack's behavior (see docs/spec/DEPENDENCY_PINS.md) and a stand-in
     // that answered it differently would report a different operator experience.
@@ -331,15 +332,20 @@ inProcessOnly(
       expect(outcome.exists).toBe(true);
       expect(outcome.gateDials).toBe(1);
       expect(outcome.outstanding).toBe(0);
-      // No operation lost anything, so no re-dial recovered anything and neither
-      // reconnect counter moves. Pinned as the limit the spec states rather than as
-      // a property to rely on: this drop reaches no reconnect counter at all, and
-      // what reports the boundary is the forced release asserted below.
-      expect(adapter.reconnectCount).toBe(0);
-      expect(adapter.midExchangeReconnectCount).toBe(0);
+      // The session the partner took is counted once, by the boundary that met
+      // it. No operation was torn, so no recovery re-dial ran and the recovery
+      // line -- which reports a drop transparently re-dialed -- does not fire; the
+      // boundary has an operator line of its own instead.
+      expect(adapter.reconnectCount).toBe(1);
+      expect(adapter.midExchangeReconnectCount).toBe(1);
       expect(
         logs.filter((entry) => entry.message.includes("dropped mid-exchange")),
       ).toEqual([]);
+      const absorbed = logs.filter((entry) =>
+        entry.message.includes("ended the SFTP session before this"),
+      );
+      expect(absorbed).toHaveLength(1);
+      expect(absorbed[0].level).toBe("WARN");
       // What the release met was a transport its own end() could not close, so it
       // spent its bound and forced the close -- the one boundary this run reports.
       expect(adapter.forcedReleaseCount).toBe(1);
@@ -484,9 +490,10 @@ inProcessOnly(
       );
       // What ended the exchange was the budget rather than a rendezvous the server
       // never cut: every re-dial the budget permits was spent first, and the drop
-      // after them is the one that raised.
+      // after them is the one that raised -- counted like the rest, the budget
+      // bounding sessions lost rather than re-dials made.
       expect(waiterAdapter.midExchangeReconnectCount).toBe(
-        DEFAULT_MAX_RECONNECT_ATTEMPTS,
+        DEFAULT_MAX_RECONNECT_ATTEMPTS + 1,
       );
       expect(srv.sessionControls.handshakeCount()).toBeGreaterThanOrEqual(
         DEFAULT_MAX_RECONNECT_ATTEMPTS,
@@ -804,8 +811,8 @@ inProcessOnly(
             // only be spent by the polling party.
             srv.sessionControls.dropActiveAfterOps(1);
             // A drop landing in a cycle's tail is absorbed by the next
-            // cycle-start dial and counted by neither counter, so this wait is
-            // the one that would spend its deadline if that ever happened.
+            // cycle-start dial and charged as the partner's loss all the same,
+            // so either route moves the counter this wait reads.
             await waitFor(
               () => receiverAdapter.midExchangeReconnectCount > before,
               {
