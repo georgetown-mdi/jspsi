@@ -98,7 +98,7 @@ export const PEER_SILENCE_GUIDANCE =
 export const entryHelloResidueGuidance = (helloName: string): string =>
   "No peer was confirmed; the hello present at start may be residue. " +
   "Re-run; remove only if it persists: " +
-  sanitizeForDisplay(helloName);
+  helloName;
 
 /**
  * Operator guidance for a run that swept the shared folder at entry and then

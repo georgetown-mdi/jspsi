@@ -10,7 +10,6 @@ import {
 import { SHARED_SECRET_REGEX } from "./config/connection";
 import { MAX_RECORD_COUNT } from "./connection/frameSize";
 import { randomBytes, toBase64Url } from "./utils/crypto";
-import { sanitizeForDisplay } from "./utils/sanitizeForDisplay";
 import { describeDecodeError } from "./utils/describeDecodeError";
 import { boundedArray } from "./utils/boundedArray";
 import {
@@ -546,9 +545,7 @@ export async function exchangeTerms(
     if (msg.decision === "abort") {
       throw new Error(
         "partner aborted linkage terms exchange" +
-          (msg.abortReasons?.length
-            ? `: ${msg.abortReasons.map((r) => sanitizeForDisplay(r)).join("; ")}`
-            : ""),
+          (msg.abortReasons?.length ? `: ${msg.abortReasons.join("; ")}` : ""),
       );
     }
 
@@ -687,9 +684,7 @@ export async function exchangeTerms(
     if (msg.decision === "abort") {
       throw new Error(
         "partner aborted linkage terms exchange" +
-          (msg.abortReasons?.length
-            ? `: ${msg.abortReasons.map((r) => sanitizeForDisplay(r)).join("; ")}`
-            : ""),
+          (msg.abortReasons?.length ? `: ${msg.abortReasons.join("; ")}` : ""),
       );
     }
 

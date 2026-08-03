@@ -17,7 +17,6 @@ import {
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
   safeParseMetadata,
-  sanitizeForDisplay,
   snakeizeKeys,
   StandardizationSchema,
   UsageError,
@@ -752,21 +751,18 @@ export function diffLinkageTerms(
  * Render a list of {@link ReconcileDiff} as an indented, human-readable block
  * for a reconciliation error message.
  *
- * The rendered values are escaped through {@link sanitizeForDisplay}: both sides
- * can carry partner-controlled, attacker-shaped strings -- the invitation's
- * linkage field/key names, and (for an online split accept) the inviter's own
- * `inbound_path`/`outbound_path` from the connection endpoint -- and this block
- * is printed to the acceptor's terminal before acceptance, so an unescaped value
- * could inject control/ANSI sequences or spoof a log line. The `field` is a
- * static, code-built path, so it is left as is. Ordinary values pass through
- * unchanged.
+ * The rendered values are interpolated raw. Both sides can carry
+ * partner-controlled, attacker-shaped strings -- the invitation's linkage
+ * field/key names, and (for an online split accept) the inviter's own
+ * `inbound_path`/`outbound_path` from the connection endpoint -- but the only
+ * caller composes this block into a {@link UsageError}, where the display
+ * boundary escapes the whole message once before it reaches the acceptor's
+ * terminal.
  */
 export function formatReconcileDiffs(diffs: ReconcileDiff[]): string {
   return diffs
     .map(
-      (d) =>
-        `  - ${d.field}: existing ${sanitizeForDisplay(d.existing)} vs ` +
-        `required ${sanitizeForDisplay(d.incoming)}`,
+      (d) => `  - ${d.field}: existing ${d.existing} vs required ${d.incoming}`,
     )
     .join("\n");
 }
@@ -854,9 +850,7 @@ export function persistHostKeyFingerprint(
       const channel = doc.getIn(["connection", "channel"]);
       if (channel !== "sftp") {
         const found =
-          typeof channel === "string"
-            ? `"${sanitizeForDisplay(channel)}"`
-            : "absent or non-scalar";
+          typeof channel === "string" ? `"${channel}"` : "absent or non-scalar";
         throw new UsageError(
           `config file ${configPath} has a non-sftp connection.channel ` +
             `(${found}); a host-key fingerprint is an sftp-only pin and must ` +
@@ -1099,12 +1093,9 @@ export function loadConfigLinkageSource(
             // Prefix each issue with its field path (e.g. "linkageKeys.0.name")
             // so the user can locate the offending field, mirroring accept's
             // decode-error formatting. The path is relative to linkage_terms.
-            // Escape each path segment through sanitizeForDisplay before joining,
-            // matching describeDecodeError's contract: harden the path components
-            // this formatter owns, relay the issue message unchanged.
             const at =
               i.path.length > 0
-                ? `${i.path.map((p) => sanitizeForDisplay(String(p))).join(".")}: `
+                ? `${i.path.map((p) => String(p)).join(".")}: `
                 : "";
             return `${at}${i.message}`;
           })
@@ -1124,10 +1115,9 @@ export function loadConfigLinkageSource(
         `config file ${configPath} has invalid standardization: ` +
           stdResult.error.issues
             .map((i) => {
-              // Escape each path segment, like the linkage_terms branch above.
               const at =
                 i.path.length > 0
-                  ? `${i.path.map((p) => sanitizeForDisplay(String(p))).join(".")}: `
+                  ? `${i.path.map((p) => String(p)).join(".")}: `
                   : "";
               return `${at}${i.message}`;
             })
@@ -1150,10 +1140,9 @@ export function loadConfigLinkageSource(
         `config file ${configPath} has invalid metadata: ` +
           metaResult.error.issues
             .map((i) => {
-              // Escape each path segment, like the linkage_terms branch above.
               const at =
                 i.path.length > 0
-                  ? `${i.path.map((p) => sanitizeForDisplay(String(p))).join(".")}: `
+                  ? `${i.path.map((p) => String(p)).join(".")}: `
                   : "";
               return `${at}${i.message}`;
             })

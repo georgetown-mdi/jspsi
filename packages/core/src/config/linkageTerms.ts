@@ -1331,30 +1331,34 @@ export function validateCompatibility(
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  // Every value interpolated into an operator-facing message below -- both the
-  // local and the partner side of a mismatch -- is routed through
-  // sanitizeForDisplay. The threat is the partner side: a mutually-distrusting
-  // party controls reference/purpose/identity/column names, and raw ANSI/control
-  // characters or deceptive Unicode there could spoof or mislead in the local
-  // operator's logs or UI. The local values are the operator's own validated
-  // config, so sanitizing them is a no-op today; they take the same path anyway,
-  // for uniformity (no future edit reintroduces a raw interpolation beside a
-  // sanitized one) and defense in depth (a loosened schema bound stays covered).
-  // The equality CHECKS always compare the RAW values -- sanitizing is
-  // display-only and lossy (it truncates), so comparing sanitized forms could
-  // mask a genuine mismatch.
+  // The threat both arrays below carry is the partner side: a
+  // mutually-distrusting party controls reference/purpose/identity/column names,
+  // and raw ANSI/control characters or deceptive Unicode there could spoof or
+  // mislead in the local operator's logs or UI. The two take different routes to
+  // that operator, so they are escaped at different points.
+  //
+  // `errors` becomes an Error message here and an abort frame the partner
+  // renders at its own display boundary; an error is escaped once by
+  // sanitizeErrorForDisplay where it is shown, so these values are interpolated
+  // RAW. `warnings` is handed to the caller as display text (runExchange's
+  // onWarning slot), so this composition IS that value's display sink and it
+  // escapes here.
+  //
+  // The equality CHECKS always compare the RAW values either way -- escaping is
+  // display-only and lossy (it truncates), so comparing escaped forms could mask
+  // a genuine mismatch.
   if (local.version !== partner.version) {
     // TODO: implement migration when new versions exist
     errors.push(
-      `version mismatch: local is ${sanitizeForDisplay(local.version)}, ` +
-        `partner is ${sanitizeForDisplay(partner.version)}`,
+      `version mismatch: local is ${local.version}, ` +
+        `partner is ${partner.version}`,
     );
   }
 
   if (local.algorithm !== partner.algorithm) {
     errors.push(
-      `algorithm mismatch: local is ${sanitizeForDisplay(local.algorithm)}, ` +
-        `partner is ${sanitizeForDisplay(partner.algorithm)}`,
+      `algorithm mismatch: local is ${local.algorithm}, ` +
+        `partner is ${partner.algorithm}`,
     );
   }
 
@@ -1363,8 +1367,8 @@ export function validateCompatibility(
   // omitted, so the value is always present and compared directly.
   if (local.linkageStrategy !== partner.linkageStrategy) {
     errors.push(
-      `linkage strategy mismatch: local is ${sanitizeForDisplay(local.linkageStrategy)}, ` +
-        `partner is ${sanitizeForDisplay(partner.linkageStrategy)}`,
+      `linkage strategy mismatch: local is ${local.linkageStrategy}, ` +
+        `partner is ${partner.linkageStrategy}`,
     );
   }
 
@@ -1495,15 +1499,15 @@ export function validateCompatibility(
       if (local.legalAgreement.reference !== partner.legalAgreement.reference) {
         errors.push(
           "legal agreement reference mismatch: local is " +
-            `"${sanitizeForDisplay(local.legalAgreement.reference)}", ` +
-            `partner is "${sanitizeForDisplay(partner.legalAgreement.reference)}"`,
+            `"${local.legalAgreement.reference}", ` +
+            `partner is "${partner.legalAgreement.reference}"`,
         );
       }
       if (local.legalAgreement.purpose !== partner.legalAgreement.purpose) {
         errors.push(
           "legal agreement purpose mismatch: local is " +
-            `"${sanitizeForDisplay(local.legalAgreement.purpose)}", ` +
-            `partner is "${sanitizeForDisplay(partner.legalAgreement.purpose)}"`,
+            `"${local.legalAgreement.purpose}", ` +
+            `partner is "${partner.legalAgreement.purpose}"`,
         );
       }
       if (
@@ -1512,15 +1516,15 @@ export function validateCompatibility(
       ) {
         errors.push(
           "legal agreement expiration date mismatch: local is " +
-            `${sanitizeForDisplay(local.legalAgreement.expirationDate)}, ` +
-            `partner is ${sanitizeForDisplay(partner.legalAgreement.expirationDate)}`,
+            `${local.legalAgreement.expirationDate}, ` +
+            `partner is ${partner.legalAgreement.expirationDate}`,
         );
       }
       const today = new Date().toISOString().slice(0, 10);
       if (local.legalAgreement.expirationDate < today) {
         errors.push(
           "legal agreement expired on " +
-            `${sanitizeForDisplay(local.legalAgreement.expirationDate)}`,
+            `${local.legalAgreement.expirationDate}`,
         );
       }
     }
@@ -1581,10 +1585,8 @@ export function validateCompatibility(
     const receiverNames = receiverReceive.map((c) => c.name).sort();
     const senderNames = senderSend.map((c) => c.name).sort();
     if (sameColumnSet(senderNames, receiverNames)) return;
-    const receiverShown = receiverNames
-      .map((n) => sanitizeForDisplay(n))
-      .join(",");
-    const senderShown = senderNames.map((n) => sanitizeForDisplay(n)).join(",");
+    const receiverShown = receiverNames.join(",");
+    const senderShown = senderNames.join(",");
     errors.push(
       receiverNames.length === 0
         ? messages.emptyReceiveMessage(senderShown)

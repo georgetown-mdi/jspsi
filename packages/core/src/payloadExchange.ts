@@ -18,7 +18,6 @@ import {
 } from "./connection/messageConnection.js";
 import { singleIssueArray } from "./utils/singleIssueArray.js";
 import { UsageError } from "./errors.js";
-import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
 
 /** The payload received from the exchange partner after PSI linkage. */
 export interface PartnerPayload {
@@ -205,9 +204,9 @@ export function preparePayload(
  * web `generateInvitation` authoring path) to keep the consent surface and the
  * token honest. The two points are disjoint entry paths, not redundant: neither
  * alone covers both the consent screen and the non-invite exchanges. Offending
- * names are partner-controlled on the accept side (the adopted inviter terms), so
- * the message routes each through {@link sanitizeForDisplay}, matching
- * `validateCompatibility`'s payload-mismatch messages.
+ * names are partner-controlled on the accept side (the adopted inviter terms) and
+ * are interpolated raw, matching `validateCompatibility`'s payload-mismatch
+ * messages: an error is escaped once where it is rendered.
  *
  * @throws {UsageError} when a non-empty `payload.send` does not name exactly the
  *   columns metadata discloses. A {@link UsageError} so the CLI classifies it as a
@@ -229,9 +228,7 @@ export function assertPayloadSendDisclosed(
   const problems: string[] = [];
   const remedies: string[] = [];
   if (overDeclared.length > 0) {
-    const shown = overDeclared
-      .map((name) => sanitizeForDisplay(name))
-      .join(", ");
+    const shown = overDeclared.join(", ");
     const plural = overDeclared.length > 1;
     problems.push(
       `names ${plural ? "columns" : "a column"} metadata does not transmit ([${shown}])`,
@@ -242,9 +239,7 @@ export function assertPayloadSendDisclosed(
     );
   }
   if (underDeclared.length > 0) {
-    const shown = underDeclared
-      .map((name) => sanitizeForDisplay(name))
-      .join(", ");
+    const shown = underDeclared.join(", ");
     const plural = underDeclared.length > 1;
     problems.push(
       `omits ${plural ? "columns" : "a column"} metadata does transmit ([${shown}])`,
@@ -307,9 +302,8 @@ export function assertPayloadSendDisclosed(
  * nothing," so any currently-disclosed column fails. Mirrors the absent/empty
  * semantics of `expectedPayloadColumns` and the token's `disclosedPayloadColumns`.
  *
- * The names are this party's own (metadata- and config-derived) but are routed
- * through {@link sanitizeForDisplay} for consistency with the sibling send-side
- * guard.
+ * The names are this party's own (metadata- and config-derived) and, like the
+ * sibling send-side guard's, are interpolated raw into the error.
  *
  * @throws {UsageError} when a present `committed` set is not exactly the columns
  *   this party's metadata currently discloses. A {@link UsageError} so the CLI
@@ -331,9 +325,7 @@ export function assertDisclosureMatchesCommitment(
   const problems: string[] = [];
   const remedies: string[] = [];
   if (noLongerDisclosed.length > 0) {
-    const shown = noLongerDisclosed
-      .map((name) => sanitizeForDisplay(name))
-      .join(", ");
+    const shown = noLongerDisclosed.join(", ");
     const plural = noLongerDisclosed.length > 1;
     problems.push(
       `no longer discloses ${plural ? "columns" : "a column"} it committed ` +
@@ -347,9 +339,7 @@ export function assertDisclosureMatchesCommitment(
     );
   }
   if (newlyDisclosed.length > 0) {
-    const shown = newlyDisclosed
-      .map((name) => sanitizeForDisplay(name))
-      .join(", ");
+    const shown = newlyDisclosed.join(", ");
     const plural = newlyDisclosed.length > 1;
     problems.push(
       `now discloses ${plural ? "columns" : "a column"} it did not commit ` +
@@ -414,8 +404,8 @@ export function assertDisclosureMatchesCommitment(
  * @throws {ConnectionError} of kind `"protocol"` when `declared` is present and
  *   the received non-empty column set is not exactly it. A protocol error because
  *   the peer violated the disclosure contract; the receiving party's callers
- *   surface it as a failed exchange. The offending names are partner-controlled,
- *   so both sides of the message route through {@link sanitizeForDisplay}.
+ *   surface it as a failed exchange. The offending names are partner-controlled
+ *   and interpolated raw, escaped once where the error is rendered.
  */
 export function reconcileReceivedPayload(
   received: PartnerPayload,
@@ -428,8 +418,8 @@ export function reconcileReceivedPayload(
   const matches =
     got.length === want.length && got.every((name, i) => name === want[i]);
   if (matches) return;
-  const gotShown = got.map((name) => sanitizeForDisplay(name)).join(", ");
-  const wantShown = want.map((name) => sanitizeForDisplay(name)).join(", ");
+  const gotShown = got.join(", ");
+  const wantShown = want.join(", ");
   const wantDescription =
     want.length === 0 ? `no payload at all` : `only [${wantShown}]`;
   throw new ConnectionError(

@@ -62,12 +62,11 @@ export const SFTP_STALL_DEADLINE_MS = 60_000;
  * `detail` states how it stalled, so the one error type carries an
  * operation-specific message.
  *
- * `path` is routed through {@link sanitizeForDisplay} before interpolation:
+ * `path` is interpolated raw and escaped where the error is rendered:
  * read/write/delete operation paths carry a peer-supplied filename, so a hostile
- * server could otherwise inject control/ANSI or deceptive-Unicode characters into
- * the operator's terminal through this diagnostic. (The operator-configured
- * rendezvous dirPath the listing-stall builders pass is not partner-controlled,
- * but routing every caller through the same escape keeps the treatment uniform.)
+ * server's control/ANSI or deceptive-Unicode characters are neutralized at the
+ * display boundary rather than here, where escaping them would leave the sink to
+ * escape them a second time.
  */
 export function transportOperationStalledError(
   operation: string,
@@ -75,7 +74,7 @@ export function transportOperationStalledError(
   detail: string,
 ): TransportOperationStalledError {
   return new TransportOperationStalledError(
-    `SFTP ${operation} of ${sanitizeForDisplay(path)} stalled: ${detail}; ` +
+    `SFTP ${operation} of ${path} stalled: ${detail}; ` +
       `refusing to wait on the server further`,
   );
 }

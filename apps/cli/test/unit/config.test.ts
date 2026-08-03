@@ -9,6 +9,7 @@ import {
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
   parseExchangeSpec,
+  sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
 import {
@@ -1014,8 +1015,9 @@ test("persistHostKeyFingerprint sanitizes the echoed channel for display", () =>
   // The rejected channel is echoed so the operator sees what was wrong, but it
   // is operator-authored config text that can carry control bytes -- an ESC that
   // drives an ANSI sequence, or a newline usable for log-line spoofing. The
-  // error is display-bound (it reaches a terminal/log), so the channel is run
-  // through sanitizeForDisplay and emitted escaped, never raw.
+  // error is display-bound (it reaches a terminal/log), so the channel reaches
+  // the operator escaped, never raw -- asserted at the rendered boundary, the
+  // altitude that escape happens at.
   const configPath = path.join(dir, "psilink.yaml");
   // A double-quoted YAML scalar whose value decodes to x<ESC><LF>y.
   const source = 'connection:\n  channel: "x\\x1b\\ny"\n';
@@ -1027,13 +1029,13 @@ test("persistHostKeyFingerprint sanitizes the echoed channel for display", () =>
     caught = err;
   }
   expect(caught).toBeInstanceOf(UsageError);
-  const message = (caught as Error).message;
-  // The raw control bytes never reach the message ...
-  expect(message).not.toContain("\u001b");
-  expect(message).not.toContain("\n");
+  const rendered = sanitizeErrorForDisplay(caught);
+  // The raw control bytes never reach the operator ...
+  expect(rendered).not.toContain("\u001b");
+  expect(rendered).not.toContain("\n");
   // ... they are shown as visible escapes instead.
-  expect(message).toContain("\\x1b");
-  expect(message).toContain("\\x0a");
+  expect(rendered).toContain("\\x1b");
+  expect(rendered).toContain("\\x0a");
   // The file is left untouched (the throw precedes the write).
   expect(fs.readFileSync(configPath, "utf8")).toBe(source);
 });
@@ -1778,14 +1780,20 @@ test("formatReconcileDiffs: escapes partner-controlled values against terminal i
   // The incoming side can be a partner-controlled string (a linkage key name, or
   // an inviter's split inbound_path/outbound_path from the connection endpoint),
   // rendered to the acceptor's terminal before acceptance. A control/ANSI
-  // sequence in it must be neutralized, not passed through.
-  const rendered = formatReconcileDiffs([
-    {
-      field: "connection.server.inbound_path",
-      existing: "/safe/in",
-      incoming: "/drop\x1b[2J\x1b[31m",
-    },
-  ]);
+  // sequence in it must be neutralized, not passed through. The block is composed
+  // into a UsageError by its only caller, so this asserts at that error's rendered
+  // boundary rather than on the raw block.
+  const rendered = sanitizeErrorForDisplay(
+    new Error(
+      formatReconcileDiffs([
+        {
+          field: "connection.server.inbound_path",
+          existing: "/safe/in",
+          incoming: "/drop\x1b[2J\x1b[31m",
+        },
+      ]),
+    ),
+  );
   expect(rendered).not.toContain("\x1b");
   expect(rendered).toContain("\\x1b");
 });
@@ -1930,7 +1938,7 @@ test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => 
 });
 
 // The three parse-error formatters route every issue-path segment through
-// sanitizeForDisplay, like describeDecodeError, so a control/ANSI or
+// the display boundary, like describeDecodeError, so a control/ANSI or
 // deceptive-Unicode byte in a path can never reach the operator raw. No reachable
 // failure produces such a path today (the linkage schemas are non-strict, so
 // unrecognized keys are stripped before they can appear), so this drives the one
@@ -1956,16 +1964,16 @@ test("loadConfigLinkageSource escapes control/ANSI bytes in a linkage_terms issu
     caught = err;
   }
   expect(caught).toBeInstanceOf(UsageError);
-  const message = (caught as Error).message;
-  expect(message).toContain("invalid linkage_terms");
+  const rendered = sanitizeErrorForDisplay(caught);
+  expect(rendered).toContain("invalid linkage_terms");
   // The fixed path prefix passes through verbatim; only the partner-style key
   // segment is escaped.
-  expect(message).toContain("linkageKeys.0.elements.0.transform.0.params.");
+  expect(rendered).toContain("linkageKeys.0.elements.0.transform.0.params.");
   // The raw bytes are neutralized: their escaped forms appear, never the bytes.
-  expect(message).not.toContain("\x1b");
-  expect(message).not.toContain("\u202e");
-  expect(message).toContain("\\x1b");
-  expect(message).toContain("\\u202e");
+  expect(rendered).not.toContain("\x1b");
+  expect(rendered).not.toContain("\u202e");
+  expect(rendered).toContain("\\x1b");
+  expect(rendered).toContain("\\u202e");
 });
 
 test("loadConfigLinkageSource leaves a schema-fixed linkage_terms issue path unescaped", () => {

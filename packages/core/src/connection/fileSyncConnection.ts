@@ -82,18 +82,18 @@ export function normalizeFiledropPath(rawPath: string): string {
 // per-operation read bounds raise, so a hang surfaces identically wherever it is
 // caught. See docs/spec/CHANNEL_SECURITY.md.
 //
-// `operation` is routed through sanitizeForDisplay: the target it names is a
-// transport path, and on a get/delete of a peer message file that path embeds
-// the partner-chosen filename, so a stalled read of a hostile name would
-// otherwise echo its control/ANSI/Unicode bytes raw to the operator. This is the
-// core-side whole-exchange-budget twin of the CLI adapter's per-operation
-// transportOperationStalledError, which escapes its path the same way.
+// `operation` is interpolated raw, like every other fragment composed into an
+// error: the target it names is a transport path, and on a get/delete of a peer
+// message file that path embeds the partner-chosen filename, so its
+// control/ANSI/Unicode bytes are neutralized by sanitizeErrorForDisplay where
+// the message is shown. This is the core-side whole-exchange-budget twin of the
+// CLI adapter's per-operation transportOperationStalledError.
 const transportBudgetExceededError = (
   operation: string,
   budgetMs: number,
 ): TransportOperationStalledError =>
   new TransportOperationStalledError(
-    `transport ${sanitizeForDisplay(operation)} exceeded the ${budgetMs} ms ` +
+    `transport ${operation} exceeded the ${budgetMs} ms ` +
       `peer-inactivity budget; the peer or server has not responded within the ` +
       `budget, so the exchange is failing rather than waiting on it further`,
   );
@@ -618,11 +618,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     return this.entryPeerHello;
   }
 
-  // The rendezvous path escaped for operator-facing logs and thrown errors. On an
-  // offline-accept-seeded config the path is partner-reachable (the partner's
-  // charset-unconstrained invitation endpoint, copied verbatim), so it can carry
-  // control/ANSI/Unicode bytes; every display sink routes it through here while
-  // the byte-exact this.path is reserved for transport-path construction. The ""
+  // The rendezvous path escaped for an operator-facing LOG line, whose call site
+  // is its display sink (a path composed into an error is interpolated raw and
+  // escaped once where the error is rendered). On an offline-accept-seeded config
+  // the path is partner-reachable (the partner's charset-unconstrained invitation
+  // endpoint, copied verbatim), so it can carry control/ANSI/Unicode bytes; the
+  // byte-exact this.path is reserved for transport-path construction. The ""
   // fallback covers the post-handshake/close window where close() nulls this.path;
   // a display sink only ever runs with it set, so the fallback never shows.
   private get displayPath(): string {
@@ -1081,10 +1082,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // partner's invitation endpoint, whose host/path are charset-unconstrained
       // and copied verbatim, so they can carry CR/LF or other control/ANSI/Unicode
       // bytes; emitted raw they would enable log-line forging/spoofing on the
-      // operator's terminal or --log-file. This routes them through
-      // sanitizeForDisplay like every other partner/server-controlled string in
-      // this file. The port is a validated integer and the username is logged
-      // only as a presence marker, so neither needs escaping.
+      // operator's terminal or --log-file. A log call site is the sink for the
+      // values it shows, so it escapes them itself, unlike the error messages in
+      // this file, which are composed raw and escaped once where they render. The
+      // port is a validated integer and the username is logged only as a presence
+      // marker, so neither needs escaping.
       this.log.debug(
         `[${this.role}] connecting to ` +
           `${sanitizeForDisplay(config.server.host)}${portString}` +
@@ -1520,9 +1522,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // Mirrors sweepProtocolFiles' dirsDisplay so a split exchange names both
     // halves consistently wherever a path appears.
     const dirsDisplay = split
-      ? `${sanitizeForDisplay(inboundPath)} (inbound) and ` +
-        `${sanitizeForDisplay(outboundPath)} (outbound)`
-      : this.displayPath;
+      ? `${inboundPath} (inbound) and ${outboundPath} (outbound)`
+      : inboundPath;
 
     if (this.peerId) throw new Error("already synchronized");
 
@@ -1581,7 +1582,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           "them (every message would be silently skipped)",
       );
 
-    this.log.info(`[${this.role}] synchronizing at path ${dirsDisplay}`);
+    this.log.info(
+      `[${this.role}] synchronizing at path ${sanitizeForDisplay(dirsDisplay)}`,
+    );
 
     return { inboundPath, outboundPath, split, dirsDisplay };
   }

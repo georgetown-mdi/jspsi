@@ -302,11 +302,10 @@ export class SftpSession {
               // also surface the digest of a non-matching key.
               const presented = await computeHostKeyFingerprint(blob);
               // keyTypeFromBlob decodes UTF-8 straight from the
-              // server-controlled blob, so it is escaped and quoted before it
-              // reaches the operator-facing message; the presented fingerprint
-              // is base64 and the pins are format-validated, so neither needs
-              // it.
-              const keyType = sanitizeForDisplay(keyTypeFromBlob(blob));
+              // server-controlled blob, so it is quoted in the message below and
+              // escaped where the error is rendered; the presented fingerprint
+              // is base64 and the pins are format-validated.
+              const keyType = keyTypeFromBlob(blob);
               // Name the presented fingerprint and the pinned set so the
               // operator can see exactly what was offered against what was
               // trusted (the singular vs. plural wording adapts to the pin
@@ -353,10 +352,10 @@ export class SftpSession {
           try {
             const blob = hostKeyBlob(keyBlob);
             const presented = await computeHostKeyFingerprint(blob);
-            const keyType = sanitizeForDisplay(keyTypeFromBlob(blob));
+            const keyType = keyTypeFromBlob(blob);
             mismatchDetails =
               `no host_key_fingerprint is pinned for ` +
-              `${sanitizeForDisplay(config.server.host)}, so the server's ` +
+              `${config.server.host}, so the server's ` +
               `identity cannot be verified and the connection is refused. The ` +
               `server presented a host key of type '${keyType}' with ` +
               `fingerprint ${presented}; verify it out-of-band and set ` +

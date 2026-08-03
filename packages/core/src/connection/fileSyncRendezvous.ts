@@ -168,8 +168,8 @@ export async function readControlFileWithGate(
       // structural bound) and still retries.
       if (err instanceof JsonStructureBoundError)
         throw new UsageError(
-          `control file at ${sanitizeForDisplay(filePath)} has a malformed ` +
-            `payload: structure exceeds the permitted bound`,
+          `control file at ${filePath} has a malformed payload: structure ` +
+            `exceeds the permitted bound`,
         );
       // Partial write: body is not valid JSON yet; retry until fully synced.
       await cancellableDelay(pollingFrequency, signal);
@@ -177,16 +177,9 @@ export async function readControlFileWithGate(
     }
     const result = schema.safeParse(parsed);
     if (!result.success) {
-      // Only filePath is escaped here; result.error.message is deliberately
-      // left raw. The sole schema at every call site is HelloEnvelopeSchema --
-      // two `z.boolean()` fields under `.strip()` -- whose zod error reports the
-      // expected type and a fixed field path, never a peer-supplied value or key
-      // (strip drops extras without naming them), so it carries no partner bytes.
-      // This differs from poll()'s message-body parse, which escapes its
-      // error text because that body is open peer-controlled JSON.
       throw new UsageError(
-        `control file at ${sanitizeForDisplay(filePath)} has a malformed ` +
-          `payload: ${result.error.message}`,
+        `control file at ${filePath} has a malformed payload: ` +
+          `${result.error.message}`,
       );
     }
     return result.data;
@@ -214,10 +207,10 @@ export async function readControlFileWithGate(
     provenance === "presentAtEntry"
       ? "peer hello never became readable; it predates this run and may be " +
           "residue. Re-run; remove only if it persists and no session shares " +
-          `this path: ${sanitizeForDisplay(filePath)}`
+          `this path: ${filePath}`
       : "peer hello never became readable; it appeared during this run, so a " +
           "peer may still be publishing. Re-run; remove only if it persists: " +
-          `${sanitizeForDisplay(filePath)}`,
+          `${filePath}`,
   );
 }
 
@@ -403,10 +396,10 @@ const entryHelloAckWindowMs = (options: RendezvousOptions): number => {
 };
 
 // What a fragment costs in the RENDERED detail link, which is not its own
-// length: the call sites sanitize the directory scope and each filename, and
-// sanitizeErrorForDisplay sanitizes the composed link again when it shows it.
-// sanitizeForDisplay doubles a literal backslash, so that second pass is not a
-// no-op and an arithmetic done on raw lengths under-counts.
+// length: the link is composed from raw fragments and sanitizeErrorForDisplay
+// escapes it once when it shows it, expanding a code point outside printable
+// ASCII to as many as ten characters and doubling a literal backslash.
+// Arithmetic done on raw lengths under-counts.
 const renderedDisplayCost = (fragment: string): number =>
   sanitizeForDisplay(fragment, { maxLength: Infinity }).length;
 
@@ -442,15 +435,13 @@ const andMoreSuffix = (count: number): string => ` (and ${count} more)`;
 // Longest prefix of `value` whose rendered cost fits `budget`, with the
 // truncation marker appended -- and paid for out of that same budget -- when
 // anything was dropped. sanitizeForDisplay's own maxLength does not serve here:
-// it appends the marker ON TOP of the cap, and it would escape an
-// already-sanitized value a second time.
+// it appends the marker ON TOP of the cap, and it escapes, which is the sink's
+// job rather than this one's.
 //
-// Stated limit: `value` arrives already escaped, so an escape sequence in it is
-// several characters this walks one at a time, and a clip can land inside one --
-// a trimmed path can end `...\u4f6...[truncated]`, or on a lone backslash. The
-// output is still printable ASCII inside `budget`, and this cuts only the
-// operator's own directory scope; splitting the value back into whole escapes
-// would mean parsing the escape grammar out of an already-escaped string.
+// `value` arrives raw, and a code point is kept only when its WHOLE rendered
+// cost fits, so the clip falls on a code-point boundary and what the sink then
+// escapes can never end inside a partial escape sequence. That is pinned by a
+// test rather than asserted here.
 const clipToRenderedCost = (value: string, budget: number): string => {
   if (renderedDisplayCost(value) <= budget) return value;
   const room = budget - DISPLAY_TRUNCATION_MARKER.length;
@@ -738,9 +729,8 @@ export class FileSyncRendezvous {
     // mode it collapses to the inbound display path.
     const dirsDisplay =
       deps.outbound() === undefined
-        ? sanitizeForDisplay(inboundPath)
-        : `${sanitizeForDisplay(inboundPath)} (inbound) and ` +
-          `${sanitizeForDisplay(deps.outbound()!)} (outbound)`;
+        ? inboundPath
+        : `${inboundPath} (inbound) and ${deps.outbound()!} (outbound)`;
 
     const signals: string[] = [];
     let retainUncertain = false;
@@ -759,9 +749,7 @@ export class FileSyncRendezvous {
       isRetainMessageAck(e.file.name),
     );
     if (messageAck)
-      signals.push(
-        `a retain-mode message ack (${sanitizeForDisplay(messageAck.file.name)})`,
-      );
+      signals.push(`a retain-mode message ack (${messageAck.file.name})`);
 
     // Read peer hello bodies only when no cheaper signal has decided it already:
     // the hello read is the load-bearing check but the only one that costs a
@@ -794,8 +782,7 @@ export class FileSyncRendezvous {
           );
           if (envelope.retainFiles) {
             signals.push(
-              `peer hello ${sanitizeForDisplay(hello.name)} advertises ` +
-                `retain_files=true`,
+              `peer hello ${hello.name} advertises retain_files=true`,
             );
             break;
           }
@@ -865,7 +852,7 @@ export class FileSyncRendezvous {
         .warn(
           `[${deps.id()}] --force-retain-sweep: permanently deleting a ` +
             `retain-mode audit transcript (${toDelete.length} protocol file(s)) ` +
-            `in ${dirsDisplay}. This is destructive and ` +
+            `in ${sanitizeForDisplay(dirsDisplay)}. This is destructive and ` +
             `irreversible; the prior ` +
             "transcript will be lost. Only use --force-retain-sweep when you " +
             "intend to discard it.",
@@ -880,7 +867,7 @@ export class FileSyncRendezvous {
       .log()
       .info(
         `[${deps.id()}] sweeping ${toDelete.length} protocol file(s) at ` +
-          `${dirsDisplay} (--sweep-exchange-files): ` +
+          `${sanitizeForDisplay(dirsDisplay)} (--sweep-exchange-files): ` +
           `${toDelete.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
       );
     // allSettled, not all: await every delete before reporting, so a single
@@ -896,13 +883,7 @@ export class FileSyncRendezvous {
     );
     const failures = results.flatMap((result, i) =>
       result.status === "rejected"
-        ? // The delete error's message re-embeds the same partner-controlled
-          // filename via the operation path, so escape it too -- otherwise it
-          // re-introduces the bytes the name sanitize on this line removed.
-          [
-            `${sanitizeForDisplay(toDelete[i].name)} ` +
-              `(${sanitizeForDisplay(errMessage(result.reason))})`,
-          ]
+        ? [`${toDelete[i].name} (${errMessage(result.reason)})`]
         : [],
     );
     if (failures.length > 0)
@@ -1260,7 +1241,7 @@ export class FileSyncRendezvous {
           // carry outbound leftovers as well as inbound ones, so directing the
           // operator at the inbound path alone would mislead.
           dirsDisplay,
-          unexpectedProtocol.map((e) => sanitizeForDisplay(e.file.name)),
+          unexpectedProtocol.map((e) => e.file.name),
         );
 
       if (peerHellos.length > 1)
@@ -1269,8 +1250,8 @@ export class FileSyncRendezvous {
             "hello files are present -- are there other sessions using this " +
             "path?",
           "peer hello files",
-          sanitizeForDisplay(scope.inboundPath),
-          peerHellos.map((f) => sanitizeForDisplay(f.name)),
+          scope.inboundPath,
+          peerHellos.map((f) => f.name),
         );
     }
 
@@ -1503,7 +1484,7 @@ export class FileSyncRendezvous {
       if (!deps.options().retainFiles) deps.responsibleFiles.delete(helloName);
       deps.resetSessionState();
       throw new Error(
-        `peer id '${sanitizeForDisplay(peerId)}' and this party's id ` +
+        `peer id '${peerId}' and this party's id ` +
           `'${deps.id()}' share a prefix at a '-' boundary; ids must not be ` +
           "prefix-extensions of each other (e.g. 'site' / 'site-2')",
       );
@@ -1605,8 +1586,8 @@ export class FileSyncRendezvous {
 
           if (peerHellos.length > 1) {
             throw new UsageError(
-              `more than one peer hello file in ${sanitizeForDisplay(scope.inboundPath)} - are there ` +
-                "other sessions using this path?",
+              `more than one peer hello file in ${scope.inboundPath} - are ` +
+                "there other sessions using this path?",
             );
           }
 
@@ -1715,7 +1696,7 @@ export class FileSyncRendezvous {
                 "peer hello present at start never answered; it may be " +
                   "residue, not a live peer. Re-run; remove only if it " +
                   "persists and no session shares this path: " +
-                  `${sanitizeForDisplay(peerHello.name)}`,
+                  `${peerHello.name}`,
               );
             deps
               .log()
@@ -1820,8 +1801,8 @@ export class FileSyncRendezvous {
             // surface it the same way rather than silently timing the first.
             if (joiningFiles.length > 1) {
               throw new UsageError(
-                `more than one joining sentinel in ${sanitizeForDisplay(scope.inboundPath)} - are ` +
-                  "there other sessions using this path?",
+                `more than one joining sentinel in ${scope.inboundPath} - ` +
+                  "are there other sessions using this path?",
               );
             }
             // Joiner is mid-arrival. Wait a bounded recovery window for the
@@ -1868,8 +1849,7 @@ export class FileSyncRendezvous {
               // entry fast-path and never enters this loop -- even though
               // `this.role` is not committed until rendezvous succeeds.
               throw new Error(
-                `[starter] peer began arriving ` +
-                  `(${sanitizeForDisplay(joiningName)}) but did ` +
+                `[starter] peer began arriving (${joiningName}) but did ` +
                   "not complete within the recovery window; it appears to " +
                   "have failed after announcing its arrival but before " +
                   "publishing its hello. Retry the exchange.",
@@ -1915,8 +1895,8 @@ export class FileSyncRendezvous {
         );
         if (foreignSentinel) {
           throw new UsageError(
-            `joining sentinel ${sanitizeForDisplay(foreignSentinel.name)} ` +
-              `in ${sanitizeForDisplay(scope.inboundPath)} ` +
+            `joining sentinel ${foreignSentinel.name} ` +
+              `in ${scope.inboundPath} ` +
               "matches no peer hello - are there other sessions using " +
               "this path?",
           );
@@ -2043,8 +2023,8 @@ export class FileSyncRendezvous {
 
         if (otherFiles.length > 1) {
           throw new UsageError(
-            `more than one peer hello file in ${sanitizeForDisplay(scope.inboundPath)} - are there ` +
-              "other sessions using this path?",
+            `more than one peer hello file in ${scope.inboundPath} - are ` +
+              "there other sessions using this path?",
           );
         }
         const otherFile = otherFiles[0];
@@ -2104,8 +2084,8 @@ export class FileSyncRendezvous {
         } else {
           if (theseFiles.length > 1) {
             throw new UsageError(
-              `more than one self hello file in ${sanitizeForDisplay(scope.inboundPath)} - are there ` +
-                "other sessions using this path?",
+              `more than one self hello file in ${scope.inboundPath} - are ` +
+                "there other sessions using this path?",
             );
           }
 
@@ -2265,8 +2245,7 @@ export class FileSyncRendezvous {
       // degrades gracefully to the bare timeout below if they ever diverged.
       if (joiningSeenAt !== undefined && joiningSeenName !== undefined) {
         throw new Error(
-          `[starter] peer began arriving ` +
-            `(${sanitizeForDisplay(joiningSeenName)}) but the ` +
+          `[starter] peer began arriving (${joiningSeenName}) but the ` +
             "exchange timed out before it completed; it appears to have " +
             "failed after announcing its arrival but before publishing its " +
             "hello. Retry the exchange.",
@@ -2305,7 +2284,7 @@ export class FileSyncRendezvous {
         deps.id().startsWith(deps.peerId()! + "-")
       )
         throw new UsageError(
-          `peer id '${sanitizeForDisplay(deps.peerId()!)}' and this party's ` +
+          `peer id '${deps.peerId()!}' and this party's ` +
             `id '${deps.id()}' share ` +
             "a prefix at a '-' boundary; ids must not be prefix-extensions " +
             "of each other (e.g. 'site' / 'site-2')",

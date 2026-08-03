@@ -36,7 +36,10 @@ import {
 import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
 import { isHelloTempName } from "../src/connection/fileSyncNames";
 import { computeHostKeyFingerprint } from "../src/utils/sshHostKey";
-import { DISPLAY_TRUNCATION_MARKER } from "../src/utils/sanitizeForDisplay";
+import {
+  DISPLAY_TRUNCATION_MARKER,
+  sanitizeForDisplay,
+} from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import {
   fromEventConnection,
@@ -2786,10 +2789,10 @@ test("poll() budget error escapes a hostile peer filename in the stalled-operati
   const err = await emittedError;
   await conn.close();
   expect(err).toBeInstanceOf(TransportOperationStalledError);
-  const message = (err as Error).message;
+  const rendered = sanitizeErrorForDisplay(err);
   // The raw ESC from the peer filename never reaches the operator's terminal.
-  expect(message).not.toContain("\x1b");
-  expect(message).toContain("\\x1b");
+  expect(rendered).not.toContain("\x1b");
+  expect(rendered).toContain("\\x1b");
 });
 
 test("close() does not hang when the server withholds a cleanup safeDelete callback", async () => {
@@ -7698,10 +7701,11 @@ test("poll() terminal: the unparseable-body error escapes control/ANSI bytes ech
   const err = await pollUnparseableBodyError(
     Buffer.from("\x1b[2J\x1b[31mEVIL not json"),
   );
-  expect(err.message).toContain("not valid JSON");
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).toContain("not valid JSON");
   // The peer's raw ESC, quoted back by the parser, never reaches the terminal.
-  expect(err.message).not.toContain("\x1b");
-  expect(err.message).toContain("\\x1b");
+  expect(rendered).not.toContain("\x1b");
+  expect(rendered).toContain("\\x1b");
 });
 
 test("poll() terminal: the unparseable-body error neutralizes deceptive Unicode echoed by the JSON parser", async () => {
@@ -7710,11 +7714,12 @@ test("poll() terminal: the unparseable-body error neutralizes deceptive Unicode 
   const err = await pollUnparseableBodyError(
     Buffer.from("\u202e\u200b\u0430 not json"),
   );
-  expect(err.message).toContain("not valid JSON");
-  expect(err.message).not.toContain("\u202e");
-  expect(err.message).not.toContain("\u200b");
-  expect(err.message).not.toContain("\u0430");
-  expect(err.message).toContain("\\u202e");
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).toContain("not valid JSON");
+  expect(rendered).not.toContain("\u202e");
+  expect(rendered).not.toContain("\u200b");
+  expect(rendered).not.toContain("\u0430");
+  expect(rendered).toContain("\\u202e");
 });
 
 test("poll() terminal: an old-format JSON message surfaces a likely-incompatible-version hint", async () => {
@@ -8355,10 +8360,11 @@ test("poll(): an unrecognized file mid-loop is a terminal UsageError under the d
 
 // The foreign/unexpected-file handler is the highest-priority live injection
 // vector: a foreign filename passes every existing guard (length, count,
-// protocol grammar) and was interpolated raw into the terminal error. These pin
-// that its partner-controlled name is now routed through sanitizeForDisplay,
-// mirroring the sanitizeForDisplay categories. Driven through the default error
-// policy, the same path the ordinary-name test above exercises.
+// protocol grammar) and rides into the terminal error. These pin that it reaches
+// the operator only in escaped form, asserted at the rendered boundary (the
+// altitude the escape happens at) rather than on the raw message, and covering
+// the sanitizeForDisplay categories. Driven through the default error policy, the
+// same path the ordinary-name test above exercises.
 async function pollForeignFileError(hostileName: string): Promise<Error> {
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
@@ -8372,29 +8378,47 @@ async function pollForeignFileError(hostileName: string): Promise<Error> {
 }
 
 test("poll(): the unexpected-file error escapes control/ANSI in a foreign filename", async () => {
-  const err = await pollForeignFileError("\x1b[2J\x1b[31mEVIL.json");
+  const rendered = sanitizeErrorForDisplay(
+    await pollForeignFileError("\x1b[2J\x1b[31mEVIL.json"),
+  );
   // The raw ESC that drives the sequence never reaches the operator's terminal;
   // it survives only as the inert escaped text.
-  expect(err.message).not.toContain("\x1b");
-  expect(err.message).toContain("\\x1b");
+  expect(rendered).not.toContain("\x1b");
+  expect(rendered).toContain("\\x1b");
 });
 
 test("poll(): the unexpected-file error escapes a newline in a foreign filename", async () => {
-  const err = await pollForeignFileError("ok.json\nFAKE: all clear");
-  expect(err.message).not.toContain("\n");
-  expect(err.message).toContain("\\x0a");
+  const rendered = sanitizeErrorForDisplay(
+    await pollForeignFileError("ok.json\nFAKE: all clear"),
+  );
+  expect(rendered).not.toContain("\n");
+  expect(rendered).toContain("\\x0a");
 });
 
 test("poll(): the unexpected-file error neutralizes deceptive Unicode in a foreign filename", async () => {
   // A bidi override (RLO), a zero-width char, and a Cyrillic homoglyph -- all
   // invisible or misleading rendered raw, all escaped here.
-  const err = await pollForeignFileError("a\u202eb\u200bc\u0430d.json");
-  expect(err.message).not.toContain("\u202e");
-  expect(err.message).not.toContain("\u200b");
-  expect(err.message).not.toContain("\u0430");
-  expect(err.message).toContain("\\u202e");
-  expect(err.message).toContain("\\u200b");
-  expect(err.message).toContain("\\u0430");
+  const rendered = sanitizeErrorForDisplay(
+    await pollForeignFileError("a\u202eb\u200bc\u0430d.json"),
+  );
+  expect(rendered).not.toContain("\u202e");
+  expect(rendered).not.toContain("\u200b");
+  expect(rendered).not.toContain("\u0430");
+  expect(rendered).toContain("\\u202e");
+  expect(rendered).toContain("\\u200b");
+  expect(rendered).toContain("\\u0430");
+});
+
+test("poll(): a foreign filename with one literal backslash renders with one", async () => {
+  // The tell that escaping happens at one altitude and not two: sanitizeForDisplay
+  // doubles a backslash on every pass, so a second pass would show the operator
+  // four backslashes for the one on disk -- a name they cannot match to the file.
+  const hostile = "conflicted\\copy.json";
+  const rendered = sanitizeErrorForDisplay(await pollForeignFileError(hostile));
+  expect(rendered).toContain(sanitizeForDisplay(hostile));
+  expect(rendered).not.toContain(
+    sanitizeForDisplay(sanitizeForDisplay(hostile)),
+  );
 });
 
 test("poll(): the unexpected-file error passes an ordinary printable filename through unchanged", async () => {
@@ -8419,12 +8443,12 @@ test("poll(): a peer-derived peerId with control/ANSI is escaped in a terminal e
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
-  const message = (errors[0] as Error).message;
+  const rendered = sanitizeErrorForDisplay(errors[0]);
   // The peer id is the only hostile content in this message (the path is the
-  // ASCII /test), so a clean message proves peerId is routed through sanitize.
-  expect(message).toContain("more than one message file");
-  expect(message).not.toContain("\x1b");
-  expect(message).toContain("\\x1b");
+  // ASCII /test), so a clean rendering proves peerId reaches the operator escaped.
+  expect(rendered).toContain("more than one message file");
+  expect(rendered).not.toContain("\x1b");
+  expect(rendered).toContain("\\x1b");
 });
 
 test("poll(): an unrecognized file mid-loop warns once per name under the warn policy", async () => {

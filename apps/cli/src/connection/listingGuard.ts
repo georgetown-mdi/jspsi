@@ -1,6 +1,6 @@
 import {
   DirectoryListingBoundsError,
-  sanitizeForDisplay,
+  DISPLAY_TRUNCATION_MARKER,
   type TransportOperationStalledError,
 } from "@psilink/core";
 
@@ -82,16 +82,15 @@ export const MAX_FILENAME_LENGTH = 255;
  * Construct the typed, terminal error for a directory whose entry count exceeds
  * {@link MAX_DIRECTORY_ENTRIES}. `dirPath` is the rendezvous path (operator-
  * configured, but it can be seeded from a charset-unconstrained partner invitation
- * endpoint on an offline-accept config), so it is routed through
- * {@link sanitizeForDisplay} as defense-in-depth -- the same treatment every other
- * builder in this module applies to it.
+ * endpoint on an offline-accept config), so it is interpolated raw and escaped
+ * where the error is rendered, like every other fragment in this module.
  */
 export function directoryTooLargeError(
   dirPath: string,
   max: number,
 ): DirectoryListingBoundsError {
   return new DirectoryListingBoundsError(
-    `directory ${sanitizeForDisplay(dirPath)} contains more than ${max} ` +
+    `directory ${dirPath} contains more than ${max} ` +
       `entries; refusing to enumerate it to avoid an unbounded memory ` +
       `allocation`,
   );
@@ -99,22 +98,24 @@ export function directoryTooLargeError(
 
 /**
  * Construct the typed, terminal error for a directory entry whose filename
- * exceeds {@link MAX_FILENAME_LENGTH}. The offending name is routed through
- * {@link sanitizeForDisplay}, which both truncates it (so the error -- and any
- * log line carrying it -- cannot relay an attacker-sized string) and escapes
- * control/ANSI/deceptive-Unicode characters (so a hostile server cannot spoof
- * the operator's terminal through a crafted filename). The true length is
- * reported separately and unsanitized: it is a number, not partner text.
- * `dirPath` is escaped as in {@link directoryTooLargeError}.
+ * exceeds {@link MAX_FILENAME_LENGTH}. Only a leading slice of the offending
+ * name is interpolated: it is the one fragment here with no upper bound at all
+ * (a hostile server can synthesize a name of any length in a READDIR response),
+ * so the error must not relay an attacker-sized string into memory. The slice is
+ * raw -- escaping is the display boundary's job, and it renders a split surrogate
+ * pair as a visible escape rather than mojibake. The true length is reported
+ * separately: it is a number, not partner text.
  */
 export function filenameTooLongError(
   dirPath: string,
   name: string,
   max: number,
 ): DirectoryListingBoundsError {
-  const shown = sanitizeForDisplay(name, { maxLength: 64 });
+  // A name reaching here is longer than MAX_FILENAME_LENGTH and so longer than
+  // this preview, which is why the marker is unconditional.
+  const shown = `${name.slice(0, 64)}${DISPLAY_TRUNCATION_MARKER}`;
   return new DirectoryListingBoundsError(
-    `directory ${sanitizeForDisplay(dirPath)} contains an entry whose filename ` +
+    `directory ${dirPath} contains an entry whose filename ` +
       `is ${name.length} characters, exceeding the maximum of ${max} (${shown}); ` +
       `refusing to process it`,
   );

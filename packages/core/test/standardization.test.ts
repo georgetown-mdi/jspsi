@@ -19,6 +19,7 @@ import {
 import { StandardizationTermsError } from "../src/errors";
 import * as linearRegex from "../src/utils/linearRegex";
 import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
+import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { inferMetadata } from "../src/config/metadata";
 import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
 import { getDefaultStandardization } from "../src/defaults/standardization";
@@ -2050,34 +2051,49 @@ describe("validateStandardizationAgainstTerms", () => {
     ).toEqual([]);
   });
 
-  // The output/function names are interpolated into the returned messages, which a
-  // caller may surface directly (the web's config alert renders one). They are
-  // routed through sanitizeForDisplay at interpolation so a caller is safe without
-  // re-sanitizing; a control character in a name must reach the message only in its
-  // escaped form. ASCII-only names (the other cases here) are a no-op for the
-  // sanitizer, so they cannot pin this -- these two do.
+  // The output/function names are interpolated raw into the returned messages,
+  // which assertStandardizationMatchesTerms composes into a
+  // StandardizationTermsError; a control character in a name must reach the
+  // operator only in its escaped form, and that escape happens once where the
+  // error is rendered. Asserted THERE, never on the raw message: a raw assertion
+  // would pass equally on a value escaped twice, which is what this convention
+  // exists to catch. ASCII-only names (the other cases here) are a no-op for the
+  // escape, so they cannot pin this -- these two do.
+  const renderedRefusal = (
+    standardization: Standardization,
+    terms: LinkageTerms,
+  ): string =>
+    sanitizeErrorForDisplay(
+      ((): unknown => {
+        try {
+          assertStandardizationMatchesTerms(standardization, terms);
+        } catch (err) {
+          return err;
+        }
+        throw new Error("expected assertStandardizationMatchesTerms to throw");
+      })(),
+    );
+
   test("an output name with a control character is escaped in the message", () => {
     const raw = "last\u0000name"; // a null byte; not a declared field name
-    const errors = validateStandardizationAgainstTerms(
+    const rendered = renderedRefusal(
       [{ output: raw, input: "X" }],
       minimalTerms,
     );
-    expect(errors).toHaveLength(1);
-    // The membership test used the raw value (so it was correctly flagged), but the
-    // message carries only the sanitized form, never the raw control character.
-    expect(errors[0]).not.toContain(raw);
-    expect(errors[0]).toContain(sanitizeForDisplay(raw));
+    // The membership test used the raw value (so it was correctly flagged), but
+    // the operator sees only the escaped form, never the raw control character.
+    expect(rendered).not.toContain(raw);
+    expect(rendered).toContain(sanitizeForDisplay(raw));
   });
 
   test("an unknown function name with a control character is escaped in the message", () => {
     const raw = "bad\u0000fn"; // a null byte; not a known function name
-    const errors = validateStandardizationAgainstTerms(
+    const rendered = renderedRefusal(
       [{ output: "last_name", input: "LN", steps: [{ function: raw }] }],
       minimalTerms,
     );
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).not.toContain(raw);
-    expect(errors[0]).toContain(sanitizeForDisplay(raw));
+    expect(rendered).not.toContain(raw);
+    expect(rendered).toContain(sanitizeForDisplay(raw));
   });
 
   // The reachability the OperatorConfigError doc rests on: the accept side derives

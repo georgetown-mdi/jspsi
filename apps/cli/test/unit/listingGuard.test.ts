@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { DirectoryListingBoundsError, UsageError } from "@psilink/core";
+import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DirectoryListingBoundsError,
+  DISPLAY_TRUNCATION_MARKER,
+  sanitizeErrorForDisplay,
+  UsageError,
+} from "@psilink/core";
 
 import {
   MAX_DIRECTORY_ENTRIES,
@@ -38,18 +44,24 @@ describe("directoryTooLargeError", () => {
   });
 
   // dirPath can be seeded from a partner invitation endpoint on an offline-accept
-  // config, so it is routed through sanitizeForDisplay; every listingGuard builder
-  // treats its interpolated path uniformly. Mirrors the sanitizeForDisplay categories.
+  // config, so it must reach the operator escaped. Asserted at the RENDERED
+  // boundary, the altitude the escape happens at: on the raw message these would
+  // pass equally on a value the operator sees escaped twice. Mirrors the
+  // sanitizeForDisplay categories.
   test("escapes control/ANSI characters in the directory path", () => {
-    const err = directoryTooLargeError("/drop/\x1b[31mEVIL", 8192);
-    expect(err.message).not.toContain("\x1b");
-    expect(err.message).toContain("\\x1b");
+    const rendered = sanitizeErrorForDisplay(
+      directoryTooLargeError("/drop/\x1b[31mEVIL", 8192),
+    );
+    expect(rendered).not.toContain("\x1b");
+    expect(rendered).toContain("\\x1b");
   });
 
   test("neutralizes deceptive Unicode (bidi-override) in the directory path", () => {
-    const err = directoryTooLargeError("/drop/dir\u202eEVIL", 8192);
-    expect(err.message).not.toContain("\u202e");
-    expect(err.message).toContain("\\u202e");
+    const rendered = sanitizeErrorForDisplay(
+      directoryTooLargeError("/drop/dir\u202eEVIL", 8192),
+    );
+    expect(rendered).not.toContain("\u202e");
+    expect(rendered).toContain("\\u202e");
   });
 });
 
@@ -82,25 +94,27 @@ describe("filenameTooLongError", () => {
   test("escapes control/ANSI characters so a hostile name cannot spoof the terminal", () => {
     const hostile = "evil\x1b[31m" + "n".repeat(300);
     const err = filenameTooLongError("/drop", hostile, 255);
+    const rendered = sanitizeErrorForDisplay(err);
     // The raw ESC never reaches the operator's terminal; it survives as text.
-    expect(err.message).not.toContain("\x1b");
-    expect(err.message).toContain("\\x1b");
+    expect(rendered).not.toContain("\x1b");
+    expect(rendered).toContain("\\x1b");
     // The true length is still reported.
-    expect(err.message).toContain(`${hostile.length} characters`);
+    expect(rendered).toContain(`${hostile.length} characters`);
   });
 
   test("stays bounded even when the name is all non-ASCII (escapes expand each char)", () => {
     // Each astral emoji escapes to a 9-char \u{...} (up to 10 for a 6-hex-digit
-    // code point); the preview bounds the escaped output, not the code-point
-    // count, so the message cannot balloon.
+    // code point), so the message's own preview slice is what keeps the name out
+    // of memory whole, and the display boundary's per-link cap is what keeps the
+    // rendered form small. Both are asserted, because either alone would let the
+    // other regress unnoticed.
     const hostile = "\u{1f600}".repeat(5000);
     const err = filenameTooLongError("/drop", hostile, 255);
     expect(err.message).not.toContain(hostile);
-    // The escaped name is bounded by its 64-char preview, not the code-point
-    // count, so the name cannot balloon the message. This case holds the
-    // rendezvous path short; the path's own bound is exercised separately below,
-    // which is why <500 is a faithful ceiling here.
     expect(err.message.length).toBeLessThan(500);
+    expect(sanitizeErrorForDisplay(err).length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
+    );
   });
 
   // The directory path is escaped through the same helper as in
@@ -108,28 +122,25 @@ describe("filenameTooLongError", () => {
   // across both bound errors -- defense-in-depth for a path that can be seeded
   // from a charset-unconstrained partner invitation endpoint.
   test("escapes control/ANSI characters in the directory path", () => {
-    const err = filenameTooLongError(
-      "/drop/\x1b[31mEVIL",
-      "x".repeat(300),
-      255,
+    const rendered = sanitizeErrorForDisplay(
+      filenameTooLongError("/drop/\x1b[31mEVIL", "x".repeat(300), 255),
     );
-    expect(err.message).not.toContain("\x1b");
-    expect(err.message).toContain("\\x1b");
+    expect(rendered).not.toContain("\x1b");
+    expect(rendered).toContain("\\x1b");
   });
 
-  // Routing dirPath through sanitizeForDisplay also bounds its length (the same
-  // truncation that bounds the filename preview), so even when BOTH the path and
-  // the name are attacker-sized the message stays small. Before the path was
-  // escaped, a long raw dirPath flowed into the builder message verbatim; this
-  // pins that bound. Worst case is ~660 chars (path <=270, name preview <=78, the
-  // static frame, and the fixed recovery step) -- far below the 10,000 chars of
-  // hostile input fed here.
+  // The dirPath is interpolated raw and is the one fragment here with no bound of
+  // its own, so what an operator actually sees is bounded by the display
+  // boundary's per-link cap. Pin the bound where it exists, not on the raw
+  // message: even with BOTH the path and the name attacker-sized, the rendered
+  // refusal stays one capped link.
   test("stays bounded when both the directory path and filename are attacker-sized", () => {
     const hostilePath = "/" + "d".repeat(5000);
     const hostileName = "n".repeat(5000);
     const err = filenameTooLongError(hostilePath, hostileName, 255);
-    expect(err.message).not.toContain(hostilePath);
     expect(err.message).not.toContain(hostileName);
-    expect(err.message.length).toBeLessThan(1000);
+    expect(sanitizeErrorForDisplay(err).length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
+    );
   });
 });
