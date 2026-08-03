@@ -94,6 +94,12 @@ const UNESCAPED_DISPLAY_BYTE = /[^\x20-\x7e]/;
 // byte test rather than exempted from it, because exempting the bare newline
 // would let a forged log line -- printable ASCII plus LF, one of the threats
 // this gate exists to catch -- pass unnoticed.
+//
+// Stated limit: the removal is literal and carries no notion of who emitted the
+// sequence, so a line whose UNESCAPED payload itself contains `\ncaused by: `
+// survives the strip and passes the byte test. Distinguishing the renderer's
+// own framing from a payload that imitates it needs provenance this sees
+// nothing of -- it receives a flat joined line.
 const RENDERER_FRAMING = /\ncaused by: /g;
 
 // Join console arguments into one matchable line. Strings pass through verbatim
