@@ -9,6 +9,7 @@ import {
 } from "./standardization.js";
 import { columnValues, inferDateFormat } from "./utils/date.js";
 import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
+import { sanitizeErrorForDisplay } from "./utils/sanitizeErrorForDisplay.js";
 import type { CSVRow } from "./file.js";
 import { PSIParticipant } from "./participant.js";
 import type { PsiEngine } from "./psiEngine.js";
@@ -921,7 +922,7 @@ export async function runExchange(
   } catch (err) {
     getLogger("exchange").warn(
       "the exchange succeeded but the self-attested record could not be " +
-        `built (${err instanceof Error ? err.message : String(err)}); the ` +
+        `built (${sanitizeErrorForDisplay(err)}); the ` +
         "result above is unaffected",
     );
   }

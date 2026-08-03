@@ -1,5 +1,6 @@
 import {
   getLogger,
+  sanitizeErrorForDisplay,
   serializeExchangeRecord,
   serializeVerificationKeys,
 } from "@psilink/core";
@@ -160,7 +161,7 @@ export function writeExchangeRecord(
   } catch (err) {
     log.warn(
       "the exchange and results succeeded but the audit record could not be " +
-        `written (${err instanceof Error ? err.message : String(err)}); ` +
+        `written (${sanitizeErrorForDisplay(err)}); ` +
         "the results above are unaffected and the exchange need not be re-run",
     );
     // The keys are written before the record, so a record-write failure leaves

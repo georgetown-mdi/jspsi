@@ -1,0 +1,138 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { ESLint } from "eslint";
+import { describe, expect, it } from "vitest";
+
+// Coverage of the display-sink ban in the repo-root eslint.config.mjs: no raw
+// error may be rendered at an operator-facing sink. Operator-facing escaping
+// happens at ONE altitude -- the sink -- so an omission there puts a partner- or
+// server-controlled error message on the terminal verbatim, with whatever ANSI,
+// CR/LF, bidi or confusable bytes it carries. The ban is a set of esquery
+// selectors, and a selector that stops matching fails silently: it keeps
+// reporting zero problems, which is indistinguishable from clean source. These
+// cases are what makes its coverage executable.
+//
+// Each case is linted through the real repo config against a path inside a
+// guarded tree, so the scope, the selectors, and the rule wiring are all
+// exercised as CI runs them rather than restated here.
+
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(here, "..");
+
+const eslint = new ESLint({
+  cwd: repoRoot,
+  overrideConfigFile: resolve(repoRoot, "eslint.config.mjs"),
+});
+
+/** Messages the display-sink ban reports for `source` linted as `filePath`. */
+async function banHits(filePath, source) {
+  const [result] = await eslint.lintText(source, { filePath });
+  return result.messages.filter(
+    (message) =>
+      message.ruleId === "no-restricted-syntax" &&
+      message.message.startsWith("Do not render a raw error"),
+  );
+}
+
+const CORE_FILE = resolve(repoRoot, "packages/core/src/banFixture.ts");
+const CLI_FILE = resolve(repoRoot, "apps/cli/src/banFixture.ts");
+
+// Each entry is a statement body appended to a preamble that declares the
+// bindings it uses, so a case reads as the line a contributor would write.
+const BANNED = [
+  ["a bare error value at console.error", "console.error(err);"],
+  ["a bare error value at a logger", "log.error(err);"],
+  ["`.message` read at a logger", "log.warn(err.message);"],
+  ["String() coercion at a logger", "log.warn(String(err));"],
+  ["template coercion of the value", "log.warn(`failed: ${err}`);"],
+  [
+    "template interpolation of `.message`",
+    "log.warn(`failed: ${err.message}`);",
+  ],
+  ["concatenation of `.message`", 'log.warn("failed: " + err.message);'],
+  [
+    "a ternary over `.message`",
+    "log.warn(err instanceof Error ? err.message : String(err));",
+  ],
+  ["the errorMessage accessor", "log.info(errorMessage(err));"],
+  ["a `.log()` accessor sink", "deps.log().debug(`failed: ${err.message}`);"],
+  ["a `this.log` field sink", "holder.log.debug(errorMessage(err));"],
+  ["a getLogger(...) sink", 'getLogger("x").error(err);'],
+  [
+    "a value mapped inside the call",
+    'log.info(errors.map((cause) => cause.message).join(", "));',
+  ],
+];
+
+const ALLOWED = [
+  [
+    "an error routed through the error sanitizer",
+    "console.error(sanitizeErrorForDisplay(err));",
+  ],
+  [
+    "an interpolated sanitized error",
+    "log.warn(`failed: ${sanitizeErrorForDisplay(err)}`);",
+  ],
+  [
+    "a concatenated sanitized error",
+    'log.warn("failed: " + sanitizeErrorForDisplay(err));',
+  ],
+  [
+    "a sanitized message accessor",
+    "log.debug(`failed: ${sanitizeForDisplay(errorMessage(err))}`);",
+  ],
+  [
+    "a sanitized string fragment",
+    "log.info(`at ${sanitizeForDisplay(name)}`);",
+  ],
+  [
+    "a raw fragment composed into an Error",
+    "throw new Error(`at ${name}: ${errorMessage(err)}`);",
+  ],
+  ["`.message` on a non-sink call", "record(err.message);"],
+];
+
+const PREAMBLE = `
+declare const err: unknown;
+declare const name: string;
+declare const errors: Array<{ message: string }>;
+declare const log: {
+  trace(...args: unknown[]): void;
+  debug(...args: unknown[]): void;
+  info(...args: unknown[]): void;
+  warn(...args: unknown[]): void;
+  error(...args: unknown[]): void;
+};
+declare const holder: { log: typeof log };
+declare const deps: { log(): typeof log };
+declare function getLogger(name: string): typeof log;
+declare function errorMessage(value: unknown): string;
+declare function sanitizeForDisplay(value: string): string;
+declare function sanitizeErrorForDisplay(value: unknown): string;
+declare function record(value: string): void;
+export function fixture(): void {
+`;
+
+function fixture(body) {
+  return `${PREAMBLE}  ${body}\n}\n`;
+}
+
+describe("the display-sink raw-error ban", () => {
+  for (const [label, body] of BANNED) {
+    it(`rejects ${label}`, async () => {
+      expect(await banHits(CORE_FILE, fixture(body))).not.toHaveLength(0);
+    });
+  }
+
+  for (const [label, body] of ALLOWED) {
+    it(`accepts ${label}`, async () => {
+      expect(await banHits(CORE_FILE, fixture(body))).toHaveLength(0);
+    });
+  }
+
+  it("guards apps/cli/src as well as packages/core/src", async () => {
+    expect(
+      await banHits(CLI_FILE, fixture("log.warn(err.message);")),
+    ).not.toHaveLength(0);
+  });
+});

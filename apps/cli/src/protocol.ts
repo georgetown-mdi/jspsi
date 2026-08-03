@@ -1074,7 +1074,7 @@ export async function runProtocol(
               "succeeded and the rotated key was saved; the exchange will " +
               "continue, but any persistence the hook performs (e.g. writing " +
               "the configuration) did not complete: " +
-              (hookErr instanceof Error ? hookErr.message : String(hookErr)),
+              sanitizeErrorForDisplay(hookErr),
           );
         }
       }

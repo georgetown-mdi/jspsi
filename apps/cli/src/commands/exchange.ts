@@ -8,6 +8,7 @@ import {
   getLogger,
   loadCSVFile,
   prepareForExchange,
+  sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -934,7 +935,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // the exchange's own outcome reported below.
       log.debug(
         "could not re-read the key file for the token-expiry advisory:",
-        err instanceof Error ? err.message : String(err),
+        sanitizeErrorForDisplay(err),
       );
     }
     if (advisory !== undefined) log.warn(advisory);

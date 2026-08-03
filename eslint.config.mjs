@@ -33,6 +33,67 @@ const noBareRootLoglevelEmit = {
     "Do not emit through the bare root logger (logLibrary.<level>()): the CLI integration console sentinel and withCapturedLogs capture only see named loggers, so a bare-root emit escapes both leak-detection backstops. Use getLogger / getLoggerForVerbosity; logLibrary is for setLevel / levels / getLogger only.",
 };
 
+// The operator-facing display sinks this repo emits diagnostics through: the
+// `console` methods, and a loglevel logger reached through the receivers used in
+// core/src and cli/src -- a `log`/`logger` local, a `.log`/`.logger` field, a
+// `deps.log()` accessor, or a getLogger(...) call emitted on directly.
+const OPERATOR_DISPLAY_SINK =
+  "CallExpression:matches(" +
+  [
+    "[callee.object.name='console']",
+    "[callee.object.name=/^(log|logger)$/][callee.property.name=/^(trace|debug|info|warn|error)$/]",
+    "[callee.object.property.name=/^(log|logger)$/][callee.property.name=/^(trace|debug|info|warn|error)$/]",
+    "[callee.object.callee.property.name=/^(log|logger)$/][callee.property.name=/^(trace|debug|info|warn|error)$/]",
+    "[callee.object.callee.name=/^getLogger(ForVerbosity)?$/][callee.property.name=/^(trace|debug|info|warn|error)$/]",
+  ].join(", ") +
+  ")";
+
+// The three ways a raw error reaches display text: reading `.message` off it,
+// coercing it (String(err), `${err}`, or handing the value straight to the
+// sink), and the two message accessors -- core's exported `errorMessage` and the
+// `errMessage` local the file-sync modules define.
+const RAW_ERROR_RENDER =
+  "MemberExpression[property.name='message'], " +
+  "CallExpression[callee.name=/^(String|errorMessage|errMessage)$/], " +
+  "Identifier[name=/^(e|err|error|cause)$|(Err|Error)$/]";
+
+// Positions a value can occupy on its way into a sink call. Each is a DIRECT
+// child of its enclosing node, which is what makes the ban precise: escaping
+// wraps the value in sanitizeErrorForDisplay / sanitizeForDisplay, so a
+// correctly escaped value puts that CallExpression in the position instead and
+// the raw shape sits one level deeper, where this does not look.
+const SINK_VALUE_POSITIONS = [
+  "> .arguments",
+  "TemplateLiteral > .expressions",
+  "BinaryExpression[operator='+'] > .left",
+  "BinaryExpression[operator='+'] > .right",
+  "ConditionalExpression > .consequent",
+  "ConditionalExpression > .alternate",
+  "ArrowFunctionExpression > .body",
+];
+
+// Ban rendering a raw error at an operator-facing sink. Escaping happens at ONE
+// altitude -- the sink -- so a fragment interpolated into an Error message is
+// composed raw and sanitizeErrorForDisplay escapes the whole rendered chain
+// once. That leaves the sink as the only place the escape can be omitted, and an
+// omission there is silent: a partner-controlled error message carries the
+// server's or the peer's bytes, so `log.warn(err.message)` puts ANSI, CR/LF,
+// bidi overrides and confusables straight on the operator's terminal or into a
+// --log-file. Before the escaping moved to the sink a miss printed
+// double-escaped text; now it prints the raw bytes, so the miss has to be
+// impossible by construction rather than by review.
+//
+// Coverage is first-party source only. A dependency that writes the file
+// descriptor itself -- ssh2-sftp-client's "Global ... listener" console lines --
+// reaches the terminal without passing through any call this can see; the CLI
+// integration console sentinel is the backstop for that half, and it is
+// best-effort (see its module header).
+const noRawErrorAtDisplaySink = SINK_VALUE_POSITIONS.map((position) => ({
+  selector: `${OPERATOR_DISPLAY_SINK} ${position}:matches(${RAW_ERROR_RENDER})`,
+  message:
+    "Do not render a raw error at an operator-facing sink: pass it through sanitizeErrorForDisplay(err) (an error instance, cause chain included) or sanitizeForDisplay(text) (a single string fragment). A partner- or server-controlled error message reaches the terminal and any --log-file verbatim otherwise, carrying ANSI, CR/LF, bidi and confusable bytes. A value that is provably not error text: eslint-disable-next-line with a one-line justification.",
+}));
+
 export default tseslint.config(
   {
     ignores: [
@@ -98,6 +159,7 @@ export default tseslint.config(
             "Parse credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveJson); raw JSON.parse can echo a leading span of the source. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
         },
         noBareRootLoglevelEmit,
+        ...noRawErrorAtDisplaySink,
       ],
       // Close the named-import bypass (`import { parse } from "yaml"`); the
       // chokepoint imports the YAML default, so this never hits legitimate code.
@@ -158,6 +220,7 @@ export default tseslint.config(
             "Parse operator/credential files through packages/core/src/sensitiveFile.ts (parseSensitiveYaml / editSensitiveYamlDocument); raw YAML.parse leaks source into errors and the warning channel. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
         },
         noBareRootLoglevelEmit,
+        ...noRawErrorAtDisplaySink,
       ],
       // Close the named-import bypass (`import { parse } from "yaml"`); the
       // chokepoint imports the YAML default, so this never hits legitimate code.
