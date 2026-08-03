@@ -10718,24 +10718,18 @@ describe("SFTP adapter session accounting", () => {
     /* eslint-enable @typescript-eslint/no-explicit-any */
   }
 
-  // INV-L1, as the arithmetic it is: no generation leaves the live state without
-  // exactly one recorded cause, so the generations ended equal the sum of the
-  // losses. Read after EVERY step rather than once at the end -- run totals cannot
-  // tell a missed charge from a double one, and a step-by-step reading names the
-  // step that broke it.
-  function expectBalanced(
+  // The scenario's guard is the per-cause assertion each step makes below:
+  // WHICH cause was charged, and that its total moved by exactly one. The
+  // balance sum(losses) === generationsEnded is deliberately not asserted --
+  // it is an arithmetic identity of the ledger (losses rise only where `live`
+  // clears, and the ended count is derived from `live`), so it holds whatever
+  // the adapter does and a missed or mis-attributed charge cannot move it.
+  // What holds INV-L1 at runtime is structural instead: the dial charges any
+  // pending end before advancing, and the ledger raises if one slips through.
+  function lossesAfter(
     adapter: SSH2SFTPClientAdapter,
-    step: string,
   ): Readonly<Record<string, number>> {
-    const accounting = adapter.sessionAccounting;
-    const charged = Object.values(accounting.losses).reduce(
-      (total, count) => total + count,
-      0,
-    );
-    expect(charged, `${step}: sum(losses) === generations ended`).toBe(
-      accounting.generationsEnded,
-    );
-    return accounting.losses;
+    return adapter.sessionAccounting.losses;
   }
 
   test("every generation a driven scenario ends records exactly one cause", async () => {
@@ -10747,7 +10741,7 @@ describe("SFTP adapter session accounting", () => {
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 4 });
-      expect(expectBalanced(adapter, "the first dial")).toEqual({
+      expect(lossesAfter(adapter)).toEqual({
         partner: 0,
         deliberate: 0,
         teardown: 0,
@@ -10756,11 +10750,10 @@ describe("SFTP adapter session accounting", () => {
 
       // The ordinary release: this side drove the close and the partner answered.
       await adapter.releaseForIdle();
-      expect(expectBalanced(adapter, "an ordinary release").deliberate).toBe(1);
+      expect(lossesAfter(adapter).deliberate).toBe(1);
 
       // A second boundary over the same already-ended generation adds nothing.
       await adapter.releaseForIdle();
-      expectBalanced(adapter, "a boundary over an ended generation");
       expect(adapter.sessionAccounting.losses.deliberate).toBe(1);
 
       // The peer's FIN consumed before the boundary: the session was the peer's to
@@ -10768,18 +10761,13 @@ describe("SFTP adapter session accounting", () => {
       await adapter.ensureConnected();
       socket.readableEnded = true;
       await adapter.releaseForIdle();
-      expect(
-        expectBalanced(adapter, "a peer FIN at the boundary").partner,
-      ).toBe(1);
+      expect(lossesAfter(adapter).partner).toBe(1);
 
       // The session already cleared when the boundary fell.
       await adapter.ensureConnected();
       state.live = false;
       await adapter.releaseForIdle();
-      expect(
-        expectBalanced(adapter, "a session already gone at the boundary")
-          .partner,
-      ).toBe(2);
+      expect(lossesAfter(adapter).partner).toBe(2);
 
       // The partner's disconnect answered by ssh2 ending its own half, with
       // nothing on the wire: the release takes the session, the partner took what
@@ -10787,9 +10775,7 @@ describe("SFTP adapter session accounting", () => {
       await adapter.ensureConnected();
       socket.writableEnded = true;
       await adapter.releaseForIdle();
-      expect(
-        expectBalanced(adapter, "a drop absorbed at the boundary").partner,
-      ).toBe(3);
+      expect(lossesAfter(adapter).partner).toBe(3);
 
       // A drop that tore an operation, recovered by the arm's own re-dial.
       await adapter.ensureConnected();
@@ -10799,9 +10785,7 @@ describe("SFTP adapter session accounting", () => {
       // case's fake clock has to be advanced to.
       await vi.advanceTimersByTimeAsync(10);
       await expect(torn).resolves.toBe(true);
-      expect(
-        expectBalanced(adapter, "a drop tearing an operation").partner,
-      ).toBe(4);
+      expect(lossesAfter(adapter).partner).toBe(4);
 
       // A partner that never answers the close, so this side forces it: a boundary
       // this side ended all the same.
@@ -10810,17 +10794,17 @@ describe("SFTP adapter session accounting", () => {
       await vi.advanceTimersByTimeAsync(7_000);
       await forced;
       expect(adapter.forcedReleaseCount).toBe(1);
-      expect(expectBalanced(adapter, "a forced release").deliberate).toBe(2);
+      expect(lossesAfter(adapter).deliberate).toBe(2);
 
       // A fatal SFTP protocol error kills the wrapper: the generation ends with a
       // cause of its own, and the teardown behind it records nothing over it.
       state.closesOnRequest = true;
       await adapter.ensureConnected();
       wrapper.emit("error", new Error("malformed SFTP packet"));
-      expect(expectBalanced(adapter, "a fatal protocol error").fatal).toBe(1);
+      expect(lossesAfter(adapter).fatal).toBe(1);
 
       await adapter.end();
-      const losses = expectBalanced(adapter, "the terminal close");
+      const losses = lossesAfter(adapter);
       expect(losses.teardown).toBe(0);
 
       // The boundary partition is total: every invocation of the release recorded
@@ -10904,9 +10888,15 @@ describe("SFTP adapter session accounting", () => {
 
     expect(connect).toHaveBeenCalledTimes(2);
     expect(adapter.midExchangeReconnectCount).toBe(2);
-    expectBalanced(adapter, "a refused drop");
+    expect(lossesAfter(adapter).partner).toBe(2);
 
     await adapter.end();
-    expectBalanced(adapter, "the terminal close after a refused drop");
+    // The refused drop already took the session, so the teardown ends nothing.
+    expect(lossesAfter(adapter)).toEqual({
+      partner: 2,
+      deliberate: 0,
+      teardown: 0,
+      fatal: 0,
+    });
   });
 });

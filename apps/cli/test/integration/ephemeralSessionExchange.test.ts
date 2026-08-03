@@ -811,8 +811,8 @@ inProcessOnly(
             // only be spent by the polling party.
             srv.sessionControls.dropActiveAfterOps(1);
             // A drop landing in a cycle's tail is absorbed by the next
-            // cycle-start dial and counted by neither counter, so this wait is
-            // the one that would spend its deadline if that ever happened.
+            // cycle-start dial and charged as the partner's loss all the same,
+            // so either route moves the counter this wait reads.
             await waitFor(
               () => receiverAdapter.midExchangeReconnectCount > before,
               {

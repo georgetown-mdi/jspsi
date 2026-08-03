@@ -1930,7 +1930,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // gate in any case -- safeDelete, whose never-reject contract puts it outside
   // recovery, and a put whose source cannot be re-issued (a one-shot stream, or
   // flags:"a") -- and both are counted by that precondition, which reaches past the
-  // recovery-wrapped operations (tracked() names what it leaves uncounted). That
+  // recovery-wrapped operations (runOperation opens the span for every data-plane entry, recovery-wrapped or not). That
   // covers each of them only where it was ISSUED before the boundary; for the
   // cleanup delete, one issued AFTER the release reaches no session at all, and
   // what covers that -- for the protocol's own temp write, the one file no other
@@ -1967,8 +1967,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // operation being issued now. Both are the release's to set, and the release
   // returns before enqueuing when the mode is off, so the default held-session
   // mode reads false here every time without a mode check of its own. The first
-  // covers the close window itself, including a release the PEER began (which
-  // records no boundary); the second covers the gap after a release completed, and
+  // covers the close window itself, including a release the PEER began (recorded
+  // as the closedByPeer outcome); the second covers the gap after a release completed, and
   // asks only whether a release took the session -- WHOSE loss it closed over is
   // the recovery arm's question, not this one's, and a release that closed over a
   // partner's drop left no session for this operation exactly as any other did.
@@ -2045,8 +2045,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   //   midExchangeReconnectBudgetExhaustedError).
   //   Connection-per-poll: every line here reports a loss that was the PARTNER's.
   //   The mode's own release-and-re-dial lifecycle is exempt -- only a release that
-  //   was itself what ended the session records the boundary withSessionRecovery
-  //   exempts, and a unit case pins an ordinary cycle warning nothing -- while a
+  //   was itself what ended the session records the deliberatelyReleased reading
+  //   that keeps it off these lines, and a unit case pins an ordinary cycle
+  //   warning nothing -- while a
   //   partner drop a release closed over instead (see releaseForIdle) is one of the
   //   two causes below rather than a third, the release closing only at a poll-cycle
   //   boundary, so the drop it closed over cut inside a cycle. Which of the two it
@@ -3128,10 +3129,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `so far this exchange).`,
       );
     if (outcome === "didNotClose")
-      this.ledger.pacedWarn(
-        count,
-        () =>
-          "The connection-per-poll idle release did not close the SFTP session " +
+      // Unpaced deliberately: this is the one degraded outcome with no run
+      // total, so every occurrence is its own record.
+      this.log.warn(
+        "The connection-per-poll idle release did not close the SFTP session " +
           "and its transport is still writable, which the ssh2 client's end() " +
           "should have ended: the session may still be live and held across " +
           "this idle gap, which is the one thing this mode exists to prevent. " +
