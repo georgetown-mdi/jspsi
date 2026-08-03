@@ -10176,6 +10176,144 @@ describe("connection-per-poll idle-boundary signal", () => {
     expect(pollerActiveBeforeDriverStop).toBe(false);
   });
 
+  test("a close() interrupting an in-flight poll cycle performs no idle release", async () => {
+    // The release and the reschedule sit inside the same poller-active guard,
+    // and close() clears that flag through stop() before it drives anything on
+    // the transport, so a cycle still running when close() lands never reaches
+    // a boundary at all: its session is carried into teardown rather than
+    // released and re-established.
+    const { client } = makeMockClient();
+    const trace: string[] = [];
+    let openCycleList!: () => void;
+    let notifyCycleInFlight!: () => void;
+    const cycleInFlight = new Promise<void>((r) => (notifyCycleInFlight = r));
+    const heldList = new Promise<void>((r) => (openCycleList = r));
+    let heldOnce = false;
+    client.ensureConnected = async () => {
+      trace.push("ensure");
+      return true;
+    };
+    client.releaseForIdle = async () => {
+      trace.push("release");
+    };
+    const origList = client.list.bind(client);
+    client.list = async (dir: string) => {
+      if (!heldOnce) {
+        heldOnce = true;
+        notifyCycleInFlight();
+        await heldList;
+      }
+      return origList(dir);
+    };
+
+    const conn = await makeConnectedConn(client, { pollingFrequency: 5 });
+    conn.peerId = "stub-peer";
+    const errors: unknown[] = [];
+    conn.on("error", (e) => errors.push(e));
+    conn.start();
+    await cycleInFlight;
+
+    // close() runs stop() synchronously, so the parked cycle's finally reads an
+    // inactive poller when the list below lets it resume.
+    const closeP = conn.close();
+    openCycleList();
+    await closeP;
+
+    // No boundary ran over that teardown. Moving the release outside the
+    // poller-active guard puts a "release" in this trace.
+    expect(trace).not.toContain("release");
+    // The cycle really was in flight and teardown really did drive the
+    // transport, so the absence above is the route's property and not a run
+    // that never got going.
+    expect(heldOnce).toBe(true);
+    expect(trace).toContain("ensure");
+    expect(errors).toEqual([]);
+  });
+
+  test("a close() from the inter-poll gap finds the session the last boundary released", async () => {
+    // The mirror route: the boundary was reached with the poller still active,
+    // so it released, and teardown is what establishes a session again.
+    const { client } = makeMockClient();
+    const trace: string[] = [];
+    let notifyBoundary!: () => void;
+    const boundaryReached = new Promise<void>((r) => (notifyBoundary = r));
+    client.ensureConnected = async () => {
+      trace.push("ensure");
+      return true;
+    };
+    client.releaseForIdle = async () => {
+      trace.push("release");
+      notifyBoundary();
+    };
+
+    // Long enough that the next cycle cannot start before close() does.
+    const conn = await makeConnectedConn(client, { pollingFrequency: 500 });
+    conn.peerId = "stub-peer";
+    const errors: unknown[] = [];
+    conn.on("error", (e) => errors.push(e));
+    conn.start();
+    await boundaryReached;
+    // Let the loop arm its reschedule, so close() is reached from the gap
+    // rather than from inside the boundary itself.
+    await new Promise((r) => setTimeout(r, 5));
+
+    trace.push("close");
+    await conn.close();
+
+    // A release at the boundary, then a real re-establishment at teardown, in
+    // that order. Dropping teardown's establish leaves no "ensure" past the
+    // marker.
+    const closeIdx = trace.indexOf("close");
+    expect(trace.lastIndexOf("release")).toBeGreaterThanOrEqual(0);
+    expect(trace.lastIndexOf("release")).toBeLessThan(closeIdx);
+    expect(trace.indexOf("ensure", closeIdx)).toBeGreaterThan(closeIdx);
+    expect(errors).toEqual([]);
+  });
+
+  test("the abort-marker write is not preceded by the teardown re-establishment", async () => {
+    // The two teardown writes are asymmetric on purpose: the drain's session is
+    // established for it, the marker's is recovered under it. An establish
+    // issued ahead of the marker write would race that write's own re-dial on
+    // the one shared session.
+    const { client, files } = makeMockClient();
+    const trace: string[] = [];
+    client.ensureConnected = async () => {
+      trace.push("ensure");
+      return true;
+    };
+    client.releaseForIdle = async () => {
+      trace.push("release");
+    };
+    const origRename = client.rename.bind(client);
+    client.rename = async (from: string, to: string) => {
+      trace.push(`rename ${to}`);
+      return origRename(from, to);
+    };
+
+    const conn = await makeConnectedConn(client, {
+      pollingFrequency: 500,
+      peerTimeoutMs: 200,
+    });
+    conn.peerId = "stub-peer";
+    conn.armAbort(new Uint8Array(32).fill(7), new Uint8Array(32).fill(9));
+
+    // close() parks on the abort decision; the write resolves it, and close()
+    // awaits that write before it reaches anything else.
+    const closeP = conn.close();
+    await conn.writeAbortMarker().catch(() => {});
+    await closeP;
+
+    const markerIdx = trace.findIndex(
+      (entry) => entry.startsWith("rename ") && entry.endsWith("-abort.json"),
+    );
+    expect(markerIdx).toBeGreaterThanOrEqual(0);
+    expect(files.has(`/test/${conn.id}-abort.json`)).toBe(true);
+    // Nothing established a session ahead of the marker write, and teardown
+    // established one after it -- so the ordering is not vacuous.
+    expect(trace.slice(0, markerIdx)).not.toContain("ensure");
+    expect(trace.indexOf("ensure")).toBeGreaterThan(markerIdx);
+  });
+
   test("close() re-establishes a session before the drain deadline starts", async () => {
     const { client, files } = makeMockClient();
     const calls: string[] = [];
