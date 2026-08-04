@@ -23,6 +23,15 @@ export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
  * reaches each field with something to escape -- and a field that reaches either
  * without escaping is caught wherever it lands, with nothing to enumerate.
  *
+ * The exceptions are the values a summary position is KEYED ON rather than filled
+ * from: the `replace_regex` function name and its `pattern` / `replacement`
+ * parameter names, and the `generateFuzzyComparisons` enum. Each must be exactly
+ * what core recognizes for the position it unlocks (the glossary description, the
+ * runtime-coercion note, the fuzzy-comparison label) to exist at all, and each of
+ * those positions holds first-party copy keyed by that recognized value. Reaching
+ * them is what the walk needs; the hostile bytes sit in the partner text beside
+ * them (the pattern's value, the field and key names).
+ *
  * Deliberately beyond what the schema admits: `version`, `date`, and
  * `expirationDate` are format-constrained (semver, `z.iso.date`), so a decoded
  * token cannot carry a hostile byte in them today. They carry one here because
@@ -68,7 +77,18 @@ export const hostileTerms: LinkageTerms = {
               function: `mystery${BEL}fn`,
               params: { [`pat${RLO}tern`]: `${ESC}[31m` },
             },
+            // Recognized by core, and declaring `replacement` as null, so the
+            // step carries both a glossary description and the runtime-coercion
+            // note core's describeTransformCoercions derives from that null.
+            {
+              function: "replace_regex",
+              params: { pattern: `[${BEL}]`, replacement: null },
+            },
           ],
+        },
+        {
+          field: `unde${BEL}clared`,
+          generateFuzzyComparisons: "transpositions",
         },
       ],
       swap: [`elem${RLO}one`, `last${BEL}name`],
@@ -86,16 +106,67 @@ export const hostileTerms: LinkageTerms = {
 };
 
 /**
- * The decoded-token subset `summarizeInvitation` takes, carrying
- * {@link hostileTerms} plus the two partner-controlled values the terms
- * themselves do not hold: the invitation's expiry instant and a file-drop
- * endpoint's advisory path.
+ * {@link hostileTerms} with a swap whose transforms sit on ONE side only. The
+ * swap in those terms carries a transform on both of its elements, which
+ * summarizes as the bidirectional interchange; a single transform-carrier
+ * summarizes as the one-directional donor instead -- the other arm of the same
+ * branch, so one terms document cannot reach both and a second one is what
+ * reaches the donor.
  */
-export const hostileSource: Pick<
+export const swapDonorTerms: LinkageTerms = {
+  ...hostileTerms,
+  linkageKeys: [
+    {
+      name: `key${BEL}two`,
+      elements: [
+        {
+          field: "first_name",
+          name: `donor${RLO}elem`,
+          transform: [
+            { function: "substring", params: { start: 2, length: 4 } },
+          ],
+        },
+        { field: `last${BEL}name` },
+      ],
+      swap: [`donor${RLO}elem`, `last${BEL}name`],
+    },
+  ],
+};
+
+/**
+ * The decoded-token subset `summarizeInvitation` takes: linkage terms plus the
+ * partner-controlled values the terms themselves do not hold -- the invitation's
+ * expiry instant and a file-drop endpoint's advisory path.
+ */
+export type HostileSource = Pick<
   InvitationToken,
   "linkageTerms" | "expires" | "disclosedPayloadColumns" | "connectionEndpoint"
-> = {
+>;
+
+/** {@link hostileTerms} as the decoded-token subset. */
+export const hostileSource: HostileSource = {
   linkageTerms: hostileTerms,
   expires: `2026-02-01T00:00:00.000Z${BEL}`,
   connectionEndpoint: { channel: "filedrop", path: `drop${BEL}box` },
 };
+
+/** {@link swapDonorTerms} as the decoded-token subset. */
+export const swapDonorSource: HostileSource = {
+  ...hostileSource,
+  linkageTerms: swapDonorTerms,
+};
+
+/**
+ * Every hostile variant the display-escaping halves run over, named for the
+ * failure message. Both walk this list -- the unit walk summarizes each and the
+ * browser walk mounts each -- so a variant added to reach a summary position one
+ * terms document cannot hold alongside the others is escaped-checked at both
+ * altitudes rather than only where it was added.
+ */
+export const hostileVariants: ReadonlyArray<{
+  name: string;
+  source: HostileSource;
+}> = [
+  { name: "transforms on both swapped elements", source: hostileSource },
+  { name: "a transform on one swapped element", source: swapDonorSource },
+];
