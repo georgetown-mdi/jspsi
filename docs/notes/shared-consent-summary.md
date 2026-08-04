@@ -122,14 +122,27 @@ to have, rather than restating them: each partner-controlled value stays behind
 its fixed first-party label, on its own line, where it can neither begin a line
 nor manufacture one.
 
-What the repetition carries is bounded, and the bound is the point rather than an
-oversight. It is the four to six lines heading the outline; the linkage strategy
-and, under single-pass, its disclosure note are not among them, though that note
-describes a real disclosure the acceptor consents to. The note is 423 characters,
-about six wrapped lines on an eighty-column terminal, so repeating it would
-roughly double a block whose whole value is being short enough to take in at the
-prompt -- and a repetition long enough to scroll is the condition it exists to
-fix. The limit is therefore that an operator who reads only the repetition has
-not seen every disclosure-affecting term, and `docs/CLI.md` says so where the
-operator will meet it. Closing it properly means shortening what those terms say,
-not lengthening the block.
+What the repetition carries is a deliberate selection, and what it leaves out is
+chosen rather than overlooked. The linkage strategy and, under single-pass, its
+disclosure note are not among the repeated facts, though that note describes a
+real disclosure the acceptor consents to. The note is 423 characters, about six
+wrapped lines on an eighty-column terminal, and adding it would roughly double
+the block in the common case -- a repetition long enough to scroll is the
+condition this exists to fix. So one limit is that an operator who reads only the
+repetition has not seen every disclosure-affecting term, and `docs/CLI.md` says
+so where the operator will meet it. Closing that properly means shortening what
+those terms say, not lengthening the block.
+
+The block's own length is not bounded, and the mechanism degrades where that
+bites. It is three lines plus one per column the acceptor discloses, because the
+outbound-send list is repeated in full rather than as a count -- a count would be
+a second wording, which is the whole thing this shape exists to avoid. So the
+repetition is six lines at three disclosed columns, forty-three at forty, and a
+hundred and twenty-three at a hundred and twenty; past roughly twenty columns it
+scrolls on an eighty-by-twenty-four terminal, and the first thing to go is the
+outbound-send list, which is the acceptor's hardest-to-undo consent. That count
+comes from the operator's own file and not from the partner, so it is a limit of
+the mitigation rather than something a partner can drive. No check holds a bound
+here, because there is no bound to hold: the honest reading is that the
+repetition helps most for the ordinary handful of disclosed columns and helps
+less as that list grows.
