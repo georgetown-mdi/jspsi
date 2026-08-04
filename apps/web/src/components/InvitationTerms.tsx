@@ -14,7 +14,12 @@ import {
 import { IconChevronRight } from "@tabler/icons-react";
 import { useReducedMotion } from "@mantine/hooks";
 
-import { sanitizeForDisplay, summarizeInvitation } from "@psilink/core";
+import {
+  CONSENT_FACTS,
+  PROPOSED_NOT_APPLIED_NOTES,
+  sanitizeForDisplay,
+  summarizeInvitation,
+} from "@psilink/core";
 
 import { ColumnChips } from "@components/ColumnChips";
 
@@ -162,7 +167,7 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
                       it does not. Not-applied narrows the match (fewer candidates),
                       the safe disclosure direction, so it needs no core prominence. */}
                   {!element.fuzzyComparisonApplied &&
-                    " (proposed; not yet applied)"}
+                    ` ${PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons}`}
                 </Text>
               )}
             </Text>
@@ -340,14 +345,15 @@ function CondensableDetails({
  * deduplicate and fuzzy change match multiplicity/breadth, not what is disclosed,
  * so their headlines sit in a disclosure rather than the core (deduplicate in
  * "Other details", fuzzy in each key's detail, itself behind the matching
- * disclosure) and their caveats sit with those headlines, co-hidden with them. The asymmetry is deliberate and safe in the disclosure direction: psi-c
- * not-applied makes the run disclose MORE than its count-only headline promises
- * (identifiers revealed) -- the disclosure-critical direction that demands core
- * prominence -- while deduplicate/fuzzy not-applied make the run match LESS than
- * proposed, disclosing no more than the acceptor consented to. All caveat copy is
- * fixed (gated on the schema enum and the APPLIED_SETTINGS flags), so no partner
- * text enters a caveat, and render tests pin each caveat at its headline's level
- * against the accessibility tree.
+ * disclosure) and their caveats sit with those headlines, co-hidden with them. The
+ * asymmetry is deliberate: a count-only headline is the one an acceptor could act
+ * on -- treating an exchange as safe to run because only a count is revealed --
+ * whereas a looser match multiplicity or breadth is not something a reader takes as
+ * a disclosure guarantee, so its caveat can sit one expand down with it. What each
+ * caveat SAYS is fixed copy read from `PROPOSED_NOT_APPLIED_NOTES` in
+ * `@psilink/core`, which the CLI accept prompt renders too, so no partner text
+ * enters a caveat and neither surface can restate one. Render tests pin each caveat
+ * at its headline's level against the accessibility tree.
  *
  * Two payload facts whose detail lives in the "Other details" disclosure carry an
  * always-visible count in a direction tier, since each would otherwise be invisible
@@ -368,8 +374,12 @@ function CondensableDetails({
  *
  * Result sharing's two lines are NOT equally enforced, and the copy marks the
  * difference so a cooperative withholding is not read as a cryptographic guarantee.
- * The viewer's OWN non-receipt is enforced -- a party set to receive no result is
- * sent none and its receive check fails closed on any it is sent -- so a "No" there
+ * Which register each falls in, and the sentence that says so, are read from
+ * `CONSENT_FACTS` in `@psilink/core` -- the same table the CLI accept prompt reads,
+ * so the two acceptance surfaces cannot classify one fact two ways or word its
+ * caveat differently. The viewer's OWN non-receipt is enforced -- a party set to
+ * receive no result is sent none and its receive check fails closed on any it is
+ * sent -- so a "No" there
  * is a hard fact. The PARTNER's non-receipt is COOPERATIVE: keeping the result from
  * the partner rests on the agreed terms being honored, not on a guarantee this side
  * can impose (a documented property of one-sided PSI, docs/notes/one-sided-
@@ -689,7 +699,7 @@ export function InvitationTerms({
           it into the heading's announcement; pinned by render tests. */}
       {perspective === "review" && (
         <Text id={identityNoteId} size="sm" fw={500}>
-          Your partner entered this name; psilink has not verified it.
+          {CONSENT_FACTS.invitingParty.note}
         </Text>
       )}
       <Text size="sm" c="dimmed">
@@ -841,17 +851,15 @@ export function InvitationTerms({
             )}
           </Text>
           {/* psi-c states a disclosure guarantee, so by the caveat-placement rule
-              above its caveat is always-visible here with its headline: flag a
-              proposed count-only setting the run does not yet honor, so the line
-              above cannot read as in force while the exchange still reveals matched
-              identifiers. This is the disclosure-critical case -- not-applied means
-              the run reveals MORE than the count-only headline promises, so the
-              caveat may never be demoted below this always-visible headline. */}
+              above its caveat is always-visible here with its headline: the
+              count-only line must never read as in force while the exchange
+              refuses to run on those terms at all. What the caveat says -- the
+              refusal, and what to ask the partner for -- is the shared copy the
+              CLI accept prompt renders, so the two surfaces cannot state opposite
+              outcomes for one invitation, which they once did. */}
           {summary.algorithm === "psi-c" && !summary.psiCApplied && (
             <Text size="xs" c="dimmed">
-              Your partner proposes this, but this version of the exchange does
-              not yet apply it; the shared identifiers of matched records are
-              still revealed.
+              {PROPOSED_NOT_APPLIED_NOTES.psiC}
             </Text>
           )}
         </Term>
@@ -875,8 +883,7 @@ export function InvitationTerms({
           </Text>
           {!viewerReceivesResult && (
             <Text size="xs" c="dimmed">
-              Enforced: you are sent no result, and any result sent to you is
-              rejected.
+              {CONSENT_FACTS.viewerReceivesNoResult.note}
             </Text>
           )}
           <Text size="sm">
@@ -889,15 +896,12 @@ export function InvitationTerms({
             // agreement -- not this tool -- governs its use, mirroring the cooperative
             // caveat's "the tool is not the control here" frame.
             <Text size="xs" c="dimmed">
-              Once received, its use is governed by your agreement, not this
-              tool.
+              {CONSENT_FACTS.partnerReceivesResult.note}
             </Text>
           ) : (
             <>
               <Text size="xs" c="dimmed">
-                By agreement, not enforced: keeping the result from your partner
-                rests on the agreed terms being honored, not on anything this
-                tool can enforce.
+                {CONSENT_FACTS.partnerReceivesNoResult.note}
               </Text>
               {/* The honest-helper membership disclosure, kept DISTINCT from the
                   cooperative caveat above: that caveat is about a dishonest
@@ -919,9 +923,7 @@ export function InvitationTerms({
                   so no partner text enters it; strategy-neutral, since it is true
                   for every one-sided configuration. */}
               <Text size="xs" c="dimmed">
-                Even when honored, your partner learns which of its own records
-                are in your data (not which of yours). This is inherent to the
-                match, not a breach.
+                {CONSENT_FACTS.partnerLearnsOwnMembership.note}
               </Text>
             </>
           )}
@@ -1090,12 +1092,7 @@ export function InvitationTerms({
             >
               Partner-defined character constraints
             </Title>
-            <Text size="sm">
-              Your partner declares an allowed-character pattern for these
-              fields. Each is a partner-supplied regular expression that psilink
-              has not verified, and it is a data expectation rather than an
-              enforced filter.
-            </Text>
+            <Text size="sm">{CONSENT_FACTS.allowedCharacterPatterns.note}</Text>
             <Stack gap="xs">
               {/* Keyed by index: the fields are already deduped and their order is
                   fixed for a given terms document, and the sanitized label is not
@@ -1328,9 +1325,7 @@ export function InvitationTerms({
                 nothing is disclosed. */}
                 {summary.deduplicate && !summary.deduplicateApplied && (
                   <Text size="xs" c="dimmed">
-                    Your partner proposes this, but this version of the exchange
-                    does not yet apply it and will refuse to run; ask your
-                    partner for an invitation without deduplication.
+                    {PROPOSED_NOT_APPLIED_NOTES.deduplicate}
                   </Text>
                 )}
               </Term>

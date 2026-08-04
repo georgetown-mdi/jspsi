@@ -13,6 +13,7 @@ import { InvitationTerms } from "@components/InvitationTerms";
 
 import {
   BEL,
+  CONSENT_PROBE_TERMS,
   ESC,
   PRINTABLE_ASCII,
   RLO,
@@ -78,6 +79,20 @@ const terms: LinkageTerms = {
     expirationDate: "2027-12-31",
   },
 };
+
+// The corrected count-only caveat, spelled out as the whole sentence rather than
+// read from PROPOSED_NOT_APPLIED_NOTES. What it SAYS is load-bearing and moving:
+// psi-c is asserted on every run path today, so the exchange is refused before any
+// identifier is revealed, and when the count-only run path lands both this and the
+// CLI accept prompt's pin (apps/cli/test/unit/accept.test.ts) flip to the
+// count-only disclosure statement. Pinning the sentence on both surfaces, against
+// the same terms document, is what makes that flip a deliberate edit on each rather
+// than a divergence neither notices -- these two surfaces have already once stated
+// opposite outcomes for the same invitation.
+const PSI_C_CAVEAT =
+  "Your partner proposes a count-only exchange, but this version of the " +
+  "exchange does not yet apply it and will refuse to run; ask your partner " +
+  'for an invitation using the "psi" algorithm.';
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -502,15 +517,13 @@ describe("InvitationTerms: the condensed reference view folds the lower tiers", 
   test("folding never sweeps the disclosure-critical psi-c caveat out of the always-visible core", async () => {
     // psi-c is a disclosure GUARANTEE (only the count is revealed). Its "not yet
     // applied" caveat must stay in the always-visible "What the exchange produces"
-    // tier -- folding it would let a viewer read count-only as in force while the run
-    // still reveals matched identifiers. This is the one caveat that may never move
+    // tier -- folding it would let a viewer read count-only as in force while the
+    // exchange refuses to run at all. This is the one caveat that may never move
     // below its headline, so it must never move behind the fold either.
     renderCondensed({ algorithm: "psi-c" });
     const produce = group("What the exchange produces");
     await expect.element(produce).toBeInTheDocument();
-    expect(produce.element().textContent).toContain(
-      "matched records are still revealed",
-    );
+    expect(produce.element().textContent).toContain(PSI_C_CAVEAT);
   });
 
   test("the fold toggle is self-describing (perspective-neutral, so it fits agreed terms too)", async () => {
@@ -1608,10 +1621,29 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
     renderTerms({ ...terms, ...overrides });
   }
 
-  // psi-c- and deduplicate-specific caveat tails: both caveats share the "does not
-  // yet apply it" lead, so each assertion keys on the distinguishing clause.
-  const psiCCaveat = "matched records are still revealed";
-  const deduplicateCaveat = "will refuse to run";
+  // Both caveats share the "does not yet apply it and will refuse to run" lead --
+  // psilink refuses the run either way -- so each assertion keys on the clause
+  // that names what to ask the partner for instead.
+  const psiCCaveat = PSI_C_CAVEAT;
+  const deduplicateCaveat = "for an invitation without deduplication";
+
+  test("the psi-c caveat states the refusal, in the words the CLI accept prompt shows", async () => {
+    // The correction: psi-c is refused on every run path, so nothing runs and no
+    // identifier is revealed. The caveat this replaced described a run that does
+    // not happen, and said the opposite of what the CLI prompt said for the very
+    // same invitation.
+    //
+    // Rendered from core's shared consent probe -- the same terms document the
+    // CLI's pin uses -- so the two pins measure one sentence against one input.
+    renderTerms({ ...CONSENT_PROBE_TERMS, algorithm: "psi-c" });
+    await expect
+      .element(group("What the exchange produces"))
+      .toBeInTheDocument();
+    expect(container!.textContent).toContain(PSI_C_CAVEAT);
+    expect(container!.textContent).not.toContain(
+      "matched records are still revealed",
+    );
+  });
 
   test("the psi-c count-only caveat is always-visible in the core, not one expand down", async () => {
     // psi-c proposed, not applied (APPLIED_SETTINGS.psiC is false), so the count-only

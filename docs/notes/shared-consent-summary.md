@@ -111,13 +111,21 @@ guarantee as in force without also meeting the caveat. Deduplication and fuzzy
 comparison change match multiplicity and breadth, not what is disclosed, so their
 caveats sit one expand down with the headlines they qualify.
 
-What each caveat SAYS is that the exchange refuses to run: all three settings are
-asserted on every run path, so a term this version cannot apply aborts before any
-identifier is revealed rather than running looser. The caveat therefore names the
-refusal and what to ask the inviter for. That the count-only caveat is a moving
-target is the reason it is pinned by a render test on both surfaces: when the
-count-only run path lands, both flip to the count-only disclosure statement
-together, as a deliberate edit rather than a silent divergence.
+What each caveat SAYS follows what not applying the setting actually does, and the
+three are not alike there. The count-only algorithm and deduplication are refused
+at the exchange boundary, so an invitation carrying either aborts before any
+identifier is revealed; their caveats name that refusal and what to ask the
+inviter for. A caveat saying the run proceeds and reveals more than the headline
+promised describes a run that does not happen -- which is what one surface said
+about a count-only invitation while the other said the opposite. The fuzzy
+expansion has no such refusal: it is a silent no-op that narrows the match, so its
+marker says only that the expansion is proposed, and a refusal claim there would be
+the same error facing the other way.
+
+That the count-only caveat is a moving target is the reason it is pinned by a
+render test on both surfaces: when the count-only run path lands, both flip to the
+count-only disclosure statement together, as a deliberate edit rather than a silent
+divergence.
 
 The caveat copy is carried once, beside the classification, and rendered twice --
 for the same reason the classification is. Two surfaces authoring their own
