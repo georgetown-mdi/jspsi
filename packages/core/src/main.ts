@@ -52,10 +52,14 @@ export {
 export type { CanonicalValue } from "./utils/canonical";
 export {
   sanitizeForDisplay,
+  displayText,
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
 } from "./utils/sanitizeForDisplay";
-export type { SanitizeForDisplayOptions } from "./utils/sanitizeForDisplay";
+export type {
+  Displayable,
+  SanitizeForDisplayOptions,
+} from "./utils/sanitizeForDisplay";
 export {
   sanitizeErrorForDisplay,
   MAX_ERROR_CAUSE_DEPTH,

@@ -1,6 +1,7 @@
 import {
   dateFormatComponents,
   describeTransformCoercions,
+  displayText,
   parseDateInputDropsEveryRecord,
   pipelineAlwaysDrops,
   sanitizeForDisplay,
@@ -10,6 +11,7 @@ import { APPLIED_SETTINGS } from "@psi/appliedSettings";
 
 import type {
   Algorithm,
+  Displayable,
   InvitationToken,
   LinkageField,
   LinkageKey,
@@ -24,16 +26,21 @@ import type {
  * safe to render verbatim. The field's `name` is partner-controlled free text
  * and is deliberately not shown -- the semantic type is what matters for an
  * acceptor deciding whether to consent, and it cannot carry an injection.
+ *
+ * Typed {@link Displayable} because a label shares display fields with the
+ * sanitized fallback for an unresolved field (see {@link summarizeKey}); fixed
+ * copy enters through `displayText`, the compiler-policed way in for a literal
+ * this file authors.
  */
-const FIELD_TYPE_LABELS: Record<LinkageField["type"], string> = {
-  first_name: "First name",
-  last_name: "Last name",
-  date_of_birth: "Date of birth",
-  ssn: "Social Security number",
-  ssn4: "Last 4 of Social Security number",
-  phone_number: "Phone number",
-  email_address: "Email address",
-  zip_code: "ZIP code",
+const FIELD_TYPE_LABELS: Record<LinkageField["type"], Displayable> = {
+  first_name: displayText`First name`,
+  last_name: displayText`Last name`,
+  date_of_birth: displayText`Date of birth`,
+  ssn: displayText`Social Security number`,
+  ssn4: displayText`Last 4 of Social Security number`,
+  phone_number: displayText`Phone number`,
+  email_address: displayText`Email address`,
+  zip_code: displayText`ZIP code`,
 };
 
 /**
@@ -45,15 +52,15 @@ const FIELD_TYPE_LABELS: Record<LinkageField["type"], string> = {
  * full-SSN and last-4 cases are a real disclosure difference the acceptor must
  * see, and "SSN4" is internal jargon.
  */
-const COMPACT_FIELD_TYPE_LABELS: Record<LinkageField["type"], string> = {
-  first_name: "first name",
-  last_name: "last name",
-  date_of_birth: "date of birth",
-  ssn: "SSN",
-  ssn4: "SSN (last 4)",
-  phone_number: "phone",
-  email_address: "email",
-  zip_code: "ZIP",
+const COMPACT_FIELD_TYPE_LABELS: Record<LinkageField["type"], Displayable> = {
+  first_name: displayText`first name`,
+  last_name: displayText`last name`,
+  date_of_birth: displayText`date of birth`,
+  ssn: displayText`SSN`,
+  ssn4: displayText`SSN (last 4)`,
+  phone_number: displayText`phone`,
+  email_address: displayText`email`,
+  zip_code: displayText`ZIP`,
 };
 
 /**
@@ -133,19 +140,25 @@ export const TRANSFORM_FUNCTION_GLOSSARY: Record<string, string> = {
 /** Legal-agreement context, with the partner-controlled free text sanitized. */
 export interface InvitationLegalAgreementSummary {
   /** Agreement identifier (e.g. "MOU-2025-0042"), sanitized for display. */
-  reference: string;
+  reference: Displayable;
   /** Stated purpose of the disclosure, sanitized for display. */
-  purpose: string;
-  /** ISO 8601 date (YYYY-MM-DD) after which the exchange is refused. */
-  expirationDate: string;
+  purpose: Displayable;
+  /**
+   * ISO 8601 date (YYYY-MM-DD) after which the exchange is refused, sanitized
+   * for display like the free-text fields: the `z.iso` schema rejects anything
+   * that could carry a deceptive character today, but the boundary does not
+   * depend on that validation staying in place.
+   */
+  expirationDate: Displayable;
 }
 
 /** The optional data columns the inviter declares, with names sanitized. */
 export interface InvitationPayloadSummary {
   /** Columns the inviter will send for matched records (what the acceptor
-   * receives), in the inviter's namespace. Empty when the declared set is empty;
-   * read {@link sendDeclared} to tell that apart from the lazy case. */
-  send: Array<string>;
+   * receives), in the inviter's namespace, each sanitized for display. Empty when
+   * the declared set is empty; read {@link sendDeclared} to tell that apart from
+   * the lazy case. */
+  send: Array<Displayable>;
   /**
    * Whether the send set is a definite DECLARATION the acceptor is locked in to --
    * the carried disclosed subset (possibly empty), or an authored `payload.send` --
@@ -157,9 +170,10 @@ export interface InvitationPayloadSummary {
    */
   sendDeclared: boolean;
   /** Columns the inviter requests from the acceptor for matched records (what
-   * the acceptor sends). Empty when the declared set is empty; read
-   * {@link receiveDeclared} to tell that apart from the lazy case. */
-  receive: Array<string>;
+   * the acceptor sends), each sanitized for display. Empty when the declared set
+   * is empty; read {@link receiveDeclared} to tell that apart from the lazy
+   * case. */
+  receive: Array<Displayable>;
   /**
    * Whether the receive set is a definite DECLARATION (an authored
    * `payload.receive`, present even when empty) as opposed to the lazy case (no
@@ -182,7 +196,7 @@ export interface InvitationPayloadSummary {
  */
 export interface InvitationTransformSummary {
   /** Sanitized name of the transform function. */
-  function: string;
+  function: Displayable;
   /**
    * One sanitized `key: value` string per declared parameter, in declaration
    * order, capped at {@link MAX_DISPLAYED_PARAMS} (a trailing "... N more"
@@ -192,7 +206,7 @@ export interface InvitationTransformSummary {
    * Each parameter is shown verbatim; a parameter core coerces before applying
    * is clarified separately in {@link coercions}, not folded into its line.
    */
-  params: Array<string>;
+  params: Array<Displayable>;
   /**
    * Plain-language description of what this function does to matching, from
    * {@link TRANSFORM_FUNCTION_GLOSSARY}. Fixed copy keyed by the recognized
@@ -208,8 +222,10 @@ export interface InvitationTransformSummary {
    * character position maps to the value the acceptor sees (a name field); absent
    * for a date or other reformatted field, a negative/non-integer slice, or a
    * function with no literal -- the renderer then leads with {@link description}.
+   * The phrase is fixed copy carrying partner-supplied slice positions, so it is
+   * composed through `displayText`, which admits a number but no partner string.
    */
-  effect?: string;
+  effect?: Displayable;
   /**
    * Parameters this function coerces before applying, each naming the parameter
    * and the value it actually runs as (e.g. `replacement` runs as the empty
@@ -232,8 +248,12 @@ export interface InvitationTransformSummary {
  * carries (a value transform or a fuzzy-comparison expansion).
  */
 export interface InvitationKeyElementSummary {
-  /** Human-readable label for the field this element derives from. */
-  fieldLabel: string;
+  /**
+   * Human-readable label for the field this element derives from: the fixed
+   * label for its semantic type, or the sanitized raw field name when the
+   * reference does not resolve.
+   */
+  fieldLabel: Displayable;
   /**
    * Transform steps applied to the value before hashing, in order; empty when
    * the value is matched as-is. Each carries the sanitized function name and a
@@ -269,7 +289,7 @@ export interface InvitationKeySummary {
    */
   id: string;
   /** The key's name, sanitized for display. */
-  name: string;
+  name: Displayable;
   /** Ordered elements combined to form the key. */
   elements: Array<InvitationKeyElementSummary>;
   /** True when the key declares a swap (two elements matched in either order). */
@@ -278,11 +298,14 @@ export interface InvitationKeySummary {
    * The two swapped elements' field labels, present only when both swap
    * references resolve to elements with *distinct* labels (the common case,
    * e.g. ["Last name", "First name"]). Absent when an identifier names no
-   * element or the two would carry the same label. No identifier, raw or
-   * sanitized, ever enters this tuple: in those cases the renderer
-   * falls back to a generic swap note keyed off {@link hasSwap} instead.
+   * element or the two would carry the same label: an unresolved swap
+   * identifier never enters this tuple, raw or sanitized -- the renderer falls
+   * back to a generic swap note keyed off {@link hasSwap} instead. The entries
+   * are the same resolved labels {@link InvitationKeyElementSummary.fieldLabel}
+   * carries, so like those they fall back to a sanitized raw field name for an
+   * element whose field reference does not resolve.
    */
-  swap?: [string, string];
+  swap?: [Displayable, Displayable];
   /**
    * True when the two swapped elements (resolved in {@link swap}) BOTH carry a
    * transform. On the receiver side a swap moves each element's field reference
@@ -308,7 +331,7 @@ export interface InvitationKeySummary {
    * resolved field labels {@link swap} holds, never the raw swap-reference
    * identifier.
    */
-  swapTransformDonor?: [string, string];
+  swapTransformDonor?: [Displayable, Displayable];
   /**
    * The always-visible one-liner of the fields this key matches on: one entry per
    * element, each a COMPACT semantic-type label carrying a terse breadth marker
@@ -329,7 +352,7 @@ export interface InvitationKeySummary {
    * The cross-application of the rules the detail lists is anchored there by
    * {@link swapTransformInterchange} / {@link swapTransformDonor}.
    */
-  headerFields: Array<string>;
+  headerFields: Array<Displayable>;
 }
 
 /**
@@ -366,7 +389,7 @@ export interface InvitationFieldSummary {
    * partner-supplied and unverified. Sanitized once here, at the single display
    * boundary, so no caller re-derives the escaping.
    */
-  allowedCharacters?: string;
+  allowedCharacters?: Displayable;
 }
 
 /**
@@ -380,10 +403,27 @@ export interface InvitationFieldSummary {
  * characters this neutralizes. The dates cannot carry such characters today (the
  * `z.iso` schemas reject them), but routing them through the same boundary keeps
  * the contract uniform rather than depending on that validation staying in place.
+ *
+ * Every field a partner-controlled value can reach AND that is rendered is typed
+ * {@link Displayable} rather than `string`, across this interface and the nested
+ * summaries, so filling one of them from an un-sanitized value fails to compile.
+ * The guarantee runs in that direction only: the brand rejects a plain `string`
+ * assigned into a field already DECLARED `Displayable`, and nothing forces a
+ * newly added field to be declared that way -- one declared `string` and filled
+ * from a partner value still compiles. Adding a rendered field therefore remains
+ * a review obligation; what the brand removes is the risk of an existing field
+ * silently losing its sanitize call.
+ *
+ * Most fields left as `string` are ones no partner value reaches: fixed copy
+ * keyed by a schema-validated enum, and the core-derived transform notes.
+ * {@link InvitationKeySummary.id} is the exception -- it carries the partner's
+ * raw key name verbatim, and is safe because it is never rendered, not because
+ * its value is first-party. Rendering it would need the sanitize call its
+ * unbranded type does not demand.
  */
 export interface InvitationSummary {
   /** The inviter's self-asserted identity, sanitized for display. */
-  invitingParty: string;
+  invitingParty: Displayable;
   /** `psi` reveals matched identifiers; `psi-c` reveals only the count. */
   algorithm: Algorithm;
   /**
@@ -432,15 +472,19 @@ export interface InvitationSummary {
    * sees WHICH data is matched on without expanding it. A field reference that
    * does not resolve to a declared type falls back to its sanitized raw name.
    */
-  matchedFields: Array<string>;
+  matchedFields: Array<Displayable>;
   /** PII fields involved, each with its label and declared constraints. */
   linkageFields: Array<InvitationFieldSummary>;
   /** Present only when the inviter attached a legal agreement. */
   legalAgreement?: InvitationLegalAgreementSummary;
   /** Present only when the inviter declared payload columns to send or receive. */
   payload?: InvitationPayloadSummary;
-  /** The invitation's expiry instant (ISO 8601), if the token carries one. */
-  expires?: string;
+  /**
+   * The invitation's expiry instant (ISO 8601), if the token carries one,
+   * sanitized for display on the same uniform-contract grounds as the agreement
+   * dates.
+   */
+  expires?: Displayable;
   /**
    * The partner's advisory shared-directory locator, sanitized for display: the
    * `path` a single-directory file-drop endpoint carries (its folder name, minted
@@ -450,7 +494,7 @@ export interface InvitationSummary {
    * as a React text child, whose escaping is part of its safety, and never to be
    * interpolated into an attribute value or raw HTML.
    */
-  connectionPath?: string;
+  connectionPath?: Displayable;
 }
 
 /**
@@ -504,7 +548,7 @@ function describeConstraints(field: LinkageField): Array<string> {
  * complement. `allowedCharacters` is a short, length-bounded, partner-controlled
  * string, so it is sanitized before display, once here at the single boundary.
  */
-function allowedCharactersClass(field: LinkageField): string | undefined {
+function allowedCharactersClass(field: LinkageField): Displayable | undefined {
   const constraints = field.constraints;
   if (
     constraints === undefined ||
@@ -576,7 +620,7 @@ function describeExecutedValue(value: unknown): string {
 function substringEffect(
   step: TransformStep,
   positionalSafe: boolean,
-): string | undefined {
+): Displayable | undefined {
   if (step.function !== "substring" || !positionalSafe) return undefined;
   const start = step.params?.start;
   const length = step.params?.length;
@@ -590,9 +634,10 @@ function substringEffect(
     return undefined;
   if (start === 1)
     return length === 1
-      ? "the first character"
-      : `the first ${length} characters`;
-  if (start > 1) return `characters ${start} to ${start + length - 1}`;
+      ? displayText`the first character`
+      : displayText`the first ${length} characters`;
+  if (start > 1)
+    return displayText`characters ${start} to ${start + length - 1}`;
   return undefined;
 }
 
@@ -614,7 +659,7 @@ function summarizeTransform(
     sanitizeForDisplay(`${entry[0]}: ${describeParamValue(entry[1])}`),
   );
   if (entries.length > MAX_DISPLAYED_PARAMS)
-    params.push(`... ${entries.length - MAX_DISPLAYED_PARAMS} more`);
+    params.push(displayText`... ${entries.length - MAX_DISPLAYED_PARAMS} more`);
   const summary: InvitationTransformSummary = {
     function: sanitizeForDisplay(step.function),
     params,
@@ -766,7 +811,9 @@ function parseDateBreadth(
  * complete rule set sits one expand down in {@link MatchKeyDetails}. The element
  * stays flagged either way.
  */
-function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
+function elementBreadthMarker(
+  element: LinkageKeyElement,
+): Displayable | undefined {
   const steps = element.transform ?? [];
   const functions = new Set(steps.map((s) => s.function));
   // An element whose pipeline produces no value for ANY record matches nothing,
@@ -785,7 +832,7 @@ function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
   // `parse_date` that drops only some components, not all, is the milder "partial"
   // handled below at the parse_date position.)
   const parseDateBreadths = steps.map(parseDateBreadth);
-  if (parseDateBreadths.includes("any date")) return "any date";
+  if (parseDateBreadths.includes("any date")) return displayText`any date`;
   // Effect named where the direction is determinable from the terms. "partial"
   // is a literal truncation, so a substring counts only where it slices the
   // literal value -- not after a value-recoding `phonetic` step, where it slices
@@ -795,22 +842,22 @@ function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
       step.function === "substring" &&
       !steps.slice(0, index).some((prior) => prior.function === "phonetic"),
   );
-  if (truncatesLiteral) return "partial";
-  if (element.generateFuzzyComparisons !== undefined) return "fuzzy";
-  if (functions.has("phonetic")) return "sound-alike";
-  if (functions.has("split_on")) return "multiple";
-  if (functions.has("coalesce")) return "fallback";
+  if (truncatesLiteral) return displayText`partial`;
+  if (element.generateFuzzyComparisons !== undefined) return displayText`fuzzy`;
+  if (functions.has("phonetic")) return displayText`sound-alike`;
+  if (functions.has("split_on")) return displayText`multiple`;
+  if (functions.has("coalesce")) return displayText`fallback`;
   // parse_date is routine date canonicalization UNLESS its output layout narrows
   // matching: an output that keeps a date token but drops a component its input
   // carries matches on only part of the date ("partial"). The tokenless
   // every-date-to-one case is the stronger "any date", handled at the top.
-  if (parseDateBreadths.includes("partial")) return "partial";
+  if (parseDateBreadths.includes("partial")) return displayText`partial`;
   // Rule named directly where a partner-authored pattern or value list makes the
   // matching direction indeterminate from the terms alone.
-  if (functions.has("replace_regex")) return "pattern replacement";
-  if (functions.has("extract_regex")) return "pattern extraction";
-  if (functions.has("filter_regex")) return "pattern filter";
-  if (functions.has("null_if")) return "excludes values";
+  if (functions.has("replace_regex")) return displayText`pattern replacement`;
+  if (functions.has("extract_regex")) return displayText`pattern extraction`;
+  if (functions.has("filter_regex")) return displayText`pattern filter`;
+  if (functions.has("null_if")) return displayText`excludes values`;
   return undefined;
 }
 
@@ -824,14 +871,14 @@ function summarizeKey(
   key: LinkageKey,
   fieldByName: Map<string, LinkageField["type"]>,
 ): InvitationKeySummary {
-  const labelForField = (fieldName: string): string => {
+  const labelForField = (fieldName: string): Displayable => {
     const type = fieldByName.get(fieldName);
     return type !== undefined
       ? FIELD_TYPE_LABELS[type]
       : sanitizeForDisplay(fieldName);
   };
 
-  const compactLabelForField = (fieldName: string): string => {
+  const compactLabelForField = (fieldName: string): Displayable => {
     const type = fieldByName.get(fieldName);
     return type !== undefined
       ? COMPACT_FIELD_TYPE_LABELS[type]
@@ -866,15 +913,18 @@ function summarizeKey(
   );
 
   const hasSwap = key.swap !== undefined;
-  let swap: [string, string] | undefined;
+  let swap: [Displayable, Displayable] | undefined;
   let swapTransformInterchange = false;
-  let swapTransformDonor: [string, string] | undefined;
+  let swapTransformDonor: [Displayable, Displayable] | undefined;
   // Header-marker re-attribution across a swap: maps each swapped element to the
   // breadth marker its header entry should show INSTEAD of its own (an explicit
   // `undefined` blanks the marker). Empty for a non-swap or same-label swap, so
   // the header loop falls back to each element's own marker. Built here because
   // the swap resolution below supplies the element pairing it needs.
-  const headerMarkerOverride = new Map<LinkageKeyElement, string | undefined>();
+  const headerMarkerOverride = new Map<
+    LinkageKeyElement,
+    Displayable | undefined
+  >();
   if (key.swap !== undefined) {
     // A swap names two elements by their effective identifier (element `name`
     // if present, otherwise `field`); resolve each to its element so the note
@@ -932,14 +982,15 @@ function summarizeKey(
   // collapse onto a whole-value one of the same field. A swap re-attributes each
   // marker to its partner's field (see headerMarkerOverride above); a non-swapped
   // element shows its own marker.
-  const headerFields: Array<string> = [];
+  const headerFields: Array<Displayable> = [];
   const seenHeaderFields = new Set<string>();
   for (const element of key.elements) {
     const label = compactLabelForField(element.field);
     const marker = headerMarkerOverride.has(element)
       ? headerMarkerOverride.get(element)
       : elementBreadthMarker(element);
-    const entry = marker !== undefined ? `${label} (${marker})` : label;
+    const entry =
+      marker !== undefined ? displayText`${label} (${marker})` : label;
     if (seenHeaderFields.has(entry)) continue;
     seenHeaderFields.add(entry);
     headerFields.push(entry);
@@ -1032,7 +1083,7 @@ export function summarizeInvitation(
   // detail. Derived from the keys' elements (the fields actually matched on), not
   // the declared field list, through the same compact-label/sanitize path the
   // per-key sublines use; markers and per-key grouping stay in the disclosure.
-  const matchedFields: Array<string> = [];
+  const matchedFields: Array<Displayable> = [];
   const seenMatchedFields = new Set<string>();
   for (const key of terms.linkageKeys) {
     for (const element of key.elements) {
