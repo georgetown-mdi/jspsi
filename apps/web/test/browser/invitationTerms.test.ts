@@ -7,10 +7,21 @@ import { page, userEvent } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
+import { sanitizeForDisplay } from "@psilink/core";
+
 import { InvitationTerms } from "@components/InvitationTerms";
 
+import {
+  BEL,
+  ESC,
+  PRINTABLE_ASCII,
+  RLO,
+  hostileSource,
+  hostileTerms,
+} from "../utils/displayEscapingFixtures";
 import { renderApp } from "./renderApp";
 
+import type { ComponentProps } from "react";
 import type { Root } from "react-dom/client";
 
 import type { LinkageStrategy, LinkageTerms } from "@psilink/core";
@@ -1751,5 +1762,145 @@ describe("InvitationTerms: the send-columns chip list is named by its visible ca
     render({ perspective: "accepted", outboundColumns: ["risk_score"] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     await expectNamedByVisibleCaptionOnly("What you will send to your partner");
+  });
+});
+
+describe("InvitationTerms: no partner-controlled byte reaches the screen", () => {
+  // The render half of the display-escaping property the unit suite asserts by
+  // walking the whole summarizeInvitation return value (invitationSummaryBrand,
+  // under test/unit). That walk exempts exactly one position,
+  // InvitationKeySummary.id -- the raw partner key name, left unsanitized as the
+  // stable identity per-key UI state is keyed by. The exemption is sound only
+  // while the id reaches no rendered text or attribute, so that is checked here
+  // rather than asserted in prose: the same hostile fixture is mounted whole,
+  // and every string the screen presents must be printable ASCII, which the raw
+  // id (carrying a BEL) is not.
+  //
+  // The mounted tree, not the summary: a component that interpolated a raw
+  // linkage-terms value of its own -- past the summary boundary entirely -- is
+  // caught here too.
+
+  // Attributes a user reads or hears, as opposed to the structural ones (class,
+  // id, aria-controls) that carry no partner text and are not presented.
+  const TEXT_ATTRIBUTES = [
+    "aria-label",
+    "aria-placeholder",
+    "aria-valuetext",
+    "alt",
+    "placeholder",
+    "title",
+  ];
+
+  // The one code point outside printable ASCII the component's OWN fixed copy
+  // puts on the screen: the typographic apostrophe of its swap notes ("...are
+  // applied to Last name&rsquo;s value"). Allowed by name, and only this one, so
+  // the walk below still fails on every other non-ASCII byte. It cannot swallow a
+  // partner value: sanitizeForDisplay escapes U+2019 exactly as it escapes every
+  // other non-ASCII code point, so no partner string reaches the DOM carrying
+  // one -- and the fixture's own hostile code points are asserted absent
+  // separately, so a widening of this allowance cannot go unnoticed.
+  const FIRST_PARTY_APOSTROPHE = /\u2019/g;
+
+  // Every string the mounted tree presents: each text node, plus the readable
+  // attributes above, tagged with where it sits so a failure names the node. A
+  // <style> or <script> element's text is program text the browser consumes, not
+  // rendered text, so its content is not walked (its readable attributes, of
+  // which it has none, would be).
+  function presentedStrings(
+    node: Node,
+    found: Array<{ where: string; text: string }> = [],
+  ): Array<{ where: string; text: string }> {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const parent = node.parentElement?.tagName.toLowerCase() ?? "detached";
+      found.push({ where: `${parent} text`, text: node.textContent ?? "" });
+      return found;
+    }
+    if (!(node instanceof Element)) return found;
+    const tag = node.tagName.toLowerCase();
+    for (const attribute of TEXT_ATTRIBUTES) {
+      const value = node.getAttribute(attribute);
+      if (value !== null)
+        found.push({ where: `${tag}[${attribute}]`, text: value });
+    }
+    if (tag === "style" || tag === "script") return found;
+    for (const child of Array.from(node.childNodes))
+      presentedStrings(child, found);
+    return found;
+  }
+
+  // Open every disclosure so the collapsed detail is on screen and walked. Two
+  // passes at least: the per-key disclosures mount only once the matching list
+  // above them is open, so they are not present to click in the first.
+  async function openEveryDisclosure() {
+    for (let pass = 0; pass < 3; pass += 1)
+      for (const collapsed of Array.from(
+        container!.querySelectorAll('[aria-expanded="false"]'),
+      ))
+        await userEvent.click(collapsed);
+    await expect
+      .poll(() => container!.querySelectorAll('[aria-expanded="false"]').length)
+      .toBe(0);
+  }
+
+  /**
+   * Mount the hostile fixture with the given props, open every disclosure, and
+   * require that every string the screen presents is printable ASCII (bar the
+   * first-party apostrophe above). `reachedScreen` names raw partner strings
+   * whose escaped form must be on screen, so the walk cannot pass over a render
+   * that never carried the fixture's partner text -- the vacuity guard, with no
+   * per-field enumeration behind it.
+   */
+  async function expectEveryPresentedStringEscaped(
+    props: ComponentProps<typeof InvitationTerms>,
+    reachedScreen: Array<string>,
+  ) {
+    root!.render(renderApp(createElement(InvitationTerms, props)));
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    await openEveryDisclosure();
+
+    for (const raw of reachedScreen)
+      await expect
+        .poll(() => container!.textContent)
+        .toContain(sanitizeForDisplay(raw));
+
+    const presented = presentedStrings(container!);
+    expect(
+      presented.filter(
+        (entry) =>
+          !PRINTABLE_ASCII.test(entry.text.replace(FIRST_PARTY_APOSTROPHE, "")),
+      ),
+    ).toEqual([]);
+    // The property the allowance above may never soften: not one of the
+    // fixture's hostile code points is on the screen, raw.
+    for (const hostile of [ESC, RLO, BEL])
+      expect(presented.filter((entry) => entry.text.includes(hostile))).toEqual(
+        [],
+      );
+  }
+
+  test("every string the screen presents is escaped, so the raw key id never reaches the DOM", async () => {
+    await expectEveryPresentedStringEscaped({ linkageTerms: hostileTerms }, [
+      // The key name in its own disclosure toggle, and the deepest per-key
+      // detail: a transform function name inside that key's collapsed body.
+      hostileTerms.linkageKeys[0].name,
+      `mystery${BEL}fn`,
+    ]);
+  });
+
+  test("the same holds on the acceptor's review screen, over the columns and expiry the token carries", async () => {
+    // The props the accept screen supplies alongside the terms: the partner's
+    // carried disclosed-columns subset, the acceptor's own file header, and the
+    // token's expiry instant -- each reaching the screen through the same
+    // display boundary.
+    await expectEveryPresentedStringEscaped(
+      {
+        linkageTerms: hostileTerms,
+        perspective: "review",
+        disclosedPayloadColumns: [`disclo${RLO}sed`],
+        outboundColumns: [`hea${BEL}der`],
+        expires: hostileSource.expires,
+      },
+      [hostileTerms.identity, `disclo${RLO}sed`, `hea${BEL}der`],
+    );
   });
 });

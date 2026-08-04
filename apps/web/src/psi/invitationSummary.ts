@@ -285,7 +285,10 @@ export interface InvitationKeySummary {
    * `LinkageTerms` this is guaranteed unique across `linkageKeys`, unlike
    * {@link name}, whose sanitization/truncation can collapse two distinct raw
    * names to the same displayed string. Never rendered -- carries no display
-   * obligation, so it is not sanitized.
+   * obligation, so it is not sanitized. That it stays off the screen is checked
+   * rather than stated: the browser suite mounts the consent screen on linkage
+   * terms whose every partner-controlled string carries a hostile code point and
+   * fails on any rendered text outside printable ASCII.
    */
   id: string;
   /** The key's name, sanitized for display. */
@@ -410,9 +413,12 @@ export interface InvitationFieldSummary {
  * The guarantee runs in that direction only: the brand rejects a plain `string`
  * assigned into a field already DECLARED `Displayable`, and nothing forces a
  * newly added field to be declared that way -- one declared `string` and filled
- * from a partner value still compiles. Adding a rendered field therefore remains
- * a review obligation; what the brand removes is the risk of an existing field
- * silently losing its sanitize call.
+ * from a partner value still compiles. The runtime half covers that gap: a test
+ * walks this whole returned value, built from linkage terms whose every
+ * partner-controlled string carries a hostile code point, and fails on any string
+ * outside printable ASCII, with no per-field list to keep current. What the brand
+ * adds is the compile-time half: an existing field cannot silently lose its
+ * sanitize call.
  *
  * Most fields left as `string` are ones no partner value reaches: fixed copy
  * keyed by a schema-validated enum, and the core-derived transform notes.
