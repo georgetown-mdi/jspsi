@@ -1740,6 +1740,67 @@ test("displayInvitation: the short field list precedes the long key list", () =>
   expect(keys).toBeGreaterThan(fields);
 });
 
+const REPEAT_HEADING = "Before you accept, repeated from above:";
+
+test("displayInvitation: the decision facts are repeated verbatim immediately before the prompt", () => {
+  // The terms run well past a screen, so an operator answering the prompt reads the
+  // tail: the columns they send, who they disclose to, and the algorithm have all
+  // scrolled away. They are printed again last, by the same renderer that prints
+  // them first, and this measures the property that makes the second printing a
+  // repetition rather than a second account -- the two are byte-identical, so
+  // neither can state a fact the other does not. A recap composing its own wording
+  // is what would need a check that its facts appear above; this needs only that
+  // the bytes match.
+  const log = getLogger("accept-display-repeat-test");
+  log.setLevel("silent");
+  const defaultTerms = getDefaultLinkageTerms("Inviter Org");
+  const cases: Array<{
+    linkageTerms: LinkageTerms;
+    ownOutboundSend: ReadonlyArray<string> | undefined;
+  }> = [
+    { linkageTerms: defaultTerms, ownOutboundSend: ["diagnosis", "notes"] },
+    { linkageTerms: defaultTerms, ownOutboundSend: [] },
+    { linkageTerms: defaultTerms, ownOutboundSend: undefined },
+    { linkageTerms: CONSENT_PROBE_TERMS, ownOutboundSend: ["diagnosis"] },
+    {
+      linkageTerms: { ...CONSENT_PROBE_TERMS, algorithm: "psi-c" },
+      ownOutboundSend: [],
+    },
+    // The hostile fixtures, so the repetition is measured on a partner identity
+    // carrying escapes rather than only on well-behaved text.
+    ...hostileVariants.map(({ source }) => ({
+      linkageTerms: source.linkageTerms,
+      ownOutboundSend: [`own${BEL}column`],
+    })),
+  ];
+
+  for (const { linkageTerms, ownOutboundSend } of cases) {
+    const lines = renderDisplayInvitation(
+      log,
+      { ...sampleToken(FUTURE()), linkageTerms },
+      ownOutboundSend,
+    ).split("\n");
+
+    expect(lines.filter((line) => line === REPEAT_HEADING)).toHaveLength(1);
+    const heading = lines.indexOf(REPEAT_HEADING);
+    const repeated = lines.slice(heading + 1);
+    // Nothing follows the repetition: a line printed after it would be the last
+    // thing the operator reads, outside what this measures.
+    expect(repeated.length).toBeGreaterThan(0);
+    // The same block, byte for byte, at the head of the display -- where index 0 is
+    // the "Invitation details:" heading the facts open under.
+    expect(lines.slice(1, 1 + repeated.length)).toEqual(repeated);
+    // Non-vacuous: the block carries the decisive partner-controlled fact rather
+    // than being an empty tail that trivially matches.
+    expect(repeated.some((line) => line.startsWith("  inviting party: "))).toBe(
+      true,
+    );
+    expect(
+      repeated.some((line) => line.startsWith("  columns you will send")),
+    ).toBe(true);
+  }
+});
+
 test("displayInvitation: every linkage key is listed, including one after an entry with nested detail", () => {
   // entriesUnder backs the separator-safety assertions, so it must collect
   // siblings across an entry's own nested block (a key's derived one-liner and its

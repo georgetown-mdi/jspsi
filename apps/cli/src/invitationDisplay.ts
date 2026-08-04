@@ -182,13 +182,28 @@ function displayLinkageFields(
  * are operator-file strings that reach no display boundary of their own, so they are
  * escaped here, at their sink.
  */
-export function displayInvitation(
-  token: InvitationToken,
-  ownOutboundSend: ReadonlyArray<string> | undefined,
+/**
+ * The facts the acceptance decision turns on, printed by this one function at both
+ * of the two points the operator needs them: heading the terms, and again
+ * immediately above the confirmation prompt.
+ *
+ * The terms run to well over a screen -- a default-terms invitation renders past
+ * 160 lines -- so an operator answering the prompt is looking at the tail, and
+ * these facts have scrolled away. Printing them twice from one renderer is what
+ * makes the second printing a repetition rather than a second account: there is
+ * one wording, so the two cannot drift and no check is needed to keep them
+ * agreeing. Composing a separate summary here instead would reintroduce exactly
+ * that gap.
+ *
+ * Every partner-controlled value keeps the treatment it has above -- preceded on
+ * its own line by a fixed first-party label -- so none of them can begin a line or
+ * manufacture one.
+ */
+function logDecisionFacts(
   log: ReturnType<typeof getLogger>,
+  summary: InvitationSummary,
+  ownOutboundSend: ReadonlyArray<string> | undefined,
 ): void {
-  const summary = summarizeInvitation(token);
-  log.info("Invitation details:");
   // Lead with the acceptor's OWN outbound disclosure -- the columns it will send to
   // the partner for matched records, its hardest-to-undo consent -- before the
   // inviter's proposed terms, matching the web acceptor flow. undefined is the
@@ -222,6 +237,16 @@ export function displayInvitation(
         "version does not yet apply it and will refuse to run; ask for an " +
         'invitation using the "psi" algorithm.',
     );
+}
+
+export function displayInvitation(
+  token: InvitationToken,
+  ownOutboundSend: ReadonlyArray<string> | undefined,
+  log: ReturnType<typeof getLogger>,
+): void {
+  const summary = summarizeInvitation(token);
+  log.info("Invitation details:");
+  logDecisionFacts(log, summary, ownOutboundSend);
   // The linkage strategy is a mandatory-consistency term (like the algorithm),
   // and single-pass is disclosure-affecting -- it is the load-bearing thing the
   // acceptor consents to here -- so show it plainly and, for single-pass, the
@@ -315,4 +340,11 @@ export function displayInvitation(
   }
 
   if (summary.expires !== undefined) log.info(`  expires: ${summary.expires}`);
+
+  // Nothing is printed after this, so what the prompt is answered against is these
+  // facts rather than the tail of the key list. The heading says "repeated" because
+  // that is the whole claim being made: this block introduces nothing, and the
+  // operator who read the terms from the top has already seen every line of it.
+  log.info("Before you accept, repeated from above:");
+  logDecisionFacts(log, summary, ownOutboundSend);
 }

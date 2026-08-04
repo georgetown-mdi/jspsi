@@ -101,3 +101,22 @@ Joining is a renderer's decision and a renderer's hazard. The display sanitizer
 neutralizes control, bidi, and non-ASCII code points but leaves a printable ASCII
 comma intact, so a comma-joined list lets one partner-controlled name read as
 two. Both surfaces render every such list one entry per line.
+
+Putting a fact back in front of the operator is also a renderer's decision, and
+the shape it takes is the load-bearing part. A terminal has no scrollback the
+prompt can rely on: a default-terms invitation renders past 160 lines, so the
+operator answering the CLI prompt is reading the tail of the key list, and the
+facts the decision turns on left the screen long before. The CLI prints those
+facts a second time, immediately above the prompt, from the SAME function that
+prints them first.
+
+That the two printings share a renderer rather than a subject is the whole of
+it. A summary composing its own wording is a second account of the same facts,
+and a second account can state something the first did not -- which is a real
+defect, not a hypothetical one: an earlier attempt here did exactly that, and
+pinning it took a bespoke check that each of its clauses also appeared above.
+Byte-identical output needs no such check, because there is no second wording to
+drift. It also inherits every property the first printing was already measured
+to have, rather than restating them: each partner-controlled value stays behind
+its fixed first-party label, on its own line, where it can neither begin a line
+nor manufacture one.
