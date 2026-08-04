@@ -725,15 +725,17 @@ const promptStream = process.stderr;
  * this is prompt-adjacent text rather than a diagnostic record (a `--log-file`
  * copy of the same line still carries the prefix).
  *
- * Best-effort in the same way {@link configureStderrLogging} is: a wedged stream
- * drops the line rather than throwing back into the caller -- this stream is the
- * only place the failure could have been reported to.
+ * Best-effort: a wedged stream drops the line rather than throwing back into the
+ * caller. The drop is not reported, so a run whose prompt stream fails partway
+ * through the surface can reach the question having shown only part of it. That
+ * is a stated limit of the pairing, recorded for the operator under acceptance in
+ * docs/CLI.md; closing it means giving the caller back a write outcome to act on.
  */
 export function writePromptLine(line: string): void {
   try {
     promptStream.write(`${line}\n`);
   } catch {
-    // Nowhere left to report to; drop the line.
+    // Dropped; see the limit above.
   }
 }
 
