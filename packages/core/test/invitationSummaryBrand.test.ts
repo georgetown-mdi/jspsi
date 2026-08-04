@@ -4,10 +4,6 @@ import { describe, expect, test } from "vitest";
 
 import ts from "typescript";
 
-import { sanitizeForDisplay } from "@psilink/core";
-
-import { summarizeInvitation } from "@psi/invitationSummary";
-
 import {
   BEL,
   ESC,
@@ -16,18 +12,21 @@ import {
   hostileSource,
   hostileTerms,
   hostileVariants,
-} from "../utils/displayEscapingFixtures";
+} from "../src/displayEscapingFixtures.js";
+import { summarizeInvitation } from "../src/invitationSummary.js";
+import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay.js";
 
 import type {
   InvitationLegalAgreementSummary,
   InvitationSummary,
-} from "@psi/invitationSummary";
+} from "../src/invitationSummary.js";
 
 /**
  * The one position the walk below skips: a linkage key's `id` carries the raw
  * partner key name verbatim, as the stable identity per-key UI state is keyed
- * by, and reaches no rendered text or attribute -- that claim is checked at the
- * render boundary (test/browser/invitationTerms.test.ts), not asserted here.
+ * by, and reaches no rendered text or attribute -- that claim is checked at each
+ * render boundary (the web app's browser consent-screen suite and the CLI's
+ * accept-prompt escaping test), not asserted here.
  * Matched by PATH rather than by key name, so a future `id` anywhere else in the
  * summary is checked rather than silently exempted too.
  */
@@ -68,9 +67,9 @@ function repoPath(relative: string): string {
   return fileURLToPath(new URL(relative, import.meta.url));
 }
 
-const SUMMARY_SOURCE = repoPath("../../src/psi/invitationSummary.ts");
+const SUMMARY_SOURCE = repoPath("../src/invitationSummary.ts");
 const SUMMARY_ROOT = "InvitationSummary";
-const WEB_APP_ROOT = repoPath("../../");
+const CORE_ROOT = repoPath("../");
 
 /**
  * Type flags carrying no properties of their own, so a position of that type is
@@ -121,14 +120,14 @@ function declaredSummaryPositions(): {
   all: Set<string>;
   optional: Set<string>;
 } {
-  const configPath = repoPath("../../tsconfig.json");
+  const configPath = repoPath("../tsconfig.json");
   const config = ts.readConfigFile(configPath, ts.sys.readFile);
   if (config.error !== undefined)
     throw new Error(`cannot read ${configPath} for the summary derivation`);
   const parsed = ts.parseJsonConfigFileContent(
     config.config,
     ts.sys,
-    WEB_APP_ROOT,
+    CORE_ROOT,
   );
   const program = ts.createProgram({
     rootNames: [SUMMARY_SOURCE],

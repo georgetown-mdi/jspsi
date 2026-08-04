@@ -11,12 +11,12 @@ import {
 import { IconArrowDown, IconArrowUp } from "@tabler/icons-react";
 
 import {
+  APPLIED_SETTINGS,
   AlgorithmSchema,
   LinkageStrategySchema,
   sanitizeForDisplay,
 } from "@psilink/core";
 
-import { APPLIED_SETTINGS } from "@psi/appliedSettings";
 import { buildAdvancedTerms } from "@psi/advancedInvite";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";

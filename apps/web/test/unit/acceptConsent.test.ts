@@ -2,13 +2,11 @@ import { describe, expect, test } from "vitest";
 
 import {
   STANDARDIZATION_FUNCTION_NAMES,
+  TRANSFORM_FUNCTION_GLOSSARY,
   generateSharedSecret,
+  summarizeInvitation,
 } from "@psilink/core";
 
-import {
-  TRANSFORM_FUNCTION_GLOSSARY,
-  summarizeInvitation,
-} from "@psi/invitationSummary";
 import { commitAcceptance } from "@psi/acceptConsent";
 
 import type {

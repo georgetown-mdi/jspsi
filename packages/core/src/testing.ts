@@ -15,6 +15,19 @@ export type {
   LinkageTermClassification,
 } from "./linkageTermConsentCoverage.js";
 
+export {
+  BEL,
+  ESC,
+  PRINTABLE_ASCII,
+  RLO,
+  hostileSource,
+  hostileTerms,
+  hostileVariants,
+  swapDonorSource,
+  swapDonorTerms,
+} from "./displayEscapingFixtures.js";
+export type { HostileSource } from "./displayEscapingFixtures.js";
+
 /** @internal */
 export function sortAssociationTable(
   value: AssociationTable,

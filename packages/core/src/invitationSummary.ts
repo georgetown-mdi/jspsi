@@ -1,24 +1,22 @@
+import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
   dateFormatComponents,
   describeTransformCoercions,
-  displayText,
   parseDateInputDropsEveryRecord,
   pipelineAlwaysDrops,
-  sanitizeForDisplay,
-} from "@psilink/core";
+} from "./standardization.js";
+import { displayText, sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
 
-import { APPLIED_SETTINGS } from "@psi/appliedSettings";
-
+import type { InvitationToken } from "./config/invitation.js";
 import type {
-  Algorithm,
-  Displayable,
-  InvitationToken,
   LinkageField,
   LinkageKey,
   LinkageKeyElement,
   LinkageStrategy,
   TransformStep,
-} from "@psilink/core";
+} from "./config/linkageTerms.js";
+import type { Algorithm } from "./types.js";
+import type { Displayable } from "./utils/sanitizeForDisplay.js";
 
 /**
  * Human-readable label for each linkage-field semantic type. The `type` is a
@@ -285,10 +283,11 @@ export interface InvitationKeySummary {
    * `LinkageTerms` this is guaranteed unique across `linkageKeys`, unlike
    * {@link name}, whose sanitization/truncation can collapse two distinct raw
    * names to the same displayed string. Never rendered -- carries no display
-   * obligation, so it is not sanitized. That it stays off the screen is checked
-   * rather than stated: the browser suite mounts the consent screen on linkage
-   * terms whose every partner-controlled string carries a hostile code point and
-   * fails on any rendered text outside printable ASCII.
+   * obligation, so it is not sanitized. That it stays off both acceptance
+   * surfaces is checked rather than stated: the web app's browser suite mounts
+   * the consent screen, and the CLI suite renders the accept prompt, on linkage
+   * terms whose every partner-controlled string carries a hostile code point, and
+   * each fails on any output text outside printable ASCII.
    */
   id: string;
   /** The key's name, sanitized for display. */
@@ -400,10 +399,12 @@ export interface InvitationFieldSummary {
  * from a decoded {@link InvitationToken}. Every partner-controlled value (the
  * self-asserted identity, linkage-key names, legal-agreement text, payload
  * column names, and the schema-validated date fields) is passed through
- * {@link sanitizeForDisplay} here, at the one boundary, so renderers can show
- * these fields without each re-deriving the escaping -- React's JSX escaping
- * covers HTML metacharacters but not the control, bidi, zero-width, or homoglyph
- * characters this neutralizes. The dates cannot carry such characters today (the
+ * {@link sanitizeForDisplay} here, at the one boundary, so neither acceptance
+ * surface -- the web consent screen nor the CLI accept prompt -- re-derives the
+ * escaping. Neither renderer's own defenses suffice: React's JSX escaping covers
+ * HTML metacharacters, and a terminal none, but neither covers the control, bidi,
+ * zero-width, or homoglyph characters this neutralizes. The dates cannot carry
+ * such characters today (the
  * `z.iso` schemas reject them), but routing them through the same boundary keeps
  * the contract uniform rather than depending on that validation staying in place.
  *
@@ -814,8 +815,8 @@ function parseDateBreadth(
  * header is deliberately terse, so an element carrying more than one rule shows
  * just the first -- the maximal-breadth "any date" collapse ranks first, then the
  * other effect-named rules, then the directly-named ones -- while its
- * complete rule set sits one expand down in {@link MatchKeyDetails}. The element
- * stays flagged either way.
+ * complete rule set is carried on {@link InvitationKeySummary.elements} for the
+ * renderer's per-key detail. The element stays flagged either way.
  */
 function elementBreadthMarker(
   element: LinkageKeyElement,

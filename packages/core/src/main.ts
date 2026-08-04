@@ -81,6 +81,27 @@ export * from "./config/metadata";
 export * from "./config/signing";
 export * from "./signingIdentity";
 export * from "./standardization";
+// The one display model both acceptance surfaces render the inviter's proposed
+// terms from -- the web consent screen and the CLI accept prompt -- so the
+// judgment of what an acceptor is consenting to, and the escaping of every
+// partner-controlled string in it, is made once rather than per surface.
+export {
+  summarizeInvitation,
+  TRANSFORM_FUNCTION_GLOSSARY,
+} from "./invitationSummary.js";
+export type {
+  InvitationFieldSummary,
+  InvitationKeyElementSummary,
+  InvitationKeySummary,
+  InvitationLegalAgreementSummary,
+  InvitationPayloadSummary,
+  InvitationSummary,
+  InvitationTransformSummary,
+} from "./invitationSummary.js";
+// Which proposed settings today's exchange actually applies. Read by the summary
+// above (to flag a proposed-but-not-applied term) and by the web app's linkage-
+// terms editor and import path.
+export { APPLIED_SETTINGS } from "./appliedSettings.js";
 export {
   loadCSVFile,
   loadCSVColumns,

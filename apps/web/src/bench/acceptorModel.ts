@@ -1,8 +1,11 @@
-import { disclosedColumnNames, sanitizeForDisplay } from "@psilink/core";
+import {
+  disclosedColumnNames,
+  sanitizeForDisplay,
+  summarizeInvitation,
+} from "@psilink/core";
 
 import { commitAcceptance } from "@psi/acceptConsent";
 import { isBareSftpHost } from "@psi/sftpHost";
-import { summarizeInvitation } from "@psi/invitationSummary";
 
 import { TRANSPORT_LEDGER_LABELS, dateTimeLabel } from "./inviterModel";
 import { saveRailNote } from "./saveExchangeModel";

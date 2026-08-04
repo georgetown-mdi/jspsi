@@ -14,17 +14,13 @@ import {
 import { IconChevronRight } from "@tabler/icons-react";
 import { useReducedMotion } from "@mantine/hooks";
 
-import { sanitizeForDisplay } from "@psilink/core";
-
-import { summarizeInvitation } from "@psi/invitationSummary";
+import { sanitizeForDisplay, summarizeInvitation } from "@psilink/core";
 
 import { ColumnChips } from "@components/ColumnChips";
 
 import type { ReactNode, Ref } from "react";
 
-import type { LinkageTerms } from "@psilink/core";
-
-import type { InvitationKeySummary } from "@psi/invitationSummary";
+import type { InvitationKeySummary, LinkageTerms } from "@psilink/core";
 
 function yesNo(value: boolean): string {
   return value ? "Yes" : "No";
