@@ -14,6 +14,7 @@ import {
   parseExchangeSpec,
   reconcileReceivedPayload,
   sanitizeForDisplay,
+  summarizeInvitation,
   UsageError,
 } from "@psilink/core";
 import {
@@ -64,6 +65,7 @@ import {
   resolveAcceptPositionals,
   validateAccept,
 } from "../../src/commands/accept";
+import { logDecisionFacts } from "../../src/invitationDisplay";
 import {
   generateSharedSecret,
   runOnlineBootstrap,
@@ -1738,6 +1740,78 @@ test("displayInvitation: the short field list precedes the long key list", () =>
   const keys = lines.indexOf("  linkage keys:");
   expect(fields).toBeGreaterThanOrEqual(0);
   expect(keys).toBeGreaterThan(fields);
+});
+
+const REPEAT_HEADING = "Before you accept, repeated from above:";
+
+test("displayInvitation: the decision facts are repeated verbatim immediately before the prompt", () => {
+  // The terms run well past a screen, so an operator answering the prompt reads the
+  // tail: the columns they send, who they disclose to, and the algorithm have all
+  // scrolled away. They are printed again last, by the same renderer that prints
+  // them first, and this measures the property that makes the second printing a
+  // repetition rather than a second account -- the two are byte-identical, so
+  // neither can state a fact the other does not. A recap composing its own wording
+  // is what would need a check that its facts appear above; this needs only that
+  // the bytes match.
+  const log = getLogger("accept-display-repeat-test");
+  log.setLevel("silent");
+  const defaultTerms = getDefaultLinkageTerms("Inviter Org");
+  const cases: Array<{
+    linkageTerms: LinkageTerms;
+    ownOutboundSend: ReadonlyArray<string> | undefined;
+  }> = [
+    { linkageTerms: defaultTerms, ownOutboundSend: ["diagnosis", "notes"] },
+    { linkageTerms: defaultTerms, ownOutboundSend: [] },
+    { linkageTerms: defaultTerms, ownOutboundSend: undefined },
+    { linkageTerms: CONSENT_PROBE_TERMS, ownOutboundSend: ["diagnosis"] },
+    {
+      linkageTerms: { ...CONSENT_PROBE_TERMS, algorithm: "psi-c" },
+      ownOutboundSend: [],
+    },
+    // The hostile fixtures, so the repetition is measured on a partner identity
+    // carrying escapes rather than only on well-behaved text.
+    ...hostileVariants.map(({ source }) => ({
+      linkageTerms: source.linkageTerms,
+      ownOutboundSend: [`own${BEL}column`],
+    })),
+  ];
+
+  for (const { linkageTerms, ownOutboundSend } of cases) {
+    const lines = renderDisplayInvitation(
+      log,
+      { ...sampleToken(FUTURE()), linkageTerms },
+      ownOutboundSend,
+    ).split("\n");
+
+    // The block is rendered independently rather than read off either printing, so
+    // its LENGTH is measured too. Slicing the tail and comparing it to an
+    // equal-length window at the head is a sliding comparison: it cannot see a line
+    // appended after the repetition that happens to match the head's next line,
+    // which leaves the end of the output unmeasured.
+    const block: Array<string> = [];
+    logDecisionFacts(
+      { ...log, info: (entry: unknown) => block.push(String(entry)) },
+      summarizeInvitation({ ...sampleToken(FUTURE()), linkageTerms }),
+      ownOutboundSend,
+    );
+
+    expect(lines.filter((line) => line === REPEAT_HEADING)).toHaveLength(1);
+    const heading = lines.indexOf(REPEAT_HEADING);
+    // Exact equality, not a prefix: a line printed after the repetition makes the
+    // tail longer than the block and fails here, whatever that line says.
+    expect(lines.slice(heading + 1)).toEqual(block);
+    // The same block, byte for byte, at the head of the display -- where index 0 is
+    // the "Invitation details:" heading the facts open under.
+    expect(lines.slice(1, 1 + block.length)).toEqual(block);
+    // Non-vacuous: the block carries the decisive partner-controlled fact rather
+    // than being an empty tail that trivially matches.
+    expect(block.some((line) => line.startsWith("  inviting party: "))).toBe(
+      true,
+    );
+    expect(
+      block.some((line) => line.startsWith("  columns you will send")),
+    ).toBe(true);
+  }
 });
 
 test("displayInvitation: every linkage key is listed, including one after an entry with nested detail", () => {

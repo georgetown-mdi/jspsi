@@ -152,6 +152,65 @@ function displayLinkageFields(
 /**
  * @internal exported for testing
  *
+ * The facts the acceptance decision turns on, printed by this one function at both
+ * of the two points the operator needs them: heading the terms, and again
+ * immediately above the confirmation prompt.
+ *
+ * The terms run to well over a screen -- far past what a terminal shows at the
+ * prompt -- so an operator answering it is looking at the tail, and these facts
+ * have scrolled away. Printing them twice from one renderer is what
+ * makes the second printing a repetition rather than a second account: there is
+ * one wording, so the two cannot drift and no check is needed to keep them
+ * agreeing. Composing a separate summary here instead would reintroduce exactly
+ * that gap.
+ *
+ * Every partner-controlled value keeps the treatment it has above -- preceded on
+ * its own line by a fixed first-party label -- so none of them can begin a line or
+ * manufacture one.
+ */
+export function logDecisionFacts(
+  log: ReturnType<typeof getLogger>,
+  summary: InvitationSummary,
+  ownOutboundSend: ReadonlyArray<string> | undefined,
+): void {
+  // Lead with the acceptor's OWN outbound disclosure -- the columns it will send to
+  // the partner for matched records, its hardest-to-undo consent -- before the
+  // inviter's proposed terms, matching the web acceptor flow. undefined is the
+  // not-yet-known case (no metadata resolved): forward-reference rather than assert
+  // a count. An empty set is a truthful "(none)", not a presupposed non-empty
+  // disclosure.
+  if (ownOutboundSend === undefined)
+    log.info(`  columns you will send: ${OUTBOUND_SEND_FORWARD_REFERENCE}`);
+  else if (ownOutboundSend.length === 0)
+    log.info("  columns you will send: (none) -- only matched records");
+  else {
+    log.info("  columns you will send:");
+    logList(
+      log,
+      "    ",
+      ownOutboundSend.map((column) => sanitizeForDisplay(column)),
+    );
+  }
+
+  log.info(`  inviting party: ${summary.invitingParty}`);
+  log.info(`  PSI algorithm: ${summary.algorithm}`);
+  // A proposed count-only algorithm states a DISCLOSURE guarantee the run does not
+  // honor, so the caveat sits with the headline it contradicts. What not-applied
+  // means here is a refusal, not a looser run: the acceptor adopts the algorithm
+  // verbatim and every run path asserts it (assertAlgorithmImplemented), so the
+  // exchange aborts before any identifier is revealed. Name that, and what to ask
+  // the inviter for, the way the deduplicate note below does.
+  if (summary.algorithm === "psi-c" && !summary.psiCApplied)
+    log.info(
+      "  note: the inviting party proposes a count-only exchange, but this " +
+        "version does not yet apply it and will refuse to run; ask for an " +
+        'invitation using the "psi" algorithm.',
+    );
+}
+
+/**
+ * @internal exported for testing
+ *
  * Print, before the acceptance prompt, everything the operator is consenting to:
  * their own outbound disclosure first, then every term of the inviter's proposal
  * that decides what is matched or what is disclosed -- under `psi` what is matched
@@ -189,39 +248,7 @@ export function displayInvitation(
 ): void {
   const summary = summarizeInvitation(token);
   log.info("Invitation details:");
-  // Lead with the acceptor's OWN outbound disclosure -- the columns it will send to
-  // the partner for matched records, its hardest-to-undo consent -- before the
-  // inviter's proposed terms, matching the web acceptor flow. undefined is the
-  // not-yet-known case (no metadata resolved): forward-reference rather than assert
-  // a count. An empty set is a truthful "(none)", not a presupposed non-empty
-  // disclosure.
-  if (ownOutboundSend === undefined)
-    log.info(`  columns you will send: ${OUTBOUND_SEND_FORWARD_REFERENCE}`);
-  else if (ownOutboundSend.length === 0)
-    log.info("  columns you will send: (none) -- only matched records");
-  else {
-    log.info("  columns you will send:");
-    logList(
-      log,
-      "    ",
-      ownOutboundSend.map((column) => sanitizeForDisplay(column)),
-    );
-  }
-
-  log.info(`  inviting party: ${summary.invitingParty}`);
-  log.info(`  PSI algorithm: ${summary.algorithm}`);
-  // A proposed count-only algorithm states a DISCLOSURE guarantee the run does not
-  // honor, so the caveat sits with the headline it contradicts. What not-applied
-  // means here is a refusal, not a looser run: the acceptor adopts the algorithm
-  // verbatim and every run path asserts it (assertAlgorithmImplemented), so the
-  // exchange aborts before any identifier is revealed. Name that, and what to ask
-  // the inviter for, the way the deduplicate note below does.
-  if (summary.algorithm === "psi-c" && !summary.psiCApplied)
-    log.info(
-      "  note: the inviting party proposes a count-only exchange, but this " +
-        "version does not yet apply it and will refuse to run; ask for an " +
-        'invitation using the "psi" algorithm.',
-    );
+  logDecisionFacts(log, summary, ownOutboundSend);
   // The linkage strategy is a mandatory-consistency term (like the algorithm),
   // and single-pass is disclosure-affecting -- it is the load-bearing thing the
   // acceptor consents to here -- so show it plainly and, for single-pass, the
@@ -315,4 +342,11 @@ export function displayInvitation(
   }
 
   if (summary.expires !== undefined) log.info(`  expires: ${summary.expires}`);
+
+  // Nothing is printed after this, so what the prompt is answered against is these
+  // facts rather than the tail of the key list. The heading says "repeated" because
+  // that is the whole claim being made: this block introduces nothing, and the
+  // operator who read the terms from the top has already seen every line of it.
+  log.info("Before you accept, repeated from above:");
+  logDecisionFacts(log, summary, ownOutboundSend);
 }
