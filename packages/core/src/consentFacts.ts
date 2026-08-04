@@ -5,10 +5,9 @@
 // for the reason the summary itself does: a fact both surfaces state must carry
 // ONE classification and ONE caveat sentence. A renderer that authored its own
 // could classify the same fact differently from the other surface, or attach a
-// caveat that contradicts it -- which is not hypothetical, since the two surfaces
-// once stated opposite outcomes for a proposed count-only exchange. The
-// consent-coverage check cannot see that class of divergence: it measures whether
-// a field moves a surface's output, never whether the two say the same thing.
+// caveat that contradicts it. The consent-coverage check cannot see that class of
+// divergence: it measures whether a field moves a surface's output, never whether
+// the two say the same thing.
 //
 // A table keyed by a fact identifier, not a field on `InvitationSummary`. Two
 // properties a per-field flag cannot carry force it: not every classified fact is
@@ -218,16 +217,15 @@ export const CONSENT_BASIS_MARKERS: Record<ConsentFactBasis, string> = {
  * in `exchange.ts`), so an invitation carrying either aborts before any identifier
  * is revealed: their copy names the refusal and what to ask the inviter for. A
  * caveat claiming the run proceeds and discloses more than the headline would be
- * describing a run that does not happen -- which one surface once did.
+ * describing a run that does not happen.
  * `fuzzyComparisons` has no such refusal; it is a silent no-op that narrows the
  * match, so its marker says only that the expansion is proposed, and claiming a
  * refusal there would be the same error in the other direction.
  *
- * Shared for the same reason the classification is: these are the facts the two
- * surfaces most recently drifted on. The count-only entry is a moving target --
- * when the count-only run path lands, both surfaces flip to the count-only
- * disclosure statement together, which the render tests pinning it make a
- * deliberate edit.
+ * Shared for the same reason the classification is. The count-only entry is a
+ * moving target -- when the count-only run path lands, both surfaces flip to the
+ * count-only disclosure statement together, which the render tests pinning it
+ * make a deliberate edit.
  */
 export const PROPOSED_NOT_APPLIED_NOTES = {
   psiC:

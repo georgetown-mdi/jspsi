@@ -856,7 +856,7 @@ export function InvitationTerms({
               refuses to run on those terms at all. What the caveat says -- the
               refusal, and what to ask the partner for -- is the shared copy the
               CLI accept prompt renders, so the two surfaces cannot state opposite
-              outcomes for one invitation, which they once did. */}
+              outcomes for one invitation. */}
           {summary.algorithm === "psi-c" && !summary.psiCApplied && (
             <Text size="xs" c="dimmed">
               {PROPOSED_NOT_APPLIED_NOTES.psiC}

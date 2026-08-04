@@ -1681,7 +1681,7 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
   expect(inviterWithheld).toContain(
     "  what your partner learns either way (enforced):",
   );
-  // The remaining lines AC 2 names, each on the register it belongs to.
+  // The remaining marked lines, each on the register it belongs to.
   expect(rendered).toContain(`  ${INVITING_PARTY_LABEL}: `);
   expect(rendered).toContain(
     "      declared data standards (your partner's word):",
@@ -1694,13 +1694,13 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
 test("the psi-c caveat states the refusal, on both surfaces, from one terms document", () => {
   // psi-c is refused outright on every run path (assertAlgorithmImplemented), so
   // the exchange aborts before any identifier is revealed. A caveat saying the
-  // matched identifiers are still revealed describes a run that does not happen,
-  // and the two surfaces once said opposite things about it.
+  // matched identifiers are still revealed would describe a run that does not
+  // happen.
   //
-  // This pins the corrected wording here; apps/web/test/browser/invitationTerms
-  // pins the same sentence against the same terms document, so the pair cannot
-  // drift apart silently. When the count-only run path lands, both flip together
-  // and both pins have to be edited -- which is the point of pinning them.
+  // apps/web/test/browser/invitationTerms pins the same sentence against the same
+  // terms document, so the pair cannot drift apart silently. When the count-only
+  // run path lands, both flip together and both pins have to be edited -- which is
+  // the point of pinning them.
   const log = getLogger("accept-display-psi-c-test");
   log.setLevel("silent");
   const countOnly = renderDisplayInvitation(log, {

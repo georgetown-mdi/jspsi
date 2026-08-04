@@ -87,8 +87,7 @@ const terms: LinkageTerms = {
 // CLI accept prompt's pin (apps/cli/test/unit/accept.test.ts) flip to the
 // count-only disclosure statement. Pinning the sentence on both surfaces, against
 // the same terms document, is what makes that flip a deliberate edit on each rather
-// than a divergence neither notices -- these two surfaces have already once stated
-// opposite outcomes for the same invitation.
+// than a divergence neither notices.
 const PSI_C_CAVEAT =
   "Your partner proposes a count-only exchange, but this version of the " +
   "exchange does not yet apply it and will refuse to run; ask your partner " +
@@ -1628,10 +1627,9 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
   const deduplicateCaveat = "for an invitation without deduplication";
 
   test("the psi-c caveat states the refusal, in the words the CLI accept prompt shows", async () => {
-    // The correction: psi-c is refused on every run path, so nothing runs and no
-    // identifier is revealed. The caveat this replaced described a run that does
-    // not happen, and said the opposite of what the CLI prompt said for the very
-    // same invitation.
+    // psi-c is refused on every run path, so nothing runs and no identifier is
+    // revealed; a caveat saying the matched identifiers are still revealed would
+    // describe a run that does not happen.
     //
     // Rendered from core's shared consent probe -- the same terms document the
     // CLI's pin uses -- so the two pins measure one sentence against one input.
