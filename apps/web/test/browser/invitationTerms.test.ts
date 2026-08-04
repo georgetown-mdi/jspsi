@@ -19,7 +19,7 @@ import {
   hostileSource,
   hostileTerms,
   hostileVariants,
-} from "../utils/displayEscapingFixtures";
+} from "@psilink/core/testing";
 import { renderApp } from "./renderApp";
 
 import type { ComponentProps } from "react";
@@ -1767,9 +1767,10 @@ describe("InvitationTerms: the send-columns chip list is named by its visible ca
 });
 
 describe("InvitationTerms: no partner-controlled byte reaches the screen", () => {
-  // The render half of the display-escaping property the unit suite asserts by
-  // walking the whole summarizeInvitation return value (invitationSummaryBrand,
-  // under test/unit). That walk exempts exactly one position,
+  // The render half of the display-escaping property core's unit suite asserts
+  // by walking the whole summarizeInvitation return value
+  // (invitationSummaryBrand, alongside the summarizer it walks). That walk
+  // exempts exactly one position,
   // InvitationKeySummary.id -- the raw partner key name, left unsanitized as the
   // stable identity per-key UI state is keyed by. The exemption is sound only
   // while the id reaches no rendered text or attribute, so that is checked here

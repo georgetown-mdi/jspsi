@@ -9,7 +9,6 @@ import {
   disclosedColumnNames,
   getLogger,
   parseExchangeSpec,
-  sanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -29,6 +28,7 @@ import {
 import { detectFileConflicts } from "../fileUtils";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { decodeAndValidateInvitation } from "../invitationDecode";
+import { displayInvitation } from "../invitationDisplay";
 import {
   assertNoUnknownOptions,
   configureLogging,
@@ -66,7 +66,6 @@ import {
   looksLikeUrl,
   prepareForOnlineExchange,
   runOnlineBootstrap,
-  singlePassDisclosureNotice,
   type ResolvedDataSpec,
 } from "../onlineBootstrap";
 
@@ -178,118 +177,7 @@ export { decodeAndValidateInvitation } from "../invitationDecode";
 
 // --- Display -----------------------------------------------------------------
 
-/**
- * The forward-reference wording the outbound-send line carries when the acceptor's
- * own disclosed set is not yet determined at prompt time -- no input file (offline
- * accept without one) or an input whose columns cannot satisfy the invitation's
- * linkage keys, both of which leave the resolved spec without metadata. It points
- * ahead to the operator's input file rather than asserting a count it cannot yet know,
- * mirroring the web acceptor's pre-file forward-reference.
- */
-const OUTBOUND_SEND_FORWARD_REFERENCE = "determined from your input file";
-
-/**
- * @internal exported for testing
- *
- * `ownOutboundSend` is the columns THIS party will disclose to the partner for
- * matched records -- its own outbound disclosure, the hardest-to-undo fact it
- * consents to here. It is `disclosedColumnNames` over the acceptor's own resolved
- * metadata (exactly the set `preparePayload` transmits), so the prompt cannot
- * overstate what leaves this machine; `undefined` when that set is not yet
- * determined at prompt time (see {@link OUTBOUND_SEND_FORWARD_REFERENCE}), an empty
- * array when the acceptor discloses nothing. The names are operator-file strings,
- * escaped and shown one per line so a name containing the list separator cannot be
- * misread as two columns.
- */
-export function displayInvitation(
-  token: InvitationToken,
-  ownOutboundSend: ReadonlyArray<string> | undefined,
-  log: ReturnType<typeof getLogger>,
-): void {
-  const terms = token.linkageTerms;
-  log.info("Invitation details:");
-  // Lead with the acceptor's OWN outbound disclosure -- the columns it will send to
-  // the partner for matched records, its hardest-to-undo consent -- before the
-  // inviter's proposed terms, matching the web acceptor flow. undefined is the
-  // not-yet-known case (no metadata resolved): forward-reference rather than assert
-  // a count. Otherwise render every disclosed column, one sanitized name per line
-  // (the names are operator-file strings, and sanitizeForDisplay does not escape a
-  // comma, so a joined list could misread a name containing one as two entries);
-  // an empty set is a truthful "(none)", not a presupposed non-empty disclosure.
-  if (ownOutboundSend === undefined)
-    log.info(`    columns you will send: ${OUTBOUND_SEND_FORWARD_REFERENCE}`);
-  else if (ownOutboundSend.length === 0)
-    log.info("    columns you will send: (none) -- only matched records");
-  else {
-    log.info("    columns you will send:");
-    for (const column of ownOutboundSend)
-      log.info(`      - ${sanitizeForDisplay(column)}`);
-  }
-  // identity and linkage-key names are partner-controlled free text (the inviter
-  // crafts the token); escape them before they reach the acceptor's terminal,
-  // since this summary is shown before the operator confirms acceptance.
-  log.info(`  inviting party: ${sanitizeForDisplay(terms.identity)}`);
-  log.info(`  PSI algorithm: ${terms.algorithm}`);
-  // The linkage strategy is a mandatory-consistency term (like the algorithm),
-  // and single-pass is disclosure-affecting -- it is the load-bearing thing the
-  // acceptor consents to here -- so show it plainly and, for single-pass, the
-  // disclosure-tradeoff note. The value is a schema enum, not partner free text,
-  // so it needs no sanitizing; the note is shared with the inviter's selection
-  // surface so both parties read identical framing.
-  log.info(`  linkage strategy: ${terms.linkageStrategy}`);
-  if (terms.linkageStrategy === "single-pass")
-    log.info(`  note: ${singlePassDisclosureNotice()}`);
-  // Stated from the accepting party's perspective (this summary is shown only to
-  // the acceptor, before it confirms): YOU receive iff the inviter shares, and the
-  // inviter receives iff its terms expect output. For a one-sided invitation this
-  // tells the acceptor plainly whether it gets a result, rather than leaving it to
-  // invert the inviter's "shares with partner" bit.
-  log.info(
-    `  you will receive the result: ${terms.output.shareWithPartner ? "yes" : "no"}`,
-  );
-  log.info(
-    `  the inviting party will receive the result: ` +
-      `${terms.output.expectsOutput ? "yes" : "no"}`,
-  );
-  log.info(
-    `  linkage keys: ` +
-      `${terms.linkageKeys.map((k) => sanitizeForDisplay(k.name)).join(", ")}`,
-  );
-  // The columns the inviter declared it will transmit for matched records, in the
-  // inviter's namespace -- what this party will RECEIVE. Derived from the wire's
-  // own disclosure predicate (disclosedPayloadColumns), the same set the runtime
-  // lock-in enforces. Partner-controlled, so escaped. Shown whenever the invitation
-  // carried the subset; an empty set is a real "you will receive no payload
-  // columns" lock-in (a later non-empty payload aborts), shown as (none). Omitted
-  // entirely only for an older or metadata-unknown mint, which reconciles lazily.
-  if (token.disclosedPayloadColumns !== undefined)
-    log.info(
-      `  columns you will receive: ` +
-        (token.disclosedPayloadColumns.length > 0
-          ? token.disclosedPayloadColumns
-              .map((c) => sanitizeForDisplay(c))
-              .join(", ")
-          : "(none) -- any payload column would abort the exchange"),
-    );
-  // The opposite direction: the columns the inviter requests FROM this party for
-  // matched records -- what YOU may send. A declared receive (present, even if
-  // empty) is cross-checked: an empty set strictly asserts you send nothing (a
-  // non-empty send then aborts), shown as (none); an absent receive reconciles
-  // lazily (the inviter takes whatever your metadata discloses) and is omitted.
-  // Partner-controlled names, so escaped. This is the CLI counterpart of the web
-  // consent screen's "your partner requests from you" line, mirroring the disclosed
-  // subset block above on the opposite direction.
-  if (terms.payload?.receive !== undefined)
-    log.info(
-      `  columns the inviting party requests from you: ` +
-        (terms.payload.receive.length > 0
-          ? terms.payload.receive
-              .map((c) => sanitizeForDisplay(c.name))
-              .join(", ")
-          : "(none) -- any payload column would abort the exchange"),
-    );
-  if (token.expires !== undefined) log.info(`  expires: ${token.expires}`);
-}
+export { displayInvitation };
 
 // --- Validation (the no-commit phase) ----------------------------------------
 

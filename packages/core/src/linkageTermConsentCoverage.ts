@@ -298,11 +298,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       edited(terms, (draft) => {
         draft.deduplicate = true;
       }),
-    unrepresented: {
-      cli:
-        "The CLI prompt renders the inviter's two output preferences but not " +
-        "its deduplicate setting.",
-    },
   },
   "linkageFields[].name": {
     classification: "excluded",
@@ -328,9 +323,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
           type: "ssn",
         };
       }),
-    unrepresented: {
-      cli: "The CLI prompt renders no linkage fields at all.",
-    },
   },
   "linkageFields[].constraints.allowedCharacters": {
     classification: "consent-relevant",
@@ -344,9 +336,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
           allowedCharacters: "A-Za-z0-9",
         };
       }),
-    unrepresented: {
-      cli: "The CLI prompt renders no field constraints.",
-    },
   },
   "linkageFields[].constraints.affixesAllowed": {
     classification: "consent-relevant",
@@ -360,9 +349,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
           affixesAllowed: true,
         };
       }),
-    unrepresented: {
-      cli: "The CLI prompt renders no field constraints.",
-    },
   },
   "linkageFields[].constraints.exclude": {
     classification: "consent-relevant",
@@ -379,9 +365,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
           exclude: ["UNKNOWN", "TEST"],
         };
       }),
-    unrepresented: {
-      cli: "The CLI prompt renders no field constraints.",
-    },
   },
   "linkageFields[].constraints.validOnly": {
     classification: "consent-relevant",
@@ -395,15 +378,12 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
           validOnly: false,
         };
       }),
-    unrepresented: {
-      cli: "The CLI prompt renders no field constraints.",
-    },
   },
   "linkageKeys[].name": {
     classification: "consent-relevant",
     reason:
-      "Names the matching round the acceptor is agreeing to, and is the only " +
-      "per-key anchor the CLI prompt offers.",
+      "Names the matching round the acceptor is agreeing to, and anchors the " +
+      "per-key rules each surface lists under it.",
     vary: (terms) =>
       edited(terms, (draft) => {
         draft.linkageKeys[0].name = "given name and family name";
@@ -418,11 +398,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       edited(terms, (draft) => {
         draft.linkageKeys[0].elements[2].field = "family_name";
       }),
-    unrepresented: {
-      cli:
-        "The CLI prompt renders each linkage key's name only, not the elements " +
-        "it combines.",
-    },
   },
   "linkageKeys[].elements[].name": {
     classification: "excluded",
@@ -442,11 +417,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
         draft.linkageKeys[0].elements[2].generateFuzzyComparisons =
           "transpositions";
       }),
-    unrepresented: {
-      cli:
-        "The CLI prompt renders each linkage key's name only, not the matching " +
-        "rules its elements carry.",
-    },
   },
   "linkageKeys[].elements[].transform[].function": {
     classification: "consent-relevant",
@@ -458,11 +428,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       edited(terms, (draft) => {
         probeTransform(draft)[0].function = "to_lower_case";
       }),
-    unrepresented: {
-      cli:
-        "The CLI prompt renders each linkage key's name only, not the transforms " +
-        "its elements apply.",
-    },
   },
   "linkageKeys[].elements[].transform[].params": {
     classification: "consent-relevant",
@@ -473,11 +438,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       edited(terms, (draft) => {
         probeTransform(draft)[1].params = { start: 1, length: 4 };
       }),
-    unrepresented: {
-      cli:
-        "The CLI prompt renders each linkage key's name only, not the transforms " +
-        "its elements apply.",
-    },
   },
   "linkageKeys[].swap": {
     classification: "consent-relevant",
@@ -488,11 +448,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       edited(terms, (draft) => {
         delete draft.linkageKeys[0].swap;
       }),
-    unrepresented: {
-      cli:
-        "The CLI prompt renders each linkage key's name only, not the swap it " +
-        "declares.",
-    },
   },
   "payload.send[].name": {
     classification: "consent-relevant",
@@ -504,13 +459,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
         if (draft.payload?.send !== undefined)
           draft.payload.send[0].name = "risk_band";
       }),
-    unrepresented: {
-      cli:
-        "The CLI prompt derives its received-columns line from the invitation " +
-        "token's carried `disclosedPayloadColumns` -- the wire's own " +
-        "transmission predicate -- and renders no line at all for a token that " +
-        "carries none, so the authored declaration never reaches the prompt.",
-    },
   },
   "payload.send[].description": {
     classification: "excluded",
@@ -547,9 +495,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
         if (draft.legalAgreement !== undefined)
           draft.legalAgreement.reference = "MOU-2026-0002";
       }),
-    unrepresented: {
-      cli: "The CLI prompt renders no legal agreement.",
-    },
   },
   "legalAgreement.purpose": {
     classification: "consent-relevant",
@@ -562,9 +507,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
           draft.legalAgreement.purpose =
             "Evaluation of the county after-school program";
       }),
-    unrepresented: {
-      cli: "The CLI prompt renders no legal agreement.",
-    },
   },
   "legalAgreement.expirationDate": {
     classification: "consent-relevant",
@@ -576,9 +518,6 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
         if (draft.legalAgreement !== undefined)
           draft.legalAgreement.expirationDate = "2028-06-30";
       }),
-    unrepresented: {
-      cli: "The CLI prompt renders no legal agreement.",
-    },
   },
 };
 

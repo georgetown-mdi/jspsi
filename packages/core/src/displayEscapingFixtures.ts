@@ -1,15 +1,26 @@
-import type { InvitationToken, LinkageTerms } from "@psilink/core";
+// Shared fixtures for the display-escaping halves that run over the invitation
+// consent summary: the object walk in this package, and the web app's
+// render-boundary walk over the mounted consent screen. One copy, behind the
+// `./testing` subpath, so the two cannot drift apart on what a hostile
+// invitation looks like.
+
+import type { InvitationToken } from "./config/invitation.js";
+import type { LinkageTerms } from "./config/linkageTerms.js";
 
 /**
- * Inviter-crafted characters JSX escaping does not neutralize, built from their
- * code points so this source carries no raw control or bidi byte: an ESC that
- * drives ANSI, a right-to-left override, and a BEL.
+ * @internal
+ *
+ * Inviter-crafted characters neither a terminal nor JSX escaping neutralizes,
+ * built from their code points so this source carries no raw control or bidi
+ * byte: an ESC that drives ANSI, a right-to-left override, and a BEL.
  */
 export const ESC = String.fromCodePoint(0x1b);
 export const RLO = String.fromCodePoint(0x202e);
 export const BEL = String.fromCodePoint(0x07);
 
 /**
+ * @internal
+ *
  * Printable ASCII (U+0020-U+007E), the character set `sanitizeForDisplay` leaves
  * intact and escapes everything else into. Shared by the unit walk over the
  * summary and the render-boundary walk over the mounted DOM so the two halves
@@ -18,6 +29,8 @@ export const BEL = String.fromCodePoint(0x07);
 export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
 
 /**
+ * @internal
+ *
  * Linkage terms in which EVERY partner-controlled string carries one of the
  * hostile code points above, so a summary or a rendered screen built from them
  * reaches each field with something to escape -- and a field that reaches either
@@ -26,8 +39,9 @@ export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
  * The exceptions are the values a summary position is KEYED ON rather than filled
  * from: the `replace_regex` function name and its `pattern` / `replacement`
  * parameter names, and the `generateFuzzyComparisons` enum. Each must be exactly
- * what core recognizes for the position it unlocks (the glossary description, the
- * runtime-coercion note, the fuzzy-comparison label) to exist at all, and each of
+ * what the standardization layer recognizes for the position it unlocks (the
+ * glossary description, the runtime-coercion note, the fuzzy-comparison label)
+ * to exist at all, and each of
  * those positions holds first-party copy keyed by that recognized value. Reaching
  * them is what the walk needs; the hostile bytes sit in the partner text beside
  * them (the pattern's value, the field and key names).
@@ -77,9 +91,9 @@ export const hostileTerms: LinkageTerms = {
               function: `mystery${BEL}fn`,
               params: { [`pat${RLO}tern`]: `${ESC}[31m` },
             },
-            // Recognized by core, and declaring `replacement` as null, so the
+            // A recognized function declaring `replacement` as null, so the
             // step carries both a glossary description and the runtime-coercion
-            // note core's describeTransformCoercions derives from that null.
+            // note describeTransformCoercions derives from that null.
             {
               function: "replace_regex",
               params: { pattern: `[${BEL}]`, replacement: null },
@@ -106,6 +120,8 @@ export const hostileTerms: LinkageTerms = {
 };
 
 /**
+ * @internal
+ *
  * {@link hostileTerms} with a swap whose transforms sit on ONE side only. The
  * swap in those terms carries a transform on both of its elements, which
  * summarizes as the bidirectional interchange; a single transform-carrier
@@ -134,6 +150,8 @@ export const swapDonorTerms: LinkageTerms = {
 };
 
 /**
+ * @internal
+ *
  * The decoded-token subset `summarizeInvitation` takes: linkage terms plus the
  * partner-controlled values the terms themselves do not hold -- the invitation's
  * expiry instant and a file-drop endpoint's advisory path.
@@ -143,20 +161,30 @@ export type HostileSource = Pick<
   "linkageTerms" | "expires" | "disclosedPayloadColumns" | "connectionEndpoint"
 >;
 
-/** {@link hostileTerms} as the decoded-token subset. */
+/**
+ * @internal
+ *
+ * {@link hostileTerms} as the decoded-token subset.
+ */
 export const hostileSource: HostileSource = {
   linkageTerms: hostileTerms,
   expires: `2026-02-01T00:00:00.000Z${BEL}`,
   connectionEndpoint: { channel: "filedrop", path: `drop${BEL}box` },
 };
 
-/** {@link swapDonorTerms} as the decoded-token subset. */
+/**
+ * @internal
+ *
+ * {@link swapDonorTerms} as the decoded-token subset.
+ */
 export const swapDonorSource: HostileSource = {
   ...hostileSource,
   linkageTerms: swapDonorTerms,
 };
 
 /**
+ * @internal
+ *
  * Every hostile variant the display-escaping halves run over, named for the
  * failure message. Both walk this list -- the unit walk summarizes each and the
  * browser walk mounts each -- so a variant added to reach a summary position one

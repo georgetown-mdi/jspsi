@@ -1,4 +1,5 @@
 import {
+  APPLIED_SETTINGS,
   CanonicalEncodingError,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
@@ -13,7 +14,6 @@ import {
   draftFromTerms,
   keyIsSupplyable,
 } from "./advancedInviteDraft";
-import { APPLIED_SETTINGS } from "./appliedSettings";
 import { buildAdvancedTerms } from "./advancedInviteTerms";
 import { isStepValid } from "./standardizationAuthoring";
 import { outputForDirection } from "./advancedInviteTypes";

@@ -13,14 +13,24 @@ import {
   getLogger,
   parseExchangeSpec,
   reconcileReceivedPayload,
+  sanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
-import { consentRepresentationProbes } from "@psilink/core/testing";
+import {
+  BEL,
+  CONSENT_PROBE_TERMS,
+  ESC,
+  PRINTABLE_ASCII,
+  RLO,
+  consentRepresentationProbes,
+  hostileVariants,
+} from "@psilink/core/testing";
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
   InvitationToken,
   LinkageTerms,
+  TransformStep,
 } from "@psilink/core";
 
 // Mock only promptConfirm; every other cli.ts export (openInputSource, which the
@@ -1243,6 +1253,44 @@ function renderDisplayInvitation(
   }
 }
 
+/**
+ * The bullet entries listed directly under `heading`, sliced out of the rendered
+ * lines so an assertion about one list cannot be satisfied -- or broken -- by a
+ * bullet belonging to another block at the same depth. An entry is a bullet line
+ * one indent level deeper than the heading; an entry's own nested detail (a
+ * linkage key's `matches on:` and `elements:` sub-list) sits deeper still and is
+ * skipped rather than ending the run, so every sibling entry is collected and a
+ * single displayed entry is distinguishable from two. The block ends at the first
+ * line back at the heading's own level or shallower, or at an entry-level line
+ * that is not a bullet.
+ */
+function entriesUnder(
+  lines: ReadonlyArray<string>,
+  heading: string,
+): Array<string> {
+  const index = lines.indexOf(heading);
+  if (index < 0) return [];
+  const indentOf = (line: string): number =>
+    line.length - line.trimStart().length;
+  const headingIndent = indentOf(heading);
+  const entryIndent = headingIndent + 2;
+  const bullet = `${" ".repeat(entryIndent)}- `;
+  const entries: Array<string> = [];
+  for (const line of lines.slice(index + 1)) {
+    if (line.startsWith(bullet)) {
+      entries.push(line.slice(bullet.length));
+      continue;
+    }
+    if (indentOf(line) <= entryIndent) break;
+  }
+  return entries;
+}
+
+/** The acceptor's own outbound-send columns, as displayed. */
+function outboundSendEntries(lines: ReadonlyArray<string>): Array<string> {
+  return entriesUnder(lines, "  columns you will send:");
+}
+
 test("displayInvitation escapes a hostile inviter identity and key names", () => {
   const token: InvitationToken = {
     ...sampleToken(FUTURE()),
@@ -1284,9 +1332,13 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
   const lines = (token: InvitationToken): string =>
     renderDisplayInvitation(log, token);
   const base = sampleToken(FUTURE());
-  expect(
-    lines({ ...base, disclosedPayloadColumns: ["diagnosis", "notes"] }),
-  ).toContain("columns you will receive: diagnosis, notes");
+  const named = lines({
+    ...base,
+    disclosedPayloadColumns: ["diagnosis", "notes"],
+  });
+  expect(named).toContain("columns you will receive:");
+  expect(named).toContain("\n    - diagnosis");
+  expect(named).toContain("\n    - notes");
   expect(lines({ ...base, disclosedPayloadColumns: [] })).toContain(
     "columns you will receive: (none) -- any payload column would abort the exchange",
   );
@@ -1312,9 +1364,10 @@ test("displayInvitation: the inviter's request-from-acceptor receive shows names
     ...base,
     linkageTerms: { ...base.linkageTerms, payload: { receive } },
   });
-  expect(lines(withReceive([{ name: "dose" }, { name: "outcome" }]))).toContain(
-    "columns the inviting party requests from you: dose, outcome",
-  );
+  const named = lines(withReceive([{ name: "dose" }, { name: "outcome" }]));
+  expect(named).toContain("columns the inviting party requests from you:");
+  expect(named).toContain("\n    - dose");
+  expect(named).toContain("\n    - outcome");
   expect(lines(withReceive([]))).toContain(
     "columns the inviting party requests from you: (none) -- any payload column would abort the exchange",
   );
@@ -1340,8 +1393,8 @@ test("displayInvitation: shows the acceptor's own outbound send, one column per 
       l.includes("columns you will send:"),
     );
     expect(headingIndex).toBeGreaterThanOrEqual(0);
-    expect(lines).toContain("      - diagnosis");
-    expect(lines).toContain("      - medication");
+    expect(lines).toContain("    - diagnosis");
+    expect(lines).toContain("    - medication");
     // No presupposing empty/unknown phrasing when the set is a real non-empty
     // disclosure.
     const joined = lines.join("\n");
@@ -1362,11 +1415,9 @@ test("displayInvitation: a column name containing the list separator is not spli
   try {
     displayInvitation(sampleToken(FUTURE()), ["last, first", "notes"], log);
     const lines = infoSpy.mock.calls.map((c) => String(c[0]));
-    // The comma-bearing name is one entry on its own line, not split at the comma.
-    expect(lines).toContain("      - last, first");
-    expect(lines).toContain("      - notes");
-    // Exactly two disclosed-column lines: the separator did not create a third.
-    expect(lines.filter((l) => l.startsWith("      - ")).length).toBe(2);
+    // The comma-bearing name is one entry on its own line, not split at the comma,
+    // and the separator did not create a third entry.
+    expect(outboundSendEntries(lines)).toEqual(["last, first", "notes"]);
   } finally {
     infoSpy.mockRestore();
   }
@@ -1385,7 +1436,7 @@ test("displayInvitation: the empty and not-yet-known outbound-send cases avoid a
   expect(empty).toContain(
     "columns you will send: (none) -- only matched records",
   );
-  expect(empty).not.toContain("      - ");
+  expect(outboundSendEntries(empty.split("\n"))).toEqual([]);
   // Not-yet-known: no metadata at prompt time, so the line forward-references the
   // exchange rather than claiming any count.
   const unknown = renderDisplayInvitation(log, base, undefined);
@@ -1393,7 +1444,7 @@ test("displayInvitation: the empty and not-yet-known outbound-send cases avoid a
     "columns you will send: determined from your input file",
   );
   expect(unknown).not.toContain("(none)");
-  expect(unknown).not.toContain("      - ");
+  expect(outboundSendEntries(unknown.split("\n"))).toEqual([]);
 });
 
 test("displayInvitation: shows the linkage strategy and, for single-pass, the disclosure note", () => {
@@ -1449,6 +1500,343 @@ test("displayInvitation: represents every consent-relevant linkage term, bar the
       .map((probe) => probe.path)
       .sort(),
   );
+});
+
+test("displayInvitation: shows each matching rule the acceptor is consenting to", () => {
+  // The representation check above proves each term MOVES the output; these pin
+  // what it actually says, so a term cannot satisfy that check while reading as
+  // something else. The probe terms carry one of everything: a parameterized
+  // transform, a fuzzy comparison, a swap, field constraints, a payload in both
+  // directions, and a legal agreement.
+  const log = getLogger("accept-display-rules-test");
+  log.setLevel("silent");
+  const out = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    linkageTerms: CONSENT_PROBE_TERMS,
+  });
+
+  expect(out).toContain("    - given name, family name, and date of birth");
+  // The elements the key combines, each under its declared semantic type -- the
+  // partner-authored field name is deliberately not shown.
+  expect(out).toContain("        - First name");
+  expect(out).toContain("        - Last name");
+  expect(out).toContain("        - Date of birth");
+  // A transform with its plain-language consequence and every declared parameter.
+  expect(out).toContain("          transform: to_upper_case");
+  expect(out).toContain("          transform: substring");
+  expect(out).toContain("            - start: 1");
+  expect(out).toContain("            - length: 3");
+  // The fuzzy-comparison expansion, marked as proposed: the run does not yet
+  // apply it, so the prompt must not state a looser match than it performs.
+  expect(out).toContain(
+    "          also matches approximate variants (adjacent years) (proposed; not yet applied)",
+  );
+  // The swap, and the cross-application of the transform-carrier's rules onto the
+  // other element's value that the generic swap note alone does not convey.
+  expect(out).toContain(
+    "      swap: First name and Last name may be matched in either order",
+  );
+  expect(out).toContain(
+    "note: when matched in that order, the transforms shown for First name are " +
+      "applied to Last name's value",
+  );
+  // The per-field data standards, including the partner-authored character class
+  // labelled as the unverified partner input it is rather than paraphrased.
+  expect(out).toContain("      - honorifics and suffixes removed");
+  expect(out).toContain("      - 1 excluded value");
+  expect(out).toContain("      - values must be valid");
+  expect(out).toContain(
+    "      allowed characters (partner-supplied, unverified): A-Za-z",
+  );
+  // Both payload directions, and the attached agreement.
+  expect(out).toContain("    - risk_score");
+  expect(out).toContain("    - program_outcome");
+  expect(out).toContain("    reference: MOU-2026-0001");
+  expect(out).toContain(
+    "    stated purpose: Evaluation of the county tutoring program",
+  );
+  expect(out).toContain("    agreement valid through: 2027-12-31");
+});
+
+test("displayInvitation: a proposed setting the run does not apply is marked, not stated as in force", () => {
+  // deduplicate and psi-c are declarable but unimplemented. Printing either as a
+  // plain fact would have the operator consent to a behavior the run does not
+  // perform -- and for psi-c the run discloses MORE than the count-only claim.
+  const log = getLogger("accept-display-proposed-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  const render = (overrides: Partial<LinkageTerms>): string =>
+    renderDisplayInvitation(log, {
+      ...base,
+      linkageTerms: { ...base.linkageTerms, ...overrides },
+    });
+
+  const oneToOne = render({});
+  expect(oneToOne).toContain(
+    "duplicate matches: each record matches at most one of the partner's records",
+  );
+  expect(oneToOne).not.toContain("proposes this");
+
+  const deduplicating = render({ deduplicate: true });
+  expect(deduplicating).toContain(
+    "duplicate matches: a record may match more than one of the partner's records",
+  );
+  expect(deduplicating).toContain(
+    "note: the inviting party proposes this, but this version does not yet " +
+      "apply it and will refuse to run",
+  );
+
+  // psi-c is refused outright on every run path (assertAlgorithmImplemented), so
+  // the note must name the refusal and what to ask for -- the same shape the
+  // deduplicate note carries -- not a looser run that reveals more.
+  const countOnly = render({ algorithm: "psi-c" });
+  expect(countOnly).toContain("PSI algorithm: psi-c");
+  expect(countOnly).toContain(
+    "note: the inviting party proposes a count-only exchange, but this version " +
+      "does not yet apply it and will refuse to run; ask for an invitation " +
+      'using the "psi" algorithm.',
+  );
+  // The consequence the prompt must not state: nothing is revealed, because
+  // nothing runs.
+  expect(countOnly).not.toContain(
+    "the shared identifiers of matched records are still revealed",
+  );
+});
+
+/**
+ * The probe terms carrying a single linkage key whose one element applies
+ * `transform`, so a transform-rendering assertion reads that key's detail with no
+ * other key's rules at the same indent. The probe's own fields are reused as-is.
+ */
+function probeTermsWithTransform(
+  transform: Array<TransformStep>,
+): LinkageTerms {
+  return {
+    ...CONSENT_PROBE_TERMS,
+    linkageKeys: [
+      { name: "probe key", elements: [{ field: "given_name", transform }] },
+    ],
+  };
+}
+
+test("displayInvitation: a transform this version cannot explain is marked as unrecognized", () => {
+  // A declared function name core does not recognize has neither a literal slice
+  // phrase nor a glossary description, so unmarked it prints in exactly the shape
+  // of a recognized rule minus one line -- indistinguishable from a rule psilink
+  // understands. A rule this version cannot explain earns the same explicitness as
+  // one it cannot apply.
+  const log = getLogger("accept-display-unknown-transform-test");
+  log.setLevel("silent");
+  const render = (transform: Array<TransformStep>): string =>
+    renderDisplayInvitation(log, {
+      ...sampleToken(FUTURE()),
+      linkageTerms: probeTermsWithTransform(transform),
+    });
+
+  const unrecognized = render([{ function: "org_internal_rule" }]);
+  expect(unrecognized).toContain("          transform: org_internal_rule");
+  expect(unrecognized).toContain(
+    "            not recognized by this version; its effect on matching is not shown",
+  );
+  // A recognized function carries its plain-language consequence and no marker, so
+  // the marker tells the two apart rather than decorating both.
+  const recognized = render([{ function: "to_upper_case" }]);
+  expect(recognized).toContain(
+    "            Upper-cases the value before matching, so values differing only in letter case can match.",
+  );
+  expect(recognized).not.toContain("not recognized by this version");
+});
+
+test("displayInvitation: a coerced transform parameter names the parameter and the value it runs as", () => {
+  // `replace_regex` with `replacement: null` executes as the empty string. The
+  // declared parameter is shown verbatim and the coercion is its own line, so
+  // partner text placed inside a parameter value cannot impersonate it; this pins
+  // the CLI's own rendering of that line, including which half is the parameter.
+  const log = getLogger("accept-display-coercion-test");
+  log.setLevel("silent");
+  const lines = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    linkageTerms: probeTermsWithTransform([
+      {
+        function: "replace_regex",
+        params: { pattern: "-", replacement: null },
+      },
+    ]),
+  }).split("\n");
+
+  const coercion = "            replacement runs as the empty string";
+  const param = "            - replacement: null";
+  expect(lines).toContain(param);
+  expect(lines).toContain(coercion);
+  // The parameter names itself first: a swapped interpolation would read as a
+  // parameter called "the empty string".
+  expect(lines).not.toContain(
+    "            the empty string runs as replacement",
+  );
+  expect(lines.indexOf(coercion)).toBeGreaterThan(lines.indexOf(param));
+});
+
+test("displayInvitation: names the fields matched on, once at the top and under each key", () => {
+  // The key `name` is partner free text and would otherwise be the only line at a
+  // key's own level, so an operator scanning key headings would read nothing but
+  // strings the inviter chose. The derived field one-liner is the honest anchor,
+  // and it carries the breadth the rules alone do not spell out.
+  const log = getLogger("accept-display-matched-fields-test");
+  log.setLevel("silent");
+  const lines = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    linkageTerms: CONSENT_PROBE_TERMS,
+  }).split("\n");
+
+  expect(lines).toContain("  matched on: first name, last name, date of birth");
+  // The swap re-attributes each element's marker to its partner's field, so the
+  // truncating element's "partial" is shown on the field it will actually read.
+  const keyIndex = lines.indexOf(
+    "    - given name, family name, and date of birth",
+  );
+  expect(keyIndex).toBeGreaterThanOrEqual(0);
+  expect(lines[keyIndex + 1]).toBe(
+    "      matches on: first name - last name (partial) - " +
+      "date of birth (fuzzy) (matched in either order)",
+  );
+  expect(lines[keyIndex + 2]).toBe("      elements:");
+});
+
+test("displayInvitation: the operator's own outbound heading sits level with the other payload headings", () => {
+  // Indentation carries hierarchy in this outline, so the operator's own outbound
+  // disclosure must not be the one heading a level below its two counterparts, at
+  // the depth of a linkage-key entry.
+  const log = getLogger("accept-display-indent-test");
+  log.setLevel("silent");
+  const lines = renderDisplayInvitation(
+    log,
+    {
+      ...sampleToken(FUTURE()),
+      linkageTerms: CONSENT_PROBE_TERMS,
+      disclosedPayloadColumns: ["risk_score"],
+    },
+    ["diagnosis"],
+  ).split("\n");
+
+  expect(lines).toContain("  columns you will send:");
+  expect(lines).toContain("  columns you will receive:");
+  expect(lines).toContain("  columns the inviting party requests from you:");
+  expect(outboundSendEntries(lines)).toEqual(["diagnosis"]);
+});
+
+test("displayInvitation: the short field list precedes the long key list", () => {
+  // The keys enumerate combinations OF the fields and run many times longer, so on
+  // a terminal the block printed second is the one that scrolls the first away.
+  const log = getLogger("accept-display-order-test");
+  log.setLevel("silent");
+  const lines = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    linkageTerms: CONSENT_PROBE_TERMS,
+  }).split("\n");
+
+  const fields = lines.indexOf("  personal data used:");
+  const keys = lines.indexOf("  linkage keys:");
+  expect(fields).toBeGreaterThanOrEqual(0);
+  expect(keys).toBeGreaterThan(fields);
+});
+
+test("displayInvitation: every linkage key is listed, including one after an entry with nested detail", () => {
+  // entriesUnder backs the separator-safety assertions, so it must collect
+  // siblings across an entry's own nested block (a key's derived one-liner and its
+  // elements) rather than halting there and silently under-checking. The first key
+  // also carries the list separator in its name, which a joined list would misread
+  // as two keys.
+  const log = getLogger("accept-display-key-siblings-test");
+  log.setLevel("silent");
+  const lines = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    linkageTerms: {
+      ...CONSENT_PROBE_TERMS,
+      linkageKeys: [
+        {
+          name: "surname, given name",
+          elements: [{ field: "family_name" }, { field: "given_name" }],
+        },
+        { name: "date of birth", elements: [{ field: "birth_date" }] },
+      ],
+    },
+  }).split("\n");
+
+  expect(entriesUnder(lines, "  linkage keys:")).toEqual([
+    "surname, given name",
+    "date of birth",
+  ]);
+});
+
+test.each(hostileVariants)(
+  "displayInvitation: every line stays printable ASCII on hostile terms ($name)",
+  ({ source }) => {
+    // The prompt renders every partner-controlled position the summary holds --
+    // transform function names and parameters, the allowed-character class, the
+    // legal agreement, the expiry -- so the escaping claim is checked over the
+    // whole output rather than the few fields an enumeration would list. The
+    // fixture is the same one the web app's consent screen is walked with, so the
+    // two surfaces cannot drift on what a hostile invitation looks like. This also
+    // pins that a key's raw `id` never reaches the prompt: it carries the
+    // unsanitized key name, which would fail here.
+    const log = getLogger("accept-display-hostile-test");
+    log.setLevel("silent");
+    const infoSpy = vi.spyOn(log, "info");
+    try {
+      displayInvitation(
+        { ...sampleToken(FUTURE()), ...source },
+        [`own${BEL}column`],
+        log,
+      );
+      const lines = infoSpy.mock.calls.map((c) => String(c[0]));
+      // Guard against a vacuous pass: the prompt must have reached the nested
+      // rules, and each hostile code point must appear in its escaped form -- so
+      // an output that collapsed, or one the partner text never flowed into,
+      // fails here rather than satisfying the assertion below by having nothing
+      // to check.
+      expect(lines.length).toBeGreaterThan(20);
+      for (const hostile of [ESC, RLO, BEL])
+        expect(
+          lines.filter((line) => line.includes(sanitizeForDisplay(hostile)))
+            .length,
+        ).toBeGreaterThan(0);
+      expect(lines.filter((line) => !PRINTABLE_ASCII.test(line))).toEqual([]);
+    } finally {
+      infoSpy.mockRestore();
+    }
+  },
+);
+
+test("displayInvitation: a linkage key name containing the list separator is one entry", () => {
+  // sanitizeForDisplay leaves a printable ASCII comma intact, so a comma-joined
+  // key list would read a single key named "surname, given name" as two keys.
+  const log = getLogger("accept-display-key-comma-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  const infoSpy = vi.spyOn(log, "info");
+  try {
+    displayInvitation(
+      {
+        ...base,
+        linkageTerms: {
+          ...base.linkageTerms,
+          linkageKeys: [
+            { name: "surname, given name", elements: [{ field: "last_name" }] },
+          ],
+        },
+      },
+      undefined,
+      log,
+    );
+    expect(
+      entriesUnder(
+        infoSpy.mock.calls.map((c) => String(c[0])),
+        "  linkage keys:",
+      ),
+    ).toEqual(["surname, given name"]);
+  } finally {
+    infoSpy.mockRestore();
+  }
 });
 
 // --- handler: repeated single-value flag -------------------------------------

@@ -1,10 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { consentRepresentationProbes } from "@psilink/core/testing";
+import { consentRepresentationProbes } from "../src/linkageTermConsentCoverage.js";
+import { summarizeInvitation } from "../src/invitationSummary.js";
 
-import { summarizeInvitation } from "@psi/invitationSummary";
-
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms } from "../src/config/linkageTerms.js";
 
 /**
  * The consent summary built from a set of linkage terms, as a comparable string.

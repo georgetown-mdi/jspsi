@@ -1,11 +1,11 @@
 import {
+  APPLIED_SETTINGS,
   assessLinkageSatisfiability,
   authoredLinkageFields,
   getDefaultLinkageTerms,
   referencedLinkageFieldNames,
 } from "@psilink/core";
 
-import { APPLIED_SETTINGS } from "./appliedSettings";
 import { outputForDirection } from "./advancedInviteTypes";
 import { payloadSendForMetadata } from "./metadataEditing";
 
