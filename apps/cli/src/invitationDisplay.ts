@@ -150,63 +150,6 @@ function displayLinkageFields(
 }
 
 /**
- * What the run reveals about matched records, for the pre-prompt recap. `psi-c`
- * has two honest readings and neither is the count-only guarantee its name
- * suggests: applied, only the count is revealed; not applied -- today's state --
- * every run path refuses the algorithm outright, so the decisive fact is the
- * refusal, not a disclosure.
- */
-function recapDisclosure(summary: InvitationSummary): string {
-  if (summary.algorithm !== "psi-c")
-    return "the shared identifiers of matched records are revealed";
-  return summary.psiCApplied
-    ? "only the number of matched records is revealed"
-    : "this version will refuse to run this count-only exchange";
-}
-
-/**
- * What leaves this machine, for the pre-prompt recap: a count rather than the
- * names, which are listed in full above and can carry the list separator. The
- * three cases mirror the outbound-send line's own (not yet determined, a real
- * empty set, a disclosure).
- */
-function recapOutboundSend(
-  ownOutboundSend: ReadonlyArray<string> | undefined,
-): string {
-  if (ownOutboundSend === undefined)
-    return `the columns you send are ${OUTBOUND_SEND_FORWARD_REFERENCE}`;
-  if (ownOutboundSend.length === 0)
-    return "you send no columns, only matched records";
-  return (
-    `you send ${ownOutboundSend.length} column` +
-    `${ownOutboundSend.length === 1 ? "" : "s"} (listed above)`
-  );
-}
-
-/**
- * Restate, on the line before the confirmation prompt, the facts the decision
- * turns on: who the disclosure goes to, what the run reveals, what leaves this
- * machine, and what is matched on. The full terms run to well over a screen, so
- * without this the operator answering the prompt sees only its tail. Every fact
- * here is stated in full above -- this is a recap, never the sole appearance of
- * anything -- and it takes no input the display above does not already render.
- */
-function logDecisionRecap(
-  log: ReturnType<typeof getLogger>,
-  summary: InvitationSummary,
-  ownOutboundSend: ReadonlyArray<string> | undefined,
-): void {
-  const facts = [
-    `you are disclosing to ${summary.invitingParty}`,
-    recapDisclosure(summary),
-    recapOutboundSend(ownOutboundSend),
-  ];
-  if (summary.matchedFields.length > 0)
-    facts.push(`matched on ${summary.matchedFields.join(", ")}`);
-  log.info(`Before you accept: ${facts.join("; ")}.`);
-}
-
-/**
  * @internal exported for testing
  *
  * Print, before the acceptance prompt, everything the operator is consenting to:
@@ -372,6 +315,4 @@ export function displayInvitation(
   }
 
   if (summary.expires !== undefined) log.info(`  expires: ${summary.expires}`);
-
-  logDecisionRecap(log, summary, ownOutboundSend);
 }

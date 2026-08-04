@@ -1740,46 +1740,6 @@ test("displayInvitation: the short field list precedes the long key list", () =>
   expect(keys).toBeGreaterThan(fields);
 });
 
-test("displayInvitation: closes with a recap of the facts the decision turns on", () => {
-  // The full terms run well past a screen, so the operator answering the prompt
-  // would otherwise see only the display's tail. The recap restates -- never
-  // solely states -- who the disclosure goes to, what the run reveals, what leaves
-  // this machine, and what is matched on.
-  const log = getLogger("accept-display-recap-test");
-  log.setLevel("silent");
-  const base = { ...sampleToken(FUTURE()), linkageTerms: CONSENT_PROBE_TERMS };
-  const lastLine = (
-    token: InvitationToken,
-    ownOutboundSend?: ReadonlyArray<string>,
-  ): string => {
-    const lines = renderDisplayInvitation(log, token, ownOutboundSend).split(
-      "\n",
-    );
-    return lines[lines.length - 1];
-  };
-
-  expect(lastLine(base, ["diagnosis", "notes"])).toBe(
-    "Before you accept: you are disclosing to Probe County Health Department; " +
-      "the shared identifiers of matched records are revealed; you send 2 " +
-      "columns (listed above); matched on first name, last name, date of birth.",
-  );
-  // The outbound clause tracks the same three cases the outbound-send line has.
-  expect(lastLine(base, [])).toContain(
-    "you send no columns, only matched records",
-  );
-  expect(lastLine(base, undefined)).toContain(
-    "the columns you send are determined from your input file",
-  );
-  // A count-only proposal is refused rather than run, so the recap names the
-  // refusal rather than a disclosure.
-  expect(
-    lastLine({
-      ...base,
-      linkageTerms: { ...CONSENT_PROBE_TERMS, algorithm: "psi-c" },
-    }),
-  ).toContain("this version will refuse to run this count-only exchange");
-});
-
 test("displayInvitation: every linkage key is listed, including one after an entry with nested detail", () => {
   // entriesUnder backs the separator-safety assertions, so it must collect
   // siblings across an entry's own nested block (a key's derived one-liner and its
