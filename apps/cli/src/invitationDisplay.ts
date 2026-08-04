@@ -109,11 +109,19 @@ const OUTBOUND_SEND_FORWARD_REFERENCE = {
  * reconciles and throws on; the empty set the inviter declares it will receive is
  * the inviter's lock-in, enforced on the inviter's side against whatever this party
  * transmits.
+ *
+ * Neither abort keeps the columns from crossing, and the wording may not read as
+ * though it does: payloads are exchanged before either side reconciles what it
+ * received (`reconcileReceivedPayload` runs after `exchangePayloads` in
+ * `exchange.ts`), so a violated lock-in is caught on the far side of the wire. The
+ * lock-in stops the exchange from completing, not the values from arriving.
  */
 const EMPTY_INBOUND_PAYLOAD_LOCK_IN =
-  "(none) -- your side aborts the exchange if the inviting party sends any";
+  "(none) -- anything the inviting party sends is received and then rejected, " +
+  "aborting the exchange";
 const EMPTY_REQUESTED_PAYLOAD_LOCK_IN =
-  "(none) -- the inviting party aborts the exchange if you send any";
+  "(none) -- anything you send reaches the inviting party before it aborts the " +
+  "exchange";
 
 /**
  * The heading above the repeated decision block on the prompting path, where the

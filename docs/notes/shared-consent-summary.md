@@ -163,6 +163,17 @@ neutralizes control, bidi, and non-ASCII code points but leaves a printable ASCI
 comma intact, so a comma-joined list lets one partner-controlled name read as
 two. Both surfaces render every such list one entry per line.
 
+The basis markers inherit the same limit, and it is accepted rather than closed.
+They are plain parenthesized ASCII, so a partner-controlled value can embed the
+text of one: an inviter naming itself `Acme Health (enforced)` renders as
+`inviting party (your partner's word): Acme Health (enforced)`. This is a
+scanning hazard, not a spoof of the classification -- the authoritative marker
+sits on the fixed first-party label at a fixed indent, ahead of the value, and
+that line is itself marked as the partner's word -- so the reader who checks the
+label still reads the right basis. Closing it properly means a marker vocabulary
+no printable-ASCII value can imitate, which the terminal has no budget for; a
+third surface inheriting this vocabulary inherits the limit with it.
+
 Putting a fact back in front of the operator is also a renderer's decision, and
 the shape it takes is the load-bearing part. A terminal has no scrollback the
 prompt can rely on: a default-terms invitation renders far past what a terminal

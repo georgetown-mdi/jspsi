@@ -1357,9 +1357,11 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
   // symmetric in who that is: this one is enforced by THIS party's own received-
   // payload reconciliation, so a subject-less "would abort the exchange" would
   // leave the acceptor unable to tell it apart from the opposite direction below.
+  // It also may not read as prevention: reconciliation runs after the payload
+  // exchange, so the columns arrive and are then rejected.
   expect(lines({ ...base, disclosedPayloadColumns: [] })).toContain(
-    "columns you will receive (enforced): (none) -- your side aborts the " +
-      "exchange if the inviting party sends any",
+    "columns you will receive (enforced): (none) -- anything the inviting " +
+      "party sends is received and then rejected, aborting the exchange",
   );
   expect(lines({ ...base, disclosedPayloadColumns: undefined })).not.toContain(
     "columns you will receive",
@@ -1391,10 +1393,13 @@ test("displayInvitation: the inviter's request-from-acceptor receive shows names
   expect(named).toContain("\n    - outcome");
   // The mirror of the lock-in above, and the aborting party is the other one: the
   // inviter locked this empty set in as what it will receive, so its side is what
-  // fails when this party transmits anything.
+  // fails when this party transmits anything -- which it can only do once the
+  // values have reached it, the direction where reading the lock-in as prevention
+  // would cost this party its own data.
   expect(lines(withReceive([]))).toContain(
     "columns the inviting party requests from you (your partner's word): " +
-      "(none) -- the inviting party aborts the exchange if you send any",
+      "(none) -- anything you send reaches the inviting party before it aborts " +
+      "the exchange",
   );
   expect(lines(withReceive(undefined))).not.toContain(
     "the inviting party requests from you",

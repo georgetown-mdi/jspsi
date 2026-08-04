@@ -62,8 +62,11 @@ export const CONSENT_FACTS = {
     basis: "enforced",
     reason:
       "The acceptor's own disclosure, derived from its resolved metadata " +
-      "through the same predicate the payload step transmits on, so the " +
-      "displayed set is the set that leaves the machine.",
+      "through the same predicate the payload step transmits on, so no column " +
+      "outside the displayed set leaves the machine. A bound, not an " +
+      "exactness: the payload step sends nothing at all to a partner not " +
+      "entitled to the result, so the run may disclose less than the line " +
+      "lists, never more.",
   },
   invitingParty: {
     basis: "trust-contingent",
