@@ -18,6 +18,7 @@ import {
   RLO,
   hostileSource,
   hostileTerms,
+  hostileVariants,
 } from "../utils/displayEscapingFixtures";
 import { renderApp } from "./renderApp";
 
@@ -1878,14 +1879,37 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
       );
   }
 
-  test("every string the screen presents is escaped, so the raw key id never reaches the DOM", async () => {
-    await expectEveryPresentedStringEscaped({ linkageTerms: hostileTerms }, [
-      // The key name in its own disclosure toggle, and the deepest per-key
-      // detail: a transform function name inside that key's collapsed body.
-      hostileTerms.linkageKeys[0].name,
-      `mystery${BEL}fn`,
-    ]);
-  });
+  /**
+   * The partner-controlled strings a variant's terms must put on screen for its
+   * walk to mean anything: every key's name, carried by its own disclosure
+   * toggle, and every declared transform function name -- the deepest per-key
+   * detail, which the body renders either as its lead or as the technical line
+   * under a plainer one. Read off the terms rather than listed per variant, so a
+   * variant added to reach a summary position gets its vacuity guard for free.
+   */
+  function partnerStringsOnScreen(linkageTerms: LinkageTerms): Array<string> {
+    return [
+      ...linkageTerms.linkageKeys.map((key) => key.name),
+      ...linkageTerms.linkageKeys.flatMap((key) =>
+        key.elements.flatMap((element) =>
+          (element.transform ?? []).map((step) => step.function),
+        ),
+      ),
+    ];
+  }
+
+  // Every variant the unit walk summarizes is mounted here, so the two halves
+  // stay agreed on what "escaped" means over the same fixtures rather than only
+  // over the one that happened to be shared.
+  test.each(hostileVariants)(
+    "every string the screen presents is escaped, so the raw key id never reaches the DOM ($name)",
+    async ({ source }) => {
+      await expectEveryPresentedStringEscaped(
+        { linkageTerms: source.linkageTerms },
+        partnerStringsOnScreen(source.linkageTerms),
+      );
+    },
+  );
 
   test("the same holds on the acceptor's review screen, over the columns and expiry the token carries", async () => {
     // The props the accept screen supplies alongside the terms: the partner's
