@@ -2270,13 +2270,16 @@ test("handler: --consent-to-terms leaves the terms in the --log-file, not on the
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
     const expected = await expectedConsentSurface(encoded);
-    const { stderrWrites } = await runOfflineAcceptCapturingStdio({
-      encoded,
-      fixture,
-      flags: { "consent-to-terms": true, "log-file": logFile },
-    });
+    const { stderrWrites, stdoutWrites } = await runOfflineAcceptCapturingStdio(
+      {
+        encoded,
+        fixture,
+        flags: { "consent-to-terms": true, "log-file": logFile },
+      },
+    );
     expect(promptConfirmMock).not.toHaveBeenCalled();
     expect(surfaceOnStderr(stderrWrites)).toEqual([]);
+    expect(stdoutWrites.join("")).toBe("");
     const logged = fs.readFileSync(logFile, "utf8");
     for (const line of expected)
       expect(logged).toContain(`[INFO] [accept] ${line}\n`);
@@ -2291,13 +2294,16 @@ test("handler: --consent-to-terms keeps --log-level silent silencing the terms",
   const fixture = offlineAcceptFixture();
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
-    const { stderrWrites } = await runOfflineAcceptCapturingStdio({
-      encoded,
-      fixture,
-      flags: { "consent-to-terms": true, "log-level": "silent" },
-    });
+    const { stderrWrites, stdoutWrites } = await runOfflineAcceptCapturingStdio(
+      {
+        encoded,
+        fixture,
+        flags: { "consent-to-terms": true, "log-level": "silent" },
+      },
+    );
     expect(promptConfirmMock).not.toHaveBeenCalled();
     expect(stderrWrites.join("")).toBe("");
+    expect(stdoutWrites.join("")).toBe("");
     expect(fs.existsSync(fixture.configFile)).toBe(true);
   } finally {
     fs.rmSync(fixture.dir, { recursive: true, force: true });
@@ -2319,11 +2325,14 @@ test("handler: hostile terms stay printable ASCII on the prompt's own sink", asy
         linkageKeys: [{ name: `ssn${BEL}`, elements: [{ field: "ssn" }] }],
       },
     });
-    const { stderrWrites } = await runOfflineAcceptCapturingStdio({
-      encoded,
-      fixture,
-      flags: { "log-level": "silent" },
-    });
+    const { stderrWrites, stdoutWrites } = await runOfflineAcceptCapturingStdio(
+      {
+        encoded,
+        fixture,
+        flags: { "log-level": "silent" },
+      },
+    );
+    expect(stdoutWrites.join("")).toBe("");
     const lines = stderrLines(stderrWrites);
     // Non-vacuous: the terms reached the terminal, and each hostile code point
     // arrived in its escaped form rather than never arriving at all.

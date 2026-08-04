@@ -36,9 +36,12 @@ export type ConsentSurfaceSink = (line: string) => void;
  *
  * The extra write is conditional because on the default path -- stderr sink at
  * `info` -- the log's own output already lands where the prompt asks, and an
- * unconditional copy would print the whole multi-screen outline twice. The
- * logger's own level is read rather than the parsed `--log-level`, so a path that
- * adjusts the level after the logger is built cannot desync the two.
+ * unconditional copy would print the whole multi-screen outline twice. The level
+ * half reads the logger's own level, not the parsed `--log-level`, so a path that
+ * adjusts the level after the logger is built cannot desync the two. The sink half
+ * has no such reading available -- an installed diagnostic sink is an opaque
+ * function that cannot be asked where it writes -- so it takes the parsed
+ * `--log-file`, and a caller must feed that same value to `configureLogging`.
  */
 export function consentSurfaceSink(params: {
   log: ReturnType<typeof getLogger>;

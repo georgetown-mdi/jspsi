@@ -726,9 +726,8 @@ const promptStream = process.stderr;
  * copy of the same line still carries the prefix).
  *
  * Best-effort in the same way {@link configureStderrLogging} is: a wedged stream
- * drops the line rather than throwing back into the caller. Nothing is lost by
- * staying quiet about it -- a stream that cannot take this line cannot take the
- * prompt either, and a prompt that cannot be shown reads EOF and declines.
+ * drops the line rather than throwing back into the caller -- this stream is the
+ * only place the failure could have been reported to.
  */
 export function writePromptLine(line: string): void {
   try {
