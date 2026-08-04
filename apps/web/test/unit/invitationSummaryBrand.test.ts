@@ -48,10 +48,13 @@ function displayStrings(
       displayStrings(entry, `${path}[${index}]`),
     );
   if (typeof value === "object" && value !== null)
-    return Object.entries(value).flatMap(([key, entry]) => [
-      { path: `${path}.${key} (property name)`, value: key },
-      ...displayStrings(entry, path === "" ? key : `${path}.${key}`),
-    ]);
+    return Object.entries(value).flatMap(([key, entry]) => {
+      const keyPath = path === "" ? key : `${path}.${key}`;
+      return [
+        { path: `${keyPath} (property name)`, value: key },
+        ...displayStrings(entry, keyPath),
+      ];
+    });
   return [];
 }
 
