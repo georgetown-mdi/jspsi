@@ -4,119 +4,58 @@ import { sanitizeForDisplay } from "@psilink/core";
 
 import { summarizeInvitation } from "@psi/invitationSummary";
 
-import type { Displayable, LinkageTerms } from "@psilink/core";
+import {
+  BEL,
+  ESC,
+  PRINTABLE_ASCII,
+  RLO,
+  hostileSource,
+  hostileTerms,
+} from "../utils/displayEscapingFixtures";
+
 import type {
   InvitationLegalAgreementSummary,
   InvitationSummary,
 } from "@psi/invitationSummary";
 
-// Inviter-crafted characters JSX escaping does not neutralize, built from their
-// code points so this source carries no raw control or bidi byte: an ESC that
-// drives ANSI, a right-to-left override, and a BEL.
-const ESC = String.fromCodePoint(0x1b);
-const RLO = String.fromCodePoint(0x202e);
-const BEL = String.fromCodePoint(0x07);
-
-// Every partner-controlled string in the terms carries one, so a summary built
-// from these reaches each branded field with something to escape.
-const hostileTerms: LinkageTerms = {
-  version: "1.0.0",
-  identity: `Acme${ESC}[31m${RLO}org`,
-  date: "2026-01-15",
-  algorithm: "psi",
-  linkageStrategy: "cascade",
-  output: { expectsOutput: true, shareWithPartner: false },
-  deduplicate: false,
-  linkageFields: [
-    { name: `last${BEL}name`, type: "last_name" },
-    {
-      name: "first_name",
-      type: "first_name",
-      constraints: { allowedCharacters: `A-Z${RLO}` },
-    },
-    { name: `unde${BEL}clared`, type: "ssn" },
-  ],
-  linkageKeys: [
-    {
-      name: `key${BEL}one`,
-      elements: [
-        {
-          field: "first_name",
-          transform: [
-            { function: "substring", params: { start: 1, length: 3 } },
-          ],
-        },
-        {
-          field: `last${BEL}name`,
-          transform: [
-            {
-              function: `mystery${BEL}fn`,
-              params: { [`pat${RLO}tern`]: `${ESC}[31m` },
-            },
-          ],
-        },
-      ],
-      swap: ["first_name", `last${BEL}name`],
-    },
-  ],
-  payload: {
-    send: [{ name: `risk${BEL}score` }],
-    receive: [{ name: `outcome${RLO}` }],
-  },
-  legalAgreement: {
-    reference: `MOU${BEL}-0042`,
-    purpose: `Audit${RLO} and evaluation`,
-    expirationDate: "2027-12-31",
-  },
-};
-
-const hostileSource = {
-  linkageTerms: hostileTerms,
-  expires: "2026-02-01T00:00:00.000Z",
-  connectionEndpoint: { channel: "filedrop" as const, path: `drop${BEL}box` },
-};
+/**
+ * The one position the walk below skips: a linkage key's `id` carries the raw
+ * partner key name verbatim, as the stable identity per-key UI state is keyed
+ * by, and reaches no rendered text or attribute -- that claim is checked at the
+ * render boundary (test/browser/invitationTerms.test.ts), not asserted here.
+ * Matched by PATH rather than by key name, so a future `id` anywhere else in the
+ * summary is checked rather than silently exempted too.
+ */
+const RAW_KEY_IDENTITY = /^linkageKeys\[\d+\]\.id$/;
 
 /**
- * Every value in the summary whose field is declared {@link Displayable} -- the
- * enumeration a partner-controlled value can reach. It fails to COMPILE if any
- * of those fields is widened back to a plain `string`, and its runtime assertion
- * below is the other half: each collected value has actually been escaped.
+ * Every string reachable in `value`, paired with the path it sits at. Property
+ * names are visited alongside their values, so a summary field that is a record
+ * keyed by partner text is covered as well.
  *
- * A linkage key's deliberately raw `id` is absent because it is never rendered,
- * as is every field only fixed first-party copy reaches.
+ * Recursive rather than a per-field enumeration: a field added to the summary is
+ * checked without being listed anywhere, which is the whole point -- an
+ * enumeration only ever covers what someone remembered to add to it.
  */
-function brandedDisplayValues(summary: InvitationSummary): Array<Displayable> {
-  const values: Array<Displayable | undefined> = [
-    summary.invitingParty,
-    summary.expires,
-    summary.connectionPath,
-    ...summary.matchedFields,
-    ...(summary.legalAgreement === undefined
-      ? []
-      : [
-          summary.legalAgreement.reference,
-          summary.legalAgreement.purpose,
-          summary.legalAgreement.expirationDate,
-        ]),
-    ...(summary.payload?.send ?? []),
-    ...(summary.payload?.receive ?? []),
-    ...summary.linkageFields.map((field) => field.allowedCharacters),
-    ...summary.linkageKeys.flatMap((key) => [
-      key.name,
-      ...key.headerFields,
-      ...(key.swap ?? []),
-      ...(key.swapTransformDonor ?? []),
-      ...key.elements.flatMap((element) => [
-        element.fieldLabel,
-        ...element.transforms.flatMap((transform) => [
-          transform.function,
-          transform.effect,
-          ...transform.params,
-        ]),
-      ]),
-    ]),
-  ];
-  return values.filter((value) => value !== undefined);
+function displayStrings(
+  value: unknown,
+  path = "",
+): Array<{ path: string; value: string }> {
+  if (typeof value === "string")
+    return RAW_KEY_IDENTITY.test(path) ? [] : [{ path, value }];
+  if (Array.isArray(value))
+    return value.flatMap((entry, index) =>
+      displayStrings(entry, `${path}[${index}]`),
+    );
+  if (typeof value === "object" && value !== null)
+    return Object.entries(value).flatMap(([key, entry]) => {
+      const keyPath = path === "" ? key : `${path}.${key}`;
+      return [
+        { path: `${keyPath} (property name)`, value: key },
+        ...displayStrings(entry, keyPath),
+      ];
+    });
+  return [];
 }
 
 describe("the display-struct brand", () => {
@@ -167,12 +106,29 @@ describe("the display-struct brand", () => {
     expect(invitingParty).toBe(agreement.reference);
   });
 
-  test("brands every summary field a partner-controlled value reaches, and each is escaped", () => {
-    const values = brandedDisplayValues(summarizeInvitation(hostileSource));
-    // The enumeration reaches every nested struct, so an empty or collapsed
-    // fixture cannot let the assertion below pass vacuously.
-    expect(values.length).toBeGreaterThan(20);
-    for (const value of values) expect(value).toMatch(/^[\x20-\x7e]*$/);
+  test("escapes every string in the summary a partner-controlled value reaches", () => {
+    const visited = displayStrings(summarizeInvitation(hostileSource));
+
+    // Guard against a vacuous pass, without an enumeration to maintain: the walk
+    // must have reached the nested structs, and must have found each of the
+    // fixture's hostile code points in the escaped form sanitizeForDisplay
+    // produces -- so a summary that collapsed, or one built from a fixture whose
+    // partner text never flowed through, fails here rather than satisfying the
+    // assertion below by having nothing to check.
+    expect(visited.length).toBeGreaterThan(20);
+    for (const hostile of [ESC, RLO, BEL]) {
+      const escaped = sanitizeForDisplay(hostile);
+      expect(
+        visited.filter((visit) => visit.value.includes(escaped)).length,
+      ).toBeGreaterThan(0);
+    }
+
+    // Every string in the whole summary, at whatever depth and whether its field
+    // is declared Displayable or plain `string`: a field added to the summary and
+    // filled from partner text is caught here with nothing to add to a list.
+    expect(
+      visited.filter((visit) => !PRINTABLE_ASCII.test(visit.value)),
+    ).toEqual([]);
   });
 
   test("stays a plain string at the renderer, needing no cast or unwrapping", () => {
