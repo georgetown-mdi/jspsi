@@ -73,6 +73,7 @@ import {
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 import { saveConfig } from "../../src/config";
 import { promptConfirm } from "../../src/util/cli";
+import { captureStdio } from "../loggingTestSupport";
 
 const promptConfirmMock = vi.mocked(promptConfirm);
 
@@ -1237,10 +1238,11 @@ test("decode error escapes a hostile unrecognized endpoint key name end to end",
   expect(msg).toContain("\\x1b");
 });
 
-// Renders displayInvitation into the joined info-log output, spying on the
-// given logger so each test can assert against its own logger instance. The
-// acceptor's own outbound-send set defaults to undefined (the not-yet-known case),
-// so a test exercising an unrelated line need not supply one.
+// Renders displayInvitation into the joined info-log output, through the same
+// log-writing sink the unattended path renders to and spying on the given logger
+// so each test can assert against its own logger instance. The acceptor's own
+// outbound-send set defaults to undefined (the not-yet-known case), so a test
+// exercising an unrelated line need not supply one.
 function renderDisplayInvitation(
   log: ReturnType<typeof getLogger>,
   token: InvitationToken,
@@ -1248,7 +1250,9 @@ function renderDisplayInvitation(
 ): string {
   const infoSpy = vi.spyOn(log, "info");
   try {
-    displayInvitation(token, ownOutboundSend, log);
+    displayInvitation(token, ownOutboundSend, (line) => {
+      log.info(line);
+    });
     return infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
   } finally {
     infoSpy.mockRestore();
@@ -1307,21 +1311,15 @@ test("displayInvitation escapes a hostile inviter identity and key names", () =>
   };
   const log = getLogger("accept-display-test");
   log.setLevel("silent");
-  const infoSpy = vi.spyOn(log, "info");
-  try {
-    // A hostile acceptor-file column name reaches the new "columns you will send"
-    // line; it must be escaped there too. The acceptor's own outbound-send names
-    // are operator-file strings rather than partner-controlled, but they still pass
-    // through the same escaping, so the assertion covers that line as well.
-    displayInvitation(token, ["send\x1b[0m\u202e"], log);
-    const joined = infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(joined).not.toContain("\x1b");
-    expect(joined).not.toContain("\u202e");
-    expect(joined).toContain("\\x1b");
-    expect(joined).toContain("\\u202e");
-  } finally {
-    infoSpy.mockRestore();
-  }
+  // A hostile acceptor-file column name reaches the new "columns you will send"
+  // line; it must be escaped there too. The acceptor's own outbound-send names
+  // are operator-file strings rather than partner-controlled, but they still pass
+  // through the same escaping, so the assertion covers that line as well.
+  const joined = renderDisplayInvitation(log, token, ["send\x1b[0m\u202e"]);
+  expect(joined).not.toContain("\x1b");
+  expect(joined).not.toContain("\u202e");
+  expect(joined).toContain("\\x1b");
+  expect(joined).toContain("\\u202e");
 });
 
 test("displayInvitation: the carried disclosed subset shows names, '(none)' when empty, and nothing when absent", () => {
@@ -1385,26 +1383,23 @@ test("displayInvitation: shows the acceptor's own outbound send, one column per 
   // details before the inviter's proposed terms.
   const log = getLogger("accept-display-outbound-test");
   log.setLevel("silent");
-  const infoSpy = vi.spyOn(log, "info");
-  try {
-    displayInvitation(sampleToken(FUTURE()), ["diagnosis", "medication"], log);
-    const lines = infoSpy.mock.calls.map((c) => String(c[0]));
-    // The heading is present and the columns appear one per line, before the
-    // inviter's "columns you will receive"/"linkage keys" terms.
-    const headingIndex = lines.findIndex((l) =>
-      l.includes("columns you will send:"),
-    );
-    expect(headingIndex).toBeGreaterThanOrEqual(0);
-    expect(lines).toContain("    - diagnosis");
-    expect(lines).toContain("    - medication");
-    // No presupposing empty/unknown phrasing when the set is a real non-empty
-    // disclosure.
-    const joined = lines.join("\n");
-    expect(joined).not.toContain("(none)");
-    expect(joined).not.toContain("determined from your input file");
-  } finally {
-    infoSpy.mockRestore();
-  }
+  const joined = renderDisplayInvitation(log, sampleToken(FUTURE()), [
+    "diagnosis",
+    "medication",
+  ]);
+  const lines = joined.split("\n");
+  // The heading is present and the columns appear one per line, before the
+  // inviter's "columns you will receive"/"linkage keys" terms.
+  const headingIndex = lines.findIndex((l) =>
+    l.includes("columns you will send:"),
+  );
+  expect(headingIndex).toBeGreaterThanOrEqual(0);
+  expect(lines).toContain("    - diagnosis");
+  expect(lines).toContain("    - medication");
+  // No presupposing empty/unknown phrasing when the set is a real non-empty
+  // disclosure.
+  expect(joined).not.toContain("(none)");
+  expect(joined).not.toContain("determined from your input file");
 });
 
 test("displayInvitation: a column name containing the list separator is not split into two entries", () => {
@@ -1413,16 +1408,13 @@ test("displayInvitation: a column name containing the list separator is not spli
   // per line keeps it a single entry.
   const log = getLogger("accept-display-outbound-comma-test");
   log.setLevel("silent");
-  const infoSpy = vi.spyOn(log, "info");
-  try {
-    displayInvitation(sampleToken(FUTURE()), ["last, first", "notes"], log);
-    const lines = infoSpy.mock.calls.map((c) => String(c[0]));
-    // The comma-bearing name is one entry on its own line, not split at the comma,
-    // and the separator did not create a third entry.
-    expect(outboundSendEntries(lines)).toEqual(["last, first", "notes"]);
-  } finally {
-    infoSpy.mockRestore();
-  }
+  const lines = renderDisplayInvitation(log, sampleToken(FUTURE()), [
+    "last, first",
+    "notes",
+  ]).split("\n");
+  // The comma-bearing name is one entry on its own line, not split at the comma,
+  // and the separator did not create a third entry.
+  expect(outboundSendEntries(lines)).toEqual(["last, first", "notes"]);
 });
 
 test("displayInvitation: the empty and not-yet-known outbound-send cases avoid a presupposing phrase", () => {
@@ -1790,7 +1782,7 @@ test("displayInvitation: the decision facts are repeated verbatim immediately be
     // which leaves the end of the output unmeasured.
     const block: Array<string> = [];
     logDecisionFacts(
-      { ...log, info: (entry: unknown) => block.push(String(entry)) },
+      (entry) => block.push(entry),
       summarizeInvitation({ ...sampleToken(FUTURE()), linkageTerms }),
       ownOutboundSend,
     );
@@ -1855,29 +1847,23 @@ test.each(hostileVariants)(
     // unsanitized key name, which would fail here.
     const log = getLogger("accept-display-hostile-test");
     log.setLevel("silent");
-    const infoSpy = vi.spyOn(log, "info");
-    try {
-      displayInvitation(
-        { ...sampleToken(FUTURE()), ...source },
-        [`own${BEL}column`],
-        log,
-      );
-      const lines = infoSpy.mock.calls.map((c) => String(c[0]));
-      // Guard against a vacuous pass: the prompt must have reached the nested
-      // rules, and each hostile code point must appear in its escaped form -- so
-      // an output that collapsed, or one the partner text never flowed into,
-      // fails here rather than satisfying the assertion below by having nothing
-      // to check.
-      expect(lines.length).toBeGreaterThan(20);
-      for (const hostile of [ESC, RLO, BEL])
-        expect(
-          lines.filter((line) => line.includes(sanitizeForDisplay(hostile)))
-            .length,
-        ).toBeGreaterThan(0);
-      expect(lines.filter((line) => !PRINTABLE_ASCII.test(line))).toEqual([]);
-    } finally {
-      infoSpy.mockRestore();
-    }
+    const lines = renderDisplayInvitation(
+      log,
+      { ...sampleToken(FUTURE()), ...source },
+      [`own${BEL}column`],
+    ).split("\n");
+    // Guard against a vacuous pass: the prompt must have reached the nested
+    // rules, and each hostile code point must appear in its escaped form -- so
+    // an output that collapsed, or one the partner text never flowed into,
+    // fails here rather than satisfying the assertion below by having nothing
+    // to check.
+    expect(lines.length).toBeGreaterThan(20);
+    for (const hostile of [ESC, RLO, BEL])
+      expect(
+        lines.filter((line) => line.includes(sanitizeForDisplay(hostile)))
+          .length,
+      ).toBeGreaterThan(0);
+    expect(lines.filter((line) => !PRINTABLE_ASCII.test(line))).toEqual([]);
   },
 );
 
@@ -1887,30 +1873,18 @@ test("displayInvitation: a linkage key name containing the list separator is one
   const log = getLogger("accept-display-key-comma-test");
   log.setLevel("silent");
   const base = sampleToken(FUTURE());
-  const infoSpy = vi.spyOn(log, "info");
-  try {
-    displayInvitation(
-      {
-        ...base,
-        linkageTerms: {
-          ...base.linkageTerms,
-          linkageKeys: [
-            { name: "surname, given name", elements: [{ field: "last_name" }] },
-          ],
-        },
-      },
-      undefined,
-      log,
-    );
-    expect(
-      entriesUnder(
-        infoSpy.mock.calls.map((c) => String(c[0])),
-        "  linkage keys:",
-      ),
-    ).toEqual(["surname, given name"]);
-  } finally {
-    infoSpy.mockRestore();
-  }
+  const lines = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      linkageKeys: [
+        { name: "surname, given name", elements: [{ field: "last_name" }] },
+      ],
+    },
+  }).split("\n");
+  expect(entriesUnder(lines, "  linkage keys:")).toEqual([
+    "surname, given name",
+  ]);
 });
 
 // --- handler: repeated single-value flag -------------------------------------
@@ -2050,6 +2024,10 @@ test("handler: without --consent-to-terms the prompt runs and a decline writes n
   const { dir, input, configFile, keyFile } = offlineAcceptFixture();
   // afterEach reset the mock to a clean slate; set the decline impl this test needs.
   promptConfirmMock.mockResolvedValue(false);
+  // A prompting run at a level that drops info shows the terms at the prompt
+  // regardless (the surface tests below measure that); capture stdio so they land
+  // here rather than in the suite's own output.
+  const stdio = captureStdio();
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
@@ -2071,8 +2049,293 @@ test("handler: without --consent-to-terms the prompt runs and a decline writes n
     expect(fs.existsSync(configFile)).toBe(false);
     expect(fs.existsSync(keyFile)).toBe(false);
   } finally {
+    stdio.restore();
     exit.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- handler: the consent surface reaches wherever the prompt asks ------------
+
+const SURFACE_HEADING = "Invitation details:";
+
+// The first line the handler writes after the consent surface, one per path
+// through the consent decision: the bypass note under --consent-to-terms, the
+// decline note when the prompt answers no. What lies between the heading and
+// whichever of these follows is the surface itself.
+const POST_SURFACE_PREFIXES = [
+  "--consent-to-terms given:",
+  "invitation declined",
+];
+
+/**
+ * Everything the run wrote to stderr, one entry per line, with the
+ * `[ISO] [LEVEL] [context]` prefix stripped -- so a line the log put there and a
+ * line written straight to the prompt's sink compare as the same line.
+ */
+function stderrLines(writes: ReadonlyArray<string>): Array<string> {
+  const lines = writes.join("").split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  return lines.map((line) =>
+    line.replace(/^\[[^\]]*\] \[[A-Z]+\] \[[^\]]*\] /, ""),
+  );
+}
+
+/**
+ * The consent surface as stderr received it: the run of lines from the display's
+ * heading to the first line the handler writes after it. Empty when the surface
+ * never reached stderr at all.
+ */
+function surfaceOnStderr(writes: ReadonlyArray<string>): Array<string> {
+  const lines = stderrLines(writes);
+  const start = lines.indexOf(SURFACE_HEADING);
+  if (start < 0) return [];
+  const rest = lines.slice(start);
+  const end = rest.findIndex(
+    (line, index) =>
+      index > 0 && POST_SURFACE_PREFIXES.some((p) => line.startsWith(p)),
+  );
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
+/**
+ * The consent surface the handler renders for `encoded` over the offline fixture,
+ * produced by displayInvitation itself so an assertion compares the operator's
+ * terminal against the whole surface rather than a few lines chosen for the test.
+ * The fixture CSV discloses no payload columns -- pinned here, since a fixture
+ * that started disclosing some would otherwise silently change what the handler
+ * renders and leave every comparison below trivially true.
+ */
+async function expectedConsentSurface(encoded: string): Promise<Array<string>> {
+  const lines: Array<string> = [];
+  displayInvitation(await decodeAndValidateInvitation(encoded), [], (line) =>
+    lines.push(line),
+  );
+  expect(lines).toContain(
+    "  columns you will send: (none) -- only matched records",
+  );
+  expect(lines.length).toBeGreaterThan(20);
+  return lines;
+}
+
+/**
+ * Run the offline accept handler over `fixture` with `flags` folded into its
+ * argv, capturing both standard streams -- so a test can assert what the terminal
+ * received, and the mirrored surface never lands in the suite's own output.
+ */
+async function runOfflineAcceptCapturingStdio(params: {
+  encoded: string;
+  fixture: ReturnType<typeof offlineAcceptFixture>;
+  flags?: Record<string, unknown>;
+}): Promise<{ stderrWrites: Array<string>; stdoutWrites: Array<string> }> {
+  const { encoded, fixture, flags } = params;
+  // A real invocation creates getLogger("accept") after applying --log-level, so
+  // the command's logger carries the level the flag names. This suite runs many
+  // invocations in one process, where that logger already exists and loglevel's
+  // setDefaultLevel does not reach an existing named logger (driven against
+  // loglevel 1.9.2: an existing logger keeps the level it was created with), so
+  // the flag is applied to it here too and restored afterwards.
+  const acceptLog = getLogger("accept");
+  const priorLevel = acceptLog.getLevel();
+  acceptLog.setLevel(
+    ((flags?.["log-level"] as string | undefined) ??
+      "info") as logLibrary.LogLevelDesc,
+    false,
+  );
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: [encoded, fixture.input],
+      "config-file": fixture.configFile,
+      "key-file": fixture.keyFile,
+      record: false,
+      ...flags,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+    return {
+      stderrWrites: [...stdio.stderrWrites],
+      stdoutWrites: [...stdio.stdoutWrites],
+    };
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
+    acceptLog.setLevel(priorLevel, false);
+  }
+}
+
+test("handler: --log-file records the terms and still shows them where the prompt asks", async () => {
+  // The file sink replaces stderr outright, so the log's copy of the terms lands
+  // nowhere near the terminal the question is asked on. Both destinations receive
+  // them: the file for the operator's record, the terminal for the decision.
+  const fixture = offlineAcceptFixture();
+  const logFile = path.join(fixture.dir, "accept.log");
+  promptConfirmMock.mockResolvedValue(false);
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const expected = await expectedConsentSurface(encoded);
+    const { stderrWrites, stdoutWrites } = await runOfflineAcceptCapturingStdio(
+      {
+        encoded,
+        fixture,
+        flags: { "log-file": logFile },
+      },
+    );
+    expect(promptConfirmMock).toHaveBeenCalledTimes(1);
+    // The terminal the question is asked on received the whole surface, in order,
+    // and plain: the prefix belongs to the log's record of it, not to text sitting
+    // beside a prompt.
+    expect(surfaceOnStderr(stderrWrites)).toEqual(expected);
+    expect(stderrWrites.join("")).not.toContain("[INFO]");
+    // stdout stays reserved for result data, the reason the prompt is on stderr.
+    expect(stdoutWrites.join("")).toBe("");
+    // The operator's chosen routing is untouched: the file still holds every line.
+    const logged = fs.readFileSync(logFile, "utf8");
+    for (const line of expected)
+      expect(logged).toContain(`[INFO] [accept] ${line}\n`);
+  } finally {
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test.each(["warn", "error", "silent"])(
+  "handler: --log-level %s still shows the terms where the prompt asks",
+  async (level) => {
+    // Each level that drops info drops the surface from the log; the prompt asks
+    // either way, so the surface reaches the prompt's own sink either way.
+    const fixture = offlineAcceptFixture();
+    promptConfirmMock.mockResolvedValue(false);
+    try {
+      const encoded = await encodeInvitation(sampleToken(FUTURE()));
+      const expected = await expectedConsentSurface(encoded);
+      const { stderrWrites, stdoutWrites } =
+        await runOfflineAcceptCapturingStdio({
+          encoded,
+          fixture,
+          flags: { "log-level": level },
+        });
+      expect(promptConfirmMock).toHaveBeenCalledTimes(1);
+      expect(surfaceOnStderr(stderrWrites)).toEqual(expected);
+      // The level still governs the log itself: no info line was emitted.
+      expect(stderrWrites.join("")).not.toContain("[INFO]");
+      expect(stdoutWrites.join("")).toBe("");
+    } finally {
+      fs.rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test("handler: the default prompting path prints each line of the terms exactly once", async () => {
+  // The default sink and level already put the log's own output where the prompt
+  // asks, so mirroring there unconditionally would print the whole multi-screen
+  // outline twice. Every line appears exactly as many times as the renderer
+  // emitted it -- twice for the decision facts it deliberately repeats, once for
+  // everything else.
+  const fixture = offlineAcceptFixture();
+  promptConfirmMock.mockResolvedValue(false);
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const expected = await expectedConsentSurface(encoded);
+    const { stderrWrites, stdoutWrites } = await runOfflineAcceptCapturingStdio(
+      {
+        encoded,
+        fixture,
+      },
+    );
+    expect(stdoutWrites.join("")).toBe("");
+    const lines = stderrLines(stderrWrites);
+    for (const line of new Set(expected))
+      expect(lines.filter((seen) => seen === line)).toHaveLength(
+        expected.filter((rendered) => rendered === line).length,
+      );
+    expect(surfaceOnStderr(stderrWrites)).toEqual(expected);
+    // The one copy is the log's: the default path's rendering is unchanged.
+    expect(stderrWrites.join("")).toContain(
+      `[INFO] [accept] ${SURFACE_HEADING}`,
+    );
+  } finally {
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: --consent-to-terms leaves the terms in the --log-file, not on the terminal", async () => {
+  // Nothing asks on the unattended path, so nothing is mirrored: the surface is
+  // ordinary diagnostic output following the routing the operator chose.
+  const fixture = offlineAcceptFixture();
+  const logFile = path.join(fixture.dir, "accept.log");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const expected = await expectedConsentSurface(encoded);
+    const { stderrWrites } = await runOfflineAcceptCapturingStdio({
+      encoded,
+      fixture,
+      flags: { "consent-to-terms": true, "log-file": logFile },
+    });
+    expect(promptConfirmMock).not.toHaveBeenCalled();
+    expect(surfaceOnStderr(stderrWrites)).toEqual([]);
+    const logged = fs.readFileSync(logFile, "utf8");
+    for (const line of expected)
+      expect(logged).toContain(`[INFO] [accept] ${line}\n`);
+  } finally {
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: --consent-to-terms keeps --log-level silent silencing the terms", async () => {
+  // The other half of the unattended path: a level that drops the surface still
+  // drops it, on the terminal as well as in the log.
+  const fixture = offlineAcceptFixture();
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const { stderrWrites } = await runOfflineAcceptCapturingStdio({
+      encoded,
+      fixture,
+      flags: { "consent-to-terms": true, "log-level": "silent" },
+    });
+    expect(promptConfirmMock).not.toHaveBeenCalled();
+    expect(stderrWrites.join("")).toBe("");
+    expect(fs.existsSync(fixture.configFile)).toBe(true);
+  } finally {
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: hostile terms stay printable ASCII on the prompt's own sink", async () => {
+  // The mirror is a second route from partner-controlled text to the operator's
+  // terminal, so the escaping claim the renderer's tests make through the log sink
+  // is measured on this route too. --log-level silent leaves the mirrored copy as
+  // the only thing on stderr, so every line asserted here came through it.
+  const fixture = offlineAcceptFixture();
+  promptConfirmMock.mockResolvedValue(false);
+  try {
+    const encoded = await encodeInvitation({
+      ...sampleToken(FUTURE()),
+      linkageTerms: {
+        ...getDefaultLinkageTerms(`Inviter${ESC}[31mOrg${RLO}`),
+        linkageKeys: [{ name: `ssn${BEL}`, elements: [{ field: "ssn" }] }],
+      },
+    });
+    const { stderrWrites } = await runOfflineAcceptCapturingStdio({
+      encoded,
+      fixture,
+      flags: { "log-level": "silent" },
+    });
+    const lines = stderrLines(stderrWrites);
+    // Non-vacuous: the terms reached the terminal, and each hostile code point
+    // arrived in its escaped form rather than never arriving at all.
+    expect(lines.length).toBeGreaterThan(20);
+    for (const hostile of [ESC, RLO, BEL])
+      expect(
+        lines.filter((line) => line.includes(sanitizeForDisplay(hostile)))
+          .length,
+      ).toBeGreaterThan(0);
+    expect(lines.filter((line) => !PRINTABLE_ASCII.test(line))).toEqual([]);
+  } finally {
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
   }
 });
 
