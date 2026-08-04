@@ -152,44 +152,13 @@ function displayLinkageFields(
 /**
  * @internal exported for testing
  *
- * Print, before the acceptance prompt, everything the operator is consenting to:
- * their own outbound disclosure first, then every term of the inviter's proposal
- * that decides what is matched or what is disclosed -- under `psi` what is matched
- * decides which identifiers are revealed, so a matching rule this omitted would be
- * consented to unseen.
- *
- * What the operator SEES is narrower than what this prints, and the difference is
- * not something this function can close: it writes through `log.info`, so
- * `--log-file` (which replaces the stderr sink outright) or a `--log-level` above
- * info routes the whole surface away from the terminal, while `promptConfirm`
- * writes its question straight to stderr and still asks. The limit is recorded for
- * the operator in docs/CLI.md, under acceptance.
- *
- * The inviter's terms are read through `summarizeInvitation`, the display model the
- * web consent screen renders from, so the two surfaces cannot drift on what an
- * acceptor is shown or on the escaping of the partner-controlled strings in it. A
- * term today's exchange does not apply (`psi-c`, `deduplicate`, and the per-element
- * fuzzy expansion) is marked as proposed, so the prompt never states a matching
- * behavior the run does not perform.
- *
- * `ownOutboundSend` is the columns THIS party will disclose to the partner for
- * matched records -- its own outbound disclosure, the hardest-to-undo fact it
- * consents to here. It is `disclosedColumnNames` over the acceptor's own resolved
- * metadata (exactly the set `preparePayload` transmits), so the prompt cannot
- * overstate what leaves this machine; `undefined` when that set is not yet
- * determined at prompt time (see {@link OUTBOUND_SEND_FORWARD_REFERENCE}), an empty
- * array when the acceptor discloses nothing. Unlike the inviter's terms these names
- * are operator-file strings that reach no display boundary of their own, so they are
- * escaped here, at their sink.
- */
-/**
  * The facts the acceptance decision turns on, printed by this one function at both
  * of the two points the operator needs them: heading the terms, and again
  * immediately above the confirmation prompt.
  *
- * The terms run to well over a screen -- a default-terms invitation renders past
- * 160 lines -- so an operator answering the prompt is looking at the tail, and
- * these facts have scrolled away. Printing them twice from one renderer is what
+ * The terms run to well over a screen -- far past what a terminal shows at the
+ * prompt -- so an operator answering it is looking at the tail, and these facts
+ * have scrolled away. Printing them twice from one renderer is what
  * makes the second printing a repetition rather than a second account: there is
  * one wording, so the two cannot drift and no check is needed to keep them
  * agreeing. Composing a separate summary here instead would reintroduce exactly
@@ -199,7 +168,7 @@ function displayLinkageFields(
  * its own line by a fixed first-party label -- so none of them can begin a line or
  * manufacture one.
  */
-function logDecisionFacts(
+export function logDecisionFacts(
   log: ReturnType<typeof getLogger>,
   summary: InvitationSummary,
   ownOutboundSend: ReadonlyArray<string> | undefined,
@@ -239,6 +208,39 @@ function logDecisionFacts(
     );
 }
 
+/**
+ * @internal exported for testing
+ *
+ * Print, before the acceptance prompt, everything the operator is consenting to:
+ * their own outbound disclosure first, then every term of the inviter's proposal
+ * that decides what is matched or what is disclosed -- under `psi` what is matched
+ * decides which identifiers are revealed, so a matching rule this omitted would be
+ * consented to unseen.
+ *
+ * What the operator SEES is narrower than what this prints, and the difference is
+ * not something this function can close: it writes through `log.info`, so
+ * `--log-file` (which replaces the stderr sink outright) or a `--log-level` above
+ * info routes the whole surface away from the terminal, while `promptConfirm`
+ * writes its question straight to stderr and still asks. The limit is recorded for
+ * the operator in docs/CLI.md, under acceptance.
+ *
+ * The inviter's terms are read through `summarizeInvitation`, the display model the
+ * web consent screen renders from, so the two surfaces cannot drift on what an
+ * acceptor is shown or on the escaping of the partner-controlled strings in it. A
+ * term today's exchange does not apply (`psi-c`, `deduplicate`, and the per-element
+ * fuzzy expansion) is marked as proposed, so the prompt never states a matching
+ * behavior the run does not perform.
+ *
+ * `ownOutboundSend` is the columns THIS party will disclose to the partner for
+ * matched records -- its own outbound disclosure, the hardest-to-undo fact it
+ * consents to here. It is `disclosedColumnNames` over the acceptor's own resolved
+ * metadata (exactly the set `preparePayload` transmits), so the prompt cannot
+ * overstate what leaves this machine; `undefined` when that set is not yet
+ * determined at prompt time (see {@link OUTBOUND_SEND_FORWARD_REFERENCE}), an empty
+ * array when the acceptor discloses nothing. Unlike the inviter's terms these names
+ * are operator-file strings that reach no display boundary of their own, so they are
+ * escaped here, at their sink.
+ */
 export function displayInvitation(
   token: InvitationToken,
   ownOutboundSend: ReadonlyArray<string> | undefined,

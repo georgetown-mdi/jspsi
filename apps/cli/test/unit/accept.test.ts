@@ -14,6 +14,7 @@ import {
   parseExchangeSpec,
   reconcileReceivedPayload,
   sanitizeForDisplay,
+  summarizeInvitation,
   UsageError,
 } from "@psilink/core";
 import {
@@ -64,6 +65,7 @@ import {
   resolveAcceptPositionals,
   validateAccept,
 } from "../../src/commands/accept";
+import { logDecisionFacts } from "../../src/invitationDisplay";
 import {
   generateSharedSecret,
   runOnlineBootstrap,
@@ -1781,22 +1783,33 @@ test("displayInvitation: the decision facts are repeated verbatim immediately be
       ownOutboundSend,
     ).split("\n");
 
+    // The block is rendered independently rather than read off either printing, so
+    // its LENGTH is measured too. Slicing the tail and comparing it to an
+    // equal-length window at the head is a sliding comparison: it cannot see a line
+    // appended after the repetition that happens to match the head's next line,
+    // which leaves the end of the output unmeasured.
+    const block: Array<string> = [];
+    logDecisionFacts(
+      { ...log, info: (entry: unknown) => block.push(String(entry)) },
+      summarizeInvitation({ ...sampleToken(FUTURE()), linkageTerms }),
+      ownOutboundSend,
+    );
+
     expect(lines.filter((line) => line === REPEAT_HEADING)).toHaveLength(1);
     const heading = lines.indexOf(REPEAT_HEADING);
-    const repeated = lines.slice(heading + 1);
-    // Nothing follows the repetition: a line printed after it would be the last
-    // thing the operator reads, outside what this measures.
-    expect(repeated.length).toBeGreaterThan(0);
+    // Exact equality, not a prefix: a line printed after the repetition makes the
+    // tail longer than the block and fails here, whatever that line says.
+    expect(lines.slice(heading + 1)).toEqual(block);
     // The same block, byte for byte, at the head of the display -- where index 0 is
     // the "Invitation details:" heading the facts open under.
-    expect(lines.slice(1, 1 + repeated.length)).toEqual(repeated);
+    expect(lines.slice(1, 1 + block.length)).toEqual(block);
     // Non-vacuous: the block carries the decisive partner-controlled fact rather
     // than being an empty tail that trivially matches.
-    expect(repeated.some((line) => line.startsWith("  inviting party: "))).toBe(
+    expect(block.some((line) => line.startsWith("  inviting party: "))).toBe(
       true,
     );
     expect(
-      repeated.some((line) => line.startsWith("  columns you will send")),
+      block.some((line) => line.startsWith("  columns you will send")),
     ).toBe(true);
   }
 });

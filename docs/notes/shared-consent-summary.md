@@ -104,9 +104,10 @@ two. Both surfaces render every such list one entry per line.
 
 Putting a fact back in front of the operator is also a renderer's decision, and
 the shape it takes is the load-bearing part. A terminal has no scrollback the
-prompt can rely on: a default-terms invitation renders past 160 lines, so the
-operator answering the CLI prompt is reading the tail of the key list, and the
-facts the decision turns on left the screen long before. The CLI prints those
+prompt can rely on: a default-terms invitation renders far past what a terminal
+shows, so the operator answering the CLI prompt is reading the tail of the key
+list, and the facts the decision turns on left the screen long before. The CLI
+prints those
 facts a second time, immediately above the prompt, from the SAME function that
 prints them first.
 
@@ -120,3 +121,15 @@ drift. It also inherits every property the first printing was already measured
 to have, rather than restating them: each partner-controlled value stays behind
 its fixed first-party label, on its own line, where it can neither begin a line
 nor manufacture one.
+
+What the repetition carries is bounded, and the bound is the point rather than an
+oversight. It is the four to six lines heading the outline; the linkage strategy
+and, under single-pass, its disclosure note are not among them, though that note
+describes a real disclosure the acceptor consents to. The note is 423 characters,
+about six wrapped lines on an eighty-column terminal, so repeating it would
+roughly double a block whose whole value is being short enough to take in at the
+prompt -- and a repetition long enough to scroll is the condition it exists to
+fix. The limit is therefore that an operator who reads only the repetition has
+not seen every disclosure-affecting term, and `docs/CLI.md` says so where the
+operator will meet it. Closing it properly means shortening what those terms say,
+not lengthening the block.
