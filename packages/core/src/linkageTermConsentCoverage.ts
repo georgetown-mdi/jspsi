@@ -1,0 +1,631 @@
+// The consent-surface representation check's shared half: which `LinkageTerms`
+// fields an acceptor's consent turns on, and the per-field variants that decide
+// whether a surface represents each one at all.
+//
+// It lives in core, behind the `./testing` subpath, because the expensive half --
+// judging which fields consent turns on -- is identical for the web consent
+// summary and the CLI consent prompt. Two copies of that judgment would drift,
+// which is the failure this check exists to remove.
+//
+// The classification below is a table rather than the enumeration itself: the
+// field paths it is keyed by are DERIVED from the `LinkageTerms` declaration with
+// the compiler API (test/linkageTermConsentCoverage.test.ts), and the two are
+// asserted to agree in both directions. A hand-kept list cannot notice a field
+// added to core; a derivation cannot judge whether a field bears on consent. Each
+// half covers what the other cannot.
+
+import { parseLinkageTerms } from "./config/linkageTerms.js";
+
+import type {
+  LinkageField,
+  LinkageTerms,
+  TransformStep,
+} from "./config/linkageTerms.js";
+
+/**
+ * @internal
+ *
+ * The two surfaces an acceptor consents from: the web app's structured
+ * invitation summary and the CLI accept command's prompt output.
+ */
+export type ConsentSurfaceName = "web" | "cli";
+
+/**
+ * @internal
+ *
+ * A `LinkageTerms` field an acceptor's consent turns on -- one that decides what
+ * is matched or what is disclosed -- and so belongs on both consent surfaces.
+ */
+export interface ConsentRelevantTerm {
+  classification: "consent-relevant";
+  /** What about the acceptor's decision this field decides. */
+  reason: string;
+  /**
+   * Adjustment applied to {@link CONSENT_PROBE_TERMS} before {@link vary}, for a
+   * field whose variation would otherwise break a cross-field schema constraint
+   * (`output.expectsOutput: false` requires an empty `payload.receive`). It is
+   * applied to BOTH sides of the pair, so the pair still differs at this field
+   * alone.
+   */
+  prepare?: (terms: LinkageTerms) => LinkageTerms;
+  /**
+   * A terms document differing from its base at this field and nowhere else.
+   * Both sides are rendered and the renderings compared, so a surface that omits
+   * the field produces identical output and is reported as not representing it.
+   * A variation a surface collapses (an `exclude` denylist the web reports only
+   * the SIZE of) has to move what the surface actually shows, or it measures the
+   * rendering rather than the representation.
+   */
+  vary: (terms: LinkageTerms) => LinkageTerms;
+  /**
+   * Surfaces that do not render this field, each with why it is still absent.
+   * Recorded rather than closed here: surfacing a field changes what an acceptor
+   * sees before consenting, which is a partner-facing consent change and takes
+   * its own change and its own review. Recording it is what keeps the difference
+   * between "we chose not to show this" and "this surface does not show it yet"
+   * legible -- and the per-surface check pins this set exactly, so closing a gap
+   * without striking its entry fails too.
+   */
+  unrepresented?: Partial<Record<ConsentSurfaceName, string>>;
+}
+
+/**
+ * @internal
+ *
+ * A `LinkageTerms` field an acceptor's consent does not turn on, with the reason
+ * it is out of scope. An excluded field needs no variant: nothing asserts where
+ * it does or does not appear.
+ */
+export interface ExcludedTerm {
+  classification: "excluded";
+  /** Why consent does not turn on this field. */
+  reason: string;
+}
+
+/** @internal */
+export type LinkageTermClassification = ConsentRelevantTerm | ExcludedTerm;
+
+/** A copy of `terms` with `edit` applied, leaving the original untouched. */
+function edited(
+  terms: LinkageTerms,
+  edit: (draft: LinkageTerms) => void,
+): LinkageTerms {
+  const draft = structuredClone(terms);
+  edit(draft);
+  return draft;
+}
+
+/** The transform pipeline the probe base's first linkage-key element declares. */
+function probeTransform(terms: LinkageTerms): Array<TransformStep> {
+  const transform = terms.linkageKeys[0].elements[0].transform;
+  if (transform === undefined)
+    throw new Error("the consent probe base declares no element transform");
+  return transform;
+}
+
+/** The probe base's linkage field of the given semantic type. */
+function fieldOfType<T extends LinkageField["type"]>(
+  terms: LinkageTerms,
+  type: T,
+): Extract<LinkageField, { type: T }> {
+  const field = terms.linkageFields.find(
+    (candidate): candidate is Extract<LinkageField, { type: T }> =>
+      candidate.type === type,
+  );
+  if (field === undefined)
+    throw new Error(`the consent probe base declares no ${type} field`);
+  return field;
+}
+
+/**
+ * @internal
+ *
+ * The coherent linkage terms both consent surfaces are rendered from. Every
+ * consent-relevant field carries a value, so each variant in
+ * {@link LINKAGE_TERM_CONSENT_CLASSIFICATION} can change one in place rather than
+ * introducing the structure that holds it -- which would differ at more than the
+ * field under test.
+ *
+ * Ordinary, readable terms rather than the web suite's hostile-code-point
+ * fixture: that fixture answers whether a partner string reaching a surface is
+ * escaped, which is a different question from whether a field reaches the surface
+ * at all, and its escaped renderings would obscure the per-field difference this
+ * probe reads. It is also shared with the CLI suite, which has no access to the
+ * web app's test utilities.
+ */
+export const CONSENT_PROBE_TERMS: LinkageTerms = {
+  version: "1.0.0",
+  identity: "Probe County Health Department",
+  date: "2026-01-15",
+  algorithm: "psi",
+  linkageStrategy: "cascade",
+  output: { expectsOutput: true, shareWithPartner: true },
+  deduplicate: false,
+  linkageFields: [
+    {
+      name: "given_name",
+      type: "first_name",
+      constraints: {
+        allowedCharacters: "A-Za-z",
+        affixesAllowed: false,
+        exclude: ["UNKNOWN"],
+      },
+    },
+    {
+      name: "family_name",
+      type: "last_name",
+      constraints: {
+        allowedCharacters: "A-Za-z",
+        affixesAllowed: false,
+        exclude: ["UNKNOWN"],
+      },
+    },
+    {
+      name: "birth_date",
+      type: "date_of_birth",
+      constraints: { validOnly: true, exclude: ["1900-01-01"] },
+    },
+  ],
+  linkageKeys: [
+    {
+      name: "given name, family name, and date of birth",
+      elements: [
+        {
+          field: "given_name",
+          name: "given",
+          transform: [
+            { function: "to_upper_case" },
+            { function: "substring", params: { start: 1, length: 3 } },
+          ],
+        },
+        { field: "family_name", name: "family" },
+        { field: "birth_date", generateFuzzyComparisons: "adjacent_years" },
+      ],
+      swap: ["given", "family"],
+    },
+  ],
+  payload: {
+    send: [
+      { name: "risk_score", description: "Model score for the matched record" },
+    ],
+    receive: [
+      {
+        name: "program_outcome",
+        description: "Observed outcome for the matched record",
+      },
+    ],
+  },
+  legalAgreement: {
+    reference: "MOU-2026-0001",
+    purpose: "Evaluation of the county tutoring program",
+    expirationDate: "2027-12-31",
+  },
+};
+
+/**
+ * @internal
+ *
+ * Every field path the `LinkageTerms` declaration reaches, classified as one an
+ * acceptor's consent turns on or one it does not. Keyed by the paths derived from
+ * that declaration, with array and tuple indices collapsed to `[]`, so a field
+ * added to core has no entry here and fails the derivation check until someone
+ * judges it.
+ *
+ * `linkageKeys[].elements[].transform[].params` terminates as a whole rather than
+ * expanding: it is a `Record<string, unknown>`, whose index signature declares no
+ * property paths to walk. Consent turns on the parameters as a set -- they decide
+ * what each transform does to a value -- so classifying the record is the right
+ * grain, not a workaround.
+ */
+export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
+  string,
+  LinkageTermClassification
+> = {
+  version: {
+    classification: "excluded",
+    reason:
+      "A schema-compatibility gate. A version the acceptor cannot migrate to " +
+      "aborts the exchange before any data moves, and it selects nothing about " +
+      "what is matched or what is disclosed.",
+  },
+  identity: {
+    classification: "consent-relevant",
+    reason:
+      "The party the acceptor is disclosing to -- the first thing consent turns " +
+      "on.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        draft.identity = "Probe State Education Agency";
+      }),
+  },
+  date: {
+    classification: "excluded",
+    reason:
+      "A last-modified stamp on the terms. Consistency is soft (a mismatch warns " +
+      "that one party may hold a stale copy) and it selects nothing matched or " +
+      "disclosed.",
+  },
+  algorithm: {
+    classification: "consent-relevant",
+    reason:
+      "Decides whether the exchange reveals the matched identifiers (`psi`) or " +
+      "only their count (`psi-c`).",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        draft.algorithm = "psi-c";
+      }),
+  },
+  linkageStrategy: {
+    classification: "consent-relevant",
+    reason:
+      "`single-pass` hands the receiver the full per-key value structure in one " +
+      "batch, so it observes matches on less precise keys a cascade would have " +
+      "filtered out first.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        draft.linkageStrategy = "single-pass";
+      }),
+  },
+  "output.expectsOutput": {
+    classification: "consent-relevant",
+    reason: "Whether the inviting party receives the intersection result.",
+    // A party that receives no output may request no payload, so the pair is
+    // built on a base with no requested columns; both sides carry that same
+    // empty request.
+    prepare: (terms) =>
+      edited(terms, (draft) => {
+        if (draft.payload !== undefined) draft.payload.receive = [];
+      }),
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        draft.output.expectsOutput = false;
+      }),
+  },
+  "output.shareWithPartner": {
+    classification: "consent-relevant",
+    reason: "Whether the accepting party receives the intersection result.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        draft.output.shareWithPartner = false;
+      }),
+  },
+  deduplicate: {
+    classification: "consent-relevant",
+    reason:
+      "Whether one of the inviter's records may match several of the " +
+      "acceptor's, which changes how many records the intersection holds.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        draft.deduplicate = true;
+      }),
+    unrepresented: {
+      cli:
+        "The CLI prompt renders the inviter's two output preferences but not " +
+        "its deduplicate setting.",
+    },
+  },
+  "linkageFields[].name": {
+    classification: "excluded",
+    reason:
+      "A partner-authored label that only binds a key element to a declared " +
+      "field. It never reaches a matched value, and the web summary withholds " +
+      "it deliberately -- unvetted partner text that could impersonate a system " +
+      "label -- showing the semantic `type` it resolves to instead.",
+  },
+  "linkageFields[].type": {
+    classification: "consent-relevant",
+    reason:
+      "Which category of PII participates in linkage -- a full SSN and its last " +
+      "four digits are a real disclosure difference.",
+    // A date-of-birth field becomes an SSN field: the two carry the same
+    // constraint shape, so the replacement moves the semantic type and nothing
+    // else.
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        const field = fieldOfType(draft, "date_of_birth");
+        draft.linkageFields[draft.linkageFields.indexOf(field)] = {
+          ...field,
+          type: "ssn",
+        };
+      }),
+    unrepresented: {
+      cli: "The CLI prompt renders no linkage fields at all.",
+    },
+  },
+  "linkageFields[].constraints.allowedCharacters": {
+    classification: "consent-relevant",
+    reason:
+      "The character class the party commits its values to, which decides which " +
+      "values are flagged as off-standard before matching.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        fieldOfType(draft, "first_name").constraints = {
+          ...fieldOfType(draft, "first_name").constraints,
+          allowedCharacters: "A-Za-z0-9",
+        };
+      }),
+    unrepresented: {
+      cli: "The CLI prompt renders no field constraints.",
+    },
+  },
+  "linkageFields[].constraints.affixesAllowed": {
+    classification: "consent-relevant",
+    reason:
+      "Whether honorifics and suffixes are expected to have been removed, which " +
+      "decides whether two spellings of the same name meet.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        fieldOfType(draft, "first_name").constraints = {
+          ...fieldOfType(draft, "first_name").constraints,
+          affixesAllowed: true,
+        };
+      }),
+    unrepresented: {
+      cli: "The CLI prompt renders no field constraints.",
+    },
+  },
+  "linkageFields[].constraints.exclude": {
+    classification: "consent-relevant",
+    reason:
+      "Values the party commits not to present for matching, so a record " +
+      "carrying one is expected to go unmatched.",
+    // The web summary reports this denylist by SIZE rather than by value, so the
+    // variant adds an entry: changing one in place would leave the rendering
+    // identical and read as an absent field.
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        fieldOfType(draft, "first_name").constraints = {
+          ...fieldOfType(draft, "first_name").constraints,
+          exclude: ["UNKNOWN", "TEST"],
+        };
+      }),
+    unrepresented: {
+      cli: "The CLI prompt renders no field constraints.",
+    },
+  },
+  "linkageFields[].constraints.validOnly": {
+    classification: "consent-relevant",
+    reason:
+      "Whether values are committed to be well-formed (a parseable date, an SSN " +
+      "meeting SSA rules), which decides which records are expected to match.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        fieldOfType(draft, "date_of_birth").constraints = {
+          ...fieldOfType(draft, "date_of_birth").constraints,
+          validOnly: false,
+        };
+      }),
+    unrepresented: {
+      cli: "The CLI prompt renders no field constraints.",
+    },
+  },
+  "linkageKeys[].name": {
+    classification: "consent-relevant",
+    reason:
+      "Names the matching round the acceptor is agreeing to, and is the only " +
+      "per-key anchor the CLI prompt offers.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        draft.linkageKeys[0].name = "given name and family name";
+      }),
+  },
+  "linkageKeys[].elements[].field": {
+    classification: "consent-relevant",
+    reason:
+      "Which declared field a key element matches on, and so which PII the " +
+      "intersection is computed over.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        draft.linkageKeys[0].elements[2].field = "family_name";
+      }),
+    unrepresented: {
+      cli:
+        "The CLI prompt renders each linkage key's name only, not the elements " +
+        "it combines.",
+    },
+  },
+  "linkageKeys[].elements[].name": {
+    classification: "excluded",
+    reason:
+      "An intra-key alias that exists only to make a `swap` reference " +
+      "unambiguous when one field appears twice in a key. It never reaches a " +
+      "matched value; the swap it identifies is classified on its own.",
+  },
+  "linkageKeys[].elements[].generateFuzzyComparisons": {
+    classification: "consent-relevant",
+    reason:
+      "Expands one value into several match candidates, so records that do not " +
+      "agree exactly still match -- and under `psi` their identifiers are " +
+      "disclosed.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        draft.linkageKeys[0].elements[2].generateFuzzyComparisons =
+          "transpositions";
+      }),
+    unrepresented: {
+      cli:
+        "The CLI prompt renders each linkage key's name only, not the matching " +
+        "rules its elements carry.",
+    },
+  },
+  "linkageKeys[].elements[].transform[].function": {
+    classification: "consent-relevant",
+    reason:
+      "Rewrites the value before it is hashed, so it decides which records meet " +
+      "-- a truncation or a sound-alike recoding matches records the raw values " +
+      "never would.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        probeTransform(draft)[0].function = "to_lower_case";
+      }),
+    unrepresented: {
+      cli:
+        "The CLI prompt renders each linkage key's name only, not the transforms " +
+        "its elements apply.",
+    },
+  },
+  "linkageKeys[].elements[].transform[].params": {
+    classification: "consent-relevant",
+    reason:
+      "Decides what a transform actually does: the same function under different " +
+      "parameters matches a different set of records.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        probeTransform(draft)[1].params = { start: 1, length: 4 };
+      }),
+    unrepresented: {
+      cli:
+        "The CLI prompt renders each linkage key's name only, not the transforms " +
+        "its elements apply.",
+    },
+  },
+  "linkageKeys[].swap": {
+    classification: "consent-relevant",
+    reason:
+      "Matches two elements in either order on the receiving side, so records " +
+      "whose values are transposed between two fields match.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        delete draft.linkageKeys[0].swap;
+      }),
+    unrepresented: {
+      cli:
+        "The CLI prompt renders each linkage key's name only, not the swap it " +
+        "declares.",
+    },
+  },
+  "payload.send[].name": {
+    classification: "consent-relevant",
+    reason:
+      "The columns the inviter declares it will transmit for matched records -- " +
+      "what the acceptor receives beyond the intersection itself.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        if (draft.payload?.send !== undefined)
+          draft.payload.send[0].name = "risk_band";
+      }),
+    unrepresented: {
+      cli:
+        "The CLI prompt derives its received-columns line from the invitation " +
+        "token's carried `disclosedPayloadColumns` -- the wire's own " +
+        "transmission predicate -- and renders no line at all for a token that " +
+        "carries none, so the authored declaration never reaches the prompt.",
+    },
+  },
+  "payload.send[].description": {
+    classification: "excluded",
+    reason:
+      "A data-dictionary annotation on a column the same list already names. It " +
+      "changes nothing about which columns are transmitted, matched on, or " +
+      "disclosed.",
+  },
+  "payload.receive[].name": {
+    classification: "consent-relevant",
+    reason:
+      "The columns the inviter requests FROM the acceptor for matched records -- " +
+      "an outbound disclosure the acceptor is being asked to make.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        if (draft.payload?.receive !== undefined)
+          draft.payload.receive[0].name = "program_status";
+      }),
+  },
+  "payload.receive[].description": {
+    classification: "excluded",
+    reason:
+      "A data-dictionary annotation on a column the same list already names. It " +
+      "changes nothing about which columns are transmitted, matched on, or " +
+      "disclosed.",
+  },
+  "legalAgreement.reference": {
+    classification: "consent-relevant",
+    reason:
+      "Identifies the agreement that authorizes the disclosure, and is " +
+      "cross-checked against the acceptor's own copy.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        if (draft.legalAgreement !== undefined)
+          draft.legalAgreement.reference = "MOU-2026-0002";
+      }),
+    unrepresented: {
+      cli: "The CLI prompt renders no legal agreement.",
+    },
+  },
+  "legalAgreement.purpose": {
+    classification: "consent-relevant",
+    reason:
+      "States the purpose the disclosure is made for, and is recorded as the " +
+      "disclosure-log entry the exchange stands on.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        if (draft.legalAgreement !== undefined)
+          draft.legalAgreement.purpose =
+            "Evaluation of the county after-school program";
+      }),
+    unrepresented: {
+      cli: "The CLI prompt renders no legal agreement.",
+    },
+  },
+  "legalAgreement.expirationDate": {
+    classification: "consent-relevant",
+    reason:
+      "The date past which the exchange is refused, cross-checked between the " +
+      "parties before any data moves.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        if (draft.legalAgreement !== undefined)
+          draft.legalAgreement.expirationDate = "2028-06-30";
+      }),
+    unrepresented: {
+      cli: "The CLI prompt renders no legal agreement.",
+    },
+  },
+};
+
+/**
+ * @internal
+ *
+ * One rendering pair per consent-relevant field: a base document and a variant
+ * differing from it at that field alone. A surface represents the field when it
+ * renders the two differently.
+ */
+export interface ConsentRepresentationProbe {
+  /** The derived `LinkageTerms` field path this pair varies. */
+  path: string;
+  /** {@link ConsentRelevantTerm.reason} for the field. */
+  reason: string;
+  base: LinkageTerms;
+  variant: LinkageTerms;
+  /** {@link ConsentRelevantTerm.unrepresented} for the field, never absent. */
+  unrepresented: Partial<Record<ConsentSurfaceName, string>>;
+}
+
+/**
+ * @internal
+ *
+ * The rendering pairs for every consent-relevant entry of
+ * {@link LINKAGE_TERM_CONSENT_CLASSIFICATION}.
+ *
+ * Both sides go through `parseLinkageTerms`, so a variant that is not a coherent
+ * terms document -- a renamed field with no element updated to reference it, a
+ * setting the schema forbids alongside another -- throws here instead of
+ * rendering into a difference that would prove nothing about the field.
+ */
+export function consentRepresentationProbes(): Array<ConsentRepresentationProbe> {
+  const probes: Array<ConsentRepresentationProbe> = [];
+  for (const [path, entry] of Object.entries(
+    LINKAGE_TERM_CONSENT_CLASSIFICATION,
+  )) {
+    if (entry.classification !== "consent-relevant") continue;
+    const prepared =
+      entry.prepare?.(CONSENT_PROBE_TERMS) ?? CONSENT_PROBE_TERMS;
+    probes.push({
+      path,
+      reason: entry.reason,
+      base: parseLinkageTerms(prepared),
+      variant: parseLinkageTerms(entry.vary(prepared)),
+      unrepresented: entry.unrepresented ?? {},
+    });
+  }
+  return probes;
+}
