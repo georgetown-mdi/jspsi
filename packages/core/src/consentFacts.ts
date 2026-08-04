@@ -103,10 +103,14 @@ export const CONSENT_FACTS = {
     note: "Enforced: you are sent no result, and any result sent to you is rejected.",
   },
   partnerReceivesResult: {
-    basis: "trust-contingent",
+    basis: "enforced",
     reason:
-      "The disclosure itself is accountable and happens; what the partner then " +
-      "does with the result is governed by the agreement, not by psilink.",
+      "The receipt is settled by the run rather than by the partner's conduct: " +
+      "the two parties' output directions are compared as a mirror before data " +
+      "moves, and the run then delivers the result to the party those agreed " +
+      "terms entitle to it. What the partner does with the result once it holds " +
+      "it is governed by the agreement, not by psilink -- a limit on its use, " +
+      "which the note carries, not on whether the disclosure happens.",
     note: "Once received, its use is governed by your agreement, not this tool.",
   },
   partnerReceivesNoResult: {

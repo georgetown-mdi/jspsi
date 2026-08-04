@@ -1353,15 +1353,13 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
   expect(named).toContain("columns you will receive (enforced):");
   expect(named).toContain("\n    - diagnosis");
   expect(named).toContain("\n    - notes");
-  // The empty-set lock-in names the party that aborts. The two directions are not
-  // symmetric in who that is: this one is enforced by THIS party's own received-
-  // payload reconciliation, so a subject-less "would abort the exchange" would
-  // leave the acceptor unable to tell it apart from the opposite direction below.
-  // It also may not read as prevention: reconciliation runs after the payload
-  // exchange, so the columns arrive and are then rejected.
-  expect(lines({ ...base, disclosedPayloadColumns: [] })).toContain(
-    "columns you will receive (enforced): (none) -- anything the inviting " +
-      "party sends is received and then rejected, aborting the exchange",
+  // The empty set is a bare "(none)", with nothing after it: the line renders only
+  // for a declared direction (the absent case below prints no line at all), so the
+  // reader of a "(none)" is already looking at an explicit declaration, and the
+  // enforcement register is what the label's marker carries. What the declaration
+  // commits its party to is stated at length in docs/CLI.md, not on the prompt.
+  expect(lines({ ...base, disclosedPayloadColumns: [] }).split("\n")).toContain(
+    "  columns you will receive (enforced): (none)",
   );
   expect(lines({ ...base, disclosedPayloadColumns: undefined })).not.toContain(
     "columns you will receive",
@@ -1391,15 +1389,11 @@ test("displayInvitation: the inviter's request-from-acceptor receive shows names
   );
   expect(named).toContain("\n    - dose");
   expect(named).toContain("\n    - outcome");
-  // The mirror of the lock-in above, and the aborting party is the other one: the
-  // inviter locked this empty set in as what it will receive, so its side is what
-  // fails when this party transmits anything -- which it can only do once the
-  // values have reached it, the direction where reading the lock-in as prevention
-  // would cost this party its own data.
-  expect(lines(withReceive([]))).toContain(
-    "columns the inviting party requests from you (your partner's word): " +
-      "(none) -- anything you send reaches the inviting party before it aborts " +
-      "the exchange",
+  // The mirror of the line above, and bare for the same reason: only a declared
+  // direction prints, so "(none)" is the inviter asking for no column rather than
+  // the lazy case, which prints nothing.
+  expect(lines(withReceive([])).split("\n")).toContain(
+    "  columns the inviting party requests from you (your partner's word): (none)",
   );
   expect(lines(withReceive(undefined))).not.toContain(
     "the inviting party requests from you",
@@ -1475,6 +1469,47 @@ test("displayInvitation: the empty and not-yet-known outbound-send cases avoid a
   expect(unknown).not.toContain("(none)");
   expect(unknown).not.toContain("you will confirm");
   expect(outboundSendEntries(unknown.split("\n"))).toEqual([]);
+});
+
+test("displayInvitation: an inviting party that receives no result is sent nothing, whatever the acceptor's own set is", () => {
+  // The payload step transmits nothing at all to a partner not entitled to the
+  // result, so a listed column set would name a disclosure that does not happen --
+  // under the marker that says the run holds it. The direction answers the line for
+  // every value of the acceptor's own set: a resolved set is not listed, the
+  // not-yet-known forward reference does not run (the input file it names cannot
+  // change this answer), and the empty case's "only matched records" tail gives way
+  // to the reason that holds however the operator's file changes.
+  const log = getLogger("accept-display-outbound-one-sided-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  const oneSided: InvitationToken = {
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      output: { expectsOutput: false, shareWithPartner: true },
+    },
+  };
+  for (const own of [["diagnosis", "medication"], [], undefined]) {
+    const rendered = renderDisplayInvitation(log, oneSided, own);
+    expect(rendered.split("\n")).toContain(
+      `  ${OUTBOUND_SEND_LABEL}: (none) -- the inviting party receives no ` +
+        "result, so no payload is sent",
+    );
+    expect(outboundSendEntries(rendered.split("\n"))).toEqual([]);
+    expect(rendered).not.toContain("diagnosis");
+    expect(rendered).not.toContain("only matched records");
+    expect(rendered).not.toContain("not yet known");
+  }
+  // The direction is the whole of the gate: the same acceptor set is listed in full
+  // when the inviting party does receive the result.
+  const twoSided = renderDisplayInvitation(log, base, [
+    "diagnosis",
+    "medication",
+  ]);
+  expect(outboundSendEntries(twoSided.split("\n"))).toEqual([
+    "diagnosis",
+    "medication",
+  ]);
 });
 
 test("displayInvitation: shows the linkage strategy and, for single-pass, the disclosure note", () => {
@@ -1671,11 +1706,15 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
   expect(acceptorWithheld).toContain(
     "  you will receive the result (enforced): no",
   );
-  expect(acceptorWithheld).toContain(
-    "  the inviting party will receive the result (your partner's word): yes",
-  );
   expect(inviterWithheld).toContain(
     "  you will receive the result (enforced): yes",
+  );
+  // The partner's receipt line is marked by its VALUE, not by the line: a partner
+  // that receives is one the run delivers to, and only its use of the result rests
+  // on the agreement; a partner that does not receive rests on the agreement for
+  // the whole fact.
+  expect(acceptorWithheld).toContain(
+    "  the inviting party will receive the result (enforced): yes",
   );
   expect(inviterWithheld).toContain(
     "  the inviting party will receive the result (your partner's word): no",

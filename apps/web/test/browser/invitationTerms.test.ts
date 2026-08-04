@@ -1179,11 +1179,13 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
     render(terms, { disclosedPayloadColumns: [] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(group("What you receive").query()).toBeNull();
-    // ... yet the declared-empty send still shows "(none)" in the detail, confirming
-    // this is the lock-in case (distinct from lazy, which omits the send line).
+    // ... yet the declared-empty send still shows a bare "(none)" in the detail,
+    // confirming this is the declared case (distinct from lazy, which omits the
+    // send line).
     const panel = await readyPanel("Other details");
     expect(panel.textContent).toContain("Your partner will send:");
     expect(panel.textContent).toContain("(none)");
+    expect(panel.textContent).not.toContain("abort");
   });
 
   test("a lazy (undeclared) send raises no ingress count and no receive tier", async () => {
@@ -1531,8 +1533,10 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
     const panel = await readyPanel("Other details");
     expect(panel.textContent).toContain("Your partner requests from you:");
     expect(panel.textContent).toContain("(none)");
-    // The "(none)" names its strict consequence rather than reading as innocuous.
-    expect(panel.textContent).toContain("would abort the exchange");
+    // The "(none)" is bare: the line renders only for a declared direction (the
+    // lazy case below shows none at all), so it is already read as an explicit
+    // declaration, and what a violated declaration costs is docs/CLI.md's to say.
+    expect(panel.textContent).not.toContain("abort");
   });
 
   test("a lazy (undeclared) receive renders no request line", async () => {
@@ -1551,7 +1555,7 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
     const panel = await readyPanel("Other details");
     expect(panel.textContent).toContain("You request from your partner:");
     expect(panel.textContent).toContain("(none)");
-    expect(panel.textContent).toContain("would abort the exchange");
+    expect(panel.textContent).not.toContain("abort");
   });
 });
 

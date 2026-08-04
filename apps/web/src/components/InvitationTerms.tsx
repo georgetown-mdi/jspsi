@@ -869,14 +869,16 @@ export function InvitationTerms({
             The two lines are NOT equally enforced, and the copy must not present a
             trust-contingent "No" as a cryptographic guarantee: Line A (the viewer's
             own receipt) is enforced -- a party set to receive no result is sent none
-            and its receive check fails closed on any it is sent -- while Line B (the
-            partner's receipt) is COOPERATIVE, resting on the agreed terms being
-            honored rather than on a guarantee this side can impose (a documented
-            property of one-sided PSI, docs/notes/one-sided-disclosure.md). Each "No"
-            carries the caveat for its register. The viewer's own "Yes" is left
-            unqualified (receiving your own result needs no note); the partner's "Yes"
-            -- the accountable disclosure of your result to them -- carries a brief
-            pointer that the agreement, not this tool, governs its use once out. */}
+            and its receive check fails closed on any it is sent -- while Line B's
+            "No" is COOPERATIVE, resting on the agreed terms being honored rather
+            than on a guarantee this side can impose (a documented property of
+            one-sided PSI, docs/notes/one-sided-disclosure.md); its "Yes" is a
+            disclosure the run itself delivers, and only the partner's use of the
+            result rests on the agreement. Each "No" carries the caveat for its
+            register. The viewer's own "Yes" is left unqualified (receiving your own
+            result needs no note); the partner's "Yes" -- the accountable disclosure
+            of your result to them -- carries a brief pointer that the agreement, not
+            this tool, governs its use once out. */}
         <Term label="Result sharing">
           <Text size="sm">
             You will receive the matched result: {yesNo(viewerReceivesResult)}
@@ -1257,9 +1259,11 @@ export function InvitationTerms({
                     instead, so it is suppressed here under "proposing". */}
                   {/* Shown whenever the send set is a definite declaration --
                     including the empty set, rendered "(none)" so the strict
-                    "receive nothing" lock-in is visible rather than inferred from a
-                    missing line (the CLI's displayInvitation shows the same). A
-                    lazy send (not declared) is omitted instead. */}
+                    "receive nothing" commitment is visible rather than inferred from
+                    a missing line (the CLI's displayInvitation shows the same). A
+                    lazy send (not declared) is omitted instead, which is what leaves
+                    the bare "(none)" unambiguous: only a declared direction reaches
+                    this line at all. */}
                   {summary.payload.sendDeclared &&
                     perspective !== "proposing" && (
                       <Stack gap={2}>
@@ -1277,8 +1281,7 @@ export function InvitationTerms({
                           </List>
                         ) : (
                           <Text size="sm" c="dimmed">
-                            (none) -- any payload column would abort the
-                            exchange
+                            (none)
                           </Text>
                         )}
                       </Stack>
@@ -1286,7 +1289,9 @@ export function InvitationTerms({
                   {/* Mirror of the send block: a declared receive is shown even
                       when empty, rendered "(none)" so the strict "the acceptor
                       sends nothing" assertion is visible rather than inferred from
-                      a missing line. A lazy (undeclared) receive is omitted. */}
+                      a missing line. A lazy (undeclared) receive is omitted, so the
+                      "(none)" is the inviter asking for no column rather than asking
+                      for none in particular. */}
                   {summary.payload.receiveDeclared && (
                     <Stack gap={2}>
                       <Text size="sm">
@@ -1302,7 +1307,7 @@ export function InvitationTerms({
                         </List>
                       ) : (
                         <Text size="sm" c="dimmed">
-                          (none) -- any payload column would abort the exchange
+                          (none)
                         </Text>
                       )}
                     </Stack>

@@ -100,28 +100,27 @@ const OUTBOUND_SEND_FORWARD_REFERENCE = {
 };
 
 /**
- * The lock-in wording each declared-but-empty payload direction carries: an empty
- * declaration is a strict "nothing crosses in this direction", not an absent one.
+ * The wording the outbound-send line carries when the invitation gives the inviting
+ * party no result: the payload step transmits nothing at all to a partner not
+ * entitled to one (an empty message goes on the wire in its place), so no column
+ * leaves this machine whatever the input file holds, and listing a set that never
+ * moves would overstate the disclosure the `enforced` marker stands behind.
  *
- * The two directions are not symmetric in WHO aborts, so they are separate strings
- * rather than one subject-less sentence. The empty set the invitation declares it
- * will send becomes this party's own received-payload lock-in, which its own side
- * reconciles and throws on; the empty set the inviter declares it will receive is
- * the inviter's lock-in, enforced on the inviter's side against whatever this party
- * transmits.
+ * The displayed direction and the run's own gate are the same fact with an aborting
+ * check between them: acceptance mirrors the invitation's output direction into this
+ * party's terms, and the compatibility check refuses a partner presenting terms that
+ * disagree with that mirror.
  *
- * Neither abort keeps the columns from crossing, and the wording may not read as
- * though it does: payloads are exchanged before either side reconciles what it
- * received (`reconcileReceivedPayload` runs after `exchangePayloads` in
- * `exchange.ts`), so a violated lock-in is caught on the far side of the wire. The
- * lock-in stops the exchange from completing, not the values from arriving.
+ * It wins over both other cases. Over the not-yet-known forward reference, because
+ * the input file that would settle the set cannot change this answer -- pointing at
+ * it would send the operator to look for something that does not bear on it. Over
+ * the empty-set tail, because when the acceptor also discloses nothing both are
+ * true and this is the one that survives the operator changing their input file,
+ * where "only matched records" is a property of the metadata resolved for this
+ * acceptance alone.
  */
-const EMPTY_INBOUND_PAYLOAD_LOCK_IN =
-  "(none) -- anything the inviting party sends is received and then rejected, " +
-  "aborting the exchange";
-const EMPTY_REQUESTED_PAYLOAD_LOCK_IN =
-  "(none) -- anything you send reaches the inviting party before it aborts the " +
-  "exchange";
+const OUTBOUND_SEND_NO_PAYLOAD =
+  "(none) -- the inviting party receives no result, so no payload is sent";
 
 /**
  * The heading above the repeated decision block on the prompting path, where the
@@ -304,12 +303,16 @@ export function logDecisionFacts(
 ): void {
   // Lead with the acceptor's OWN outbound disclosure -- the columns it will send to
   // the partner for matched records, its hardest-to-undo consent -- before the
-  // inviter's proposed terms, matching the web acceptor flow. undefined is the
-  // not-yet-known case (no metadata resolved): say so and name what settles it,
-  // rather than assert a count. An empty set is a truthful "(none)", not a
-  // presupposed non-empty disclosure.
+  // inviter's proposed terms, matching the web acceptor flow. An invitation that
+  // gives the inviting party no result transmits no payload at all, so the line
+  // states that instead of any column set (see {@link OUTBOUND_SEND_NO_PAYLOAD}).
+  // Otherwise undefined is the not-yet-known case (no metadata resolved): say so and
+  // name what settles it, rather than assert a count. An empty set is a truthful
+  // "(none)", not a presupposed non-empty disclosure.
   const outboundLabel = marked("columns you will send", "outboundSend");
-  if (ownOutboundSend === undefined) {
+  if (!summary.inviterReceivesOutput)
+    emit(`  ${outboundLabel}: ${OUTBOUND_SEND_NO_PAYLOAD}`);
+  else if (ownOutboundSend === undefined) {
     emit(`  ${outboundLabel}: ${OUTBOUND_SEND_FORWARD_REFERENCE.value}`);
     emit(`    ${OUTBOUND_SEND_FORWARD_REFERENCE.note}`);
   } else if (ownOutboundSend.length === 0)
@@ -368,9 +371,11 @@ export function logDecisionFacts(
  * metadata (exactly the set `preparePayload` transmits), so the prompt cannot
  * overstate what leaves this machine; `undefined` when that set is not yet
  * determined at prompt time (see {@link OUTBOUND_SEND_FORWARD_REFERENCE}), an empty
- * array when the acceptor discloses nothing. Unlike the inviter's terms these names
- * are operator-file strings that reach no display boundary of their own, so they are
- * escaped here, at their sink.
+ * array when the acceptor discloses nothing. Neither value is rendered when the
+ * invitation gives the inviting party no result, since the payload step then sends
+ * nothing at all (see {@link OUTBOUND_SEND_NO_PAYLOAD}). Unlike the inviter's terms
+ * these names are operator-file strings that reach no display boundary of their own,
+ * so they are escaped here, at their sink.
  *
  * `promptFollows` says whether a confirmation prompt runs after this returns. It
  * selects the heading above the repeated decision block and nothing else: the block
@@ -408,6 +413,13 @@ export function displayInvitation(params: {
   // its basis: this party's own non-receipt is a hard fact the run holds, while
   // withholding a result from the partner rests on the agreed terms being honored.
   // Presenting them alike would let a cooperative undertaking read as a guarantee.
+  //
+  // The partner's line is not one register either, so its marker follows the VALUE
+  // rather than the line: a partner that does receive is one the run itself delivers
+  // to, and only its use of the result rests on the agreement, while a partner that
+  // does not rests on the agreement for the whole fact. Marking a disclosure that
+  // certainly happens as merely the partner's word is the same error facing the
+  // other way.
   emit(
     `  ${marked("you will receive the result", "viewerReceivesResult")}: ` +
       (summary.inviterSharesResult ? "yes" : "no"),
@@ -415,8 +427,12 @@ export function displayInvitation(params: {
   if (!summary.inviterSharesResult)
     emit(`    ${CONSENT_FACTS.viewerReceivesNoResult.note}`);
   emit(
-    `  ${marked("the inviting party will receive the result", "partnerReceivesResult")}: ` +
-      (summary.inviterReceivesOutput ? "yes" : "no"),
+    `  ${marked(
+      "the inviting party will receive the result",
+      summary.inviterReceivesOutput
+        ? "partnerReceivesResult"
+        : "partnerReceivesNoResult",
+    )}: ` + (summary.inviterReceivesOutput ? "yes" : "no"),
   );
   emit(
     `    ${
@@ -466,30 +482,30 @@ export function displayInvitation(params: {
   // inviter's namespace -- what this party will RECEIVE. Derived from the wire's own
   // disclosure predicate (the token's carried disclosedPayloadColumns) when the
   // invitation carries one, falling back to the authored payload.send otherwise. A
-  // declared-but-empty set is a real "you will receive no payload columns" lock-in (a
-  // later non-empty payload aborts), shown as (none); a lazy send -- no carried subset
-  // and nothing authored -- is omitted, since it reconciles at exchange time.
+  // lazy send -- no carried subset and nothing authored -- is omitted, since it
+  // reconciles at exchange time; that omission is what leaves a bare "(none)"
+  // unambiguous, since only a declared direction reaches the line at all. What the
+  // declaration commits its party to, and what a violation of it costs, is
+  // docs/CLI.md's to state.
   if (summary.payload?.sendDeclared === true) {
     const label = marked("columns you will receive", "inboundPayloadColumns");
-    if (summary.payload.send.length === 0)
-      emit(`  ${label}: ${EMPTY_INBOUND_PAYLOAD_LOCK_IN}`);
+    if (summary.payload.send.length === 0) emit(`  ${label}: (none)`);
     else {
       emit(`  ${label}:`);
       logList(emit, "    ", summary.payload.send);
     }
   }
   // The opposite direction: the columns the inviter requests FROM this party for
-  // matched records -- what YOU may send. A declared receive (present, even if
-  // empty) is cross-checked: an empty set strictly asserts you send nothing (a
-  // non-empty send then aborts), shown as (none); an absent receive reconciles
-  // lazily (the inviter takes whatever your metadata discloses) and is omitted.
+  // matched records -- what YOU may send. Same declaration gate as above: an absent
+  // receive reconciles lazily (the inviter takes whatever your metadata discloses)
+  // and prints nothing, so the "(none)" a declared empty set prints is the inviter
+  // asking for no column rather than asking for none in particular.
   if (summary.payload?.receiveDeclared === true) {
     const label = marked(
       "columns the inviting party requests from you",
       "requestedPayloadColumns",
     );
-    if (summary.payload.receive.length === 0)
-      emit(`  ${label}: ${EMPTY_REQUESTED_PAYLOAD_LOCK_IN}`);
+    if (summary.payload.receive.length === 0) emit(`  ${label}: (none)`);
     else {
       emit(`  ${label}:`);
       logList(emit, "    ", summary.payload.receive);
