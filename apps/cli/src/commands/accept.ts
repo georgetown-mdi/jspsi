@@ -28,7 +28,7 @@ import {
 import { detectFileConflicts } from "../fileUtils";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { decodeAndValidateInvitation } from "../invitationDecode";
-import { displayInvitation } from "../invitationDisplay";
+import { consentSurfaceSink, displayInvitation } from "../invitationDisplay";
 import {
   assertNoUnknownOptions,
   configureLogging,
@@ -602,7 +602,20 @@ export async function handler(argv: Arguments): Promise<void> {
         ready.dataSpec.metadata !== undefined
           ? disclosedColumnNames(ready.dataSpec.metadata)
           : undefined;
-      displayInvitation(ready.token, ownOutboundSend, log);
+      // Rendered through a sink that knows whether the prompt below will run: when
+      // it will, the terms reach the terminal it asks on even when the operator
+      // routed diagnostics to a --log-file or above info, so consent is never asked
+      // for terms this run did not show. --consent-to-terms asks nothing, so its
+      // surface stays plain diagnostic output on the routing the operator chose.
+      displayInvitation(
+        ready.token,
+        ownOutboundSend,
+        consentSurfaceSink({
+          log,
+          logFile: options.logFile,
+          willPrompt: !consentToTerms,
+        }),
+      );
       // With --consent-to-terms, skip the prompt and proceed on the recorded
       // advance consent. Log the bypass so an unattended run's own log shows the
       // human checkpoint was deliberately satisfied ahead of time, not silently

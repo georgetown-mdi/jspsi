@@ -1,6 +1,9 @@
+import logLibrary from "loglevel";
+
 import { sanitizeForDisplay, summarizeInvitation } from "@psilink/core";
 
 import { singlePassDisclosureNotice } from "./onlineBootstrap";
+import { writePromptLine } from "./util/cli";
 
 import type {
   InvitationKeySummary,
@@ -8,6 +11,52 @@ import type {
   InvitationToken,
   getLogger,
 } from "@psilink/core";
+
+/**
+ * Where one rendered line of the consent surface is written. The renderer takes
+ * this rather than a logger because where the surface has to appear depends on
+ * whether the operator is about to be asked to consent to it --
+ * {@link consentSurfaceSink} builds it for the asking and unattended paths alike.
+ */
+export type ConsentSurfaceSink = (line: string) => void;
+
+/**
+ * The sink {@link displayInvitation} renders through, resolved from what the
+ * operator chose for diagnostics and whether acceptance will stop to ask them.
+ *
+ * Every line goes to the log, so an operator's `--log-file` and `--log-level`
+ * keep routing the surface exactly as they route every other diagnostic -- this
+ * is not an exemption of the surface from log routing. When acceptance will
+ * PROMPT, each line additionally goes to the prompt's own sink
+ * ({@link writePromptLine}) unless the log would already have put it there, so
+ * the terms the y/N question asks about cannot have been routed somewhere the
+ * question is not. `--log-file` therefore shows the terms on the terminal and
+ * still records them in the file; a level that drops `info` still shows them at
+ * the prompt and still keeps them out of the log.
+ *
+ * The extra write is conditional because on the default path -- stderr sink at
+ * `info` -- the log's own output already lands where the prompt asks, and an
+ * unconditional copy would print the whole multi-screen outline twice. The level
+ * half reads the logger's own level, not the parsed `--log-level`, so a path that
+ * adjusts the level after the logger is built cannot desync the two. The sink half
+ * has no such reading available -- an installed diagnostic sink is an opaque
+ * function that cannot be asked where it writes -- so it takes the parsed
+ * `--log-file`, and a caller must feed that same value to `configureLogging`.
+ */
+export function consentSurfaceSink(params: {
+  log: ReturnType<typeof getLogger>;
+  logFile: string | undefined;
+  willPrompt: boolean;
+}): ConsentSurfaceSink {
+  const { log, logFile, willPrompt } = params;
+  return (line: string) => {
+    log.info(line);
+    if (!willPrompt) return;
+    const logReachesPrompt =
+      logFile === undefined && log.getLevel() <= logLibrary.levels.INFO;
+    if (!logReachesPrompt) writePromptLine(line);
+  };
+}
 
 /**
  * The forward-reference wording the outbound-send line carries when the acceptor's
@@ -31,11 +80,11 @@ const EMPTY_PAYLOAD_LOCK_IN =
  * every list this renders holds partner- or operator-controlled names.
  */
 function logList(
-  log: ReturnType<typeof getLogger>,
+  emit: ConsentSurfaceSink,
   indent: string,
   entries: ReadonlyArray<string>,
 ): void {
-  for (const entry of entries) log.info(`${indent}- ${entry}`);
+  for (const entry of entries) emit(`${indent}- ${entry}`);
 }
 
 /**
@@ -50,32 +99,32 @@ function logList(
  * is deliberately untouched: `name` is the displayable form.
  */
 function displayLinkageKey(
-  log: ReturnType<typeof getLogger>,
+  emit: ConsentSurfaceSink,
   key: InvitationKeySummary,
 ): void {
-  log.info(`    - ${key.name}`);
+  emit(`    - ${key.name}`);
   // The derived field one-liner, above the declared rules: the key's `name` is
   // partner free text and is the only other line at this key's own level, so
   // without this the operator scanning key headings reads nothing but strings the
   // inviter chose. Every entry here is a fixed compact label for the element's
   // schema-validated field type plus a fixed breadth marker, so the joined line
   // carries no partner text and cannot be misread across the separator.
-  log.info(
+  emit(
     `      matches on: ${key.headerFields.join(" - ")}` +
       (key.hasSwap ? " (matched in either order)" : ""),
   );
-  log.info("      elements:");
+  emit("      elements:");
   for (const element of key.elements) {
-    log.info(`        - ${element.fieldLabel}`);
+    emit(`        - ${element.fieldLabel}`);
     if (element.fuzzyComparison !== undefined)
-      log.info(
+      emit(
         `          also matches approximate variants (${element.fuzzyComparison})` +
           (element.fuzzyComparisonApplied
             ? ""
             : " (proposed; not yet applied)"),
       );
     for (const transform of element.transforms) {
-      log.info(`          transform: ${transform.function}`);
+      emit(`          transform: ${transform.function}`);
       // Lead with the plain matching consequence where there is one: the literal
       // slice phrase when it is faithful, else the glossary description. A function
       // the standardization layer does not recognize has neither, and would
@@ -83,25 +132,25 @@ function displayLinkageKey(
       // indistinguishable from a rule psilink understands. Mark it instead, so a
       // rule this version cannot explain is as explicit as one it cannot apply.
       if (transform.effect !== undefined)
-        log.info(`            matches on ${transform.effect}`);
+        emit(`            matches on ${transform.effect}`);
       else if (transform.description !== undefined)
-        log.info(`            ${transform.description}`);
+        emit(`            ${transform.description}`);
       else
-        log.info(
+        emit(
           "            not recognized by this version; its effect on matching " +
             "is not shown",
         );
-      logList(log, "            ", transform.params);
+      logList(emit, "            ", transform.params);
       // The coercion note is core-derived on both halves (the function's own
       // parameter name and the value core's coercion contract runs it as), and sits
       // on its own line rather than folded into a parameter line, so partner text
       // placed inside a parameter value cannot impersonate it.
       for (const coercion of transform.coercions ?? [])
-        log.info(`            ${coercion.param} runs as ${coercion.runsAs}`);
+        emit(`            ${coercion.param} runs as ${coercion.runsAs}`);
     }
   }
   if (key.hasSwap)
-    log.info(
+    emit(
       key.swap !== undefined
         ? `      swap: ${key.swap[0]} and ${key.swap[1]} may be matched in either order`
         : "      swap: two of these elements may be matched in either order",
@@ -112,13 +161,13 @@ function displayLinkageKey(
   // interchange (both sides carry transforms) or the one-directional donor (exactly
   // one does) is stated outright.
   if (key.swapTransformInterchange && key.swap !== undefined)
-    log.info(
+    emit(
       `      note: when matched in that order, the transforms shown for ` +
         `${key.swap[0]} are applied to ${key.swap[1]}'s value, and those for ` +
         `${key.swap[1]} to ${key.swap[0]}'s value`,
     );
   if (key.swapTransformDonor !== undefined)
-    log.info(
+    emit(
       `      note: when matched in that order, the transforms shown for ` +
         `${key.swapTransformDonor[0]} are applied to ` +
         `${key.swapTransformDonor[1]}'s value`,
@@ -134,15 +183,15 @@ function displayLinkageKey(
  * very different set than it reads as.
  */
 function displayLinkageFields(
-  log: ReturnType<typeof getLogger>,
+  emit: ConsentSurfaceSink,
   summary: InvitationSummary,
 ): void {
-  log.info("  personal data used:");
+  emit("  personal data used:");
   for (const field of summary.linkageFields) {
-    log.info(`    - ${field.label}`);
-    logList(log, "      ", field.constraints);
+    emit(`    - ${field.label}`);
+    logList(emit, "      ", field.constraints);
     if (field.allowedCharacters !== undefined)
-      log.info(
+      emit(
         `      allowed characters (partner-supplied, unverified): ` +
           field.allowedCharacters,
       );
@@ -169,7 +218,7 @@ function displayLinkageFields(
  * manufacture one.
  */
 export function logDecisionFacts(
-  log: ReturnType<typeof getLogger>,
+  emit: ConsentSurfaceSink,
   summary: InvitationSummary,
   ownOutboundSend: ReadonlyArray<string> | undefined,
 ): void {
@@ -180,20 +229,20 @@ export function logDecisionFacts(
   // a count. An empty set is a truthful "(none)", not a presupposed non-empty
   // disclosure.
   if (ownOutboundSend === undefined)
-    log.info(`  columns you will send: ${OUTBOUND_SEND_FORWARD_REFERENCE}`);
+    emit(`  columns you will send: ${OUTBOUND_SEND_FORWARD_REFERENCE}`);
   else if (ownOutboundSend.length === 0)
-    log.info("  columns you will send: (none) -- only matched records");
+    emit("  columns you will send: (none) -- only matched records");
   else {
-    log.info("  columns you will send:");
+    emit("  columns you will send:");
     logList(
-      log,
+      emit,
       "    ",
       ownOutboundSend.map((column) => sanitizeForDisplay(column)),
     );
   }
 
-  log.info(`  inviting party: ${summary.invitingParty}`);
-  log.info(`  PSI algorithm: ${summary.algorithm}`);
+  emit(`  inviting party: ${summary.invitingParty}`);
+  emit(`  PSI algorithm: ${summary.algorithm}`);
   // A proposed count-only algorithm states a DISCLOSURE guarantee the run does not
   // honor, so the caveat sits with the headline it contradicts. What not-applied
   // means here is a refusal, not a looser run: the acceptor adopts the algorithm
@@ -201,7 +250,7 @@ export function logDecisionFacts(
   // exchange aborts before any identifier is revealed. Name that, and what to ask
   // the inviter for, the way the deduplicate note below does.
   if (summary.algorithm === "psi-c" && !summary.psiCApplied)
-    log.info(
+    emit(
       "  note: the inviting party proposes a count-only exchange, but this " +
         "version does not yet apply it and will refuse to run; ask for an " +
         'invitation using the "psi" algorithm.',
@@ -217,12 +266,12 @@ export function logDecisionFacts(
  * decides which identifiers are revealed, so a matching rule this omitted would be
  * consented to unseen.
  *
- * What the operator SEES is narrower than what this prints, and the difference is
- * not something this function can close: it writes through `log.info`, so
- * `--log-file` (which replaces the stderr sink outright) or a `--log-level` above
- * info routes the whole surface away from the terminal, while `promptConfirm`
- * writes its question straight to stderr and still asks. The limit is recorded for
- * the operator in docs/CLI.md, under acceptance.
+ * Where `emit` puts the surface decides what the operator SEES, which is why it is
+ * a parameter rather than a logger: on the prompting path it has to reach the
+ * terminal the y/N question is asked on whatever the operator's diagnostic routing
+ * is, and on the unattended path it is diagnostic output like any other. Build it
+ * with {@link consentSurfaceSink}, which resolves both cases; the behavior is
+ * documented for the operator in docs/CLI.md, under acceptance.
  *
  * The inviter's terms are read through `summarizeInvitation`, the display model the
  * web consent screen renders from, so the two surfaces cannot drift on what an
@@ -244,40 +293,40 @@ export function logDecisionFacts(
 export function displayInvitation(
   token: InvitationToken,
   ownOutboundSend: ReadonlyArray<string> | undefined,
-  log: ReturnType<typeof getLogger>,
+  emit: ConsentSurfaceSink,
 ): void {
   const summary = summarizeInvitation(token);
-  log.info("Invitation details:");
-  logDecisionFacts(log, summary, ownOutboundSend);
+  emit("Invitation details:");
+  logDecisionFacts(emit, summary, ownOutboundSend);
   // The linkage strategy is a mandatory-consistency term (like the algorithm),
   // and single-pass is disclosure-affecting -- it is the load-bearing thing the
   // acceptor consents to here -- so show it plainly and, for single-pass, the
   // disclosure-tradeoff note. The value is a schema enum, not partner free text;
   // the note is shared with the inviter's selection surface so both parties read
   // identical framing.
-  log.info(`  linkage strategy: ${summary.linkageStrategy}`);
+  emit(`  linkage strategy: ${summary.linkageStrategy}`);
   if (summary.linkageStrategy === "single-pass")
-    log.info(`  note: ${singlePassDisclosureNotice()}`);
+    emit(`  note: ${singlePassDisclosureNotice()}`);
   // Stated from the accepting party's perspective (this summary is shown only to
   // the acceptor, before it confirms): YOU receive iff the inviter shares, and the
   // inviter receives iff its terms expect output. For a one-sided invitation this
   // tells the acceptor plainly whether it gets a result, rather than leaving it to
   // invert the inviter's "shares with partner" bit.
-  log.info(
+  emit(
     `  you will receive the result: ${summary.inviterSharesResult ? "yes" : "no"}`,
   );
-  log.info(
+  emit(
     `  the inviting party will receive the result: ` +
       `${summary.inviterReceivesOutput ? "yes" : "no"}`,
   );
-  log.info(
+  emit(
     `  duplicate matches: ` +
       (summary.deduplicate
         ? "a record may match more than one of the partner's records"
         : "each record matches at most one of the partner's records"),
   );
   if (summary.deduplicate && !summary.deduplicateApplied)
-    log.info(
+    emit(
       "  note: the inviting party proposes this, but this version does not " +
         "yet apply it and will refuse to run; ask for an invitation without " +
         "deduplication.",
@@ -289,14 +338,14 @@ export function displayInvitation(
   // compact label for a schema-validated field type, so the joined line carries no
   // partner text.
   if (summary.matchedFields.length > 0)
-    log.info(`  matched on: ${summary.matchedFields.join(", ")}`);
+    emit(`  matched on: ${summary.matchedFields.join(", ")}`);
 
   // The short, high-level field list precedes the long key list: the keys enumerate
   // the combinations OF these fields, and on a terminal the block printed second is
   // the one that scrolls the first off the screen.
-  displayLinkageFields(log, summary);
-  log.info("  linkage keys:");
-  for (const key of summary.linkageKeys) displayLinkageKey(log, key);
+  displayLinkageFields(emit, summary);
+  emit("  linkage keys:");
+  for (const key of summary.linkageKeys) displayLinkageKey(emit, key);
 
   // The columns the inviter declares it will transmit for matched records, in the
   // inviter's namespace -- what this party will RECEIVE. Derived from the wire's own
@@ -307,10 +356,10 @@ export function displayInvitation(
   // and nothing authored -- is omitted, since it reconciles at exchange time.
   if (summary.payload?.sendDeclared === true) {
     if (summary.payload.send.length === 0)
-      log.info(`  columns you will receive: ${EMPTY_PAYLOAD_LOCK_IN}`);
+      emit(`  columns you will receive: ${EMPTY_PAYLOAD_LOCK_IN}`);
     else {
-      log.info("  columns you will receive:");
-      logList(log, "    ", summary.payload.send);
+      emit("  columns you will receive:");
+      logList(emit, "    ", summary.payload.send);
     }
   }
   // The opposite direction: the columns the inviter requests FROM this party for
@@ -320,33 +369,33 @@ export function displayInvitation(
   // lazily (the inviter takes whatever your metadata discloses) and is omitted.
   if (summary.payload?.receiveDeclared === true) {
     if (summary.payload.receive.length === 0)
-      log.info(
+      emit(
         `  columns the inviting party requests from you: ${EMPTY_PAYLOAD_LOCK_IN}`,
       );
     else {
-      log.info("  columns the inviting party requests from you:");
-      logList(log, "    ", summary.payload.receive);
+      emit("  columns the inviting party requests from you:");
+      logList(emit, "    ", summary.payload.receive);
     }
   }
 
   if (summary.legalAgreement !== undefined) {
-    log.info("  legal agreement:");
-    log.info(`    reference: ${summary.legalAgreement.reference}`);
+    emit("  legal agreement:");
+    emit(`    reference: ${summary.legalAgreement.reference}`);
     // "stated purpose", not "purpose": the value is partner-authored free text,
     // sanitized but never vetted -- only byte-compared against this party's own copy
     // at exchange time -- so the label marks it as partner-attested.
-    log.info(`    stated purpose: ${summary.legalAgreement.purpose}`);
-    log.info(
+    emit(`    stated purpose: ${summary.legalAgreement.purpose}`);
+    emit(
       `    agreement valid through: ${summary.legalAgreement.expirationDate}`,
     );
   }
 
-  if (summary.expires !== undefined) log.info(`  expires: ${summary.expires}`);
+  if (summary.expires !== undefined) emit(`  expires: ${summary.expires}`);
 
   // Nothing is printed after this, so what the prompt is answered against is these
   // facts rather than the tail of the key list. The heading says "repeated" because
   // that is the whole claim being made: this block introduces nothing, and the
   // operator who read the terms from the top has already seen every line of it.
-  log.info("Before you accept, repeated from above:");
-  logDecisionFacts(log, summary, ownOutboundSend);
+  emit("Before you accept, repeated from above:");
+  logDecisionFacts(emit, summary, ownOutboundSend);
 }

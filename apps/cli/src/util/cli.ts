@@ -710,6 +710,36 @@ export function writeOutput(
 // --- Confirmation prompt -----------------------------------------------------
 
 /**
+ * The stream a confirmation prompt asks on -- stderr, so stdout stays reserved
+ * for a command's result data. {@link promptConfirm} and {@link writePromptLine}
+ * both write through this one binding rather than naming `process.stderr`
+ * separately, so text a caller must show WITH a prompt cannot land on a different
+ * descriptor than the question does.
+ */
+const promptStream = process.stderr;
+
+/**
+ * Write one line where {@link promptConfirm} asks, for text the operator must see
+ * whatever the diagnostic sink and level are -- the accept consent surface, which
+ * the prompt's own question is answered against. Plain: no log prefix, because
+ * this is prompt-adjacent text rather than a diagnostic record (a `--log-file`
+ * copy of the same line still carries the prefix).
+ *
+ * Best-effort: a wedged stream drops the line rather than throwing back into the
+ * caller. The drop is not reported, so a run whose prompt stream fails partway
+ * through the surface can reach the question having shown only part of it. That
+ * is a stated limit of the pairing, recorded for the operator under acceptance in
+ * docs/CLI.md; closing it means giving the caller back a write outcome to act on.
+ */
+export function writePromptLine(line: string): void {
+  try {
+    promptStream.write(`${line}\n`);
+  } catch {
+    // Dropped; see the limit above.
+  }
+}
+
+/**
  * Prompt the user to confirm on the terminal, returning true only on an
  * explicit yes. Anything else (including EOF or a non-interactive stdin)
  * defaults to no. Prompts on stderr so stdout stays reserved for exchange
@@ -718,7 +748,7 @@ export function writeOutput(
 export async function promptConfirm(question: string): Promise<boolean> {
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stderr,
+    output: promptStream,
   });
   try {
     // `rl.question()` never settles when stdin reaches EOF (a closed or
