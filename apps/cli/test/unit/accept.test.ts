@@ -15,6 +15,7 @@ import {
   reconcileReceivedPayload,
   UsageError,
 } from "@psilink/core";
+import { consentRepresentationProbes } from "@psilink/core/testing";
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
@@ -1414,6 +1415,40 @@ test("displayInvitation: shows the linkage strategy and, for single-pass, the di
   expect(singlePass).toContain("linkage strategy: single-pass");
   expect(singlePass).toContain("consented disclosure tradeoff");
   expect(singlePass).toContain("docs/EXCHANGE_REFERENCE.md");
+});
+
+test("displayInvitation: represents every consent-relevant linkage term, bar the recorded gaps", () => {
+  // Which terms an acceptor's consent turns on is judged once, in core's shared
+  // classification, so this prompt and the web consent summary cannot drift on
+  // the answer. A term is represented here when two sets of terms differing at
+  // that term alone print differently; one the prompt omits prints identically
+  // and has to be recorded as a gap in that same classification.
+  const log = getLogger("accept-display-coverage-test");
+  log.setLevel("silent");
+  // One token, reused across every rendering, so only the terms move -- minting
+  // a fresh one per render would vary the displayed `expires` too. Its
+  // `disclosedPayloadColumns` is left absent deliberately: it is a token field
+  // the inviter derives from its own metadata, not a linkage term, and supplying
+  // one would answer the question about it rather than about `payload.send`. The
+  // acceptor's own outbound-send set is held at the not-yet-known case for the
+  // same reason.
+  const token = sampleToken(FUTURE());
+  const render = (linkageTerms: LinkageTerms): string =>
+    renderDisplayInvitation(log, { ...token, linkageTerms });
+
+  const probes = consentRepresentationProbes();
+  expect(probes.length).toBeGreaterThan(0);
+  expect(
+    probes
+      .filter((probe) => render(probe.base) === render(probe.variant))
+      .map((probe) => probe.path)
+      .sort(),
+  ).toEqual(
+    probes
+      .filter((probe) => probe.unrepresented.cli !== undefined)
+      .map((probe) => probe.path)
+      .sort(),
+  );
 });
 
 // --- handler: repeated single-value flag -------------------------------------

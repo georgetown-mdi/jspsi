@@ -2,6 +2,19 @@ import logLibrary from "loglevel";
 
 import type { AssociationTable } from "./types";
 
+export {
+  CONSENT_PROBE_TERMS,
+  LINKAGE_TERM_CONSENT_CLASSIFICATION,
+  consentRepresentationProbes,
+} from "./linkageTermConsentCoverage.js";
+export type {
+  ConsentRelevantTerm,
+  ConsentRepresentationProbe,
+  ConsentSurfaceName,
+  ExcludedTerm,
+  LinkageTermClassification,
+} from "./linkageTermConsentCoverage.js";
+
 /** @internal */
 export function sortAssociationTable(
   value: AssociationTable,
