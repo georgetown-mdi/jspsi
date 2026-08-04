@@ -54,6 +54,16 @@ function displayLinkageKey(
   key: InvitationKeySummary,
 ): void {
   log.info(`    - ${key.name}`);
+  // The derived field one-liner, above the declared rules: the key's `name` is
+  // partner free text and is the only other line at this key's own level, so
+  // without this the operator scanning key headings reads nothing but strings the
+  // inviter chose. Every entry here is a fixed compact label for the element's
+  // schema-validated field type plus a fixed breadth marker, so the joined line
+  // carries no partner text and cannot be misread across the separator.
+  log.info(
+    `      matches on: ${key.headerFields.join(" - ")}` +
+      (key.hasSwap ? " (matched in either order)" : ""),
+  );
   log.info("      elements:");
   for (const element of key.elements) {
     log.info(`        - ${element.fieldLabel}`);
@@ -68,12 +78,19 @@ function displayLinkageKey(
       log.info(`          transform: ${transform.function}`);
       // Lead with the plain matching consequence where there is one: the literal
       // slice phrase when it is faithful, else the glossary description. A function
-      // the standardization layer does not recognize has neither, and the bare name
-      // above is all the terms declare about it.
+      // the standardization layer does not recognize has neither, and would
+      // otherwise print in the same shape as a recognized rule minus one line --
+      // indistinguishable from a rule psilink understands. Mark it instead, so a
+      // rule this version cannot explain is as explicit as one it cannot apply.
       if (transform.effect !== undefined)
         log.info(`            matches on ${transform.effect}`);
       else if (transform.description !== undefined)
         log.info(`            ${transform.description}`);
+      else
+        log.info(
+          "            not recognized by this version; its effect on matching " +
+            "is not shown",
+        );
       logList(log, "            ", transform.params);
       // The coercion note is core-derived on both halves (the function's own
       // parameter name and the value core's coercion contract runs it as), and sits
@@ -133,14 +150,77 @@ function displayLinkageFields(
 }
 
 /**
+ * What the run reveals about matched records, for the pre-prompt recap. `psi-c`
+ * has two honest readings and neither is the count-only guarantee its name
+ * suggests: applied, only the count is revealed; not applied -- today's state --
+ * every run path refuses the algorithm outright, so the decisive fact is the
+ * refusal, not a disclosure.
+ */
+function recapDisclosure(summary: InvitationSummary): string {
+  if (summary.algorithm !== "psi-c")
+    return "the shared identifiers of matched records are revealed";
+  return summary.psiCApplied
+    ? "only the number of matched records is revealed"
+    : "this version will refuse to run this count-only exchange";
+}
+
+/**
+ * What leaves this machine, for the pre-prompt recap: a count rather than the
+ * names, which are listed in full above and can carry the list separator. The
+ * three cases mirror the outbound-send line's own (not yet determined, a real
+ * empty set, a disclosure).
+ */
+function recapOutboundSend(
+  ownOutboundSend: ReadonlyArray<string> | undefined,
+): string {
+  if (ownOutboundSend === undefined)
+    return `the columns you send are ${OUTBOUND_SEND_FORWARD_REFERENCE}`;
+  if (ownOutboundSend.length === 0)
+    return "you send no columns, only matched records";
+  return (
+    `you send ${ownOutboundSend.length} column` +
+    `${ownOutboundSend.length === 1 ? "" : "s"} (listed above)`
+  );
+}
+
+/**
+ * Restate, on the line before the confirmation prompt, the facts the decision
+ * turns on: who the disclosure goes to, what the run reveals, what leaves this
+ * machine, and what is matched on. The full terms run to well over a screen, so
+ * without this the operator answering the prompt sees only its tail. Every fact
+ * here is stated in full above -- this is a recap, never the sole appearance of
+ * anything -- and it takes no input the display above does not already render.
+ */
+function logDecisionRecap(
+  log: ReturnType<typeof getLogger>,
+  summary: InvitationSummary,
+  ownOutboundSend: ReadonlyArray<string> | undefined,
+): void {
+  const facts = [
+    `you are disclosing to ${summary.invitingParty}`,
+    recapDisclosure(summary),
+    recapOutboundSend(ownOutboundSend),
+  ];
+  if (summary.matchedFields.length > 0)
+    facts.push(`matched on ${summary.matchedFields.join(", ")}`);
+  log.info(`Before you accept: ${facts.join("; ")}.`);
+}
+
+/**
  * @internal exported for testing
  *
  * Print, before the acceptance prompt, everything the operator is consenting to:
  * their own outbound disclosure first, then every term of the inviter's proposal
- * that decides what is matched or what is disclosed. Nothing is held back behind a
- * second command -- under `psi` what is matched decides which identifiers are
- * revealed, so a matching rule the prompt did not show would be consented to
- * unseen.
+ * that decides what is matched or what is disclosed -- under `psi` what is matched
+ * decides which identifiers are revealed, so a matching rule this omitted would be
+ * consented to unseen.
+ *
+ * What the operator SEES is narrower than what this prints, and the difference is
+ * not something this function can close: it writes through `log.info`, so
+ * `--log-file` (which replaces the stderr sink outright) or a `--log-level` above
+ * info routes the whole surface away from the terminal, while `promptConfirm`
+ * writes its question straight to stderr and still asks. The limit is recorded for
+ * the operator in docs/CLI.md, under acceptance.
  *
  * The inviter's terms are read through `summarizeInvitation`, the display model the
  * web consent screen renders from, so the two surfaces cannot drift on what an
@@ -173,14 +253,14 @@ export function displayInvitation(
   // a count. An empty set is a truthful "(none)", not a presupposed non-empty
   // disclosure.
   if (ownOutboundSend === undefined)
-    log.info(`    columns you will send: ${OUTBOUND_SEND_FORWARD_REFERENCE}`);
+    log.info(`  columns you will send: ${OUTBOUND_SEND_FORWARD_REFERENCE}`);
   else if (ownOutboundSend.length === 0)
-    log.info("    columns you will send: (none) -- only matched records");
+    log.info("  columns you will send: (none) -- only matched records");
   else {
-    log.info("    columns you will send:");
+    log.info("  columns you will send:");
     logList(
       log,
-      "      ",
+      "    ",
       ownOutboundSend.map((column) => sanitizeForDisplay(column)),
     );
   }
@@ -188,13 +268,16 @@ export function displayInvitation(
   log.info(`  inviting party: ${summary.invitingParty}`);
   log.info(`  PSI algorithm: ${summary.algorithm}`);
   // A proposed count-only algorithm states a DISCLOSURE guarantee the run does not
-  // honor, so the caveat sits with the headline it contradicts: not-applied means
-  // the exchange reveals more than the count-only claim promises.
+  // honor, so the caveat sits with the headline it contradicts. What not-applied
+  // means here is a refusal, not a looser run: the acceptor adopts the algorithm
+  // verbatim and every run path asserts it (assertAlgorithmImplemented), so the
+  // exchange aborts before any identifier is revealed. Name that, and what to ask
+  // the inviter for, the way the deduplicate note below does.
   if (summary.algorithm === "psi-c" && !summary.psiCApplied)
     log.info(
       "  note: the inviting party proposes a count-only exchange, but this " +
-        "version does not yet apply it; the shared identifiers of matched " +
-        "records are still revealed.",
+        "version does not yet apply it and will refuse to run; ask for an " +
+        'invitation using the "psi" algorithm.',
     );
   // The linkage strategy is a mandatory-consistency term (like the algorithm),
   // and single-pass is disclosure-affecting -- it is the load-bearing thing the
@@ -230,9 +313,20 @@ export function displayInvitation(
         "deduplication.",
     );
 
+  // The fields the keys actually match on, one short line ahead of the two long
+  // matching blocks, so the single fact consent most depends on is legible without
+  // scrolling back through the keys and their combinations. Each entry is a fixed
+  // compact label for a schema-validated field type, so the joined line carries no
+  // partner text.
+  if (summary.matchedFields.length > 0)
+    log.info(`  matched on: ${summary.matchedFields.join(", ")}`);
+
+  // The short, high-level field list precedes the long key list: the keys enumerate
+  // the combinations OF these fields, and on a terminal the block printed second is
+  // the one that scrolls the first off the screen.
+  displayLinkageFields(log, summary);
   log.info("  linkage keys:");
   for (const key of summary.linkageKeys) displayLinkageKey(log, key);
-  displayLinkageFields(log, summary);
 
   // The columns the inviter declares it will transmit for matched records, in the
   // inviter's namespace -- what this party will RECEIVE. Derived from the wire's own
@@ -278,4 +372,6 @@ export function displayInvitation(
   }
 
   if (summary.expires !== undefined) log.info(`  expires: ${summary.expires}`);
+
+  logDecisionRecap(log, summary, ownOutboundSend);
 }
