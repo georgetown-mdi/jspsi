@@ -404,13 +404,22 @@ export interface InvitationFieldSummary {
  * `z.iso` schemas reject them), but routing them through the same boundary keeps
  * the contract uniform rather than depending on that validation staying in place.
  *
- * Every field a partner-controlled value can reach is typed {@link Displayable}
- * rather than `string`, across this interface and the nested summaries, so a
- * field added and rendered without the sanitize call fails to compile instead of
- * relying on a review round to catch it. The fields left as `string` are the ones
- * no partner value reaches: fixed copy keyed by a schema-validated enum, the
- * core-derived transform notes, and the deliberately raw
- * {@link InvitationKeySummary.id}, which is never rendered.
+ * Every field a partner-controlled value can reach AND that is rendered is typed
+ * {@link Displayable} rather than `string`, across this interface and the nested
+ * summaries, so filling one of them from an un-sanitized value fails to compile.
+ * The guarantee runs in that direction only: the brand rejects a plain `string`
+ * assigned into a field already DECLARED `Displayable`, and nothing forces a
+ * newly added field to be declared that way -- one declared `string` and filled
+ * from a partner value still compiles. Adding a rendered field therefore remains
+ * a review obligation; what the brand removes is the risk of an existing field
+ * silently losing its sanitize call.
+ *
+ * Most fields left as `string` are ones no partner value reaches: fixed copy
+ * keyed by a schema-validated enum, and the core-derived transform notes.
+ * {@link InvitationKeySummary.id} is the exception -- it carries the partner's
+ * raw key name verbatim, and is safe because it is never rendered, not because
+ * its value is first-party. Rendering it would need the sanitize call its
+ * unbranded type does not demand.
  */
 export interface InvitationSummary {
   /** The inviter's self-asserted identity, sanitized for display. */

@@ -16,9 +16,13 @@ declare const displayableBrand: unique symbol;
  * assertion. It exists only in the type system -- no value carries the property
  * at runtime, and the branded string is byte-identical to the unbranded one.
  *
- * The brand marks a value as safe to SHOW, never as the value to use: the
- * display form is lossy and escaped, so a comparison, storage, or hashing site
- * still takes the raw string (see {@link sanitizeForDisplay}).
+ * The brand marks a value as safe to SHOW AS TEXT, never as the value to use:
+ * the display form is lossy and escaped, so a comparison, storage, or hashing
+ * site still takes the raw string (see {@link sanitizeForDisplay}). "As text" is
+ * the whole of the claim -- the sanitizer leaves every printable ASCII byte
+ * intact, `<`, `>`, `&`, `"` and `'` among them, so a `Displayable` is safe in a
+ * React text child because JSX escapes it there, and carries no HTML-,
+ * attribute-, or URL-safety of its own.
  */
 export type Displayable = string & { readonly [displayableBrand]: true };
 
