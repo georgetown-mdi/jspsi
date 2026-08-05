@@ -13,6 +13,7 @@ import { InvitationTerms } from "@components/InvitationTerms";
 
 import {
   BEL,
+  CONSENT_PROBE_TERMS,
   ESC,
   PRINTABLE_ASCII,
   RLO,
@@ -78,6 +79,29 @@ const terms: LinkageTerms = {
     expirationDate: "2027-12-31",
   },
 };
+
+// The corrected count-only caveat, spelled out as the whole sentence rather than
+// read from PROPOSED_NOT_APPLIED_NOTES. What it SAYS is load-bearing and moving:
+// psi-c is asserted on every run path today, so the exchange is refused before any
+// identifier is revealed, and when the count-only run path lands both this and the
+// CLI accept prompt's pin (apps/cli/test/unit/accept.test.ts) flip to the
+// count-only disclosure statement. Pinning the sentence on both surfaces, against
+// the same terms document, is what makes that flip a deliberate edit on each rather
+// than a divergence neither notices.
+const PSI_C_CAVEAT =
+  "Your partner proposes a count-only exchange, but this version of the " +
+  "exchange does not yet apply it and will refuse to run; ask your partner " +
+  'for an invitation using the "psi" algorithm.';
+
+// The whole no-payload sentence, spelled out here rather than imported from
+// OUTBOUND_SEND_NO_PAYLOAD_SENTENCE, so a copy edit that drops the reason -- or the
+// clause ruling the operator's own file out of the answer -- fails these assertions
+// instead of silently moving them. It is asserted on both sides of the exchange
+// below, which is what pins that ONE string serves both framings: an edit that made
+// it read for only one viewer reddens the other side's block.
+const NO_PAYLOAD_SENTENCE =
+  "Your partner receives no result from this exchange, so no columns are " +
+  "sent to them -- whatever your file contains.";
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -502,15 +526,13 @@ describe("InvitationTerms: the condensed reference view folds the lower tiers", 
   test("folding never sweeps the disclosure-critical psi-c caveat out of the always-visible core", async () => {
     // psi-c is a disclosure GUARANTEE (only the count is revealed). Its "not yet
     // applied" caveat must stay in the always-visible "What the exchange produces"
-    // tier -- folding it would let a viewer read count-only as in force while the run
-    // still reveals matched identifiers. This is the one caveat that may never move
+    // tier -- folding it would let a viewer read count-only as in force while the
+    // exchange refuses to run at all. This is the one caveat that may never move
     // below its headline, so it must never move behind the fold either.
     renderCondensed({ algorithm: "psi-c" });
     const produce = group("What the exchange produces");
     await expect.element(produce).toBeInTheDocument();
-    expect(produce.element().textContent).toContain(
-      "matched records are still revealed",
-    );
+    expect(produce.element().textContent).toContain(PSI_C_CAVEAT);
   });
 
   test("the fold toggle is self-describing (perspective-neutral, so it fits agreed terms too)", async () => {
@@ -1167,11 +1189,13 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
     render(terms, { disclosedPayloadColumns: [] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(group("What you receive").query()).toBeNull();
-    // ... yet the declared-empty send still shows "(none)" in the detail, confirming
-    // this is the lock-in case (distinct from lazy, which omits the send line).
+    // ... yet the declared-empty send still shows a bare "(none)" in the detail,
+    // confirming this is the declared case (distinct from lazy, which omits the
+    // send line).
     const panel = await readyPanel("Other details");
     expect(panel.textContent).toContain("Your partner will send:");
     expect(panel.textContent).toContain("(none)");
+    expect(panel.textContent).not.toContain("abort");
   });
 
   test("a lazy (undeclared) send raises no ingress count and no receive tier", async () => {
@@ -1269,6 +1293,200 @@ describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference"
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(container!.textContent).not.toContain(forwardReference);
     expect(container!.textContent).toContain("Columns sent to your partner");
+  });
+});
+
+describe("InvitationTerms: the acceptor's outbound send is gated on the inviting party receiving a result", () => {
+  // An invitation that gives the inviting party no result transmits no payload at
+  // all: the payload step puts an empty message on the wire for a partner not
+  // entitled to the result, so no column leaves whatever the acceptor's file holds.
+  // A listed set would name a disclosure that does not happen, at the one point the
+  // acceptor consents to it. So the direction answers this block for every value of
+  // the acceptor's own set -- the chips do not render, the pre-file
+  // forward-reference does not stand in (the file it points at cannot change the
+  // answer), and the empty-set confirmation gives way to the reason that holds
+  // however the operator's file changes. That is the precedence the CLI accept
+  // prompt applies (apps/cli/test/unit/accept.test.ts pins it there), so the pair
+  // resolves an overlapping case one way rather than two.
+  const oneSided: LinkageTerms = {
+    ...terms,
+    output: { expectsOutput: false, shareWithPartner: true },
+  };
+
+  function render(
+    linkageTerms: LinkageTerms,
+    options: {
+      perspective: "review" | "accepted" | "proposing";
+      outboundColumns?: Array<string>;
+    },
+  ) {
+    renderTerms(linkageTerms, options);
+  }
+
+  // The two lines this one takes precedence over, each asserted absent as its whole
+  // sentence so the assertion cannot pass on a shared opening clause.
+  const emptySendLine =
+    "No columns are sent to your partner; only the linkage result (which of " +
+    "your rows matched) is produced.";
+  const forwardReference =
+    "After you choose your file, you will confirm exactly which of its columns " +
+    "are sent to your partner for matched records.";
+
+  test("a chosen file's columns are not listed, and the line states why", async () => {
+    render(oneSided, {
+      perspective: "accepted",
+      outboundColumns: ["risk_score", "diagnosis"],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    // In the acceptor's own disclosure tier, under the same caption the send list
+    // takes, so the fact occupies the slot rather than vanishing from the screen.
+    const disclose = group("What you disclose");
+    await expect.element(disclose).toBeInTheDocument();
+    expect(disclose.element().textContent).toContain(
+      "What you will send to your partner",
+    );
+    expect(disclose.element().textContent).toContain(NO_PAYLOAD_SENTENCE);
+    // Neither column name reaches the screen at all: "risk_score" is the module
+    // terms' inviter-side send, which renders in Details as what the acceptor
+    // RECEIVES, so the acceptor's own set is pinned by the name only it carries.
+    expect(container!.textContent).not.toContain("diagnosis");
+    expect(
+      page
+        .getByRole("list", { name: "What you will send to your partner" })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("wins over the pre-file forward-reference on the review screen", async () => {
+    // No file chosen (outboundColumns undefined) on the pre-consent screen: the
+    // forward-reference would send the acceptor to look at a file that cannot
+    // change this answer.
+    render(oneSided, { perspective: "review" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(NO_PAYLOAD_SENTENCE);
+    expect(container!.textContent).not.toContain(forwardReference);
+  });
+
+  test("wins over the empty-set confirmation", async () => {
+    // A chosen file that discloses nothing: both statements are true, and the one
+    // that survives the operator changing their input file is the one shown.
+    render(oneSided, { perspective: "accepted", outboundColumns: [] });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(NO_PAYLOAD_SENTENCE);
+    expect(container!.textContent).not.toContain(emptySendLine);
+  });
+
+  test("does not fire when the inviting party does receive the result", async () => {
+    // The direction is the whole of the gate: the same acceptor set renders as
+    // chips under the two-sided module terms.
+    render(terms, {
+      perspective: "accepted",
+      outboundColumns: ["risk_score", "diagnosis"],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
+    await expect
+      .element(
+        page.getByRole("list", { name: "What you will send to your partner" }),
+      )
+      .toHaveTextContent("diagnosis");
+  });
+
+  test("does not fire on the inviter's own preview of these same terms", async () => {
+    // The direction control for the mirror. Under THESE terms the acceptor is the
+    // party that receives, so the inviter's payload does move and its declared send
+    // must still be listed. A preview gated on the acceptor's own fact
+    // (inviterReceivesOutput) rather than the inviter's (inviterSharesResult) fails
+    // here, which is the one way to get this wrong that suppresses a real
+    // disclosure.
+    render(oneSided, { perspective: "proposing" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
+    await expect
+      .element(page.getByRole("list", { name: "Columns sent to your partner" }))
+      .toHaveTextContent("risk_score");
+  });
+});
+
+describe("InvitationTerms: the inviter's own send is gated on the accepting party receiving a result", () => {
+  // The mirror of the block above, and the same run gate: the payload step transmits
+  // only to a partner entitled to the result. On the inviter's own preview that
+  // partner is the ACCEPTOR, which receives when the invitation shares its result --
+  // so the fact is shareWithPartner (summary.inviterSharesResult), not the
+  // expectsOutput the acceptor's block reads. Chips naming the inviter's declared
+  // send would name columns that never move, on the surface where the inviter is
+  // authoring exactly that declaration.
+  //
+  // The console's direct-exchange framing pairs this same "proposing" perspective
+  // with a heading/intro override and nothing else, so it inherits this block; the
+  // sentence is viewer-relative ("your partner", "your file"), which is what lets it
+  // read correctly there and on the invitation-authoring preview alike.
+  const acceptorGetsNothing: LinkageTerms = {
+    ...terms,
+    output: { expectsOutput: true, shareWithPartner: false },
+  };
+
+  test("the declared send is not listed, and the slot states why", async () => {
+    renderTerms(acceptorGetsNothing, { perspective: "proposing" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    // In the inviter's own disclosure tier, under the caption its chips take, so the
+    // fact occupies the slot rather than dropping off the screen.
+    const disclose = group("What you disclose");
+    await expect.element(disclose).toBeInTheDocument();
+    expect(disclose.element().textContent).toContain(
+      "Columns sent to your partner",
+    );
+    expect(disclose.element().textContent).toContain(NO_PAYLOAD_SENTENCE);
+    // The declared column itself reaches no part of the screen: under "proposing"
+    // the send has no "Other details" entry either, so its name is absent outright.
+    expect(container!.textContent).not.toContain("risk_score");
+    expect(
+      page.getByRole("list", { name: "Columns sent to your partner" }).query(),
+    ).toBeNull();
+  });
+
+  test("the empty-send confirmation gives way to it", async () => {
+    // An inviter declaring no send: both statements are true, and the one shown is
+    // the one that holds however the inviter edits its declaration, matching the
+    // precedence the acceptor's block applies to its own empty set.
+    renderTerms(
+      { ...acceptorGetsNothing, payload: { send: [], receive: [] } },
+      { perspective: "proposing" },
+    );
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(NO_PAYLOAD_SENTENCE);
+    expect(container!.textContent).not.toContain(
+      "No columns are sent to your partner; your file is used only to find matches.",
+    );
+  });
+
+  test("a two-sided invitation still lists the declared send", async () => {
+    // The direction is the whole of the gate: the module terms share the result both
+    // ways, so the chips render in full.
+    renderTerms(terms, { perspective: "proposing" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
+    await expect
+      .element(page.getByRole("list", { name: "Columns sent to your partner" }))
+      .toHaveTextContent("risk_score");
+  });
+
+  test("the acceptor's screens read the mirror of these same terms", async () => {
+    // The direction control facing the other way: under terms that give the ACCEPTOR
+    // nothing, the acceptor still sends -- the inviting party receives -- so its own
+    // outbound list must stand. An acceptor block gated on the inviter's fact fails
+    // here.
+    renderTerms(acceptorGetsNothing, {
+      perspective: "accepted",
+      outboundColumns: ["diagnosis"],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
+    await expect
+      .element(
+        page.getByRole("list", { name: "What you will send to your partner" }),
+      )
+      .toHaveTextContent("diagnosis");
   });
 });
 
@@ -1519,8 +1737,10 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
     const panel = await readyPanel("Other details");
     expect(panel.textContent).toContain("Your partner requests from you:");
     expect(panel.textContent).toContain("(none)");
-    // The "(none)" names its strict consequence rather than reading as innocuous.
-    expect(panel.textContent).toContain("would abort the exchange");
+    // The "(none)" is bare: the line renders only for a declared direction (the
+    // lazy case below shows none at all), so it is already read as an explicit
+    // declaration, and what a violated declaration costs is docs/CLI.md's to say.
+    expect(panel.textContent).not.toContain("abort");
   });
 
   test("a lazy (undeclared) receive renders no request line", async () => {
@@ -1539,7 +1759,7 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
     const panel = await readyPanel("Other details");
     expect(panel.textContent).toContain("You request from your partner:");
     expect(panel.textContent).toContain("(none)");
-    expect(panel.textContent).toContain("would abort the exchange");
+    expect(panel.textContent).not.toContain("abort");
   });
 });
 
@@ -1608,10 +1828,28 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
     renderTerms({ ...terms, ...overrides });
   }
 
-  // psi-c- and deduplicate-specific caveat tails: both caveats share the "does not
-  // yet apply it" lead, so each assertion keys on the distinguishing clause.
-  const psiCCaveat = "matched records are still revealed";
-  const deduplicateCaveat = "will refuse to run";
+  // Both caveats share the "does not yet apply it and will refuse to run" lead --
+  // psilink refuses the run either way -- so each assertion keys on the clause
+  // that names what to ask the partner for instead.
+  const psiCCaveat = PSI_C_CAVEAT;
+  const deduplicateCaveat = "for an invitation without deduplication";
+
+  test("the psi-c caveat states the refusal, in the words the CLI accept prompt shows", async () => {
+    // psi-c is refused on every run path, so nothing runs and no identifier is
+    // revealed; a caveat saying the matched identifiers are still revealed would
+    // describe a run that does not happen.
+    //
+    // Rendered from core's shared consent probe -- the same terms document the
+    // CLI's pin uses -- so the two pins measure one sentence against one input.
+    renderTerms({ ...CONSENT_PROBE_TERMS, algorithm: "psi-c" });
+    await expect
+      .element(group("What the exchange produces"))
+      .toBeInTheDocument();
+    expect(container!.textContent).toContain(PSI_C_CAVEAT);
+    expect(container!.textContent).not.toContain(
+      "matched records are still revealed",
+    );
+  });
 
   test("the psi-c count-only caveat is always-visible in the core, not one expand down", async () => {
     // psi-c proposed, not applied (APPLIED_SETTINGS.psiC is false), so the count-only

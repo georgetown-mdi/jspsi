@@ -1,11 +1,18 @@
 import logLibrary from "loglevel";
 
-import { sanitizeForDisplay, summarizeInvitation } from "@psilink/core";
+import {
+  CONSENT_BASIS_MARKERS,
+  CONSENT_FACTS,
+  PROPOSED_NOT_APPLIED_NOTES,
+  sanitizeForDisplay,
+  summarizeInvitation,
+} from "@psilink/core";
 
 import { singlePassDisclosureNotice } from "./onlineBootstrap";
 import { writePromptLine } from "./util/cli";
 
 import type {
+  ConsentFactId,
   InvitationKeySummary,
   InvitationSummary,
   InvitationToken,
@@ -59,19 +66,76 @@ export function consentSurfaceSink(params: {
 }
 
 /**
- * The forward-reference wording the outbound-send line carries when the acceptor's
- * own disclosed set is not yet determined at prompt time -- no input file (offline
- * accept without one) or an input whose columns cannot satisfy the invitation's
- * linkage keys, both of which leave the resolved spec without metadata. It points
- * ahead to the operator's input file rather than asserting a count it cannot yet know,
- * mirroring the web acceptor's pre-file forward-reference.
+ * The label a classified fact carries: its own wording plus the terse basis marker
+ * from the shared classification, so the operator reads whether the exchange holds
+ * the fact or the inviting party merely declared it. A terminal has no styling
+ * budget for the tiering the web consent screen uses, and the marker sits on the
+ * first-party LABEL rather than after the value, so no partner-controlled string
+ * precedes it on the line and none can be read as carrying it.
  */
-const OUTBOUND_SEND_FORWARD_REFERENCE = "determined from your input file";
+function marked(label: string, fact: ConsentFactId): string {
+  return `${label} (${CONSENT_BASIS_MARKERS[CONSENT_FACTS[fact].basis]})`;
+}
 
-/** The lock-in wording a declared-but-empty payload direction carries: an empty
- * declaration is a strict "nothing crosses in this direction", not an absent one. */
-const EMPTY_PAYLOAD_LOCK_IN =
-  "(none) -- any payload column would abort the exchange";
+/**
+ * The wording the outbound-send line carries when the acceptor's own disclosed set
+ * is not yet determined at prompt time -- no input file (offline accept without
+ * one) or an input whose columns cannot satisfy the invitation's linkage keys, both
+ * of which leave the resolved spec without metadata.
+ *
+ * It states what actually happens next on THIS path, which is not what happens on
+ * the web: there the acceptor chooses its file on the same screen and confirms the
+ * exact column set before consenting, so the web's forward reference can promise a
+ * confirmation. Nothing asks again here. The set is resolved when `psilink
+ * exchange` reads the input file (from the config's metadata if one was written,
+ * else inferred from the CSV header), and it is sent without a further prompt --
+ * so the line says that rather than pointing ahead to a checkpoint that does not
+ * exist.
+ */
+const OUTBOUND_SEND_FORWARD_REFERENCE = {
+  value: "not yet known",
+  note:
+    "Determined from your input file when the exchange runs; psilink does not " +
+    "ask you to confirm it again.",
+};
+
+/**
+ * The wording the outbound-send line carries when the invitation gives the inviting
+ * party no result: the payload step transmits nothing at all to a partner not
+ * entitled to one (an empty message goes on the wire in its place), so no column
+ * leaves this machine whatever the input file holds, and listing a set that never
+ * moves would overstate the disclosure the `enforced` marker stands behind.
+ *
+ * The displayed direction and the run's own gate are the same fact with an aborting
+ * check between them: acceptance mirrors the invitation's output direction into this
+ * party's terms, and the compatibility check refuses a partner presenting terms that
+ * disagree with that mirror.
+ *
+ * It wins over both other cases. Over the not-yet-known forward reference, because
+ * the input file that would settle the set cannot change this answer -- pointing at
+ * it would send the operator to look for something that does not bear on it. Over
+ * the empty-set tail, because when the acceptor also discloses nothing both are
+ * true and this is the one that survives the operator changing their input file,
+ * where "only matched records" is a property of the metadata resolved for this
+ * acceptance alone.
+ */
+const OUTBOUND_SEND_NO_PAYLOAD =
+  "(none) -- the inviting party receives no result, so no payload is sent";
+
+/**
+ * The heading above the repeated decision block on the prompting path, where the
+ * question this block is answered against comes next.
+ */
+const REPEATED_FACTS_HEADING_BEFORE_PROMPT =
+  "Before you accept, repeated from above:";
+
+/**
+ * The heading above the repeated decision block under `--consent-to-terms`, where
+ * consent is already recorded and nothing follows to answer. The block beneath is
+ * byte-identical to the prompting path's, which is what keeps both printings one
+ * wording rather than two.
+ */
+const REPEATED_FACTS_HEADING_UNATTENDED = "Repeated from above:";
 
 /**
  * Emits one indented line per entry, so a name containing the list separator
@@ -121,7 +185,7 @@ function displayLinkageKey(
         `          also matches approximate variants (${element.fuzzyComparison})` +
           (element.fuzzyComparisonApplied
             ? ""
-            : " (proposed; not yet applied)"),
+            : ` ${PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons}`),
       );
     for (const transform of element.transforms) {
       emit(`          transform: ${transform.function}`);
@@ -176,25 +240,40 @@ function displayLinkageKey(
 
 /**
  * The PII the linkage keys are computed over, each field with the data standards
- * the inviter commits it to. The constraint phrases are fixed copy derived from the
- * schema; the allowed-character class is a partner-authored regular expression and
- * is labelled as unverified rather than paraphrased as a vetted allow-list, since a
- * crafted class (a leading `^` negation, a shorthand or bracket breakout) admits a
- * very different set than it reads as.
+ * the inviter commits it to.
+ *
+ * The categories the keys draw on are what the run computes, so they carry the
+ * enforced marker; the standards under them are the inviter's own undertaking that
+ * psilink warns about rather than filters on, so they sit under their own
+ * trust-contingent heading rather than reading as rules the exchange applies. The
+ * constraint phrases are fixed copy derived from the schema; the allowed-character
+ * class is a partner-authored regular expression bound in the value position after
+ * a fixed first-party label, never paraphrased as a vetted allow-list -- a crafted
+ * class (a leading `^` negation, a shorthand or bracket breakout) admits a very
+ * different set than it reads as. Its shared caveat is emitted once, for the whole
+ * list, the way the web consent screen captions its constraints group.
  */
 function displayLinkageFields(
   emit: ConsentSurfaceSink,
   summary: InvitationSummary,
 ): void {
-  emit("  personal data used:");
+  emit(`  ${marked("personal data used", "personalDataCategories")}:`);
   for (const field of summary.linkageFields) {
     emit(`    - ${field.label}`);
-    logList(emit, "      ", field.constraints);
+    const standards = [...field.constraints];
     if (field.allowedCharacters !== undefined)
-      emit(
-        `      allowed characters (partner-supplied, unverified): ` +
-          field.allowedCharacters,
-      );
+      standards.push(`allowed characters: ${field.allowedCharacters}`);
+    if (standards.length === 0) continue;
+    emit(
+      `      ${marked("declared data standards", "declaredDataStandards")}:`,
+    );
+    logList(emit, "        ", standards);
+  }
+  if (summary.linkageFields.some((f) => f.allowedCharacters !== undefined)) {
+    emit(
+      `  ${marked("allowed-character patterns", "allowedCharacterPatterns")}:`,
+    );
+    emit(`    ${CONSENT_FACTS.allowedCharacterPatterns.note}`);
   }
 }
 
@@ -224,16 +303,22 @@ export function logDecisionFacts(
 ): void {
   // Lead with the acceptor's OWN outbound disclosure -- the columns it will send to
   // the partner for matched records, its hardest-to-undo consent -- before the
-  // inviter's proposed terms, matching the web acceptor flow. undefined is the
-  // not-yet-known case (no metadata resolved): forward-reference rather than assert
-  // a count. An empty set is a truthful "(none)", not a presupposed non-empty
-  // disclosure.
-  if (ownOutboundSend === undefined)
-    emit(`  columns you will send: ${OUTBOUND_SEND_FORWARD_REFERENCE}`);
-  else if (ownOutboundSend.length === 0)
-    emit("  columns you will send: (none) -- only matched records");
+  // inviter's proposed terms, matching the web acceptor flow. An invitation that
+  // gives the inviting party no result transmits no payload at all, so the line
+  // states that instead of any column set (see {@link OUTBOUND_SEND_NO_PAYLOAD}).
+  // Otherwise undefined is the not-yet-known case (no metadata resolved): say so and
+  // name what settles it, rather than assert a count. An empty set is a truthful
+  // "(none)", not a presupposed non-empty disclosure.
+  const outboundLabel = marked("columns you will send", "outboundSend");
+  if (!summary.inviterReceivesOutput)
+    emit(`  ${outboundLabel}: ${OUTBOUND_SEND_NO_PAYLOAD}`);
+  else if (ownOutboundSend === undefined) {
+    emit(`  ${outboundLabel}: ${OUTBOUND_SEND_FORWARD_REFERENCE.value}`);
+    emit(`    ${OUTBOUND_SEND_FORWARD_REFERENCE.note}`);
+  } else if (ownOutboundSend.length === 0)
+    emit(`  ${outboundLabel}: (none) -- only matched records`);
   else {
-    emit("  columns you will send:");
+    emit(`  ${outboundLabel}:`);
     logList(
       emit,
       "    ",
@@ -241,20 +326,17 @@ export function logDecisionFacts(
     );
   }
 
-  emit(`  inviting party: ${summary.invitingParty}`);
-  emit(`  PSI algorithm: ${summary.algorithm}`);
-  // A proposed count-only algorithm states a DISCLOSURE guarantee the run does not
-  // honor, so the caveat sits with the headline it contradicts. What not-applied
-  // means here is a refusal, not a looser run: the acceptor adopts the algorithm
-  // verbatim and every run path asserts it (assertAlgorithmImplemented), so the
-  // exchange aborts before any identifier is revealed. Name that, and what to ask
-  // the inviter for, the way the deduplicate note below does.
+  emit(
+    `  ${marked("inviting party", "invitingParty")}: ${summary.invitingParty}`,
+  );
+  emit(`    ${CONSENT_FACTS.invitingParty.note}`);
+  emit(`  ${marked("PSI algorithm", "algorithm")}: ${summary.algorithm}`);
+  // A proposed count-only algorithm states a DISCLOSURE guarantee, so the caveat
+  // sits with the headline it contradicts rather than further down. Its wording is
+  // the shared one the web consent screen renders, so the two surfaces cannot say
+  // different things about what a psi-c invitation does here.
   if (summary.algorithm === "psi-c" && !summary.psiCApplied)
-    emit(
-      "  note: the inviting party proposes a count-only exchange, but this " +
-        "version does not yet apply it and will refuse to run; ask for an " +
-        'invitation using the "psi" algorithm.',
-    );
+    emit(`    ${PROPOSED_NOT_APPLIED_NOTES.psiC}`);
 }
 
 /**
@@ -275,10 +357,13 @@ export function logDecisionFacts(
  *
  * The inviter's terms are read through `summarizeInvitation`, the display model the
  * web consent screen renders from, so the two surfaces cannot drift on what an
- * acceptor is shown or on the escaping of the partner-controlled strings in it. A
- * term today's exchange does not apply (`psi-c`, `deduplicate`, and the per-element
- * fuzzy expansion) is marked as proposed, so the prompt never states a matching
- * behavior the run does not perform.
+ * acceptor is shown or on the escaping of the partner-controlled strings in it. Its
+ * companion classification (`CONSENT_FACTS`) supplies both the basis marker each
+ * fact's label carries and the caveat sentence beneath it, so neither surface
+ * decides for itself whether a fact is enforced or what to say about it. A term
+ * today's exchange does not apply (`psi-c`, `deduplicate`, and the per-element fuzzy
+ * expansion) is marked as proposed, in the shared wording, so the prompt never
+ * states a matching behavior the run does not perform.
  *
  * `ownOutboundSend` is the columns THIS party will disclose to the partner for
  * matched records -- its own outbound disclosure, the hardest-to-undo fact it
@@ -286,15 +371,23 @@ export function logDecisionFacts(
  * metadata (exactly the set `preparePayload` transmits), so the prompt cannot
  * overstate what leaves this machine; `undefined` when that set is not yet
  * determined at prompt time (see {@link OUTBOUND_SEND_FORWARD_REFERENCE}), an empty
- * array when the acceptor discloses nothing. Unlike the inviter's terms these names
- * are operator-file strings that reach no display boundary of their own, so they are
- * escaped here, at their sink.
+ * array when the acceptor discloses nothing. Neither value is rendered when the
+ * invitation gives the inviting party no result, since the payload step then sends
+ * nothing at all (see {@link OUTBOUND_SEND_NO_PAYLOAD}). Unlike the inviter's terms
+ * these names are operator-file strings that reach no display boundary of their own,
+ * so they are escaped here, at their sink.
+ *
+ * `promptFollows` says whether a confirmation prompt runs after this returns. It
+ * selects the heading above the repeated decision block and nothing else: the block
+ * itself is byte-identical either way, so the two printings stay one wording.
  */
-export function displayInvitation(
-  token: InvitationToken,
-  ownOutboundSend: ReadonlyArray<string> | undefined,
-  emit: ConsentSurfaceSink,
-): void {
+export function displayInvitation(params: {
+  token: InvitationToken;
+  ownOutboundSend: ReadonlyArray<string> | undefined;
+  emit: ConsentSurfaceSink;
+  promptFollows: boolean;
+}): void {
+  const { token, ownOutboundSend, emit, promptFollows } = params;
   const summary = summarizeInvitation(token);
   emit("Invitation details:");
   logDecisionFacts(emit, summary, ownOutboundSend);
@@ -304,33 +397,68 @@ export function displayInvitation(
   // disclosure-tradeoff note. The value is a schema enum, not partner free text;
   // the note is shared with the inviter's selection surface so both parties read
   // identical framing.
-  emit(`  linkage strategy: ${summary.linkageStrategy}`);
+  emit(
+    `  ${marked("linkage strategy", "linkageStrategy")}: ` +
+      summary.linkageStrategy,
+  );
   if (summary.linkageStrategy === "single-pass")
-    emit(`  note: ${singlePassDisclosureNotice()}`);
+    emit(`    ${singlePassDisclosureNotice()}`);
   // Stated from the accepting party's perspective (this summary is shown only to
   // the acceptor, before it confirms): YOU receive iff the inviter shares, and the
   // inviter receives iff its terms expect output. For a one-sided invitation this
   // tells the acceptor plainly whether it gets a result, rather than leaving it to
   // invert the inviter's "shares with partner" bit.
+  //
+  // The two lines are NOT equally enforced, which is the whole reason each carries
+  // its basis: this party's own non-receipt is a hard fact the run holds, while
+  // withholding a result from the partner rests on the agreed terms being honored.
+  // Presenting them alike would let a cooperative undertaking read as a guarantee.
+  //
+  // The partner's line is not one register either, so its marker follows the VALUE
+  // rather than the line: a partner that does receive is one the run itself delivers
+  // to, and only its use of the result rests on the agreement, while a partner that
+  // does not rests on the agreement for the whole fact. Marking a disclosure that
+  // certainly happens as merely the partner's word is the same error facing the
+  // other way.
   emit(
-    `  you will receive the result: ${summary.inviterSharesResult ? "yes" : "no"}`,
+    `  ${marked("you will receive the result", "viewerReceivesResult")}: ` +
+      (summary.inviterSharesResult ? "yes" : "no"),
+  );
+  if (!summary.inviterSharesResult)
+    emit(`    ${CONSENT_FACTS.viewerReceivesNoResult.note}`);
+  emit(
+    `  ${marked(
+      "the inviting party will receive the result",
+      summary.inviterReceivesOutput
+        ? "partnerReceivesResult"
+        : "partnerReceivesNoResult",
+    )}: ` + (summary.inviterReceivesOutput ? "yes" : "no"),
   );
   emit(
-    `  the inviting party will receive the result: ` +
-      `${summary.inviterReceivesOutput ? "yes" : "no"}`,
+    `    ${
+      summary.inviterReceivesOutput
+        ? CONSENT_FACTS.partnerReceivesResult.note
+        : CONSENT_FACTS.partnerReceivesNoResult.note
+    }`,
   );
+  // The honest-helper membership disclosure, kept apart from the cooperative caveat
+  // above rather than folded under it: that caveat is about a partner that does not
+  // honor the terms, while this holds however honestly the partner behaves -- so it
+  // is a fact of its own, and carries the opposite basis.
+  if (!summary.inviterReceivesOutput) {
+    emit(
+      `  ${marked("what your partner learns either way", "partnerLearnsOwnMembership")}:`,
+    );
+    emit(`    ${CONSENT_FACTS.partnerLearnsOwnMembership.note}`);
+  }
   emit(
-    `  duplicate matches: ` +
+    `  ${marked("duplicate matches", "duplicateMatches")}: ` +
       (summary.deduplicate
         ? "a record may match more than one of the partner's records"
         : "each record matches at most one of the partner's records"),
   );
   if (summary.deduplicate && !summary.deduplicateApplied)
-    emit(
-      "  note: the inviting party proposes this, but this version does not " +
-        "yet apply it and will refuse to run; ask for an invitation without " +
-        "deduplication.",
-    );
+    emit(`    ${PROPOSED_NOT_APPLIED_NOTES.deduplicate}`);
 
   // The fields the keys actually match on, one short line ahead of the two long
   // matching blocks, so the single fact consent most depends on is legible without
@@ -338,48 +466,62 @@ export function displayInvitation(
   // compact label for a schema-validated field type, so the joined line carries no
   // partner text.
   if (summary.matchedFields.length > 0)
-    emit(`  matched on: ${summary.matchedFields.join(", ")}`);
+    emit(
+      `  ${marked("matched on", "matchedFields")}: ` +
+        summary.matchedFields.join(", "),
+    );
 
   // The short, high-level field list precedes the long key list: the keys enumerate
   // the combinations OF these fields, and on a terminal the block printed second is
   // the one that scrolls the first off the screen.
   displayLinkageFields(emit, summary);
-  emit("  linkage keys:");
+  emit(`  ${marked("linkage keys", "linkageKeys")}:`);
   for (const key of summary.linkageKeys) displayLinkageKey(emit, key);
 
   // The columns the inviter declares it will transmit for matched records, in the
   // inviter's namespace -- what this party will RECEIVE. Derived from the wire's own
   // disclosure predicate (the token's carried disclosedPayloadColumns) when the
   // invitation carries one, falling back to the authored payload.send otherwise. A
-  // declared-but-empty set is a real "you will receive no payload columns" lock-in (a
-  // later non-empty payload aborts), shown as (none); a lazy send -- no carried subset
-  // and nothing authored -- is omitted, since it reconciles at exchange time.
+  // lazy send -- no carried subset and nothing authored -- is omitted, since it
+  // reconciles at exchange time; that omission is what leaves a bare "(none)"
+  // unambiguous, since only a declared direction reaches the line at all. What the
+  // declaration commits its party to, and what a violation of it costs, is
+  // docs/CLI.md's to state.
+  //
+  // The two sources carry different bases, so the marker is selected from which one
+  // the summary used: only the carried subset is locked in and reconciled against.
   if (summary.payload?.sendDeclared === true) {
-    if (summary.payload.send.length === 0)
-      emit(`  columns you will receive: ${EMPTY_PAYLOAD_LOCK_IN}`);
+    const label = marked(
+      "columns you will receive",
+      summary.payload.sendFromCarriedSubset
+        ? "inboundPayloadColumnsCarried"
+        : "inboundPayloadColumnsAuthored",
+    );
+    if (summary.payload.send.length === 0) emit(`  ${label}: (none)`);
     else {
-      emit("  columns you will receive:");
+      emit(`  ${label}:`);
       logList(emit, "    ", summary.payload.send);
     }
   }
   // The opposite direction: the columns the inviter requests FROM this party for
-  // matched records -- what YOU may send. A declared receive (present, even if
-  // empty) is cross-checked: an empty set strictly asserts you send nothing (a
-  // non-empty send then aborts), shown as (none); an absent receive reconciles
-  // lazily (the inviter takes whatever your metadata discloses) and is omitted.
+  // matched records -- what YOU may send. Same declaration gate as above: an absent
+  // receive reconciles lazily (the inviter takes whatever your metadata discloses)
+  // and prints nothing, so the "(none)" a declared empty set prints is the inviter
+  // asking for no column rather than asking for none in particular.
   if (summary.payload?.receiveDeclared === true) {
-    if (summary.payload.receive.length === 0)
-      emit(
-        `  columns the inviting party requests from you: ${EMPTY_PAYLOAD_LOCK_IN}`,
-      );
+    const label = marked(
+      "columns the inviting party requests from you",
+      "requestedPayloadColumns",
+    );
+    if (summary.payload.receive.length === 0) emit(`  ${label}: (none)`);
     else {
-      emit("  columns the inviting party requests from you:");
+      emit(`  ${label}:`);
       logList(emit, "    ", summary.payload.receive);
     }
   }
 
   if (summary.legalAgreement !== undefined) {
-    emit("  legal agreement:");
+    emit(`  ${marked("legal agreement", "legalAgreement")}:`);
     emit(`    reference: ${summary.legalAgreement.reference}`);
     // "stated purpose", not "purpose": the value is partner-authored free text,
     // sanitized but never vetted -- only byte-compared against this party's own copy
@@ -390,12 +532,19 @@ export function displayInvitation(
     );
   }
 
-  if (summary.expires !== undefined) emit(`  expires: ${summary.expires}`);
+  if (summary.expires !== undefined)
+    emit(`  ${marked("expires", "invitationExpiry")}: ${summary.expires}`);
 
   // Nothing is printed after this, so what the prompt is answered against is these
-  // facts rather than the tail of the key list. The heading says "repeated" because
-  // that is the whole claim being made: this block introduces nothing, and the
-  // operator who read the terms from the top has already seen every line of it.
-  emit("Before you accept, repeated from above:");
+  // facts rather than the tail of the key list. Both headings say "repeated"
+  // because that is the whole claim being made: this block introduces nothing, and
+  // the operator who read the terms from the top has already seen every line of it.
+  // Only the framing differs -- with no prompt following, nothing is being asked,
+  // and a heading that said otherwise would invite a decision already recorded.
+  emit(
+    promptFollows
+      ? REPEATED_FACTS_HEADING_BEFORE_PROMPT
+      : REPEATED_FACTS_HEADING_UNATTENDED,
+  );
   logDecisionFacts(emit, summary, ownOutboundSend);
 }

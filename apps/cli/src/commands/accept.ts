@@ -607,15 +607,16 @@ export async function handler(argv: Arguments): Promise<void> {
       // routed diagnostics to a --log-file or above info, so consent is never asked
       // for terms this run did not show. --consent-to-terms asks nothing, so its
       // surface stays plain diagnostic output on the routing the operator chose.
-      displayInvitation(
-        ready.token,
+      displayInvitation({
+        token: ready.token,
         ownOutboundSend,
-        consentSurfaceSink({
+        emit: consentSurfaceSink({
           log,
           logFile: options.logFile,
           willPrompt: !consentToTerms,
         }),
-      );
+        promptFollows: !consentToTerms,
+      });
       // With --consent-to-terms, skip the prompt and proceed on the recorded
       // advance consent. Log the bypass so an unattended run's own log shows the
       // human checkpoint was deliberately satisfied ahead of time, not silently

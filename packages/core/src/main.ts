@@ -98,6 +98,20 @@ export type {
   InvitationSummary,
   InvitationTransformSummary,
 } from "./invitationSummary.js";
+// The classification and caveat copy that go with that display model: whether a
+// fact the acceptance surfaces state is enforced by the exchange or rests on the
+// partner's word, and the fixed sentences both surfaces render for it.
+export {
+  CONSENT_BASIS_MARKERS,
+  CONSENT_FACTS,
+  OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
+  PROPOSED_NOT_APPLIED_NOTES,
+} from "./consentFacts.js";
+export type {
+  ConsentFact,
+  ConsentFactBasis,
+  ConsentFactId,
+} from "./consentFacts.js";
 // Which proposed settings today's exchange actually applies. Read by the summary
 // above (to flag a proposed-but-not-applied term) and by the web app's linkage-
 // terms editor and import path.

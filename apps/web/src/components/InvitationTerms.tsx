@@ -14,7 +14,13 @@ import {
 import { IconChevronRight } from "@tabler/icons-react";
 import { useReducedMotion } from "@mantine/hooks";
 
-import { sanitizeForDisplay, summarizeInvitation } from "@psilink/core";
+import {
+  CONSENT_FACTS,
+  OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
+  PROPOSED_NOT_APPLIED_NOTES,
+  sanitizeForDisplay,
+  summarizeInvitation,
+} from "@psilink/core";
 
 import { ColumnChips } from "@components/ColumnChips";
 
@@ -162,7 +168,7 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
                       it does not. Not-applied narrows the match (fewer candidates),
                       the safe disclosure direction, so it needs no core prominence. */}
                   {!element.fuzzyComparisonApplied &&
-                    " (proposed; not yet applied)"}
+                    ` ${PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons}`}
                 </Text>
               )}
             </Text>
@@ -340,14 +346,15 @@ function CondensableDetails({
  * deduplicate and fuzzy change match multiplicity/breadth, not what is disclosed,
  * so their headlines sit in a disclosure rather than the core (deduplicate in
  * "Other details", fuzzy in each key's detail, itself behind the matching
- * disclosure) and their caveats sit with those headlines, co-hidden with them. The asymmetry is deliberate and safe in the disclosure direction: psi-c
- * not-applied makes the run disclose MORE than its count-only headline promises
- * (identifiers revealed) -- the disclosure-critical direction that demands core
- * prominence -- while deduplicate/fuzzy not-applied make the run match LESS than
- * proposed, disclosing no more than the acceptor consented to. All caveat copy is
- * fixed (gated on the schema enum and the APPLIED_SETTINGS flags), so no partner
- * text enters a caveat, and render tests pin each caveat at its headline's level
- * against the accessibility tree.
+ * disclosure) and their caveats sit with those headlines, co-hidden with them. The
+ * asymmetry is deliberate: a count-only headline is the one an acceptor could act
+ * on -- treating an exchange as safe to run because only a count is revealed --
+ * whereas a looser match multiplicity or breadth is not something a reader takes as
+ * a disclosure guarantee, so its caveat can sit one expand down with it. What each
+ * caveat SAYS is fixed copy read from `PROPOSED_NOT_APPLIED_NOTES` in
+ * `@psilink/core`, which the CLI accept prompt renders too, so no partner text
+ * enters a caveat and neither surface can restate one. Render tests pin each caveat
+ * at its headline's level against the accessibility tree.
  *
  * Two payload facts whose detail lives in the "Other details" disclosure carry an
  * always-visible count in a direction tier, since each would otherwise be invisible
@@ -359,7 +366,13 @@ function CondensableDetails({
  * The direction of each is viewer-relative: under the inviter's "proposing" preview
  * the same egress count is the inviter's own inbound, so it lands in "What you
  * receive" there, and the inviter's own send is shown as chips under "What you
- * disclose" rather than as an ingress line. An attached legal agreement is promoted
+ * disclose" rather than as an ingress line. Whichever side is reading, that
+ * outbound-send slot is gated on the VIEWER's partner receiving a result -- the
+ * payload step transmits nothing at all to a partner not entitled to one, so a
+ * column list there would name a disclosure that does not happen -- and the two
+ * sides resolve that one fact from opposite `output` fields.
+ *
+ * An attached legal agreement is promoted
  * in full -- its reference, PURPOSE, and expiry render in the core (not a bare flag),
  * because the purpose is the compliance-pivotal field a 45 CFR 164.528 accounting
  * and FERPA's studies / audit-evaluation exceptions turn on (docs/COMPLIANCE.md) and
@@ -368,8 +381,12 @@ function CondensableDetails({
  *
  * Result sharing's two lines are NOT equally enforced, and the copy marks the
  * difference so a cooperative withholding is not read as a cryptographic guarantee.
- * The viewer's OWN non-receipt is enforced -- a party set to receive no result is
- * sent none and its receive check fails closed on any it is sent -- so a "No" there
+ * Which register each falls in, and the sentence that says so, are read from
+ * `CONSENT_FACTS` in `@psilink/core` -- the same table the CLI accept prompt reads,
+ * so the two acceptance surfaces cannot classify one fact two ways or word its
+ * caveat differently. The viewer's OWN non-receipt is enforced -- a party set to
+ * receive no result is sent none and its receive check fails closed on any it is
+ * sent -- so a "No" there
  * is a hard fact. The PARTNER's non-receipt is COOPERATIVE: keeping the result from
  * the partner rests on the agreed terms being honored, not on a guarantee this side
  * can impose (a documented property of one-sided PSI, docs/notes/one-sided-
@@ -444,7 +461,9 @@ export function InvitationTerms({
    * list because the set is not yet known -- e.g. the review screen before a file is
    * chosen, where the `review` perspective instead surfaces a fixed-copy
    * forward-reference that the acceptor confirms its exact send after choosing a
-   * file. */
+   * file. Neither value reaches the screen when the invitation gives the inviting
+   * party no result: the payload step transmits nothing at all to a partner not
+   * entitled to one, so the block states that instead of any column set. */
   outboundColumns?: Array<string>;
   /** Which context this renders in. Drives the heading and intro copy and the
    * viewer-centric blocks (Result sharing, the payload send/receive framing, and
@@ -546,20 +565,61 @@ export function InvitationTerms({
     perspective === "proposing"
       ? "Your partner will receive the result"
       : "Your partner (the inviter) will receive the result";
-  // The acceptor's own outbound disclosure block renders as either the actual send
-  // list (a chosen file supplies outboundColumns) or, on the pre-file review screen,
-  // the fixed-copy forward-reference. Both are the acceptor's data leaving, so they
-  // sit in the "what you disclose" group with the egress request; the inviter's own
-  // send renders there as chips under "proposing" instead.
+  // The outbound-send slot holds whichever block states what this viewer's own data
+  // leaving amounts to: the inviter's declared send as chips under "proposing", and
+  // for the acceptor either the actual send list (a chosen file supplies
+  // outboundColumns) or, on the pre-file review screen, the fixed-copy
+  // forward-reference. All of them are the viewer's data leaving, so they sit in the
+  // "what you disclose" group with the egress request.
+  //
+  // A partner that receives no result takes the slot ahead of every one of them,
+  // whichever side the viewer sits on: the payload step transmits nothing at all to a
+  // partner not entitled to the result (an empty message goes on the wire in its
+  // place), so no column leaves whatever the operator's file holds, and a listed set
+  // would name a disclosure that does not happen. The gate is partnerReceivesResult
+  // -- the viewer-relative split computed above -- and not either raw summary field,
+  // because the two sides read opposite ones: an inviter transmits when ITS partner
+  // (the acceptor) receives, which is the invitation's shareWithPartner, while an
+  // acceptor transmits when ITS partner (the inviting party) receives, which is
+  // expectsOutput. Gating either preview on the other's field would suppress a
+  // disclosure that does happen.
+  //
+  // For the acceptor the fact also wins over the forward-reference, because the file
+  // that reference points at cannot change the answer, and over the empty-set
+  // confirmation, because the direction holds however the operator's file changes
+  // while an empty disclosure is a property of the metadata resolved for this
+  // acceptance alone -- the precedence the CLI accept prompt applies, so the two
+  // surfaces resolve an overlapping case the same way. The displayed direction and
+  // the run's own gate are the same fact with an aborting check between them:
+  // acceptance mirrors the invitation's output direction into this party's terms, and
+  // the compatibility check refuses a partner presenting terms that disagree with
+  // that mirror.
+  const outboundNoPayloadRenders = !partnerReceivesResult;
+  const proposingSendChipsRender =
+    perspective === "proposing" && !outboundNoPayloadRenders;
   const outboundSendListRenders =
-    perspective !== "proposing" && outboundColumns !== undefined;
+    perspective !== "proposing" &&
+    !outboundNoPayloadRenders &&
+    outboundColumns !== undefined;
   const outboundForwardRefRenders =
-    perspective === "review" && outboundColumns === undefined;
-  // The "what you disclose" group renders when this viewer discloses anything: the
-  // inviter always shows its send chips under "proposing"; the acceptor shows its
-  // outbound block and/or the egress request.
+    perspective === "review" &&
+    !outboundNoPayloadRenders &&
+    outboundColumns === undefined;
+  // Every block that can occupy the outbound-send slot carries the same caption, the
+  // one naming the viewer's own send: the inviter's declared send under "proposing",
+  // the acceptor's own otherwise. The caption follows the VIEWER, never the direction
+  // fact, so the slot does not rename itself when the gate above answers it.
+  const outboundSendSlotLabel =
+    perspective === "proposing"
+      ? "Columns sent to your partner"
+      : "What you will send to your partner";
+  // The "what you disclose" group renders when this viewer discloses anything: its
+  // outbound-send slot (which always holds one block under "proposing", and holds one
+  // for the acceptor once the gate or a chosen file answers it) and/or the egress
+  // request.
   const showsDiscloseGroup =
-    perspective === "proposing" ||
+    proposingSendChipsRender ||
+    outboundNoPayloadRenders ||
     outboundSendListRenders ||
     outboundForwardRefRenders ||
     egressNotice !== undefined;
@@ -689,7 +749,7 @@ export function InvitationTerms({
           it into the heading's announcement; pinned by render tests. */}
       {perspective === "review" && (
         <Text id={identityNoteId} size="sm" fw={500}>
-          Your partner entered this name; psilink has not verified it.
+          {CONSENT_FACTS.invitingParty.note}
         </Text>
       )}
       <Text size="sm" c="dimmed">
@@ -727,9 +787,9 @@ export function InvitationTerms({
               from what the invitation declares. The send is an eager, definite
               declaration under "proposing", so an empty set reads as a positive "no
               columns" confirmation rather than an unknown. */}
-          {perspective === "proposing" && (
+          {proposingSendChipsRender && (
             <Term
-              label="Columns sent to your partner"
+              label={outboundSendSlotLabel}
               captionId={proposingSendCaptionId}
             >
               {summary.payload !== undefined &&
@@ -747,13 +807,27 @@ export function InvitationTerms({
             </Term>
           )}
 
+          {/* This viewer's partner receives no result, so the payload step sends
+              nothing whatever the operator's file holds -- the case that takes the
+              slot ahead of every other block in it (see the precedence above).
+              Rendered at normal weight, not dimmed, for the reason the
+              forward-reference is: it sits beside the egress request, which must
+              never read more prominently than what actually leaves. The sentence is
+              read from `@psilink/core`, one copy for every surface stating the fact
+              (it is viewer-relative, so the inviter's preview and the acceptor's
+              screens render the same words); it is fixed first-party copy, naming no
+              column. */}
+          {outboundNoPayloadRenders && (
+            <Term label={outboundSendSlotLabel}>
+              <Text size="sm">{OUTBOUND_SEND_NO_PAYLOAD_SENTENCE}</Text>
+            </Term>
+          )}
+
           {/* The acceptor's OWN outbound disclosure once a file is chosen (its live
-              metadata disclosure). Condition inlined (rather than the
-              outboundSendListRenders boolean, which the group-render check also uses)
-              so TypeScript narrows outboundColumns to defined inside. */}
-          {perspective !== "proposing" && outboundColumns !== undefined && (
+              metadata disclosure). */}
+          {outboundSendListRenders && (
             <Term
-              label="What you will send to your partner"
+              label={outboundSendSlotLabel}
               captionId={outboundSendCaptionId}
             >
               {outboundColumns.length > 0 ? (
@@ -790,7 +864,7 @@ export function InvitationTerms({
               copy, so no per-render sanitization; it names no count or names, not yet
               known. */}
           {outboundForwardRefRenders && (
-            <Term label="What you will send to your partner">
+            <Term label={outboundSendSlotLabel}>
               <Text size="sm">
                 After you choose your file, you will confirm exactly which of
                 its columns are sent to your partner for matched records.
@@ -841,17 +915,15 @@ export function InvitationTerms({
             )}
           </Text>
           {/* psi-c states a disclosure guarantee, so by the caveat-placement rule
-              above its caveat is always-visible here with its headline: flag a
-              proposed count-only setting the run does not yet honor, so the line
-              above cannot read as in force while the exchange still reveals matched
-              identifiers. This is the disclosure-critical case -- not-applied means
-              the run reveals MORE than the count-only headline promises, so the
-              caveat may never be demoted below this always-visible headline. */}
+              above its caveat is always-visible here with its headline: the
+              count-only line must never read as in force while the exchange
+              refuses to run on those terms at all. What the caveat says -- the
+              refusal, and what to ask the partner for -- is the shared copy the
+              CLI accept prompt renders, so the two surfaces cannot state opposite
+              outcomes for one invitation. */}
           {summary.algorithm === "psi-c" && !summary.psiCApplied && (
             <Text size="xs" c="dimmed">
-              Your partner proposes this, but this version of the exchange does
-              not yet apply it; the shared identifiers of matched records are
-              still revealed.
+              {PROPOSED_NOT_APPLIED_NOTES.psiC}
             </Text>
           )}
         </Term>
@@ -861,22 +933,23 @@ export function InvitationTerms({
             The two lines are NOT equally enforced, and the copy must not present a
             trust-contingent "No" as a cryptographic guarantee: Line A (the viewer's
             own receipt) is enforced -- a party set to receive no result is sent none
-            and its receive check fails closed on any it is sent -- while Line B (the
-            partner's receipt) is COOPERATIVE, resting on the agreed terms being
-            honored rather than on a guarantee this side can impose (a documented
-            property of one-sided PSI, docs/notes/one-sided-disclosure.md). Each "No"
-            carries the caveat for its register. The viewer's own "Yes" is left
-            unqualified (receiving your own result needs no note); the partner's "Yes"
-            -- the accountable disclosure of your result to them -- carries a brief
-            pointer that the agreement, not this tool, governs its use once out. */}
+            and its receive check fails closed on any it is sent -- while Line B's
+            "No" is COOPERATIVE, resting on the agreed terms being honored rather
+            than on a guarantee this side can impose (a documented property of
+            one-sided PSI, docs/notes/one-sided-disclosure.md); its "Yes" is a
+            disclosure the run itself delivers, and only the partner's use of the
+            result rests on the agreement. Each "No" carries the caveat for its
+            register. The viewer's own "Yes" is left unqualified (receiving your own
+            result needs no note); the partner's "Yes" -- the accountable disclosure
+            of your result to them -- carries a brief pointer that the agreement, not
+            this tool, governs its use once out. */}
         <Term label="Result sharing">
           <Text size="sm">
             You will receive the matched result: {yesNo(viewerReceivesResult)}
           </Text>
           {!viewerReceivesResult && (
             <Text size="xs" c="dimmed">
-              Enforced: you are sent no result, and any result sent to you is
-              rejected.
+              {CONSENT_FACTS.viewerReceivesNoResult.note}
             </Text>
           )}
           <Text size="sm">
@@ -889,15 +962,12 @@ export function InvitationTerms({
             // agreement -- not this tool -- governs its use, mirroring the cooperative
             // caveat's "the tool is not the control here" frame.
             <Text size="xs" c="dimmed">
-              Once received, its use is governed by your agreement, not this
-              tool.
+              {CONSENT_FACTS.partnerReceivesResult.note}
             </Text>
           ) : (
             <>
               <Text size="xs" c="dimmed">
-                By agreement, not enforced: keeping the result from your partner
-                rests on the agreed terms being honored, not on anything this
-                tool can enforce.
+                {CONSENT_FACTS.partnerReceivesNoResult.note}
               </Text>
               {/* The honest-helper membership disclosure, kept DISTINCT from the
                   cooperative caveat above: that caveat is about a dishonest
@@ -919,9 +989,7 @@ export function InvitationTerms({
                   so no partner text enters it; strategy-neutral, since it is true
                   for every one-sided configuration. */}
               <Text size="xs" c="dimmed">
-                Even when honored, your partner learns which of its own records
-                are in your data (not which of yours). This is inherent to the
-                match, not a breach.
+                {CONSENT_FACTS.partnerLearnsOwnMembership.note}
               </Text>
             </>
           )}
@@ -1090,12 +1158,7 @@ export function InvitationTerms({
             >
               Partner-defined character constraints
             </Title>
-            <Text size="sm">
-              Your partner declares an allowed-character pattern for these
-              fields. Each is a partner-supplied regular expression that psilink
-              has not verified, and it is a data expectation rather than an
-              enforced filter.
-            </Text>
+            <Text size="sm">{CONSENT_FACTS.allowedCharacterPatterns.note}</Text>
             <Stack gap="xs">
               {/* Keyed by index: the fields are already deduped and their order is
                   fixed for a given terms document, and the sanitized label is not
@@ -1260,9 +1323,11 @@ export function InvitationTerms({
                     instead, so it is suppressed here under "proposing". */}
                   {/* Shown whenever the send set is a definite declaration --
                     including the empty set, rendered "(none)" so the strict
-                    "receive nothing" lock-in is visible rather than inferred from a
-                    missing line (the CLI's displayInvitation shows the same). A
-                    lazy send (not declared) is omitted instead. */}
+                    "receive nothing" commitment is visible rather than inferred from
+                    a missing line (the CLI's displayInvitation shows the same). A
+                    lazy send (not declared) is omitted instead, which is what leaves
+                    the bare "(none)" unambiguous: only a declared direction reaches
+                    this line at all. */}
                   {summary.payload.sendDeclared &&
                     perspective !== "proposing" && (
                       <Stack gap={2}>
@@ -1280,8 +1345,7 @@ export function InvitationTerms({
                           </List>
                         ) : (
                           <Text size="sm" c="dimmed">
-                            (none) -- any payload column would abort the
-                            exchange
+                            (none)
                           </Text>
                         )}
                       </Stack>
@@ -1289,7 +1353,9 @@ export function InvitationTerms({
                   {/* Mirror of the send block: a declared receive is shown even
                       when empty, rendered "(none)" so the strict "the acceptor
                       sends nothing" assertion is visible rather than inferred from
-                      a missing line. A lazy (undeclared) receive is omitted. */}
+                      a missing line. A lazy (undeclared) receive is omitted, so the
+                      "(none)" is the inviter asking for no column rather than asking
+                      for none in particular. */}
                   {summary.payload.receiveDeclared && (
                     <Stack gap={2}>
                       <Text size="sm">
@@ -1305,7 +1371,7 @@ export function InvitationTerms({
                         </List>
                       ) : (
                         <Text size="sm" c="dimmed">
-                          (none) -- any payload column would abort the exchange
+                          (none)
                         </Text>
                       )}
                     </Stack>
@@ -1328,9 +1394,7 @@ export function InvitationTerms({
                 nothing is disclosed. */}
                 {summary.deduplicate && !summary.deduplicateApplied && (
                   <Text size="xs" c="dimmed">
-                    Your partner proposes this, but this version of the exchange
-                    does not yet apply it and will refuse to run; ask your
-                    partner for an invitation without deduplication.
+                    {PROPOSED_NOT_APPLIED_NOTES.deduplicate}
                   </Text>
                 )}
               </Term>

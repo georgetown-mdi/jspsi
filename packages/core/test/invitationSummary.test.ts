@@ -38,6 +38,34 @@ describe("the consent summary's payload block", () => {
     expect(summary.payload?.send).toEqual(disclosed);
   });
 
+  test("records which source the displayed send set came from", () => {
+    // Both sources are declarations, and only one of them is a lock-in: an
+    // acceptance writes the CARRIED subset as what it will receive and reconciles
+    // against it, while an authored send with no carried subset leaves nothing to
+    // reconcile against. A surface classifying the received-columns line reads
+    // this narrower flag, so it is pinned apart from sendDeclared.
+    const metadata = inferMetadata(DISCLOSING_COLUMNS);
+    const terms = getDefaultLinkageTerms("Inviter", metadata);
+    const authoredSend = { payload: { send: [{ name: "notes" }] } };
+    const authored = summarizeInvitation({
+      linkageTerms: { ...terms, ...authoredSend },
+    });
+    expect(authored.payload).toMatchObject({
+      send: ["notes"],
+      sendDeclared: true,
+      sendFromCarriedSubset: false,
+    });
+    const carried = summarizeInvitation({
+      linkageTerms: { ...terms, ...authoredSend },
+      disclosedPayloadColumns: disclosedColumnNames(metadata),
+    });
+    expect(carried.payload).toMatchObject({
+      send: disclosedColumnNames(metadata),
+      sendDeclared: true,
+      sendFromCarriedSubset: true,
+    });
+  });
+
   test("shows no received columns when nothing is carried or authored", () => {
     const terms = getDefaultLinkageTerms(
       "Inviter",
@@ -65,6 +93,7 @@ describe("the consent summary's payload block", () => {
     expect(summary.payload).toEqual({
       send: [],
       sendDeclared: true,
+      sendFromCarriedSubset: true,
       receive: [],
       receiveDeclared: false,
     });
@@ -86,6 +115,7 @@ describe("the consent summary's payload block", () => {
     expect(summary.payload).toEqual({
       send: [],
       sendDeclared: false,
+      sendFromCarriedSubset: false,
       receive: [],
       receiveDeclared: true,
     });

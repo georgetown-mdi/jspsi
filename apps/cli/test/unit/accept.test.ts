@@ -8,6 +8,7 @@ import type { Arguments } from "yargs";
 import logLibrary from "loglevel";
 import YAML from "yaml";
 import {
+  CONSENT_FACTS,
   encodeInvitation,
   getDefaultLinkageTerms,
   getLogger,
@@ -29,6 +30,7 @@ import {
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
+  ConsentFact,
   InvitationToken,
   LinkageTerms,
   TransformStep,
@@ -1247,11 +1249,17 @@ function renderDisplayInvitation(
   log: ReturnType<typeof getLogger>,
   token: InvitationToken,
   ownOutboundSend?: ReadonlyArray<string>,
+  promptFollows = true,
 ): string {
   const infoSpy = vi.spyOn(log, "info");
   try {
-    displayInvitation(token, ownOutboundSend, (line) => {
-      log.info(line);
+    displayInvitation({
+      token,
+      ownOutboundSend,
+      emit: (line) => {
+        log.info(line);
+      },
+      promptFollows,
     });
     return infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
   } finally {
@@ -1292,9 +1300,15 @@ function entriesUnder(
   return entries;
 }
 
+// The display's marked labels, spelled out rather than derived from CONSENT_FACTS,
+// so a marker that silently changed vocabulary reddens the assertions using them
+// instead of following the table.
+const OUTBOUND_SEND_LABEL = "columns you will send (enforced)";
+const INVITING_PARTY_LABEL = "inviting party (your partner's word)";
+
 /** The acceptor's own outbound-send columns, as displayed. */
 function outboundSendEntries(lines: ReadonlyArray<string>): Array<string> {
-  return entriesUnder(lines, "  columns you will send:");
+  return entriesUnder(lines, `  ${OUTBOUND_SEND_LABEL}:`);
 }
 
 test("displayInvitation escapes a hostile inviter identity and key names", () => {
@@ -1336,15 +1350,69 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
     ...base,
     disclosedPayloadColumns: ["diagnosis", "notes"],
   });
-  expect(named).toContain("columns you will receive:");
+  expect(named).toContain("columns you will receive (enforced):");
   expect(named).toContain("\n    - diagnosis");
   expect(named).toContain("\n    - notes");
-  expect(lines({ ...base, disclosedPayloadColumns: [] })).toContain(
-    "columns you will receive: (none) -- any payload column would abort the exchange",
+  // The empty set is a bare "(none)", with nothing after it: the line renders only
+  // for a declared direction (the absent case below prints no line at all), so the
+  // reader of a "(none)" is already looking at an explicit declaration, and the
+  // enforcement register is what the label's marker carries. What the declaration
+  // commits its party to is stated at length in docs/CLI.md, not on the prompt.
+  expect(lines({ ...base, disclosedPayloadColumns: [] }).split("\n")).toContain(
+    "  columns you will receive (enforced): (none)",
   );
   expect(lines({ ...base, disclosedPayloadColumns: undefined })).not.toContain(
     "columns you will receive",
   );
+});
+
+test("displayInvitation: the received-columns marker follows what the invitation carried, not what it declared", () => {
+  // The same line has two sources and they do not rest on the same thing. The
+  // carried subset is the set an acceptance locks in and reconciles the received
+  // payload against; an authored payload.send with no carried subset locks in
+  // nothing, so an inviter that declares one set and transmits another is not
+  // stopped on the online run. Marking that case "enforced" would announce a check
+  // that does not run, so the marker is keyed on what was carried.
+  const log = getLogger("accept-display-receive-basis-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  // One terms document for both renderings, authoring the columns the carried
+  // subset also names, so the only difference between the two is whether the token
+  // carries the subset.
+  const linkageTerms: LinkageTerms = {
+    ...base.linkageTerms,
+    payload: { send: [{ name: "diagnosis" }, { name: "notes" }] },
+  };
+  const authored = renderDisplayInvitation(log, { ...base, linkageTerms });
+  const carried = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms,
+    disclosedPayloadColumns: ["diagnosis", "notes"],
+  });
+  expect(authored).toContain("columns you will receive (your partner's word):");
+  expect(authored).toContain("\n    - diagnosis");
+  expect(authored).toContain("\n    - notes");
+  expect(authored).not.toContain("columns you will receive (enforced)");
+  expect(carried).toContain("columns you will receive (enforced):");
+  expect(carried).not.toContain(
+    "columns you will receive (your partner's word)",
+  );
+  // The marker is the whole of the difference: the same columns are listed either
+  // way, so nothing else about the surface moves with the basis.
+  expect(
+    authored.replace(
+      "columns you will receive (your partner's word)",
+      "columns you will receive (enforced)",
+    ),
+  ).toBe(carried);
+  // An authored EMPTY send is not a declaration at all -- it carries no subset and
+  // prints no line -- so a rendered "(none)" is always the carried, enforced case.
+  expect(
+    renderDisplayInvitation(log, {
+      ...base,
+      linkageTerms: { ...base.linkageTerms, payload: { send: [] } },
+    }),
+  ).not.toContain("columns you will receive");
 });
 
 test("displayInvitation: the inviter's request-from-acceptor receive shows names, '(none)' when empty, and nothing when absent", () => {
@@ -1365,11 +1433,16 @@ test("displayInvitation: the inviter's request-from-acceptor receive shows names
     linkageTerms: { ...base.linkageTerms, payload: { receive } },
   });
   const named = lines(withReceive([{ name: "dose" }, { name: "outcome" }]));
-  expect(named).toContain("columns the inviting party requests from you:");
+  expect(named).toContain(
+    "columns the inviting party requests from you (your partner's word):",
+  );
   expect(named).toContain("\n    - dose");
   expect(named).toContain("\n    - outcome");
-  expect(lines(withReceive([]))).toContain(
-    "columns the inviting party requests from you: (none) -- any payload column would abort the exchange",
+  // The mirror of the line above, and bare for the same reason: only a declared
+  // direction prints, so "(none)" is the inviter asking for no column rather than
+  // the lazy case, which prints nothing.
+  expect(lines(withReceive([])).split("\n")).toContain(
+    "  columns the inviting party requests from you (your partner's word): (none)",
   );
   expect(lines(withReceive(undefined))).not.toContain(
     "the inviting party requests from you",
@@ -1391,7 +1464,7 @@ test("displayInvitation: shows the acceptor's own outbound send, one column per 
   // The heading is present and the columns appear one per line, before the
   // inviter's "columns you will receive"/"linkage keys" terms.
   const headingIndex = lines.findIndex((l) =>
-    l.includes("columns you will send:"),
+    l.includes(`${OUTBOUND_SEND_LABEL}:`),
   );
   expect(headingIndex).toBeGreaterThanOrEqual(0);
   expect(lines).toContain("    - diagnosis");
@@ -1399,7 +1472,7 @@ test("displayInvitation: shows the acceptor's own outbound send, one column per 
   // No presupposing empty/unknown phrasing when the set is a real non-empty
   // disclosure.
   expect(joined).not.toContain("(none)");
-  expect(joined).not.toContain("determined from your input file");
+  expect(joined).not.toContain("not yet known");
 });
 
 test("displayInvitation: a column name containing the list separator is not split into two entries", () => {
@@ -1428,17 +1501,64 @@ test("displayInvitation: the empty and not-yet-known outbound-send cases avoid a
   // list and not a forward-reference.
   const empty = renderDisplayInvitation(log, base, []);
   expect(empty).toContain(
-    "columns you will send: (none) -- only matched records",
+    `${OUTBOUND_SEND_LABEL}: (none) -- only matched records`,
   );
   expect(outboundSendEntries(empty.split("\n"))).toEqual([]);
-  // Not-yet-known: no metadata at prompt time, so the line forward-references the
-  // exchange rather than claiming any count.
+  // Not-yet-known: no metadata at prompt time, so the line says the set is not
+  // known rather than claiming any count -- and names what actually settles it.
+  // Nothing on this path asks the acceptor to confirm the set later, unlike the
+  // web acceptor, which chooses its file on the consent screen itself, so the line
+  // must not point ahead to a confirmation psilink never gives.
   const unknown = renderDisplayInvitation(log, base, undefined);
+  expect(unknown).toContain(`${OUTBOUND_SEND_LABEL}: not yet known`);
   expect(unknown).toContain(
-    "columns you will send: determined from your input file",
+    "    Determined from your input file when the exchange runs; psilink does " +
+      "not ask you to confirm it again.",
   );
   expect(unknown).not.toContain("(none)");
+  expect(unknown).not.toContain("you will confirm");
   expect(outboundSendEntries(unknown.split("\n"))).toEqual([]);
+});
+
+test("displayInvitation: an inviting party that receives no result is sent nothing, whatever the acceptor's own set is", () => {
+  // The payload step transmits nothing at all to a partner not entitled to the
+  // result, so a listed column set would name a disclosure that does not happen --
+  // under the marker that says the run holds it. The direction answers the line for
+  // every value of the acceptor's own set: a resolved set is not listed, the
+  // not-yet-known forward reference does not run (the input file it names cannot
+  // change this answer), and the empty case's "only matched records" tail gives way
+  // to the reason that holds however the operator's file changes.
+  const log = getLogger("accept-display-outbound-one-sided-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  const oneSided: InvitationToken = {
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      output: { expectsOutput: false, shareWithPartner: true },
+    },
+  };
+  for (const own of [["diagnosis", "medication"], [], undefined]) {
+    const rendered = renderDisplayInvitation(log, oneSided, own);
+    expect(rendered.split("\n")).toContain(
+      `  ${OUTBOUND_SEND_LABEL}: (none) -- the inviting party receives no ` +
+        "result, so no payload is sent",
+    );
+    expect(outboundSendEntries(rendered.split("\n"))).toEqual([]);
+    expect(rendered).not.toContain("diagnosis");
+    expect(rendered).not.toContain("only matched records");
+    expect(rendered).not.toContain("not yet known");
+  }
+  // The direction is the whole of the gate: the same acceptor set is listed in full
+  // when the inviting party does receive the result.
+  const twoSided = renderDisplayInvitation(log, base, [
+    "diagnosis",
+    "medication",
+  ]);
+  expect(outboundSendEntries(twoSided.split("\n"))).toEqual([
+    "diagnosis",
+    "medication",
+  ]);
 });
 
 test("displayInvitation: shows the linkage strategy and, for single-pass, the disclosure note", () => {
@@ -1449,7 +1569,7 @@ test("displayInvitation: shows the linkage strategy and, for single-pass, the di
   const base = sampleToken(FUTURE());
   // The default (cascade) is shown plainly, with no disclosure note.
   const cascade = lines(base);
-  expect(cascade).toContain("linkage strategy: cascade");
+  expect(cascade).toContain("linkage strategy (enforced): cascade");
   expect(cascade).not.toContain("consented disclosure tradeoff");
   // single-pass is the disclosure-affecting choice the acceptor consents to, so
   // it carries the shared tradeoff note (with the operator-facing doc pointer).
@@ -1457,7 +1577,7 @@ test("displayInvitation: shows the linkage strategy and, for single-pass, the di
     ...base,
     linkageTerms: { ...base.linkageTerms, linkageStrategy: "single-pass" },
   });
-  expect(singlePass).toContain("linkage strategy: single-pass");
+  expect(singlePass).toContain("linkage strategy (enforced): single-pass");
   expect(singlePass).toContain("consented disclosure tradeoff");
   expect(singlePass).toContain("docs/EXCHANGE_REFERENCE.md");
 });
@@ -1534,14 +1654,15 @@ test("displayInvitation: shows each matching rule the acceptor is consenting to"
     "note: when matched in that order, the transforms shown for First name are " +
       "applied to Last name's value",
   );
-  // The per-field data standards, including the partner-authored character class
-  // labelled as the unverified partner input it is rather than paraphrased.
-  expect(out).toContain("      - honorifics and suffixes removed");
-  expect(out).toContain("      - 1 excluded value");
-  expect(out).toContain("      - values must be valid");
-  expect(out).toContain(
-    "      allowed characters (partner-supplied, unverified): A-Za-z",
-  );
+  // The per-field data standards, under a heading marking them as the inviter's
+  // own undertaking rather than rules the exchange applies, with the
+  // partner-authored character class shown raw after a fixed first-party label
+  // rather than paraphrased as a vetted allow-list.
+  expect(out).toContain("      declared data standards (your partner's word):");
+  expect(out).toContain("        - honorifics and suffixes removed");
+  expect(out).toContain("        - 1 excluded value");
+  expect(out).toContain("        - values must be valid");
+  expect(out).toContain("        - allowed characters: A-Za-z");
   // Both payload directions, and the attached agreement.
   expect(out).toContain("    - risk_score");
   expect(out).toContain("    - program_outcome");
@@ -1553,9 +1674,9 @@ test("displayInvitation: shows each matching rule the acceptor is consenting to"
 });
 
 test("displayInvitation: a proposed setting the run does not apply is marked, not stated as in force", () => {
-  // deduplicate and psi-c are declarable but unimplemented. Printing either as a
-  // plain fact would have the operator consent to a behavior the run does not
-  // perform -- and for psi-c the run discloses MORE than the count-only claim.
+  // deduplicate and psi-c are declarable but unimplemented, and core refuses both
+  // on every run path. Printing either as a plain fact would have the operator
+  // consent to a behavior the run does not perform.
   const log = getLogger("accept-display-proposed-test");
   log.setLevel("silent");
   const base = sampleToken(FUTURE());
@@ -1567,30 +1688,125 @@ test("displayInvitation: a proposed setting the run does not apply is marked, no
 
   const oneToOne = render({});
   expect(oneToOne).toContain(
-    "duplicate matches: each record matches at most one of the partner's records",
+    "duplicate matches (enforced): each record matches at most one of the " +
+      "partner's records",
   );
   expect(oneToOne).not.toContain("proposes this");
 
   const deduplicating = render({ deduplicate: true });
   expect(deduplicating).toContain(
-    "duplicate matches: a record may match more than one of the partner's records",
+    "duplicate matches (enforced): a record may match more than one of the " +
+      "partner's records",
   );
   expect(deduplicating).toContain(
-    "note: the inviting party proposes this, but this version does not yet " +
-      "apply it and will refuse to run",
+    "    Your partner proposes this, but this version of the exchange does " +
+      "not yet apply it and will refuse to run; ask your partner for an " +
+      "invitation without deduplication.",
   );
+});
 
-  // psi-c is refused outright on every run path (assertAlgorithmImplemented), so
-  // the note must name the refusal and what to ask for -- the same shape the
-  // deduplicate note carries -- not a looser run that reveals more.
-  const countOnly = render({ algorithm: "psi-c" });
-  expect(countOnly).toContain("PSI algorithm: psi-c");
-  expect(countOnly).toContain(
-    "note: the inviting party proposes a count-only exchange, but this version " +
-      "does not yet apply it and will refuse to run; ask for an invitation " +
-      'using the "psi" algorithm.',
+test("displayInvitation: every classified fact is marked, and carries core's caveat verbatim", () => {
+  // An acceptor meets two unlike kinds of fact here: ones the exchange holds
+  // itself, and ones that are only what the inviting party declared. Reading a
+  // cooperative undertaking as a cryptographic guarantee is the error this
+  // marking exists to prevent, so an enforced line is marked positively rather
+  // than told apart by the absence of a marker on the other.
+  const log = getLogger("accept-display-basis-test");
+  log.setLevel("silent");
+  const render = (output: LinkageTerms["output"], receive: boolean): string =>
+    renderDisplayInvitation(log, {
+      ...sampleToken(FUTURE()),
+      linkageTerms: {
+        ...CONSENT_PROBE_TERMS,
+        output,
+        // A party that receives no output may request no payload columns, so the
+        // request is dropped alongside expectsOutput rather than left to fail the
+        // schema.
+        payload: receive
+          ? CONSENT_PROBE_TERMS.payload
+          : { ...CONSENT_PROBE_TERMS.payload, receive: [] },
+      },
+    });
+  // Between them these two raise every caveat the shared table carries: this
+  // party receives nothing while the inviter does, then the reverse.
+  const acceptorWithheld = render(
+    { expectsOutput: true, shareWithPartner: false },
+    true,
   );
-  // The consequence the prompt must not state: nothing is revealed, because
+  const inviterWithheld = render(
+    { expectsOutput: false, shareWithPartner: true },
+    false,
+  );
+  const rendered = `${acceptorWithheld}\n${inviterWithheld}`;
+
+  // The whole table, rather than a list restated here: a caveat this renderer
+  // authored for itself instead of reading is absent from the rendering and fails,
+  // and one the web reworded on its own side fails there for the same reason.
+  const classified: Array<ConsentFact> = Object.values(CONSENT_FACTS);
+  const notes = classified
+    .map((fact) => fact.note)
+    .filter((note) => note !== undefined);
+  expect(notes.length).toBeGreaterThan(0);
+  for (const note of notes) expect(rendered).toContain(`\n    ${note}`);
+
+  // Both classes marked, on the pair whose difference in register is the whole
+  // reason for marking: this party's own non-receipt is a hard fact the run holds,
+  // and withholding a result from the partner is not.
+  expect(acceptorWithheld).toContain(
+    "  you will receive the result (enforced): no",
+  );
+  expect(inviterWithheld).toContain(
+    "  you will receive the result (enforced): yes",
+  );
+  // The partner's receipt line is marked by its VALUE, not by the line: a partner
+  // that receives is one the run delivers to, and only its use of the result rests
+  // on the agreement; a partner that does not receive rests on the agreement for
+  // the whole fact.
+  expect(acceptorWithheld).toContain(
+    "  the inviting party will receive the result (enforced): yes",
+  );
+  expect(inviterWithheld).toContain(
+    "  the inviting party will receive the result (your partner's word): no",
+  );
+  // The honest-helper disclosure is its own fact, not a rider on the cooperative
+  // caveat: it holds however honestly the partner behaves, so it carries the
+  // opposite basis and may not inherit that line's marker.
+  expect(inviterWithheld).toContain(
+    "  what your partner learns either way (enforced):",
+  );
+  // The remaining marked lines, each on the register it belongs to.
+  expect(rendered).toContain(`  ${INVITING_PARTY_LABEL}: `);
+  expect(rendered).toContain(
+    "      declared data standards (your partner's word):",
+  );
+  expect(rendered).toContain(
+    "  allowed-character patterns (your partner's word):",
+  );
+});
+
+test("the psi-c caveat states the refusal, on both surfaces, from one terms document", () => {
+  // psi-c is refused outright on every run path (assertAlgorithmImplemented), so
+  // the exchange aborts before any identifier is revealed. A caveat saying the
+  // matched identifiers are still revealed would describe a run that does not
+  // happen.
+  //
+  // apps/web/test/browser/invitationTerms pins the same sentence against the same
+  // terms document, so the pair cannot drift apart silently. When the count-only
+  // run path lands, both flip together and both pins have to be edited -- which is
+  // the point of pinning them.
+  const log = getLogger("accept-display-psi-c-test");
+  log.setLevel("silent");
+  const countOnly = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    linkageTerms: { ...CONSENT_PROBE_TERMS, algorithm: "psi-c" },
+  });
+  expect(countOnly).toContain("PSI algorithm (enforced): psi-c");
+  expect(countOnly).toContain(
+    "    Your partner proposes a count-only exchange, but this version of the " +
+      "exchange does not yet apply it and will refuse to run; ask your partner " +
+      'for an invitation using the "psi" algorithm.',
+  );
+  // The consequence neither surface may state: nothing is revealed, because
   // nothing runs.
   expect(countOnly).not.toContain(
     "the shared identifiers of matched records are still revealed",
@@ -1682,7 +1898,9 @@ test("displayInvitation: names the fields matched on, once at the top and under 
     linkageTerms: CONSENT_PROBE_TERMS,
   }).split("\n");
 
-  expect(lines).toContain("  matched on: first name, last name, date of birth");
+  expect(lines).toContain(
+    "  matched on (enforced): first name, last name, date of birth",
+  );
   // The swap re-attributes each element's marker to its partner's field, so the
   // truncating element's "partial" is shown on the field it will actually read.
   const keyIndex = lines.indexOf(
@@ -1712,9 +1930,11 @@ test("displayInvitation: the operator's own outbound heading sits level with the
     ["diagnosis"],
   ).split("\n");
 
-  expect(lines).toContain("  columns you will send:");
-  expect(lines).toContain("  columns you will receive:");
-  expect(lines).toContain("  columns the inviting party requests from you:");
+  expect(lines).toContain(`  ${OUTBOUND_SEND_LABEL}:`);
+  expect(lines).toContain("  columns you will receive (enforced):");
+  expect(lines).toContain(
+    "  columns the inviting party requests from you (your partner's word):",
+  );
   expect(outboundSendEntries(lines)).toEqual(["diagnosis"]);
 });
 
@@ -1728,13 +1948,16 @@ test("displayInvitation: the short field list precedes the long key list", () =>
     linkageTerms: CONSENT_PROBE_TERMS,
   }).split("\n");
 
-  const fields = lines.indexOf("  personal data used:");
-  const keys = lines.indexOf("  linkage keys:");
+  const fields = lines.indexOf("  personal data used (enforced):");
+  const keys = lines.indexOf("  linkage keys (enforced):");
   expect(fields).toBeGreaterThanOrEqual(0);
   expect(keys).toBeGreaterThan(fields);
 });
 
+// The two headings the repeated decision block can sit under. Only the framing
+// differs: a prompt follows on one path and nothing does on the other.
 const REPEAT_HEADING = "Before you accept, repeated from above:";
+const REPEAT_HEADING_UNATTENDED = "Repeated from above:";
 
 test("displayInvitation: the decision facts are repeated verbatim immediately before the prompt", () => {
   // The terms run well past a screen, so an operator answering the prompt reads the
@@ -1769,12 +1992,6 @@ test("displayInvitation: the decision facts are repeated verbatim immediately be
   ];
 
   for (const { linkageTerms, ownOutboundSend } of cases) {
-    const lines = renderDisplayInvitation(
-      log,
-      { ...sampleToken(FUTURE()), linkageTerms },
-      ownOutboundSend,
-    ).split("\n");
-
     // The block is rendered independently rather than read off either printing, so
     // its LENGTH is measured too. Slicing the tail and comparing it to an
     // equal-length window at the head is a sliding comparison: it cannot see a line
@@ -1787,21 +2004,42 @@ test("displayInvitation: the decision facts are repeated verbatim immediately be
       ownOutboundSend,
     );
 
-    expect(lines.filter((line) => line === REPEAT_HEADING)).toHaveLength(1);
-    const heading = lines.indexOf(REPEAT_HEADING);
-    // Exact equality, not a prefix: a line printed after the repetition makes the
-    // tail longer than the block and fails here, whatever that line says.
-    expect(lines.slice(heading + 1)).toEqual(block);
-    // The same block, byte for byte, at the head of the display -- where index 0 is
-    // the "Invitation details:" heading the facts open under.
-    expect(lines.slice(1, 1 + block.length)).toEqual(block);
+    // Both paths through the consent decision. The heading differs -- under
+    // --consent-to-terms no prompt follows, so a heading framing the block as
+    // something to decide on would be asking for a decision already recorded --
+    // and the block below it does not, which is what keeps the two printings one
+    // wording rather than two.
+    for (const [promptFollows, expectedHeading] of [
+      [true, REPEAT_HEADING],
+      [false, REPEAT_HEADING_UNATTENDED],
+    ] as const) {
+      const lines = renderDisplayInvitation(
+        log,
+        { ...sampleToken(FUTURE()), linkageTerms },
+        ownOutboundSend,
+        promptFollows,
+      ).split("\n");
+
+      expect(lines.filter((line) => line === expectedHeading)).toHaveLength(1);
+      const heading = lines.indexOf(expectedHeading);
+      // Exact equality, not a prefix: a line printed after the repetition makes
+      // the tail longer than the block and fails here, whatever that line says.
+      expect(lines.slice(heading + 1)).toEqual(block);
+      // The same block, byte for byte, at the head of the display -- where index 0
+      // is the "Invitation details:" heading the facts open under.
+      expect(lines.slice(1, 1 + block.length)).toEqual(block);
+      // The unattended heading asks nothing, so the prompting path's framing must
+      // not survive anywhere on it.
+      if (!promptFollows) expect(lines).not.toContain(REPEAT_HEADING);
+    }
+
     // Non-vacuous: the block carries the decisive partner-controlled fact rather
     // than being an empty tail that trivially matches.
-    expect(block.some((line) => line.startsWith("  inviting party: "))).toBe(
-      true,
-    );
     expect(
-      block.some((line) => line.startsWith("  columns you will send")),
+      block.some((line) => line.startsWith(`  ${INVITING_PARTY_LABEL}: `)),
+    ).toBe(true);
+    expect(
+      block.some((line) => line.startsWith(`  ${OUTBOUND_SEND_LABEL}`)),
     ).toBe(true);
   }
 });
@@ -1828,7 +2066,7 @@ test("displayInvitation: every linkage key is listed, including one after an ent
     },
   }).split("\n");
 
-  expect(entriesUnder(lines, "  linkage keys:")).toEqual([
+  expect(entriesUnder(lines, "  linkage keys (enforced):")).toEqual([
     "surname, given name",
     "date of birth",
   ]);
@@ -1882,7 +2120,7 @@ test("displayInvitation: a linkage key name containing the list separator is one
       ],
     },
   }).split("\n");
-  expect(entriesUnder(lines, "  linkage keys:")).toEqual([
+  expect(entriesUnder(lines, "  linkage keys (enforced):")).toEqual([
     "surname, given name",
   ]);
 });
@@ -2106,13 +2344,19 @@ function surfaceOnStderr(writes: ReadonlyArray<string>): Array<string> {
  * that started disclosing some would otherwise silently change what the handler
  * renders and leave every comparison below trivially true.
  */
-async function expectedConsentSurface(encoded: string): Promise<Array<string>> {
+async function expectedConsentSurface(
+  encoded: string,
+  promptFollows = true,
+): Promise<Array<string>> {
   const lines: Array<string> = [];
-  displayInvitation(await decodeAndValidateInvitation(encoded), [], (line) =>
-    lines.push(line),
-  );
+  displayInvitation({
+    token: await decodeAndValidateInvitation(encoded),
+    ownOutboundSend: [],
+    emit: (line) => lines.push(line),
+    promptFollows,
+  });
   expect(lines).toContain(
-    "  columns you will send: (none) -- only matched records",
+    `  ${OUTBOUND_SEND_LABEL}: (none) -- only matched records`,
   );
   expect(lines.length).toBeGreaterThan(20);
   return lines;
@@ -2122,13 +2366,21 @@ async function expectedConsentSurface(encoded: string): Promise<Array<string>> {
  * Run the offline accept handler over `fixture` with `flags` folded into its
  * argv, capturing both standard streams -- so a test can assert what the terminal
  * received, and the mirrored surface never lands in the suite's own output.
+ *
+ * `onPrompt` answers the confirmation prompt and is handed everything stderr has
+ * received at the instant it is called -- both routes to the operator in one
+ * ordered transcript, since the log's own sink and the prompt's own writes land on
+ * the same descriptor. That instant is the only place the "nothing intervenes
+ * between the terms and the question" property can be read: by the time the
+ * handler returns, its own post-decision lines have been written.
  */
 async function runOfflineAcceptCapturingStdio(params: {
   encoded: string;
   fixture: ReturnType<typeof offlineAcceptFixture>;
   flags?: Record<string, unknown>;
+  onPrompt?: (stderrWrites: ReadonlyArray<string>) => boolean;
 }): Promise<{ stderrWrites: Array<string>; stdoutWrites: Array<string> }> {
-  const { encoded, fixture, flags } = params;
+  const { encoded, fixture, flags, onPrompt } = params;
   // A real invocation creates getLogger("accept") after applying --log-level, so
   // the command's logger carries the level the flag names. This suite runs many
   // invocations in one process, where that logger already exists and loglevel's
@@ -2146,6 +2398,10 @@ async function runOfflineAcceptCapturingStdio(params: {
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
   const stdio = captureStdio();
+  if (onPrompt !== undefined)
+    promptConfirmMock.mockImplementation(() =>
+      Promise.resolve(onPrompt(stdio.stderrWrites)),
+    );
   try {
     await acceptHandler({
       _: [],
@@ -2167,6 +2423,52 @@ async function runOfflineAcceptCapturingStdio(params: {
     acceptLog.setLevel(priorLevel, false);
   }
 }
+
+test("handler: nothing reaches the operator between the terms and the question", async () => {
+  // The repeated decision block is the last thing printed, so the y/N is answered
+  // against those facts rather than the tail of the key list. A line added between
+  // displayInvitation and promptConfirm would push the block off a short terminal
+  // with nothing turning red -- so the property is a check rather than a comment.
+  //
+  // It reads what the OPERATOR saw, not what one route emitted: the surface
+  // reaches them through the log's own sink on the default routing, and through
+  // the prompt's own stream where the log would miss it (--log-file), and both
+  // land on stderr. A check watching only the logger would pass while a direct
+  // prompt-stream write scrolled the block away. Both routings are driven here,
+  // and in each the transcript is snapshotted at the instant the prompt is called.
+  const fixture = offlineAcceptFixture();
+  const logFile = path.join(fixture.dir, "accept.log");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const surface = await expectedConsentSurface(encoded);
+    // The repeated block with its heading: everything from the heading to the end
+    // of the display. Taken from the renderer rather than restated, so the check
+    // measures the block's whole length and not a line or two chosen for it.
+    const repeated = surface.slice(surface.indexOf(REPEAT_HEADING));
+    expect(repeated.length).toBeGreaterThan(1);
+    for (const flags of [{}, { "log-file": logFile }]) {
+      let atPrompt: Array<string> | undefined;
+      await runOfflineAcceptCapturingStdio({
+        encoded,
+        fixture,
+        flags,
+        onPrompt: (stderrWrites) => {
+          atPrompt = stderrLines([...stderrWrites]);
+          return false;
+        },
+      });
+      expect(promptConfirmMock).toHaveBeenCalledTimes(1);
+      expect(atPrompt).toBeDefined();
+      // The last thing on the operator's terminal when the question arrives is the
+      // repeated block, entire and in order. Anything written in that window --
+      // by either route -- lands after it and fails this.
+      expect(atPrompt!.slice(-repeated.length)).toEqual(repeated);
+      promptConfirmMock.mockReset();
+    }
+  } finally {
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
 
 test("handler: --log-file records the terms and still shows them where the prompt asks", async () => {
   // The file sink replaces stderr outright, so the log's copy of the terms lands
@@ -2269,7 +2571,10 @@ test("handler: --consent-to-terms leaves the terms in the --log-file, not on the
   const logFile = path.join(fixture.dir, "accept.log");
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
-    const expected = await expectedConsentSurface(encoded);
+    // Rendered for the unattended path, which is the one the handler takes here:
+    // no prompt follows, so the repeated decision block sits under a heading that
+    // repeats rather than asks.
+    const expected = await expectedConsentSurface(encoded, false);
     const { stderrWrites, stdoutWrites } = await runOfflineAcceptCapturingStdio(
       {
         encoded,
@@ -2283,6 +2588,10 @@ test("handler: --consent-to-terms leaves the terms in the --log-file, not on the
     const logged = fs.readFileSync(logFile, "utf8");
     for (const line of expected)
       expect(logged).toContain(`[INFO] [accept] ${line}\n`);
+    // The framing the prompting path uses never reaches an unattended run, where
+    // there is nothing to accept and nothing to answer.
+    expect(logged).not.toContain(REPEAT_HEADING);
+    expect(logged).toContain(`[INFO] [accept] ${REPEAT_HEADING_UNATTENDED}\n`);
   } finally {
     fs.rmSync(fixture.dir, { recursive: true, force: true });
   }
