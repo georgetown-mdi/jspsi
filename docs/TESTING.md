@@ -83,6 +83,14 @@ paths. The in-process backend adds two surfaces a real `sshd` cannot offer:
   partner that consumed it), and a STAT/LSTAT of it can be held until it has been
   REMOVEd, which orders a real partner's consume-delete strictly before the
   sender's landed-confirmation probe of the same path.
+- Request accounting, on the same hub. A meter counts requests as they arrive
+  and replies as they are written, across every session being served at once, so
+  a suite driving a concurrent fan reads how deep the client let its request
+  pipeline run on the one channel from the end this project owns rather than
+  from the client library's internals. A reading carries per-opcode counts and
+  the peak simultaneously-unanswered depth. A reply written straight onto the
+  channel by a fault injection, and a withheld reply, are never counted as
+  answers, so each leaves its request outstanding for the rest of the window.
 
 Adapter behavior against a partner that cuts, stalls, or never closes is
 asserted through those controls. A probe that settles a dependency fact belongs
