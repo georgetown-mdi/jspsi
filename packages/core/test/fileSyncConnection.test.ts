@@ -1087,7 +1087,9 @@ test("open (sftp) with a list of pins fails closed when the key matches NONE and
       channel: "sftp",
       server: { host: "sftp.example.org", hostKeyFingerprint: [a, b] },
     }),
-    // The mismatch names the presented fingerprint and the whole pinned set.
+    // The mismatch message names how many pins were compared; the set itself
+    // rides its own cause link, asserted at the rendered boundary in
+    // sftpSession.test.ts.
   ).rejects.toThrow(/does not match any of the 2 pinned fingerprints/);
   expect(conn.connected).toBe(false);
   expect(conn.observedHostKey).toBeUndefined();
