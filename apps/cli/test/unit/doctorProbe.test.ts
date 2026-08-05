@@ -557,11 +557,15 @@ describe("smbclient output parsing", () => {
 
 describe("local cleanup does not depend on the remote", () => {
   test("a runner that dies during del still loses the work directory", async () => {
+    // The throw is pinned to this run's own litter name, not the wildcard
+    // stale-mask sweep that runs before litter has a member: the finally's
+    // litter loop must actually iterate for this test to measure its guard.
     let authDir: string | undefined;
     const probeDeps = deps((args) => {
       const authPath = authPathOf(args);
       if (authPath !== undefined) authDir = path.dirname(authPath);
-      if ((commandOf(args) ?? "").startsWith("del "))
+      const command = commandOf(args) ?? "";
+      if (command.startsWith("del psilink-probe-") && !command.includes("*"))
         throw new Error("runner died");
       return healthyReply(args);
     });

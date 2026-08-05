@@ -231,6 +231,28 @@ describe("working names occupied by directories", () => {
   });
 });
 
+describe("a matching marker that cannot be removed", () => {
+  test("is a warning with a full verdict, not a crash", () => {
+    const directory = tempDirectory();
+    fs.writeFileSync(path.join(directory, MARKER), `${TOKEN}\n`);
+    const refusesMarkerDelete: MountFs = {
+      ...nodeMountFs,
+      remove: (file) => {
+        if (path.basename(file) === MARKER) throw new Error("EACCES");
+        nodeMountFs.remove(file);
+      },
+    };
+    const report = runMountChecks(directory, INPUT, refusesMarkerDelete);
+    const check = checkById(report, "marker");
+    expect(check.status).toBe("warn");
+    expect(check.action).toContain(MARKER);
+    expect(report.checks.map((entry) => entry.id)).toEqual([
+      ...MOUNT_CHECK_IDS,
+    ]);
+    expect(fs.existsSync(path.join(directory, MARKER))).toBe(true);
+  });
+});
+
 describe("the marker token must match exactly", () => {
   test("a stale token that merely contains this run's is another run's marker", () => {
     const directory = tempDirectory();

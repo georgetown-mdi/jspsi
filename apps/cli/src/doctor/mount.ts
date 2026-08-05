@@ -73,7 +73,11 @@ function padSkipped(checks: DoctorCheckRecord[]): DoctorCheckRecord[] {
   return [
     ...checks,
     ...MOUNT_CHECK_IDS.filter((id) => !seen.has(id)).map((id) =>
-      skipped(id, "not run: the folder could not be reached."),
+      skipped(id, "not run: an earlier check stopped the battery.", {
+        meaning:
+          "an earlier check failed and stopped the battery before " +
+          "this one, so nothing was established about it.",
+      }),
     ),
   ];
 }
@@ -89,6 +93,11 @@ function markerCheck(
       "marker",
       "no marker and token were supplied, so this folder was not cross-checked " +
         "against the one `psilink doctor probe` tested.",
+      {
+        meaning:
+          "does not apply to the inputs given: no marker and token were " +
+          "supplied.",
+      },
     );
   const markerPath = path.join(directory, input.marker);
   let contents: string;
@@ -119,8 +128,20 @@ function markerCheck(
         "and run this again: if it comes back, you have company.",
     );
   // The mount check owns the marker's lifecycle: the probe deliberately leaves
-  // it, and this is where it is consumed.
-  mountFs.remove(markerPath);
+  // it, and this is where it is consumed. A mount that matches but refuses the
+  // delete still gets its verdict -- the write checks below own that diagnosis.
+  try {
+    mountFs.remove(markerPath);
+  } catch {
+    return warn(
+      "marker",
+      "the folders match, but the marker could not be removed.",
+      "the mount and the network checks agree on this folder, and this mount " +
+        "refuses deletes -- expect the write checks below to fail too.",
+      `remove ${input.marker} from the drop folder yourself once write ` +
+        "access is fixed.",
+    );
+  }
   return ok("marker", "the mount and the network checks agree on this folder.");
 }
 
@@ -300,6 +321,11 @@ export function runMountChecks(
         skipped(
           "rename_onto_existing",
           `could not stage the rename test (${errorCode(err)}).`,
+          {
+            meaning:
+              "the files this check renames could not be created, so " +
+              "nothing was established about renaming.",
+          },
         ),
       );
     } finally {

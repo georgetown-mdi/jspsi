@@ -145,6 +145,10 @@ jobs:
   smb-doctor:
     name: Doctor against a real Samba server
     runs-on: ubuntu-latest
+    # Rewrites the runner's smb.conf, adds an account, restarts smbd, and
+    # kernel-mounts CIFS under passwordless sudo -- the same class of host
+    # control as chroot-native, so like it, not exposed to fork PRs.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     env:
       SMB_TEST_USER: runner
       SMB_TEST_PASSWORD: psilink-ci-throwaway

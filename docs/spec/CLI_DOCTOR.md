@@ -91,7 +91,7 @@ The id set per mode is fixed and ordered. Every id below appears in every verdic
 | Id | What a passing check establishes |
 | -- | -------------------------------- |
 | `mount_readable` | The directory exists and can be listed. Its failure is the failure that stops this battery. |
-| `marker` | The file `doctor probe` left behind is here and is this run's, so both batteries examined the same directory. A marker from a different run is a `warn`; an absent one is a `fail`, since the mount and the probe are then pointing at different directories. `skipped` when no marker or token was supplied. |
+| `marker` | The file `doctor probe` left behind is here and is this run's, so both batteries examined the same directory. A marker from a different run is a `warn`, and so is a matching marker the mount cannot delete; an absent one is a `fail`, since the mount and the probe are then pointing at different directories. `skipped` when no marker or token was supplied. |
 | `write_rename` | A file was written under a temporary name and renamed into place, the shape psilink writes every message with. |
 | `exclusive_create` | The share refuses to create a file that already exists -- the `O_EXCL` refusal psilink's rendezvous uses to decide which side goes first. A share that does not refuse it is a `warn`; a share where the create could not be tested at all is `skipped`, carrying an `action` naming the same remedy. |
 | `rename_onto_existing` | The share renames a file onto an existing one, which psilink does when two sides meet at once. A share that will not is a `warn`. |

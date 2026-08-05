@@ -222,7 +222,13 @@ function padSkipped(
     ...checks,
     ...ids
       .filter((id) => !seen.has(id))
-      .map((id) => skipped(id, "not run: an earlier check did not pass.")),
+      .map((id) =>
+        skipped(id, "not run: an earlier check did not pass.", {
+          meaning:
+            "an earlier check failed and stopped the battery before this " +
+            "one, so nothing was established about it.",
+        }),
+      ),
   ];
 }
 
@@ -434,7 +440,11 @@ function subdirectoryCheck(
 function freeSpaceCheck(listing: string): DoctorCheckRecord {
   const freeMb = freeMegabytes(listing);
   if (freeMb === undefined)
-    return skipped("free_space", "the server did not report free space.");
+    return skipped("free_space", "the server did not report free space.", {
+      meaning:
+        "the listing carried no free-space figure, so nothing was " +
+        "established about it.",
+    });
   if (freeMb === 0)
     return warn(
       "free_space",
@@ -812,6 +822,10 @@ export async function runProbe(
         skipped(
           "marker",
           "no marker was requested, so no cross-check file was left behind.",
+          {
+            meaning:
+              "does not apply to the inputs given: no marker was requested.",
+          },
         ),
       );
       return finish();

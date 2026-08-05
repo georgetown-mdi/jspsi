@@ -294,7 +294,7 @@ psilink doctor mount DIRECTORY
 
 Run both: the probe leaves a marker file behind and the mount check looks for it, so the two together also establish that the mount and the checks are pointing at the same directory. A wrong server, share, or subfolder -- a DFS path is the usual cause -- is caught there rather than by a failed exchange.
 
-Neither mode changes anything on the share beyond its own working files: the probe attempts to remove every file it creates except the marker and sweeps anything an earlier run left behind, and the mount check consumes the marker and removes the rest. On a share that refuses deletes or a connection that dies mid-run, a `psilink-probe-*.tmp*` working file can remain until the next run's sweep ([cleanup limits](spec/CLI_DOCTOR.md#cleanup-limits)).
+Neither mode changes anything on the share beyond its own working files: the probe attempts to remove every file it creates except the marker and sweeps any `psilink-probe` working file already present, whichever run left it, and the mount check consumes the marker and removes the rest. On a share that refuses deletes or a connection that dies mid-run, a `psilink-probe-*.tmp*` working file can remain until the next run's sweep ([cleanup limits](spec/CLI_DOCTOR.md#cleanup-limits)).
 
 ### Inputs
 
