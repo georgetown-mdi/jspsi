@@ -1137,12 +1137,27 @@ describe("acceptor columns step: the send summary is gated on the inviting party
     expect(container!.textContent).toContain(
       "Nothing here is sent to your partner.",
     );
+    // And the spoken account with it: the grid's live region at the disclosure
+    // controls is what a screen-reader user hears when they mark a column, and a
+    // region still naming the set would leave one operator told nothing is sent
+    // while another is told their columns are, on the same screen. Queried by
+    // testid because the sentence is on this screen twice -- here and in the
+    // visible panel above -- so a getByText would not say which one it read.
+    const announcement = page.getByTestId("disclosure-summary-announcement");
+    await expect.element(announcement).toHaveTextContent(noPayloadSentence);
+    expect(announcement.element().textContent).not.toContain("risk_score");
   });
 
   test("a two-sided invitation still lists the disclosed set", async () => {
     // The direction is the whole of the gate: the same file and marks under terms
     // that give the inviting party a result render the list in full.
     mountStep(acceptorTerms);
+    // Awaited first: the announcement is debounced, so settling it here is what
+    // puts the spoken copy inside the container check below rather than reading it
+    // while the region is still empty.
+    await expect
+      .element(page.getByTestId("disclosure-summary-announcement"))
+      .toHaveTextContent("Columns sent to your partner: risk_score.");
     expect(container!.textContent).not.toContain(noPayloadSentence);
     await expect
       .element(page.getByText("For each matched row:", { exact: false }))
@@ -1162,6 +1177,12 @@ describe("acceptor columns step: the send summary is gated on the inviting party
       ...acceptorTerms,
       output: { expectsOutput: true, shareWithPartner: false },
     });
+    // The region reads the same field as the panel, so the control holds for the
+    // spoken copy too: silence here would be the suppression that costs most, an
+    // operator hearing nothing where a disclosure does happen.
+    await expect
+      .element(page.getByTestId("disclosure-summary-announcement"))
+      .toHaveTextContent("Columns sent to your partner: risk_score.");
     expect(container!.textContent).not.toContain(noPayloadSentence);
     await expect
       .element(page.getByText("For each matched row:", { exact: false }))

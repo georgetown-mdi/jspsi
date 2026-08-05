@@ -327,6 +327,7 @@ export function AcceptorColumnsStep({
           metadata={columnsState.metadata}
           onChange={onMetadataChange}
           caption="Your columns: type and use"
+          partnerReceivesResult={partnerReceivesResult}
         />
         <p className={`${styles.small} ${styles.sub}`}>
           Only one column can be the record identifier. Choose a single column

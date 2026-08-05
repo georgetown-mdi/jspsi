@@ -2,7 +2,10 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { Select, Stack, Table, Text, VisuallyHidden } from "@mantine/core";
 
-import { SEMANTIC_TYPES } from "@psilink/core";
+import {
+  OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
+  SEMANTIC_TYPES,
+} from "@psilink/core";
 
 import {
   DISCLOSURE_LABELS,
@@ -81,21 +84,41 @@ function conflictTypeControlAria(
  * `preparePayload` transmits on, so it cannot over- or under-state what leaves the
  * machine -- debounced and voiced right at the disclosure control the static chips
  * cannot speak for.
+ *
+ * That predicate bounds the set only where the payload step transmits at all, which
+ * is what {@link partnerReceivesResult} carries: where it does not, the region
+ * voices the fact the host's visible panel states, read from the same string in
+ * `@psilink/core`. One screen states one account -- a live region gated apart from
+ * the panel beside it speaks a disclosure the screen denies, to the reader least
+ * placed to check the other channel.
  */
 export function MetadataGrid({
   metadata,
   onChange,
   caption,
+  partnerReceivesResult = true,
 }: {
   metadata: Metadata;
   onChange: (next: Metadata) => void;
   /** A visually-hidden table caption naming this grid for assistive tech (e.g.
    * "Your columns and how each is used"). */
   caption: string;
+  /** Whether the viewer's partner receives a result, which is whether the payload
+   * step transmits anything at all from this machine: it sends only to a partner
+   * entitled to the result, putting an empty message on the wire otherwise, so no
+   * column leaves whatever the operator marks here. The grid holds no linkage
+   * terms, so the host resolves the fact for its own viewer and passes it.
+   *
+   * Defaults to a partner that receives: a caller that does not resolve the
+   * direction keeps announcing the disclosed set, since a set announced where none
+   * is sent misinforms the operator while a silence where a disclosure happens
+   * leaves them unaware there is anything to check. */
+  partnerReceivesResult?: boolean;
 }) {
   const disclosed = disclosedColumnNames(metadata);
-  const summary =
-    disclosed.length === 0
+  const summary = !partnerReceivesResult
+    ? OUTBOUND_SEND_NO_PAYLOAD_SENTENCE
+    : disclosed.length === 0
       ? "No columns will be sent to your partner."
       : `Columns sent to your partner: ${disclosed.join(", ")}.`;
 
@@ -249,8 +272,16 @@ export function MetadataGrid({
           screen-reader user toggling a disclosure Select above gets no spoken
           feedback from the static chips, so this single debounced live region --
           computed from the same disclosedColumnNames predicate the run transmits
-          on -- voices the new set as it changes, right at the control. */}
-      <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
+          on, under the direction that decides whether it transmits at all --
+          voices the set as it changes, right at the control. The testid is how a
+          test tells this region's copy from the identical sentence the host
+          renders visibly. */}
+      <VisuallyHidden
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="disclosure-summary-announcement"
+      >
         {announcement}
       </VisuallyHidden>
       {/* The demotion is announced immediately (the summary above is debounced),

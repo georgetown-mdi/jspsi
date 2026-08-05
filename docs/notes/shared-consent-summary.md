@@ -187,6 +187,12 @@ once beside the classification and rendered by each place that states it in pros
 the web consent screen's outbound block, the inviter's preview, and the acceptor's
 column-picking step, which is the screen where the operator is actively marking what
 to disclose and so the worst place to be told columns will be sent when none will.
+That step states it in both of its channels, the visible panel and the live region
+its disclosure controls speak through. A screen has one account, not one per sense:
+where the two are gated separately, the ungated one leaves a sighted operator told
+nothing is sent while a screen-reader user is told their columns are -- the same
+divergence between surfaces, folded inside a single screen, and read by the operator
+least able to check it against the other channel.
 The CLI states the same fact as its line's value instead, in the label-and-value
 shape its outline uses, which is the per-surface half the division above leaves to
 the renderer. What is not left to a renderer is a fourth account of the fact: a
