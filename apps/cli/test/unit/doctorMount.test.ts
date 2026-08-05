@@ -193,3 +193,50 @@ describe("the real filesystem implementation", () => {
     ).not.toThrow();
   });
 });
+
+describe("working names occupied by directories", () => {
+  test.each([".psilink-w.tmp", ".psilink-w2.tmp"])(
+    "a directory named %s blocks write_rename with a verdict, not a throw",
+    (name) => {
+      const directory = tempDirectory();
+      fs.writeFileSync(path.join(directory, MARKER), `${TOKEN}\n`);
+      fs.mkdirSync(path.join(directory, name));
+      const report = runMountChecks(directory, INPUT);
+      const check = checkById(report, "write_rename");
+      expect(check.status).toBe("fail");
+      expect(check.action).toContain(name);
+      expect(report.checks.map((entry) => entry.id)).toEqual([
+        ...MOUNT_CHECK_IDS,
+      ]);
+      expect(overallOf(report)).toBe("fix_and_retry");
+    },
+  );
+
+  test.each([
+    [".psilink-x.tmp", "exclusive_create"],
+    [".psilink-a.tmp", "rename_onto_existing"],
+    [".psilink-b.tmp", "rename_onto_existing"],
+  ])("a directory named %s blocks only %s", (name, id) => {
+    const directory = tempDirectory();
+    fs.writeFileSync(path.join(directory, MARKER), `${TOKEN}\n`);
+    fs.mkdirSync(path.join(directory, name));
+    const report = runMountChecks(directory, INPUT);
+    const check = checkById(report, id);
+    expect(check.status).toBe("fail");
+    expect(check.action).toContain(name);
+    expect(checkById(report, "write_rename").status).toBe("ok");
+    expect(report.checks.map((entry) => entry.id)).toEqual([
+      ...MOUNT_CHECK_IDS,
+    ]);
+  });
+});
+
+describe("the marker token must match exactly", () => {
+  test("a stale token that merely contains this run's is another run's marker", () => {
+    const directory = tempDirectory();
+    fs.writeFileSync(path.join(directory, MARKER), `kernel${TOKEN}\n`);
+    const report = runMountChecks(directory, INPUT);
+    expect(checkById(report, "marker").status).toBe("warn");
+    expect(fs.existsSync(path.join(directory, MARKER))).toBe(true);
+  });
+});

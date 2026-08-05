@@ -117,3 +117,15 @@ The two nonzero values follow BSD `sysexits`, as the rest of the CLI does: `fix_
 Every code above is below 125, which Docker reserves for its own failure to start a container, so a caller running the doctor in a container can tell "Docker could not run it" from any verdict the command reaches.
 
 A usage error -- a missing or malformed input, or a bad flag -- is not in that set: it exits 64 (`EX_USAGE`) and prints no verdict on either stream, because the checks never ran. A caller that sees 64 has established nothing about the share.
+
+## Cleanup limits
+
+Probe cleanup is attempted, never guaranteed. A delete is issued for every
+working file the run created (`psilink-probe-*.tmp*`) on every handled exit
+path, but its outcome is not re-verified: a share that refuses deletes or a
+transport that dies mid-battery leaves the file in place. The next probe run
+sweeps that name mask before its own staged test, which is the designed
+backstop for such residue.
+
+The marker file is the single deliberately persistent artifact: the probe
+leaves it behind, and `doctor mount` consumes it on a matching cross-check.

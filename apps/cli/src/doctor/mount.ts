@@ -108,7 +108,7 @@ function markerCheck(
         "page, 'Reading the real path from Windows'.",
     );
   }
-  if (!contents.includes(input.token))
+  if (contents.trim() !== input.token)
     return warn(
       "marker",
       `${input.marker} is here but is not this run's file.`,
@@ -136,6 +136,27 @@ export function runMountChecks(
   const checks: DoctorCheckRecord[] = [];
   const at = (name: string): string => path.join(directory, name);
 
+  // A working name the battery cannot clear -- usually a directory someone left
+  // in the shared drop folder, which best-effort remove() cannot take -- blocks
+  // that one check, never the battery: the verdict document comes back whatever
+  // the folder holds.
+  const clearName = (name: string): boolean => {
+    try {
+      mountFs.remove(at(name));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const occupied = (id: string, name: string): DoctorCheckRecord =>
+    fail(
+      id,
+      `${name} is in this folder and cannot be removed.`,
+      "something is occupying a name this check creates and removes -- " +
+        "usually a folder with the doctor's working name.",
+      `remove ${name} from the drop folder and run this again.`,
+    );
+
   try {
     mountFs.readDirectory(directory);
   } catch (err) {
@@ -157,6 +178,15 @@ export function runMountChecks(
 
   checks.push(markerCheck(directory, input, mountFs));
 
+  const writeBlocked = !clearName(WRITE_NAME)
+    ? WRITE_NAME
+    : !clearName(WRITE_RENAMED_NAME)
+      ? WRITE_RENAMED_NAME
+      : undefined;
+  if (writeBlocked !== undefined) {
+    checks.push(occupied("write_rename", writeBlocked));
+    return { mode: "mount", checks: padSkipped(checks) };
+  }
   try {
     // Write under a temporary name and rename into place, which is what psilink
     // does for every message: read access alone is not enough, and neither is
@@ -176,84 +206,105 @@ export function runMountChecks(
         "see the troubleshooting page, 'The folder cannot be written to'.",
       ),
     );
-    mountFs.remove(at(WRITE_NAME));
-    mountFs.remove(at(WRITE_RENAMED_NAME));
+    clearName(WRITE_NAME);
+    clearName(WRITE_RENAMED_NAME);
     return { mode: "mount", checks: padSkipped(checks) };
   }
 
-  mountFs.remove(at(EXCLUSIVE_NAME));
-  let created = false;
-  try {
-    mountFs.createExclusive(at(EXCLUSIVE_NAME));
-    created = true;
-  } catch {
-    checks.push(
-      skipped(
-        "exclusive_create",
-        "could not test exclusive create on this share.",
-        {
-          meaning:
-            "psilink uses an exclusive create to decide which side goes first.",
-          action:
-            "if the exchange hangs at the start, pass --lockless-rendezvous on " +
-            "both sides.",
-        },
-      ),
-    );
-  }
-  if (created) {
-    let refused = true;
-    try {
-      mountFs.createExclusive(at(EXCLUSIVE_NAME));
-      refused = false;
-    } catch {
-      refused = true;
-    }
-    checks.push(
-      refused
-        ? ok("exclusive_create", "the share refuses to create a file twice.")
-        : warn(
-            "exclusive_create",
-            "this share does not refuse to create a file that already exists.",
-            "psilink uses that refusal to decide which side goes first, so " +
-              "without it both sides can believe they did.",
-            "pass --lockless-rendezvous on BOTH sides of the exchange.",
-          ),
-    );
-    mountFs.remove(at(EXCLUSIVE_NAME));
+  if (!clearName(EXCLUSIVE_NAME)) {
+    checks.push(occupied("exclusive_create", EXCLUSIVE_NAME));
+  } else {
+    runExclusiveCreate();
   }
 
-  mountFs.remove(at(RENAME_SOURCE_NAME));
-  mountFs.remove(at(RENAME_TARGET_NAME));
-  try {
-    mountFs.writeFile(at(RENAME_SOURCE_NAME), "a\n");
-    mountFs.writeFile(at(RENAME_TARGET_NAME), "b\n");
-    try {
-      mountFs.rename(at(RENAME_SOURCE_NAME), at(RENAME_TARGET_NAME));
-      checks.push(
-        ok("rename_onto_existing", "the share renames onto an existing file."),
-      );
-    } catch {
-      checks.push(
-        warn(
-          "rename_onto_existing",
-          "this share will not rename a file onto an existing one.",
-          "psilink does that when two sides meet at once.",
-          "pass --lockless-rendezvous on BOTH sides of the exchange.",
-        ),
-      );
-    }
-  } catch (err) {
-    checks.push(
-      skipped(
-        "rename_onto_existing",
-        `could not stage the rename test (${errorCode(err)}).`,
-      ),
-    );
-  } finally {
-    mountFs.remove(at(RENAME_SOURCE_NAME));
-    mountFs.remove(at(RENAME_TARGET_NAME));
+  const renameBlocked = !clearName(RENAME_SOURCE_NAME)
+    ? RENAME_SOURCE_NAME
+    : !clearName(RENAME_TARGET_NAME)
+      ? RENAME_TARGET_NAME
+      : undefined;
+  if (renameBlocked !== undefined) {
+    checks.push(occupied("rename_onto_existing", renameBlocked));
+  } else {
+    runRenameOntoExisting();
   }
 
   return { mode: "mount", checks };
+
+  function runExclusiveCreate(): void {
+    let created = false;
+    try {
+      mountFs.createExclusive(at(EXCLUSIVE_NAME));
+      created = true;
+    } catch {
+      checks.push(
+        skipped(
+          "exclusive_create",
+          "could not test exclusive create on this share.",
+          {
+            meaning:
+              "psilink uses an exclusive create to decide which side goes first.",
+            action:
+              "if the exchange hangs at the start, pass --lockless-rendezvous on " +
+              "both sides.",
+          },
+        ),
+      );
+    }
+    if (created) {
+      let refused = true;
+      try {
+        mountFs.createExclusive(at(EXCLUSIVE_NAME));
+        refused = false;
+      } catch {
+        refused = true;
+      }
+      checks.push(
+        refused
+          ? ok("exclusive_create", "the share refuses to create a file twice.")
+          : warn(
+              "exclusive_create",
+              "this share does not refuse to create a file that already exists.",
+              "psilink uses that refusal to decide which side goes first, so " +
+                "without it both sides can believe they did.",
+              "pass --lockless-rendezvous on BOTH sides of the exchange.",
+            ),
+      );
+      clearName(EXCLUSIVE_NAME);
+    }
+  }
+
+  function runRenameOntoExisting(): void {
+    try {
+      mountFs.writeFile(at(RENAME_SOURCE_NAME), "a\n");
+      mountFs.writeFile(at(RENAME_TARGET_NAME), "b\n");
+      try {
+        mountFs.rename(at(RENAME_SOURCE_NAME), at(RENAME_TARGET_NAME));
+        checks.push(
+          ok(
+            "rename_onto_existing",
+            "the share renames onto an existing file.",
+          ),
+        );
+      } catch {
+        checks.push(
+          warn(
+            "rename_onto_existing",
+            "this share will not rename a file onto an existing one.",
+            "psilink does that when two sides meet at once.",
+            "pass --lockless-rendezvous on BOTH sides of the exchange.",
+          ),
+        );
+      }
+    } catch (err) {
+      checks.push(
+        skipped(
+          "rename_onto_existing",
+          `could not stage the rename test (${errorCode(err)}).`,
+        ),
+      );
+    } finally {
+      clearName(RENAME_SOURCE_NAME);
+      clearName(RENAME_TARGET_NAME);
+    }
+  }
 }

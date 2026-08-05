@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { MAX_DIRECTORY_ENTRIES } from "../../src/connection/listingGuard";
@@ -551,5 +552,35 @@ describe("smbclient output parsing", () => {
   test("countEntries excludes the dot entries", () => {
     expect(countEntries(DIRECTORY_LISTING)).toBe(1);
     expect(countEntries("")).toBe(0);
+  });
+});
+
+describe("local cleanup does not depend on the remote", () => {
+  test("a runner that dies during del still loses the work directory", async () => {
+    let authDir: string | undefined;
+    const probeDeps = deps((args) => {
+      const authPath = authPathOf(args);
+      if (authPath !== undefined) authDir = path.dirname(authPath);
+      if ((commandOf(args) ?? "").startsWith("del "))
+        throw new Error("runner died");
+      return healthyReply(args);
+    });
+    await expect(runProbe(INPUT, probeDeps)).rejects.toThrow("runner died");
+    expect(authDir).toBeDefined();
+    expect(fs.existsSync(authDir as string)).toBe(false);
+  });
+
+  test("signal cleanup is registered for the battery and removed after", async () => {
+    const before = process.listenerCount("SIGINT");
+    const beforeTerm = process.listenerCount("SIGTERM");
+    let during = -1;
+    const probeDeps = deps((args) => {
+      during = process.listenerCount("SIGINT");
+      return healthyReply(args);
+    });
+    await runProbe(INPUT, probeDeps);
+    expect(during).toBe(before + 1);
+    expect(process.listenerCount("SIGINT")).toBe(before);
+    expect(process.listenerCount("SIGTERM")).toBe(beforeTerm);
   });
 });

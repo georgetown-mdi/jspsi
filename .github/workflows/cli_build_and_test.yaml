@@ -261,6 +261,20 @@ jobs:
               '(.checks[] | select(.id == "share_open") | .status == "ok")
                and (.checks[] | select(.id == "subdirectory") | .status == "fail")' )
 
+          # SMB_PATH is handed to smbclient as -D's own argv element, so a
+          # dash-leading or option-shaped value must be read as a folder name,
+          # never as an option. Only the real client can prove that; the right
+          # answer for both is the nonexistent-subdirectory verdict.
+          ( export SMB_PATH=-dashfolder
+            expect "dash-leading subdirectory" 78 \
+              '(.checks[] | select(.id == "share_open") | .status == "ok")
+               and (.checks[] | select(.id == "subdirectory") | .status == "fail")' )
+
+          ( export SMB_PATH="--option=client min protocol=NT1"
+            expect "option-shaped subdirectory" 78 \
+              '(.checks[] | select(.id == "share_open") | .status == "ok")
+               and (.checks[] | select(.id == "subdirectory") | .status == "fail")' )
+
           ( export SMB_SHARE=readonly
             unset SMB_PATH
             expect "read-only share" 78 \

@@ -545,7 +545,22 @@ export async function runProbe(
     `password=${input.password}`,
     ...(input.domain === "" ? [] : [`domain=${input.domain}`]),
   ];
-  fs.writeFileSync(authFile, `${lines.join("\n")}\n`, { mode: 0o600 });
+  try {
+    fs.writeFileSync(authFile, `${lines.join("\n")}\n`, { mode: 0o600 });
+  } catch (err) {
+    fs.rmSync(workDir, { recursive: true, force: true });
+    throw err;
+  }
+
+  // Ctrl-C is the likely operator response to the very hang this command
+  // exists to diagnose, and it must not leave the credentials file behind.
+  // The signal is re-raised after cleanup so the exit still reports it.
+  const onSignal = (signal: NodeJS.Signals): void => {
+    fs.rmSync(workDir, { recursive: true, force: true });
+    process.kill(process.pid, signal);
+  };
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
 
   // Names this run can leave on the share. The share belongs to someone else and
   // their partner can see it, so anything still there when the run ends -- on a
@@ -814,7 +829,12 @@ export async function runProbe(
     );
     return finish();
   } finally {
-    for (const leftover of litter) await smb(`del ${leftover}`);
-    fs.rmSync(workDir, { recursive: true, force: true });
+    try {
+      for (const leftover of litter) await smb(`del ${leftover}`);
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+    }
   }
 }
