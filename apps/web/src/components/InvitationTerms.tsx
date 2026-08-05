@@ -454,7 +454,9 @@ export function InvitationTerms({
    * list because the set is not yet known -- e.g. the review screen before a file is
    * chosen, where the `review` perspective instead surfaces a fixed-copy
    * forward-reference that the acceptor confirms its exact send after choosing a
-   * file. */
+   * file. Neither value reaches the screen when the invitation gives the inviting
+   * party no result: the payload step transmits nothing at all to a partner not
+   * entitled to one, so the block states that instead of any column set. */
   outboundColumns?: Array<string>;
   /** Which context this renders in. Drives the heading and intro copy and the
    * viewer-centric blocks (Result sharing, the payload send/receive framing, and
@@ -561,15 +563,37 @@ export function InvitationTerms({
   // the fixed-copy forward-reference. Both are the acceptor's data leaving, so they
   // sit in the "what you disclose" group with the egress request; the inviter's own
   // send renders there as chips under "proposing" instead.
+  //
+  // An invitation giving the inviting party no result answers the block ahead of
+  // both: the payload step transmits nothing at all to a partner not entitled to the
+  // result (an empty message goes on the wire in its place), so no column leaves
+  // whatever the acceptor's file holds, and a listed set would name a disclosure that
+  // does not happen. It wins over the forward-reference, because the file that
+  // reference points at cannot change the answer, and over the empty-set
+  // confirmation, because the direction holds however the operator's file changes
+  // while an empty disclosure is a property of the metadata resolved for this
+  // acceptance alone -- the precedence the CLI accept prompt applies, so the two
+  // surfaces resolve an overlapping case the same way. The displayed direction and
+  // the run's own gate are the same fact with an aborting check between them:
+  // acceptance mirrors the invitation's output direction into this party's terms, and
+  // the compatibility check refuses a partner presenting terms that disagree with
+  // that mirror.
+  const outboundNoPayloadRenders =
+    perspective !== "proposing" && !summary.inviterReceivesOutput;
   const outboundSendListRenders =
-    perspective !== "proposing" && outboundColumns !== undefined;
+    perspective !== "proposing" &&
+    !outboundNoPayloadRenders &&
+    outboundColumns !== undefined;
   const outboundForwardRefRenders =
-    perspective === "review" && outboundColumns === undefined;
+    perspective === "review" &&
+    !outboundNoPayloadRenders &&
+    outboundColumns === undefined;
   // The "what you disclose" group renders when this viewer discloses anything: the
   // inviter always shows its send chips under "proposing"; the acceptor shows its
   // outbound block and/or the egress request.
   const showsDiscloseGroup =
     perspective === "proposing" ||
+    outboundNoPayloadRenders ||
     outboundSendListRenders ||
     outboundForwardRefRenders ||
     egressNotice !== undefined;
@@ -757,11 +781,26 @@ export function InvitationTerms({
             </Term>
           )}
 
+          {/* The invitation gives the inviting party no result, so the payload step
+              sends nothing whatever the acceptor's file holds -- the case that takes
+              this slot ahead of both blocks below (see the precedence above). Stated
+              with its reason, since the reason is what an operator would otherwise
+              look for in their own file. Rendered at normal weight, not dimmed, for
+              the reason the forward-reference is: it sits beside the egress request,
+              which must never read more prominently than what actually leaves. Fixed
+              copy, naming no column. */}
+          {outboundNoPayloadRenders && (
+            <Term label="What you will send to your partner">
+              <Text size="sm">
+                Your partner receives no result from this exchange, so no
+                columns are sent to them -- whatever your file contains.
+              </Text>
+            </Term>
+          )}
+
           {/* The acceptor's OWN outbound disclosure once a file is chosen (its live
-              metadata disclosure). Condition inlined (rather than the
-              outboundSendListRenders boolean, which the group-render check also uses)
-              so TypeScript narrows outboundColumns to defined inside. */}
-          {perspective !== "proposing" && outboundColumns !== undefined && (
+              metadata disclosure). */}
+          {outboundSendListRenders && (
             <Term
               label="What you will send to your partner"
               captionId={outboundSendCaptionId}

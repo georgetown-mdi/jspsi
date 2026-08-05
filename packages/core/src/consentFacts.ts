@@ -64,11 +64,10 @@ export const CONSENT_FACTS = {
       "The acceptor's own disclosure, derived from its resolved metadata " +
       "through the same predicate the payload step transmits on, so no column " +
       "outside the displayed set leaves the machine under the configuration " +
-      "this acceptance writes. A bound, not an exactness: the payload step " +
-      "sends nothing at all to a partner not entitled to the result, so the " +
-      "run may disclose less than the line lists. The bound does not reach an " +
-      "acceptance that keeps an existing configuration, whose stored metadata " +
-      "the exchange runs on and which nothing compares against this input.",
+      "this acceptance writes. A bound with one limit: it does not reach an " +
+      "acceptance that keeps a configuration already on disk, whose stored " +
+      "metadata the exchange runs on and which nothing compares against the " +
+      "input this line is rendered from.",
   },
   invitingParty: {
     basis: "trust-contingent",

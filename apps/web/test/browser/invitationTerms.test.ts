@@ -1286,6 +1286,117 @@ describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference"
   });
 });
 
+describe("InvitationTerms: the acceptor's outbound send is gated on the inviting party receiving a result", () => {
+  // An invitation that gives the inviting party no result transmits no payload at
+  // all: the payload step puts an empty message on the wire for a partner not
+  // entitled to the result, so no column leaves whatever the acceptor's file holds.
+  // A listed set would name a disclosure that does not happen, at the one point the
+  // acceptor consents to it. So the direction answers this block for every value of
+  // the acceptor's own set -- the chips do not render, the pre-file
+  // forward-reference does not stand in (the file it points at cannot change the
+  // answer), and the empty-set confirmation gives way to the reason that holds
+  // however the operator's file changes. That is the precedence the CLI accept
+  // prompt applies (apps/cli/test/unit/accept.test.ts pins it there), so the pair
+  // resolves an overlapping case one way rather than two.
+  const oneSided: LinkageTerms = {
+    ...terms,
+    output: { expectsOutput: false, shareWithPartner: true },
+  };
+
+  function render(
+    linkageTerms: LinkageTerms,
+    options: {
+      perspective: "review" | "accepted" | "proposing";
+      outboundColumns?: Array<string>;
+    },
+  ) {
+    renderTerms(linkageTerms, options);
+  }
+
+  // The whole fixed sentence, so a copy edit that drops the reason -- or the clause
+  // ruling the acceptor's own file out of the answer -- fails this assertion.
+  const noPayloadLine =
+    "Your partner receives no result from this exchange, so no columns are " +
+    "sent to them -- whatever your file contains.";
+  // The two lines this one takes precedence over, each asserted absent as its whole
+  // sentence so the assertion cannot pass on a shared opening clause.
+  const emptySendLine =
+    "No columns are sent to your partner; only the linkage result (which of " +
+    "your rows matched) is produced.";
+  const forwardReference =
+    "After you choose your file, you will confirm exactly which of its columns " +
+    "are sent to your partner for matched records.";
+
+  test("a chosen file's columns are not listed, and the line states why", async () => {
+    render(oneSided, {
+      perspective: "accepted",
+      outboundColumns: ["risk_score", "diagnosis"],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    // In the acceptor's own disclosure tier, under the same caption the send list
+    // takes, so the fact occupies the slot rather than vanishing from the screen.
+    const disclose = group("What you disclose");
+    await expect.element(disclose).toBeInTheDocument();
+    expect(disclose.element().textContent).toContain(
+      "What you will send to your partner",
+    );
+    expect(disclose.element().textContent).toContain(noPayloadLine);
+    // Neither column name reaches the screen at all: "risk_score" is the module
+    // terms' inviter-side send, which renders in Details as what the acceptor
+    // RECEIVES, so the acceptor's own set is pinned by the name only it carries.
+    expect(container!.textContent).not.toContain("diagnosis");
+    expect(
+      page
+        .getByRole("list", { name: "What you will send to your partner" })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("wins over the pre-file forward-reference on the review screen", async () => {
+    // No file chosen (outboundColumns undefined) on the pre-consent screen: the
+    // forward-reference would send the acceptor to look at a file that cannot
+    // change this answer.
+    render(oneSided, { perspective: "review" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(noPayloadLine);
+    expect(container!.textContent).not.toContain(forwardReference);
+  });
+
+  test("wins over the empty-set confirmation", async () => {
+    // A chosen file that discloses nothing: both statements are true, and the one
+    // that survives the operator changing their input file is the one shown.
+    render(oneSided, { perspective: "accepted", outboundColumns: [] });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(noPayloadLine);
+    expect(container!.textContent).not.toContain(emptySendLine);
+  });
+
+  test("does not fire when the inviting party does receive the result", async () => {
+    // The direction is the whole of the gate: the same acceptor set renders as
+    // chips under the two-sided module terms.
+    render(terms, {
+      perspective: "accepted",
+      outboundColumns: ["risk_score", "diagnosis"],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(noPayloadLine);
+    await expect
+      .element(
+        page.getByRole("list", { name: "What you will send to your partner" }),
+      )
+      .toHaveTextContent("diagnosis");
+  });
+
+  test("is absent from the inviter's own proposing preview", async () => {
+    // The gate is on the acceptor's block; the inviter's preview shows its own
+    // declared send under its own caption, which this must not displace.
+    render(oneSided, { perspective: "proposing" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(noPayloadLine);
+    expect(container!.textContent).toContain("Columns sent to your partner");
+  });
+});
+
 describe("InvitationTerms: the outbound-send caption does not presuppose a non-empty send", () => {
   // The caption above the acceptor's own outbound disclosure is a topic phrase
   // ("What you will send to your partner"), not the declarative "Columns you will
