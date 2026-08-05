@@ -6,7 +6,7 @@ import {
   isDisclosedToPartner,
   disclosedColumnNames,
 } from "./config/metadata.js";
-import type { Payload } from "./config/linkageTerms.js";
+import type { Output, Payload } from "./config/linkageTerms.js";
 import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
 import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
@@ -156,8 +156,8 @@ export function preparePayload(
 }
 
 /**
- * Reject a non-empty `payload.send` data dictionary that does not name EXACTLY
- * the columns this party transmits.
+ * Reject a PRESENT `payload.send` data dictionary that does not name EXACTLY the
+ * columns this party transmits.
  *
  * `payload.send` is the operator-authored data dictionary: it is exchanged with
  * the partner, shown on the consent screen, written verbatim into the
@@ -169,7 +169,7 @@ export function preparePayload(
  * wired independently, so a dictionary can drift from what metadata sends in
  * either direction.
  *
- * A non-empty `payload.send` must therefore name exactly the disclosed set -- no
+ * A present `payload.send` must therefore name exactly the disclosed set -- no
  * more and no less:
  * - OVER-declaration (a name metadata does not transmit: `isPayload: false`,
  *   `role: ignored`, or absent from metadata) makes the exchanged, consented, and
@@ -181,18 +181,49 @@ export function preparePayload(
  *   columns and abort an otherwise-honest exchange when the metadata-governed
  *   transmission delivers the omitted column.
  *
- * Neither direction leaks: transmission is governed by metadata, which the
- * operator set, so this is a consent-, record-, and lock-in-accuracy guarantee,
- * not a leak control.
+ * For a NON-EMPTY dictionary neither direction leaks: transmission is governed by
+ * metadata, which the operator set, so there this is a consent-, record-, and
+ * lock-in-accuracy guarantee, not a leak control. The EMPTY dictionary is the
+ * stronger case. An acceptor's `send` is the MIRROR of the inviter's
+ * `payload.receive` ({@link deriveAcceptedLinkageTerms}), so an empty one means the
+ * partner declared it will take nothing -- while this party's metadata may be
+ * INFERRED from its CSV header, where every unrecognized column defaults to
+ * `isPayload: true` with no operator choice involved. Refusing here, from inside
+ * `prepareForExchange` and so before the connection, is what keeps those columns
+ * off the wire: the partner's {@link reconcileReceivedPayload} aborts only once
+ * they have already arrived.
  *
- * An ABSENT or EMPTY `payload.send` is the deliberate exception (early return):
- * the guided and default paths author no dictionary while metadata still
- * transmits, and the cross-party mirror is lazy on an unauthored `receive`, so
- * holding an unauthored dictionary to equality would reject every such exchange.
- * Only a non-empty dictionary -- an explicit declaration -- is held to the
- * disclosed set. `payload.receive` is out of scope here: it has no local-metadata
- * counterpart (metadata gates sending, not receiving) and is cross-checked against
- * the partner's advertised `send` in `validateCompatibility`.
+ * Only an ABSENT `payload.send` is the deliberate exception (early return): the
+ * guided and default paths author no dictionary while metadata still transmits,
+ * and the cross-party mirror is lazy on an unauthored `receive`, so holding an
+ * unauthored dictionary to equality would reject every such exchange. A
+ * PRESENT-but-empty dictionary is NOT that case -- it is an explicit "I disclose
+ * nothing", so every disclosed column is an under-declaration -- matching the
+ * absent/empty semantics `disclosedPayloadColumns` and `expectedPayloadColumns`
+ * already carry (see exchangeSpec.ts) and {@link reconcileReceivedPayload}'s.
+ * `payload.receive` is out of scope here: it has no local-metadata counterpart
+ * (metadata gates sending, not receiving) and is cross-checked against the
+ * partner's advertised `send` in `validateCompatibility`.
+ *
+ * The EMPTY case -- and only that case -- is gated on `output`. `runExchange`
+ * builds this party's payload only when the PARTNER is entitled to the result, so
+ * with `output.shareWithPartner` false nothing leaves the machine whatever the
+ * metadata discloses, and a disclosure control has nothing left to control: an
+ * empty `send` against disclosed metadata is then a pair the exchange runs to
+ * completion on, transmitting nothing. Refusing it would also put two
+ * contradictory statements on the acceptor's consent screen -- a refusal notice
+ * above a `columns you will send` line reading "no payload is sent". The
+ * NON-EMPTY case stays UNGATED in every direction: that comparison is an accuracy
+ * control over a dictionary that is exchanged with the partner, shown for
+ * consent, and written into the exchange record whatever the output direction, so
+ * a dictionary naming columns is held to the disclosed set even when the columns
+ * never move.
+ *
+ * `output` is this party's OWN declaration, and before `validateCompatibility`
+ * has compared it against the partner's mirror it is only that -- so this gate
+ * decides the coherence of the operator's own configuration, and the transmission
+ * gate in `runExchange` (which reads the partner's authenticated terms) stays the
+ * fail-closed backstop that actually keeps the columns off the wire.
  *
  * Enforced at two points, both of which have the local metadata beside the
  * terms. `prepareForExchange` covers every exchange -- including the paths that
@@ -208,16 +239,22 @@ export function preparePayload(
  * are interpolated raw, matching `validateCompatibility`'s payload-mismatch
  * messages: an error is escaped once where it is rendered.
  *
- * @throws {UsageError} when a non-empty `payload.send` does not name exactly the
+ * @param output This party's own output declaration, from the same
+ *   {@link LinkageTerms} the `payload` comes from. Required rather than optional so
+ *   every call site states the direction and the `shareWithPartner` reading lives
+ *   here alone.
+ * @throws {UsageError} when a present `payload.send` does not name exactly the
  *   columns metadata discloses. A {@link UsageError} so the CLI classifies it as a
  *   configuration error (exit 64), not a transport failure.
  */
 export function assertPayloadSendDisclosed(
   payload: Payload | undefined,
   metadata: Metadata,
+  output: Output,
 ): void {
-  const send = payload?.send ?? [];
-  if (send.length === 0) return;
+  const send = payload?.send;
+  if (send === undefined) return;
+  if (send.length === 0 && !output.shareWithPartner) return;
   const sendNames = send.map((column) => column.name);
   const disclosed = disclosedColumnNames(metadata);
   const disclosedSet = new Set(disclosed);
@@ -244,9 +281,21 @@ export function assertPayloadSendDisclosed(
     problems.push(
       `omits ${plural ? "columns" : "a column"} metadata does transmit ([${shown}])`,
     );
+    // An EMPTY send gets a different remedy: "add them to payload.send" is wrong
+    // advice there. On an accepted invitation the empty send is the mirror of the
+    // inviter's `payload.receive: []` -- the partner declared it will take nothing
+    // -- so widening the declaration locally would not make the disclosure agreed,
+    // and the next acceptance would overwrite it. Narrowing what is transmitted,
+    // or getting a corrected invitation, are the remedies that exist.
     remedies.push(
-      `Add [${shown}] to payload.send, or set ${plural ? "their" : "its"} ` +
-        `metadata not to transmit (is_payload: false or role ignored).`,
+      sendNames.length === 0
+        ? `Set the metadata for [${shown}] not to transmit (is_payload: false ` +
+            `or role ignored). An empty payload.send declares that this party ` +
+            `discloses nothing; on an accepted invitation it mirrors the ` +
+            `partner's payload.receive, so disclosing these columns instead ` +
+            `takes a corrected invitation, not a local edit.`
+        : `Add [${shown}] to payload.send, or set ${plural ? "their" : "its"} ` +
+            `metadata not to transmit (is_payload: false or role ignored).`,
     );
   }
   throw new UsageError(

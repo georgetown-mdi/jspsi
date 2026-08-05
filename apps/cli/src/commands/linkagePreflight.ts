@@ -1,6 +1,8 @@
 import {
   assessLinkageSatisfiability,
+  disclosedColumnNames,
   getLogger,
+  inferMetadata,
   sanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -108,5 +110,98 @@ export function checkLinkageSatisfiability(
     `the CSV cannot satisfy all of the ${messaging.source}'s linkage fields` +
       detail((token) => sanitizeForDisplay(token)) +
       "; keys that require those fields will be inactive for this exchange.",
+  );
+}
+
+/** Which `psilink accept` path is running, selecting the outcome stated. */
+export type AcceptMode = "online" | "offline";
+
+/**
+ * What happens to the acceptance itself after the warning, which the two accept
+ * paths answer differently.
+ *
+ * Online, `prepareForOnlineExchange` runs inside `validateAccept` -- the same
+ * `prepareForExchange` that carries the refusal -- so the `UsageError` aborts the
+ * command before the terms display, the prompt, and every write. Offline there is
+ * no prepare call, so the acceptance runs to its prompt and the refusal waits for
+ * `psilink exchange`.
+ */
+const ACCEPTANCE_OUTCOME: Record<AcceptMode, string> = {
+  online:
+    "This acceptance cannot finish: it stops next as a configuration error " +
+    "(exit 64), before the terms are displayed and without writing a " +
+    "configuration or key file.",
+  offline:
+    "This acceptance is not stopped by it: confirming writes the configuration " +
+    "and key file, and the refusal arrives when you run 'psilink exchange'.",
+};
+
+/**
+ * Warn, on the ACCEPT path, when this party's input discloses payload columns the
+ * invitation declares the inviting party will accept none of. Accept-only: its
+ * copy names the invitation, so an exchange-path caller would have to
+ * parameterize the source the way {@link LinkagePreflightMessaging} does.
+ *
+ * `terms` are the acceptor's own derived terms, whose `payload.send` is the
+ * MIRROR of the inviter's `payload.receive` (`deriveAcceptedLinkageTerms`): a
+ * present-but-empty `send` is the inviter declaring it accepts no payload column,
+ * while an ABSENT one is the lazy direction, reconciled against this party's own
+ * disclosure when the exchange runs.
+ *
+ * Gated on the acceptor's own `output.shareWithPartner` -- mirrored from the
+ * invitation's `expectsOutput`, the same fact the consent display's `columns you
+ * will send` line reads. An inviting party entitled to no result receives no
+ * payload at all, so `assertPayloadSendDisclosed` does not refuse that pair and
+ * the display states that nothing is sent; warning there would contradict the
+ * line beneath it.
+ *
+ * The disclosed set is read the way the RUN resolves it (`prepareForExchange`
+ * takes the spec's metadata, else infers from the column names), so the warning
+ * also covers the acceptance whose metadata was dropped for an input that
+ * satisfies only some linkage keys -- the run infers metadata there and meets the
+ * refusal all the same. `columnNames` absent (an offline acceptance given no
+ * input file) leaves nothing to compare: the disclosed set is settled by whatever
+ * CSV `psilink exchange` is later given, which is what the display's
+ * not-yet-known line already says.
+ *
+ * That pair cannot run: `assertPayloadSendDisclosed` refuses it inside
+ * `prepareForExchange`, before connecting, so without this the operator meets the
+ * refusal only after consenting, writing files, and coordinating with a partner
+ * -- while both facts were on the consent surface. It warns rather than refuses
+ * on both paths, matching the grading {@link checkLinkageSatisfiability} already
+ * applies; what the acceptance then does differs by path, so the warning states
+ * it (see {@link ACCEPTANCE_OUTCOME}).
+ *
+ * A NON-EMPTY declared `send` that disagrees with the disclosed set is a
+ * different comparison with different remedies and is not covered here. The
+ * column names are this party's own file's and reach a log sink without ever
+ * becoming an `Error`, so they are escaped at that sink, and are rendered one per
+ * line so a name carrying the list separator cannot read as two.
+ */
+export function warnColumnsTheInvitationWillNotAccept(params: {
+  metadata: Metadata | undefined;
+  columnNames: string[] | undefined;
+  terms: LinkageTerms;
+  mode: AcceptMode;
+  log: ReturnType<typeof getLogger>;
+}): void {
+  const { metadata, columnNames, terms, mode, log } = params;
+  const send = terms.payload?.send;
+  if (send === undefined || send.length > 0) return;
+  if (!terms.output.shareWithPartner) return;
+  const resolved =
+    metadata ??
+    (columnNames !== undefined ? inferMetadata(columnNames) : undefined);
+  if (resolved === undefined) return;
+  const disclosed = disclosedColumnNames(resolved);
+  if (disclosed.length === 0) return;
+  log.warn(
+    "the invitation declares that the inviting party will accept no payload " +
+      "columns, but your input file discloses columns to send:\n" +
+      disclosed.map((name) => `  - ${sanitizeForDisplay(name)}`).join("\n") +
+      "\nThe exchange this acceptance configures refuses to run, before " +
+      `connecting, while the two disagree. ${ACCEPTANCE_OUTCOME[mode]} Set the ` +
+      "metadata for those columns not to transmit (is_payload: false or role " +
+      "ignored), or ask your partner for an invitation that accepts them.",
   );
 }
