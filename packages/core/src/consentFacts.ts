@@ -216,6 +216,32 @@ export const CONSENT_BASIS_MARKERS: Record<ConsentFactBasis, string> = {
 };
 
 /**
+ * The sentence a surface renders in the outbound-send slot, in place of any
+ * column set, when the viewer's partner receives no result from the exchange.
+ *
+ * The payload step transmits nothing at all to a partner not entitled to the
+ * result -- an empty message goes on the wire where a payload would -- so no
+ * column leaves the machine whatever the operator's file holds, and listing a set
+ * that never moves would overstate the disclosure. The reason is stated with the
+ * fact, because the reason is what an operator would otherwise go looking for in
+ * their own file.
+ *
+ * It is viewer-relative in both directions, which is what lets ONE sentence serve
+ * a surface on either side: the acceptor's partner is the inviting party, which
+ * receives when `output.expectsOutput` is set, and the inviter's partner is the
+ * acceptor, which receives when `output.shareWithPartner` is set (acceptance
+ * mirrors the pair). Each surface resolves that fact for its own viewer and
+ * renders this; a surface that composes its own sentence is a second account of
+ * the fact, which is the drift carrying the copy here removes.
+ *
+ * Fixed first-party copy, naming no column: no partner-controlled value reaches
+ * it, so a surface may render it verbatim.
+ */
+export const OUTBOUND_SEND_NO_PAYLOAD_SENTENCE =
+  "Your partner receives no result from this exchange, so no columns are sent " +
+  "to them -- whatever your file contains.";
+
+/**
  * The caveat copy for a term an inviter may declare that today's exchange does
  * not apply, keyed by the {@link APPLIED_SETTINGS} flag that gates it.
  *

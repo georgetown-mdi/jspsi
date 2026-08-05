@@ -93,6 +93,16 @@ const PSI_C_CAVEAT =
   "exchange does not yet apply it and will refuse to run; ask your partner " +
   'for an invitation using the "psi" algorithm.';
 
+// The whole no-payload sentence, spelled out here rather than imported from
+// OUTBOUND_SEND_NO_PAYLOAD_SENTENCE, so a copy edit that drops the reason -- or the
+// clause ruling the operator's own file out of the answer -- fails these assertions
+// instead of silently moving them. It is asserted on both sides of the exchange
+// below, which is what pins that ONE string serves both framings: an edit that made
+// it read for only one viewer reddens the other side's block.
+const NO_PAYLOAD_SENTENCE =
+  "Your partner receives no result from this exchange, so no columns are " +
+  "sent to them -- whatever your file contains.";
+
 let container: HTMLElement | undefined;
 let root: Root | undefined;
 
@@ -1313,11 +1323,6 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
     renderTerms(linkageTerms, options);
   }
 
-  // The whole fixed sentence, so a copy edit that drops the reason -- or the clause
-  // ruling the acceptor's own file out of the answer -- fails this assertion.
-  const noPayloadLine =
-    "Your partner receives no result from this exchange, so no columns are " +
-    "sent to them -- whatever your file contains.";
   // The two lines this one takes precedence over, each asserted absent as its whole
   // sentence so the assertion cannot pass on a shared opening clause.
   const emptySendLine =
@@ -1340,7 +1345,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
     expect(disclose.element().textContent).toContain(
       "What you will send to your partner",
     );
-    expect(disclose.element().textContent).toContain(noPayloadLine);
+    expect(disclose.element().textContent).toContain(NO_PAYLOAD_SENTENCE);
     // Neither column name reaches the screen at all: "risk_score" is the module
     // terms' inviter-side send, which renders in Details as what the acceptor
     // RECEIVES, so the acceptor's own set is pinned by the name only it carries.
@@ -1358,7 +1363,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
     // change this answer.
     render(oneSided, { perspective: "review" });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(noPayloadLine);
+    expect(container!.textContent).toContain(NO_PAYLOAD_SENTENCE);
     expect(container!.textContent).not.toContain(forwardReference);
   });
 
@@ -1367,7 +1372,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
     // that survives the operator changing their input file is the one shown.
     render(oneSided, { perspective: "accepted", outboundColumns: [] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(noPayloadLine);
+    expect(container!.textContent).toContain(NO_PAYLOAD_SENTENCE);
     expect(container!.textContent).not.toContain(emptySendLine);
   });
 
@@ -1379,7 +1384,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
       outboundColumns: ["risk_score", "diagnosis"],
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(noPayloadLine);
+    expect(container!.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
     await expect
       .element(
         page.getByRole("list", { name: "What you will send to your partner" }),
@@ -1387,13 +1392,101 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
       .toHaveTextContent("diagnosis");
   });
 
-  test("is absent from the inviter's own proposing preview", async () => {
-    // The gate is on the acceptor's block; the inviter's preview shows its own
-    // declared send under its own caption, which this must not displace.
+  test("does not fire on the inviter's own preview of these same terms", async () => {
+    // The direction control for the mirror. Under THESE terms the acceptor is the
+    // party that receives, so the inviter's payload does move and its declared send
+    // must still be listed. A preview gated on the acceptor's own fact
+    // (inviterReceivesOutput) rather than the inviter's (inviterSharesResult) fails
+    // here, which is the one way to get this wrong that suppresses a real
+    // disclosure.
     render(oneSided, { perspective: "proposing" });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(noPayloadLine);
-    expect(container!.textContent).toContain("Columns sent to your partner");
+    expect(container!.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
+    await expect
+      .element(page.getByRole("list", { name: "Columns sent to your partner" }))
+      .toHaveTextContent("risk_score");
+  });
+});
+
+describe("InvitationTerms: the inviter's own send is gated on the accepting party receiving a result", () => {
+  // The mirror of the block above, and the same run gate: the payload step transmits
+  // only to a partner entitled to the result. On the inviter's own preview that
+  // partner is the ACCEPTOR, which receives when the invitation shares its result --
+  // so the fact is shareWithPartner (summary.inviterSharesResult), not the
+  // expectsOutput the acceptor's block reads. Chips naming the inviter's declared
+  // send would name columns that never move, on the surface where the inviter is
+  // authoring exactly that declaration.
+  //
+  // The console's direct-exchange framing pairs this same "proposing" perspective
+  // with a heading/intro override and nothing else, so it inherits this block; the
+  // sentence is viewer-relative ("your partner", "your file"), which is what lets it
+  // read correctly there and on the invitation-authoring preview alike.
+  const acceptorGetsNothing: LinkageTerms = {
+    ...terms,
+    output: { expectsOutput: true, shareWithPartner: false },
+  };
+
+  test("the declared send is not listed, and the slot states why", async () => {
+    renderTerms(acceptorGetsNothing, { perspective: "proposing" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    // In the inviter's own disclosure tier, under the caption its chips take, so the
+    // fact occupies the slot rather than dropping off the screen.
+    const disclose = group("What you disclose");
+    await expect.element(disclose).toBeInTheDocument();
+    expect(disclose.element().textContent).toContain(
+      "Columns sent to your partner",
+    );
+    expect(disclose.element().textContent).toContain(NO_PAYLOAD_SENTENCE);
+    // The declared column itself reaches no part of the screen: under "proposing"
+    // the send has no "Other details" entry either, so its name is absent outright.
+    expect(container!.textContent).not.toContain("risk_score");
+    expect(
+      page.getByRole("list", { name: "Columns sent to your partner" }).query(),
+    ).toBeNull();
+  });
+
+  test("the empty-send confirmation gives way to it", async () => {
+    // An inviter declaring no send: both statements are true, and the one shown is
+    // the one that holds however the inviter edits its declaration, matching the
+    // precedence the acceptor's block applies to its own empty set.
+    renderTerms(
+      { ...acceptorGetsNothing, payload: { send: [], receive: [] } },
+      { perspective: "proposing" },
+    );
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(NO_PAYLOAD_SENTENCE);
+    expect(container!.textContent).not.toContain(
+      "No columns are sent to your partner; your file is used only to find matches.",
+    );
+  });
+
+  test("a two-sided invitation still lists the declared send", async () => {
+    // The direction is the whole of the gate: the module terms share the result both
+    // ways, so the chips render in full.
+    renderTerms(terms, { perspective: "proposing" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
+    await expect
+      .element(page.getByRole("list", { name: "Columns sent to your partner" }))
+      .toHaveTextContent("risk_score");
+  });
+
+  test("the acceptor's screens read the mirror of these same terms", async () => {
+    // The direction control facing the other way: under terms that give the ACCEPTOR
+    // nothing, the acceptor still sends -- the inviting party receives -- so its own
+    // outbound list must stand. An acceptor block gated on the inviter's fact fails
+    // here.
+    renderTerms(acceptorGetsNothing, {
+      perspective: "accepted",
+      outboundColumns: ["diagnosis"],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
+    await expect
+      .element(
+        page.getByRole("list", { name: "What you will send to your partner" }),
+      )
+      .toHaveTextContent("diagnosis");
   });
 });
 

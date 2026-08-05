@@ -16,7 +16,10 @@ import {
   IconCircleCheck,
 } from "@tabler/icons-react";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import {
+  OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import { MetadataGrid } from "@components/MetadataGrid";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
@@ -69,6 +72,10 @@ export function AcceptorColumnsStep({
   onLaunch,
   onBack,
 }: {
+  /** The INVITER's terms, decoded from the invitation -- so `output.expectsOutput`
+   * is this acceptor's PARTNER receiving the result, which is what the payload
+   * step transmits on (acceptance mirrors the pair, so the acceptor's own
+   * `expectsOutput` is the invitation's `shareWithPartner`). */
   linkageTerms: LinkageTerms;
   /** The acceptor's own CSV column names. */
   columns: Array<string>;
@@ -117,6 +124,17 @@ export function AcceptorColumnsStep({
     editorState,
   );
   const disclosed = acceptorDisclosedColumns(editorState.metadata);
+  // Whether the payload step transmits anything at all from this machine. It sends
+  // only to a partner entitled to the result, putting an empty message on the wire
+  // otherwise, so an invitation that gives the inviting party no result sends no
+  // column whatever this operator marks below -- and this screen, where the operator
+  // is actively choosing what to disclose, is the worst place to be told otherwise.
+  // The acceptor's partner IS the inviting party, so the fact is the invitation's own
+  // `expectsOutput`; the mirrored acceptor-side field would be the wrong one, naming
+  // this party's receipt rather than its partner's. The consent screen's outbound
+  // block resolves the same fact for the same viewer, and both render the sentence
+  // core carries.
+  const partnerReceivesResult = linkageTerms.output.expectsOutput;
   const standardizationValid = acceptorStandardizationValid(
     editorState.standardization,
   );
@@ -147,8 +165,15 @@ export function AcceptorColumnsStep({
       </h1>
       <p className={`${styles.small} ${styles.sub}`}>
         Tell us what each column in your file is and what should be done with
-        it. Nothing here is sent to your partner except the columns you mark as
-        shared.
+        it.{" "}
+        {/* The bound on what leaves, stated where the operator starts marking
+            columns. Its exception clause drops when the payload step sends nothing:
+            naming the marked columns as the thing that goes would promise a
+            disclosure the run does not make, on the screen where those marks are
+            being set. The panel below states the same bound with its reason. */}
+        {partnerReceivesResult
+          ? "Nothing here is sent to your partner except the columns you mark as shared."
+          : "Nothing here is sent to your partner."}
       </p>
 
       <Stack>
@@ -269,7 +294,13 @@ export function AcceptorColumnsStep({
             <Text size="sm" fw={600} mb={4}>
               What you will send to your partner
             </Text>
-            {disclosed.length === 0 ? (
+            {!partnerReceivesResult ? (
+              // The direction answers this panel ahead of the operator's own marks,
+              // so it takes the slot rather than qualifying a list beneath it, and
+              // renders at normal weight (not the dimmed empty-state voice): it is a
+              // statement about what leaves, not an absence of one.
+              <Text size="xs">{OUTBOUND_SEND_NO_PAYLOAD_SENTENCE}</Text>
+            ) : disclosed.length === 0 ? (
               <Text size="xs" c="dimmed">
                 No additional columns. Your columns are used only to find
                 matches; for each matched row you receive the columns your

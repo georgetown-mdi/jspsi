@@ -16,6 +16,7 @@ import { useReducedMotion } from "@mantine/hooks";
 
 import {
   CONSENT_FACTS,
+  OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
   sanitizeForDisplay,
   summarizeInvitation,
@@ -365,7 +366,13 @@ function CondensableDetails({
  * The direction of each is viewer-relative: under the inviter's "proposing" preview
  * the same egress count is the inviter's own inbound, so it lands in "What you
  * receive" there, and the inviter's own send is shown as chips under "What you
- * disclose" rather than as an ingress line. An attached legal agreement is promoted
+ * disclose" rather than as an ingress line. Whichever side is reading, that
+ * outbound-send slot is gated on the VIEWER's partner receiving a result -- the
+ * payload step transmits nothing at all to a partner not entitled to one, so a
+ * column list there would name a disclosure that does not happen -- and the two
+ * sides resolve that one fact from opposite `output` fields.
+ *
+ * An attached legal agreement is promoted
  * in full -- its reference, PURPOSE, and expiry render in the core (not a bare flag),
  * because the purpose is the compliance-pivotal field a 45 CFR 164.528 accounting
  * and FERPA's studies / audit-evaluation exceptions turn on (docs/COMPLIANCE.md) and
@@ -558,18 +565,27 @@ export function InvitationTerms({
     perspective === "proposing"
       ? "Your partner will receive the result"
       : "Your partner (the inviter) will receive the result";
-  // The acceptor's own outbound disclosure block renders as either the actual send
-  // list (a chosen file supplies outboundColumns) or, on the pre-file review screen,
-  // the fixed-copy forward-reference. Both are the acceptor's data leaving, so they
-  // sit in the "what you disclose" group with the egress request; the inviter's own
-  // send renders there as chips under "proposing" instead.
+  // The outbound-send slot holds whichever block states what this viewer's own data
+  // leaving amounts to: the inviter's declared send as chips under "proposing", and
+  // for the acceptor either the actual send list (a chosen file supplies
+  // outboundColumns) or, on the pre-file review screen, the fixed-copy
+  // forward-reference. All of them are the viewer's data leaving, so they sit in the
+  // "what you disclose" group with the egress request.
   //
-  // An invitation giving the inviting party no result answers the block ahead of
-  // both: the payload step transmits nothing at all to a partner not entitled to the
-  // result (an empty message goes on the wire in its place), so no column leaves
-  // whatever the acceptor's file holds, and a listed set would name a disclosure that
-  // does not happen. It wins over the forward-reference, because the file that
-  // reference points at cannot change the answer, and over the empty-set
+  // A partner that receives no result takes the slot ahead of every one of them,
+  // whichever side the viewer sits on: the payload step transmits nothing at all to a
+  // partner not entitled to the result (an empty message goes on the wire in its
+  // place), so no column leaves whatever the operator's file holds, and a listed set
+  // would name a disclosure that does not happen. The gate is partnerReceivesResult
+  // -- the viewer-relative split computed above -- and not either raw summary field,
+  // because the two sides read opposite ones: an inviter transmits when ITS partner
+  // (the acceptor) receives, which is the invitation's shareWithPartner, while an
+  // acceptor transmits when ITS partner (the inviting party) receives, which is
+  // expectsOutput. Gating either preview on the other's field would suppress a
+  // disclosure that does happen.
+  //
+  // For the acceptor the fact also wins over the forward-reference, because the file
+  // that reference points at cannot change the answer, and over the empty-set
   // confirmation, because the direction holds however the operator's file changes
   // while an empty disclosure is a property of the metadata resolved for this
   // acceptance alone -- the precedence the CLI accept prompt applies, so the two
@@ -578,8 +594,9 @@ export function InvitationTerms({
   // acceptance mirrors the invitation's output direction into this party's terms, and
   // the compatibility check refuses a partner presenting terms that disagree with
   // that mirror.
-  const outboundNoPayloadRenders =
-    perspective !== "proposing" && !summary.inviterReceivesOutput;
+  const outboundNoPayloadRenders = !partnerReceivesResult;
+  const proposingSendChipsRender =
+    perspective === "proposing" && !outboundNoPayloadRenders;
   const outboundSendListRenders =
     perspective !== "proposing" &&
     !outboundNoPayloadRenders &&
@@ -588,11 +605,20 @@ export function InvitationTerms({
     perspective === "review" &&
     !outboundNoPayloadRenders &&
     outboundColumns === undefined;
-  // The "what you disclose" group renders when this viewer discloses anything: the
-  // inviter always shows its send chips under "proposing"; the acceptor shows its
-  // outbound block and/or the egress request.
+  // Every block that can occupy the outbound-send slot carries the same caption, the
+  // one naming the viewer's own send: the inviter's declared send under "proposing",
+  // the acceptor's own otherwise. The caption follows the VIEWER, never the direction
+  // fact, so the slot does not rename itself when the gate above answers it.
+  const outboundSendSlotLabel =
+    perspective === "proposing"
+      ? "Columns sent to your partner"
+      : "What you will send to your partner";
+  // The "what you disclose" group renders when this viewer discloses anything: its
+  // outbound-send slot (which always holds one block under "proposing", and holds one
+  // for the acceptor once the gate or a chosen file answers it) and/or the egress
+  // request.
   const showsDiscloseGroup =
-    perspective === "proposing" ||
+    proposingSendChipsRender ||
     outboundNoPayloadRenders ||
     outboundSendListRenders ||
     outboundForwardRefRenders ||
@@ -761,9 +787,9 @@ export function InvitationTerms({
               from what the invitation declares. The send is an eager, definite
               declaration under "proposing", so an empty set reads as a positive "no
               columns" confirmation rather than an unknown. */}
-          {perspective === "proposing" && (
+          {proposingSendChipsRender && (
             <Term
-              label="Columns sent to your partner"
+              label={outboundSendSlotLabel}
               captionId={proposingSendCaptionId}
             >
               {summary.payload !== undefined &&
@@ -781,20 +807,19 @@ export function InvitationTerms({
             </Term>
           )}
 
-          {/* The invitation gives the inviting party no result, so the payload step
-              sends nothing whatever the acceptor's file holds -- the case that takes
-              this slot ahead of both blocks below (see the precedence above). Stated
-              with its reason, since the reason is what an operator would otherwise
-              look for in their own file. Rendered at normal weight, not dimmed, for
-              the reason the forward-reference is: it sits beside the egress request,
-              which must never read more prominently than what actually leaves. Fixed
-              copy, naming no column. */}
+          {/* This viewer's partner receives no result, so the payload step sends
+              nothing whatever the operator's file holds -- the case that takes the
+              slot ahead of every other block in it (see the precedence above).
+              Rendered at normal weight, not dimmed, for the reason the
+              forward-reference is: it sits beside the egress request, which must
+              never read more prominently than what actually leaves. The sentence is
+              read from `@psilink/core`, one copy for every surface stating the fact
+              (it is viewer-relative, so the inviter's preview and the acceptor's
+              screens render the same words); it is fixed first-party copy, naming no
+              column. */}
           {outboundNoPayloadRenders && (
-            <Term label="What you will send to your partner">
-              <Text size="sm">
-                Your partner receives no result from this exchange, so no
-                columns are sent to them -- whatever your file contains.
-              </Text>
+            <Term label={outboundSendSlotLabel}>
+              <Text size="sm">{OUTBOUND_SEND_NO_PAYLOAD_SENTENCE}</Text>
             </Term>
           )}
 
@@ -802,7 +827,7 @@ export function InvitationTerms({
               metadata disclosure). */}
           {outboundSendListRenders && (
             <Term
-              label="What you will send to your partner"
+              label={outboundSendSlotLabel}
               captionId={outboundSendCaptionId}
             >
               {outboundColumns.length > 0 ? (
@@ -839,7 +864,7 @@ export function InvitationTerms({
               copy, so no per-render sanitization; it names no count or names, not yet
               known. */}
           {outboundForwardRefRenders && (
-            <Term label="What you will send to your partner">
+            <Term label={outboundSendSlotLabel}>
               <Text size="sm">
                 After you choose your file, you will confirm exactly which of
                 its columns are sent to your partner for matched records.

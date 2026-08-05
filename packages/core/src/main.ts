@@ -104,6 +104,7 @@ export type {
 export {
   CONSENT_BASIS_MARKERS,
   CONSENT_FACTS,
+  OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
 } from "./consentFacts.js";
 export type {

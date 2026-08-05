@@ -1074,6 +1074,101 @@ describe("acceptor columns step: disclosure summary sanitization", () => {
   });
 });
 
+describe("acceptor columns step: the send summary is gated on the inviting party receiving a result", () => {
+  // The payload step transmits only to a partner entitled to the result, putting an
+  // empty message on the wire otherwise, so an invitation that gives the inviting
+  // party no result sends no column whatever this operator marks here. This is the
+  // screen where those marks are being set, so a summary listing them would promise
+  // a disclosure the run does not make at the moment the operator is deciding it.
+  //
+  // The acceptor's partner IS the inviting party, so the fact is the invitation's own
+  // expectsOutput -- the same fact the consent screen's outbound block reads
+  // (apps/web/test/browser/invitationTerms.test.ts pins it there), rendering the same
+  // sentence from @psilink/core.
+  const noResultForInviter: LinkageTerms = {
+    ...acceptorTerms,
+    output: { expectsOutput: false, shareWithPartner: true },
+  };
+  // Spelled out rather than imported, so a copy edit fails here as it does on the
+  // consent screen instead of moving both assertions at once.
+  const noPayloadSentence =
+    "Your partner receives no result from this exchange, so no columns are " +
+    "sent to them -- whatever your file contains.";
+
+  // A file whose columns cover both keys and disclose one payload column, so the
+  // send summary renders (not the mapper) with a non-empty set to suppress.
+  function mountStep(linkageTerms: LinkageTerms) {
+    const columns = ["first_name", "last_name", "risk_score"];
+    const rows = [Object.fromEntries(columns.map((c) => [c, "x"]))];
+    const columnsState = acceptorInitialColumnsState(columns);
+    const editorState = acceptorColumnsEditorState(
+      columnsState,
+      linkageTerms,
+      rows,
+    );
+    const noop = () => undefined;
+    mount(
+      createElement(AcceptorColumnsStep, {
+        linkageTerms,
+        columns,
+        columnsState,
+        editorState,
+        verdict: acceptorVerdict(columns, linkageTerms, editorState),
+        onMetadataChange: noop,
+        onRemap: noop,
+        onReset: noop,
+        onLaunch: noop,
+        onBack: noop,
+      }),
+    );
+  }
+
+  test("the disclosed set is not listed, and the panel states why", async () => {
+    mountStep(noResultForInviter);
+    // Under the same caption the list takes, so the fact occupies the panel rather
+    // than leaving it blank.
+    await expect
+      .element(page.getByText("What you will send to your partner"))
+      .toBeInTheDocument();
+    expect(container!.textContent).toContain(noPayloadSentence);
+    expect(container!.textContent).not.toContain("For each matched row:");
+    // The step's own lead-in drops its "except the columns you mark as shared"
+    // clause with the disclosure it would have promised.
+    expect(container!.textContent).toContain(
+      "Nothing here is sent to your partner.",
+    );
+  });
+
+  test("a two-sided invitation still lists the disclosed set", async () => {
+    // The direction is the whole of the gate: the same file and marks under terms
+    // that give the inviting party a result render the list in full.
+    mountStep(acceptorTerms);
+    expect(container!.textContent).not.toContain(noPayloadSentence);
+    await expect
+      .element(page.getByText("For each matched row:", { exact: false }))
+      .toHaveTextContent("risk_score");
+    expect(container!.textContent).toContain(
+      "Nothing here is sent to your partner except the columns you mark as shared.",
+    );
+  });
+
+  test("the acceptor's own withheld result does not suppress its send", async () => {
+    // The direction control. Terms that share nothing back still have this party
+    // sending -- the inviting party receives -- so a panel gated on the mirrored
+    // field (this party's own receipt) would hide a disclosure that does happen,
+    // which is the one way to get the direction wrong that costs the operator
+    // something.
+    mountStep({
+      ...acceptorTerms,
+      output: { expectsOutput: true, shareWithPartner: false },
+    });
+    expect(container!.textContent).not.toContain(noPayloadSentence);
+    await expect
+      .element(page.getByText("For each matched row:", { exact: false }))
+      .toHaveTextContent("risk_score");
+  });
+});
+
 describe("acceptor bench: run and completion", () => {
   // Consent, name, a fully-covered file, then Start the exchange -- the columns
   // step's launch, which auto-starts the run. The run token carries a future

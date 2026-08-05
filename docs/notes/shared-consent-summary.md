@@ -168,6 +168,31 @@ because it is the one the derivation does not reach -- an acceptance that keeps 
 configuration already on disk runs on that file's stored metadata, which nothing
 compares against the input the line was rendered from.
 
+## The same line, read from the other seat
+
+What the line turns on is the VIEWER's partner receiving a result, not the inviting
+party's receipt as such, and the difference bites wherever a display serves both
+seats. The inviter's own preview of the terms it is proposing reads the mirror: its
+partner is the acceptor, which receives when the invitation shares its result. A
+preview gated on the acceptor's own fact would blank a list of columns that do move,
+so each side's direction is pinned by a control rendering the opposite one-sided
+terms, where the columns must still be listed. The failure worth pinning against is
+the suppression, not the over-statement: an operator who reads a column they will not
+send is misinformed, while one who reads nothing where a disclosure happens is
+misinformed and unaware there is anything to check.
+
+Because the fact is viewer-relative, so is the sentence that states it -- "your
+partner", "your file" -- and one wording therefore serves either seat. It is carried
+once beside the classification and rendered by each place that states it in prose:
+the web consent screen's outbound block, the inviter's preview, and the acceptor's
+column-picking step, which is the screen where the operator is actively marking what
+to disclose and so the worst place to be told columns will be sent when none will.
+The CLI states the same fact as its line's value instead, in the label-and-value
+shape its outline uses, which is the per-surface half the division above leaves to
+the renderer. What is not left to a renderer is a fourth account of the fact: a
+surface composing its own sentence is exactly the drift the shared table exists to
+make unrepresentable.
+
 ## Two facts side by side, and no comparison between them
 
 The acceptor's own outbound columns and the inviting party's declared request sit
