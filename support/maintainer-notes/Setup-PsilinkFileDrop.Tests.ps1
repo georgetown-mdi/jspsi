@@ -100,11 +100,18 @@ BeforeAll {
             }
             $exitCode = $null
             if ($exited) { $exitCode = $process.ExitCode }
+            # Plain statements and an explicit null check: CI measured Errors
+            # arriving at the assertions as null despite a [string] cast here,
+            # so the coercion is spelled out where a debugger cannot reach.
+            $stdout = Get-Content -LiteralPath $outFile -Raw
+            if ($null -eq $stdout) { $stdout = '' }
+            $stderr = Get-Content -LiteralPath $errFile -Raw
+            if ($null -eq $stderr) { $stderr = '' }
             return [ordered]@{
                 TimedOut = (-not $exited)
                 Exit     = $exitCode
-                Output   = [string] (Get-Content -LiteralPath $outFile -Raw)
-                Errors   = [string] (Get-Content -LiteralPath $errFile -Raw)
+                Output   = [string] $stdout
+                Errors   = [string] $stderr
             }
         } finally {
             Remove-Item -LiteralPath $outFile, $errFile, $inFile -Force -ErrorAction SilentlyContinue
@@ -118,12 +125,19 @@ Describe 'The -LoadFunctionsOnly guard' {
             "if (Get-Command Resolve-DropPath -ErrorAction SilentlyContinue) { 'LOADED' }"
         $run = Start-PowerShellChild -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $command) -TimeoutSeconds 60
 
-        $run.TimedOut | Should -BeFalse
-        $run.Exit | Should -Be 0
-        $run.Errors.Trim() | Should -BeNullOrEmpty
+        # Null-safe reads and a -Because carrying the run's shape: the failure
+        # annotation is the only diagnostic that leaves the runner, so an
+        # assertion here must describe the run it judged, never throw.
+        $stdout = ([string] $run.Output).Trim()
+        $stderr = ([string] $run.Errors).Trim()
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) " +
+            "out_null=$($null -eq $run.Output) err_null=$($null -eq $run.Errors)"
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 0 -Because $shape
+        $stderr | Should -BeNullOrEmpty -Because $shape
         # Exactly the one word: the setup flow announces itself with a banner
         # before it does anything, so any of it running shows up here.
-        $run.Output.Trim() | Should -Be 'LOADED'
+        $stdout | Should -Be 'LOADED' -Because $shape
     }
 
     It 'leaves an ordinary run running the setup flow' {
