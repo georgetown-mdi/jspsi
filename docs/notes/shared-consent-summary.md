@@ -268,22 +268,29 @@ the renderer. What is not left to a renderer is a fourth account of the fact: a
 surface composing its own sentence is exactly the drift the shared table exists to
 make unrepresentable.
 
-## Two facts side by side, and no comparison between them
+## Two facts side by side, and where the comparison lives
 
 The acceptor's own outbound columns and the inviting party's declared request sit
-in the same part of the display, and nothing on either surface compares them. An
-inviter declaring it will receive no payload column, against an input file whose
-metadata discloses some, is a disagreement no surface states and nothing on this
-party's side resolves before the run: an empty declared request is not held
-against this party's own disclosure at prepare time, so the columns cross and the
-receiving side rejects them once they have arrived. `docs/CLI.md` states that
-ordering on the line itself.
+in the same part of the display, and nothing on either surface compares them. The
+comparison is real, but it is not the display's. An inviter declaring it will
+receive no payload column, against an input file whose metadata discloses some, is
+a disagreement `psilink accept` states during the input-versus-terms checking it
+already performs, before the terms display and the prompt, and one
+`assertPayloadSendDisclosed` refuses at prepare time, before this party connects,
+so the columns never cross rather than being rejected once they have arrived.
 
-Closing it belongs with the direction reasoning the outbound-send gate already
-carries, not with the display. A refusal keyed on the declaration alone would fire
-even where the run transmits nothing, which is the contradiction the gated lines
-elsewhere in this note exist to prevent: a screen cannot say the exchange refuses
-to run directly above a line saying no payload is sent.
+That refusal is keyed on direction, not on the declaration alone, which is what
+lets it sit beside the display without contradicting it. A refusal keyed on the
+declaration alone would fire even where the run transmits nothing, which is the
+contradiction the gated lines elsewhere in this note exist to prevent: a screen
+cannot say the exchange refuses to run directly above a line saying no payload is
+sent. So the empty declared request is held against this party's own disclosure
+only where this party's `output.shareWithPartner` says the partner receives the
+matched result, the same entitlement the outbound-send gate reads. Where it does
+not, nothing crosses whatever the metadata discloses, the line reads that no
+payload is sent, and no warning is stated against it. `docs/spec/FILE_SYNC.md`
+carries the normative rule and `docs/CLI.md` the per-path account of what
+acceptance does after it states the conflict.
 
 ## Proposed is not applied
 
