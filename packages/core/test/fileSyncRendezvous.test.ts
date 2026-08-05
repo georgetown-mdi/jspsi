@@ -1549,6 +1549,83 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     expect(rendered).not.toContain(sanitizeForDisplay(once));
   });
 
+  // A filename is partner-chosen text, and the display boundary's private-key
+  // redaction is fail-closed past a truncated key: from a BEGIN marker to the
+  // end of its link. The name is placed FIRST, which is the order a partner
+  // planting one would choose -- what the refusal is here to deliver (the count,
+  // the directory to go to, and the other names to clear) is composed BEHIND it,
+  // so a redaction that ran past the name would take all of it, and this
+  // assertion is what would see that.
+  test("a filename shaped like a private-key header does not take the enumeration with it", async () => {
+    const files = new Map<string, Buffer>();
+    // The name really reaches the guard: it satisfies the protocol grammar on
+    // its `-lock.json` terminal, asserted below, so it classifies as an
+    // unexpected protocol file rather than a tolerated foreign one.
+    const planted = `-----BEGIN RSA PRIVATE KEY-----lock.json`;
+    expect(planted.endsWith(LOCK_SUFFIX)).toBe(true);
+    const locks = Array.from({ length: 3 }, () => `${uuidv4()}${LOCK_SUFFIX}`);
+    files.set(`${REAL_DIR}/${planted}`, Buffer.alloc(0));
+    for (const name of locks) files.set(`${REAL_DIR}/${name}`, Buffer.alloc(0));
+    const p = makeParty("aaa", flags, files, {}, REAL_DIR);
+
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(err);
+    // The refusal and the step that clears it, in the leading link.
+    expect(rendered).toContain("must be empty except for a single peer hello");
+    expect(rendered).toContain("--sweep-exchange-files");
+    // The detail link: the true count, the directory, and the names behind the
+    // planted one, each still whole enough to act on.
+    expect(detailLink(rendered)).toContain("4 unexpected protocol file(s)");
+    expect(detailLink(rendered)).toContain(REAL_DIR);
+    const { shown, omitted } = listedNames(rendered);
+    expect(shown.slice(1)).toEqual(locks);
+    expect(omitted).toBe(0);
+    // The name is redacted where it stands, and to its end: redaction inside a
+    // fragment is the same fail-closed rule, so a name that IS key material is
+    // taken whole rather than leaving a tail behind.
+    expect(shown[0]).toBe("[redacted private key]");
+    // The replacement is shorter than the shortest marker it stands in for, so
+    // the budget, fitted over the raw names, still holds once it has run.
+    expect(detailLink(rendered).length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  });
+
+  // The same shape at the other composed enumeration: `<name> (<transport
+  // error>)` joined with `"; "`, and the sentence that tells the operator the
+  // directory is only partly swept composed after the join. This one message
+  // carries the whole report, so it is measured on names short enough that the
+  // per-link cap is not what decides the outcome -- suppression is.
+  test("a private-key-shaped name in a sweep failure does not take the rest of the report", async () => {
+    const files = new Map<string, Buffer>();
+    const planted = `-----BEGIN RSA PRIVATE KEY-----lock.json`;
+    const second = `b${LOCK_SUFFIX}`;
+    files.set(`${DIR}/${planted}`, Buffer.alloc(0));
+    files.set(`${DIR}/${second}`, Buffer.alloc(0));
+    const p = makeParty("aaa", { ...flags, sweepExchangeFiles: true }, files, {
+      deleteThrows: true,
+    });
+
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).toContain("[redacted private key]");
+    // What the operator acts on, all of it composed behind the planted name.
+    expect(rendered).toContain(second);
+    expect(rendered).toContain(
+      "The directory may be partially swept; resolve the transport error and re-run.",
+    );
+  });
+
   // The scope is the one fragment the entry guard clips itself, and it is clipped
   // BEFORE the display boundary escapes it. Clipping a raw value on a code-point
   // boundary is what keeps the escape whole; clipping an already-escaped one

@@ -5,6 +5,7 @@ import {
   retryPromise,
   withTimeout,
   TimeoutError,
+  redactPrivateKeyMaterial,
   DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
 } from "@psilink/core";
 import type {
@@ -182,7 +183,8 @@ export class LocalFSClient implements FileTransportClient {
             .access(dirPath, fs.constants.R_OK | fs.constants.W_OK)
             .catch((err: unknown) => {
               throw new Error(
-                `cannot read/write filedrop directory: ${dirPath}: ` +
+                `cannot read/write filedrop directory: ` +
+                  `${redactPrivateKeyMaterial(dirPath)}: ` +
                   (err instanceof Error ? err.message : String(err)),
               );
             }),

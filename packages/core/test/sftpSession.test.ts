@@ -5,6 +5,9 @@ import type { FileTransportClient } from "../src/connection/fileSyncConnection";
 import type { SFTPConnectionConfig } from "../src/config/connection";
 import { DEFAULT_SERVER_CONNECT_TIMEOUT_MS } from "../src/config/connection";
 import type { getLoggerForVerbosity } from "../src/utils/logger";
+import { computeHostKeyFingerprint } from "../src/utils/sshHostKey";
+import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
+import { DISPLAY_TRUNCATION_MARKER } from "../src/utils/sanitizeForDisplay";
 
 // The connect-option tests never dial, and construction only needs a
 // FileTransportClient reference, so an inert stub suffices. The whole-class
@@ -127,6 +130,106 @@ test("buildConnectOptions omits credentials when includeCredentials is false and
   expect(withCreds["privateKey"]).toBe("PRIVATE");
   expect(withCreds["passphrase"]).toBe("PASS");
   expect(withCreds["tryKeyboard"]).toBe(true);
+});
+
+// A raw OpenSSH host-key blob: a uint32 length prefix, the key-type string, and
+// the key bytes. The type is decoded verbatim out of the blob the server sent,
+// so it is server-controlled text sitting ahead of everything the mismatch
+// message tells the operator.
+function hostKeyBlob(keyType: string): Buffer<ArrayBuffer> {
+  const type = Buffer.from(keyType, "utf8");
+  const header = Buffer.alloc(4);
+  header.writeUInt32BE(type.length, 0);
+  return Buffer.concat([header, type, Buffer.alloc(32, 7)]);
+}
+
+// Drive the installed verifier against a presented key and render the failure
+// the connect path composes from it, exactly as fileSyncConnection does.
+async function renderMismatch(keyType: string): Promise<string> {
+  const { session } = makeSession();
+  const config: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      hostKeyFingerprint: `SHA256:${"A".repeat(43)}`,
+    },
+  };
+  const connectOptions: Record<string, unknown> = {};
+  const verifier = session.installEnforcingVerifier(connectOptions, config);
+  const hostVerifier = connectOptions["hostVerifier"] as (
+    blob: Buffer,
+    verify: (permitted: boolean) => void,
+  ) => void;
+  await new Promise<void>((resolve) => {
+    hostVerifier(hostKeyBlob(keyType), () => resolve());
+  });
+  return sanitizeErrorForDisplay(
+    new Error(
+      `SFTP host-key verification failed: ${verifier.mismatchDetails()}`,
+    ),
+  );
+}
+
+// The key type is quoted into the message ahead of the presented fingerprint
+// and the pinned set, and a server chooses it: keyTypeFromBlob decodes it
+// verbatim out of the blob under no allowlist. The display boundary's
+// private-key redaction is fail-closed past a truncated key, so without
+// redaction where the type is composed, a server naming its key type with a PEM
+// header deletes the comparison the operator makes by hand.
+//
+// This message also runs past the per-link display cap, which is a separate
+// bound and cuts the same tail whatever the key type is. The benign rendering is
+// measured alongside the planted one so the assertions pin what redaction
+// restores rather than what the cap removes.
+test("a private-key-shaped host key type does not suppress the mismatch detail", async () => {
+  const marker = "-----BEGIN RSA PRIVATE KEY-----";
+  const presented = await computeHostKeyFingerprint(hostKeyBlob(marker));
+  const rendered = await renderMismatch(marker);
+  const benign = await renderMismatch("ssh-ed25519");
+
+  expect(rendered).toContain("[redacted private key]");
+  // What a benign key type shows, and what the operator compares by hand.
+  expect(rendered).toContain(`with fingerprint ${presented}`);
+  expect(rendered).toContain("which does not match the pinned fingerprint");
+  // The cap, not the planted marker, is what ends this link: the benign
+  // rendering ends the same way, so the tail beyond it is not this item's loss.
+  expect(benign).toContain(DISPLAY_TRUNCATION_MARKER);
+  expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
+  expect(benign).not.toContain("or an active attack");
+});
+
+test("a host key type carrying a sliced key does not suppress the mismatch detail", async () => {
+  // A key type is length-prefixed bytes, not a token: it can carry line breaks,
+  // and a whole key sliced into it is the shape the redaction exists for. Both
+  // the marker and every line of armor behind it go, and the comparison stays.
+  const rendered = await renderMismatch(
+    "-----BEGIN RSA PRIVATE KEY-----\nc2gtcnNhAAAAAwEAAQ==\nQ1n3QqzB2rN0m8oL7v",
+  );
+  expect(rendered).toContain("[redacted private key]");
+  expect(rendered).not.toContain("c2gtcnNhAAAAAwEAAQ");
+  expect(rendered).not.toContain("Q1n3QqzB2rN0m8oL7v");
+  expect(rendered).toContain("which does not match the pinned fingerprint");
+});
+
+// The separator forms a sliced key can arrive in. A key that reached an error
+// through a folded YAML scalar carries spaces where its line breaks were, and
+// one carried in a single-line JSON scalar may carry no separator at all -- so
+// the redaction cannot key on line structure and stay closed.
+test("a sliced key in the host key type is redacted whatever joins its armor", async () => {
+  const body = [
+    "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtz",
+    "Wq1n3QqzB2rN0m8oL7vC5xY6aJ4kD1gH2sF3dP9uT8iR6eW0yA==",
+  ];
+  for (const separator of ["\n", "\r\n", " ", "\t", ""]) {
+    const rendered = await renderMismatch(
+      `-----BEGIN OPENSSH PRIVATE KEY-----${separator}${body.join(separator)}`,
+    );
+    expect(rendered).toContain("[redacted private key]");
+    for (const line of body) {
+      expect(rendered).not.toContain(line.slice(0, 24));
+      expect(rendered).not.toContain(line.slice(-24));
+    }
+  }
 });
 
 test("buildConnectOptions always sets readyTimeout: the default when unset, the configured value otherwise", () => {

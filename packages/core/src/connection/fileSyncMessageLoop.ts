@@ -34,6 +34,7 @@
 import { v4 as uuidv4 } from "uuid";
 
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
+import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay";
 import { parseBoundedJson } from "../utils/boundedJson";
 import type { getLoggerForVerbosity } from "../utils/logger";
 import {
@@ -638,8 +639,9 @@ export class FileSyncMessageLoop {
     if (policy === "ignore") return;
     if (policy === "error")
       throw new UsageError(
-        `unexpected file(s) appeared in ${path} during the exchange: ` +
-          `${names.join(", ")}. The ` +
+        `unexpected file(s) appeared in ${redactPrivateKeyMaterial(path)} ` +
+          `during the exchange: ` +
+          `${names.map(redactPrivateKeyMaterial).join(", ")}. The ` +
           `directory must be dedicated to a single ` +
           'exchange between exactly two parties (see EXCHANGE_REFERENCE.md "Directory ' +
           'exclusivity"); a foreign file usually means another process or ' +
@@ -785,7 +787,9 @@ export class FileSyncMessageLoop {
                 // handleUnexpectedFiles. The message flags the possibility
                 // rather than listing them.
                 throw new UsageError(
-                  `message file ${name} from ${peerId} in ${path} has a ` +
+                  `message file ${redactPrivateKeyMaterial(name)} from ` +
+                    `${redactPrivateKeyMaterial(peerId)} in ` +
+                    `${redactPrivateKeyMaterial(path)} has a ` +
                     "byte-count terminal segment but no parseable NNN segment; " +
                     "a correctly configured retain-mode peer cannot produce " +
                     "this name, so the file is corrupt or does not belong to " +
@@ -870,13 +874,16 @@ export class FileSyncMessageLoop {
           // directory reuse, not necessarily a separate session.
           throw new UsageError(
             `more than one message file with NNN=${this.recvSeq} from ` +
-              `${peerId} in ${path} - possible duplicate-NNN or directory reuse`,
+              `${redactPrivateKeyMaterial(peerId)} in ` +
+              `${redactPrivateKeyMaterial(path)} - possible duplicate-NNN or ` +
+              `directory reuse`,
           );
         }
         // Delete mode keeps at most one outstanding message per direction (I9),
         // so two peer messages means a concurrent session or a protocol bug.
         throw new UsageError(
-          `more than one message file from ${peerId} in ${path} - are there ` +
+          `more than one message file from ${redactPrivateKeyMaterial(peerId)} ` +
+            `in ${redactPrivateKeyMaterial(path)} - are there ` +
             "other sessions using this path?",
         );
       }
@@ -906,8 +913,13 @@ export class FileSyncMessageLoop {
         // one.
         const frameCap = this.inboundFrameCap ?? MAX_FRAME_SIZE_BYTES;
         if (declaredSize > frameCap || messageFile.size > frameCap) {
+          // Name, peer id and path are partner-controlled and stand ahead of
+          // the cap this reports and the next step FrameSizeExceededError
+          // appends (see redactPrivateKeyMaterial).
           throw new FrameSizeExceededError(
-            `message file ${messageFile.name} from ${peerId} in ${path} ` +
+            `message file ${redactPrivateKeyMaterial(messageFile.name)} from ` +
+              `${redactPrivateKeyMaterial(peerId)} in ` +
+              `${redactPrivateKeyMaterial(path)} ` +
               `declares ${declaredSize} byte(s) (on disk: ${messageFile.size}), ` +
               `exceeding the maximum inbound frame size of ` +
               `${frameCap} bytes; refusing to read it into memory`,
@@ -983,7 +995,8 @@ export class FileSyncMessageLoop {
               // failure into one obvious log line.
               if (parseErr instanceof IncompatibleEnvelopeVersionError)
                 throw new UsageError(
-                  `message file ${messageFile.name} from ${peerId} has an ` +
+                  `message file ${redactPrivateKeyMaterial(messageFile.name)} ` +
+                    `from ${redactPrivateKeyMaterial(peerId)} has an ` +
                     `unrecognized wire ` +
                     `format (envelope version byte ${parseErr.foundVersion}, ` +
                     `not this build's ${MESSAGE_ENVELOPE_VERSION}); the partner ` +
@@ -993,7 +1006,8 @@ export class FileSyncMessageLoop {
               // Any other envelope failure (truncation, unknown type, out-of-
               // range seq) is genuine corruption from a same-version peer.
               throw new UsageError(
-                `message file ${messageFile.name} from ${peerId} is fully ` +
+                `message file ${redactPrivateKeyMaterial(messageFile.name)} ` +
+                  `from ${redactPrivateKeyMaterial(peerId)} is fully ` +
                   `synced but has a malformed envelope: ` +
                   `${errMessage(parseErr)}`,
               );
@@ -1015,7 +1029,8 @@ export class FileSyncMessageLoop {
               value = parseBoundedJson(envelope.payload);
             } catch (parseErr: unknown) {
               throw new UsageError(
-                `message file ${messageFile.name} from ${peerId} is fully ` +
+                `message file ${redactPrivateKeyMaterial(messageFile.name)} ` +
+                  `from ${redactPrivateKeyMaterial(peerId)} is fully ` +
                   `synced but is not valid JSON: ${errMessage(parseErr)}`,
               );
             }

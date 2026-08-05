@@ -27,6 +27,7 @@
 
 import type { getLoggerForVerbosity } from "../utils/logger";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
+import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay";
 import {
   computeHostKeyFingerprint,
   matchHostKeyFingerprint,
@@ -302,10 +303,15 @@ export class SftpSession {
               // also surface the digest of a non-matching key.
               const presented = await computeHostKeyFingerprint(blob);
               // keyTypeFromBlob decodes UTF-8 straight from the
-              // server-controlled blob, so it is quoted in the message below and
-              // escaped where the error is rendered; the presented fingerprint
-              // is base64 and the pins are format-validated.
-              const keyType = keyTypeFromBlob(blob);
+              // server-controlled blob under no allowlist, so it is quoted in
+              // the message below and escaped where the error is rendered; the
+              // presented fingerprint is base64 and the pins are
+              // format-validated. It is redacted here because it is the one
+              // fragment of this message a server chooses and it leads: without
+              // that, the party this message warns about picks the string that
+              // deletes the comparison the operator makes by hand (see
+              // redactPrivateKeyMaterial).
+              const keyType = redactPrivateKeyMaterial(keyTypeFromBlob(blob));
               // Name the presented fingerprint and the pinned set so the
               // operator can see exactly what was offered against what was
               // trusted (the singular vs. plural wording adapts to the pin

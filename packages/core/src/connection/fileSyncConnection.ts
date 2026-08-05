@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getLoggerForVerbosity } from "../utils/logger";
 import { pathsResolveToSameDir } from "../utils/pathCompare";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
+import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay";
 import {
   DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
@@ -86,14 +87,17 @@ export function normalizeFiledropPath(rawPath: string): string {
 // error: the target it names is a transport path, and on a get/delete of a peer
 // message file that path embeds the partner-chosen filename, so its
 // control/ANSI/Unicode bytes are neutralized by sanitizeErrorForDisplay where
-// the message is shown. This is the core-side whole-exchange-budget twin of the
-// CLI adapter's per-operation transportOperationStalledError.
+// the message is shown. It is redacted here rather than at each of the callers
+// that build it, since it leads the message, ahead of the budget, the diagnosis
+// and the next step TransportOperationStalledError appends (see
+// redactPrivateKeyMaterial). This is the core-side whole-exchange-budget twin of
+// the CLI adapter's per-operation transportOperationStalledError.
 const transportBudgetExceededError = (
   operation: string,
   budgetMs: number,
 ): TransportOperationStalledError =>
   new TransportOperationStalledError(
-    `transport ${operation} exceeded the ${budgetMs} ms ` +
+    `transport ${redactPrivateKeyMaterial(operation)} exceeded the ${budgetMs} ms ` +
       `peer-inactivity budget; the peer or server has not responded within the ` +
       `budget, so the exchange is failing rather than waiting on it further`,
   );

@@ -2,6 +2,7 @@ import canonicalize from "canonicalize";
 import { z } from "zod";
 
 import { UsageError } from "../errors.js";
+import { redactPrivateKeyMaterial } from "./sanitizeErrorForDisplay.js";
 
 // Canonical encoding for receipt and record artifacts (RFC 8785, JSON
 // Canonicalization Scheme). The same logical object must serialize to a
@@ -67,7 +68,10 @@ export class CanonicalEncodingError extends UsageError {
 
 function fail(reason: string, path: string, cause?: unknown): never {
   throw new CanonicalEncodingError(
-    `canonical encoding failed at ${path}: ${reason}`,
+    // The pointer is built from the encoded object's own keys, partner-chosen on
+    // a partner-supplied document, and it stands ahead of the reason (see
+    // redactPrivateKeyMaterial).
+    `canonical encoding failed at ${redactPrivateKeyMaterial(path)}: ${reason}`,
     // Only pass options when there is a cause, so the common origin rejections
     // (which have none) do not allocate an options object per call.
     cause === undefined ? undefined : { cause },

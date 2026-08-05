@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   sanitizeErrorForDisplay,
+  redactPrivateKeyMaterial,
   MAX_ERROR_CAUSE_DEPTH,
 } from "../src/utils/sanitizeErrorForDisplay";
 import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
@@ -307,6 +308,70 @@ describe("sanitizeErrorForDisplay", () => {
       expect(
         sanitizeErrorForDisplay(new Error(`host key ${fingerprint}`)),
       ).toContain(fingerprint);
+    });
+
+    // A key sliced into an error message carries whatever structure the thing
+    // that carried it left behind: real line breaks from a file read, spaces
+    // from a folded or plain multi-line YAML scalar, or nothing at all from a
+    // single-line JSON scalar. The reach past a truncated marker is to the end
+    // of the link for exactly this reason -- a rule that consumes only armor
+    // organised into LINES leaks the whole body of every other delivery.
+    test("redacts a truncated key whatever joins its armor lines", () => {
+      const body = [
+        "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtz",
+        "c2gtZWQyNTUxOQAAACBQ1n3QqzB2rN0m8oL7vC5xY6aJ4kD1gH2sF3dP9uT8iQ",
+        "Wq1n3QqzB2rN0m8oL7vC5xY6aJ4kD1gH2sF3dP9uT8iR6eW0yA==",
+      ];
+      const marker = "-----BEGIN OPENSSH PRIVATE KEY-----";
+      for (const separator of ["\n", "\r\n", "\r", " ", "\t", "", "\\n"]) {
+        const sliced = `${marker}${separator}${body.join(separator)}`;
+        for (const carrier of [
+          `could not load key: ${sliced}`,
+          `bad config {"key": "${sliced}"}`,
+        ]) {
+          const out = sanitizeErrorForDisplay(new Error(carrier));
+          expect(out).toContain("[redacted private key]");
+          for (const line of body) {
+            expect(out).not.toContain(line.slice(0, 24));
+            expect(out).not.toContain(line.slice(-24));
+          }
+        }
+      }
+    });
+
+    test("redactPrivateKeyMaterial is idempotent and never grows its input", () => {
+      // Composition sites redact a fragment before it is interpolated, and the
+      // renderer redacts the whole link again. The second pass must be a no-op
+      // (the replacement carries no marker), and neither pass may lengthen the
+      // text, or a display budget fitted over raw fragments would overrun.
+      const inputs = [
+        "",
+        "plain text",
+        "-----BEGIN RSA PRIVATE KEY-----",
+        `-----BEGIN RSA PRIVATE KEY-----\n${KEY_BODY}`,
+        `a-----BEGIN PRIVATE KEY-----b-----END PRIVATE KEY-----c`,
+        "-----BEGIN A PRIVATE KEY-----".repeat(200),
+      ];
+      for (const input of inputs) {
+        const once = redactPrivateKeyMaterial(input);
+        expect(redactPrivateKeyMaterial(once)).toBe(once);
+        expect(once.length).toBeLessThanOrEqual(input.length);
+      }
+    });
+
+    // The reach is fail-closed to the end of the link, so operator text composed
+    // after a marker in the SAME link is taken with it. That is the cost the
+    // composition sites pay off by redacting their partner-controlled fragments
+    // first; it is pinned here so a future change to the reach is a visible
+    // decision rather than a silent one.
+    test("the reach past a marker is the whole link, and stops at the link boundary", () => {
+      const out = sanitizeErrorForDisplay(
+        new Error("-----BEGIN RSA PRIVATE KEY-----then first-party text", {
+          cause: new Error("the next link is out of reach"),
+        }),
+      );
+      expect(out).not.toContain("then first-party text");
+      expect(out).toContain("the next link is out of reach");
     });
   });
 });
