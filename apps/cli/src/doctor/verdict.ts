@@ -69,6 +69,34 @@ export interface DoctorVerdict {
   checks: DoctorCheck[];
 }
 
+// Record builders shared by both batteries.
+
+export function ok(
+  id: string,
+  summary: string,
+  extra: Partial<DoctorCheckRecord> = {},
+): DoctorCheckRecord {
+  return { id, status: "ok", summary, ...extra };
+}
+
+export function fail(
+  id: string,
+  summary: string,
+  meaning: string,
+  action: string,
+  extra: Partial<DoctorCheckRecord> = {},
+): DoctorCheckRecord {
+  return { id, status: "fail", summary, meaning, action, ...extra };
+}
+
+export function skipped(
+  id: string,
+  summary: string,
+  extra: Partial<DoctorCheckRecord> = {},
+): DoctorCheckRecord {
+  return { id, status: "skipped", summary, ...extra };
+}
+
 /**
  * Exit code per overall verdict, the closed set a caller may see from a run that
  * produced a verdict. All are below 125, which Docker reserves for its own

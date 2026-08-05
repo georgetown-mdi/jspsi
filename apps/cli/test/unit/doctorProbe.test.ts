@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { describe, expect, test } from "vitest";
 
+import { MAX_DIRECTORY_ENTRIES } from "../../src/connection/listingGuard";
 import type { CommandResult, CommandRunner } from "../../src/doctor/runner";
 import {
   PROBE_CHECK_IDS,
@@ -46,6 +47,22 @@ const DIRECTORY_LISTING = [
   "\t\t10485760 blocks of size 1024. 5242880 blocks available",
   "",
 ].join("\n");
+
+/** A listing one entry past the bound the transport will refuse to read. */
+function oversizedListing(): string {
+  return [
+    "  .                                   D        0  Mon Jan  1 00:00:00 2024",
+    "  ..                                  D        0  Mon Jan  1 00:00:00 2024",
+    ...Array.from(
+      { length: MAX_DIRECTORY_ENTRIES + 1 },
+      (_, i) =>
+        `  file-${i}.csv                      A      100  Mon Jan  1 00:00:00 2024`,
+    ),
+    "",
+    "\t\t10485760 blocks of size 1024. 5242880 blocks available",
+    "",
+  ].join("\n");
+}
 
 interface Invocation {
   args: string[];
@@ -424,12 +441,45 @@ describe("checks that could not run are fatal, not a verdict", () => {
 });
 
 describe("inputs that change the shape of the run", () => {
-  test("no subdirectory skips that check and targets the share root", async () => {
+  test("no subdirectory targets the share root and counts its entries", async () => {
     const probeDeps = deps(healthyReply);
     const report = await runProbe({ ...INPUT, subdirectory: "" }, probeDeps);
-    expect(checkById(report, "subdirectory").status).toBe("skipped");
+    const check = checkById(report, "subdirectory");
+    expect(check.status).toBe("ok");
+    expect(check.summary).toContain("share root");
+    expect(check.summary).toContain("1 file(s)");
     expect(overallOf(report)).toBe("ok");
     for (const call of probeDeps.calls) expect(call.args).not.toContain("-D");
+  });
+
+  test("an oversized exchange folder carries the entry-count advisory", async () => {
+    const report = await runProbe(
+      INPUT,
+      deps((args) =>
+        commandOf(args) === "ls" && args.includes("-D")
+          ? { output: oversizedListing() }
+          : healthyReply(args),
+      ),
+    );
+    const check = checkById(report, "subdirectory");
+    expect(check.status).toBe("ok");
+    expect(check.action).toContain("dedicated to the exchange");
+    expect(overallOf(report)).toBe("ok");
+  });
+
+  test("an oversized share root carries the same advisory", async () => {
+    const report = await runProbe(
+      { ...INPUT, subdirectory: "" },
+      deps((args) =>
+        commandOf(args) === "ls"
+          ? { output: oversizedListing() }
+          : healthyReply(args),
+      ),
+    );
+    const check = checkById(report, "subdirectory");
+    expect(check.status).toBe("ok");
+    expect(check.action).toContain("dedicated to the exchange");
+    expect(overallOf(report)).toBe("ok");
   });
 
   test("a share root that will not list is not a failure when a subfolder was given", async () => {

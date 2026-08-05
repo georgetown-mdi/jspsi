@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { SmbMountInput } from "./smbEnvironment";
 import type { DoctorCheckRecord, DoctorReport } from "./verdict";
+import { fail, ok, skipped } from "./verdict";
 
 // The kernel half of the file-drop checks: the operations psilink's rendezvous
 // is built on, run over the real mount rather than over smbclient, which refuses
@@ -62,32 +63,6 @@ export const nodeMountFs: MountFs = {
   rename: (from, to) => fs.renameSync(from, to),
   remove: (file) => fs.rmSync(file, { force: true }),
 };
-
-function ok(
-  id: string,
-  summary: string,
-  extra: Partial<DoctorCheckRecord> = {},
-): DoctorCheckRecord {
-  return { id, status: "ok", summary, ...extra };
-}
-
-function fail(
-  id: string,
-  summary: string,
-  meaning: string,
-  action: string,
-  extra: Partial<DoctorCheckRecord> = {},
-): DoctorCheckRecord {
-  return { id, status: "fail", summary, meaning, action, ...extra };
-}
-
-function skipped(
-  id: string,
-  summary: string,
-  extra: Partial<DoctorCheckRecord> = {},
-): DoctorCheckRecord {
-  return { id, status: "skipped", summary, ...extra };
-}
 
 function errorCode(err: unknown): string {
   return (err as NodeJS.ErrnoException).code ?? "unknown error";

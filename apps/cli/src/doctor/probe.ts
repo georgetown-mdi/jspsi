@@ -5,10 +5,12 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
+import { MAX_DIRECTORY_ENTRIES } from "../connection/listingGuard";
 import type { CommandResult, CommandRunner } from "./runner";
 import { nodeCommandRunner } from "./runner";
 import type { SmbProbeInput } from "./smbEnvironment";
 import type { DoctorCheckRecord, DoctorReport } from "./verdict";
+import { fail, ok, skipped } from "./verdict";
 
 // The userspace half of the file-drop checks: what the exchange needs, asked of
 // the server over TCP with smbclient, with nothing mounted. It answers the
@@ -27,13 +29,6 @@ const TCP_PROBE_TIMEOUT_MS = 8_000;
 
 /** The SMB port an exchange over a file drop is carried on. */
 const SMB_PORT = 445;
-
-/**
- * psilink will not read a rendezvous folder holding more than this many entries,
- * so a folder already past it fails an exchange however the permissions come
- * out. Kept in step with the transport's own directory-listing bound.
- */
-const MAX_RENDEZVOUS_ENTRIES = 8192;
 
 /** Free space below which the share is worth a note, in MB. */
 const LOW_FREE_SPACE_MB = 100;
@@ -149,6 +144,21 @@ export function countEntries(listing: string): number {
 }
 
 /**
+ * The advisory a target folder earns when it already holds more entries than
+ * the transport will list.
+ */
+function entryOverflowExtra(entries: number): Partial<DoctorCheckRecord> {
+  if (entries <= MAX_DIRECTORY_ENTRIES) return {};
+  return {
+    meaning:
+      `psilink will not read a rendezvous folder holding more than ` +
+      `${MAX_DIRECTORY_ENTRIES} entries, so an exchange here will ` +
+      "fail however the permissions come out.",
+    action: "use a folder dedicated to the exchange.",
+  };
+}
+
+/**
  * The dialect arguments for one smbclient invocation. `-m` sets the MAXIMUM
  * protocol only; the client minimum stays where it is, so asking for NT1 with
  * `-m` alone is a contradiction the client rejects out of hand against every
@@ -195,32 +205,6 @@ function listArgs(input: SmbProbeInput, authFile: string): string[] {
     authFile,
     ...dialectArgs(input.dialect),
   ];
-}
-
-function ok(
-  id: string,
-  summary: string,
-  extra: Partial<DoctorCheckRecord> = {},
-): DoctorCheckRecord {
-  return { id, status: "ok", summary, ...extra };
-}
-
-function fail(
-  id: string,
-  summary: string,
-  meaning: string,
-  action: string,
-  extra: Partial<DoctorCheckRecord> = {},
-): DoctorCheckRecord {
-  return { id, status: "fail", summary, meaning, action, ...extra };
-}
-
-function skipped(
-  id: string,
-  summary: string,
-  extra: Partial<DoctorCheckRecord> = {},
-): DoctorCheckRecord {
-  return { id, status: "skipped", summary, ...extra };
 }
 
 /**
@@ -658,8 +642,13 @@ export async function runProbe(
     }
 
     if (input.subdirectory === "") {
+      const entries = countEntries(listing);
       checks.push(
-        skipped("subdirectory", "using the share root; none was given."),
+        ok(
+          "subdirectory",
+          `using the share root; ${entries} file(s) in it.`,
+          entryOverflowExtra(entries),
+        ),
       );
     } else {
       const subdirectoryList = await deps.runner.run(
@@ -682,17 +671,11 @@ export async function runProbe(
       }
       const entries = countEntries(subdirectoryList.output);
       checks.push(
-        ok("subdirectory", `directory listed, ${entries} file(s) in it.`, {
-          ...(entries > MAX_RENDEZVOUS_ENTRIES
-            ? {
-                meaning:
-                  `psilink will not read a rendezvous folder holding more than ` +
-                  `${MAX_RENDEZVOUS_ENTRIES} entries, so an exchange here will ` +
-                  "fail however the permissions come out.",
-                action: "use a folder dedicated to the exchange.",
-              }
-            : {}),
-        }),
+        ok(
+          "subdirectory",
+          `directory listed, ${entries} file(s) in it.`,
+          entryOverflowExtra(entries),
+        ),
       );
       target = input.subdirectory;
       listing = subdirectoryList.output;

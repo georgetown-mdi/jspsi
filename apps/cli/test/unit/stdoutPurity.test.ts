@@ -21,7 +21,7 @@ import {
   snapshotDiagnosticSinkAndLevel,
 } from "../loggingTestSupport";
 
-// Executable form of the contract issue 206965143 establishes: stdout carries
+// Executable form of the stdout contract: stdout carries
 // only a command's result data, and every diagnostic goes to stderr. These tests
 // run a command to completion and assert nothing diagnostic reached stdout -- the
 // property a prose note could only claim, not enforce (CONTRIBUTING: encode a
@@ -35,9 +35,9 @@ import {
 // Covered here are the offline, no-network commands whose stdout shape is
 // unambiguous: `invite` (a single opaque token), `init` (no stdout result -- its
 // result is the written file), and `fingerprint` (the bare fingerprint value;
-// board item 207023432 routed its action banner, bound identity, --force
-// regeneration warning, and out-of-band sharing instructions off stdout and
-// through the logger). The online CSV-result commands route diagnostics through
+// its action banner, bound identity, --force regeneration warning, and
+// out-of-band sharing instructions all route off stdout and through the
+// logger). The online CSV-result commands route diagnostics through
 // the same sink, pinned at the sink level in stderrLogging.test.ts.
 
 const DIAGNOSTIC_PREFIX = /\[(TRACE|DEBUG|INFO|WARN|ERROR)\]/;
