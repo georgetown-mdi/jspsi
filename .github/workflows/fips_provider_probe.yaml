@@ -1,24 +1,22 @@
 name: FIPS Provider Probe
 
-# Measurement harness for the FIPS provider spike. It builds an OpenSSL FIPS
-# provider from source on top of the same Alpine base the shipped image runs,
-# lists that provider's key-exchange, signature and KEM algorithms, and probes
-# whether the base image's Node engages a configured FIPS provider for
+# Measurement harness behind docs/notes/fips-provider-surface.md. It builds an
+# OpenSSL FIPS provider from source on top of the same Alpine base the shipped
+# image runs, lists that provider's key-exchange, signature and KEM algorithms,
+# and probes whether the base image's Node engages a configured FIPS provider for
 # AES-256-GCM. Nothing it builds ships: support/fips-probe/ is a throwaway image
 # and the root Dockerfile is not touched by any of it.
 #
-# A workflow_dispatch-only workflow cannot be dispatched until its file is on the
-# default branch, so the push trigger below is what makes the spike runnable at
-# all. That trigger and the probe-out/ transcripts are both spike scaffolding and
-# come out before this branch is proposed for merge.
+# Manual only. It answers a question that is asked when a provider or a base
+# image changes, not on every push, and it builds OpenSSL twice from source --
+# too costly to run on a schedule for an answer that moves that rarely.
 on:
   workflow_dispatch:
-  push:
-    branches: [fips-provider-surface-spike]
-    # The last step commits the transcript back to this branch. Without this
-    # ignore that commit re-triggers the workflow on its own output.
-    paths-ignore:
-      - "probe-out/**"
+    inputs:
+      publish_transcript:
+        description: "Commit the transcripts to probe-out/ on the dispatched branch"
+        type: boolean
+        default: false
 
 # Cancel a superseded run when a newer commit lands on the same branch.
 concurrency:
@@ -178,8 +176,13 @@ jobs:
           name: fips-probe-transcript-${{ matrix.leg }}
           path: transcript-${{ matrix.leg }}.md
 
-      - name: Publish the transcript to the probe branch
-        if: always()
+      # Off by default: the artifact above is the channel for anyone who can
+      # reach it. This one exists because a dev container here cannot -- both
+      # workflow artifacts and run logs are served from blob storage the
+      # firewall blocks, so a file committed to the branch is the only way the
+      # measurement reaches a session working in one.
+      - name: Publish the transcript to the dispatched branch
+        if: always() && inputs.publish_transcript
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: ${{ github.ref_name }}
