@@ -3857,6 +3857,38 @@ test("synchronize() lock starter: a sentinel visible when the TTL expires yields
   expect(isPeerWaitTimeout(err)).toBe(false);
 });
 
+// The sentinel's name carries a peer id recovered from a partner-written
+// filename under no charset bound, and both stuck-joiner errors put the whole
+// diagnosis and "Retry the exchange." BEHIND it in one link. Redacting the name
+// where it is interpolated is what keeps the next step reachable.
+test("synchronize() lock starter: a private-key-shaped sentinel name does not take the stuck-joiner diagnosis", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    joinerRecoveryMs: 10_000,
+    timeToLiveMs: 150,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const joiningName = `-----BEGIN RSA PRIVATE KEY------joining.json`;
+  files.set(`${conn.path}/${joiningName}`, LOCK_HELLO_BODY);
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [{ name: joiningName, modifyTime: Date.now(), size: 0 }];
+  };
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).toContain("[redacted private key]");
+  expect(rendered).toMatch(/the exchange timed out before it completed/);
+  expect(rendered).toMatch(
+    /failed after announcing its arrival but before publishing its hello/,
+  );
+  expect(rendered).toContain("Retry the exchange.");
+});
+
 test("synchronize() lock starter: a sentinel that vanishes and reappears gets a fresh recovery window", async () => {
   // The empty-poll reset of joiningSeenAt/joiningSeenName times a reappearing
   // sentinel from its REappearance, not its first sighting. Without the reset,

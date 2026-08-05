@@ -96,6 +96,30 @@ export interface RendezvousScope {
   dirsDisplay: string;
 }
 
+/**
+ * Compose the operator-facing directory scope, redacting each path where it is
+ * interpolated rather than the composed result. The split form carries
+ * first-party labels BETWEEN two paths, so redacting the composite would let a
+ * marker in the inbound path consume the labels and the operator's own outbound
+ * path under the fail-closed dangling rule -- the shape
+ * {@link redactPrivateKeyMaterial} exists to contain. Every producer of a
+ * {@link RendezvousScope}'s `dirsDisplay`, and the sweep's own scope string,
+ * goes through here so the property is structural rather than a convention each
+ * call site has to remember.
+ *
+ * @internal
+ */
+export function composeDirsDisplay(
+  inboundPath: string,
+  outboundPath: string | undefined,
+): string {
+  const inbound = redactPrivateKeyMaterial(inboundPath);
+  return outboundPath === undefined
+    ? inbound
+    : `${inbound} (inbound) and ` +
+        `${redactPrivateKeyMaterial(outboundPath)} (outbound)`;
+}
+
 // What a caller of the read gate knows about the hello it is asking for: whether
 // it was in the directory when this run scanned it, or appeared afterwards. The
 // same distinction the bounded ack window is armed on, and for the same reason:
@@ -169,8 +193,8 @@ export async function readControlFileWithGate(
       // structural bound) and still retries.
       if (err instanceof JsonStructureBoundError)
         throw new UsageError(
-          `control file at ${filePath} has a malformed payload: structure ` +
-            `exceeds the permitted bound`,
+          `control file at ${redactPrivateKeyMaterial(filePath)} has a ` +
+            `malformed payload: structure exceeds the permitted bound`,
         );
       // Partial write: body is not valid JSON yet; retry until fully synced.
       await cancellableDelay(pollingFrequency, signal);
@@ -179,8 +203,8 @@ export async function readControlFileWithGate(
     const result = schema.safeParse(parsed);
     if (!result.success) {
       throw new UsageError(
-        `control file at ${filePath} has a malformed payload: ` +
-          `${result.error.message}`,
+        `control file at ${redactPrivateKeyMaterial(filePath)} has a ` +
+          `malformed payload: ${result.error.message}`,
       );
     }
     return result.data;
@@ -730,10 +754,7 @@ export class FileSyncRendezvous {
     // split mode the sweep deletes from BOTH directories (peer leftovers in
     // inbound, this party's own leftovers in outbound), so name both; in shared
     // mode it collapses to the inbound display path.
-    const dirsDisplay =
-      deps.outbound() === undefined
-        ? inboundPath
-        : `${inboundPath} (inbound) and ${deps.outbound()!} (outbound)`;
+    const dirsDisplay = composeDirsDisplay(inboundPath, deps.outbound());
 
     const signals: string[] = [];
     let retainUncertain = false;
@@ -890,9 +911,8 @@ export class FileSyncRendezvous {
     const failures = results.flatMap((result, i) =>
       result.status === "rejected"
         ? [
-            redactPrivateKeyMaterial(
-              `${toDelete[i].name} (${errMessage(result.reason)})`,
-            ),
+            `${redactPrivateKeyMaterial(toDelete[i].name)} ` +
+              `(${redactPrivateKeyMaterial(errMessage(result.reason))})`,
           ]
         : [],
     );
@@ -1862,7 +1882,8 @@ export class FileSyncRendezvous {
               // entry fast-path and never enters this loop -- even though
               // `this.role` is not committed until rendezvous succeeds.
               throw new Error(
-                `[starter] peer began arriving (${joiningName}) but did ` +
+                `[starter] peer began arriving ` +
+                  `(${redactPrivateKeyMaterial(joiningName)}) but did ` +
                   "not complete within the recovery window; it appears to " +
                   "have failed after announcing its arrival but before " +
                   "publishing its hello. Retry the exchange.",
@@ -2260,7 +2281,8 @@ export class FileSyncRendezvous {
       // degrades gracefully to the bare timeout below if they ever diverged.
       if (joiningSeenAt !== undefined && joiningSeenName !== undefined) {
         throw new Error(
-          `[starter] peer began arriving (${joiningSeenName}) but the ` +
+          `[starter] peer began arriving ` +
+            `(${redactPrivateKeyMaterial(joiningSeenName)}) but the ` +
             "exchange timed out before it completed; it appears to have " +
             "failed after announcing its arrival but before publishing its " +
             "hello. Retry the exchange.",

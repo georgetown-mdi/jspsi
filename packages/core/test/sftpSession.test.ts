@@ -178,9 +178,10 @@ async function renderMismatch(keyType: string): Promise<string> {
 // header deletes the comparison the operator makes by hand.
 //
 // This message also runs past the per-link display cap, which is a separate
-// bound and cuts the same tail whatever the key type is. The benign rendering is
-// measured alongside the planted one so the assertions pin what redaction
-// restores rather than what the cap removes.
+// bound. How much it cuts depends on the key type's LENGTH, which the server
+// also chooses without bound, so the benign rendering is measured alongside the
+// planted one at each length: the assertions pin what redaction restores rather
+// than what the cap removes, and the cap's own reach is pinned separately below.
 test("a private-key-shaped host key type does not suppress the mismatch detail", async () => {
   const marker = "-----BEGIN RSA PRIVATE KEY-----";
   const presented = await computeHostKeyFingerprint(hostKeyBlob(marker));
@@ -196,6 +197,29 @@ test("a private-key-shaped host key type does not suppress the mismatch detail",
   expect(benign).toContain(DISPLAY_TRUNCATION_MARKER);
   expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
   expect(benign).not.toContain("or an active attack");
+});
+
+// The key type leads the message and the server chooses its LENGTH as freely as
+// its bytes -- keyTypeFromBlob bounds neither -- so a long enough type pushes the
+// fingerprint and the pinned-set comparison past the per-link cap on its own.
+// Pinned here rather than stated above it, because it is the bound that decides
+// how much of this message an operator ever sees: redaction restores the
+// comparison only while the type is short enough for it to fit at all. A benign
+// type of the same length is measured alongside, so a regression that made
+// redaction the suppressor would separate the two.
+test("a long host key type pushes the comparison past the cap, redacted or not", async () => {
+  const long = "X".repeat(200);
+  const planted = await renderMismatch(
+    `${long}-----BEGIN RSA PRIVATE KEY-----`,
+  );
+  const benign = await renderMismatch(long);
+
+  for (const rendered of [planted, benign]) {
+    expect(rendered).not.toContain(
+      "which does not match the pinned fingerprint",
+    );
+    expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
+  }
 });
 
 test("a host key type carrying a sliced key does not suppress the mismatch detail", async () => {

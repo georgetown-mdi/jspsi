@@ -50,7 +50,11 @@ export {
   serializeFileSyncMessageHeader,
   serializeFileSyncMessage,
 } from "./fileSyncFraming";
-import { FileSyncRendezvous, type RendezvousScope } from "./fileSyncRendezvous";
+import {
+  composeDirsDisplay,
+  FileSyncRendezvous,
+  type RendezvousScope,
+} from "./fileSyncRendezvous";
 
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -1525,9 +1529,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // outbound for the freshness check), or just the inbound path otherwise.
     // Mirrors sweepProtocolFiles' dirsDisplay so a split exchange names both
     // halves consistently wherever a path appears.
-    const dirsDisplay = split
-      ? `${inboundPath} (inbound) and ${outboundPath} (outbound)`
-      : inboundPath;
+    const dirsDisplay = composeDirsDisplay(
+      inboundPath,
+      split ? outboundPath : undefined,
+    );
 
     if (this.peerId) throw new Error("already synchronized");
 

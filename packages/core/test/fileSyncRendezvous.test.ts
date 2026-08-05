@@ -5,6 +5,7 @@ import {
   readControlFileWithGate,
   helloEnvelope,
   bilateralMismatch,
+  composeDirsDisplay,
   isPeerHelloName,
   isPeerJoiningName,
   FileSyncRendezvous,
@@ -269,6 +270,42 @@ describe("readControlFileWithGate", () => {
     });
     expect(calls).toBe(1);
   });
+
+  // The control file's path carries a partner-chosen filename, and both
+  // malformed-payload refusals put the diagnosis BEHIND it in the same link.
+  test.each([
+    [
+      "the structural bound",
+      () => Buffer.from("[".repeat(4097)) as Buffer<ArrayBufferLike>,
+      "structure exceeds the permitted bound",
+    ],
+    [
+      "schema validation",
+      () => Buffer.from("{}") as Buffer<ArrayBufferLike>,
+      "malformed payload",
+    ],
+  ])(
+    "a marker in the control file path does not suppress the %s diagnosis",
+    async (_, body, diagnosis) => {
+      const client = stubClient(async () => body());
+      const err = await readControlFileWithGate(
+        client,
+        "in/-----BEGIN RSA PRIVATE KEY-----.json",
+        future(),
+        1,
+        HelloEnvelopeSchema,
+        "presentAtEntry",
+        signal(),
+      ).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+
+      const rendered = sanitizeErrorForDisplay(err);
+      expect(rendered).toContain("[redacted private key]");
+      expect(rendered).toContain(diagnosis);
+    },
+  );
 
   test("names directory residue and the recovery step once the deadline has passed", async () => {
     const client = stubClient(async () => {
@@ -1244,11 +1281,14 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     "/mnt/partner-sync/acme-health/2026/exchange-north/inbound-drop";
   const SPLIT_OUTBOUND =
     "/mnt/partner-sync/acme-health/2026/exchange-north/outbound-drop";
-  const splitScope = (): RendezvousScope => ({
-    inboundPath: SPLIT_INBOUND,
+  // Built through the production composer, not a copy of it: these tests exist
+  // to measure what an operator is shown, and a hand-composed dirsDisplay would
+  // measure a shape no producer builds.
+  const splitScope = (inbound = SPLIT_INBOUND): RendezvousScope => ({
+    inboundPath: inbound,
     outboundPath: SPLIT_OUTBOUND,
     split: true,
-    dirsDisplay: `${SPLIT_INBOUND} (inbound) and ${SPLIT_OUTBOUND} (outbound)`,
+    dirsDisplay: composeDirsDisplay(inbound, SPLIT_OUTBOUND),
   });
 
   // The cause link carrying the scope and the filenames. The renderer caps it
@@ -1326,6 +1366,46 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     for (const name of shown)
       expect(files.has(`${REAL_DIR}/${name}`)).toBe(true);
     expect(shown.length + omitted).toBe(12);
+  });
+
+  // The split scope is the one operator-facing string that puts FIRST-PARTY text
+  // between two partner-influenceable paths. Redacting the composed result would
+  // let a marker in the inbound path take the labels and the operator's own
+  // outbound directory with it, so the composer redacts each path where it is
+  // interpolated. Driven through the real refusal, because that is where the
+  // composed scope is shown.
+  test("a marker in the inbound path leaves the scope labels and the outbound path standing", async () => {
+    // Short paths, so the whole scope fits one link: the display cap is a
+    // separate bound that cuts this scope on length alone, and letting it fire
+    // here would hide whether redaction stopped at the path it was given.
+    const inbound = "/in/-----BEGIN RSA PRIVATE KEY-----";
+    const outbound = "/out";
+    const files = new Map<string, Buffer>();
+    files.set(`${inbound}/${uuidv4()}${LOCK_SUFFIX}`, Buffer.alloc(0));
+    const p = makeParty("aaa", flags, files);
+
+    const err = await p.rdv
+      .run({
+        inboundPath: inbound,
+        outboundPath: outbound,
+        split: true,
+        dirsDisplay: composeDirsDisplay(inbound, outbound),
+      })
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+
+    expect(err).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).toContain("[redacted private key]");
+    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    // All of this sits BEHIND the planted marker and is what the fail-closed
+    // rule would have eaten had the composed scope been redacted as one string.
+    expect(detailLink(rendered)).toContain("(inbound) and");
+    expect(detailLink(rendered)).toContain(outbound);
+    expect(detailLink(rendered)).toContain("(outbound)");
+    expect(detailLink(rendered)).toContain("1 unexpected protocol file(s)");
   });
 
   test("the peer-hello refusal's operative sentence survives rendering at a peer_id longer than a uuid", async () => {
@@ -1624,6 +1704,11 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     expect(rendered).toContain(
       "The directory may be partially swept; resolve the transport error and re-run.",
     );
+    // The name and its transport error are redacted separately, so the planted
+    // entry keeps its own parenthetical: redacting `<name> (<error>)` as one
+    // string would leave the entry reading as a bare replacement and drop the
+    // reason its delete failed, which is the half that says what to fix.
+    expect(rendered).toContain("[redacted private key] (delete not supported)");
   });
 
   // The scope is the one fragment the entry guard clips itself, and it is clipped
