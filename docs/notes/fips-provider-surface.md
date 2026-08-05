@@ -4,7 +4,7 @@ title: "What a FIPS Provider Offers in the Shipped Image"
 
 # What a FIPS provider offers in the shipped image
 
-*Status: measured, not decided. This note records what an OpenSSL FIPS provider carries and reaches inside the container image PSI-Link ships, so the container, compliance, and crypto items can cite a measurement instead of a belief. It chooses nothing: which provider to target, and whether to pursue a FIPS claim at all, remain open. See [docs/notes/README.md](README.md).*
+*Status: measured, not decided. This note records what an OpenSSL FIPS provider carries and reaches inside the container image PSI-Link ships, and what the CMVP certificates approve, so the container, compliance, and crypto items can cite a measurement instead of a belief. It chooses nothing: which certificate to target, whether to change the base image, and whether to pursue a FIPS claim at all, remain open. See [docs/notes/README.md](README.md).*
 
 Three unverified facts gated the whole FIPS thread: whether the provider we would ship carries X25519 key agreement, whether it carries Ed25519 signing, and whether Node's WebCrypto in the shipped image engages a configured FIPS provider at all. All three are now measured by running the real tool in an image built on this repo's `Dockerfile` runtime base. Two of the answers invert the assumption they replace.
 
@@ -19,13 +19,15 @@ Nothing measured here changes any shipped code. The harness is `support/fips-pro
 | Provider build A | OpenSSL 3.0.21, `fips.so` sha256 `2d28258e29d40067c2c6adfa5dc74679b6b31ae97d37beb4384d97e8ab60d52f` |
 | Provider build B | OpenSSL 3.5.7, `fips.so` sha256 `74cee9ce943744dc111fccf6d3e43dade3f6a866fa838d679afb232b65b666e1` |
 
-Both providers were built from source from the `openssl/openssl` release tags with `enable-fips`, installed with `make install_sw install_fips`, and configured by the `fipsmodule.cnf` that `openssl fipsinstall` wrote. Two builds rather than one because the choice of provider is itself a variable this spike had to expose: 3.0.x is the series carrying CMVP certificates, and 3.5.7 is what the image's own Node links. Since Node links its own 3.5.7 libcrypto whatever provider is installed, the 3.0.21 leg is also the **cross-load** configuration -- a validated-series module under a current libcrypto -- which is the arrangement an actual FIPS deployment would use.
+Both providers were built from source from the `openssl/openssl` release tags with `enable-fips`, installed with `make install_sw install_fips`, and configured by the `fipsmodule.cnf` that `openssl fipsinstall` wrote. Two builds rather than one because the choice of provider is itself a variable this spike had to expose: the 3.0 line is where the OpenSSL Project's CMVP certificates sit, and 3.5.7 is what the image's own Node links. Since Node links its own 3.5.7 libcrypto whatever provider is installed, the 3.0.21 leg is also the **cross-load** configuration -- an older module under a current libcrypto -- which is the arrangement an actual FIPS deployment would use.
 
-A note on what "provider build" means for a claim: a CMVP certificate binds to tested operational environments, so a provider built from source here is not itself a validated module even when its source is the validated series. What is measured below is the algorithm surface and the dispatch behaviour, not validation status.
+The certificates cover 3.0.8 and 3.0.9 specifically, not the 3.0 line as a whole, so those two were built and measured afterwards on the same base. Both behave identically to 3.0.21 on every question below.
+
+A note on what "provider build" means for a claim: a CMVP certificate binds to tested operational environments, so a provider built from source here is not itself a validated module even when its source matches a certified version. The measurements below are the algorithm surface and the dispatch behaviour; what the certificates approve is a separate question, answered in its own section.
 
 ## Question 1: is X25519 among the provider's key-exchange algorithms?
 
-**3.0.21: present. 3.5.7: absent.** The 3.5 series dropped it.
+**Present in 3.0.8, 3.0.9 and 3.0.21. Absent in 3.5.7.** The 3.5 series dropped it.
 
     $ openssl list -key-exchange-algorithms      # 3.0.21, fips-only configuration
       { 1.2.840.113549.1.3.1, DH, dhKeyAgreement } @ fips
@@ -41,7 +43,7 @@ A note on what "provider build" means for a claim: a CMVP certificate binds to t
       TLS1-PRF @ fips
       HKDF @ fips
 
-The prior belief recorded on the board was "believed absent -- unverified". That is right for the version Node links and wrong for the series that carries certificates, which is the least convenient combination: the two builds disagree exactly where the decision sits.
+The prior belief recorded on the board was "believed absent -- unverified". That is right for the version Node links and wrong for the certified versions, which is the least convenient combination: the builds disagree exactly where the decision sits.
 
 Two traps around this answer, both of which produce a confident wrong result:
 
@@ -50,7 +52,7 @@ Two traps around this answer, both of which produce a confident wrong result:
 
 ## Question 2: is Ed25519 among the provider's signature algorithms?
 
-**Present in both builds.**
+**Present in every measured build** -- 3.0.8, 3.0.9, 3.0.21 and 3.5.7.
 
     { 1.3.101.112, ED25519 } @ fips      # 3.0.21 and 3.5.7 alike
 
@@ -58,7 +60,7 @@ Two traps around this answer, both of which produce a confident wrong result:
 
 ## Question 3: does `crypto.subtle` engage the configured provider for AES-256-GCM?
 
-**Engaged, on both builds, attributed rather than assumed.**
+**Engaged, on every build measured, attributed rather than assumed.**
 
 The acceptance criterion here was to distinguish "the call succeeded" from "the call ran inside the provider". A call that returns proves nothing on its own: with no provider loaded at all, the same AES-256-GCM round trip succeeds through the default provider and looks identical. So the verdict is computed from four legs, and ENGAGED requires all of them:
 
@@ -101,29 +103,67 @@ That has a deployment consequence worth carrying to the SFTP profile item: in a 
 
 The ceiling this table implies is the important part. Today the AEAD and the key-schedule primitives could sit inside a provider boundary; key establishment, receipt signing, and the PSI masking itself could not. The PSI masking is the one that cannot be fixed by moving code to WebCrypto, because it is BoringSSL inside a vendored module, not OpenSSL.
 
+## What the certificates say
+
+Everything above describes a provider's algorithm surface. A FIPS claim rests on a certificate, and the two are not the same thing: a module can carry an algorithm its certificate does not approve. This section was added after the certificates were read from a network-capable host, and it answers what this note originally recorded as unsettled.
+
+The OpenSSL Project holds three active certificates under the module name "OpenSSL FIPS Provider": **4282** and **4811** (FIPS 140-2, module versions 3.0.8 and 3.0.9), and **4985** (FIPS 140-3, module version 3.1.2). The certified surface is therefore not one series.
+
+The two algorithms this spike measured land in different tables, and that difference is the whole answer:
+
+| Algorithm | 4282 / 4811 (140-2) | 4985 (140-3) |
+|---|---|---|
+| X25519 | Table 7, **Allowed** | Table 8, **Non-Approved, Not Allowed** |
+| Ed25519 | Table 8, **Non-Approved** | Table 8, **Non-Approved, Not Allowed** |
+
+Neither appears in any certificate's approved-algorithm table. The 140-2 policy states the rule rather than leaving it to be inferred from table membership: use of the approved algorithms "and allowed algorithms listed in table 7" places the module in the Approved mode, while use of a Table 8 algorithm "will place the module in the non-Approved mode of operation". The EdDSA placement is deliberate -- the policy revision history records "Updated to move EdDSA to the non-Approved mode" at version 1.2, 26 January 2023.
+
+Three statements therefore have to be kept apart, and collapsing them is how this gets written wrongly:
+
+- **Approved** -- on the certificate's approved list. AES-GCM, SHA2, HMAC, ECDSA and KAS-SSC key agreement are.
+- **Allowed** -- not approved, but does not take the module out of approved mode. X25519 is, under 140-2 only.
+- **Not allowed** -- using it puts the module in non-approved mode. Ed25519 is, under both certificates; X25519 is, under 140-3.
+
+The direction of travel tightens. A newer certified provider withdraws X25519's reprieve rather than extending it, so "wait for a newer certificate" is not a strategy that helps here.
+
+The runtime measurements agree with the tables, which is a useful cross-check that the intended module was loaded: under a fips-only configuration on 3.0.8 and 3.0.9, an X25519 `deriveBits` succeeds while the below-minimum RSA keygen and the MD5 digest fail beside it -- exactly the behaviour of an algorithm the module serves without approving.
+
+### No certificate covers the base that ships
+
+All 40 active certificates carrying this module name were read: 15 from their certificate pages, and the other 25 from their security policies, because those pages render no operational-environment section at all. **None names a musl, Alpine, uClibc or BusyBox environment.** Every environment across the 40 is glibc-based, or macOS, FreeBSD, or Windows. The OpenSSL Project's own certificates name five OS families across 12 tested configurations, each with and without PAA: Ubuntu 22.04.1, Debian 11.5, FreeBSD 13.1, Windows 10, and macOS 11.5.2.
+
+The stronger form of that argument does not depend on the search at all. A tested operational environment binds to the hardware and OS it was tested on, not to a libc family: even a certificate whose firmware turned out to be musl would name something like "Linux 5.10 on an HP DesignJet Cortex-A7", and an Alpine container on generic x86-64 would still not be a covered environment. Alpine does not become reachable by finding a musl entry.
+
 ## What is settled, and what is not
 
 Settled by measurement, in the image, on the base that ships:
 
-- X25519 is in the 3.0.21 FIPS provider's key-exchange algorithms and is not in 3.5.7's.
-- Ed25519 is in both providers' signature algorithms.
+- X25519 is in the FIPS provider's key-exchange algorithms in 3.0.8, 3.0.9 and 3.0.21, and is not in 3.5.7's.
+- Ed25519 is in every measured provider's signature algorithms.
 - `crypto.subtle` AES-256-GCM, and `node:crypto`, both dispatch into a configured FIPS provider in this image, by the four-leg attribution above.
 - A 3.0.x provider cross-loads into the 3.5.7 libcrypto Node links, and serves.
 - A module that fails its integrity check stops the process from starting.
 
-Not settled, and not settleable from the dev container:
+Settled by reading the certificates:
 
-- **Approved versus present.** A module can carry algorithms its certificate does not list as approved. Nothing measured here distinguishes the two, and CMVP is not reachable from the firewalled container. "X25519 is present in 3.0.21" is therefore not "X25519 key establishment may be claimed inside a validated boundary", and must not be read as it.
-- **Whether a validated module is obtainable on this base at all.** A CMVP certificate binds to tested operational environments; the provider measured here was built from source under Alpine/musl. Whether any validated build covers that environment is unverified.
+- Neither X25519 nor Ed25519 is an approved algorithm on any OpenSSL Project certificate. X25519 is allowed inside approved mode under 140-2 only; Ed25519 is not allowed under either standard.
+- No active certificate for this module covers a musl or Alpine operational environment, and the environment binds to tested hardware and OS regardless.
+
+Still open:
+
+- **Whether a validated module is obtainable for this product at all**, which is now a question about changing the base rather than about the provider. A base drawn from the certified list, or a distro base paired with that distro vendor's own certificate, are the two shapes an answer could take.
+- **Whether the 140-2 or the 140-3 certificate is the target**, which decides whether X25519 key agreement is tolerable inside approved mode or forecloses it.
 
 ## What this means for the items downstream
 
-- Shipping a validated provider in the image: the mechanism works -- the module loads, serves, and is attributable. The open part is provider selection, which the two builds above frame as a real tradeoff rather than a detail, plus the operational-environment question.
+- Shipping a validated provider in the image: the mechanism works -- the module loads, serves, and is attributable -- but no certificate covers the Alpine base, so the deliverable is either a base change or the recorded answer that this base cannot get there.
 - Documenting a FIPS deployment profile for SFTP: the provider build determines the surviving SSH algorithm set. That is now measured, not assumed.
-- Rewriting the FIPS and SC-13 claims in [COMPLIANCE.md](../COMPLIANCE.md): the current text says the modules in use are not FIPS 140-validated, which remains accurate. Nothing here licenses "validated module" anywhere, and the PSI masking ceiling above bounds what any future claim can cover.
-- Moving Ed25519 receipt signing off pure JS: a provider target exists on both candidate builds, and Node 26's WebCrypto carries Ed25519 natively, so the destination is available. Scope is unblocked.
-- Deciding the key-establishment FIPS boundary: the answer depends on the provider build, and on the approved-versus-present question that is still open. A 3.5.x provider forecloses X25519; a 3.0.x provider carries it, subject to what its certificate actually approves.
+- Rewriting the FIPS and SC-13 claims in [COMPLIANCE.md](../COMPLIANCE.md): the current text says the modules in use are not FIPS 140-validated, which remains accurate. The rewrite's real work is the approved / allowed / not-allowed distinction above -- the SC-13 row today lists X25519 and Ed25519 as NIST-approved, which conflates algorithm-standard approval with module-certificate approval. Both things are true at once and the document has to say so.
+- Moving Ed25519 receipt signing off pure JS: the provider carries Ed25519, but every certificate places it outside approved mode, so the swap removes a pure-JS dependency without buying approved-mode signing -- and would put the module in non-approved mode for that operation. ECDSA is the approved alternative, which makes that item's disclose-or-migrate question live rather than settled.
+- Deciding the key-establishment FIPS boundary: a third answer, not either arm. X25519 is allowed inside approved mode under 140-2 (3.0.8/3.0.9) and not allowed under 140-3 (3.1.2), so the disclosure path stays cheap on the older certificate while the migration arm becomes necessary on the newer one. The decision is coupled to which certificate the container item targets.
 
 ## Reproducing this
 
-`.github/workflows/fips_provider_probe.yaml` builds `support/fips-probe/` on the `Dockerfile` runtime base and runs both scripts against both provider builds; `support/fips-probe/README.md` gives the local `docker` invocation. Both scripts print every command, its raw output, and its exit status, and derive their verdicts from those same captured bytes, so a transcript carries the evidence as well as the conclusion. The measurements in this note came from workflow run 31046265222.
+`.github/workflows/fips_provider_probe.yaml` builds `support/fips-probe/` on the `Dockerfile` runtime base and runs both scripts against a provider build named by an OpenSSL release tag; `support/fips-probe/README.md` gives the local `docker` invocation, which is how 3.0.8 and 3.0.9 were measured. Both scripts print every command, its raw output, and its exit status, and derive their verdicts from those same captured bytes, so a transcript carries the evidence as well as the conclusion. The 3.0.21 and 3.5.7 measurements came from workflow run 31046265222.
+
+The certificate findings come from the CMVP validated-modules search and the security policies it links, read from a network-capable host because the dev container cannot reach CMVP. Each certificate's security policy is the authority for its tables; the rendered certificate pages omit those sections for most certificates, and an extraction that finds nothing there is an unread page rather than a negative result.
