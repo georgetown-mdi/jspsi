@@ -73,7 +73,13 @@ param(
     [string] $Dialect = '',
     [string] $VolumeName = 'psilink-sync',
     [switch] $SkipVolumeTest,
-    [switch] $SkipConfirm
+    [switch] $SkipConfirm,
+    # Dot-source the script with this switch to define its functions and stop
+    # before the setup runs; it is how the Pester suite in
+    # support/maintainer-notes drives the path-resolution functions. Not for
+    # operators, and the flow runs whenever it is absent, so nothing they type
+    # can skip it.
+    [switch] $LoadFunctionsOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -143,6 +149,18 @@ function Test-Elevated {
         return (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole(
             [Security.Principal.WindowsBuiltInRole]::Administrator)
     } catch { return $false }
+}
+
+function Get-DialectMountVersion {
+    <#  The "vers=" mount option for a -Dialect name.
+
+        smbclient's SMB3 is 3.1.1, not 3.0, and pinning the mount to 3.0 while
+        the checks ran at 3.1.1 produces exactly the "step 3 passed, step 4
+        failed" confusion the flag exists to remove. #>
+    param([string] $Dialect)
+
+    $versMap = @{ 'SMB3' = '3.1.1'; 'SMB2' = '2.1'; 'NT1' = '1.0' }
+    return $versMap[$Dialect]
 }
 
 # ==========================================================================
@@ -848,6 +866,10 @@ emit ""
 emit "ALL CHECKS PASSED"
 '@
 
+# Everything above defines something; everything below runs the setup. A
+# dot-source that asked for the definitions alone stops here.
+if ($LoadFunctionsOnly) { return }
+
 # ==========================================================================
 # Preflight
 # ==========================================================================
@@ -1174,11 +1196,7 @@ try {
     $opts = "username=$Username,password=$plainPass"
     if ($Domain)  { $opts = "$opts,domain=$Domain" }
     if ($Dialect) {
-        # smbclient's SMB3 is 3.1.1, not 3.0, and pinning the mount to 3.0
-        # while the checks ran at 3.1.1 produces exactly the "step 3 passed,
-        # step 4 failed" confusion the flag exists to remove.
-        $versMap = @{ 'SMB3' = '3.1.1'; 'SMB2' = '2.1'; 'NT1' = '1.0' }
-        $opts = "$opts,vers=$($versMap[$Dialect])"
+        $opts = "$opts,vers=$(Get-DialectMountVersion -Dialect $Dialect)"
         if ($Dialect -eq 'NT1') {
             Write-Warn 'The Docker VM kernel is built without SMB1, so the mount below'
             Write-Note 'will be refused however well the checks went. -Dialect NT1 is'
