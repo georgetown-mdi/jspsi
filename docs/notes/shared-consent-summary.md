@@ -71,8 +71,16 @@ worth spending screen space to prevent.
 
 So each fact carries a basis, `enforced` or `trust-contingent`, and the caveat
 sentence that explains it. Both live in core beside the summary
-(`consentFacts.ts`), keyed by a fact identifier; each surface looks the pair up
-and renders it, and neither states one of its own.
+(`consentFacts.ts`), keyed by a fact identifier; a surface looks the pair up
+rather than stating one of its own.
+
+WHICH facts a surface marks is still the surface's own. The received-columns
+basis is marked on the CLI's line and not on the web's payload block, which shows
+the set with no basis beside it. The two surfaces do not disagree there -- one of
+them declines to state the fact rather than stating it differently -- and the
+silence understates, which is the safe direction. It is nonetheless the one place
+the shared table does not yet reach both renderers, and no check catches a
+classified fact that neither surface renders.
 
 That the classification is a KEYED TABLE, rather than a field on
 `InvitationSummary`, follows from two properties a per-field flag cannot carry.
