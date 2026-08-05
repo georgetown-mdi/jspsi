@@ -363,12 +363,32 @@ for (const [label, render, recovery] of FLOODED_REFUSALS) {
 // the underlying error text is a fragment nobody first-party chose, so it takes a
 // link of its own and can consume nothing but itself. Refusal is what the catch
 // is for, so the fail-closed settle is pinned here too.
-const UNREADABLE_KEY_REFUSALS: Array<[string, SFTPConnectionConfig, string]> = [
+// The text the platform throws when the view is built, read here rather than
+// restated, so the detail link can be asserted whole: an assertion that only
+// anchors the label would pass with first-party guidance re-joined behind the
+// fragment, which is the composition the partition exists to prevent.
+const UNREADABLE_BLOB_ERROR = (() => {
+  try {
+    new Uint8Array(
+      UNREADABLE_BLOB.buffer,
+      UNREADABLE_BLOB.byteOffset,
+      UNREADABLE_BLOB.byteLength,
+    );
+  } catch (err) {
+    return (err as Error).message;
+  }
+  throw new Error("UNREADABLE_BLOB must not be viewable");
+})();
+
+const UNREADABLE_KEY_REFUSALS: Array<
+  [string, SFTPConnectionConfig, string, string]
+> = [
   [
     "the no-pin branch",
     { channel: "sftp", server: { host: "sftp.example.org" } },
     "no host_key_fingerprint is pinned and the presented host key could not " +
       "be read, so the connection is refused.",
+    "host key read error",
   ],
   [
     "the pinned branch",
@@ -377,23 +397,24 @@ const UNREADABLE_KEY_REFUSALS: Array<[string, SFTPConnectionConfig, string]> = [
       server: { host: "sftp.example.org", hostKeyFingerprint: PIN },
     },
     "the server's host key could not be verified, so the connection is refused.",
+    "host key verification error",
   ],
 ];
 
-for (const [label, config, summary] of UNREADABLE_KEY_REFUSALS) {
+for (const [label, config, summary, detailLabel] of UNREADABLE_KEY_REFUSALS) {
   test(`an unreadable host key refuses on ${label} with the error text on its own link`, async () => {
     const rendered = await renderRefusalFromBlob(config, UNREADABLE_BLOB);
     const links = linksOf(rendered);
 
     // The refusal reaches the operator whole, on the message's own link.
     expect(links[0]).toBe(`SFTP host-key verification failed: ${summary}`);
-    // The error text is alone on the link behind it, behind a leading label.
-    expect(links[1]).toMatch(/^host key (read|verification) error: .+/);
+    // Whole link, not a prefix: the branch's own label, then the error text,
+    // and nothing behind it for the fragment to consume. The label is matched
+    // per branch, so swapping the two labels fails here.
+    expect(links[1]).toBe(`${detailLabel}: ${UNREADABLE_BLOB_ERROR}`);
     // Still fail-closed, and still ahead of the transport error ssh2 rejected
     // with, so the depth bound cannot drop the detail in its favour.
     expect(links[links.length - 1]).toContain("Host denied");
-    for (const link of links)
-      expect(link.length).toBeLessThanOrEqual(MAX_RENDERED_LINK_LENGTH);
   });
 }
 
