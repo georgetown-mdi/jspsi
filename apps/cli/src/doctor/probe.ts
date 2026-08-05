@@ -10,7 +10,7 @@ import type { CommandResult, CommandRunner } from "./runner";
 import { nodeCommandRunner } from "./runner";
 import type { SmbProbeInput } from "./smbEnvironment";
 import type { DoctorCheckRecord, DoctorReport } from "./verdict";
-import { fail, ok, skipped } from "./verdict";
+import { fail, ok, skipped, warn } from "./verdict";
 
 // The userspace half of the file-drop checks: what the exchange needs, asked of
 // the server over TCP with smbclient, with nothing mounted. It answers the
@@ -144,18 +144,20 @@ export function countEntries(listing: string): number {
 }
 
 /**
- * The advisory a target folder earns when it already holds more entries than
- * the transport will list.
+ * The subdirectory check over the folder the exchange will run in, carrying the
+ * advisory a folder earns when it already holds more entries than the transport
+ * will list.
  */
-function entryOverflowExtra(entries: number): Partial<DoctorCheckRecord> {
-  if (entries <= MAX_DIRECTORY_ENTRIES) return {};
-  return {
-    meaning:
-      `psilink will not read a rendezvous folder holding more than ` +
+function entryCountCheck(summary: string, entries: number): DoctorCheckRecord {
+  if (entries <= MAX_DIRECTORY_ENTRIES) return ok("subdirectory", summary);
+  return warn(
+    "subdirectory",
+    summary,
+    `psilink will not read a rendezvous folder holding more than ` +
       `${MAX_DIRECTORY_ENTRIES} entries, so an exchange here will ` +
       "fail however the permissions come out.",
-    action: "use a folder dedicated to the exchange.",
-  };
+    "use a folder dedicated to the exchange.",
+  );
 }
 
 /**
@@ -434,21 +436,22 @@ function freeSpaceCheck(listing: string): DoctorCheckRecord {
   if (freeMb === undefined)
     return skipped("free_space", "the server did not report free space.");
   if (freeMb === 0)
-    return ok("free_space", "the share reports no free space.", {
-      meaning:
-        "a tiny test file still fits in slack, so these checks can pass while " +
+    return warn(
+      "free_space",
+      "the share reports no free space.",
+      "a tiny test file still fits in slack, so these checks can pass while " +
         "a real exchange fails partway through.",
-      action: "ask for quota on this share before running an exchange.",
-    });
-  return ok("free_space", `${freeMb} MB free on this share.`, {
-    ...(freeMb < LOW_FREE_SPACE_MB
-      ? {
-          meaning:
-            "that is little enough that a large exchange could exhaust it.",
-          action: "ask for more quota if your input files are large.",
-        }
-      : {}),
-  });
+      "ask for quota on this share before running an exchange.",
+    );
+  const summary = `${freeMb} MB free on this share.`;
+  if (freeMb < LOW_FREE_SPACE_MB)
+    return warn(
+      "free_space",
+      summary,
+      "that is little enough that a large exchange could exhaust it.",
+      "ask for more quota if your input files are large.",
+    );
+  return ok("free_space", summary);
 }
 
 /**
@@ -644,10 +647,9 @@ export async function runProbe(
     if (input.subdirectory === "") {
       const entries = countEntries(listing);
       checks.push(
-        ok(
-          "subdirectory",
+        entryCountCheck(
           `using the share root; ${entries} file(s) in it.`,
-          entryOverflowExtra(entries),
+          entries,
         ),
       );
     } else {
@@ -671,11 +673,7 @@ export async function runProbe(
       }
       const entries = countEntries(subdirectoryList.output);
       checks.push(
-        ok(
-          "subdirectory",
-          `directory listed, ${entries} file(s) in it.`,
-          entryOverflowExtra(entries),
-        ),
+        entryCountCheck(`directory listed, ${entries} file(s) in it.`, entries),
       );
       target = input.subdirectory;
       listing = subdirectoryList.output;

@@ -305,7 +305,7 @@ Neither mode changes anything on the share beyond its own working files: the pro
 | `SMB_SERVER` | Server name or address (required) |
 | `SMB_SHARE` | Share name -- the first path component only (required) |
 | `SMB_USER` | Account username (required) |
-| `SMB_PATH` | Subdirectory under the share the exchange runs in; omit for the share root |
+| `SMB_PATH` | Subdirectory under the share the exchange runs in; omit to run the checks against the share root itself |
 | `SMB_DOMAIN` | Account domain, for a domain account |
 | `SMB_PASS` | Account password |
 | `SMB_DIALECT` | `SMB3`, `SMB2`, or `NT1` to pin a dialect; omit to negotiate |
@@ -316,44 +316,9 @@ Neither mode changes anything on the share beyond its own working files: the pro
 
 ### Output
 
-By default each check prints a line on stderr -- `OK:`, `WARN:`, `FAIL:`, or `SKIP:` -- with `MEANING:` and `ACTION:` lines under anything that needs one, closing with a summary line.
+By default each check prints a line on stderr -- `OK:`, `WARN:`, `FAIL:`, or `SKIP:` -- with `MEANING:` and `ACTION:` lines under anything that needs one, closing with a summary line. A `WARN:` does not stop an exchange; it names something worth knowing before you run one, such as a share that works only with `--lockless-rendezvous` or one nearly out of space. Read the `ACTION:` lines, change what they name, and run the command again.
 
-`--json` instead prints the verdict as one line of JSON on stdout, for a script or a setup launcher to consume:
-
-```json
-{
-  "version": 1,
-  "mode": "probe",
-  "overall": "fix_and_retry",
-  "checks": [
-    { "id": "tcp_445", "status": "ok" },
-    {
-      "id": "write",
-      "status": "fail",
-      "meaning": "this account can read the folder but not write to it.",
-      "action": "ask whoever administers the share for write permission on this folder."
-    }
-  ]
-}
-```
-
-Read `version` first and refuse a value you do not know. `overall` is `ok` (nothing here blocks an exchange), `fix_and_retry` (a check returned a verdict you can act on), or `fatal` (the checks could not be run, so nothing was established either way). A check's `status` is `ok`, `fail`, or `skipped`; `meaning` and `action` appear when there is something to say, including on a check that passed -- a share that works only with `--lockless-rendezvous`, or one nearly out of space, is `ok` with an `action`, and is what the human rendering labels `WARN:`. smbclient's own output is not carried in the JSON; the classified `meaning` and `action` are.
-
-The check list is fixed and ordered, so a consumer can index it by id. A check that did not run is reported as `skipped`, never omitted.
-
-- `probe`: `name_resolution`, `tcp_445`, `smbclient_available`, `authentication`, `share_open`, `subdirectory`, `free_space`, `write`, `rename`, `delete`, `marker`.
-- `mount`: `mount_readable`, `marker`, `write_rename`, `exclusive_create`, `rename_onto_existing`.
-
-### Exit codes
-
-`doctor` maps `overall` to a closed set of exit codes, all below 125 (which Docker reserves for its own failure to start a container, so a caller running the doctor in a container can tell that apart from any verdict):
-
-| Code | `overall` |
-| ---- | --------- |
-| 0 | `ok` |
-| 78 | `fix_and_retry` |
-| 69 | `fatal` |
-| 64 | no verdict -- a usage error in the inputs or flags |
+`--json` prints the verdict as one line of JSON on stdout instead of those check lines, for a script or a setup launcher to consume. Either way the run's exit code carries the verdict, so a caller that parses nothing still learns whether anything blocks an exchange (see [Exit codes](#exit-codes)). The full contract -- every field, the schema version and the rule for reading it, the status and verdict vocabularies, both modes' fixed check lists, and the exit-code mapping -- is in [docs/spec/CLI_DOCTOR.md](spec/CLI_DOCTOR.md).
 
 ## Verifying a receipt
 

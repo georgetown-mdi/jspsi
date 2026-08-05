@@ -90,6 +90,28 @@ describe("the overall verdict rolls the checks up", () => {
     ).toBe("ok");
   });
 
+  test("a warn does not move the verdict off ok, in the JSON or the exit code", () => {
+    const warned = report([
+      { id: "a", status: "ok", summary: "" },
+      {
+        id: "b",
+        status: "warn",
+        summary: "",
+        meaning: "nearly out of space.",
+        action: "ask for more quota.",
+      },
+    ]);
+    const verdict = verdictOf(warned);
+    expect(verdict.overall).toBe("ok");
+    expect(verdict.checks[1]).toEqual({
+      id: "b",
+      status: "warn",
+      meaning: "nearly out of space.",
+      action: "ask for more quota.",
+    });
+    expect(DOCTOR_EXIT_CODE[verdict.overall]).toBe(0);
+  });
+
   test("an ordinary failure is fix_and_retry", () => {
     expect(overallOf(report([{ id: "a", status: "fail", summary: "" }]))).toBe(
       "fix_and_retry",
@@ -119,13 +141,11 @@ describe("exit codes are a closed set below Docker's reserved range", () => {
 
 describe("the human rendering", () => {
   test("labels a passing check that still asks something of the operator WARN", () => {
-    // The JSON keeps it `ok` -- it does not block an exchange -- while the
-    // operator-facing line has to say there is something to do.
     const lines = verdictLines(
       report([
         {
           id: "rename_onto_existing",
-          status: "ok",
+          status: "warn",
           summary: "will not rename onto an existing file.",
           meaning: "psilink does that when two sides meet at once.",
           action: "pass --lockless-rendezvous on BOTH sides.",

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import type { SmbMountInput } from "./smbEnvironment";
 import type { DoctorCheckRecord, DoctorReport } from "./verdict";
-import { fail, ok, skipped } from "./verdict";
+import { fail, ok, skipped, warn } from "./verdict";
 
 // The kernel half of the file-drop checks: the operations psilink's rendezvous
 // is built on, run over the real mount rather than over smbclient, which refuses
@@ -109,15 +109,15 @@ function markerCheck(
     );
   }
   if (!contents.includes(input.token))
-    return ok("marker", `${input.marker} is here but is not this run's file.`, {
-      meaning:
-        "either someone else is setting up this same share right now, or an " +
+    return warn(
+      "marker",
+      `${input.marker} is here but is not this run's file.`,
+      "either someone else is setting up this same share right now, or an " +
         "earlier run left the file behind. The mount reached the folder either " +
         "way.",
-      action:
-        `to tell the two apart, delete ${input.marker} from the drop folder ` +
+      `to tell the two apart, delete ${input.marker} from the drop folder ` +
         "and run this again: if it comes back, you have company.",
-    });
+    );
   // The mount check owns the marker's lifecycle: the probe deliberately leaves
   // it, and this is where it is consumed.
   mountFs.remove(markerPath);
@@ -212,16 +212,12 @@ export function runMountChecks(
     checks.push(
       refused
         ? ok("exclusive_create", "the share refuses to create a file twice.")
-        : ok(
+        : warn(
             "exclusive_create",
             "this share does not refuse to create a file that already exists.",
-            {
-              meaning:
-                "psilink uses that refusal to decide which side goes first, so " +
-                "without it both sides can believe they did.",
-              action:
-                "pass --lockless-rendezvous on BOTH sides of the exchange.",
-            },
+            "psilink uses that refusal to decide which side goes first, so " +
+              "without it both sides can believe they did.",
+            "pass --lockless-rendezvous on BOTH sides of the exchange.",
           ),
     );
     mountFs.remove(at(EXCLUSIVE_NAME));
@@ -239,13 +235,11 @@ export function runMountChecks(
       );
     } catch {
       checks.push(
-        ok(
+        warn(
           "rename_onto_existing",
           "this share will not rename a file onto an existing one.",
-          {
-            meaning: "psilink does that when two sides meet at once.",
-            action: "pass --lockless-rendezvous on BOTH sides of the exchange.",
-          },
+          "psilink does that when two sides meet at once.",
+          "pass --lockless-rendezvous on BOTH sides of the exchange.",
         ),
       );
     }

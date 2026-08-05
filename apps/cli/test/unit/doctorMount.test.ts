@@ -70,7 +70,7 @@ describe("the marker cross-check", () => {
     fs.writeFileSync(path.join(directory, MARKER), "someone-else\n");
     const report = runMountChecks(directory, INPUT);
     const check = checkById(report, "marker");
-    expect(check.status).toBe("ok");
+    expect(check.status).toBe("warn");
     expect(check.action).toContain(MARKER);
     expect(overallOf(report)).toBe("ok");
     // Another operator may be relying on it right now, so it stays.
@@ -122,7 +122,7 @@ describe("shares whose semantics differ from a local disk", () => {
     fs.writeFileSync(path.join(directory, MARKER), `${TOKEN}\n`);
     const report = runMountChecks(directory, INPUT, permissive);
     const check = checkById(report, "exclusive_create");
-    expect(check.status).toBe("ok");
+    expect(check.status).toBe("warn");
     expect(check.action).toContain("--lockless-rendezvous");
     expect(overallOf(report)).toBe("ok");
   });
@@ -153,7 +153,7 @@ describe("shares whose semantics differ from a local disk", () => {
     fs.writeFileSync(path.join(directory, MARKER), `${TOKEN}\n`);
     const report = runMountChecks(directory, INPUT, noClobber);
     const check = checkById(report, "rename_onto_existing");
-    expect(check.status).toBe("ok");
+    expect(check.status).toBe("warn");
     expect(check.action).toContain("--lockless-rendezvous");
     // The plain write-then-rename still passed, so the folder is usable.
     expect(checkById(report, "write_rename").status).toBe("ok");

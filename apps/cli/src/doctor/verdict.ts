@@ -14,11 +14,13 @@ export const DOCTOR_VERDICT_VERSION = 1;
 export type DoctorMode = "probe" | "mount";
 
 /**
- * The outcome of a single check. `skipped` covers both "an earlier check failed
- * so this one never ran" and "this check does not apply to the inputs given",
- * which the check's `meaning` distinguishes.
+ * The outcome of a single check. `warn` is a check that ran and does not block
+ * an exchange, but carries a meaning and an action the operator should read.
+ * `skipped` covers both "an earlier check failed so this one never ran" and
+ * "this check does not apply to the inputs given", which the check's `meaning`
+ * distinguishes.
  */
-export type DoctorCheckStatus = "ok" | "fail" | "skipped";
+export type DoctorCheckStatus = "ok" | "warn" | "fail" | "skipped";
 
 /**
  * The roll-up a caller keys on: `ok` (nothing blocks an exchange here),
@@ -71,12 +73,27 @@ export interface DoctorVerdict {
 
 // Record builders shared by both batteries.
 
+/**
+ * A check that passed and asks nothing of the operator. It cannot carry an
+ * `action`: a passing check that has one is a `warn`, which is what both
+ * renderings key on.
+ */
 export function ok(
   id: string,
   summary: string,
-  extra: Partial<DoctorCheckRecord> = {},
+  extra: Omit<Partial<DoctorCheckRecord>, "action" | "status"> = {},
 ): DoctorCheckRecord {
   return { id, status: "ok", summary, ...extra };
+}
+
+/** A check that passed and still has something for the operator to do. */
+export function warn(
+  id: string,
+  summary: string,
+  meaning: string,
+  action: string,
+): DoctorCheckRecord {
+  return { id, status: "warn", summary, meaning, action };
 }
 
 export function fail(
@@ -193,17 +210,17 @@ function wrapLabelled(label: string, text: string): string[] {
 }
 
 /**
- * The label a check's headline carries. A check that passed but still asks
- * something of the operator -- a share that works for an exchange only with
- * `--lockless-rendezvous`, a share nearly out of space -- is labelled WARN so the
- * human rendering keeps the setup script's distinction between "this stops you"
- * and "this is worth knowing". The JSON verdict has no such label: the same
- * check is `status: "ok"` there, carrying the `action` that makes it a warning.
+ * The label a check's headline carries, one per status. A check that passed but
+ * still asks something of the operator -- a share that works for an exchange
+ * only with `--lockless-rendezvous`, a share nearly out of space -- is a `warn`
+ * and is labelled WARN, keeping the setup script's distinction between "this
+ * stops you" and "this is worth knowing" in both renderings.
  */
 function labelOf(check: DoctorCheckRecord): string {
   if (check.status === "fail") return "FAIL";
+  if (check.status === "warn") return "WARN";
   if (check.status === "skipped") return "SKIP";
-  return check.action !== undefined ? "WARN" : "OK";
+  return "OK";
 }
 
 /** Render the human-readable check lines, in check order. */

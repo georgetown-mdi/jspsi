@@ -324,7 +324,7 @@ describe("staged failures", () => {
     expect(checkById(report, "rename").action).toContain("DELETE right");
   });
 
-  test("a share with no free space passes but asks for quota", async () => {
+  test("a share with no free space warns and asks for quota", async () => {
     const report = await runProbe(
       INPUT,
       deps((args) =>
@@ -338,7 +338,7 @@ describe("staged failures", () => {
       ),
     );
     const check = checkById(report, "free_space");
-    expect(check.status).toBe("ok");
+    expect(check.status).toBe("warn");
     expect(check.action).toContain("quota");
     expect(overallOf(report)).toBe("ok");
   });
@@ -462,7 +462,7 @@ describe("inputs that change the shape of the run", () => {
       ),
     );
     const check = checkById(report, "subdirectory");
-    expect(check.status).toBe("ok");
+    expect(check.status).toBe("warn");
     expect(check.action).toContain("dedicated to the exchange");
     expect(overallOf(report)).toBe("ok");
   });
@@ -477,7 +477,7 @@ describe("inputs that change the shape of the run", () => {
       ),
     );
     const check = checkById(report, "subdirectory");
-    expect(check.status).toBe("ok");
+    expect(check.status).toBe("warn");
     expect(check.action).toContain("dedicated to the exchange");
     expect(overallOf(report)).toBe("ok");
   });
