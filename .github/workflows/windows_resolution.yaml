@@ -8,9 +8,12 @@ name: Windows Path Resolution
 #
 # Two jobs, two contracts:
 #
-#   test     Pester over the script's own resolution functions, dot-sourced with
-#            -LoadFunctionsOnly. It ASSERTS: a failed test fails the job. Runs on
-#            every pull request touching the paths below.
+#   test     Pester over the guide scripts' own functions, dot-sourced with
+#            -LoadFunctionsOnly: the setup script's path resolution against the
+#            rig below, and the launcher's verdict reader, release stamp and DFS
+#            candidate selection, which need no rig and only Windows PowerShell.
+#            It ASSERTS: a failed test fails the job. Runs on every pull request
+#            touching the paths below.
 #   measure  The original measurement harness, which asks whether the runner can
 #            host the rig at all and never fails. Kept for re-measuring, and run
 #            only on manual dispatch -- an edit to that harness is checked by
@@ -34,7 +37,9 @@ on:
     branches: [main, staging]
     paths:
       - "support/windows-network-filedrop/Setup-PsilinkFileDrop.ps1"
+      - "support/windows-network-filedrop/Start-Psilink.ps1"
       - "support/maintainer-notes/Setup-PsilinkFileDrop.Tests.ps1"
+      - "support/maintainer-notes/Start-Psilink.Tests.ps1"
       - "support/maintainer-notes/ci-resolution-tests.ps1"
       - ".github/workflows/windows_resolution.yaml"
   workflow_dispatch:

@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-    Runs Setup-PsilinkFileDrop.Tests.ps1 under Pester and reports the run as
-    check-run annotations. Maintainer-facing: an operator following the setup
-    page never touches it.
+    Runs this folder's Pester suites -- Setup-PsilinkFileDrop.Tests.ps1 and
+    Start-Psilink.Tests.ps1 -- and reports the run as check-run annotations.
+    Maintainer-facing: an operator following the setup page never touches it.
 
 .DESCRIPTION
     .github/workflows/windows_resolution.yaml runs this on a windows-latest
@@ -169,8 +169,13 @@ function Write-RigPremises {
 $failedJob = $false
 
 try {
-    $testFile = Join-Path $PSScriptRoot 'Setup-PsilinkFileDrop.Tests.ps1'
-    if (-not (Test-Path -LiteralPath $testFile)) { throw "the suite is not at $testFile" }
+    # Named one by one rather than discovered by mask: a suite that was renamed
+    # or lost would otherwise leave the job green having run whatever remained.
+    $testFiles = @('Setup-PsilinkFileDrop.Tests.ps1', 'Start-Psilink.Tests.ps1') |
+        ForEach-Object { Join-Path $PSScriptRoot $_ }
+    foreach ($file in $testFiles) {
+        if (-not (Test-Path -LiteralPath $file)) { throw "a suite is not at $file" }
+    }
 
     # --- Pester -------------------------------------------------------------
     # The runner image is expected to carry Pester 5; Windows PowerShell also
@@ -203,7 +208,7 @@ try {
     } else {
         $configuration = [PesterConfiguration]::Default
     }
-    $configuration.Run.Path = $testFile
+    $configuration.Run.Path = $testFiles
     $configuration.Run.PassThru = $true
     # This script owns the exit code, so that the annotations below are emitted
     # before the job ends.

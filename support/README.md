@@ -42,7 +42,11 @@ describe rather than with this repository.
   [troubleshooting page](windows-network-filedrop/troubleshooting.md) with a
   section per failure, an optional page on
   [choosing the account](windows-network-filedrop/passwords.md) whose password
-  Docker will store, and the scripts themselves.
+  Docker will store, and the scripts themselves. The launchers that open the
+  psilink console -- `Start-Psilink.ps1` and `start-psilink.sh` -- live here
+  too, because the Windows one needs the setup script beside it; the macOS and
+  Linux one is here to keep the pair together rather than because the folder's
+  subject matter applies to it.
 
 ## Maintainer notes
 

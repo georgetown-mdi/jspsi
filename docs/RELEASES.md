@@ -26,12 +26,41 @@ Each release produces:
 | -------------- | ------------------------------ | ------------------------------------------------------------------------ |
 | Docker image   | Docker Hub (`vdorie/psi-link`) | `vdorie/psi-link:X.Y.Z`, `vdorie/psi-link:X.Y`, `vdorie/psi-link:latest` |
 | GitHub Release | GitHub Releases                | Tag `vX.Y.Z`                                                             |
+| Launchers      | GitHub Release assets          | `start-psilink.sh`, `Start-Psilink.ps1`, `Setup-PsilinkFileDrop.ps1`     |
 
 The single `vdorie/psi-link` image carries both roles: it runs headless as the CLI by default (`docker run ... vdorie/psi-link exchange ...`) and, when its first argument is `serve`, as the single-party web console appliance (`docker run ... vdorie/psi-link serve`). See [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment) for running each role.
 
 The hosted web deployment (`apps/web`) is a separate deployment to its hosting environment as part of CI/CD; it is not this image and is not distributed as a versioned artifact.
 
+The three launcher files are the host-side front door an operator runs to open the console: `start-psilink.sh` for macOS and Linux, `Start-Psilink.ps1` for Windows, and `Setup-PsilinkFileDrop.ps1`, which the Windows one dot-sources for its path resolution and which must sit beside it. They travel as one unit; see [Stamped launchers](#stamped-launchers) for what a release does to them.
+
 `@psilink/core` is not currently published to the npm registry. If that changes, add an npm row to the table above.
+
+## Stamped launchers
+
+A launcher is plaintext an operator reads before running, and it names the image by digest rather than by a floating tag, so a release copy runs exactly the manifest this release signed. The digest is not in the repository: each launcher carries a placeholder line, and the release workflow fills it in.
+
+**What gets stamped.** One line per launcher, replaced whole:
+
+| File | Line the release rewrites |
+| ---- | ------------------------- |
+| `start-psilink.sh` | `PSILINK_IMAGE_DIGEST='@@PSILINK_IMAGE_DIGEST@@'` |
+| `Start-Psilink.ps1` | `$PsilinkImageDigest = '@@PSILINK_IMAGE_DIGEST@@'` |
+
+The value substituted is `steps.build.outputs.digest` from the image build -- the manifest-list digest, the same value [step 8](#8-build-and-publish-the-container-image-ci) signs with Cosign. Each launcher also names the repository in full, `docker.io/vdorie/psi-link`, because podman requires the registry prefix and docker accepts it.
+
+**What holds the seam together.** The workflow refuses the release if a launcher does not carry its placeholder line exactly once, and again if a placeholder survives the substitution, so a reworded line cannot make the stamp silently no-op. `npm run test:scripts` pins the same two lines from the repository side, in both the launchers and the workflow. A copy that reaches an operator unstamped refuses to run and says where a release copy comes from, rather than falling back to a tag.
+
+**What a release publishes.** The `launchers` job attaches the two stamped files plus `Setup-PsilinkFileDrop.ps1` -- unstamped, and the one `Start-Psilink.ps1` dot-sources -- as assets on the release for this tag, creating it as a draft if the tag has none yet. That job is the only one in the workflow holding `contents: write`.
+
+**How an organisation verifies a copy.** The digest a launcher carries is a claim about which image it will run; Cosign is what makes it checkable. Read the digest out of the launcher and verify the signature over that exact reference:
+
+```sh
+grep PSILINK_IMAGE_DIGEST start-psilink.sh
+cosign verify --key cosign.pub docker.io/vdorie/psi-link@sha256:...
+```
+
+A digest that verifies is the image the maintainer signed. `cosign.pub` is the public signing key at the repository root; see [Verifying a Release](#verifying-a-release) for the tag and image checks it sits alongside.
 
 ## Release Checklist
 
@@ -96,7 +125,7 @@ git push origin vX.Y.Z
 
 ### 8. Build and publish the container image `[CI]`
 
-The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds the multi-platform image and pushes it to Docker Hub. Ensure the `DOCKER_USERNAME` and `DOCKER_TOKEN` repository secrets are set before tagging.
+The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds the multi-platform image and pushes it to Docker Hub, signs it with Cosign, and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). Ensure the `DOCKER_USERNAME` and `DOCKER_TOKEN` repository secrets are set before tagging.
 
 If you must build and push by hand -- for a workflow outage or a local test -- follow the multi-platform buildx instructions in `apps/cli/README.md` (creating `multiarch-builder` and running `docker buildx build --push` from the repository root).
 
@@ -124,7 +153,7 @@ Do not reach for `@cyclonedx/cyclonedx-npm --ignore-npm-errors` as the workaroun
 
 ### 10. Publish the GitHub Release
 
-Create a GitHub Release for tag `vX.Y.Z`. Copy the CHANGELOG section for this version as the release body. Attach `psilink-X.Y.Z.cdx.json` and record the Docker image digest from step 8 in the release notes.
+Step 8 leaves a draft release for tag `vX.Y.Z` carrying the stamped launchers. Open it, copy the CHANGELOG section for this version as the release body, attach `psilink-X.Y.Z.cdx.json`, record the Docker image digest from step 8 in the release notes, and publish. Leave the launcher assets in place: they are the copy an operator downloads.
 
 ### 11. Merge back to staging
 

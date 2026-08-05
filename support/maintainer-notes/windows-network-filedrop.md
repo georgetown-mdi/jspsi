@@ -25,6 +25,13 @@ folder and reading the DFS tab.
   Explorer plus network credentials, resolves the server, share and subfolder,
   asks the operator to confirm them, tests the share from inside a container,
   creates the volume, tests it, and prints the `docker run` command.
+- `Start-Psilink.ps1` -- the launcher: the same ground plus starting the console
+  and opening it. It dot-sources the setup script with `-LoadFunctionsOnly` for
+  the resolution rather than carrying a second copy, which is why the two travel
+  together and why a release publishes both.
+- `start-psilink.sh` -- the launcher for macOS and Linux. It shares only the
+  doctor verdict contract with the PowerShell one; there is no resolution
+  machinery in it, because a path the host can see is a path the engine can.
 - `README.md` -- the setup page, covering this script and the Command Prompt
   one alike.
 - `troubleshooting.md` -- the page the script's errors cite by section name.
@@ -139,12 +146,41 @@ tests hold that switch to its contract from both sides, since a guard that
 swallowed the flow would leave every operator with a script that does nothing.
 Nothing past resolution is covered -- the prompts, the container checks and the
 volume are verified by the passes above and by nothing else.
-`ci-resolution-tests.ps1` runs the suite and reports it as check-run
+`ci-resolution-tests.ps1` runs the suites and reports them as check-run
 annotations, which is all a reader of a CI run can see.
+
+**The launchers, as of 5 August 2026: the shell one is driven end to end, the
+PowerShell one has never been run.** `scripts/start-psilink-launcher.test.mjs`
+drives `start-psilink.sh` on Linux CI against a stub engine on PATH -- a real
+process reading the real argument vector, so the mounts and the publish binding
+are asserted as the engine receives them. Covered: the unstamped refusal, and
+that it happens before the engine is touched at all; the sourcing contract from
+both sides; the verdict reader (absent versus null, prose holding a brace, a
+comma and a quote, an escaped control character rendered as a space, a check
+found by id rather than by position); a `fix_and_retry` loop printing MEANING
+and ACTION verbatim and running again; a declined retry; a `fatal` stop that is
+not retried; a refused verdict version; the docker-then-podman order; and one
+pass reaching the console. Nothing there pulls the real image, opens a browser,
+or reaches a network.
+
+`Start-Psilink.ps1` is covered only by `Start-Psilink.Tests.ps1`, which is
+entirely pure: the verdict reader against the same fixtures, the release stamp,
+the DFS candidate selection, and the console's argument vector. Its flow has
+never been executed anywhere -- not the folder picker or its typed fallback, the
+prompts, the credentials, the volume, the detached container, or the port wait.
+A first real-Windows pass should start with the picker in a session whose
+language mode really is constrained, which is the one branch chosen from
+documentation rather than measurement, and with the DFS offer.
+
+The launcher's CIFS volume options are the setup script's, and like them have
+only ever been driven against docker. The launcher says so on screen before
+creating the volume under any other engine rather than predicting what podman
+will make of them.
 
 Still unverified: the Windows-containers branch, which needs Docker Desktop
 switched to Windows containers to reach -- only the `{{.Server.Os}}` parse it
-keys on is confirmed, against a `linux` engine.
+keys on is confirmed, against a `linux` engine. The launcher asks the same
+question of docker alone, for the same reason.
 
 Unverified on Windows since that pass, the whole delta: the branch that
 reports a volume which mounted and then refused the write, split out of the
@@ -305,6 +341,48 @@ ConstrainedLanguage blocks on exactly the locked-down endpoints this guide
 targets, and there is no way to test it here. If a domain-joined machine
 becomes available, measure the premise first -- if `Get-SmbConnection` does
 name the target, a much smaller fix exists.
+
+**Partly reversed, 5 August 2026: the suggestion is back, as an offer.**
+`Start-Psilink.ps1` asks `Get-SmbConnection` for a correction when the operator
+says the resolved server and share are wrong, and offers what it finds rather
+than substituting it. Of the three defects above, two no longer hold and one
+still does.
+
+*Server-only substitution* is fixed rather than argued away. `Select-DfsCandidate`
+matches `ServerName` and `ShareName` together and returns both, so a correction
+that keeps the namespace's share cannot be produced at all. The suite holds that
+against a connection list where the target sits on the namespace's own server
+under a different share.
+
+*Namespace-root masking is measured away.* The claim that the connection list
+answers with the name already in hand was read off the protocol, not measured;
+the rig has measured it. Check-run `92447351999`'s `Q3_resolve` annotation,
+taken after a write through `\\runnervmhisb5\psilinkdfs2d4600cc\drop` whose
+folder target is `\\runnervmhisb5\psilinkci2d4600cc`, records:
+
+```text
+smb_connections=localhost\psilinkci2d4600cc|runnervmhisb5\IPC$|runnervmhisb5\psilinkci2d4600cc|runnervmhisb5\psilinkdfs2d4600cc
+```
+
+The target share is there alongside the namespace root, so dropping the
+namespace's own pair leaves something real to offer. Read it for the limit as
+well: with `IPC$` dropped, two entries naming a real share remain, so on that
+rig the selection reports several and falls back. The rig settles the premise,
+not the offer.
+
+*The elevation requirement stands, and is still unmeasured where it matters.*
+`Get-SmbConnection` answered on the runner, whose session holds the rights; it
+has not been run in an ordinary operator's non-elevated window, where the field
+notes below recorded "Access is denied". That is why the fallback is
+load-bearing rather than an edge case, and why the suggestion is never more than
+an offer: on zero candidates, several, an error, or an empty result the launcher
+routes to the DFS tab, exactly the manual route the setup script gives. Settling
+the non-elevated premise is assigned to the planned real-Windows end-to-end
+pass, which is also the only thing that can exercise the offer's prompt.
+
+The offer is reached only after the operator declines the confirmation, which
+keeps it off every path that resolved correctly. `Setup-PsilinkFileDrop.ps1` is
+unchanged: it still prints the manual route and stops.
 
 **The probe reports derived facts, not the operator's data.** Step 3 used to
 print the server's share list and step 5 the drop folder's listing. The runbook
