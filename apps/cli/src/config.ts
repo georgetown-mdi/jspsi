@@ -27,9 +27,9 @@ import { parseSensitiveYaml, editSensitiveYamlDocument } from "./sensitiveFile";
 
 /**
  * Default path for the exchange config file written by the provisioning
- * commands (`invite`, `accept`, and `exchange --save`). Matches the default the
- * `exchange` command reads from, so a config written here is found without an
- * explicit `--config-file`.
+ * commands (`invite`, `accept`, and a zero-setup run with `--save`). Matches
+ * the default the `exchange` command reads from, so a config written here is
+ * found without an explicit `--config-file`.
  */
 export const DEFAULT_CONFIG_PATH = "./psilink.yaml";
 
