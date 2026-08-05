@@ -5,8 +5,9 @@ title: "One consent summary for two acceptance surfaces"
 # One consent summary for two acceptance surfaces
 
 _Status: shipped. This note records why the invitation consent summary is a
-shared display model in `@psilink/core` rather than one per surface, and what
-that arrangement does and does not guarantee. The escaping contract it rests on
+shared display model in `@psilink/core` rather than one per surface, what each
+classified line claims on that basis, and what the arrangement does and does not
+guarantee. The escaping contract it rests on
 is specified normatively in
 [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#display-sanitization-escape-format);
 the operator-facing description of what `psilink accept` prints is in
@@ -82,6 +83,19 @@ non-receipt is enforced, while the partner's non-receipt on the same
 `output` pair rests on the partner's word. The shared consent-coverage
 classification is the repo's existing precedent for the shape.
 
+The partner's own result receipt is the second instance of that property, and it
+is classified by VALUE rather than by field. A `yes` is enforced: the two
+parties' output directions are compared as a mirror before data moves, and the
+run then delivers the result to the party those agreed terms entitle to it, so
+the disclosure is one the exchange makes rather than one the partner elects. What
+the partner does with the result once it holds it is a limit on its USE and not on
+whether the disclosure happens, so the fact's caveat sentence carries that limit
+rather than its marker. A `no` -- a result withheld from a partner -- stays
+trust-contingent, because one-sided PSI gives this side nothing to impose it
+with. Marking the disclosure that certainly happens as merely the partner's word
+would be the same error as presenting the withholding as a guarantee, facing the
+other way.
+
 The caveat sentence is one shared string, not two agreeing ones. The web's copy
 was the material to promote: every line carrying this classification there is
 markup-free text in a single element, so nothing about the markup forced a
@@ -93,6 +107,77 @@ A terminal has no styling budget, so where the web separates a caveat from its
 headline by size and colour, the CLI marks the basis on the fact's own label and
 puts the shared sentence on the line beneath. The marker vocabulary lives in the
 same table, so a third surface inherits it rather than inventing a third.
+
+## A line states what crosses; its marker states the basis
+
+A payload direction the inviting party declares empty renders as a bare `(none)`
+on both surfaces, with nothing after it.
+
+The display distinguishes an explicit empty declaration from an absent one
+structurally rather than in words. The line renders only for a DECLARED
+direction; a direction the invitation leaves open prints no line at all and is
+reconciled against the sender's own disclosure when the exchange runs. A reader
+meeting `(none)` is therefore already looking at an explicit declaration, and a
+clause saying so restates what the structure carries.
+
+What such a clause adds beyond that restatement is worse than redundant. Payloads
+are exchanged before either side reconciles what it received, so a violated
+declaration aborts the exchange only after the values have crossed the wire -- an
+enforcement that does not do what "would abort the exchange" sounds like at a
+consent prompt, where an acceptor is deciding what it is willing to have leave the
+machine.
+
+So the line states what crosses, and whether the exchange holds that fact or the
+inviting party merely declared it is the basis marker's job -- the division of
+labour the classification above sets up. The lock-in mechanics, which party aborts
+and that the abort follows transmission, are the operator's to know and are
+carried in [CLI.md](../CLI.md#offline-acceptance), which has room to state them.
+
+## The outbound-send line, and what it stands behind
+
+Both surfaces lead the acceptor with its OWN outbound columns, the
+hardest-to-undo fact it consents to, and both state that nothing is sent when the
+inviting party receives no result.
+
+The run transmits nothing at all to a partner not entitled to the result: an empty
+message goes on the wire where a payload would, so no column leaves the machine
+whatever the acceptor's input file holds. Listing a set that never moves would
+overstate the disclosure, under a marker asserting the exchange holds the fact.
+
+That answer takes the line ahead of the two cases that would otherwise fill it,
+and both surfaces apply the precedence the same way, so the case where they
+overlap is not the case they diverge on. It comes ahead of the not-yet-known
+forward reference, because the input file that reference points at cannot change
+the answer, and pointing at it sends the operator to look for something that does
+not bear on the question. It comes ahead of the empty set's own wording, because
+where the acceptor discloses nothing both statements are true and the direction is
+the one that survives the operator changing their file, while an empty disclosure
+is a property of the metadata resolved for this acceptance alone.
+
+The displayed direction and the run's own payload gate are one fact with an
+aborting check between them, not two derivations that happen to agree. Acceptance
+mirrors the invitation's output direction into this party's own terms, and the
+compatibility check refuses a partner presenting terms that disagree with that
+mirror, so the two cannot come apart without the exchange aborting.
+
+Where columns ARE listed, the `enforced` marker stands behind a bound: the set is
+derived from the acceptor's own resolved metadata through the same predicate the
+payload step transmits on, so no column outside it leaves the machine under the
+configuration this acceptance writes. One limit is stated beside the bound,
+because it is the one the derivation does not reach -- an acceptance that keeps a
+configuration already on disk runs on that file's stored metadata, which nothing
+compares against the input the line was rendered from.
+
+## Two facts side by side, and no comparison between them
+
+The acceptor's own outbound columns and the inviting party's declared request sit
+in the same part of the display, and nothing on either surface compares them. An
+inviter declaring it will receive no payload column, against an input file whose
+metadata discloses some, is a pairing the exchange refuses: `prepareForExchange`
+rejects a payload dictionary that does not match what metadata transmits, before
+this party connects, so the refusal costs no disclosure. It lands after consent
+rather than at it: an operator can read both lines, consent to them, and meet the
+refusal when the exchange is run.
 
 ## Proposed is not applied
 
