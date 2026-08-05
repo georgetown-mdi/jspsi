@@ -4,7 +4,7 @@ title: "What a FIPS Provider Offers in the Shipped Image"
 
 # What a FIPS provider offers in the shipped image
 
-*Status: measured, not decided. This note records what an OpenSSL FIPS provider carries and reaches inside the container image PSI-Link ships, and what the CMVP certificates approve, so the container, compliance, and crypto items can cite a measurement instead of a belief. It chooses nothing: which certificate to target, whether to change the base image, and whether to pursue a FIPS claim at all, remain open. See [docs/notes/README.md](README.md).*
+*Status: measurement, plus two decisions taken on it. This note records what an OpenSSL FIPS provider carries and reaches inside the container image PSI-Link ships, and what the CMVP certificates approve, so the container, compliance, and crypto items can cite a measurement instead of a belief. The owner has since set FIPS 140-3 as the target standard and accepted that the Alpine base will likely give way; which certificate and base pair, and whether to pursue a FIPS claim at all, remain open. See [docs/notes/README.md](README.md).*
 
 Three unverified facts gated the whole FIPS thread: whether the provider we would ship carries X25519 key agreement, whether it carries Ed25519 signing, and whether Node's WebCrypto in the shipped image engages a configured FIPS provider at all. All three are now measured by running the real tool in an image built on this repo's `Dockerfile` runtime base. Two of the answers invert the assumption they replace.
 
@@ -134,6 +134,10 @@ All 40 active certificates carrying this module name were read: 15 from their ce
 
 The stronger form of that argument does not depend on the search at all. A tested operational environment binds to the hardware and OS it was tested on, not to a libc family: even a certificate whose firmware turned out to be musl would name something like "Linux 5.10 on an HP DesignJet Cortex-A7", and an Alpine container on generic x86-64 would still not be a covered environment. Alpine does not become reachable by finding a musl entry.
 
+The 140-3 policy closes the usual escape hatch explicitly. Its operational-environment section states: **"No operational environments are vendor affirmed."** So certificate 4985 covers its 12 tested configurations and nothing else, and each of those names hardware as well as an OS -- Ubuntu 22.04.1 Server and Debian 11.5 on a Dell Inspiron with an Intel i7, FreeBSD 13.1 and Windows 10 Pro on the same machine, macOS 11.5.2 on Apple M1 and Intel Mac minis. Matching the distribution is therefore necessary but not sufficient, and there is no affirmation route that extends the certificate to a container on arbitrary hardware.
+
+That points at the other shape of an answer: a distribution vendor's own certificate, where the tested environments are that vendor's OS on machines closer to how a container is actually deployed. Red Hat's covers RHEL 9 on Dell PowerEdge and IBM POWER10; AlmaLinux's covers 9.2 on AWS `a1.metal` and `m5.metal` instances. Which of the vendor certificates are FIPS 140-3 rather than 140-2 is not established here and has to be read per certificate.
+
 ## What is settled, and what is not
 
 Settled by measurement, in the image, on the base that ships:
@@ -149,18 +153,23 @@ Settled by reading the certificates:
 - Neither X25519 nor Ed25519 is an approved algorithm on any OpenSSL Project certificate. X25519 is allowed inside approved mode under 140-2 only; Ed25519 is not allowed under either standard.
 - No active certificate for this module covers a musl or Alpine operational environment, and the environment binds to tested hardware and OS regardless.
 
+Decided since, by the owner, and recorded here because it changes how the rows above should be read:
+
+- **FIPS 140-3 is the target standard**, on the grounds that 140-2 is being retired. That forecloses X25519 inside the module: under 4985 it is Non-Approved and Not Allowed, so its "allowed" status under 140-2 is not something to build on.
+- **The Alpine base is expected to give way**, dropping musl, since no certificate reaches it.
+
 Still open:
 
-- **Whether a validated module is obtainable for this product at all**, which is now a question about changing the base rather than about the provider. A base drawn from the certified list, or a distro base paired with that distro vendor's own certificate, are the two shapes an answer could take.
-- **Whether the 140-2 or the 140-3 certificate is the target**, which decides whether X25519 key agreement is tolerable inside approved mode or forecloses it.
+- **Which certificate and base pair**, given that matching a distribution is not sufficient on 4985 and the vendor certificates trade that problem for a dependence on the vendor's own distribution and tested hardware.
+- **Whether any reachable pairing is a 140-3 certificate**, which the vendor certificates have to be read individually to answer.
 
 ## What this means for the items downstream
 
-- Shipping a validated provider in the image: the mechanism works -- the module loads, serves, and is attributable -- but no certificate covers the Alpine base, so the deliverable is either a base change or the recorded answer that this base cannot get there.
+- Shipping a validated provider in the image: the mechanism works -- the module loads, serves, and is attributable -- but no certificate covers the Alpine base, and the target certificate affirms no environments beyond the twelve it tested. The deliverable is a base change, and the harder part of it is that matching a distribution does not by itself put the image inside a tested environment.
 - Documenting a FIPS deployment profile for SFTP: the provider build determines the surviving SSH algorithm set. That is now measured, not assumed.
 - Rewriting the FIPS and SC-13 claims in [COMPLIANCE.md](../COMPLIANCE.md): the current text says the modules in use are not FIPS 140-validated, which remains accurate. The rewrite's real work is the approved / allowed / not-allowed distinction above -- the SC-13 row today lists X25519 and Ed25519 as NIST-approved, which conflates algorithm-standard approval with module-certificate approval. Both things are true at once and the document has to say so.
-- Moving Ed25519 receipt signing off pure JS: the provider carries Ed25519, but every certificate places it outside approved mode, so the swap removes a pure-JS dependency without buying approved-mode signing -- and would put the module in non-approved mode for that operation. ECDSA is the approved alternative, which makes that item's disclose-or-migrate question live rather than settled.
-- Deciding the key-establishment FIPS boundary: a third answer, not either arm. X25519 is allowed inside approved mode under 140-2 (3.0.8/3.0.9) and not allowed under 140-3 (3.1.2), so the disclosure path stays cheap on the older certificate while the migration arm becomes necessary on the newer one. The decision is coupled to which certificate the container item targets.
+- Moving Ed25519 receipt signing off pure JS: the provider carries Ed25519, but every certificate places it outside approved mode, and under the targeted 140-3 certificate it is Not Allowed outright. Routing signing through the provider is therefore off the table -- it would take the module out of approved mode for that operation. The remaining fork is ECDSA, which is approved, or keeping the pure-JS implementation and disclosing it, which costs nothing in module terms because an algorithm run outside the module does not change the module's mode.
+- Deciding the key-establishment FIPS boundary: with 140-3 as the target, X25519 must not be routed through the module at all. That does not force the migration, though, and the distinction is the item's whole answer: X25519 stays outside the module today because it runs in `@noble/curves`, and an algorithm the module never performs does not affect the module's mode. So the disclosure path remains available and cheap; the migration to P-256 ECDH is what buys key establishment *inside* the boundary, and it is now the only thing that does.
 
 ## Reproducing this
 
