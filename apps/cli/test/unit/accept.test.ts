@@ -1366,6 +1366,55 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
   );
 });
 
+test("displayInvitation: the received-columns marker follows what the invitation carried, not what it declared", () => {
+  // The same line has two sources and they do not rest on the same thing. The
+  // carried subset is the set an acceptance locks in and reconciles the received
+  // payload against; an authored payload.send with no carried subset locks in
+  // nothing, so an inviter that declares one set and transmits another is not
+  // stopped on the online run. Marking that case "enforced" would announce a check
+  // that does not run, so the marker is keyed on what was carried.
+  const log = getLogger("accept-display-receive-basis-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  // One terms document for both renderings, authoring the columns the carried
+  // subset also names, so the only difference between the two is whether the token
+  // carries the subset.
+  const linkageTerms: LinkageTerms = {
+    ...base.linkageTerms,
+    payload: { send: [{ name: "diagnosis" }, { name: "notes" }] },
+  };
+  const authored = renderDisplayInvitation(log, { ...base, linkageTerms });
+  const carried = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms,
+    disclosedPayloadColumns: ["diagnosis", "notes"],
+  });
+  expect(authored).toContain("columns you will receive (your partner's word):");
+  expect(authored).toContain("\n    - diagnosis");
+  expect(authored).toContain("\n    - notes");
+  expect(authored).not.toContain("columns you will receive (enforced)");
+  expect(carried).toContain("columns you will receive (enforced):");
+  expect(carried).not.toContain(
+    "columns you will receive (your partner's word)",
+  );
+  // The marker is the whole of the difference: the same columns are listed either
+  // way, so nothing else about the surface moves with the basis.
+  expect(
+    authored.replace(
+      "columns you will receive (your partner's word)",
+      "columns you will receive (enforced)",
+    ),
+  ).toBe(carried);
+  // An authored EMPTY send is not a declaration at all -- it carries no subset and
+  // prints no line -- so a rendered "(none)" is always the carried, enforced case.
+  expect(
+    renderDisplayInvitation(log, {
+      ...base,
+      linkageTerms: { ...base.linkageTerms, payload: { send: [] } },
+    }),
+  ).not.toContain("columns you will receive");
+});
+
 test("displayInvitation: the inviter's request-from-acceptor receive shows names, '(none)' when empty, and nothing when absent", () => {
   // The opposite direction from "columns you will receive": the inviter's
   // payload.receive is what it requests FROM this party. A declared receive

@@ -133,6 +133,63 @@ labour the classification above sets up. The lock-in mechanics, which party abor
 and that the abort follows transmission, are the operator's to know and are
 carried in [CLI.md](../CLI.md#offline-acceptance), which has room to state them.
 
+## One line, two bases: carried against declared
+
+The received-columns line has two sources. Where the invitation carries the
+disclosed subset, the line IS that subset -- the inviter's own transmission
+predicate run over its own metadata, so the displayed set cannot drift from the
+bytes that flow. Where it carries none -- an older or metadata-unknown mint, or the
+inviter's own pre-mint preview of terms it has authored but not yet minted -- the
+line falls back to the `payload.send` the inviter wrote.
+
+Both are declarations; only one of them is a lock-in. An acceptance records the
+CARRIED subset as what it will receive and the received payload is reconciled
+against it, while the authored fallback records nothing -- and an absent
+expectation is the lazy reconciliation path, whose absent-versus-empty semantics
+are the spec's and are stated normatively with the payload step. A marker keyed on
+"the invitation declared something" therefore puts `enforced` on a line where an
+inviter may declare one set, transmit another, and not be stopped. Worse, which
+source the line comes from is the INVITING party's choice, so a surface keyed on
+the declaration lets a partner earn the `enforced` marker without earning the
+check behind it.
+
+So the fact splits in two, one entry per basis, selected on the provenance the
+summary already knows. This is the second line to carry two classifications at
+once, and it does so on a different axis than the first: the partner's result
+receipt splits by the fact's VALUE, this one by where the displayed set came from.
+The keyed table absorbs both without a conditional-basis mechanism, which is the
+property that made a table the right shape to begin with.
+
+The `(none)` reading above is unaffected. An authored `payload.send` that is empty
+is not a declaration the display recognizes at all -- it prints no line, exactly as
+a lazy direction does -- so a rendered `(none)` is always the carried case, and
+always the strict commitment.
+
+## What the marker understates, on purpose
+
+The classification keys on the invitation, and the invitation is the same on both
+acceptance paths. The enforcement is not. An offline acceptance writes a
+configuration whose terms mirror the inviter's `payload.send` into this party's own
+`payload.receive`, and the later `psilink exchange` falls back to that mirror as
+its received-column lock-in where no carried subset was recorded. The
+authored-declaration case is therefore enforced on that path, and the line marks it
+as the partner's word regardless.
+
+That understatement is deliberate. The display is rendered at consent time, before
+the run that follows is settled; one function serves both paths and neither it nor
+the summary can see which one the operator is on, so one of the two markings is
+wrong in one of the two cases. Only one of those errors costs the operator
+anything. An operator told psilink will stop a violation it will not stop plans
+around a check that never runs -- the failure this classification exists to
+prevent, and the same error as reading a cooperative undertaking as a
+cryptographic guarantee. An operator told psilink will not stop something it does
+stop has lost a reassurance and nothing else.
+
+Making the display path-aware is not the way to close it, either: the path is a
+property of what the operator does next, not of the invitation they are being
+asked to consent to, and a marker that changed with the subcommand would be
+stating two different bases for one unchanged fact.
+
 ## The outbound-send line, and what it stands behind
 
 Both surfaces lead the acceptor with its OWN outbound columns, the

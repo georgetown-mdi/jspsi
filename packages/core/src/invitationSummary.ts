@@ -158,15 +158,33 @@ export interface InvitationPayloadSummary {
    * the lazy case. */
   send: Array<Displayable>;
   /**
-   * Whether the send set is a definite DECLARATION the acceptor is locked in to --
-   * the carried disclosed subset (possibly empty), or an authored `payload.send` --
-   * as opposed to the lazy case (the inviter sends whatever its own metadata
-   * discloses, nothing declared up front). When true and {@link send} is empty the
-   * acceptor is locked in to "receive nothing" (a later non-empty payload aborts),
-   * so the renderer states that explicitly ("(none)") rather than omitting the
-   * line; when false the send side is lazy and is not shown.
+   * Whether the send set is a definite DECLARATION -- the carried disclosed
+   * subset (possibly empty), or an authored `payload.send` -- as opposed to the
+   * lazy case (the inviter sends whatever its own metadata discloses, nothing
+   * declared up front). When true and {@link send} is empty the acceptor is
+   * locked in to "receive nothing" (a later non-empty payload aborts), so the
+   * renderer states that explicitly ("(none)") rather than omitting the line;
+   * when false the send side is lazy and is not shown. Whether the declaration is
+   * one an acceptance can hold the inviter to is the narrower
+   * {@link sendFromCarriedSubset}.
    */
   sendDeclared: boolean;
+  /**
+   * Whether {@link send} is the disclosed subset the invitation CARRIED -- the
+   * inviter's own transmission predicate run over its own metadata -- rather than
+   * the authored `payload.send` the summary falls back to when no subset was
+   * carried. Strictly narrower than {@link sendDeclared}: a carried subset is
+   * always a declaration, while an authored send is a declaration with no subset
+   * behind it.
+   *
+   * The narrower condition is the one enforcement turns on. An acceptance locks
+   * in the CARRIED subset as what it will receive, and reconciles the received
+   * payload against it; where the invitation carried none there is no such set to
+   * write, and an absent expectation is the lazy reconciliation path, so an online
+   * run takes whatever the inviter transmits. A surface classifying the
+   * received-columns fact reads this rather than {@link sendDeclared}.
+   */
+  sendFromCarriedSubset: boolean;
   /** Columns the inviter requests from the acceptor for matched records (what
    * the acceptor sends), each sanitized for display. Empty when the declared set
    * is empty; read {@link receiveDeclared} to tell that apart from the lazy
@@ -1155,9 +1173,15 @@ export function summarizeInvitation(
   // absent one is lazy. A declared-but-empty receive is the strict "the acceptor
   // sends nothing" assertion, rendered "(none)" for the same reason. The section
   // renders whenever the send OR the receive is declared.
+  //
+  // sendFromCarriedSubset carries which of the two declaration cases produced the
+  // displayed send, because only the carried subset becomes an acceptance's
+  // received-column lock-in: the authored fallback writes no expectation, and an
+  // absent expectation is the lazy path, so a surface marking that fact enforced
+  // off sendDeclared alone would announce a check that does not run.
+  const sendFromCarriedSubset = source.disclosedPayloadColumns !== undefined;
   const sendDeclared =
-    source.disclosedPayloadColumns !== undefined ||
-    (terms.payload?.send ?? []).length > 0;
+    sendFromCarriedSubset || (terms.payload?.send ?? []).length > 0;
   const receiveDeclared = terms.payload?.receive !== undefined;
   const send =
     source.disclosedPayloadColumns ??
@@ -1167,6 +1191,7 @@ export function summarizeInvitation(
     summary.payload = {
       send: send.map((name) => sanitizeForDisplay(name)),
       sendDeclared,
+      sendFromCarriedSubset,
       receive: receive.map((name) => sanitizeForDisplay(name)),
       receiveDeclared,
     };

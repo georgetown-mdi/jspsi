@@ -139,6 +139,7 @@ describe("summarizeInvitation", () => {
     expect(summary.payload).toEqual({
       send: ["risk_score"],
       sendDeclared: true,
+      sendFromCarriedSubset: false,
       receive: ["program_outcome"],
       receiveDeclared: true,
     });

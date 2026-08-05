@@ -487,8 +487,16 @@ export function displayInvitation(params: {
   // unambiguous, since only a declared direction reaches the line at all. What the
   // declaration commits its party to, and what a violation of it costs, is
   // docs/CLI.md's to state.
+  //
+  // The two sources carry different bases, so the marker is selected from which one
+  // the summary used: only the carried subset is locked in and reconciled against.
   if (summary.payload?.sendDeclared === true) {
-    const label = marked("columns you will receive", "inboundPayloadColumns");
+    const label = marked(
+      "columns you will receive",
+      summary.payload.sendFromCarriedSubset
+        ? "inboundPayloadColumnsCarried"
+        : "inboundPayloadColumnsAuthored",
+    );
     if (summary.payload.send.length === 0) emit(`  ${label}: (none)`);
     else {
       emit(`  ${label}:`);
