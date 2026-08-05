@@ -62,7 +62,7 @@ The two failure classes are distinguished by `overall` alone; which check stoppe
 | `ok` | `OK:` | The check ran and establishes what it set out to. Nothing is asked of the operator. | optional | never |
 | `warn` | `WARN:` | The check ran and does not block an exchange, but carries something the operator should read -- a share that works only with `--lockless-rendezvous`, one nearly out of space, an exchange folder already past the transport's listing bound. | always | always |
 | `fail` | `FAIL:` | The check ran and what it tests is not the case. Any `fail` moves `overall` to `fix_and_retry` or `fatal`. | always | always |
-| `skipped` | `SKIP:` | The check did not run: either an earlier check failed and stopped the battery, or the check does not apply to the inputs given. The `meaning` distinguishes the two. | optional | optional |
+| `skipped` | `SKIP:` | The check did not establish its property, for one of three reasons the `meaning` states: an earlier check failed and stopped the battery; the check does not apply to the inputs given; or the check was attempted and could not be completed. Every `skipped` record carries a `meaning`. | always | optional |
 
 `warn` is its own status rather than an `ok` carrying an `action`: a consumer classifies on `status` alone, without inferring severity from which optional fields are present, and both renderings key off the same field -- the human label column above is the whole mapping.
 

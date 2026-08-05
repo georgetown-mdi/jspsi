@@ -837,8 +837,9 @@ export async function runProbe(
         ? ok("marker", `left ${input.marker} for the mount check to find.`)
         : skipped("marker", "could not leave the marker file.", {
             meaning:
-              "a later `psilink doctor mount` cannot confirm the mounted " +
-              "folder is this one.",
+              "the check was attempted and could not be completed: a later " +
+              "`psilink doctor mount` cannot confirm the mounted folder is " +
+              "this one.",
           }),
     );
     return finish();

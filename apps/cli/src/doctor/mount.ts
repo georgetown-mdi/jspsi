@@ -107,11 +107,12 @@ function markerCheck(
     return fail(
       "marker",
       `${input.marker} is not in this folder.`,
-      "the file the network checks left behind is not visible here, so the " +
-        "mount and those checks are pointing at different directories. The " +
-        "server, share, or subfolder is wrong somewhere -- a DFS path is the " +
-        "usual reason, because the namespace and the real location can differ " +
-        "in all three.",
+      "the file the network checks left behind is not visible here. Either " +
+        "a previous `doctor mount` already consumed it -- run `doctor probe` " +
+        "again first -- or the mount and those checks are pointing at " +
+        "different directories: the server, share, or subfolder is wrong " +
+        "somewhere, and a DFS path is the usual reason, because the " +
+        "namespace and the real location can differ in all three.",
       "read the real path from the folder's Properties, DFS tab, and set " +
         "SMB_SERVER, SMB_SHARE and SMB_PATH from it. See the troubleshooting " +
         "page, 'Reading the real path from Windows'.",
@@ -263,7 +264,9 @@ export function runMountChecks(
           "could not test exclusive create on this share.",
           {
             meaning:
-              "psilink uses an exclusive create to decide which side goes first.",
+              "the check was attempted and could not be completed: psilink " +
+              "uses an exclusive create to decide which side goes first, and " +
+              "this share would not stage one.",
             action:
               "if the exchange hangs at the start, pass --lockless-rendezvous on " +
               "both sides.",

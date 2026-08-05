@@ -171,6 +171,8 @@ jobs:
             security = user
             server min protocol = SMB2
             log level = 1
+            interfaces = 127.0.0.1
+            bind interfaces only = yes
 
           [exchange]
             path = /srv/psilink

@@ -253,6 +253,23 @@ describe("a matching marker that cannot be removed", () => {
   });
 });
 
+describe("every skipped record explains itself", () => {
+  test("padded and inapplicable skips all carry a meaning", () => {
+    const reports = [
+      runMountChecks(path.join(os.tmpdir(), "psilink-no-such-dir"), INPUT),
+      runMountChecks(tempDirectory(), { marker: "", token: "" }),
+    ];
+    let skips = 0;
+    for (const report of reports)
+      for (const check of report.checks)
+        if (check.status === "skipped") {
+          skips += 1;
+          expect(check.meaning).toBeDefined();
+        }
+    expect(skips).toBeGreaterThan(0);
+  });
+});
+
 describe("the marker token must match exactly", () => {
   test("a stale token that merely contains this run's is another run's marker", () => {
     const directory = tempDirectory();

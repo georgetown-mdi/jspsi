@@ -555,6 +555,38 @@ describe("smbclient output parsing", () => {
   });
 });
 
+describe("every skipped record explains itself", () => {
+  test("padded, inapplicable, and incomplete skips all carry a meaning", async () => {
+    const reports = [
+      await runProbe(
+        INPUT,
+        deps((args) =>
+          args.includes("--version")
+            ? { code: null, output: "", spawnErrorCode: "ENOENT" }
+            : healthyReply(args),
+        ),
+      ),
+      await runProbe({ ...INPUT, marker: "" }, deps(healthyReply)),
+      await runProbe(
+        INPUT,
+        deps((args) =>
+          commandOf(args) === "put psilink-check.txt psilink-check.txt"
+            ? { code: 1, output: "NT_STATUS_ACCESS_DENIED putting file" }
+            : healthyReply(args),
+        ),
+      ),
+    ];
+    let skips = 0;
+    for (const report of reports)
+      for (const check of report.checks)
+        if (check.status === "skipped") {
+          skips += 1;
+          expect(check.meaning).toBeDefined();
+        }
+    expect(skips).toBeGreaterThan(0);
+  });
+});
+
 describe("local cleanup does not depend on the remote", () => {
   test("a runner that dies during del still loses the work directory", async () => {
     // The throw is pinned to this run's own litter name, not the wildcard
