@@ -102,10 +102,10 @@ export interface RendezvousScope {
  * first-party labels BETWEEN two paths, so redacting the composite would let a
  * marker in the inbound path consume the labels and the operator's own outbound
  * path under the fail-closed dangling rule -- the shape
- * {@link redactPrivateKeyMaterial} exists to contain. Every producer of a
- * {@link RendezvousScope}'s `dirsDisplay`, and the sweep's own scope string,
- * goes through here so the property is structural rather than a convention each
- * call site has to remember.
+ * {@link redactPrivateKeyMaterial} exists to contain. Every production producer
+ * of a {@link RendezvousScope}'s `dirsDisplay`, and the sweep's own scope
+ * string, goes through here -- a convention, not a guarantee: `dirsDisplay` is a
+ * plain string, so a producer composing one by hand is not rejected by the type.
  *
  * @internal
  */

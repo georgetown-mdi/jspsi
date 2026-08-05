@@ -170,6 +170,32 @@ async function renderMismatch(keyType: string): Promise<string> {
   );
 }
 
+// The sibling verifier: with nothing pinned the connection is refused too, and
+// that refusal is the one message whose whole purpose is handing the operator a
+// fingerprint to pin. The server chooses the key type here exactly as it does on
+// the mismatch branch.
+async function renderNoPinRefusal(keyType: string): Promise<string> {
+  const { session } = makeSession();
+  const config: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+  };
+  const connectOptions: Record<string, unknown> = {};
+  const verifier = session.installEnforcingVerifier(connectOptions, config);
+  const hostVerifier = connectOptions["hostVerifier"] as (
+    blob: Buffer,
+    verify: (permitted: boolean) => void,
+  ) => void;
+  await new Promise<void>((resolve) => {
+    hostVerifier(hostKeyBlob(keyType), () => resolve());
+  });
+  return sanitizeErrorForDisplay(
+    new Error(
+      `SFTP host-key verification failed: ${verifier.mismatchDetails()}`,
+    ),
+  );
+}
+
 // The key type is quoted into the message ahead of the presented fingerprint
 // and the pinned set, and a server chooses it: keyTypeFromBlob decodes it
 // verbatim out of the blob under no allowlist. The display boundary's
@@ -197,6 +223,55 @@ test("a private-key-shaped host key type does not suppress the mismatch detail",
   expect(benign).toContain(DISPLAY_TRUNCATION_MARKER);
   expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
   expect(benign).not.toContain("or an active attack");
+});
+
+// The no-pin refusal composes the same server-chosen key type, and this message
+// is the one whose whole purpose is handing the operator a fingerprint to pin.
+// Unredacted, a PEM-header key type deletes the rest of the link outright: the
+// operator is left a refusal ending at the planted type, with no fingerprint and
+// not even the label saying one was presented.
+//
+// This message ALSO runs past the per-link cap, and by more than its sibling --
+// its own fixed prefix is long enough that the fingerprint is cut short and the
+// pinning instruction never renders in ANY case, benign or planted. So the
+// benign rendering is measured alongside, and the assertions pin only what
+// redaction restores; what the cap removes is a separate bound, pinned below.
+test("a private-key-shaped host key type does not suppress the no-pin refusal", async () => {
+  const marker = "-----BEGIN RSA PRIVATE KEY-----";
+  const rendered = await renderNoPinRefusal(marker);
+  const benign = await renderNoPinRefusal("ssh-ed25519");
+
+  expect(rendered).toContain("[redacted private key]");
+  // What redaction restores: the label naming what the server presented, which
+  // the fail-closed dangling rule consumes when the type is composed raw.
+  expect(rendered).toContain("with fingerprint SHA256:");
+  expect(benign).toContain("with fingerprint SHA256:");
+});
+
+// The cap, not the planted marker, is what truncates this refusal: the benign
+// rendering loses the pinning instruction too. Pinned separately so the loss is
+// visible as its own bound rather than read as redaction's cost -- an operator
+// on this path never receives the field name to set, whatever the server sends.
+test("the no-pin refusal runs past the display cap whatever the key type", async () => {
+  const benign = await renderNoPinRefusal("ssh-ed25519");
+  const rendered = await renderNoPinRefusal("-----BEGIN RSA PRIVATE KEY-----");
+
+  for (const out of [benign, rendered]) {
+    expect(out).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(out).not.toContain("host_key_fingerprint to pin it");
+  }
+});
+
+// A whole key sliced into the type is the shape the redaction exists for, on the
+// branch that must still name what the server presented.
+test("a sliced key in the type does not suppress the no-pin refusal", async () => {
+  const rendered = await renderNoPinRefusal(
+    "-----BEGIN OPENSSH PRIVATE KEY-----\nc2gtcnNhAAAAAwEAAQ==\nQ1n3QqzB2rN",
+  );
+
+  expect(rendered).toContain("[redacted private key]");
+  expect(rendered).not.toContain("c2gtcnNhAAAAAwEAAQ==");
+  expect(rendered).toContain("with fingerprint SHA256:");
 });
 
 // The key type leads the message and the server chooses its LENGTH as freely as

@@ -358,7 +358,13 @@ export class SftpSession {
           try {
             const blob = hostKeyBlob(keyBlob);
             const presented = await computeHostKeyFingerprint(blob);
-            const keyType = keyTypeFromBlob(blob);
+            // Redacted for the same reason as the mismatch branch above, on the
+            // message whose whole purpose is handing the operator a fingerprint
+            // to pin. Composed raw, a PEM-header key type ends the link where it
+            // sits, taking even the label naming what the server presented. How
+            // much of the tail the per-link cap removes anyway is a separate
+            // bound, pinned alongside this one in sftpSession.test.ts.
+            const keyType = redactPrivateKeyMaterial(keyTypeFromBlob(blob));
             mismatchDetails =
               `no host_key_fingerprint is pinned for ` +
               `${config.server.host}, so the server's ` +
@@ -370,7 +376,9 @@ export class SftpSession {
           } catch (err) {
             mismatchDetails =
               `no host_key_fingerprint is pinned and the presented host key ` +
-              `could not be read (${errMessage(err)}); refusing to proceed.`;
+              `could not be read ` +
+              `(${redactPrivateKeyMaterial(errMessage(err))}); refusing to ` +
+              `proceed.`;
             settleVerify(verify, false);
           }
         })();
