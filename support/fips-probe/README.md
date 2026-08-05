@@ -95,18 +95,22 @@ computes its own verdict rather than leaving the reading to a human:
 - **S2** repeats it with fips and base activated, default not activated, and
   `fips=yes` as the default property, recording `crypto.getFips()` and whether
   `fips.so` appears in `/proc/self/maps` after the call.
-- **S3** attempts, in that same process, operations a FIPS provider does not
-  carry: an X25519 `deriveBits` and an RSA keygen below the FIPS minimum
-  modulus. Each is also run at baseline, so a control that cannot succeed even
-  unconfigured counts for nothing. If an informative control still succeeds
-  under the fips-only configuration, the default provider is still reachable and
-  S2's success is unattributable.
+- **S3** attempts, in that same process, operations no FIPS provider serves
+  whatever its build: an MD5 digest, which is never an approved algorithm, and
+  an RSA keygen below the FIPS minimum modulus. Those two decide attribution --
+  if either still succeeds under the fips-only configuration, the default
+  provider is still reachable and S2's success is unattributable. An X25519
+  `deriveBits` runs beside them as an observation rather than a control, because
+  whether it survives is a property of the provider build: the 3.0.x provider
+  carries X25519 key exchange and the 3.5.x provider does not. Every control is
+  also run at baseline, so one that cannot succeed even unconfigured counts for
+  nothing.
 - **S4** breaks the provider -- first the `module-mac` in its config, then the
   module truncated -- and re-runs the same call. A break counts only where
   `fips.so` stopped being mapped.
 
-The only ENGAGED verdict is S2 succeeding, every informative S3 control failing,
-and every effective S4 break stopping the call. Anything else is UNSETTLED or
+The only ENGAGED verdict is S2 succeeding, every informative build-independent
+S3 control failing, and every effective S4 break stopping the call. Anything else is UNSETTLED or
 NOT ENGAGED, and the probe prints which and why. Both are legitimate results;
 neither is a broken harness.
 

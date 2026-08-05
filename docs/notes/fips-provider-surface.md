@@ -118,11 +118,11 @@ Not settled, and not settleable from the dev container:
 
 ## What this means for the items downstream
 
-- Ship a FIPS-validated provider in the image (board 10, 224129266): the mechanism works -- the module loads, serves, and is attributable. The open part is provider selection, which the two builds above frame as a real tradeoff rather than a detail, plus the operational-environment question.
-- Document a FIPS deployment profile for SFTP (board 10, 224129384): the provider build determines the surviving SSH algorithm set. That is now measured, not assumed.
-- Rewrite the FIPS and SC-13 claims in `docs/COMPLIANCE.md` (board 10, 224129556): the current text says the modules in use are not FIPS 140-validated, which remains accurate. Nothing here licenses "validated module" anywhere, and the PSI masking ceiling above bounds what any future claim can cover.
-- Move Ed25519 receipt signing off pure JS (board 9, 224129736): a provider target exists on both candidate builds, and Node 26's WebCrypto carries Ed25519 natively, so the destination is available. Scope is unblocked.
-- Decide the key-establishment FIPS boundary (board 9, 224129878): the answer depends on the provider build, and on the approved-versus-present question that is still open. A 3.5.x provider forecloses X25519; a 3.0.x provider carries it, subject to what its certificate actually approves.
+- Shipping a validated provider in the image: the mechanism works -- the module loads, serves, and is attributable. The open part is provider selection, which the two builds above frame as a real tradeoff rather than a detail, plus the operational-environment question.
+- Documenting a FIPS deployment profile for SFTP: the provider build determines the surviving SSH algorithm set. That is now measured, not assumed.
+- Rewriting the FIPS and SC-13 claims in [COMPLIANCE.md](../COMPLIANCE.md): the current text says the modules in use are not FIPS 140-validated, which remains accurate. Nothing here licenses "validated module" anywhere, and the PSI masking ceiling above bounds what any future claim can cover.
+- Moving Ed25519 receipt signing off pure JS: a provider target exists on both candidate builds, and Node 26's WebCrypto carries Ed25519 natively, so the destination is available. Scope is unblocked.
+- Deciding the key-establishment FIPS boundary: the answer depends on the provider build, and on the approved-versus-present question that is still open. A 3.5.x provider forecloses X25519; a 3.0.x provider carries it, subject to what its certificate actually approves.
 
 ## Reproducing this
 
