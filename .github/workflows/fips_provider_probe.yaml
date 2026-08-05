@@ -1,0 +1,213 @@
+name: FIPS Provider Probe
+
+# Measurement harness behind docs/notes/fips-provider-surface.md. It builds an
+# OpenSSL FIPS provider from source on top of the same Alpine base the shipped
+# image runs, lists that provider's key-exchange, signature and KEM algorithms,
+# and probes whether the base image's Node engages a configured FIPS provider for
+# AES-256-GCM. Nothing it builds ships: support/fips-probe/ is a throwaway image
+# and the root Dockerfile is not touched by any of it.
+#
+# Manual only. It answers a question that is asked when a provider or a base
+# image changes, not on every push, and it builds OpenSSL twice from source --
+# too costly to run on a schedule for an answer that moves that rarely.
+on:
+  workflow_dispatch:
+    inputs:
+      publish_transcript:
+        description: "Commit the transcripts to probe-out/ on the dispatched branch"
+        type: boolean
+        default: false
+
+# Cancel a superseded run when a newer commit lands on the same branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege by default; the probe job raises its own scope below.
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve base image and provider builds
+    runs-on: ubuntu-latest
+    outputs:
+      base: ${{ steps.base.outputs.base }}
+      matrix: ${{ steps.builds.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Derive the base image from the Dockerfile runtime stage
+        id: base
+        # The same derivation native_alpine.yaml makes, for the same reason: the
+        # runtime stage is the LAST `FROM`, a digest-pinned ref is kept whole so
+        # the exact shipped artifact is measured, and a base that has left
+        # node:*-alpine invalidates the premise -- a provider measured beside a
+        # different Node and libc says nothing about what ships.
+        run: |
+          base=$(grep -iE '^FROM[[:space:]]' Dockerfile | tail -1 | awk '{print $2}' || true)
+          case "$base" in
+            node:*-alpine | node:*-alpine@*) ;;
+            *)
+              echo "Dockerfile runtime base '$base' is not a node:*-alpine image; this probe's premise is stale -- update or retire it." >&2
+              exit 1
+              ;;
+          esac
+          echo "measuring FIPS providers under $base (Dockerfile runtime stage)"
+          echo "base=$base" >>"$GITHUB_OUTPUT"
+
+      - name: Resolve the provider builds to measure
+        id: builds
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        # Two provider builds, both resolved rather than hardcoded: the latest
+        # 3.0.x release (the series carrying CMVP certificates) and the exact
+        # release the base image's own Node links. Running the 3.0.x module under
+        # that Node is the cross-load configuration -- the shippable one -- and
+        # the probe labels it as such from the two versions it reads at runtime.
+        run: |
+          set -euo pipefail
+          repo=https://github.com/openssl/openssl
+
+          node_openssl=$(docker run --rm "$BASE" node -p 'process.versions.openssl' | tr -d '\r')
+          node_semver=${node_openssl%%[!0-9.]*}
+          echo "the base image's Node links OpenSSL $node_openssl (release $node_semver)"
+
+          node_tag="openssl-${node_semver}"
+          if ! git ls-remote --exit-code --tags --refs "$repo" "refs/tags/${node_tag}" >/dev/null; then
+            echo "no OpenSSL release tag ${node_tag} for the version Node links (${node_openssl})" >&2
+            exit 1
+          fi
+
+          latest_30=$(git ls-remote --tags --refs "$repo" 'refs/tags/openssl-3.0.*' \
+            | awk '{print $2}' \
+            | sed 's#refs/tags/##' \
+            | grep -E '^openssl-3\.0\.[0-9]+$' \
+            | sort -V \
+            | tail -1)
+          if [ -z "$latest_30" ]; then
+            echo "could not resolve a latest 3.0.x OpenSSL release tag from ${repo}" >&2
+            exit 1
+          fi
+
+          echo "3.0.x provider build:       ${latest_30}"
+          echo "Node-linked provider build: ${node_tag}"
+          printf 'matrix={"include":[{"leg":"openssl-3.0","tag":"%s"},{"leg":"node-linked","tag":"%s"}]}\n' \
+            "$latest_30" "$node_tag" >>"$GITHUB_OUTPUT"
+
+  probe:
+    name: Probe ${{ matrix.leg }} (${{ matrix.tag }})
+    needs: resolve
+    runs-on: ubuntu-latest
+    # Raised from the workflow default for the publish step alone: it commits the
+    # transcript to this branch through the Contents API. The dev container that
+    # reads these results is firewalled off from the blob storage that serves
+    # workflow artifacts and run logs, so a file committed to the branch is the
+    # only channel that reaches it. The Contents API also keeps the commit
+    # identity the token's own -- no git identity is configured anywhere here.
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
+    env:
+      IMAGE: fips-probe:${{ matrix.leg }}
+      LEG: ${{ matrix.leg }}
+      TAG: ${{ matrix.tag }}
+      BASE: ${{ needs.resolve.outputs.base }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # The build log is teed into the transcript because a failure here is
+      # invisible to the firewalled reader otherwise: run logs are not fetchable
+      # from there, so an OpenSSL build that will not compile has to arrive in
+      # the committed file or not at all.
+      - name: Build the probe image
+        run: |
+          set -o pipefail
+          docker build \
+            --progress=plain \
+            --build-arg BASE_IMAGE="$BASE" \
+            --build-arg OPENSSL_TAG="$TAG" \
+            -t "$IMAGE" \
+            support/fips-probe 2>&1 | tee build.out
+
+      # A probe that reports ABSENT, NOT ENGAGED or UNSETTLED has measured
+      # something, and both scripts exit 0 whatever they find, so a non-zero exit
+      # from here is docker or the image failing -- an infrastructure fault, and
+      # the only thing that reddens this job.
+      - name: List the provider's algorithms
+        run: |
+          set -o pipefail
+          docker run --rm "$IMAGE" sh /probe/list-algorithms.sh 2>&1 | tee list-algorithms.out
+
+      - name: Probe crypto.subtle engagement
+        run: |
+          set -o pipefail
+          docker run --rm "$IMAGE" node /probe/webcrypto-probe.mjs 2>&1 | tee webcrypto-probe.out
+
+      - name: Assemble the transcript
+        if: always()
+        run: |
+          set -euo pipefail
+          for output in build.out list-algorithms.out webcrypto-probe.out; do
+            [ -f "$output" ] || echo "(the step producing this output did not run)" >"$output"
+          done
+          {
+            printf '# FIPS provider probe -- %s\n\n' "$LEG"
+            printf -- '- provider build: `%s`\n' "$TAG"
+            printf -- '- base image: `%s`\n' "$BASE"
+            printf -- '- workflow run: %s/%s/actions/runs/%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf -- '- measured: %s\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '## Algorithm listing (questions 1 and 2)\n\n```\n'
+            cat list-algorithms.out
+            printf '```\n\n## crypto.subtle engagement (question 3)\n\n```\n'
+            cat webcrypto-probe.out
+            printf '```\n\n## Image build (tail)\n\n```\n'
+            tail -n 300 build.out
+            printf '```\n'
+          } >"transcript-${LEG}.md"
+
+      - name: Upload the transcript
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fips-probe-transcript-${{ matrix.leg }}
+          path: transcript-${{ matrix.leg }}.md
+
+      # Off by default: the artifact above is the channel for anyone who can
+      # reach it. This one exists because a dev container here cannot -- both
+      # workflow artifacts and run logs are served from blob storage the
+      # firewall blocks, so a file committed to the branch is the only way the
+      # measurement reaches a session working in one.
+      - name: Publish the transcript to the dispatched branch
+        if: always() && inputs.publish_transcript
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        # Both legs commit to the same branch, so a concurrent commit can lose
+        # the race; re-read the file's current sha and retry rather than dropping
+        # the measurement.
+        run: |
+          set -euo pipefail
+          path="probe-out/transcript-${LEG}.md"
+          content=$(base64 -w0 "transcript-${LEG}.md")
+          for attempt in 1 2 3 4 5; do
+            sha=$(gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${BRANCH}" --jq .sha 2>/dev/null || true)
+            args=(--method PUT "repos/${GITHUB_REPOSITORY}/contents/${path}"
+              -f "message=Record FIPS probe transcript for ${LEG}"
+              -f "content=${content}"
+              -f "branch=${BRANCH}")
+            if [ -n "$sha" ]; then
+              args+=(-f "sha=${sha}")
+            fi
+            if gh api "${args[@]}" >/dev/null; then
+              echo "published ${path} on ${BRANCH}"
+              exit 0
+            fi
+            echo "publish attempt ${attempt} failed; retrying"
+            sleep 5
+          done
+          echo "could not publish ${path} after 5 attempts" >&2
+          exit 1
