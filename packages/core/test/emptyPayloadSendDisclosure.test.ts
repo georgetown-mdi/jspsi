@@ -1,0 +1,161 @@
+import { expect, test } from "vitest";
+
+import PSI from "@openmined/psi.js";
+
+import { prepareForExchange, runExchange } from "../src/exchange";
+import {
+  deriveAcceptedLinkageTerms,
+  validateCompatibility,
+} from "../src/config/linkageTerms";
+import { inferMetadata } from "../src/config/metadata";
+import { createMessagePipe } from "../src/connection/messageConnection";
+import { UsageError } from "../src/errors";
+
+import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { MessageConnection } from "../src/connection/messageConnection";
+
+// An inviter that declares `payload.receive: []` is stating "send me no payload
+// columns", and deriveAcceptedLinkageTerms mirrors that to a present, empty
+// `payload.send` on the acceptor -- the strict reading of that direction. The
+// acceptor's own metadata, meanwhile, may be INFERRED from its CSV header, where
+// every column that is not a linkage or PII alias defaults to isPayload: true with
+// no operator choice involved. These tests hold the two together at the altitude
+// where it counts: with both parties' terms declaring that no payload column
+// crosses, none may leave the acceptor's machine. The partner's runtime
+// reconciliation is not the control here -- it fires only after the values have
+// arrived, and by then the disclosure has happened.
+
+const psiLibrary = await PSI();
+
+const inviterTerms: LinkageTerms = {
+  version: "1.0.0",
+  identity: "Inviter Co",
+  date: "2026-01-01",
+  algorithm: "psi",
+  linkageStrategy: "cascade",
+  output: { expectsOutput: true, shareWithPartner: true },
+  deduplicate: false,
+  linkageFields: [{ name: "firstName", type: "first_name" }],
+  linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
+  // The strict "I want nothing from you" declaration: present, empty.
+  payload: { receive: [] },
+};
+
+// The inviter holds a linkage column only, so it discloses nothing of its own and
+// the assertions below isolate the acceptor's direction.
+const inviterRows = [
+  { first_name: "Carol" },
+  { first_name: "Elizabeth" },
+  { first_name: "Henry" },
+];
+const inviterColumns = ["first_name"];
+
+const acceptorRows = [
+  { first_name: "Alice", diagnosis: "A-hypertension", notes: "A-note" },
+  { first_name: "Carol", diagnosis: "C-diabetes", notes: "C-note" },
+  { first_name: "Elizabeth", diagnosis: "E-asthma", notes: "E-note" },
+];
+const acceptorColumns = ["first_name", "diagnosis", "notes"];
+
+function acceptorPrepared() {
+  return prepareForExchange(
+    { linkageTerms: deriveAcceptedLinkageTerms(inviterTerms, "Acceptor Co") },
+    "Acceptor Co",
+    acceptorRows,
+    acceptorColumns,
+  );
+}
+
+/** Records every message a party puts on the wire, in order. */
+function recordSends(conn: MessageConnection): {
+  conn: MessageConnection;
+  sent: unknown[];
+} {
+  const sent: unknown[] = [];
+  return {
+    sent,
+    conn: {
+      send: async (data) => {
+        sent.push(data);
+        return conn.send(data);
+      },
+      receive: (timeoutMs?: number) => conn.receive(timeoutMs),
+      close: () => conn.close(),
+    },
+  };
+}
+
+test("an inviter's empty payload.receive mirrors to a present, empty acceptor payload.send that the cross-party check accepts", () => {
+  const acceptorTerms = deriveAcceptedLinkageTerms(inviterTerms, "Acceptor Co");
+  // Present, not absent: the mirror keeps the strict reading on this direction.
+  expect(acceptorTerms.payload).toStrictEqual({ send: [] });
+
+  // Neither party's declaration-versus-declaration check has anything to object
+  // to -- both sides agree no payload column crosses -- so nothing there compares
+  // the acceptor's own file against its own declaration. That comparison is
+  // assertPayloadSendDisclosed's alone.
+  expect(validateCompatibility(acceptorTerms, inviterTerms).errors).toEqual([]);
+  expect(validateCompatibility(inviterTerms, acceptorTerms).errors).toEqual([]);
+});
+
+test("an acceptor declaring it sends nothing is refused before connecting when its metadata discloses columns", () => {
+  // Inferred, not chosen: neither `diagnosis` nor `notes` is a linkage or PII
+  // alias, so both default to transmitted.
+  expect(
+    inferMetadata(acceptorColumns)
+      .filter((column) => column.isPayload)
+      .map((column) => column.name),
+  ).toEqual(["diagnosis", "notes"]);
+
+  expect(acceptorPrepared).toThrow(UsageError);
+  // Both disclosed columns are named, and the remedy is to stop transmitting them
+  // or to get a corrected invitation -- never to widen the declaration locally,
+  // which the partner never agreed to.
+  expect(acceptorPrepared).toThrow(/\[diagnosis, notes\]/);
+  expect(acceptorPrepared).toThrow(/corrected invitation/);
+});
+
+test("no payload column reaches the wire from an acceptor declaring it sends nothing", async () => {
+  const [connInviter, connAcceptorRaw] = createMessagePipe();
+  const { conn: connAcceptor, sent } = recordSends(connAcceptorRaw);
+
+  const inviterPrepared = prepareForExchange(
+    { linkageTerms: inviterTerms },
+    "Inviter Co",
+    inviterRows,
+    inviterColumns,
+  );
+  // What the CLI derives for this config: an authored `payload.receive: []` and no
+  // separate lock-in falls back to the receive names, a strict "receive nothing".
+  inviterPrepared.expectedPayloadColumns = [];
+
+  const acceptorRun = (async () =>
+    runExchange(connAcceptor, "responder", acceptorPrepared(), {
+      psiLibrary,
+    }))().finally(() => connAcceptorRaw.close());
+
+  const [, acceptorResult] = await Promise.allSettled([
+    runExchange(connInviter, "initiator", inviterPrepared, { psiLibrary }),
+    acceptorRun,
+  ]);
+
+  // Nothing the acceptor put on the wire carries a payload column or a payload
+  // value. A regression that let the empty declaration through would transmit
+  // {columns: [diagnosis, notes]} here, and these three assertions catch it even
+  // though the partner-side reconciliation would still abort afterwards.
+  const payloadColumnsOnWire = sent.flatMap((message) =>
+    typeof message === "object" && message !== null && "columns" in message
+      ? ((message as { columns?: string[] }).columns ?? [])
+      : [],
+  );
+  expect(payloadColumnsOnWire).toEqual([]);
+  expect(JSON.stringify(sent)).not.toContain("C-diabetes");
+  expect(JSON.stringify(sent)).not.toContain("E-asthma");
+
+  // The acceptor is the party whose configuration is wrong, so it is the party
+  // that fails, and it fails as its own configuration error rather than as the
+  // partner's mid-exchange protocol abort.
+  expect(acceptorResult.status).toBe("rejected");
+  if (acceptorResult.status === "rejected")
+    expect(acceptorResult.reason).toBeInstanceOf(UsageError);
+});

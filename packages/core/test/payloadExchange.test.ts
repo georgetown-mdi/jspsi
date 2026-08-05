@@ -245,7 +245,8 @@ test("buildOutputTable: a present prototype-member identifier column emits its r
 // EXACTLY what metadata actually transmits (isDisclosedToPartner = isPayload &&
 // role !== "ignored") when present: an over-declaration (a name not transmitted)
 // or an under-declaration (a transmitted column omitted) is rejected (UsageError
-// -> CLI exit 64). An absent or empty dictionary is a no-op.
+// -> CLI exit 64). Only an ABSENT dictionary is a no-op: a present-but-empty one
+// is an explicit "I disclose nothing" and is held to it.
 
 test("assertPayloadSendDisclosed: a send column with isPayload:false is rejected", () => {
   const meta: Metadata = [
@@ -340,12 +341,47 @@ test("assertPayloadSendDisclosed: a send that both over- and under-declares name
   expect(message).toContain("[kept]"); // under-declared (transmitted, omitted)
 });
 
-test("assertPayloadSendDisclosed: an absent or empty payload is a no-op", () => {
+test("assertPayloadSendDisclosed: an absent payload is a no-op, a present-but-empty send is strict", () => {
   const meta: Metadata = [
     { name: "diagnosis", type: "other", role: "payload", isPayload: true },
   ];
+  // Absent stays lazy: the guided and default paths author no dictionary while
+  // metadata still transmits.
   expect(() => assertPayloadSendDisclosed(undefined, meta)).not.toThrow();
-  expect(() => assertPayloadSendDisclosed({ send: [] }, meta)).not.toThrow();
+  expect(() => assertPayloadSendDisclosed({}, meta)).not.toThrow();
+  // A present, empty send declares "I disclose nothing", so every disclosed column
+  // is an under-declaration. This is the direction deriveAcceptedLinkageTerms
+  // deliberately keeps strict on the acceptor, and holding it here is what keeps
+  // those columns off the wire -- a partner can only reject them after they land.
+  expect(() => assertPayloadSendDisclosed({ send: [] }, meta)).toThrow(
+    UsageError,
+  );
+  expect(() => assertPayloadSendDisclosed({ send: [] }, meta)).toThrow(
+    /diagnosis/,
+  );
+  // Nothing disclosed and nothing declared still agree.
+  expect(() =>
+    assertPayloadSendDisclosed({ send: [] }, metaLinkageOnly),
+  ).not.toThrow();
+});
+
+test("assertPayloadSendDisclosed: an empty send is not told to widen itself", () => {
+  // The under-declared remedy for a non-empty dictionary ("Add [...] to
+  // payload.send") is wrong advice for an empty one: on an accepted invitation the
+  // empty send mirrors the inviter's payload.receive, so a local widening declares
+  // a disclosure the partner never agreed to and the next acceptance overwrites.
+  const meta: Metadata = [
+    { name: "diagnosis", type: "other", role: "payload", isPayload: true },
+  ];
+  let message = "";
+  try {
+    assertPayloadSendDisclosed({ send: [] }, meta);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  expect(message).not.toContain("Add [diagnosis] to payload.send");
+  expect(message).toContain("is_payload: false or role ignored");
+  expect(message).toContain("corrected invitation");
 });
 
 test("assertPayloadSendDisclosed: every over-declared column is named, disclosed ones are not", () => {
@@ -475,7 +511,7 @@ test("assertPayloadSendDisclosed (acceptor path): a mirrored send the acceptor d
   ).toThrow(/case_id/);
 });
 
-test("assertPayloadSendDisclosed (acceptor path): the common inviter-send shape leaves the acceptor send empty (dormant early-return)", () => {
+test("assertPayloadSendDisclosed (acceptor path): the common inviter-send shape leaves the acceptor send ABSENT (dormant early-return)", () => {
   // The common shape: the inviter authors a send and NO receive. The mirror puts
   // the inviter's send into the acceptor's RECEIVE, leaving the acceptor's send
   // absent -- so the check early-returns regardless of the acceptor's metadata,
