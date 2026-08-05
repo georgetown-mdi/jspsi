@@ -116,12 +116,13 @@ export function filenameTooLongError(
   max: number,
 ): DirectoryListingBoundsError {
   // A name reaching here is longer than MAX_FILENAME_LENGTH and so longer than
-  // this preview, which is why the marker is unconditional. The preview is
-  // redacted after slicing, so the slice still bounds what an attacker-sized
-  // name can relay into memory.
-  const shown = redactPrivateKeyMaterial(
-    `${name.slice(0, 64)}${DISPLAY_TRUNCATION_MARKER}`,
-  );
+  // this preview, which is why the marker is unconditional. Redaction runs after
+  // slicing, so the slice still bounds what an attacker-sized name can relay
+  // into memory, and before the marker is appended, so a planted BEGIN marker in
+  // the slice cannot consume it under the fail-closed dangling rule.
+  const shown = `${redactPrivateKeyMaterial(
+    name.slice(0, 64),
+  )}${DISPLAY_TRUNCATION_MARKER}`;
   return new DirectoryListingBoundsError(
     `directory ${redactPrivateKeyMaterial(dirPath)} contains an entry whose ` +
       `filename is ${name.length} characters, exceeding the maximum of ` +
