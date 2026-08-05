@@ -78,9 +78,14 @@ WHICH facts a surface marks is still the surface's own. The received-columns
 basis is marked on the CLI's line and not on the web's payload block, which shows
 the set with no basis beside it. The two surfaces do not disagree there -- one of
 them declines to state the fact rather than stating it differently -- and the
-silence understates, which is the safe direction. It is nonetheless the one place
-the shared table does not yet reach both renderers, and no check catches a
-classified fact that neither surface renders.
+silence understates, which is the safe direction.
+
+That silence is deliberate rather than pending. The clause the web's line carried
+before -- that any payload column would abort the exchange -- overstates on the
+line it sat on: the commitment holds only where the invitation carries the column
+set, so an empty set reads truer bare than qualified by a promise that does not
+cover it. A fact's classification binds the surface that states the fact, not
+every surface that shows the value.
 
 That the classification is a KEYED TABLE, rather than a field on
 `InvitationSummary`, follows from two properties a per-field flag cannot carry.
