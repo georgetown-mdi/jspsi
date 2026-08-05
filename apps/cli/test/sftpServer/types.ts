@@ -171,6 +171,63 @@ export interface SftpRenameTearControls {
 }
 
 /**
+ * One reading of {@link SftpRequestMeter}, covering the window since the meter
+ * was last {@link SftpRequestMeter.reset | reset}.
+ */
+export interface SftpRequestMeterReading {
+  /** SFTP requests that arrived in the window. */
+  received: number;
+  /** Replies written in the window for requests that arrived in it. */
+  answered: number;
+  /** Requests that arrived in the window and are still unanswered. */
+  outstanding: number;
+  /**
+   * The most requests that were simultaneously unanswered at any instant in the
+   * window: how deep the client let its request pipeline run on the one channel.
+   */
+  peakOutstanding: number;
+  /** Requests that arrived in the window, by opcode. */
+  receivedByOp: Record<string, number>;
+  /**
+   * Replies written in the window, by the opcode of the request each answers.
+   * Subtracting this from {@link receivedByOp} gives the requests of one opcode
+   * still in flight, which is what a suite driving a fan of a single opcode
+   * alongside other traffic reads instead of {@link outstanding}.
+   */
+  answeredByOp: Record<string, number>;
+  /**
+   * Milliseconds from an opcode's first arrival in the window to the last reply
+   * written for that opcode, per opcode. An opcode with no reply yet is absent.
+   */
+  spanMsByOp: Record<string, number>;
+}
+
+/**
+ * Server-side accounting of the SFTP requests in flight on the channels the
+ * backend is serving, so a suite driving a concurrent fan can read what that fan
+ * actually put on the wire from the end that owns it, rather than from the
+ * client library's internals.
+ *
+ * Counts requests of the {@link import("./sessionControls").COUNTED_SFTP_OPS}
+ * set as they arrive and reply writes as they are issued, across every session
+ * the backend is serving at once. A reply written straight onto the channel by a
+ * fault injection, bypassing the backend's reply methods, is not counted as an
+ * answer, and a withheld reply is likewise never answered -- either leaves its
+ * request outstanding for the rest of the window, which is what a suite driving
+ * those injections should expect to read.
+ */
+export interface SftpRequestMeter {
+  /** The window's counts as they stand now. */
+  read(): SftpRequestMeterReading;
+  /**
+   * Start a fresh window: zero every count and forget the requests already in
+   * flight, so a reply that arrives for one of them is ignored rather than
+   * driving the new window's outstanding count negative.
+   */
+  reset(): void;
+}
+
+/**
  * Opt-in session-lifecycle controls the in-process backend exposes so the
  * connection-per-poll and mid-exchange-recovery tests can drive a server that
  * drops sessions the way the real partner's does. Every control is OFF by
@@ -284,6 +341,8 @@ export interface SftpSessionControls {
   resetHandshakeCount(): void;
   /** Deterministic rename-tear staging; see {@link SftpRenameTearControls}. */
   renameTear: SftpRenameTearControls;
+  /** Server-side in-flight request accounting; see {@link SftpRequestMeter}. */
+  requests: SftpRequestMeter;
 }
 
 /**

@@ -1,4 +1,9 @@
-import type { SftpRenameTearControls, SftpSessionControls } from "./types";
+import type {
+  SftpRenameTearControls,
+  SftpRequestMeter,
+  SftpRequestMeterReading,
+  SftpSessionControls,
+} from "./types";
 
 /**
  * The slice of an ssh2 server {@link import("ssh2").Connection} the session
@@ -62,6 +67,21 @@ interface TrackedSession {
 }
 
 /**
+ * The request meter's per-SFTP-session half, handed to the backend when it
+ * accepts an SFTP subsystem so arrivals and replies are matched by request id
+ * within that session. Request ids are only unique per session, so each session
+ * gets its own recorder rather than sharing one id space.
+ */
+export interface SftpSessionRequestRecorder {
+  /** Note an arriving request of `op` carrying request id `reqid`. */
+  received(op: string, reqid: number): void;
+  /** Note the reply being written for request id `reqid`. */
+  answered(reqid: number): void;
+  /** Drop this session's in-flight ids when its connection closes. */
+  release(): void;
+}
+
+/**
  * The public {@link SftpRenameTearControls} surface plus the wiring the RENAME,
  * REMOVE, and STAT/LSTAT handlers invoke as they serve a staged tear.
  */
@@ -85,6 +105,11 @@ export interface SftpRenameTearControlHub extends SftpRenameTearControls {
  */
 export interface SftpSessionControlHub extends SftpSessionControls {
   renameTear: SftpRenameTearControlHub;
+  /**
+   * Open per-request accounting for one accepted SFTP session, feeding
+   * {@link SftpSessionControls.requests}.
+   */
+  trackSftpSession(): SftpSessionRequestRecorder;
   /**
    * End the connection serving a staged rename tear. Shares the one-drop claim
    * with the caps, so a tear and an armed cap cannot both end one connection.
@@ -125,6 +150,49 @@ export function createSftpSessionControls(): SftpSessionControlHub {
     ControlledSocket,
     { write: ControlledSocket["write"] }
   >();
+  // Request-meter state. `inFlight` holds one reqid -> opcode map per live SFTP
+  // session; the maps are cleared in place on reset() so a recorder keeps its
+  // reference across windows.
+  const inFlight = new Set<Map<number, string>>();
+  let received = 0;
+  let answered = 0;
+  let outstanding = 0;
+  let peakOutstanding = 0;
+  const receivedByOp = new Map<string, number>();
+  const answeredByOp = new Map<string, number>();
+  const firstReceivedAtByOp = new Map<string, number>();
+  const lastAnsweredAtByOp = new Map<string, number>();
+
+  const requests: SftpRequestMeter = {
+    read(): SftpRequestMeterReading {
+      const spanMsByOp: Record<string, number> = {};
+      for (const [op, first] of firstReceivedAtByOp) {
+        const last = lastAnsweredAtByOp.get(op);
+        if (last !== undefined) spanMsByOp[op] = last - first;
+      }
+      return {
+        received,
+        answered,
+        outstanding,
+        peakOutstanding,
+        receivedByOp: Object.fromEntries(receivedByOp),
+        answeredByOp: Object.fromEntries(answeredByOp),
+        spanMsByOp,
+      };
+    },
+    reset(): void {
+      for (const pending of inFlight) pending.clear();
+      received = 0;
+      answered = 0;
+      outstanding = 0;
+      peakOutstanding = 0;
+      receivedByOp.clear();
+      answeredByOp.clear();
+      firstReceivedAtByOp.clear();
+      lastAnsweredAtByOp.clear();
+    },
+  };
+
   let handshakes = 0;
   let activeConnection: DroppableConnection | undefined;
   let oneShotOpsRemaining = 0;
@@ -233,6 +301,7 @@ export function createSftpSessionControls(): SftpSessionControlHub {
 
   const hub: SftpSessionControlHub = {
     renameTear,
+    requests,
     maxLifetimeMs: 0,
     maxOps: 0,
     maxIdleMs: 0,
@@ -262,6 +331,39 @@ export function createSftpSessionControls(): SftpSessionControlHub {
 
     tearSession(conn: DroppableConnection): void {
       dropNow(conn);
+    },
+
+    trackSftpSession(): SftpSessionRequestRecorder {
+      const pending = new Map<number, string>();
+      inFlight.add(pending);
+      return {
+        received(op: string, reqid: number): void {
+          received += 1;
+          outstanding += 1;
+          if (outstanding > peakOutstanding) peakOutstanding = outstanding;
+          receivedByOp.set(op, (receivedByOp.get(op) ?? 0) + 1);
+          if (!firstReceivedAtByOp.has(op))
+            firstReceivedAtByOp.set(op, Date.now());
+          pending.set(reqid, op);
+        },
+        answered(reqid: number): void {
+          const op = pending.get(reqid);
+          // No entry means the request arrived before the current window began,
+          // or its reply was written by a fault injection that bypassed the
+          // backend's reply methods. Neither belongs to this window's counts.
+          if (op === undefined) return;
+          pending.delete(reqid);
+          answered += 1;
+          outstanding -= 1;
+          answeredByOp.set(op, (answeredByOp.get(op) ?? 0) + 1);
+          lastAnsweredAtByOp.set(op, Date.now());
+        },
+        release(): void {
+          outstanding -= pending.size;
+          pending.clear();
+          inFlight.delete(pending);
+        },
+      };
     },
 
     handshakeCount(): number {

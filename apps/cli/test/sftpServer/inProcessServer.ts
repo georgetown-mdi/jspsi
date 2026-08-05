@@ -12,6 +12,7 @@ import { COUNTED_SFTP_OPS, createSftpSessionControls } from "./sessionControls";
 import type {
   ControlledSocket,
   SftpRenameTearControlHub,
+  SftpSessionRequestRecorder,
 } from "./sessionControls";
 import type {
   InProcessSftpServer,
@@ -66,7 +67,7 @@ interface SocketBearingConnection {
 // listener registered across the whole opcode set goes through the plain
 // EventEmitter shape instead.
 interface RequestCounterTarget {
-  on(event: string, listener: () => void): void;
+  on(event: string, listener: (reqid: number) => void): void;
 }
 
 // Frame an SFTP packet: [length u32][type u8][reqid u32][...body].
@@ -245,9 +246,13 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
           // drop. A cap that fires arms the drop as this request is counted; the
           // teardown may pre-empt this request's own reply (a mid-request cut),
           // so a counted op is not guaranteed to complete before the drop.
+          const requests = sessionControls.trackSftpSession();
           const counter = sftp as unknown as RequestCounterTarget;
           for (const op of COUNTED_SFTP_OPS) {
-            counter.on(op, () => sessionControls.recordOp(client));
+            counter.on(op, (reqid: number) => {
+              requests.received(op, reqid);
+              sessionControls.recordOp(client);
+            });
           }
           const closeOpenHandles = attachSftpHandlers(
             sftp,
@@ -255,11 +260,15 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
             inject,
             sessionControls.renameTear,
             () => sessionControls.tearSession(client),
+            requests,
           );
           // A graceful client sends CLOSE per handle; an abrupt disconnect (the
           // adversarial tests abort mid-stream) does not, so close any fds still
           // open for this session when the connection drops.
-          client.on("close", closeOpenHandles);
+          client.on("close", () => {
+            closeOpenHandles();
+            requests.release();
+          });
         });
       });
     });
@@ -388,6 +397,7 @@ function attachSftpHandlers(
   inject: SftpFaultInjection,
   renameTear: SftpRenameTearControlHub,
   tearSession: () => void,
+  requests: SftpSessionRequestRecorder,
 ): () => void {
   // A forced session drop (the session-control tests cut a connection mid-batch)
   // can land while an fs callback below is still pending; when that callback then
@@ -404,6 +414,11 @@ function attachSftpHandlers(
   for (const method of replyMethods) {
     const original = guarded[method];
     guarded[method] = (...args: unknown[]): void => {
+      // Every server reply carries its request id first, so this is also where
+      // the request meter learns a request is no longer outstanding. Noted
+      // before the write, so a reply the channel can no longer carry still
+      // clears the request the server has finished with.
+      requests.answered(args[0] as number);
       try {
         original.call(sftp, ...args);
       } catch {
