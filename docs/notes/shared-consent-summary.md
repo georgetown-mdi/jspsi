@@ -176,16 +176,15 @@ authored-declaration case is therefore enforced on that path, and the line marks
 as the partner's word regardless.
 
 That understatement is deliberate. The display is rendered at consent time, before
-the run that follows is settled; one function serves both paths and neither it nor
-the summary can see which one the operator is on, so one of the two markings is
-wrong in one of the two cases. Only one of those errors costs the operator
+the run that follows is settled, and one marking serves both paths, so one of the
+two is wrong in one of the two cases. Only one of those errors costs the operator
 anything. An operator told psilink will stop a violation it will not stop plans
 around a check that never runs -- the failure this classification exists to
 prevent, and the same error as reading a cooperative undertaking as a
 cryptographic guarantee. An operator told psilink will not stop something it does
 stop has lost a reassurance and nothing else.
 
-Making the display path-aware is not the way to close it, either: the path is a
+Making the display path-aware is not the way to close it: the path is a
 property of what the operator does next, not of the invitation they are being
 asked to consent to, and a marker that changed with the subcommand would be
 stating two different bases for one unchanged fact.
@@ -261,11 +260,17 @@ make unrepresentable.
 The acceptor's own outbound columns and the inviting party's declared request sit
 in the same part of the display, and nothing on either surface compares them. An
 inviter declaring it will receive no payload column, against an input file whose
-metadata discloses some, is a pairing the exchange refuses: `prepareForExchange`
-rejects a payload dictionary that does not match what metadata transmits, before
-this party connects, so the refusal costs no disclosure. It lands after consent
-rather than at it: an operator can read both lines, consent to them, and meet the
-refusal when the exchange is run.
+metadata discloses some, is a disagreement no surface states and nothing on this
+party's side resolves before the run: an empty declared request is not held
+against this party's own disclosure at prepare time, so the columns cross and the
+receiving side rejects them once they have arrived. `docs/CLI.md` states that
+ordering on the line itself.
+
+Closing it belongs with the direction reasoning the outbound-send gate already
+carries, not with the display. A refusal keyed on the declaration alone would fire
+even where the run transmits nothing, which is the contradiction the gated lines
+elsewhere in this note exist to prevent: a screen cannot say the exchange refuses
+to run directly above a line saying no payload is sent.
 
 ## Proposed is not applied
 
