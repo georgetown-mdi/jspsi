@@ -13,8 +13,9 @@ import { parseSensitiveJson } from "./sensitiveFile";
 
 /**
  * Default path for the key file written by the provisioning commands (`invite`,
- * `accept`, and `exchange --save`). Matches the default the `exchange` command
- * reads from, so a key written here is found without an explicit `--key-file`.
+ * `accept`, and a zero-setup run with `--save`). Matches the default the
+ * `exchange` command reads from, so a key written here is found without an
+ * explicit `--key-file`.
  */
 export const DEFAULT_KEY_PATH = "./.psilink.key";
 
