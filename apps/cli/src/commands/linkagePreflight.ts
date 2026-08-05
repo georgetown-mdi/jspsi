@@ -1,5 +1,6 @@
 import {
   assessLinkageSatisfiability,
+  disclosedColumnNames,
   getLogger,
   sanitizeForDisplay,
   UsageError,
@@ -108,5 +109,54 @@ export function checkLinkageSatisfiability(
     `the CSV cannot satisfy all of the ${messaging.source}'s linkage fields` +
       detail((token) => sanitizeForDisplay(token)) +
       "; keys that require those fields will be inactive for this exchange.",
+  );
+}
+
+/**
+ * Warn, on the ACCEPT path, when this party's input discloses payload columns the
+ * invitation declares the inviting party will accept none of. Accept-only: its
+ * copy names the invitation, so an exchange-path caller would have to
+ * parameterize the source the way {@link LinkagePreflightMessaging} does.
+ *
+ * `terms` are the acceptor's own derived terms, whose `payload.send` is the
+ * MIRROR of the inviter's `payload.receive` (`deriveAcceptedLinkageTerms`): a
+ * present-but-empty `send` is the inviter declaring it accepts no payload column,
+ * while an ABSENT one is the lazy direction, reconciled against this party's own
+ * disclosure when the exchange runs. `metadata` is the set resolved for the
+ * configuration this acceptance writes, read through the same
+ * {@link disclosedColumnNames} predicate the terms display and `preparePayload`
+ * use, so the columns named here are exactly the ones the operator is shown as
+ * `columns you will send`.
+ *
+ * That pair cannot run: `assertPayloadSendDisclosed` refuses it inside
+ * `prepareForExchange`, before connecting, so without this the operator meets the
+ * refusal only after consenting, writing files, and coordinating with a partner
+ * -- while both facts were on the consent surface. It warns rather than refuses,
+ * matching the grading {@link checkLinkageSatisfiability} already applies: the
+ * remedy is local to the written configuration, so it does not warrant writing no
+ * files.
+ *
+ * A NON-EMPTY declared `send` that disagrees with the disclosed set is a
+ * different comparison with different remedies and is not covered here. The
+ * column names are this party's own file's and reach a log sink without ever
+ * becoming an `Error`, so they are escaped at that sink.
+ */
+export function warnColumnsTheInvitationWillNotAccept(
+  metadata: Metadata | undefined,
+  terms: LinkageTerms,
+  log: ReturnType<typeof getLogger>,
+): void {
+  const send = terms.payload?.send;
+  if (send === undefined || send.length > 0 || metadata === undefined) return;
+  const disclosed = disclosedColumnNames(metadata);
+  if (disclosed.length === 0) return;
+  const names = disclosed.map((name) => sanitizeForDisplay(name)).join(", ");
+  log.warn(
+    "the invitation declares that the inviting party will accept no payload " +
+      `columns, but your input file discloses columns to send (${names}); the ` +
+      "exchange this acceptance configures refuses to run, before connecting, " +
+      "while the two disagree. Set the metadata for those columns not to " +
+      "transmit (is_payload: false or role ignored), or ask your partner for " +
+      "an invitation that accepts them.",
   );
 }

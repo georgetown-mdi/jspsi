@@ -582,6 +582,113 @@ test("validateAccept: offline warns but proceeds when the CSV satisfies only som
   }
 });
 
+// --- the disclosure the invitation will not accept ---------------------------
+
+// The columns satisfying the sample invitation's linkage keys, none of which is
+// disclosed to the partner (inferMetadata gives a recognized linkage alias
+// is_payload: false), so a CSV of these alone sends nothing.
+const LINKAGE_COLUMNS = ["first_name", "last_name", "dob", "ssn"];
+
+// The distinctive clause of the warning under test, kept apart from the remedies
+// and the column list the assertions check separately.
+const REFUSED_DISCLOSURE_CLAUSE = "will accept no payload columns";
+
+/**
+ * An invitation whose inviter declares `receive` -- what it will accept FROM the
+ * acceptor. deriveAcceptedLinkageTerms mirrors it onto the acceptor's own
+ * `payload.send`, which is what the acceptance writes and what
+ * assertPayloadSendDisclosed holds the acceptor's metadata to.
+ */
+function tokenDeclaringReceive(
+  receive: Array<{ name: string }> | undefined,
+): InvitationToken {
+  const base = sampleToken(FUTURE());
+  return {
+    ...base,
+    linkageTerms: { ...base.linkageTerms, payload: { receive } },
+  };
+}
+
+/** Every message an offline acceptance of `token` over `columns` warns with. */
+async function offlineAcceptWarnings(
+  token: InvitationToken,
+  columns: string[],
+  loggerName: string,
+): Promise<string[]> {
+  const input = writeInputCSV(columns);
+  const log = getLogger(loggerName);
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation(token);
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded, input },
+      options: testOptions(),
+      log,
+    });
+    expect(ready.mode).toBe("offline");
+    return warnSpy.mock.calls.map((c) => String(c[0]));
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(input, { force: true });
+  }
+}
+
+test("validateAccept: warns when the input discloses columns the invitation accepts none of", async () => {
+  // An explicit empty receive is the inviter declaring it takes no payload column,
+  // while inferMetadata defaults every unrecognized column to is_payload: true --
+  // so the configuration this acceptance writes cannot run (prepareForExchange
+  // refuses it before connecting). One warning, however many columns, naming them
+  // and both remedies, while the operator can still decline.
+  const hostile = `notes${ESC}[0m`;
+  const warnings = await offlineAcceptWarnings(
+    tokenDeclaringReceive([]),
+    [...LINKAGE_COLUMNS, "diagnosis", hostile],
+    "accept-refused-disclosure-warn",
+  );
+  const refused = warnings.filter((m) => m.includes(REFUSED_DISCLOSURE_CLAUSE));
+  expect(refused).toHaveLength(1);
+  expect(refused[0]).toContain("diagnosis");
+  expect(refused[0]).toContain("is_payload: false");
+  expect(refused[0]).toContain("ask your partner for an invitation");
+  // The names are the operator's own file's and reach the log sink without ever
+  // becoming an Error, so the sink is where they are escaped.
+  expect(refused[0]).not.toContain(ESC);
+  expect(refused[0]).toContain(sanitizeForDisplay(hostile));
+});
+
+test("validateAccept: stays silent where the disclosure and the invitation can agree", async () => {
+  // An ABSENT receive is not a mismatch: the inviter left the direction lazy and
+  // reconciles against this party's own disclosure when the exchange runs.
+  expect(
+    await offlineAcceptWarnings(
+      tokenDeclaringReceive(undefined),
+      [...LINKAGE_COLUMNS, "diagnosis"],
+      "accept-refused-disclosure-absent",
+    ),
+  ).not.toContainEqual(expect.stringContaining(REFUSED_DISCLOSURE_CLAUSE));
+
+  // An empty receive against a file that discloses nothing is already agreed: the
+  // acceptance writes a configuration that sends nothing and runs.
+  expect(
+    await offlineAcceptWarnings(
+      tokenDeclaringReceive([]),
+      LINKAGE_COLUMNS,
+      "accept-refused-disclosure-nothing-sent",
+    ),
+  ).not.toContainEqual(expect.stringContaining(REFUSED_DISCLOSURE_CLAUSE));
+
+  // A non-empty receive that disagrees with the disclosed set is a different
+  // comparison with different remedies, and is not what this warning covers.
+  expect(
+    await offlineAcceptWarnings(
+      tokenDeclaringReceive([{ name: "dose" }]),
+      [...LINKAGE_COLUMNS, "diagnosis"],
+      "accept-refused-disclosure-nonempty",
+    ),
+  ).not.toContainEqual(expect.stringContaining(REFUSED_DISCLOSURE_CLAUSE));
+});
+
 test("validateAccept: offline warns that a --server-* override is ignored", async () => {
   // The offline path builds the connection block from connectionFromEndpoint (a
   // placeholder here, since sampleToken carries no endpoint; or an endpoint seed
