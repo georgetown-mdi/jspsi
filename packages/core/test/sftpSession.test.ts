@@ -300,34 +300,46 @@ test("a partner-supplied host at its schema's full length spends only its own li
 });
 
 // The partition does not remove the cap, it only stops the cap falling on
-// first-party text. Both bounds still hold with every variable fragment flooded
-// at once: each link truncates on its own budget, and the whole rendered output
-// stays inside the renderer's depth bound times that budget.
-test("a flooded refusal truncates per link and stays bounded overall", async () => {
-  const rendered = await renderRefusal(
-    {
-      channel: "sftp",
-      server: {
-        host: "h".repeat(100_000),
-        hostKeyFingerprint: Array.from({ length: 500 }, () => PIN),
-      },
-    },
-    "X".repeat(100_000),
-  );
-  const links = linksOf(rendered);
-
-  for (const link of links)
-    expect(link.length).toBeLessThanOrEqual(MAX_RENDERED_LINK_LENGTH);
-  expect(links.length).toBeLessThanOrEqual(MAX_ERROR_CAUSE_DEPTH);
-  expect(rendered.length).toBeLessThanOrEqual(
-    MAX_ERROR_CAUSE_DEPTH * (MAX_RENDERED_LINK_LENGTH + CAUSE_SEPARATOR.length),
-  );
-  // Flooding the fragments still leaves the refusal and its recovery whole.
-  expect(rendered).toContain("A changed key is never auto-accepted.");
-  expect(rendered).toContain(
+// first-party text. Both bounds still hold with every fragment flooded at once:
+// each link truncates on its own budget, and the whole rendered output stays
+// inside the renderer's depth bound times that budget. A non-empty pin set
+// selects the mismatch verifier, so the two branches cannot be flooded by one
+// config and each floods the fragments IT composes -- the partner-chosen host
+// and the server-chosen key type on the no-pin branch, the operator-chosen pin
+// set and the key type on the mismatch branch.
+const FLOODED_REFUSALS: Array<[string, () => Promise<string>, string]> = [
+  [
+    "the no-pin refusal",
+    () => renderNoPinRefusal("X".repeat(100_000), "h".repeat(100_000)),
+    "set connection.server.host_key_fingerprint to pin it",
+  ],
+  [
+    "the pinned-mismatch refusal",
+    () =>
+      renderMismatch(
+        "X".repeat(100_000),
+        Array.from({ length: 500 }, () => PIN),
+      ),
     "re-run interactively to re-establish trust on first use",
-  );
-});
+  ],
+];
+
+for (const [label, render, recovery] of FLOODED_REFUSALS) {
+  test(`${label} truncates per link and stays bounded overall when flooded`, async () => {
+    const rendered = await render();
+    const links = linksOf(rendered);
+
+    for (const link of links)
+      expect(link.length).toBeLessThanOrEqual(MAX_RENDERED_LINK_LENGTH);
+    expect(links.length).toBeLessThanOrEqual(MAX_ERROR_CAUSE_DEPTH);
+    expect(rendered.length).toBeLessThanOrEqual(
+      MAX_ERROR_CAUSE_DEPTH *
+        (MAX_RENDERED_LINK_LENGTH + CAUSE_SEPARATOR.length),
+    );
+    // Flooding the fragments still leaves this branch's recovery step whole.
+    expect(rendered).toContain(recovery);
+  });
+}
 
 // A first-party link fits its own budget by measurement, not by construction:
 // nothing stops the fixed copy growing past the cap, and then the cap is back on
