@@ -248,18 +248,34 @@ test("a private-key-shaped host key type does not suppress the no-pin refusal", 
   expect(benign).toContain("with fingerprint SHA256:");
 });
 
-// The cap, not the planted marker, is what truncates this refusal: the benign
-// rendering loses the pinning instruction too. Pinned separately so the loss is
-// visible as its own bound rather than read as redaction's cost -- an operator
-// on this path never receives the field name to set, whatever the server sends.
-test("the no-pin refusal runs past the display cap whatever the key type", async () => {
+// The cap, not the planted marker, is what truncates this refusal, and it cuts
+// deeper than the pinning instruction: the presented fingerprint is itself
+// clipped to a prefix far too short to verify against, in the benign rendering
+// as much as the planted one. So the message's whole stated purpose -- hand the
+// operator a fingerprint to check out-of-band and a field to pin it in --  is
+// unreachable on this path whatever the server sends. Pinned as its own bound so
+// the loss is neither read as redaction's cost nor left implicit; redaction does
+// pay a part of it, since the replacement sits ahead of the fingerprint and
+// pushes more of it past the cap in exactly the adversarial case, which is
+// asserted here rather than left for a reader to infer. The refusal still fails
+// closed: what this bounds is disclosure, not the control.
+test("the no-pin refusal loses the fingerprint and the instruction to the cap", async () => {
+  const presented = await computeHostKeyFingerprint(hostKeyBlob("ssh-ed25519"));
   const benign = await renderNoPinRefusal("ssh-ed25519");
-  const rendered = await renderNoPinRefusal("-----BEGIN RSA PRIVATE KEY-----");
+  const planted = await renderNoPinRefusal("-----BEGIN RSA PRIVATE KEY-----");
+  // The fingerprint characters that survive ahead of the truncation marker.
+  const shown = (out: string) =>
+    out.slice(out.indexOf("SHA256:"), out.indexOf(DISPLAY_TRUNCATION_MARKER));
 
-  for (const out of [benign, rendered]) {
+  for (const out of [benign, planted]) {
     expect(out).toContain(DISPLAY_TRUNCATION_MARKER);
     expect(out).not.toContain("host_key_fingerprint to pin it");
   }
+  // Neither rendering carries a fingerprint an operator could compare.
+  expect(benign).not.toContain(presented);
+  expect(shown(benign).length).toBeLessThan(presented.length);
+  // Redaction's own share of the loss, in the adversarial case.
+  expect(shown(planted).length).toBeLessThan(shown(benign).length);
 });
 
 // A whole key sliced into the type is the shape the redaction exists for, on the
