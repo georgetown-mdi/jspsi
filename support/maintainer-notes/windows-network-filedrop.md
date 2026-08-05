@@ -122,8 +122,25 @@ already a CIFS volume made by this script, and already something else.
 `Resolve-MappedDrive` was exercised against a real Windows drive mapping in an
 earlier revision and all three of its lookup methods returned the UNC root; the
 mapping was served over WebDAV rather than SMB, because Windows' own
-file-sharing service holds port 445, so SMB-specific mapping behaviour remains
-untouched. The function is unchanged since.
+file-sharing service holds port 445. The function is unchanged since.
+
+**The SMB-served mapped drive and the DFS namespace are covered in CI as of 5
+August 2026.** `Setup-PsilinkFileDrop.Tests.ps1` drives the script's own
+resolution functions on a `windows-latest` runner that serves itself an SMB
+share over loopback: a letter mapped to that share resolves to its UNC and
+classifies as a network drive; a letter mapped to a link in a standalone DFS
+namespace resolves to the namespace path rather than to the server holding the
+data, which is the answer the confirmation prompt exists to have the operator
+correct; and a fixed local path classifies as local. The same suite covers UNC
+and device-prefix parsing, the dialect map, and password masking without a rig.
+It reaches those functions by dot-sourcing the script with `-LoadFunctionsOnly`,
+a switch that defines the functions and stops before the setup flow; two of its
+tests hold that switch to its contract from both sides, since a guard that
+swallowed the flow would leave every operator with a script that does nothing.
+Nothing past resolution is covered -- the prompts, the container checks and the
+volume are verified by the passes above and by nothing else.
+`ci-resolution-tests.ps1` runs the suite and reports it as check-run
+annotations, which is all a reader of a CI run can see.
 
 Still unverified: the Windows-containers branch, which needs Docker Desktop
 switched to Windows containers to reach -- only the `{{.Server.Os}}` parse it
@@ -253,8 +270,9 @@ here, but they were driven against the branch's copies rather than staging's:
   this up", because the script cannot be driven from a non-interactive session.
   The console reads themselves, including the masked `-AsSecureString` entry,
   were not exercised.
-- **No DFS namespace, and no SMB-served mapped drive letter.** Both remain
-  untestable here for the reasons given above and below.
+- **No DFS namespace, and no SMB-served mapped drive letter.** Neither was
+  reachable in this rig, for the reasons given above and below. Both reached CI
+  on 5 August 2026, for the resolution functions only; see the State section.
 
 ## Decisions worth not relitigating
 
@@ -441,15 +459,24 @@ Settling the DFS question needs a domain-joined machine with a real namespace
 and an elevated PowerShell session, since `Get-SmbConnection` is readable only
 to an Administrator.
 
-Mocking the namespace locally does not work, and the obstacle is worth knowing
-before someone spends an afternoon on it. Samba serves DFS referrals happily
-(`host msdfs` plus an `msdfs:server\share` symlink), so the server side is
-easy. The Windows client is the problem: its SMB redirector uses port 445 and
+A standalone namespace needs no domain, and CI stands one up: a
+`windows-latest` runner installs `FS-DFS-Namespace`, points a link at a share it
+serves itself, and the suite resolves a mapped letter through it. That settles
+what the script does with a namespace path -- it reports the namespace, not the
+target -- and settles nothing about `Get-SmbConnection` on a domain namespace,
+which is the question above.
+
+Mocking the namespace in a container does not work, and the obstacle is worth
+knowing before someone spends an afternoon on it. Samba serves DFS referrals
+happily (`host msdfs` plus an `msdfs:server\share` symlink), so the server side
+is easy. The Windows client is the problem: its SMB redirector uses port 445 and
 no other, and stopping the Server service does not free that port -- the
 listener belongs to the kernel SMB drivers and survives the service stop, so
 Docker cannot publish a container there. Freeing 445 means unbinding File and
 Printer Sharing from an interface, which is a heavier change than the test is
-worth.
+worth. What the CI runner has and a workstation does not is the namespace role
+itself: `Install-WindowsFeature` and `FS-DFS-Namespace` exist only on the server
+product types.
 
 Everything else runs on one machine with Docker and no special rights:
 

@@ -1,55 +1,83 @@
-name: Windows Resolution Spike
+name: Windows Path Resolution
 
-# Measures whether a GitHub windows-latest runner can host the drive-resolution
-# rig the file-drop guide has never had: an SMB share the runner serves itself, a
-# drive letter mapped to it, and a DFS namespace over it. The harness
-# (support/maintainer-notes/ci-resolution-rig.ps1 -- maintainer-facing, not part
-# of the operator guide folder) carries the questions and the reporting
-# contract; this file only gets it onto a Windows runner.
+# The file-drop guide's PowerShell script works out the real server, share and
+# subfolder behind whatever an operator sees in File Explorer. Two of the
+# environments it does that in -- a drive letter mapped to an SMB share, and a
+# DFS namespace -- had never been tested anywhere. This workflow tests them on a
+# throwaway windows-latest runner that serves itself the share.
 #
-# The result IS the deliverable, so the job is green whatever the answers are: a
-# red check hides its annotations, and "no" is an answer worth having. The harness
-# always exits 0 and reports each measurement as a single-line ::notice
-# annotation, reserving ::error for the harness itself breaking. Read a run
-# through its annotations rather than its log:
+# Two jobs, two contracts:
+#
+#   test     Pester over the script's own resolution functions, dot-sourced with
+#            -LoadFunctionsOnly. It ASSERTS: a failed test fails the job. Runs on
+#            every pull request touching the paths below.
+#   measure  The original measurement harness, which asks whether the runner can
+#            host the rig at all and never fails. Kept for re-measuring, and run
+#            only on manual dispatch -- an edit to that harness is checked by
+#            dispatching this workflow, not by opening a pull request.
+#
+# The session reading a run can read check-run annotations and nothing else, so
+# both jobs report everything a reader needs as single-line annotations and
+# nothing as log-only. The test job emits one ::error per failed test, one
+# ::notice summarising the counts and the Pester version, and one ::notice per
+# rig premise, so an infrastructure failure is distinguishable from a script
+# that resolves a path wrongly. Read a run through its annotations:
 #
 #   gh api repos/<owner>/<repo>/check-runs/<check-run-id>/annotations
 #
 # No same-repo gate, unlike the workflows that hold credentials: the runner is a
-# throwaway VM, the job reads no secret, and the share and namespace it creates
-# live and die inside that VM with nothing this job elevates beyond what every
+# throwaway VM, the jobs read no secret, and the share and namespace they create
+# live and die inside that VM with nothing here elevated beyond what every
 # windows-latest job already holds.
 on:
   pull_request:
     branches: [main, staging]
     paths:
-      - "support/maintainer-notes/ci-resolution-rig.ps1"
+      - "support/windows-network-filedrop/Setup-PsilinkFileDrop.ps1"
+      - "support/maintainer-notes/Setup-PsilinkFileDrop.Tests.ps1"
+      - "support/maintainer-notes/ci-resolution-tests.ps1"
       - ".github/workflows/windows_resolution.yaml"
+  workflow_dispatch:
 
 # Cancel a superseded run when a newer commit lands on the same PR/branch.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
-# Least privilege: the harness only needs its own checkout.
+# Least privilege: the jobs only need their own checkout.
 permissions:
   contents: read
 
 jobs:
-  measure:
-    name: Measure drive and namespace resolution
+  test:
+    name: Resolution functions against a live rig
     runs-on: windows-latest
     # Installing the DFS namespace role is the slow step; a hang there must not
     # hold a runner for the default six hours.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # Windows PowerShell 5.1 rather than pwsh: SmbShare, ServerManager, DFSN
+      # and the script under test are all native there rather than reached
+      # through a compatibility session. `powershell -File` under cmd states the
+      # execution policy the run depends on instead of inheriting the image's.
+      - name: Run the resolution suite
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\support\maintainer-notes\ci-resolution-tests.ps1
+
+  measure:
+    name: Measure drive and namespace resolution
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    # As above: the role install is the slow step and must not hold a runner for
+    # the default six hours.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
 
-      # Windows PowerShell 5.1 rather than pwsh: ServerManager, SmbShare, DFSN and
-      # the WScript.Network COM surface are the harness's subject matter, and 5.1
-      # is where they are native rather than reached through a compatibility
-      # session. `powershell -File` under cmd states the execution policy the run
-      # depends on instead of inheriting the image's.
+      # Windows PowerShell 5.1 for the reason the test job gives, and for the
+      # WScript.Network COM surface that is this harness's subject matter.
       - name: Measure loopback share, mapped drive, and DFS namespace
         shell: cmd
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\support\maintainer-notes\ci-resolution-rig.ps1

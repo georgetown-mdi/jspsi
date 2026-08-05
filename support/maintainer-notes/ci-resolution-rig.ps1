@@ -2,13 +2,16 @@
 .SYNOPSIS
     CI measurement harness. Not part of the operator guide: this file is run by
     .github/workflows/windows_resolution.yaml on a throwaway windows-latest
-    runner, and an operator following the setup page never touches it.
+    runner, on manual dispatch, and an operator following the setup page never
+    touches it.
 
 .DESCRIPTION
-    Two of the environments the file-drop guide describes have never been tested
-    anywhere: a drive letter mapped to an SMB share, and a DFS namespace. This
-    harness asks whether a GitHub windows-latest runner can host a rig for them,
-    by building one and reporting what each step actually did.
+    Two of the environments the file-drop guide describes had never been tested
+    anywhere when this was written: a drive letter mapped to an SMB share, and a
+    DFS namespace. This harness asks whether a GitHub windows-latest runner can
+    host a rig for them, by building one and reporting what each step actually
+    did. Setup-PsilinkFileDrop.Tests.ps1 is what asserts against the rig it
+    proved possible.
 
     It measures; it does not assert. "No" is a result rather than a failure, so
     every question emits its annotation on both the success and the failure path,
@@ -23,15 +26,15 @@
           share, link the Q1 share into it, and resolve through the namespace.
 
     Q2 mirrors Resolve-MappedDrive in Setup-PsilinkFileDrop.ps1 rather than
-    calling it. That script executes its setup flow at top level, so dot-sourcing
-    it would run the whole thing -- credential prompts, Docker volume and all --
-    which is why the lookups are re-stated here. The copy is the price of the
-    measurement and lasts only until that function becomes importable; until then
-    a change to its lookups has to be made here too, or this harness measures
-    something the script no longer does. Where the two differ deliberately:
-    Resolve-MappedDrive returns the first surface that answers, while this reports
-    all of them separately, including the WScript.Network COM surface the script
-    does not currently use, because which surfaces answer is the question.
+    calling it, by choice rather than by necessity: that script dot-sources with
+    -LoadFunctionsOnly, and Setup-PsilinkFileDrop.Tests.ps1 drives the function
+    itself. What the copy buys is the difference between the two questions.
+    Resolve-MappedDrive returns the first surface that answers,
+    while this reports all of them separately -- including the WScript.Network
+    COM surface the script does not use -- because which surfaces answer is what
+    this harness exists to measure. A change to the script's lookups still has to
+    be made here too, or the measurement describes a script that no longer
+    exists.
 
     Reporting contract, set by this run's reader rather than by taste: the session
     that reads it can read check-run annotations and nothing else, so a fact that
