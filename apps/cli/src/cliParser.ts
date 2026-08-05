@@ -38,6 +38,7 @@ import {
   builder as verifyReceiptBuilder,
   handler as verifyReceiptHandler,
 } from "./commands/verifyReceipt";
+import { builder as doctorBuilder } from "./commands/doctor";
 
 /**
  * Read this package's own version from its co-located package.json, resolved
@@ -121,6 +122,14 @@ export function buildCli(argv: string[]): Argv {
         "Verify a stored exchange record and open its commitments (read-only)",
         verifyReceiptBuilder,
         verifyReceiptHandler,
+      )
+      // Registered with a builder and no handler: the builder demands one of the
+      // `probe` / `mount` subcommands, so there is no bare `psilink doctor` for a
+      // handler to serve.
+      .command(
+        "doctor",
+        "Check a network file drop before an exchange (probe | mount)",
+        doctorBuilder,
       )
       .usage("$0 [command] [options]")
       // Fail fast on a misspelled option (e.g. --server-user for --server-username):

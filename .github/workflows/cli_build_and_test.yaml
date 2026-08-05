@@ -129,3 +129,242 @@ jobs:
           sudo --preserve-env=PATH \
             env "PATH=$PATH" PSILINK_SFTP_CHROOT_REQUIRED=1 \
             npm run test:integration:native-chroot -w apps/cli
+
+  # `psilink doctor` against a real Samba server. Its unit tests drive a recorded
+  # smbclient transcript, which pins the classification but cannot settle what the
+  # real tool does -- whether the dialect pair `-m X --option=client min protocol=X`
+  # is accepted, whether a `put` resolves its local side against the child's
+  # working directory, what status a read-only share actually answers with. Those
+  # are settled here, by driving the real tool against a real server, and by
+  # mounting that same share through CIFS for the mount-semantics battery.
+  #
+  # The Samba account below is a throwaway created on the runner for this job. It
+  # authenticates only to this runner's own loopback smbd, holds nothing, and is
+  # destroyed with the runner, so it is written in the clear rather than carried as
+  # a repository secret (which would also make it unavailable to fork PRs).
+  smb-doctor:
+    name: Doctor against a real Samba server
+    runs-on: ubuntu-latest
+    env:
+      SMB_TEST_USER: runner
+      SMB_TEST_PASSWORD: psilink-ci-throwaway
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Build CLI
+        run: npm run build -w apps/cli
+
+      - name: Start a Samba server with a writable and a read-only share
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends samba smbclient cifs-utils
+          sudo mkdir -p /srv/psilink/dropbox /srv/psilink-readonly
+          sudo chown -R "$SMB_TEST_USER":"$SMB_TEST_USER" /srv/psilink /srv/psilink-readonly
+          sudo tee /etc/samba/smb.conf >/dev/null <<CONF
+          [global]
+            workgroup = WORKGROUP
+            security = user
+            server min protocol = SMB2
+            log level = 1
+
+          [exchange]
+            path = /srv/psilink
+            read only = no
+            valid users = $SMB_TEST_USER
+
+          [readonly]
+            path = /srv/psilink-readonly
+            read only = yes
+            valid users = $SMB_TEST_USER
+          CONF
+          printf '%s\n%s\n' "$SMB_TEST_PASSWORD" "$SMB_TEST_PASSWORD" |
+            sudo smbpasswd -s -a "$SMB_TEST_USER"
+          sudo systemctl restart smbd
+          # Fail with a clear message rather than letting every check below report
+          # an unreachable server.
+          for _ in $(seq 1 30); do
+            if (exec 3<>/dev/tcp/127.0.0.1/445) 2>/dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "smbd did not begin listening on 445" >&2
+          sudo systemctl status smbd --no-pager || true
+          exit 1
+
+      - name: Probe a healthy file drop
+        run: |
+          set -euo pipefail
+          export SMB_SERVER=127.0.0.1 SMB_SHARE=exchange SMB_PATH=dropbox
+          export SMB_USER="$SMB_TEST_USER" SMB_PASS="$SMB_TEST_PASSWORD"
+          export SMB_MARKER=psilink-check.txt SMB_TOKEN=healthyrun
+          verdict=$(node apps/cli/dist/index.js doctor probe --json)
+          echo "$verdict" | jq .
+          echo "$verdict" | jq -e '.version == 1 and .mode == "probe" and .overall == "ok"'
+          echo "$verdict" | jq -e '[.checks[] | select(.status != "ok")] | length == 0'
+          # The probe removes every file it creates except the marker, which the
+          # mount battery is meant to find.
+          grep -qx healthyrun /srv/psilink/dropbox/psilink-check.txt
+          test "$(ls -A /srv/psilink/dropbox | wc -l)" = 1
+
+      - name: Probe with a pinned dialect
+        run: |
+          set -euo pipefail
+          # Both halves of the dialect pin are exercised against the real client:
+          # -m alone would be a contradiction the client rejects outright.
+          export SMB_SERVER=127.0.0.1 SMB_SHARE=exchange SMB_PATH=dropbox
+          export SMB_USER="$SMB_TEST_USER" SMB_PASS="$SMB_TEST_PASSWORD"
+          for dialect in SMB3 SMB2; do
+            SMB_DIALECT="$dialect" node apps/cli/dist/index.js doctor probe --json |
+              jq -e '.overall == "ok"' >/dev/null ||
+              { echo "pinned dialect $dialect did not pass"; exit 1; }
+          done
+
+      - name: Probe staged failures
+        run: |
+          set -euo pipefail
+          export SMB_SERVER=127.0.0.1 SMB_SHARE=exchange SMB_PATH=dropbox
+          export SMB_USER="$SMB_TEST_USER" SMB_PASS="$SMB_TEST_PASSWORD"
+
+          # Each case asserts the exit code AND which check failed: a verdict that
+          # blames the wrong step is exactly the failure this command exists to
+          # prevent, and an exit code alone cannot catch it.
+          expect() {
+            local label="$1" expected_exit="$2" filter="$3"
+            set +e
+            verdict=$(node apps/cli/dist/index.js doctor probe --json)
+            local code=$?
+            set -e
+            echo "--- $label: exit $code"
+            echo "$verdict" | jq .
+            if [ "$code" != "$expected_exit" ]; then
+              echo "$label: expected exit $expected_exit, got $code" >&2
+              exit 1
+            fi
+            if ! echo "$verdict" | jq -e "$filter" >/dev/null; then
+              echo "$label: verdict did not satisfy $filter" >&2
+              exit 1
+            fi
+          }
+
+          ( export SMB_PASS=definitely-not-the-password
+            expect "bad password" 78 \
+              '.overall == "fix_and_retry"
+               and (.checks[] | select(.id == "authentication") | .status == "fail")
+               and (.checks[] | select(.id == "write") | .status == "skipped")' )
+
+          ( export SMB_SHARE=no-such-share
+            expect "nonexistent share" 78 \
+              '.checks[] | select(.id == "share_open") | .status == "fail"' )
+
+          ( export SMB_PATH=no-such-folder
+            expect "nonexistent subdirectory" 78 \
+              '(.checks[] | select(.id == "share_open") | .status == "ok")
+               and (.checks[] | select(.id == "subdirectory") | .status == "fail")' )
+
+          ( export SMB_SHARE=readonly
+            unset SMB_PATH
+            expect "read-only share" 78 \
+              '(.checks[] | select(.id == "authentication") | .status == "ok")
+               and (.checks[] | select(.id == "share_open") | .status == "ok")
+               and (.checks[] | select(.id == "write") | .status == "fail")
+               and (.checks[] | select(.id == "write") | .action | test("write permission"))' )
+
+          # A documentation-range address with nothing behind it: the run stops at
+          # reachability, before any credential is sent. Not a loopback address --
+          # smbd binds every interface, so any 127.x would answer.
+          ( export SMB_SERVER=192.0.2.1
+            expect "unreachable port 445" 78 \
+              '(.checks[] | select(.id == "tcp_445") | .status == "fail")
+               and (.checks[] | select(.id == "authentication") | .status == "skipped")' )
+
+      - name: Probe reports failures in the human rendering too
+        run: |
+          set -euo pipefail
+          export SMB_SERVER=127.0.0.1 SMB_SHARE=exchange SMB_PATH=dropbox
+          export SMB_USER="$SMB_TEST_USER" SMB_PASS=definitely-not-the-password
+          set +e
+          node apps/cli/dist/index.js doctor probe >stdout.log 2>human.log
+          code=$?
+          set -e
+          cat human.log
+          test "$code" = 78
+          # The default rendering is what an operator reads, so it has to carry the
+          # remedy, not just the verdict.
+          grep -q "FAIL: NT_STATUS_LOGON_FAILURE" human.log
+          grep -q "MEANING:" human.log
+          grep -q "ACTION:" human.log
+          # Without --json the check lines are diagnostics, so stdout stays empty
+          # and a caller cannot half-parse it.
+          test ! -s stdout.log
+          rm -f human.log stdout.log
+
+      - name: Check the mount through a Docker CIFS volume
+        run: |
+          set -euo pipefail
+          export SMB_SERVER=127.0.0.1 SMB_SHARE=exchange SMB_PATH=dropbox
+          export SMB_USER="$SMB_TEST_USER" SMB_PASS="$SMB_TEST_PASSWORD"
+          export SMB_MARKER=psilink-check.txt SMB_TOKEN=volumerun
+          node apps/cli/dist/index.js doctor probe --json | jq -e '.overall == "ok"'
+
+          # The production shape the Windows setup script creates: a local-driver
+          # cifs volume whose device is //server/share/subpath, mounted by the
+          # daemon on the host. The container running the check is a stock node
+          # image with the repo bind-mounted rather than the psilink image, so this
+          # job does not also build that image (image_smoke.yaml does); the volume,
+          # which is what this leg exists to exercise, is identical either way.
+          docker volume create --driver local --opt type=cifs \
+            --opt device="//127.0.0.1/exchange/dropbox" \
+            --opt o="username=$SMB_TEST_USER,password=$SMB_TEST_PASSWORD,vers=3.1.1,uid=$(id -u),gid=$(id -g),file_mode=0777,dir_mode=0777" \
+            psilink-doctor-volume
+          verdict=$(docker run --rm \
+            -v psilink-doctor-volume:/rz -v "$PWD":/repo -w /repo \
+            -e SMB_MARKER -e SMB_TOKEN \
+            node:26 node apps/cli/dist/index.js doctor mount /rz --json)
+          echo "$verdict" | jq .
+          echo "$verdict" | jq -e '.version == 1 and .mode == "mount" and .overall == "ok"'
+          echo "$verdict" | jq -e '[.checks[] | select(.status != "ok")] | length == 0'
+          # The two halves agreed on the directory, and the mount battery owns the
+          # marker's lifecycle, so it is consumed and nothing is left behind.
+          test "$(ls -A /srv/psilink/dropbox | wc -l)" = 0
+          docker volume rm psilink-doctor-volume
+
+      - name: Check the mount through a kernel CIFS mount
+        run: |
+          set -euo pipefail
+          export SMB_SERVER=127.0.0.1 SMB_SHARE=exchange SMB_PATH=dropbox
+          export SMB_USER="$SMB_TEST_USER" SMB_PASS="$SMB_TEST_PASSWORD"
+          export SMB_MARKER=psilink-check.txt SMB_TOKEN=kernelrun
+          node apps/cli/dist/index.js doctor probe --json | jq -e '.overall == "ok"'
+
+          sudo mkdir -p /mnt/psilink
+          sudo mount -t cifs //127.0.0.1/exchange/dropbox /mnt/psilink \
+            -o "username=$SMB_TEST_USER,password=$SMB_TEST_PASSWORD,vers=3.1.1,uid=$(id -u),gid=$(id -g)"
+          verdict=$(node apps/cli/dist/index.js doctor mount /mnt/psilink --json)
+          echo "$verdict" | jq .
+          echo "$verdict" | jq -e '.overall == "ok"'
+          echo "$verdict" | jq -e '.checks[] | select(.id == "marker") | .status == "ok"'
+
+          # A mount pointing at a different directory is the case the marker exists
+          # to catch, so it is staged rather than assumed.
+          sudo mkdir -p /srv/psilink/elsewhere /mnt/psilink-elsewhere
+          sudo chown "$SMB_TEST_USER":"$SMB_TEST_USER" /srv/psilink/elsewhere
+          sudo mount -t cifs //127.0.0.1/exchange/elsewhere /mnt/psilink-elsewhere \
+            -o "username=$SMB_TEST_USER,password=$SMB_TEST_PASSWORD,vers=3.1.1,uid=$(id -u),gid=$(id -g)"
+          set +e
+          verdict=$(node apps/cli/dist/index.js doctor mount /mnt/psilink-elsewhere --json)
+          code=$?
+          set -e
+          echo "$verdict" | jq .
+          test "$code" = 78
+          echo "$verdict" | jq -e '.checks[] | select(.id == "marker") | .status == "fail"'
+
+          # A directory that is not mounted at all is fatal, not a verdict about
+          # the share, and carries its own exit code.
+          set +e
+          verdict=$(node apps/cli/dist/index.js doctor mount /mnt/psilink-absent --json)
+          code=$?
+          set -e
+          test "$code" = 69
+          echo "$verdict" | jq -e '.overall == "fatal"'
+
+          sudo umount /mnt/psilink /mnt/psilink-elsewhere

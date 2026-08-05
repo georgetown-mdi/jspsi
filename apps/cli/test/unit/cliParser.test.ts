@@ -101,3 +101,22 @@ test("--version prints the CLI's own package version, not yargs' walk-up guess",
   expect(exit).toBe("exit:0");
   expect(stdout.trim()).toBe(version);
 });
+
+test("`doctor` on its own demands one of its checks rather than running", async () => {
+  // It is registered with a builder and no handler, so the only thing standing
+  // between a bare `psilink doctor` and a silent no-op is this demand.
+  const { exit, stderr } = await parse(["doctor"]);
+  expect(exit).toBe("exit:64");
+  expect(stderr).toContain("doctor probe");
+});
+
+test("`doctor mount` demands the directory it is to check", async () => {
+  const { exit } = await parse(["doctor", "mount"]);
+  expect(exit).toBe("exit:64");
+});
+
+test("a misspelled option on a doctor check exits 64, naming the option", async () => {
+  const { exit, stderr } = await parse(["doctor", "probe", "--jsonn"]);
+  expect(exit).toBe("exit:64");
+  expect(stderr).toContain("jsonn");
+});
