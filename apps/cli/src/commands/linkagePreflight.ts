@@ -199,8 +199,8 @@ export function warnColumnsTheInvitationWillNotAccept(params: {
     "the invitation declares that the inviting party will accept no payload " +
       "columns, but your input file discloses columns to send:\n" +
       disclosed.map((name) => `  - ${sanitizeForDisplay(name)}`).join("\n") +
-      "\nThe exchange this acceptance configures refuses to run, before " +
-      `connecting, while the two disagree. ${ACCEPTANCE_OUTCOME[mode]} Set the ` +
+      "\nThe exchange this acceptance configures refuses to run, before any " +
+      `data is sent, while the two disagree. ${ACCEPTANCE_OUTCOME[mode]} Set the ` +
       "metadata for those columns not to transmit (is_payload: false or role " +
       "ignored), or ask your partner for an invitation that accepts them.",
   );
