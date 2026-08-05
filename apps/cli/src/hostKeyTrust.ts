@@ -1,5 +1,6 @@
 import {
   FileSyncConnection,
+  redactPrivateKeyMaterial,
   sanitizeForDisplay,
   UsageError,
   getLogger,
@@ -44,6 +45,33 @@ export interface HostKeyTrustDeps {
   /** Ask the operator to confirm; returns true only on an explicit yes. */
   confirm: (question: string) => Promise<boolean>;
 }
+
+/**
+ * Compose a host-key refusal as a cause chain rather than one string: `summary`
+ * becomes the error's own message and each `details` entry a `cause` link of its
+ * own, in order.
+ *
+ * The split is what the display boundary forces. `sanitizeErrorForDisplay` caps
+ * EVERY link at `DEFAULT_MAX_DISPLAY_LENGTH` independently, so a link that mixes
+ * first-party text with a fragment somebody else chose lets that chooser spend
+ * the whole budget and delete the step the operator has to act on. Partitioning
+ * by WHO CHOSE THE BYTES -- first-party copy on its own links, then one labelled
+ * link per chooser -- bounds the cap to a chooser's own bytes. It does not
+ * remove the cap: fixed copy that outgrows a budget truncates just the same, so
+ * what each link measures at the rendered boundary is pinned by test.
+ *
+ * Each link is assembled with `Object.assign` rather than the two-argument
+ * `Error` constructor: this app's emit target predates `ErrorOptions`, so the
+ * direct form typechecks against the test config's newer lib and then fails the
+ * build.
+ */
+const hostKeyRefusal = (summary: string, details: string[]): UsageError =>
+  new UsageError(summary, {
+    cause: details.reduceRight<unknown>(
+      (cause, detail) => Object.assign(new Error(detail), { cause }),
+      undefined,
+    ),
+  });
 
 const REAL_DEPS: HostKeyTrustDeps = {
   probe: (connection, verbosity) =>
@@ -110,15 +138,23 @@ export async function establishHostKeyTrust(
 
   const { verbosity, loggerName, persistence } = options;
   const log = getLogger(loggerName);
-  // The host is partner-reachable on an offline-accept-seeded config, and it
-  // reaches the operator down two routes with different escape points: a
-  // UsageError, composed raw because the display boundary escapes the rendered
-  // message once, and the log/prompt lines below, whose call sites are
+  // The host reaches the operator down two routes with different escape points:
+  // the refusals below, composed raw because the display boundary escapes the
+  // rendered cause chain once, and the log/prompt lines, whose call sites are
   // themselves that value's display sink.
   const host = connection.server.host;
   const hostDisplay = sanitizeForDisplay(host);
+  // On an offline-accept-seeded config the host is the PARTNER's, copied
+  // verbatim out of the invitation endpoint (connectionFromEndpoint), and the
+  // operator-config schema bounds it neither in length nor in format -- so it
+  // rides a labelled link of its own in every refusal below rather than sharing
+  // one with the text the operator has to act on. Redacted where it is
+  // interpolated, per the composition-site convention in
+  // docs/spec/CHANNEL_SECURITY.md.
+  const hostDetail = `configured host: ${redactPrivateKeyMaterial(host)}`;
   // The config the operator would pin into / where the pin will be saved; absent
-  // for an ephemeral (one-off, no --save) run, which the messages adapt to.
+  // for an ephemeral (one-off, no --save) run, which the messages adapt to. It
+  // is the operator's own unbounded path, so it too takes a link of its own.
   const configPath =
     persistence.mode === "ephemeral" ? undefined : persistence.configPath;
 
@@ -128,21 +164,26 @@ export async function establishHostKeyTrust(
   // every non-interactive run rather than hang on a prompt that can never be
   // answered or silently auto-accept.
   if (process.stdin.isTTY !== true) {
-    const recovery =
+    throw hostKeyRefusal(
+      `no host_key_fingerprint is pinned for this SFTP server and this run ` +
+        `is not interactive, so its identity cannot be confirmed; refusing ` +
+        `to connect.`,
       configPath !== undefined
-        ? `Run this command once from an interactive terminal to review the ` +
-          `presented host key and pin it, or set ` +
-          `connection.server.host_key_fingerprint in ${configPath} to the ` +
-          `server's OpenSSH SHA256 fingerprint (obtained out-of-band) before ` +
-          `running unattended.`
-        : `Run this command once from an interactive terminal to review and ` +
-          `confirm the presented host key, or pin the server out-of-band in a ` +
-          `saved configuration (set connection.server.host_key_fingerprint) ` +
-          `and run that unattended.`;
-    throw new UsageError(
-      `no host_key_fingerprint is pinned for ${host} and this run is not ` +
-        `interactive, so the server's identity cannot be confirmed; refusing ` +
-        `to connect. ${recovery}`,
+        ? [
+            `Run once from an interactive terminal to review and pin the ` +
+              `presented key, or pin it out-of-band by setting ` +
+              `connection.server.host_key_fingerprint in the configuration ` +
+              `below.`,
+            `configuration file: ${configPath}`,
+            hostDetail,
+          ]
+        : [
+            `Run once from an interactive terminal to review and pin the ` +
+              `presented key, or pin it out-of-band by setting ` +
+              `connection.server.host_key_fingerprint in a saved ` +
+              `configuration.`,
+            hostDetail,
+          ],
     );
   }
 
@@ -165,10 +206,11 @@ export async function establishHostKeyTrust(
   );
   const trusted = await deps.confirm(`Trust this host key for ${hostDisplay}?`);
   if (!trusted)
-    throw new UsageError(
-      `host key for ${host} was not trusted; no connection was made and ` +
-        `nothing was written. Obtain and verify the server's fingerprint, then ` +
-        `retry.`,
+    throw hostKeyRefusal(
+      `the presented host key was not trusted; no connection was made and ` +
+        `nothing was written. Obtain and verify the server's fingerprint ` +
+        `out-of-band, then retry.`,
+      [hostDetail],
     );
 
   // Pin in memory so the real open() that follows enforces the confirmed key.
