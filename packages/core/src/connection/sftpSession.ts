@@ -63,6 +63,39 @@ interface SftpSessionDeps {
 }
 
 /**
+ * A refused host key, partitioned by WHO CHOSE THE BYTES of each fragment.
+ * {@link sanitizeErrorForDisplay} caps every cause-chain link at
+ * {@link DEFAULT_MAX_DISPLAY_LENGTH} independently, so a link that mixes
+ * first-party text with an adversary-chosen fragment lets the adversary spend
+ * the whole budget and delete the text the operator has to act on. The
+ * `summary` therefore carries first-party text plus format-validated values
+ * only, and every fragment a server, a partner, or an unbounded config chose
+ * gets a `details` entry of its own -- one per chooser, so one party's bytes
+ * can never consume another's disclosure. Each detail carries its own
+ * first-party label, so no bare value renders unexplained.
+ *
+ * The caller renders these as a cause chain: `summary` as the error's own
+ * message and each `details` entry as a nested `cause` AHEAD of the underlying
+ * transport error (see {@link FileSyncConnection.open}).
+ *
+ * @internal
+ */
+export interface HostKeyRefusal {
+  /**
+   * The refusal itself: first-party text, the presented fingerprint (base64, of
+   * fixed length), and the pin or re-pin instruction the operator acts on.
+   * Becomes the error's own message.
+   */
+  summary: string;
+  /**
+   * Ordered detail fragments, each rendered as its own capped cause link:
+   * remaining first-party guidance first, then one link per party that chose
+   * bytes in it.
+   */
+  details: string[];
+}
+
+/**
  * SFTP session setup as a self-contained, stateful subsystem
  * {@link FileSyncConnection} composes. Owns the observed-host-key state the
  * connection used to hold inline and exposes the connect-option building,
@@ -252,17 +285,25 @@ export class SftpSession {
    * Applies to the CLI sftp channel only -- the browser/proxy SFTP path and
    * filedrop do not run ssh2's hostVerifier.
    *
-   * The returned `mismatchDetails()` captures the failure from inside the async
+   * The returned `refusal()` captures the failure from inside the async
    * hostVerifier callback so the caller's connect catch can re-throw with the
    * detail rather than ssh2's opaque "Host denied (verification failed)". It is
    * set before verify(false), so it is populated by the time the rejection
-   * propagates from the caller's connect().
+   * propagates from the caller's connect(). Every branch that refuses settles
+   * through it, including the two that fail while reading the key.
+   *
+   * It returns a {@link HostKeyRefusal} rather than one joined string because
+   * the display boundary caps each cause-chain link separately: partitioning
+   * the fragments by who chose them is what keeps the cap off the operator's
+   * instructions. The first-party text is split across links where it exceeds
+   * one budget on its own, so no link ever has to hold both a full instruction
+   * and a fragment somebody else chose.
    */
   installEnforcingVerifier(
     connectOptions: Record<string, unknown>,
     config: SFTPConnectionConfig,
-  ): { mismatchDetails(): string | undefined } {
-    let mismatchDetails: string | undefined;
+  ): { refusal(): HostKeyRefusal | undefined } {
+    let refusal: HostKeyRefusal | undefined;
     // One or many pinned fingerprints, normalized to a list. A list stages a
     // rotated host key alongside the current one during a rekey window: a key
     // matching ANY pin is accepted. An empty list (rejected at config parse,
@@ -303,43 +344,50 @@ export class SftpSession {
               // also surface the digest of a non-matching key.
               const presented = await computeHostKeyFingerprint(blob);
               // keyTypeFromBlob decodes UTF-8 straight from the
-              // server-controlled blob under no allowlist, so it is quoted in
-              // the message below and escaped where the error is rendered; the
-              // presented fingerprint is base64 and the pins are
-              // format-validated. It is redacted here because it is the one
-              // fragment of this message a server chooses and it leads: without
-              // that, the party this message warns about picks the string that
-              // deletes the comparison the operator makes by hand (see
-              // redactPrivateKeyMaterial).
+              // server-controlled blob under no allowlist and no length bound,
+              // so it rides a link of its own and is escaped where the error is
+              // rendered. It is redacted where it is interpolated, per the
+              // composition-site convention in docs/spec/CHANNEL_SECURITY.md.
               const keyType = redactPrivateKeyMaterial(keyTypeFromBlob(blob));
-              // Name the presented fingerprint and the pinned set so the
-              // operator can see exactly what was offered against what was
-              // trusted (the singular vs. plural wording adapts to the pin
-              // count).
+              // Singular vs. plural adapts to the pin COUNT, a number; the pin
+              // VALUES take a link of their own because the connection schema
+              // bounds each pin's format but not the array's length, so a
+              // many-pin config would otherwise eat the re-pin instruction.
               const pinnedDescription =
                 pins.length === 1
-                  ? `the pinned fingerprint ${pins[0]}`
-                  : `any of the ${pins.length} pinned fingerprints ` +
-                    `(${pins.join(", ")})`;
-              // A changed key is never auto-accepted (the ssh model): the
-              // recovery is to verify out-of-band, then re-pin deliberately --
-              // add the new value (keeping or dropping the old), or clear the
-              // field and re-establish trust on first use interactively.
-              mismatchDetails =
-                `the server presented a host key of type '${keyType}' with ` +
-                `fingerprint ${presented}, which does not match ` +
-                `${pinnedDescription}. This may be a legitimate key rotation ` +
-                `or an active attack -- only the server administrator can ` +
-                `disambiguate. If the key was rotated, verify the new ` +
-                `fingerprint out-of-band, then add it to ` +
-                `connection.server.host_key_fingerprint (alongside or in ` +
-                `place of the old) or remove that field and re-run ` +
-                `interactively to re-establish trust on first use. A changed ` +
-                `key is never auto-accepted.`;
+                  ? `the pinned fingerprint`
+                  : `any of the ${pins.length} pinned fingerprints`;
+              refusal = {
+                summary:
+                  `the server presented a host key with fingerprint ` +
+                  `${presented}, which does not match ${pinnedDescription}. ` +
+                  `A changed key is never auto-accepted.`,
+                details: [
+                  `This may be a legitimate key rotation or an active attack ` +
+                    `-- only the server administrator can disambiguate.`,
+                  `If the key was rotated, verify the new fingerprint ` +
+                    `out-of-band, then add it to ` +
+                    `connection.server.host_key_fingerprint (alongside or in ` +
+                    `place of the old), or remove that field and re-run ` +
+                    `interactively to re-establish trust on first use.`,
+                  pins.length === 1
+                    ? `pinned fingerprint: ${pins[0]}`
+                    : `pinned fingerprints: ${pins.join(", ")}`,
+                  `presented host key type: ${keyType}`,
+                ],
+              };
               settleVerify(verify, false);
             }
           } catch (err) {
-            mismatchDetails = `failed to verify host key: ` + errMessage(err);
+            refusal = {
+              summary:
+                `the server's host key could not be verified, so the ` +
+                `connection is refused.`,
+              details: [
+                `host key verification error: ` +
+                  redactPrivateKeyMaterial(errMessage(err)),
+              ],
+            };
             settleVerify(verify, false);
           }
         })();
@@ -358,33 +406,43 @@ export class SftpSession {
           try {
             const blob = hostKeyBlob(keyBlob);
             const presented = await computeHostKeyFingerprint(blob);
-            // Redacted for the same reason as the mismatch branch above, on the
-            // message whose whole purpose is handing the operator a fingerprint
-            // to pin. Composed raw, a PEM-header key type ends the link where it
-            // sits, taking even the label naming what the server presented. How
-            // much of the tail the per-link cap removes anyway is a separate
-            // bound, pinned alongside this one in sftpSession.test.ts.
+            // Redacted for the same reason as the mismatch branch above. The
+            // configured host takes a link of its own beside it rather than one
+            // they share: on the acceptor route the host is copied verbatim out
+            // of the partner's invitation endpoint, and the operator-config
+            // schema bounds it neither in length nor in format, so one link for
+            // both would let either party delete the other's disclosure.
             const keyType = redactPrivateKeyMaterial(keyTypeFromBlob(blob));
-            mismatchDetails =
-              `no host_key_fingerprint is pinned for ` +
-              `${config.server.host}, so the server's ` +
-              `identity cannot be verified and the connection is refused. The ` +
-              `server presented a host key of type '${keyType}' with ` +
-              `fingerprint ${presented}; verify it out-of-band and set ` +
-              `connection.server.host_key_fingerprint to pin it.`;
+            refusal = {
+              summary:
+                `no host_key_fingerprint is pinned for this SFTP server, so ` +
+                `its identity cannot be verified and the connection is ` +
+                `refused. It presented fingerprint ${presented}.`,
+              details: [
+                `Verify that fingerprint out-of-band, then set ` +
+                  `connection.server.host_key_fingerprint to pin it.`,
+                `configured host: ` +
+                  redactPrivateKeyMaterial(config.server.host),
+                `presented host key type: ${keyType}`,
+              ],
+            };
             settleVerify(verify, false);
           } catch (err) {
-            mismatchDetails =
-              `no host_key_fingerprint is pinned and the presented host key ` +
-              `could not be read ` +
-              `(${redactPrivateKeyMaterial(errMessage(err))}); refusing to ` +
-              `proceed.`;
+            refusal = {
+              summary:
+                `no host_key_fingerprint is pinned and the presented host ` +
+                `key could not be read, so the connection is refused.`,
+              details: [
+                `host key read error: ` +
+                  redactPrivateKeyMaterial(errMessage(err)),
+              ],
+            };
             settleVerify(verify, false);
           }
         })();
       };
     }
-    return { mismatchDetails: () => mismatchDetails };
+    return { refusal: () => refusal };
   }
 
   /**

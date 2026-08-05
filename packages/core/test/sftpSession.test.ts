@@ -1,19 +1,27 @@
 import { expect, test } from "vitest";
 
 import { SftpSession } from "../src/connection/sftpSession";
+import { FileSyncConnection } from "../src/connection/fileSyncConnection";
 import type { FileTransportClient } from "../src/connection/fileSyncConnection";
 import type { SFTPConnectionConfig } from "../src/config/connection";
 import { DEFAULT_SERVER_CONNECT_TIMEOUT_MS } from "../src/config/connection";
+import { MAX_ENDPOINT_HOST_LENGTH } from "../src/config/invitation";
 import type { getLoggerForVerbosity } from "../src/utils/logger";
 import { computeHostKeyFingerprint } from "../src/utils/sshHostKey";
-import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
-import { DISPLAY_TRUNCATION_MARKER } from "../src/utils/sanitizeForDisplay";
+import {
+  MAX_ERROR_CAUSE_DEPTH,
+  sanitizeErrorForDisplay,
+} from "../src/utils/sanitizeErrorForDisplay";
+import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
+} from "../src/utils/sanitizeForDisplay";
 
 // The connect-option tests never dial, and construction only needs a
-// FileTransportClient reference, so an inert stub suffices. The whole-class
-// verifier and probe behavior (which does drive a transport) is covered in
-// fileSyncConnection.test.ts; these tests exercise only the subsystem's own
-// connect-option contract, which the class-level tests reach indirectly.
+// FileTransportClient reference, so an inert stub suffices. The probe behavior
+// is covered in fileSyncConnection.test.ts; the refusal tests below dial a stub
+// that fires the installed verifier, so they render what an operator actually
+// sees rather than a message this file re-assembles.
 const inertClient: FileTransportClient = {
   connect: async () => {},
   end: async () => {},
@@ -134,8 +142,7 @@ test("buildConnectOptions omits credentials when includeCredentials is false and
 
 // A raw OpenSSH host-key blob: a uint32 length prefix, the key-type string, and
 // the key bytes. The type is decoded verbatim out of the blob the server sent,
-// so it is server-controlled text sitting ahead of everything the mismatch
-// message tells the operator.
+// so it is server-controlled text with no bound on its bytes or its length.
 function hostKeyBlob(keyType: string): Buffer<ArrayBuffer> {
   const type = Buffer.from(keyType, "utf8");
   const header = Buffer.alloc(4);
@@ -143,143 +150,225 @@ function hostKeyBlob(keyType: string): Buffer<ArrayBuffer> {
   return Buffer.concat([header, type, Buffer.alloc(32, 7)]);
 }
 
-// Drive the installed verifier against a presented key and render the failure
-// the connect path composes from it, exactly as fileSyncConnection does.
-async function renderMismatch(keyType: string): Promise<string> {
-  const { session } = makeSession();
-  const config: SFTPConnectionConfig = {
-    channel: "sftp",
-    server: {
-      host: "sftp.example.org",
-      hostKeyFingerprint: `SHA256:${"A".repeat(43)}`,
+// A transport whose connect() presents `keyBlob` to whatever hostVerifier was
+// installed and then rejects the way ssh2 does on a refusal, so open() reaches
+// its host-key catch and composes the refusal exactly as production does.
+function hostKeyMockClient(keyBlob: Buffer): FileTransportClient {
+  return {
+    ...inertClient,
+    connect: (options: Record<string, unknown>) =>
+      new Promise<void>((resolve, reject) => {
+        const hostVerifier = options["hostVerifier"] as (
+          blob: Buffer,
+          verify: (permitted: boolean) => void,
+        ) => void;
+        hostVerifier(keyBlob, (permitted: boolean) => {
+          if (permitted) resolve();
+          else reject(new Error("Host denied (verification failed)"));
+        });
+      }),
+  };
+}
+
+// The renderer's own cause-link separator, read back out of a two-link render
+// rather than restated here, so splitting a rendered chain into its links cannot
+// drift from the framing the renderer emits.
+const CAUSE_SEPARATOR = sanitizeErrorForDisplay(
+  new Error("a", { cause: new Error("b") }),
+).slice(1, -1);
+
+const linksOf = (rendered: string): string[] => rendered.split(CAUSE_SEPARATOR);
+
+// The widest a single link can render: the per-link cap plus the marker the
+// sanitizer appends when it truncates.
+const MAX_RENDERED_LINK_LENGTH =
+  DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length;
+
+// Refuse a connection through the REAL open() path and render what the operator
+// sees: sanitizeErrorForDisplay over the whole ConnectionError cause chain,
+// which is the boundary every consumer shows this at. Driving open() rather than
+// the verifier alone is what puts the partition itself under test -- the summary
+// and the per-fragment cause links are composed by the connect catch, not here.
+async function renderRefusal(
+  config: SFTPConnectionConfig,
+  keyType: string,
+): Promise<string> {
+  const conn = new FileSyncConnection(hostKeyMockClient(hostKeyBlob(keyType)), {
+    verbose: -1,
+  });
+  const err: unknown = await conn.open(config).catch((e: unknown) => e);
+  return sanitizeErrorForDisplay(err);
+}
+
+const PIN = `SHA256:${"A".repeat(43)}`;
+const OTHER_PIN = `SHA256:${"B".repeat(43)}`;
+
+const renderMismatch = (
+  keyType: string,
+  pins: string | string[] = PIN,
+): Promise<string> =>
+  renderRefusal(
+    {
+      channel: "sftp",
+      server: { host: "sftp.example.org", hostKeyFingerprint: pins },
     },
-  };
-  const connectOptions: Record<string, unknown> = {};
-  const verifier = session.installEnforcingVerifier(connectOptions, config);
-  const hostVerifier = connectOptions["hostVerifier"] as (
-    blob: Buffer,
-    verify: (permitted: boolean) => void,
-  ) => void;
-  await new Promise<void>((resolve) => {
-    hostVerifier(hostKeyBlob(keyType), () => resolve());
-  });
-  return sanitizeErrorForDisplay(
-    new Error(
-      `SFTP host-key verification failed: ${verifier.mismatchDetails()}`,
-    ),
+    keyType,
   );
+
+const renderNoPinRefusal = (
+  keyType: string,
+  host = "sftp.example.org",
+): Promise<string> =>
+  renderRefusal({ channel: "sftp", server: { host } }, keyType);
+
+// The three shapes a server can choose its key type in. It is decoded from the
+// blob under no allowlist and no length bound, so each is free: a benign type, a
+// type long enough to exhaust a display budget on its own, and a type carrying a
+// PEM BEGIN marker (the shape the composition-site redaction exists for, whose
+// fail-closed reach runs to the end of the link it lands on). Under the
+// provenance partition none of them shares a link with first-party text, so none
+// can reach what the operator has to act on.
+const SERVER_CHOSEN_KEY_TYPES: Array<[string, string]> = [
+  ["a benign key type", "ssh-ed25519"],
+  ["an over-length key type", "X".repeat(4096)],
+  ["a key type carrying a PEM BEGIN marker", "-----BEGIN RSA PRIVATE KEY-----"],
+];
+
+for (const [label, keyType] of SERVER_CHOSEN_KEY_TYPES) {
+  test(`the no-pin refusal renders the whole fingerprint and the pin instruction under ${label}`, async () => {
+    const presented = await computeHostKeyFingerprint(hostKeyBlob(keyType));
+    const rendered = await renderNoPinRefusal(keyType);
+
+    // The whole fingerprint, not a prefix: the operator compares all of it
+    // against what the server administrator gives them out-of-band.
+    expect(rendered).toContain(presented);
+    expect(rendered).toContain(
+      "set connection.server.host_key_fingerprint to pin it",
+    );
+  });
+
+  test(`the pinned-mismatch refusal renders the whole fingerprint, the warning and the re-pin step under ${label}`, async () => {
+    const presented = await computeHostKeyFingerprint(hostKeyBlob(keyType));
+    const rendered = await renderMismatch(keyType);
+
+    expect(rendered).toContain(presented);
+    expect(rendered).toContain("which does not match the pinned fingerprint");
+    expect(rendered).toContain("A changed key is never auto-accepted.");
+    expect(rendered).toContain(
+      "This may be a legitimate key rotation or an active attack",
+    );
+    expect(rendered).toContain(
+      "add it to connection.server.host_key_fingerprint",
+    );
+    expect(rendered).toContain(
+      "re-run interactively to re-establish trust on first use",
+    );
+    // The pinned set is disclosed too, on the link of its own that keeps a
+    // many-pin config from eating the instruction above.
+    expect(rendered).toContain(`pinned fingerprint: ${PIN}`);
+  });
 }
 
-// The sibling verifier: with nothing pinned the connection is refused too, and
-// that refusal is the one message whose whole purpose is handing the operator a
-// fingerprint to pin. The server chooses the key type here exactly as it does on
-// the mismatch branch.
-async function renderNoPinRefusal(keyType: string): Promise<string> {
-  const { session } = makeSession();
-  const config: SFTPConnectionConfig = {
-    channel: "sftp",
-    server: { host: "sftp.example.org" },
-  };
-  const connectOptions: Record<string, unknown> = {};
-  const verifier = session.installEnforcingVerifier(connectOptions, config);
-  const hostVerifier = connectOptions["hostVerifier"] as (
-    blob: Buffer,
-    verify: (permitted: boolean) => void,
-  ) => void;
-  await new Promise<void>((resolve) => {
-    hostVerifier(hostKeyBlob(keyType), () => resolve());
-  });
-  return sanitizeErrorForDisplay(
-    new Error(
-      `SFTP host-key verification failed: ${verifier.mismatchDetails()}`,
-    ),
+// The configured host is the OTHER adversary-reachable fragment on the no-pin
+// refusal: on the acceptor route it is copied verbatim from the partner's
+// invitation endpoint into the written config, and the operator-config schema
+// bounds it neither in length nor in format, so the invitation schema's own
+// MAX_ENDPOINT_HOST_LENGTH is a floor on what can arrive rather than a ceiling.
+// At that length it fills a whole display budget by itself -- which is the
+// point: the budget it fills is its own link's.
+test("a partner-supplied host at its schema's full length spends only its own link", async () => {
+  const keyType = "ssh-ed25519";
+  const presented = await computeHostKeyFingerprint(hostKeyBlob(keyType));
+  const host = "h".repeat(MAX_ENDPOINT_HOST_LENGTH);
+  const rendered = await renderNoPinRefusal(keyType, host);
+
+  expect(rendered).toContain(presented);
+  expect(rendered).toContain(
+    "set connection.server.host_key_fingerprint to pin it",
   );
-}
-
-// The key type is quoted into the message ahead of the presented fingerprint
-// and the pinned set, and a server chooses it: keyTypeFromBlob decodes it
-// verbatim out of the blob under no allowlist. The display boundary's
-// private-key redaction is fail-closed past a truncated key, so without
-// redaction where the type is composed, a server naming its key type with a PEM
-// header deletes the comparison the operator makes by hand.
-//
-// This message also runs past the per-link display cap, which is a separate
-// bound. How much it cuts depends on the key type's LENGTH, which the server
-// also chooses without bound, so the benign rendering is measured alongside the
-// planted one at each length: the assertions pin what redaction restores rather
-// than what the cap removes, and the cap's own reach is pinned separately below.
-test("a private-key-shaped host key type does not suppress the mismatch detail", async () => {
-  const marker = "-----BEGIN RSA PRIVATE KEY-----";
-  const presented = await computeHostKeyFingerprint(hostKeyBlob(marker));
-  const rendered = await renderMismatch(marker);
-  const benign = await renderMismatch("ssh-ed25519");
-
-  expect(rendered).toContain("[redacted private key]");
-  // What a benign key type shows, and what the operator compares by hand.
-  expect(rendered).toContain(`with fingerprint ${presented}`);
-  expect(rendered).toContain("which does not match the pinned fingerprint");
-  // The cap, not the planted marker, is what ends this link: the benign
-  // rendering ends the same way, so the tail beyond it is not this item's loss.
-  expect(benign).toContain(DISPLAY_TRUNCATION_MARKER);
-  expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
-  expect(benign).not.toContain("or an active attack");
+  const hostLink = linksOf(rendered).find((link) =>
+    link.startsWith("configured host: "),
+  );
+  expect(hostLink).toBeDefined();
+  expect(hostLink).toContain(DISPLAY_TRUNCATION_MARKER);
+  // The cap fell on the host's own bytes and nowhere else.
+  expect(
+    linksOf(rendered).filter((link) =>
+      link.includes(DISPLAY_TRUNCATION_MARKER),
+    ),
+  ).toEqual([hostLink]);
 });
 
-// The no-pin refusal composes the same server-chosen key type, and this message
-// is the one whose whole purpose is handing the operator a fingerprint to pin.
-// Unredacted, a PEM-header key type deletes the rest of the link outright: the
-// operator is left a refusal ending at the planted type, with no fingerprint and
-// not even the label saying one was presented.
-//
-// This message ALSO runs past the per-link cap, and by more than its sibling --
-// its own fixed prefix is long enough that the fingerprint is cut short and the
-// pinning instruction never renders in ANY case, benign or planted. So the
-// benign rendering is measured alongside, and the assertions pin only what
-// redaction restores; what the cap removes is a separate bound, pinned below.
-test("a private-key-shaped host key type does not suppress the no-pin refusal", async () => {
-  const marker = "-----BEGIN RSA PRIVATE KEY-----";
-  const rendered = await renderNoPinRefusal(marker);
-  const benign = await renderNoPinRefusal("ssh-ed25519");
+// The partition does not remove the cap, it only stops the cap falling on
+// first-party text. Both bounds still hold with every variable fragment flooded
+// at once: each link truncates on its own budget, and the whole rendered output
+// stays inside the renderer's depth bound times that budget.
+test("a flooded refusal truncates per link and stays bounded overall", async () => {
+  const rendered = await renderRefusal(
+    {
+      channel: "sftp",
+      server: {
+        host: "h".repeat(100_000),
+        hostKeyFingerprint: Array.from({ length: 500 }, () => PIN),
+      },
+    },
+    "X".repeat(100_000),
+  );
+  const links = linksOf(rendered);
 
-  expect(rendered).toContain("[redacted private key]");
-  // What redaction restores: the label naming what the server presented, which
-  // the fail-closed dangling rule consumes when the type is composed raw.
-  expect(rendered).toContain("with fingerprint SHA256:");
-  expect(benign).toContain("with fingerprint SHA256:");
+  for (const link of links)
+    expect(link.length).toBeLessThanOrEqual(MAX_RENDERED_LINK_LENGTH);
+  expect(links.length).toBeLessThanOrEqual(MAX_ERROR_CAUSE_DEPTH);
+  expect(rendered.length).toBeLessThanOrEqual(
+    MAX_ERROR_CAUSE_DEPTH * (MAX_RENDERED_LINK_LENGTH + CAUSE_SEPARATOR.length),
+  );
+  // Flooding the fragments still leaves the refusal and its recovery whole.
+  expect(rendered).toContain("A changed key is never auto-accepted.");
+  expect(rendered).toContain(
+    "re-run interactively to re-establish trust on first use",
+  );
 });
 
-// The cap, not the planted marker, is what truncates this refusal, and it cuts
-// deeper than the pinning instruction: the presented fingerprint is itself
-// clipped to a prefix far too short to verify against, in the benign rendering
-// as much as the planted one. So the message's whole stated purpose -- hand the
-// operator a fingerprint to check out-of-band and a field to pin it in --  is
-// unreachable on this path whatever the server sends. Pinned as its own bound so
-// the loss is neither read as redaction's cost nor left implicit; redaction does
-// pay a part of it, since the replacement sits ahead of the fingerprint and
-// pushes more of it past the cap in exactly the adversarial case, which is
-// asserted here rather than left for a reader to infer. The refusal still fails
-// closed: what this bounds is disclosure, not the control.
-test("the no-pin refusal loses the fingerprint and the instruction to the cap", async () => {
-  const presented = await computeHostKeyFingerprint(hostKeyBlob("ssh-ed25519"));
-  const benign = await renderNoPinRefusal("ssh-ed25519");
-  const planted = await renderNoPinRefusal("-----BEGIN RSA PRIVATE KEY-----");
-  // The fingerprint characters that survive ahead of the truncation marker.
-  const shown = (out: string) =>
-    out.slice(out.indexOf("SHA256:"), out.indexOf(DISPLAY_TRUNCATION_MARKER));
-
-  for (const out of [benign, planted]) {
-    expect(out).toContain(DISPLAY_TRUNCATION_MARKER);
-    expect(out).not.toContain("host_key_fingerprint to pin it");
-  }
-  // Neither rendering carries a fingerprint an operator could compare.
-  expect(benign).not.toContain(presented);
-  expect(shown(benign).length).toBeLessThan(presented.length);
-  // Redaction's own share of the loss, in the adversarial case.
-  expect(shown(planted).length).toBeLessThan(shown(benign).length);
+// A first-party link fits its own budget by measurement, not by construction:
+// nothing stops the fixed copy growing past the cap, and then the cap is back on
+// the operator's text. That is the partition's one residual, so it is a check
+// rather than a caveat. With every variable fragment at its ordinary size no
+// link truncates at all, so growing any of the fixed copy past its budget fails
+// here -- including growth after the phrase another assertion happens to read.
+test("no link of either refusal truncates when no fragment overruns", async () => {
+  for (const rendered of [
+    await renderNoPinRefusal("ssh-ed25519"),
+    await renderMismatch("ssh-ed25519"),
+    await renderMismatch("ssh-ed25519", [PIN, OTHER_PIN]),
+  ])
+    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
 });
 
-// A whole key sliced into the type is the shape the redaction exists for, on the
-// branch that must still name what the server presented.
+// The detail links are composed AHEAD of the transport error, so the renderer's
+// depth bound can never drop a detail in favour of ssh2's opaque "Host denied".
+// Asserted rather than reasoned about: the transport error still renders, which
+// is only possible while the whole chain fits inside the bound.
+test("the refusal's detail links sit ahead of the transport error, inside the depth bound", async () => {
+  const rendered = await renderMismatch("ssh-ed25519", [PIN, OTHER_PIN]);
+  const links = linksOf(rendered);
+
+  expect(links.length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
+  expect(links[links.length - 1]).toContain("Host denied");
+  expect(links.some((link) => link.startsWith("pinned fingerprints: "))).toBe(
+    true,
+  );
+  expect(
+    links.some((link) => link.startsWith("presented host key type: ")),
+  ).toBe(true);
+  // The pin count adapts to the set, which is a number rather than a value, so
+  // it stays on the summary link.
+  expect(rendered).toContain("does not match any of the 2 pinned fingerprints");
+});
+
+// Redaction at the composition site is a convention over every server- and
+// partner-controlled fragment, kept whether or not the partition already
+// contains the fragment's reach. What it buys the operator is the same either
+// way: no armor from a key sliced into the type ever renders.
 test("a sliced key in the type does not suppress the no-pin refusal", async () => {
   const rendered = await renderNoPinRefusal(
     "-----BEGIN OPENSSH PRIVATE KEY-----\nc2gtcnNhAAAAAwEAAQ==\nQ1n3QqzB2rN",
@@ -287,30 +376,7 @@ test("a sliced key in the type does not suppress the no-pin refusal", async () =
 
   expect(rendered).toContain("[redacted private key]");
   expect(rendered).not.toContain("c2gtcnNhAAAAAwEAAQ==");
-  expect(rendered).toContain("with fingerprint SHA256:");
-});
-
-// The key type leads the message and the server chooses its LENGTH as freely as
-// its bytes -- keyTypeFromBlob bounds neither -- so a long enough type pushes the
-// fingerprint and the pinned-set comparison past the per-link cap on its own.
-// Pinned here rather than stated above it, because it is the bound that decides
-// how much of this message an operator ever sees: redaction restores the
-// comparison only while the type is short enough for it to fit at all. A benign
-// type of the same length is measured alongside, so a regression that made
-// redaction the suppressor would separate the two.
-test("a long host key type pushes the comparison past the cap, redacted or not", async () => {
-  const long = "X".repeat(200);
-  const planted = await renderMismatch(
-    `${long}-----BEGIN RSA PRIVATE KEY-----`,
-  );
-  const benign = await renderMismatch(long);
-
-  for (const rendered of [planted, benign]) {
-    expect(rendered).not.toContain(
-      "which does not match the pinned fingerprint",
-    );
-    expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
-  }
+  expect(rendered).toContain("It presented fingerprint SHA256:");
 });
 
 test("a host key type carrying a sliced key does not suppress the mismatch detail", async () => {

@@ -107,6 +107,23 @@ const transportBudgetExceededError = (
       `budget, so the exchange is failing rather than waiting on it further`,
   );
 
+// Folds a host-key refusal's ordered detail fragments into a cause chain that
+// ends at the transport error the connect rejected with. Each fragment becomes
+// its own link, which is what gives it its own display budget: the display
+// boundary caps every link separately, so a fragment a server or a partner
+// chose can only ever consume the budget of the link it sits alone on.
+//
+// The fragments go AHEAD of the transport error, so the depth bound the renderer
+// walks can never drop a detail in favour of ssh2's opaque "Host denied".
+const chainRefusalDetails = (
+  details: string[],
+  transportError: unknown,
+): unknown =>
+  details.reduceRight<unknown>(
+    (cause, detail) => new Error(detail, { cause }),
+    transportError,
+  );
+
 // Races a transport operation against the peer-inactivity budget so a server that
 // withholds its callback cannot hang the await past `budgetMs`: settles with the
 // operation's own result if it finishes first, otherwise rejects with
@@ -1128,17 +1145,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       try {
         await this.client.connect(connectOptions);
       } catch (err) {
-        const mismatchDetails = hostKeyVerifier.mismatchDetails();
-        if (mismatchDetails !== undefined) {
+        const refusal = hostKeyVerifier.refusal();
+        if (refusal !== undefined) {
           // A host-identity failure -- a pinned-fingerprint mismatch or the
           // no-pin fail-closed refusal (both verifier branches settle through
-          // mismatchDetails) -- is a trust-boundary fault, so it carries the
-          // security kind consumers classify on; the message and the cause
-          // chain are unchanged.
+          // refusal()) -- is a trust-boundary fault, so it carries the security
+          // kind consumers classify on.
           throw new ConnectionError(
-            `SFTP host-key verification failed: ${mismatchDetails}`,
+            `SFTP host-key verification failed: ${refusal.summary}`,
             "security",
-            { cause: err },
+            { cause: chainRefusalDetails(refusal.details, err) },
           );
         }
         throw err;
