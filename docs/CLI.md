@@ -283,6 +283,43 @@ psilink probe-host-key SFTP_URL [--json] [--connect-timeout <duration>]
 
 `SFTP_URL` is an `sftp://host[:port]` address; you supply no username, path, or credential, and none is sent to the server (the probe refuses before authenticating). A non-sftp scheme is a usage error. `--connect-timeout` bounds the connection attempt (e.g. `10s`), enforced as the SSH ready timeout. By default the command prints a human-readable summary; `--json` instead prints one line of machine-readable JSON -- `{"fingerprint":"SHA256:...","key_type":"..."}` -- on stdout for a script to consume. A transport failure (unreachable, refused, or timed out) exits 69; a usage error exits 64. The console's "read the fingerprint from the server" affordance runs this command for the operator.
 
+## Checking a network file drop
+
+```sh
+psilink doctor probe
+psilink doctor mount DIRECTORY
+```
+
+`doctor` answers "why did the file drop not work" before an exchange is attempted, and answers it in the two places the answer can differ. `doctor probe` asks the SMB server directly over TCP, with nothing mounted: whether the name resolves from inside the container, whether port 445 is reachable, whether the credentials are accepted, whether the share and the folder open, and whether a file can be created, renamed, and deleted there. `doctor mount` checks an already-mounted directory as the kernel presents it -- the operations psilink's rendezvous is built on, which a share can refuse even after passing every network check.
+
+Run both: the probe leaves a marker file behind and the mount check looks for it, so the two together also establish that the mount and the checks are pointing at the same directory. A wrong server, share, or subfolder -- a DFS path is the usual cause -- is caught there rather than by a failed exchange.
+
+Neither mode changes anything on the share beyond its own working files: the probe attempts to remove every file it creates except the marker and sweeps any `psilink-probe` working file already present, whichever run left it, and the mount check consumes the marker and removes the rest. On a share that refuses deletes or a connection that dies mid-run, a `psilink-probe-*.tmp*` working file can remain until the next run's sweep ([cleanup limits](spec/CLI_DOCTOR.md#cleanup-limits)).
+
+### Inputs
+
+`doctor probe` takes its connection details from the environment, not from flags, so the password never becomes an argv value that any process listing on the machine can read:
+
+| Variable | Meaning |
+| -------- | ------- |
+| `SMB_SERVER` | Server name or address (required) |
+| `SMB_SHARE` | Share name -- the first path component only (required) |
+| `SMB_USER` | Account username (required) |
+| `SMB_PATH` | Subdirectory under the share the exchange runs in; omit to run the checks against the share root itself |
+| `SMB_DOMAIN` | Account domain, for a domain account |
+| `SMB_PASS` | Account password |
+| `SMB_DIALECT` | `SMB3`, `SMB2`, or `NT1` to pin a dialect; omit to negotiate |
+| `SMB_MARKER` | Filename of the marker to leave for `doctor mount`; omit to skip it |
+| `SMB_TOKEN` | Per-run value written into the marker; omit to skip the cross-check |
+
+`doctor mount` takes the mounted directory as its argument and reads `SMB_MARKER` and `SMB_TOKEN` for the cross-check; without them it runs its other checks and reports the cross-check as skipped. A missing required variable, or one whose value could change what a command means (a path separator in the server or share name, a line break in a credential, a marker or token that is not a plain identifier), is a usage error and exits 64 with no verdict printed -- the checks never ran.
+
+### Output
+
+By default each check prints a line on stderr -- `OK:`, `WARN:`, `FAIL:`, or `SKIP:` -- with `MEANING:` and `ACTION:` lines under anything that needs one, closing with a summary line. A `WARN:` does not stop an exchange; it names something worth knowing before you run one, such as a share that works only with `--lockless-rendezvous` or one nearly out of space. Read the `ACTION:` lines, change what they name, and run the command again.
+
+`--json` prints the verdict as one line of JSON on stdout instead of those check lines, for a script or a setup launcher to consume. Either way the run's exit code carries the verdict, so a caller that parses nothing still learns whether anything blocks an exchange (see [Exit codes](#exit-codes)). The full contract -- every field, the schema version and the rule for reading it, the status and verdict vocabularies, both modes' fixed check lists, and the exit-code mapping -- is in [docs/spec/CLI_DOCTOR.md](spec/CLI_DOCTOR.md).
+
 ## Verifying a receipt
 
 ```sh
@@ -335,7 +372,7 @@ See [Compromise response](SECURITY_DESIGN.md#compromise-response) for the full p
 
 ## Logging
 
-Every command that produces diagnostic output - `init`, `invite`, `accept`, `exchange`, the zero-setup form, `fingerprint`, `probe-host-key`, and `verify-receipt` - accepts `--log-level` and `--log-file`.
+Every command that produces diagnostic output - `init`, `invite`, `accept`, `exchange`, the zero-setup form, `fingerprint`, `probe-host-key`, `doctor`, and `verify-receipt` - accepts `--log-level` and `--log-file`.
 
 psilink follows the standard stream convention: a command's result data goes to `stdout`, and all diagnostic output - every log line, `info` and `debug` included, together with the interactive confirmation prompt - goes to `stderr`. This keeps a piped or redirected result clean. `psilink accept URL INVITATION 2>/dev/null > matched.csv` writes only the matched-records CSV to `matched.csv`, with the invitation-terms display, the "wrote key file" line, the runtime banner, and every other diagnostic sent to `stderr`, where the same run without the redirect still shows them on the terminal. The result on `stdout` is an exchange's CSV output (when no `OUTPUT_FILE` positional is given), the invitation token printed by `invite`, the fingerprint value printed by `fingerprint` -- whose action banner, bound identity, `--force` regeneration warning, and out-of-band sharing instructions are diagnostics on `stderr`, so `FP=$(psilink fingerprint)` captures just the value -- and the verification verdict printed by `verify-receipt` (its exit code, nonzero only on a definite failure, carries the same result for scripts).
 
@@ -363,12 +400,13 @@ Every `psilink` command exits with one of the following codes. The two failure c
 | ---- | ---- | ------- |
 | 0 | success | The command completed. For an exchange, the run finished and any result was written. |
 | 64 | `EX_USAGE` | Invalid caller input or configuration: a bad flag or positional, an unrecognized or repeated option, a missing/malformed config or key file, an unsupported channel, or -- with `--event-stream` -- fd 3 not wired. One mid-run condition also lands here rather than under 69, because its remedy is likewise a local settings change: an SFTP exchange whose cumulative mid-exchange reconnection budget (`max_reconnect_attempts`) is exhausted by a partner server that keeps dropping the held session. A problem the operator fixes locally; retrying unchanged will not help. |
-| 69 | `EX_UNAVAILABLE` | A transport or availability failure: the exchange server, peer, or shared storage was unreachable, rejected an operation, or went silent. Retrying once the transport recovers may succeed. |
+| 69 | `EX_UNAVAILABLE` | A transport or availability failure: the exchange server, peer, or shared storage was unreachable, rejected an operation, or went silent. Retrying once the transport recovers may succeed. From `psilink doctor`, it means something the checks themselves depend on was not available, so nothing was established either way. |
+| 78 | `EX_CONFIG` | `psilink doctor` only: the checks ran and something they found needs changing before an exchange will work (see [Checking a network file drop](#checking-a-network-file-drop)). |
 | 130 | interrupted (SIGINT) | The run was interrupted by `SIGINT` (Ctrl-C). 128 + 2, the conventional signal exit. |
 | 143 | terminated (SIGTERM) | The run was terminated by `SIGTERM`. 128 + 15. |
 | 1 | unexpected error | A last-resort code for an error that escaped every command handler; ordinary faults use 64 or 69 above. |
 
-64 and 69 are the classification the command error boundaries apply (a `UsageError` maps to 64, otherwise the error's own exit code or 69); 130 and 143 are set by the exchange's own signal handlers; 1 is the top-level catch-all. When `--event-stream` is active a `security`-category failure exits 69 like any other transport failure -- the exit code cannot single it out, so read the terminal event's category to detect it (see [Machine-readable event stream](#machine-readable-event-stream)).
+64 and 69 are the classification the command error boundaries apply (a `UsageError` maps to 64, otherwise the error's own exit code or 69); 78 is `psilink doctor`'s verdict code and is set nowhere else; 130 and 143 are set by the exchange's own signal handlers; 1 is the top-level catch-all. When `--event-stream` is active a `security`-category failure exits 69 like any other transport failure -- the exit code cannot single it out, so read the terminal event's category to detect it (see [Machine-readable event stream](#machine-readable-event-stream)).
 
 For `psilink exchange`, a missing, malformed, or unreadable configuration file (`psilink.yaml`) or key file (`.psilink.key`) - including a key file whose stored token is malformed - is a usage error and exits 64. An unsupported channel or URL scheme - a `webrtc` config or `ws://` URL the CLI does not yet support, an unknown scheme, or a malformed `file://` authority - is likewise a usage error and exits 64, as is a URL carrying a malformed percent-escape such as a lone `%` (with any credential redacted from the message) or an invalid connection option or combination (for example a negative, fractional, non-numeric, or above-ceiling `--max-reconnect-attempts`, a non-numeric or out-of-range (outside `0..65535`) `--server-port`, a reserved `peer_id`, or a `retain_files`/`lockless_rendezvous` contradiction). Failures during the exchange itself - connecting to the server, the rendezvous, or the message loop - exit 69. A successful run exits 0; a run terminated by a signal exits 130 (SIGINT) or 143 (SIGTERM).
 

@@ -1,0 +1,163 @@
+import type { Argv, Arguments } from "yargs";
+import logLibrary from "loglevel";
+
+import { UsageError, sanitizeForDisplay } from "@psilink/core";
+
+import { runMountChecks } from "../doctor/mount";
+import { runProbe } from "../doctor/probe";
+import { readSmbMountInput, readSmbProbeInput } from "../doctor/smbEnvironment";
+import type { DoctorReport } from "../doctor/verdict";
+import {
+  DOCTOR_EXIT_CODE,
+  overallOf,
+  verdictJson,
+  verdictLines,
+} from "../doctor/verdict";
+import {
+  configureLogging,
+  exitWithError,
+  LOG_LEVELS,
+  parseOrExit,
+  singleValue,
+} from "../util/cli";
+
+// `psilink doctor` answers "why did the file drop not work" before an exchange
+// is attempted, in the two places the answer can differ: over the network as
+// smbclient sees it (`doctor probe`), and through the kernel as a mounted folder
+// (`doctor mount`). Its `--json` verdict is a stable contract, not a formatted
+// log -- the Windows setup script and the host-side launcher that follows it
+// loop on the check ids and the overall verdict, so a check keeps its id and a
+// caller reads `version` before anything else.
+//
+// Its connection inputs come from the SMB_* environment, never flags: the
+// password must not become an argv value every `ps` on the machine can read, and
+// splitting the rest onto the command line would leave the credential the odd
+// one out. Anything malformed is a usage error (exit 64) with no verdict
+// printed, because the checks never ran.
+
+function commonOptions(cmd: Argv): Argv {
+  return cmd
+    .option("json", {
+      type: "boolean",
+      default: false,
+      describe:
+        "print the machine-readable verdict on stdout instead of the " +
+        "human-readable check lines",
+    })
+    .option("log-level", {
+      type: "string",
+      describe: "silent | error | warn | info | debug | trace; default=info",
+    })
+    .option("log-file", {
+      type: "string",
+      describe:
+        "append all log output to this file instead of the terminal; the " +
+        "parent directory must already exist",
+    });
+}
+
+/** Handler for `psilink doctor probe`. */
+export function probeHandler(argv: Arguments): Promise<void> {
+  return runDoctor(argv, "probe");
+}
+
+/** Handler for `psilink doctor mount DIRECTORY`. */
+export function mountHandler(argv: Arguments): Promise<void> {
+  return runDoctor(argv, "mount");
+}
+
+export function builder(cmd: Argv): Argv {
+  return cmd
+    .usage("Usage: $0 doctor <probe | mount DIRECTORY> [options]")
+    .command(
+      "probe",
+      "Check the file drop over the network, without mounting it",
+      (probe) => commonOptions(probe).usage("Usage: $0 doctor probe [options]"),
+      probeHandler,
+    )
+    .command(
+      "mount <directory>",
+      "Check an already-mounted file-drop directory",
+      (mount) =>
+        commonOptions(mount)
+          .usage("Usage: $0 doctor mount DIRECTORY [options]")
+          .positional("directory", {
+            type: "string",
+            describe: "the mounted file-drop directory to check",
+            demandOption: true,
+          }),
+      mountHandler,
+    )
+    .demandCommand(
+      1,
+      "specify which checks to run: `doctor probe` or `doctor mount DIRECTORY`",
+    );
+}
+
+async function runDoctor(
+  argv: Arguments,
+  mode: "probe" | "mount",
+): Promise<void> {
+  const logLevel = parseOrExit((): logLibrary.LogLevelNumbers => {
+    const raw = (
+      (singleValue(argv, "log-level") as string | undefined) || "info"
+    ).toLowerCase();
+    const resolved = LOG_LEVELS[raw];
+    if (resolved === undefined)
+      throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
+    return resolved;
+  });
+  const { log, close: closeLogging } = parseOrExit(() =>
+    configureLogging({
+      logLevel,
+      logFile: singleValue(argv, "log-file") as string | undefined,
+      name: `doctor-${mode}`,
+    }),
+  );
+
+  try {
+    const report =
+      mode === "probe"
+        ? await runProbe(readSmbProbeInput(process.env))
+        : runMountChecks(
+            // Backslashes are folded on ingestion so a Windows-shaped path
+            // names the intended directory, the convention every operator-
+            // supplied local path in the CLI follows.
+            (singleValue(argv, "directory") as string).replace(/\\/g, "/"),
+            readSmbMountInput(process.env),
+          );
+    emit(report, argv["json"] === true, log);
+    // Not process.exit: the verdict may still be draining to a pipe, and the
+    // exit code is the caller's whole machine-readable answer when --json is
+    // not in use.
+    process.exitCode = DOCTOR_EXIT_CODE[overallOf(report)];
+  } catch (err) {
+    // A malformed input is a usage error (64); anything else escaping the
+    // batteries -- they classify a tool failure rather than throwing -- is an
+    // availability failure (69), the same mapping the other commands apply.
+    exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+  } finally {
+    closeLogging();
+  }
+}
+
+/**
+ * Write the verdict. The `--json` document is the command's result, so it goes
+ * to stdout (one line, `console.log`), keeping a capture or pipe clean; the
+ * human check lines are a diagnostic and route through the logger to stderr.
+ * They carry server-controlled bytes -- an NT_STATUS token and smbclient's own
+ * output -- so they are escaped at that sink; the JSON form needs no escaping,
+ * since JSON string encoding already escapes every control byte and its consumer
+ * re-validates at its own boundary.
+ */
+function emit(
+  report: DoctorReport,
+  json: boolean,
+  log: { info: (message: string) => void },
+): void {
+  if (json) {
+    console.log(verdictJson(report));
+    return;
+  }
+  for (const line of verdictLines(report)) log.info(sanitizeForDisplay(line));
+}

@@ -11,6 +11,7 @@ import {
 import { handler as inviteHandler } from "../../src/commands/invite";
 import { handler as initHandler } from "../../src/commands/init";
 import { handler as fingerprintHandler } from "../../src/commands/fingerprint";
+import { mountHandler as doctorMountHandler } from "../../src/commands/doctor";
 import {
   loadSigningIdentity,
   saveSigningIdentity,
@@ -20,7 +21,7 @@ import {
   snapshotDiagnosticSinkAndLevel,
 } from "../loggingTestSupport";
 
-// Executable form of the contract issue 206965143 establishes: stdout carries
+// Executable form of the stdout contract: stdout carries
 // only a command's result data, and every diagnostic goes to stderr. These tests
 // run a command to completion and assert nothing diagnostic reached stdout -- the
 // property a prose note could only claim, not enforce (CONTRIBUTING: encode a
@@ -34,9 +35,9 @@ import {
 // Covered here are the offline, no-network commands whose stdout shape is
 // unambiguous: `invite` (a single opaque token), `init` (no stdout result -- its
 // result is the written file), and `fingerprint` (the bare fingerprint value;
-// board item 207023432 routed its action banner, bound identity, --force
-// regeneration warning, and out-of-band sharing instructions off stdout and
-// through the logger). The online CSV-result commands route diagnostics through
+// its action banner, bound identity, --force regeneration warning, and
+// out-of-band sharing instructions all route off stdout and through the
+// logger). The online CSV-result commands route diagnostics through
 // the same sink, pinned at the sink level in stderrLogging.test.ts.
 
 const DIAGNOSTIC_PREFIX = /\[(TRACE|DEBUG|INFO|WARN|ERROR)\]/;
@@ -266,6 +267,59 @@ test("fingerprint (regenerated): stdout is the new bare fingerprint value, the -
     expect(stderr).toMatch(/\[WARN\]/);
   } finally {
     process.chdir(cwd);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor mount --json: stdout is the verdict line only, check lines on stderr", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-stdout-doctor-"));
+  const previousExitCode = process.exitCode;
+  try {
+    const { stdout, stderr } = await runCapturing(() =>
+      doctorMountHandler({
+        _: [],
+        $0: "psilink",
+        directory: dir,
+        json: true,
+        "log-level": "info",
+      } as unknown as Arguments),
+    );
+
+    // The verdict is the command's result, so stdout is exactly one JSON line a
+    // launcher can parse -- no check lines, no diagnostic prefix.
+    const stdoutLines = stdout.split("\n").filter((l) => l.length > 0);
+    expect(stdoutLines).toHaveLength(1);
+    expect(stdout).not.toMatch(DIAGNOSTIC_PREFIX);
+    const verdict = JSON.parse(stdoutLines[0]) as { mode: string };
+    expect(verdict.mode).toBe("mount");
+    expect(stderr).not.toContain('"checks"');
+  } finally {
+    process.exitCode = previousExitCode;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor mount without --json: stdout is empty, the check lines go to stderr", async () => {
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "psilink-stdout-doctor-h-"),
+  );
+  const previousExitCode = process.exitCode;
+  try {
+    const { stdout, stderr } = await runCapturing(() =>
+      doctorMountHandler({
+        _: [],
+        $0: "psilink",
+        directory: dir,
+        json: false,
+        "log-level": "info",
+      } as unknown as Arguments),
+    );
+
+    expect(stdout).toBe("");
+    expect(stderr).toContain("OK: ");
+    expect(stderr).toMatch(DIAGNOSTIC_PREFIX);
+  } finally {
+    process.exitCode = previousExitCode;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
