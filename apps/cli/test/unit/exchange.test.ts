@@ -9,10 +9,12 @@ import {
   encodeInvitation,
   getDefaultLinkageTerms,
   getLogger,
+  prepareForExchange,
 } from "@psilink/core";
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { runProtocol } from "../../src/protocol";
+import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 import {
   builder,
   handler,
@@ -66,6 +68,12 @@ vi.mock("@psilink/core", async (importActual) => {
 // success, reject = failed exchange) deterministically, without opening a real
 // connection. protocol.test.ts covers the real runProtocol.
 vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
+
+// First-use host-key trust is a no-op for the filedrop configs the other handler
+// tests use, but live for the sftp one the prepare-before-connect ordering test
+// drives; stub it so that test reaches the runProtocol hand-off without probing
+// sftp.example.org (hostKeyTrust.test.ts covers the real flow).
+vi.mock("../../src/hostKeyTrust", () => ({ establishHostKeyTrust: vi.fn() }));
 
 // 43-char base64url tokens satisfying the sharedSecret format constraint.
 const TOKEN_A = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -1063,6 +1071,52 @@ test("handler: --invitation with a malformed code fails closed (exit 64), writin
     ).rejects.toThrow("exit:64");
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
     expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+// --- handler: prepare-time guards precede the credential-bearing connect -----
+
+test("handler: the prepare-time guard completes before runProtocol on an sftp config", async () => {
+  // The disclosure property the docs state is that every prepare-time guard
+  // settles before the run that carries credentials, terms, and data -- that is
+  // runProtocol, not the first connection. An sftp config keeps the unpinned
+  // first-use host-key path live (stubbed above), which is exactly the shape
+  // where a probe can open a socket ahead of the guard, so pin the ordering
+  // here rather than over a filedrop config where nothing connects early.
+  fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+
+  vi.mocked(prepareForExchange).mockClear();
+  vi.mocked(establishHostKeyTrust).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await handler({
+      _: [],
+      $0: "psilink",
+      input,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+    } as unknown as Arguments);
+    expect(exitSpy).not.toHaveBeenCalled();
+    // Not an ordering assertion: it establishes that this config took the
+    // host-key path at all, so the test is not silently a filedrop equivalent.
+    expect(vi.mocked(establishHostKeyTrust)).toHaveBeenCalled();
+    // Vitest stamps every mock call with a run-wide sequence number, which is
+    // what orders calls on two separate mocks against each other.
+    const [guarded] = vi.mocked(prepareForExchange).mock.invocationCallOrder;
+    const [ran] = vi.mocked(runProtocol).mock.invocationCallOrder;
+    expect(guarded).toBeLessThan(ran);
   } finally {
     exitSpy.mockRestore();
   }

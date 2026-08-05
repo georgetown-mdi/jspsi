@@ -676,7 +676,7 @@ test("validateAccept: warns when the input discloses columns the invitation acce
   // An explicit empty receive is the inviter declaring it takes no payload column,
   // while inferMetadata defaults every unrecognized column to is_payload: true --
   // so the configuration this acceptance writes cannot run (prepareForExchange
-  // refuses it before connecting). One warning, however many columns, naming them
+  // refuses it before any data is sent). One warning, however many columns, naming them
   // and both remedies, while the operator can still decline.
   const hostile = `notes${ESC}[0m`;
   const { warnings, ready } = await acceptWarnings({
