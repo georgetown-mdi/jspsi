@@ -1,6 +1,7 @@
 import {
   DirectoryListingBoundsError,
   DISPLAY_TRUNCATION_MARKER,
+  redactPrivateKeyMaterial,
   type TransportOperationStalledError,
 } from "@psilink/core";
 
@@ -83,14 +84,17 @@ export const MAX_FILENAME_LENGTH = 255;
  * {@link MAX_DIRECTORY_ENTRIES}. `dirPath` is the rendezvous path (operator-
  * configured, but it can be seeded from a charset-unconstrained partner invitation
  * endpoint on an offline-accept config), so it is interpolated raw and escaped
- * where the error is rendered, like every other fragment in this module.
+ * where the error is rendered, like every other fragment in this module. It is
+ * redacted here because it leads the message, ahead of the bound, the refusal
+ * and the next step {@link DirectoryListingBoundsError} appends (see
+ * {@link redactPrivateKeyMaterial}).
  */
 export function directoryTooLargeError(
   dirPath: string,
   max: number,
 ): DirectoryListingBoundsError {
   return new DirectoryListingBoundsError(
-    `directory ${dirPath} contains more than ${max} ` +
+    `directory ${redactPrivateKeyMaterial(dirPath)} contains more than ${max} ` +
       `entries; refusing to enumerate it to avoid an unbounded memory ` +
       `allocation`,
   );
@@ -112,12 +116,17 @@ export function filenameTooLongError(
   max: number,
 ): DirectoryListingBoundsError {
   // A name reaching here is longer than MAX_FILENAME_LENGTH and so longer than
-  // this preview, which is why the marker is unconditional.
-  const shown = `${name.slice(0, 64)}${DISPLAY_TRUNCATION_MARKER}`;
+  // this preview, which is why the marker is unconditional. Redaction runs after
+  // slicing, so the slice still bounds what an attacker-sized name can relay
+  // into memory, and before the marker is appended, so a planted BEGIN marker in
+  // the slice cannot consume it under the fail-closed dangling rule.
+  const shown = `${redactPrivateKeyMaterial(
+    name.slice(0, 64),
+  )}${DISPLAY_TRUNCATION_MARKER}`;
   return new DirectoryListingBoundsError(
-    `directory ${dirPath} contains an entry whose filename ` +
-      `is ${name.length} characters, exceeding the maximum of ${max} (${shown}); ` +
-      `refusing to process it`,
+    `directory ${redactPrivateKeyMaterial(dirPath)} contains an entry whose ` +
+      `filename is ${name.length} characters, exceeding the maximum of ` +
+      `${max} (${shown}); refusing to process it`,
   );
 }
 

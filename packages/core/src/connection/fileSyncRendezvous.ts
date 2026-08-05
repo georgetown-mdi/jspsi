@@ -38,6 +38,7 @@ import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
 } from "../utils/sanitizeForDisplay";
+import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay";
 import {
   parseBoundedJson,
   JsonStructureBoundError,
@@ -93,6 +94,30 @@ export interface RendezvousScope {
   outboundPath: string;
   split: boolean;
   dirsDisplay: string;
+}
+
+/**
+ * Compose the operator-facing directory scope, redacting each path where it is
+ * interpolated rather than the composed result. The split form carries
+ * first-party labels BETWEEN two paths, so redacting the composite would let a
+ * marker in the inbound path consume the labels and the operator's own outbound
+ * path under the fail-closed dangling rule -- the shape
+ * {@link redactPrivateKeyMaterial} exists to contain. Every production producer
+ * of a {@link RendezvousScope}'s `dirsDisplay`, and the sweep's own scope
+ * string, goes through here -- a convention, not a guarantee: `dirsDisplay` is a
+ * plain string, so a producer composing one by hand is not rejected by the type.
+ *
+ * @internal
+ */
+export function composeDirsDisplay(
+  inboundPath: string,
+  outboundPath: string | undefined,
+): string {
+  const inbound = redactPrivateKeyMaterial(inboundPath);
+  return outboundPath === undefined
+    ? inbound
+    : `${inbound} (inbound) and ` +
+        `${redactPrivateKeyMaterial(outboundPath)} (outbound)`;
 }
 
 // What a caller of the read gate knows about the hello it is asking for: whether
@@ -168,8 +193,8 @@ export async function readControlFileWithGate(
       // structural bound) and still retries.
       if (err instanceof JsonStructureBoundError)
         throw new UsageError(
-          `control file at ${filePath} has a malformed payload: structure ` +
-            `exceeds the permitted bound`,
+          `control file at ${redactPrivateKeyMaterial(filePath)} has a ` +
+            `malformed payload: structure exceeds the permitted bound`,
         );
       // Partial write: body is not valid JSON yet; retry until fully synced.
       await cancellableDelay(pollingFrequency, signal);
@@ -178,8 +203,8 @@ export async function readControlFileWithGate(
     const result = schema.safeParse(parsed);
     if (!result.success) {
       throw new UsageError(
-        `control file at ${filePath} has a malformed payload: ` +
-          `${result.error.message}`,
+        `control file at ${redactPrivateKeyMaterial(filePath)} has a ` +
+          `malformed payload: ${result.error.message}`,
       );
     }
     return result.data;
@@ -481,18 +506,20 @@ const clipToRenderedCost = (value: string, budget: number): string => {
 // does not fit is counted rather than shown, because a name the cap chopped
 // reads like a whole name the operator could go and delete.
 //
-// Stated limit: the enumeration is suppressible by name shape as well as by
-// length. sanitizeErrorForDisplay redacts before it caps, and its dangling-BEGIN
-// rule replaces from the marker to the end of the string, so one filename shaped
-// like a PEM private-key header takes the rest of this link with it -- that name
-// and every name after it. The refusal and the recovery step ride in the other
-// link, out of that rule's reach.
+// The names and the directory scope are partner-controlled and are redacted
+// here, so a name shaped like a PEM header is replaced where it stands instead
+// of taking the count, the scope and the names behind it with it (see
+// redactPrivateKeyMaterial). Redacting before the fit loop spends the budget on
+// what the operator is actually shown, and the replacement is shorter than the
+// shortest marker it can stand in for, so it never widens a fitted name.
 const entryGuardRefusal = (
   refusalAndRecovery: string,
   kindPlural: string,
-  dirsDisplay: string,
-  names: string[],
+  rawDirsDisplay: string,
+  rawNames: string[],
 ): UsageError => {
+  const dirsDisplay = redactPrivateKeyMaterial(rawDirsDisplay);
+  const names = rawNames.map(redactPrivateKeyMaterial);
   const head = `${names.length} ${kindPlural} in `;
   // The floor plus the widest count suffix the enumeration can end on, held
   // back before the directory scope is fitted.
@@ -727,10 +754,7 @@ export class FileSyncRendezvous {
     // split mode the sweep deletes from BOTH directories (peer leftovers in
     // inbound, this party's own leftovers in outbound), so name both; in shared
     // mode it collapses to the inbound display path.
-    const dirsDisplay =
-      deps.outbound() === undefined
-        ? inboundPath
-        : `${inboundPath} (inbound) and ${deps.outbound()!} (outbound)`;
+    const dirsDisplay = composeDirsDisplay(inboundPath, deps.outbound());
 
     const signals: string[] = [];
     let retainUncertain = false;
@@ -821,8 +845,8 @@ export class FileSyncRendezvous {
           : "a peer hello body that did not resolve within the inspection " +
             "budget (retain-uncertain)";
       throw new UsageError(
-        `path ${dirsDisplay} shows a retain-mode signal ` +
-          `(${reason}), so ` +
+        `path ${redactPrivateKeyMaterial(dirsDisplay)} shows a retain-mode ` +
+          `signal (${redactPrivateKeyMaterial(reason)}), so ` +
           "--sweep-exchange-files refuses to delete what may be a durable audit " +
           "transcript. Re-run with --force-retain-sweep to wipe the prior " +
           "transcript and start a fresh exchange, after confirming no concurrent " +
@@ -881,15 +905,22 @@ export class FileSyncRendezvous {
         deps.client().delete(`${entry.dir}/${entry.name}`),
       ),
     );
+    // Name and transport error are partner- or server-controlled and sit ahead
+    // of the "partially swept" warning and the re-run step in this one link (see
+    // redactPrivateKeyMaterial).
     const failures = results.flatMap((result, i) =>
       result.status === "rejected"
-        ? [`${toDelete[i].name} (${errMessage(result.reason)})`]
+        ? [
+            `${redactPrivateKeyMaterial(toDelete[i].name)} ` +
+              `(${redactPrivateKeyMaterial(errMessage(result.reason))})`,
+          ]
         : [],
     );
     if (failures.length > 0)
       throw new Error(
         `--sweep-exchange-files failed to delete ${failures.length} of ` +
-          `${toDelete.length} protocol file(s) at ${dirsDisplay}: ` +
+          `${toDelete.length} protocol file(s) at ` +
+          `${redactPrivateKeyMaterial(dirsDisplay)}: ` +
           `${failures.join("; ")}. The directory may be partially swept; ` +
           "resolve the transport error and re-run.",
       );
@@ -1484,7 +1515,7 @@ export class FileSyncRendezvous {
       if (!deps.options().retainFiles) deps.responsibleFiles.delete(helloName);
       deps.resetSessionState();
       throw new Error(
-        `peer id '${peerId}' and this party's id ` +
+        `peer id '${redactPrivateKeyMaterial(peerId)}' and this party's id ` +
           `'${deps.id()}' share a prefix at a '-' boundary; ids must not be ` +
           "prefix-extensions of each other (e.g. 'site' / 'site-2')",
       );
@@ -1586,7 +1617,8 @@ export class FileSyncRendezvous {
 
           if (peerHellos.length > 1) {
             throw new UsageError(
-              `more than one peer hello file in ${scope.inboundPath} - are ` +
+              `more than one peer hello file in ` +
+                `${redactPrivateKeyMaterial(scope.inboundPath)} - are ` +
                 "there other sessions using this path?",
             );
           }
@@ -1801,7 +1833,8 @@ export class FileSyncRendezvous {
             // surface it the same way rather than silently timing the first.
             if (joiningFiles.length > 1) {
               throw new UsageError(
-                `more than one joining sentinel in ${scope.inboundPath} - ` +
+                `more than one joining sentinel in ` +
+                  `${redactPrivateKeyMaterial(scope.inboundPath)} - ` +
                   "are there other sessions using this path?",
               );
             }
@@ -1849,7 +1882,8 @@ export class FileSyncRendezvous {
               // entry fast-path and never enters this loop -- even though
               // `this.role` is not committed until rendezvous succeeds.
               throw new Error(
-                `[starter] peer began arriving (${joiningName}) but did ` +
+                `[starter] peer began arriving ` +
+                  `(${redactPrivateKeyMaterial(joiningName)}) but did ` +
                   "not complete within the recovery window; it appears to " +
                   "have failed after announcing its arrival but before " +
                   "publishing its hello. Retry the exchange.",
@@ -1895,8 +1929,8 @@ export class FileSyncRendezvous {
         );
         if (foreignSentinel) {
           throw new UsageError(
-            `joining sentinel ${foreignSentinel.name} ` +
-              `in ${scope.inboundPath} ` +
+            `joining sentinel ${redactPrivateKeyMaterial(foreignSentinel.name)} ` +
+              `in ${redactPrivateKeyMaterial(scope.inboundPath)} ` +
               "matches no peer hello - are there other sessions using " +
               "this path?",
           );
@@ -2023,7 +2057,8 @@ export class FileSyncRendezvous {
 
         if (otherFiles.length > 1) {
           throw new UsageError(
-            `more than one peer hello file in ${scope.inboundPath} - are ` +
+            `more than one peer hello file in ` +
+              `${redactPrivateKeyMaterial(scope.inboundPath)} - are ` +
               "there other sessions using this path?",
           );
         }
@@ -2084,7 +2119,8 @@ export class FileSyncRendezvous {
         } else {
           if (theseFiles.length > 1) {
             throw new UsageError(
-              `more than one self hello file in ${scope.inboundPath} - are ` +
+              `more than one self hello file in ` +
+                `${redactPrivateKeyMaterial(scope.inboundPath)} - are ` +
                 "there other sessions using this path?",
             );
           }
@@ -2245,7 +2281,8 @@ export class FileSyncRendezvous {
       // degrades gracefully to the bare timeout below if they ever diverged.
       if (joiningSeenAt !== undefined && joiningSeenName !== undefined) {
         throw new Error(
-          `[starter] peer began arriving (${joiningSeenName}) but the ` +
+          `[starter] peer began arriving ` +
+            `(${redactPrivateKeyMaterial(joiningSeenName)}) but the ` +
             "exchange timed out before it completed; it appears to have " +
             "failed after announcing its arrival but before publishing its " +
             "hello. Retry the exchange.",
@@ -2284,8 +2321,8 @@ export class FileSyncRendezvous {
         deps.id().startsWith(deps.peerId()! + "-")
       )
         throw new UsageError(
-          `peer id '${deps.peerId()!}' and this party's ` +
-            `id '${deps.id()}' share ` +
+          `peer id '${redactPrivateKeyMaterial(deps.peerId()!)}' and this ` +
+            `party's id '${deps.id()}' share ` +
             "a prefix at a '-' boundary; ids must not be prefix-extensions " +
             "of each other (e.g. 'site' / 'site-2')",
         );

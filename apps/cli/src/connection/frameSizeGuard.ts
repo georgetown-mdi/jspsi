@@ -1,6 +1,9 @@
 import { Writable } from "node:stream";
 
-import { FrameSizeExceededError } from "@psilink/core";
+import {
+  FrameSizeExceededError,
+  redactPrivateKeyMaterial,
+} from "@psilink/core";
 
 import {
   SFTP_STALL_DEADLINE_MS,
@@ -34,7 +37,10 @@ import {
  *
  * `path` is interpolated raw and escaped where the error is rendered: on a
  * `get()` it carries the peer-supplied filename, whose control/ANSI or
- * deceptive-Unicode characters the display boundary neutralizes.
+ * deceptive-Unicode characters the display boundary neutralizes. It is redacted
+ * here because it leads the message, ahead of the cap, the refusal and the next
+ * step {@link FrameSizeExceededError} appends (see
+ * {@link redactPrivateKeyMaterial}).
  */
 export function frameSizeExceededError(
   path: string,
@@ -47,7 +53,8 @@ export function frameSizeExceededError(
       : `is ${observedBytes} bytes, exceeding the maximum frame size of ` +
         `${maxBytes} bytes`;
   return new FrameSizeExceededError(
-    `inbound file ${path} ${detail}; refusing to read it ` + `into memory`,
+    `inbound file ${redactPrivateKeyMaterial(path)} ${detail}; ` +
+      `refusing to read it into memory`,
   );
 }
 

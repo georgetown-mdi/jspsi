@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 
 import {
   TransportOperationStalledError,
+  redactPrivateKeyMaterial,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -66,7 +67,10 @@ export const SFTP_STALL_DEADLINE_MS = 60_000;
  * read/write/delete operation paths carry a peer-supplied filename, so a hostile
  * server's control/ANSI or deceptive-Unicode characters are neutralized at the
  * display boundary rather than here, where escaping them would leave the sink to
- * escape them a second time.
+ * escape them a second time. Both `path` and `detail` are additionally redacted
+ * here, ahead of the refusal and the next step
+ * {@link TransportOperationStalledError} appends; redaction is not escaping and
+ * so does not double (see {@link redactPrivateKeyMaterial}).
  */
 export function transportOperationStalledError(
   operation: string,
@@ -74,7 +78,8 @@ export function transportOperationStalledError(
   detail: string,
 ): TransportOperationStalledError {
   return new TransportOperationStalledError(
-    `SFTP ${operation} of ${path} stalled: ${detail}; ` +
+    `SFTP ${operation} of ${redactPrivateKeyMaterial(path)} stalled: ` +
+      `${redactPrivateKeyMaterial(detail)}; ` +
       `refusing to wait on the server further`,
   );
 }

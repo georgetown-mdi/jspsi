@@ -2712,6 +2712,40 @@ test("send() fails within the peer budget when the server withholds the rename c
   );
 });
 
+// The rename builder is the one bounded operation composing first-party text
+// BETWEEN two transport paths, which is the shape per-fragment redaction exists
+// for: redacting the composed label instead would let a marker in the source
+// path consume the " to " and the destination along with it. Driven through the
+// bound transport directly because every rename the exchange itself issues today
+// has a self-generated temp source -- a property of the current callers, not of
+// this builder, and precisely what a future caller must not be able to break
+// silently. Short paths keep the whole label inside one link, so the display cap
+// is not what ends it.
+test("a private-key-shaped rename source does not take the destination with it", async () => {
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs: 100,
+    timeToLiveMs: 60_000,
+  });
+  // The server accepts the rename but never invokes its callback, so the
+  // consumer-layer budget is what composes and renders the failure.
+  client.rename = () => new Promise<void>(() => {});
+  const bound = (conn as unknown as { client: FileTransportClient }).client;
+
+  const err = await bound
+    .rename("/rv/-----BEGIN RSA PRIVATE KEY-----src", "/rv/dest.json")
+    .then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+  const rendered = sanitizeErrorForDisplay(err);
+
+  expect(rendered).toContain("[redacted private key]");
+  // The first-party join and the destination, both composed BEHIND the marker.
+  expect(rendered).toContain(" to /rv/dest.json");
+  expect(rendered).toContain("peer-inactivity budget");
+});
+
 test("synchronize() fails within the peer budget when the server withholds the delete callback", async () => {
   // The lock-mode joiner fast-path publishes a joining sentinel, then deletes the
   // discovered peer hello, then renames the sentinel to its own hello. A server
@@ -3855,6 +3889,38 @@ test("synchronize() lock starter: a sentinel visible when the TTL expires yields
   // this error already carries its own diagnosis and next step, so a consumer
   // must not layer a second, contradicting likely cause onto it.
   expect(isPeerWaitTimeout(err)).toBe(false);
+});
+
+// The sentinel's name carries a peer id recovered from a partner-written
+// filename under no charset bound, and both stuck-joiner errors put the whole
+// diagnosis and "Retry the exchange." BEHIND it in one link. Redacting the name
+// where it is interpolated is what keeps the next step reachable.
+test("synchronize() lock starter: a private-key-shaped sentinel name does not take the stuck-joiner diagnosis", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    joinerRecoveryMs: 10_000,
+    timeToLiveMs: 150,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const joiningName = `-----BEGIN RSA PRIVATE KEY------joining.json`;
+  files.set(`${conn.path}/${joiningName}`, LOCK_HELLO_BODY);
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [{ name: joiningName, modifyTime: Date.now(), size: 0 }];
+  };
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).toContain("[redacted private key]");
+  expect(rendered).toMatch(/the exchange timed out before it completed/);
+  expect(rendered).toMatch(
+    /failed after announcing its arrival but before publishing its hello/,
+  );
+  expect(rendered).toContain("Retry the exchange.");
 });
 
 test("synchronize() lock starter: a sentinel that vanishes and reappears gets a fresh recovery window", async () => {

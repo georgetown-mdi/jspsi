@@ -117,6 +117,20 @@ describe("filenameTooLongError", () => {
     );
   });
 
+  test("keeps the truncation marker when the name preview carries a PEM BEGIN marker", () => {
+    // The dangling-key rule is fail-closed -- it replaces from an unterminated
+    // BEGIN marker to the end of the text -- so redacting the preview and the
+    // marker together would let a planted marker consume the marker itself and
+    // silently present the truncated name as whole.
+    const hostile = "-----BEGIN RSA PRIVATE KEY-----" + "A".repeat(300);
+    const err = filenameTooLongError("/drop", hostile, 255);
+    expect(err.message).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(err.message).not.toContain("AAAA");
+    // The refusal and the class-appended next step still reach the operator.
+    expect(err.message).toContain("refusing to process it");
+    expect(sanitizeErrorForDisplay(err)).toContain(DISPLAY_TRUNCATION_MARKER);
+  });
+
   // The directory path is escaped through the same helper as in
   // directoryTooLargeError, so the rendezvous path is neutralized uniformly
   // across both bound errors -- defense-in-depth for a path that can be seeded

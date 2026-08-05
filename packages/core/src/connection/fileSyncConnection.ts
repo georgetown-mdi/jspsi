@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getLoggerForVerbosity } from "../utils/logger";
 import { pathsResolveToSameDir } from "../utils/pathCompare";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
+import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay";
 import {
   DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
@@ -49,7 +50,11 @@ export {
   serializeFileSyncMessageHeader,
   serializeFileSyncMessage,
 } from "./fileSyncFraming";
-import { FileSyncRendezvous, type RendezvousScope } from "./fileSyncRendezvous";
+import {
+  composeDirsDisplay,
+  FileSyncRendezvous,
+  type RendezvousScope,
+} from "./fileSyncRendezvous";
 
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -86,14 +91,18 @@ export function normalizeFiledropPath(rawPath: string): string {
 // error: the target it names is a transport path, and on a get/delete of a peer
 // message file that path embeds the partner-chosen filename, so its
 // control/ANSI/Unicode bytes are neutralized by sanitizeErrorForDisplay where
-// the message is shown. This is the core-side whole-exchange-budget twin of the
-// CLI adapter's per-operation transportOperationStalledError.
+// the message is shown. It is redacted here because it leads the message, ahead
+// of the budget, the diagnosis and the next step TransportOperationStalledError
+// appends; a caller composing first-party text BETWEEN two fragments redacts
+// each of them itself, since this composite pass cannot (see
+// redactPrivateKeyMaterial). This is the core-side whole-exchange-budget twin of
+// the CLI adapter's per-operation transportOperationStalledError.
 const transportBudgetExceededError = (
   operation: string,
   budgetMs: number,
 ): TransportOperationStalledError =>
   new TransportOperationStalledError(
-    `transport ${operation} exceeded the ${budgetMs} ms ` +
+    `transport ${redactPrivateKeyMaterial(operation)} exceeded the ${budgetMs} ms ` +
       `peer-inactivity budget; the peer or server has not responded within the ` +
       `budget, so the exchange is failing rather than waiting on it further`,
   );
@@ -906,10 +915,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       put: (src, dest, options) =>
         bound(raw.put(src, dest, options), `file write to ${dest}`),
       delete: (path) => bound(raw.delete(path), `delete of ${path}`),
+      // The one builder composing first-party text BETWEEN two paths, so each is
+      // redacted here rather than left to the composite below, which would let a
+      // marker in `fromPath` consume the ` to ` and the destination.
       rename: (fromPath, toPath) =>
         bound(
           raw.rename(fromPath, toPath),
-          `rename of ${fromPath} to ${toPath}`,
+          `rename of ${redactPrivateKeyMaterial(fromPath)} to ` +
+            `${redactPrivateKeyMaterial(toPath)}`,
         ),
       createExclusive: (path) =>
         bound(raw.createExclusive(path), `exclusive create of ${path}`),
@@ -1535,9 +1548,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // outbound for the freshness check), or just the inbound path otherwise.
     // Mirrors sweepProtocolFiles' dirsDisplay so a split exchange names both
     // halves consistently wherever a path appears.
-    const dirsDisplay = split
-      ? `${inboundPath} (inbound) and ${outboundPath} (outbound)`
-      : inboundPath;
+    const dirsDisplay = composeDirsDisplay(
+      inboundPath,
+      split ? outboundPath : undefined,
+    );
 
     if (this.peerId) throw new Error("already synchronized");
 

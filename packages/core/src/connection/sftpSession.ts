@@ -27,6 +27,7 @@
 
 import type { getLoggerForVerbosity } from "../utils/logger";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
+import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay";
 import {
   computeHostKeyFingerprint,
   matchHostKeyFingerprint,
@@ -302,10 +303,15 @@ export class SftpSession {
               // also surface the digest of a non-matching key.
               const presented = await computeHostKeyFingerprint(blob);
               // keyTypeFromBlob decodes UTF-8 straight from the
-              // server-controlled blob, so it is quoted in the message below and
-              // escaped where the error is rendered; the presented fingerprint
-              // is base64 and the pins are format-validated.
-              const keyType = keyTypeFromBlob(blob);
+              // server-controlled blob under no allowlist, so it is quoted in
+              // the message below and escaped where the error is rendered; the
+              // presented fingerprint is base64 and the pins are
+              // format-validated. It is redacted here because it is the one
+              // fragment of this message a server chooses and it leads: without
+              // that, the party this message warns about picks the string that
+              // deletes the comparison the operator makes by hand (see
+              // redactPrivateKeyMaterial).
+              const keyType = redactPrivateKeyMaterial(keyTypeFromBlob(blob));
               // Name the presented fingerprint and the pinned set so the
               // operator can see exactly what was offered against what was
               // trusted (the singular vs. plural wording adapts to the pin
@@ -352,7 +358,13 @@ export class SftpSession {
           try {
             const blob = hostKeyBlob(keyBlob);
             const presented = await computeHostKeyFingerprint(blob);
-            const keyType = keyTypeFromBlob(blob);
+            // Redacted for the same reason as the mismatch branch above, on the
+            // message whose whole purpose is handing the operator a fingerprint
+            // to pin. Composed raw, a PEM-header key type ends the link where it
+            // sits, taking even the label naming what the server presented. How
+            // much of the tail the per-link cap removes anyway is a separate
+            // bound, pinned alongside this one in sftpSession.test.ts.
+            const keyType = redactPrivateKeyMaterial(keyTypeFromBlob(blob));
             mismatchDetails =
               `no host_key_fingerprint is pinned for ` +
               `${config.server.host}, so the server's ` +
@@ -364,7 +376,9 @@ export class SftpSession {
           } catch (err) {
             mismatchDetails =
               `no host_key_fingerprint is pinned and the presented host key ` +
-              `could not be read (${errMessage(err)}); refusing to proceed.`;
+              `could not be read ` +
+              `(${redactPrivateKeyMaterial(errMessage(err))}); refusing to ` +
+              `proceed.`;
             settleVerify(verify, false);
           }
         })();

@@ -62,6 +62,7 @@ export type {
 } from "./utils/sanitizeForDisplay";
 export {
   sanitizeErrorForDisplay,
+  redactPrivateKeyMaterial,
   MAX_ERROR_CAUSE_DEPTH,
 } from "./utils/sanitizeErrorForDisplay";
 export { describeDecodeError } from "./utils/describeDecodeError";

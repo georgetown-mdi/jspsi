@@ -55,14 +55,36 @@ const PRIVATE_KEY_BLOCK =
 const PRIVATE_KEY_DANGLING = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*/g;
 
 /**
- * Last-resort redaction backstop applied to each error-message link before it is
- * shown. This is NOT the primary defense: secret-bearing files are parsed
- * through the sensitive-file chokepoint (shared in `@psilink/core`, re-exported by
- * the CLI) so a parse error never carries source, and that prevention is what
- * callers must rely on. This
- * only contains an UNANTICIPATED sink -- some future code path that interpolates
- * key material into an error -- by stripping PEM / OpenSSH private-key blocks,
- * which are unambiguous and never a legitimate part of error output.
+ * Last-resort redaction backstop for PEM / OpenSSH private-key material in text
+ * about to be shown to an operator. This is NOT the primary defense:
+ * secret-bearing files are parsed through the sensitive-file chokepoint (shared
+ * in `@psilink/core`, re-exported by the CLI) so a parse error never carries
+ * source, and that prevention is what callers must rely on. This only contains
+ * an UNANTICIPATED sink -- some future code path that interpolates key material
+ * into an error -- by stripping private-key blocks, which are unambiguous and
+ * never a legitimate part of error output.
+ *
+ * The dangling rule replaces from a BEGIN marker with no END to the end of the
+ * text, which is deliberately FAIL-CLOSED: a key sliced into an error carries no
+ * reliable structure by the time it is rendered -- its line breaks may have been
+ * folded to spaces or stripped entirely by whatever carried it -- so the only
+ * bound that holds for every delivery is "everything after the marker". Any rule
+ * that infers where the key body ends from the shape of the remaining bytes
+ * leaks the body whenever the shape it expects is absent.
+ *
+ * The cost of failing closed is that the replacement also consumes whatever was
+ * composed after the marker. That is why partner-controlled fragments are passed
+ * through this function AT THEIR COMPOSITION SITE, before being interpolated
+ * into a message: a planted marker inside an already-redacted fragment does not
+ * exist by the time the whole link is rendered, so it cannot reach the operator
+ * text composed behind it. The function is idempotent -- the replacement carries
+ * no marker -- so the per-link application below is unaffected by a fragment
+ * having been redacted already.
+ *
+ * This is redaction, not escaping, and it does not make a composition site a
+ * second escaping altitude: the fragment is still interpolated raw and still
+ * escaped exactly once, by {@link sanitizeForDisplay} at the display sink (see
+ * CONTRIBUTING.md, Operator-facing escaping).
  *
  * Deliberately narrow: it does NOT scrub by secret-shape (e.g. a 43-char
  * base64url token), because the shared-secret and a host-key fingerprint share
@@ -70,8 +92,8 @@ const PRIVATE_KEY_DANGLING = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*/g;
  * scrubbing would redact legitimate output. Bare-token containment belongs to the
  * chokepoint, not here.
  */
-function redactSecretsForDisplay(message: string): string {
-  return message
+export function redactPrivateKeyMaterial(text: string): string {
+  return text
     .replace(PRIVATE_KEY_BLOCK, REDACTED_PRIVATE_KEY)
     .replace(PRIVATE_KEY_DANGLING, REDACTED_PRIVATE_KEY);
 }
@@ -84,9 +106,11 @@ function redactSecretsForDisplay(message: string): string {
  * usable for log-line spoofing, bidi overrides, zero-width and confusable
  * characters -- cannot reach a terminal, log line, or UI element. Each link is
  * additionally passed through a narrow secret-redaction backstop that strips PEM
- * / OpenSSH private-key blocks (see {@link redactSecretsForDisplay}); this is a
+ * / OpenSSH private-key blocks (see {@link redactPrivateKeyMaterial}); this is a
  * last resort for an unanticipated sink, not the primary defense (secret-bearing
- * files are parsed leak-safely at their source).
+ * files are parsed leak-safely at their source). That backstop is fail-closed
+ * past a truncated key, so a fragment a partner controls is redacted where it is
+ * composed rather than here -- see {@link redactPrivateKeyMaterial}.
  *
  * This is the display-boundary seam for rendering a raw error INSTANCE to a
  * human. The transport and message layers deliberately preserve the original
@@ -158,6 +182,6 @@ export function sanitizeErrorForDisplay(err: unknown): string {
     current = next;
   }
   return rawMessages
-    .map((message) => sanitizeForDisplay(redactSecretsForDisplay(message)))
+    .map((message) => sanitizeForDisplay(redactPrivateKeyMaterial(message)))
     .join(CAUSE_SEPARATOR);
 }
