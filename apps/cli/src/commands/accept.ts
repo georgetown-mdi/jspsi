@@ -352,7 +352,13 @@ export async function validateAccept(params: {
       rows,
     });
     for (const w of warnings) log.warn(w);
-    warnColumnsTheInvitationWillNotAccept(dataSpec.metadata, myTerms, log);
+    warnColumnsTheInvitationWillNotAccept({
+      metadata: dataSpec.metadata,
+      columnNames: rows.columns,
+      terms: myTerms,
+      mode: "online",
+      log,
+    });
 
     const prepared = await prepareForOnlineExchange(dataSpec, myIdentity, rows);
     // Lock in the columns the invitation declared the inviter will send, so the
@@ -408,7 +414,13 @@ export async function validateAccept(params: {
     rows,
   });
   for (const w of warnings) log.warn(w);
-  warnColumnsTheInvitationWillNotAccept(dataSpec.metadata, myTerms, log);
+  warnColumnsTheInvitationWillNotAccept({
+    metadata: dataSpec.metadata,
+    columnNames: rows?.columns,
+    terms: myTerms,
+    mode: "offline",
+    log,
+  });
 
   const { connection, seeded } = connectionFromEndpoint(
     token.connectionEndpoint,

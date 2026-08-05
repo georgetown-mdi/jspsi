@@ -57,7 +57,13 @@ vi.mock("../../src/onlineBootstrap", async () => {
   const actual = await vi.importActual<
     typeof import("../../src/onlineBootstrap")
   >("../../src/onlineBootstrap");
-  return { ...actual, runOnlineBootstrap: vi.fn() };
+  return {
+    ...actual,
+    runOnlineBootstrap: vi.fn(),
+    // Delegates to the real implementation for every test but the one that
+    // overrides a single call to reach its metadata-dropped branch.
+    buildDataSpec: vi.fn(actual.buildDataSpec),
+  };
 });
 
 import {
@@ -69,6 +75,7 @@ import {
 } from "../../src/commands/accept";
 import { logDecisionFacts } from "../../src/invitationDisplay";
 import {
+  buildDataSpec,
   generateSharedSecret,
   runOnlineBootstrap,
 } from "../../src/onlineBootstrap";
@@ -597,41 +604,72 @@ const REFUSED_DISCLOSURE_CLAUSE = "will accept no payload columns";
  * An invitation whose inviter declares `receive` -- what it will accept FROM the
  * acceptor. deriveAcceptedLinkageTerms mirrors it onto the acceptor's own
  * `payload.send`, which is what the acceptance writes and what
- * assertPayloadSendDisclosed holds the acceptor's metadata to.
+ * assertPayloadSendDisclosed holds the acceptor's metadata to. `output` overrides
+ * the inviter's output direction; the acceptor's `shareWithPartner` is the mirror
+ * of the inviter's `expectsOutput`, so it is what decides whether this party's
+ * disclosure actually crosses.
  */
 function tokenDeclaringReceive(
   receive: Array<{ name: string }> | undefined,
+  output?: LinkageTerms["output"],
 ): InvitationToken {
   const base = sampleToken(FUTURE());
   return {
     ...base,
-    linkageTerms: { ...base.linkageTerms, payload: { receive } },
+    linkageTerms: {
+      ...base.linkageTerms,
+      ...(output !== undefined ? { output } : {}),
+      payload: { receive },
+    },
   };
 }
 
-/** Every message an offline acceptance of `token` over `columns` warns with. */
-async function offlineAcceptWarnings(
-  token: InvitationToken,
-  columns: string[],
-  loggerName: string,
-): Promise<string[]> {
+/** Every message an acceptance of `token` over `columns` warns with, plus
+ * whatever it threw (online acceptance meets the refusal itself). */
+async function acceptWarnings(params: {
+  token: InvitationToken;
+  columns: string[];
+  loggerName: string;
+  mode?: "online" | "offline";
+  options?: CommonBootstrapOptions;
+}): Promise<{ warnings: string[]; error: unknown; ready: unknown }> {
+  const { token, columns, loggerName, mode = "offline" } = params;
+  const options = params.options ?? testOptions();
   const input = writeInputCSV(columns);
   const log = getLogger(loggerName);
   log.setLevel("silent");
   const warnSpy = vi.spyOn(log, "warn");
+  let error: unknown;
+  let ready: unknown;
   try {
     const encoded = await encodeInvitation(token);
-    const ready = await validateAccept({
-      resolved: { mode: "offline", invitation: encoded, input },
-      options: testOptions(),
+    ready = await validateAccept({
+      resolved:
+        mode === "online"
+          ? {
+              mode: "online",
+              url: new URL("sftp://host/drop"),
+              invitation: encoded,
+              input,
+            }
+          : { mode: "offline", invitation: encoded, input },
+      options,
       log,
     });
-    expect(ready.mode).toBe("offline");
-    return warnSpy.mock.calls.map((c) => String(c[0]));
-  } finally {
-    warnSpy.mockRestore();
-    fs.rmSync(input, { force: true });
+  } catch (err) {
+    error = err;
   }
+  const warnings = warnSpy.mock.calls.map((c) => String(c[0]));
+  warnSpy.mockRestore();
+  fs.rmSync(input, { force: true });
+  return { warnings, error, ready };
+}
+
+/** The one refused-disclosure warning in `warnings`, asserted to be exactly one. */
+function refusedDisclosureWarning(warnings: string[]): string {
+  const refused = warnings.filter((m) => m.includes(REFUSED_DISCLOSURE_CLAUSE));
+  expect(refused).toHaveLength(1);
+  return refused[0];
 }
 
 test("validateAccept: warns when the input discloses columns the invitation accepts none of", async () => {
@@ -641,52 +679,134 @@ test("validateAccept: warns when the input discloses columns the invitation acce
   // refuses it before connecting). One warning, however many columns, naming them
   // and both remedies, while the operator can still decline.
   const hostile = `notes${ESC}[0m`;
-  const warnings = await offlineAcceptWarnings(
-    tokenDeclaringReceive([]),
-    [...LINKAGE_COLUMNS, "diagnosis", hostile],
-    "accept-refused-disclosure-warn",
-  );
-  const refused = warnings.filter((m) => m.includes(REFUSED_DISCLOSURE_CLAUSE));
-  expect(refused).toHaveLength(1);
-  expect(refused[0]).toContain("diagnosis");
-  expect(refused[0]).toContain("is_payload: false");
-  expect(refused[0]).toContain("ask your partner for an invitation");
+  const { warnings, ready } = await acceptWarnings({
+    token: tokenDeclaringReceive([]),
+    columns: [...LINKAGE_COLUMNS, "diagnosis", hostile],
+    loggerName: "accept-refused-disclosure-warn",
+  });
+  expect((ready as { mode: string }).mode).toBe("offline");
+  const refused = refusedDisclosureWarning(warnings);
+  expect(refused).toContain("is_payload: false");
+  expect(refused).toContain("ask your partner for an invitation");
+  // One entry per line, the rendering both consent surfaces use, so a name
+  // carrying the list separator cannot be read as two entries.
+  expect(refused).toContain("\n  - diagnosis");
+  expect(refused).toContain(`\n  - ${sanitizeForDisplay(hostile)}`);
   // The names are the operator's own file's and reach the log sink without ever
   // becoming an Error, so the sink is where they are escaped.
-  expect(refused[0]).not.toContain(ESC);
-  expect(refused[0]).toContain(sanitizeForDisplay(hostile));
+  expect(refused).not.toContain(ESC);
+  // Offline acceptance completes, so it says where the refusal actually arrives.
+  expect(refused).toContain("psilink exchange");
+});
+
+test("validateAccept: online states that the acceptance itself stops, and it does", async () => {
+  // prepareForOnlineExchange runs inside validateAccept, so the refusal the
+  // warning names aborts the acceptance itself rather than waiting for a later
+  // command -- a configuration error, before the terms display and before any
+  // file is written.
+  const options = testOptions();
+  const { warnings, error } = await acceptWarnings({
+    token: tokenDeclaringReceive([]),
+    columns: [...LINKAGE_COLUMNS, "diagnosis"],
+    loggerName: "accept-refused-disclosure-online",
+    mode: "online",
+    options,
+  });
+  const refused = refusedDisclosureWarning(warnings);
+  expect(refused).toContain("exit 64");
+  expect(refused).not.toContain("psilink exchange");
+  expect(error).toBeInstanceOf(UsageError);
+  // The refusal the warning describes, not some other usage error on the path.
+  expect((error as Error).message).toContain("payload.send");
+  expect(fs.existsSync(options.configFile)).toBe(false);
+  expect(fs.existsSync(options.keyFile)).toBe(false);
+});
+
+test("validateAccept: warns on the metadata-dropped path, which the run infers metadata for", async () => {
+  // buildDataSpec keeps the terms and drops the metadata when it cannot derive a
+  // standardization, so the written configuration carries none. That does not
+  // spare the run: prepareForExchange resolves `spec.metadata ?? inferMetadata(
+  // columns)`, so the inferred disclosure meets the same refusal. Read the
+  // disclosed set the way the run will, or the message goes missing exactly where
+  // the operator most needs it.
+  vi.mocked(buildDataSpec).mockImplementationOnce((args) => ({
+    dataSpec: { linkageTerms: args.terms! },
+    warnings: ["input columns may not satisfy the invitation's linkage keys"],
+  }));
+  const { warnings, ready } = await acceptWarnings({
+    token: tokenDeclaringReceive([]),
+    columns: [...LINKAGE_COLUMNS, "diagnosis"],
+    loggerName: "accept-refused-disclosure-no-metadata",
+  });
+  expect(
+    (ready as { dataSpec: { metadata?: unknown } }).dataSpec.metadata,
+  ).toBeUndefined();
+  expect(refusedDisclosureWarning(warnings)).toContain("\n  - diagnosis");
 });
 
 test("validateAccept: stays silent where the disclosure and the invitation can agree", async () => {
   // An ABSENT receive is not a mismatch: the inviter left the direction lazy and
   // reconciles against this party's own disclosure when the exchange runs.
   expect(
-    await offlineAcceptWarnings(
-      tokenDeclaringReceive(undefined),
-      [...LINKAGE_COLUMNS, "diagnosis"],
-      "accept-refused-disclosure-absent",
-    ),
+    (
+      await acceptWarnings({
+        token: tokenDeclaringReceive(undefined),
+        columns: [...LINKAGE_COLUMNS, "diagnosis"],
+        loggerName: "accept-refused-disclosure-absent",
+      })
+    ).warnings,
   ).not.toContainEqual(expect.stringContaining(REFUSED_DISCLOSURE_CLAUSE));
 
   // An empty receive against a file that discloses nothing is already agreed: the
   // acceptance writes a configuration that sends nothing and runs.
   expect(
-    await offlineAcceptWarnings(
-      tokenDeclaringReceive([]),
-      LINKAGE_COLUMNS,
-      "accept-refused-disclosure-nothing-sent",
-    ),
+    (
+      await acceptWarnings({
+        token: tokenDeclaringReceive([]),
+        columns: LINKAGE_COLUMNS,
+        loggerName: "accept-refused-disclosure-nothing-sent",
+      })
+    ).warnings,
   ).not.toContainEqual(expect.stringContaining(REFUSED_DISCLOSURE_CLAUSE));
 
   // A non-empty receive that disagrees with the disclosed set is a different
   // comparison with different remedies, and is not what this warning covers.
   expect(
-    await offlineAcceptWarnings(
-      tokenDeclaringReceive([{ name: "dose" }]),
-      [...LINKAGE_COLUMNS, "diagnosis"],
-      "accept-refused-disclosure-nonempty",
-    ),
+    (
+      await acceptWarnings({
+        token: tokenDeclaringReceive([{ name: "dose" }]),
+        columns: [...LINKAGE_COLUMNS, "diagnosis"],
+        loggerName: "accept-refused-disclosure-nonempty",
+      })
+    ).warnings,
   ).not.toContainEqual(expect.stringContaining(REFUSED_DISCLOSURE_CLAUSE));
+});
+
+test("validateAccept: stays silent, and the display stays consistent, when the inviting party receives no result", async () => {
+  // The refusal is gated on the direction, so this pair is not refused: the
+  // inviting party is entitled to no result, the payload step transmits nothing
+  // to it whatever the metadata discloses, and the exchange runs. Warning here
+  // would put "the exchange refuses to run" directly above a consent line reading
+  // that no payload is sent.
+  const token = tokenDeclaringReceive([], {
+    expectsOutput: false,
+    shareWithPartner: true,
+  });
+  const { warnings, error } = await acceptWarnings({
+    token,
+    columns: [...LINKAGE_COLUMNS, "diagnosis"],
+    loggerName: "accept-refused-disclosure-no-inviter-output",
+  });
+  expect(error).toBeUndefined();
+  expect(warnings).not.toContainEqual(
+    expect.stringContaining(REFUSED_DISCLOSURE_CLAUSE),
+  );
+  // The line the warning would have contradicted, on the same invitation.
+  const log = getLogger("accept-refused-disclosure-no-inviter-output-display");
+  log.setLevel("silent");
+  expect(renderDisplayInvitation(log, token, ["diagnosis"])).toContain(
+    "no payload is sent",
+  );
 });
 
 test("validateAccept: offline warns that a --server-* override is ignored", async () => {
