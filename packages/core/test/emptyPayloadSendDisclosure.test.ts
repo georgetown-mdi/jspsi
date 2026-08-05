@@ -7,7 +7,7 @@ import {
   deriveAcceptedLinkageTerms,
   validateCompatibility,
 } from "../src/config/linkageTerms";
-import { inferMetadata } from "../src/config/metadata";
+import { disclosedColumnNames, inferMetadata } from "../src/config/metadata";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import { UsageError } from "../src/errors";
 
@@ -24,6 +24,12 @@ import type { MessageConnection } from "../src/connection/messageConnection";
 // crosses, none may leave the acceptor's machine. The partner's runtime
 // reconciliation is not the control here -- it fires only after the values have
 // arrived, and by then the disclosure has happened.
+//
+// The refusal is the answer only where the payload would actually cross. Three
+// configurations differing solely in that respect are covered below: the same
+// empty `send` with the inviting party entitled to the result (refused), with it
+// entitled to none (runs, sends nothing), and an absent `send` (lazy, compared
+// against nothing).
 
 const psiLibrary = await PSI();
 
@@ -41,6 +47,22 @@ const inviterTerms: LinkageTerms = {
   payload: { receive: [] },
 };
 
+// The same strict declaration with the inviting party entitled to no result. The
+// mirror gives the acceptor the same empty `send` beside `shareWithPartner:
+// false`, and runExchange builds no payload at all for a partner that expects
+// none -- so the acceptor's disclosed columns cannot reach the wire whatever its
+// metadata says, and there is no disclosure left for the guard to control.
+const inviterTermsWithoutOutput: LinkageTerms = {
+  ...inviterTerms,
+  output: { expectsOutput: false, shareWithPartner: true },
+};
+
+// The lazy direction, unchanged by any of this: the inviter authors no payload
+// block, so the mirror leaves the acceptor's `send` absent and its metadata alone
+// governs what it transmits.
+const inviterTermsWithoutPayload: LinkageTerms = { ...inviterTerms };
+delete inviterTermsWithoutPayload.payload;
+
 // The inviter holds a linkage column only, so it discloses nothing of its own and
 // the assertions below isolate the acceptor's direction.
 const inviterRows = [
@@ -57,13 +79,17 @@ const acceptorRows = [
 ];
 const acceptorColumns = ["first_name", "diagnosis", "notes"];
 
-function acceptorPrepared() {
+function acceptorPreparedFor(inviter: LinkageTerms) {
   return prepareForExchange(
-    { linkageTerms: deriveAcceptedLinkageTerms(inviterTerms, "Acceptor Co") },
+    { linkageTerms: deriveAcceptedLinkageTerms(inviter, "Acceptor Co") },
     "Acceptor Co",
     acceptorRows,
     acceptorColumns,
   );
+}
+
+function acceptorPrepared() {
+  return acceptorPreparedFor(inviterTerms);
 }
 
 /** Records every message a party puts on the wire, in order. */
@@ -83,6 +109,21 @@ function recordSends(conn: MessageConnection): {
       close: () => conn.close(),
     },
   };
+}
+
+/**
+ * Assert that no message the acceptor put on the wire names a payload column or
+ * carries one of its values.
+ */
+function expectNoPayloadOnWire(sent: unknown[]): void {
+  const payloadColumnsOnWire = sent.flatMap((message) =>
+    typeof message === "object" && message !== null && "columns" in message
+      ? ((message as { columns?: string[] }).columns ?? [])
+      : [],
+  );
+  expect(payloadColumnsOnWire).toEqual([]);
+  expect(JSON.stringify(sent)).not.toContain("C-diabetes");
+  expect(JSON.stringify(sent)).not.toContain("E-asthma");
 }
 
 test("an inviter's empty payload.receive mirrors to a present, empty acceptor payload.send that the cross-party check accepts", () => {
@@ -143,14 +184,7 @@ test("no payload column reaches the wire from an acceptor declaring it sends not
   // value. A regression that let the empty declaration through would transmit
   // {columns: [diagnosis, notes]} here, and these three assertions catch it even
   // though the partner-side reconciliation would still abort afterwards.
-  const payloadColumnsOnWire = sent.flatMap((message) =>
-    typeof message === "object" && message !== null && "columns" in message
-      ? ((message as { columns?: string[] }).columns ?? [])
-      : [],
-  );
-  expect(payloadColumnsOnWire).toEqual([]);
-  expect(JSON.stringify(sent)).not.toContain("C-diabetes");
-  expect(JSON.stringify(sent)).not.toContain("E-asthma");
+  expectNoPayloadOnWire(sent);
 
   // The acceptor is the party whose configuration is wrong, so it is the party
   // that fails, and it fails as its own configuration error rather than as the
@@ -158,4 +192,68 @@ test("no payload column reaches the wire from an acceptor declaring it sends not
   expect(acceptorResult.status).toBe("rejected");
   if (acceptorResult.status === "rejected")
     expect(acceptorResult.reason).toBeInstanceOf(UsageError);
+});
+
+test("the same acceptor configuration runs to completion when the inviting party receives no result", async () => {
+  const acceptorTerms = deriveAcceptedLinkageTerms(
+    inviterTermsWithoutOutput,
+    "Acceptor Co",
+  );
+  // The one thing that differs from the refused case: the same empty `send`, and
+  // a partner entitled to nothing.
+  expect(acceptorTerms.payload).toStrictEqual({ send: [] });
+  expect(acceptorTerms.output.shareWithPartner).toBe(false);
+  expect(
+    validateCompatibility(acceptorTerms, inviterTermsWithoutOutput).errors,
+  ).toEqual([]);
+
+  const [connInviter, connAcceptorRaw] = createMessagePipe();
+  const { conn: connAcceptor, sent } = recordSends(connAcceptorRaw);
+
+  const inviterPrepared = prepareForExchange(
+    { linkageTerms: inviterTermsWithoutOutput },
+    "Inviter Co",
+    inviterRows,
+    inviterColumns,
+  );
+  const acceptorRun = (async () =>
+    runExchange(
+      connAcceptor,
+      "responder",
+      acceptorPreparedFor(inviterTermsWithoutOutput),
+      { psiLibrary },
+    ))().finally(() => connAcceptorRaw.close());
+
+  const [inviterResult, acceptorResult] = await Promise.allSettled([
+    runExchange(connInviter, "initiator", inviterPrepared, { psiLibrary }),
+    acceptorRun,
+  ]);
+
+  // Rethrow rather than assert a status, so a regression reports the refusal it
+  // reintroduced instead of a bare "fulfilled" mismatch.
+  if (inviterResult.status === "rejected") throw inviterResult.reason;
+  if (acceptorResult.status === "rejected") throw acceptorResult.reason;
+
+  // The exchange produced the acceptor's matched result -- it ran, it was not
+  // refused -- while nothing it disclosed left the machine.
+  expect(acceptorResult.value.associationTable?.[0]).toHaveLength(2);
+  expectNoPayloadOnWire(sent);
+});
+
+test("an inviter that authors no payload block leaves the acceptor lazy", () => {
+  const acceptorTerms = deriveAcceptedLinkageTerms(
+    inviterTermsWithoutPayload,
+    "Acceptor Co",
+  );
+  // Absent, not empty: nothing to hold the acceptor's metadata to, in either
+  // output direction.
+  expect(acceptorTerms.payload).toBeUndefined();
+
+  const prepared = acceptorPreparedFor(inviterTermsWithoutPayload);
+  // The metadata the empty declaration refuses still transmits both columns here:
+  // an unauthored dictionary is compared against nothing, in either direction.
+  expect(disclosedColumnNames(prepared.metadata)).toEqual([
+    "diagnosis",
+    "notes",
+  ]);
 });

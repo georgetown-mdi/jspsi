@@ -14,7 +14,7 @@ import { disclosedColumnNames } from "../src/config/metadata";
 import { UsageError } from "../src/errors";
 
 import type { Metadata } from "../src/config/metadata";
-import type { LinkageTerms, Payload } from "../src/config/linkageTerms";
+import type { LinkageTerms, Output, Payload } from "../src/config/linkageTerms";
 import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
 import type { PartnerPayload } from "../src/payloadExchange";
 
@@ -246,7 +246,20 @@ test("buildOutputTable: a present prototype-member identifier column emits its r
 // role !== "ignored") when present: an over-declaration (a name not transmitted)
 // or an under-declaration (a transmitted column omitted) is rejected (UsageError
 // -> CLI exit 64). Only an ABSENT dictionary is a no-op: a present-but-empty one
-// is an explicit "I disclose nothing" and is held to it.
+// is an explicit "I disclose nothing" and is held to it, in the direction where
+// the payload actually crosses.
+
+// The output direction every case below runs in unless it says otherwise: the
+// partner is entitled to the result, so this party's disclosed columns leave the
+// machine. The direction gate has its own cases further down.
+const SHARING_OUTPUT: Output = { expectsOutput: true, shareWithPartner: true };
+
+// The opposite direction: the partner receives no result, so runExchange sends it
+// an empty payload message whatever the metadata discloses.
+const WITHHOLDING_OUTPUT: Output = {
+  expectsOutput: true,
+  shareWithPartner: false,
+};
 
 test("assertPayloadSendDisclosed: a send column with isPayload:false is rejected", () => {
   const meta: Metadata = [
@@ -254,9 +267,13 @@ test("assertPayloadSendDisclosed: a send column with isPayload:false is rejected
     { name: "diagnosis", type: "other", role: "payload", isPayload: false },
   ];
   const payload: Payload = { send: [{ name: "diagnosis" }] };
-  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(UsageError);
+  expect(() =>
+    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
+  ).toThrow(UsageError);
   // The offending column is named so the operator can reconcile it.
-  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(/diagnosis/);
+  expect(() =>
+    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
+  ).toThrow(/diagnosis/);
 });
 
 test("assertPayloadSendDisclosed: a send column with role:ignored is rejected", () => {
@@ -265,8 +282,12 @@ test("assertPayloadSendDisclosed: a send column with role:ignored is rejected", 
     { name: "county", type: "other", role: "ignored", isPayload: true },
   ];
   const payload: Payload = { send: [{ name: "county" }] };
-  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(UsageError);
-  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(/county/);
+  expect(() =>
+    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
+  ).toThrow(UsageError);
+  expect(() =>
+    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
+  ).toThrow(/county/);
 });
 
 test("assertPayloadSendDisclosed: a send column absent from metadata is rejected", () => {
@@ -274,7 +295,9 @@ test("assertPayloadSendDisclosed: a send column absent from metadata is rejected
     { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
   ];
   const payload: Payload = { send: [{ name: "ghost" }] };
-  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(UsageError);
+  expect(() =>
+    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
+  ).toThrow(UsageError);
 });
 
 test("assertPayloadSendDisclosed: a fully disclosed send dictionary is accepted", () => {
@@ -286,7 +309,9 @@ test("assertPayloadSendDisclosed: a fully disclosed send dictionary is accepted"
   const payload: Payload = {
     send: [{ name: "diagnosis" }, { name: "enrollment" }],
   };
-  expect(() => assertPayloadSendDisclosed(payload, meta)).not.toThrow();
+  expect(() =>
+    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
+  ).not.toThrow();
 });
 
 test("assertPayloadSendDisclosed: an identifier column left isPayload:true is disclosed and accepted", () => {
@@ -303,7 +328,9 @@ test("assertPayloadSendDisclosed: an identifier column left isPayload:true is di
     },
   ];
   const payload: Payload = { send: [{ name: "patient_id" }] };
-  expect(() => assertPayloadSendDisclosed(payload, meta)).not.toThrow();
+  expect(() =>
+    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
+  ).not.toThrow();
 });
 
 test("assertPayloadSendDisclosed: a non-empty send omitting a disclosed column is rejected (under-declaration)", () => {
@@ -318,9 +345,13 @@ test("assertPayloadSendDisclosed: a non-empty send omitting a disclosed column i
     { name: "enrollment", type: "other", role: "payload", isPayload: true },
   ];
   const payload: Payload = { send: [{ name: "diagnosis" }] };
-  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(UsageError);
+  expect(() =>
+    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
+  ).toThrow(UsageError);
   // The omitted disclosed column is named so the operator can reconcile it.
-  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(/enrollment/);
+  expect(() =>
+    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
+  ).toThrow(/enrollment/);
 });
 
 test("assertPayloadSendDisclosed: a send that both over- and under-declares names both directions", () => {
@@ -333,7 +364,7 @@ test("assertPayloadSendDisclosed: a send that both over- and under-declares name
   const payload: Payload = { send: [{ name: "off" }] };
   let message = "";
   try {
-    assertPayloadSendDisclosed(payload, meta);
+    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT);
   } catch (err) {
     message = err instanceof Error ? err.message : String(err);
   }
@@ -347,21 +378,25 @@ test("assertPayloadSendDisclosed: an absent payload is a no-op, a present-but-em
   ];
   // Absent stays lazy: the guided and default paths author no dictionary while
   // metadata still transmits.
-  expect(() => assertPayloadSendDisclosed(undefined, meta)).not.toThrow();
-  expect(() => assertPayloadSendDisclosed({}, meta)).not.toThrow();
+  expect(() =>
+    assertPayloadSendDisclosed(undefined, meta, SHARING_OUTPUT),
+  ).not.toThrow();
+  expect(() =>
+    assertPayloadSendDisclosed({}, meta, SHARING_OUTPUT),
+  ).not.toThrow();
   // A present, empty send declares "I disclose nothing", so every disclosed column
   // is an under-declaration. This is the direction deriveAcceptedLinkageTerms
   // deliberately keeps strict on the acceptor, and holding it here is what keeps
   // those columns off the wire -- a partner can only reject them after they land.
-  expect(() => assertPayloadSendDisclosed({ send: [] }, meta)).toThrow(
-    UsageError,
-  );
-  expect(() => assertPayloadSendDisclosed({ send: [] }, meta)).toThrow(
-    /diagnosis/,
-  );
+  expect(() =>
+    assertPayloadSendDisclosed({ send: [] }, meta, SHARING_OUTPUT),
+  ).toThrow(UsageError);
+  expect(() =>
+    assertPayloadSendDisclosed({ send: [] }, meta, SHARING_OUTPUT),
+  ).toThrow(/diagnosis/);
   // Nothing disclosed and nothing declared still agree.
   expect(() =>
-    assertPayloadSendDisclosed({ send: [] }, metaLinkageOnly),
+    assertPayloadSendDisclosed({ send: [] }, metaLinkageOnly, SHARING_OUTPUT),
   ).not.toThrow();
 });
 
@@ -375,13 +410,68 @@ test("assertPayloadSendDisclosed: an empty send is not told to widen itself", ()
   ];
   let message = "";
   try {
-    assertPayloadSendDisclosed({ send: [] }, meta);
+    assertPayloadSendDisclosed({ send: [] }, meta, SHARING_OUTPUT);
   } catch (err) {
     message = err instanceof Error ? err.message : String(err);
   }
   expect(message).not.toContain("Add [diagnosis] to payload.send");
   expect(message).toContain("is_payload: false or role ignored");
   expect(message).toContain("corrected invitation");
+});
+
+test("assertPayloadSendDisclosed: an empty send is not held against a partner entitled to no result", () => {
+  // runExchange builds this party's payload only when the PARTNER expects output,
+  // so with shareWithPartner false the disclosed columns never leave the machine
+  // and the empty declaration is already honored. Refusing here would abort an
+  // exchange that discloses nothing, and would contradict the acceptor consent
+  // screen, which states on this same direction that no payload is sent.
+  const meta: Metadata = [
+    { name: "diagnosis", type: "other", role: "payload", isPayload: true },
+  ];
+  expect(() =>
+    assertPayloadSendDisclosed({ send: [] }, meta, WITHHOLDING_OUTPUT),
+  ).not.toThrow();
+});
+
+test("assertPayloadSendDisclosed: a NON-EMPTY send stays checked in both directions", () => {
+  // Deliberately not gated on the direction, unlike the empty case above. A
+  // dictionary that names columns is exchanged with the partner, shown for
+  // consent, and written into the exchange record whatever the output direction,
+  // so it is an accuracy control over those surfaces rather than a disclosure
+  // control -- and mis-stating them is wrong even when nothing crosses.
+  const meta: Metadata = [
+    { name: "diagnosis", type: "other", role: "payload", isPayload: true },
+  ];
+  const overDeclaring: Payload = {
+    send: [{ name: "diagnosis" }, { name: "absent_column" }],
+  };
+  expect(() =>
+    assertPayloadSendDisclosed(overDeclaring, meta, WITHHOLDING_OUTPUT),
+  ).toThrow(UsageError);
+  expect(() =>
+    assertPayloadSendDisclosed(overDeclaring, meta, WITHHOLDING_OUTPUT),
+  ).toThrow(/absent_column/);
+  // Under-declaration too: the dictionary names a column but omits a transmitted
+  // one, and the direction does not excuse it either.
+  expect(() =>
+    assertPayloadSendDisclosed(
+      { send: [{ name: "absent_column" }] },
+      meta,
+      WITHHOLDING_OUTPUT,
+    ),
+  ).toThrow(/diagnosis/);
+});
+
+test("assertPayloadSendDisclosed: an ABSENT send is lazy in either direction", () => {
+  const meta: Metadata = [
+    { name: "diagnosis", type: "other", role: "payload", isPayload: true },
+  ];
+  expect(() =>
+    assertPayloadSendDisclosed(undefined, meta, WITHHOLDING_OUTPUT),
+  ).not.toThrow();
+  expect(() =>
+    assertPayloadSendDisclosed({}, meta, WITHHOLDING_OUTPUT),
+  ).not.toThrow();
 });
 
 test("assertPayloadSendDisclosed: every over-declared column is named, disclosed ones are not", () => {
@@ -395,7 +485,7 @@ test("assertPayloadSendDisclosed: every over-declared column is named, disclosed
   };
   let message = "";
   try {
-    assertPayloadSendDisclosed(payload, meta);
+    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT);
   } catch (err) {
     message = err instanceof Error ? err.message : String(err);
   }
@@ -479,7 +569,7 @@ test("assertPayloadSendDisclosed (acceptor path): a mirrored send the acceptor d
     { name: "case_id", type: "other", role: "payload", isPayload: true },
   ];
   expect(() =>
-    assertPayloadSendDisclosed(acceptor.payload, acceptorMeta),
+    assertPayloadSendDisclosed(acceptor.payload, acceptorMeta, SHARING_OUTPUT),
   ).not.toThrow();
 });
 
@@ -504,10 +594,10 @@ test("assertPayloadSendDisclosed (acceptor path): a mirrored send the acceptor d
     { name: "case_id", type: "other", role: "ignored", isPayload: true },
   ];
   expect(() =>
-    assertPayloadSendDisclosed(acceptor.payload, acceptorMeta),
+    assertPayloadSendDisclosed(acceptor.payload, acceptorMeta, SHARING_OUTPUT),
   ).toThrow(UsageError);
   expect(() =>
-    assertPayloadSendDisclosed(acceptor.payload, acceptorMeta),
+    assertPayloadSendDisclosed(acceptor.payload, acceptorMeta, SHARING_OUTPUT),
   ).toThrow(/case_id/);
 });
 
@@ -537,7 +627,7 @@ test("assertPayloadSendDisclosed (acceptor path): the common inviter-send shape 
     },
   ];
   expect(() =>
-    assertPayloadSendDisclosed(acceptor.payload, acceptorMeta),
+    assertPayloadSendDisclosed(acceptor.payload, acceptorMeta, SHARING_OUTPUT),
   ).not.toThrow();
 });
 

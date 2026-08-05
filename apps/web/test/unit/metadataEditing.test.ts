@@ -172,7 +172,12 @@ describe("payloadSendForMetadata authors the shared send declaration", () => {
     // preparePayload sends -- core's over-declaration reject accepts it.
     const metadata = inferMetadata(["ssn", "first_name", "notes", "member_id"]);
     const payload = payloadSendForMetadata(metadata);
-    expect(() => assertPayloadSendDisclosed(payload, metadata)).not.toThrow();
+    expect(() =>
+      assertPayloadSendDisclosed(payload, metadata, {
+        expectsOutput: true,
+        shareWithPartner: true,
+      }),
+    ).not.toThrow();
   });
 });
 

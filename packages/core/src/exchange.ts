@@ -288,7 +288,11 @@ export function prepareForExchange(
   // machine. This is the one step with both in scope, so the CLI and web paths
   // inherit the same fail-closed check; it is a no-op on the default and guided
   // paths, which author no payload block. See assertPayloadSendDisclosed.
-  assertPayloadSendDisclosed(linkageTerms.payload, metadata);
+  assertPayloadSendDisclosed(
+    linkageTerms.payload,
+    metadata,
+    linkageTerms.output,
+  );
 
   // Fail fast when this party can no longer produce a payload disclosure it
   // committed to on a prior invitation. disclosedPayloadColumns is the send-side

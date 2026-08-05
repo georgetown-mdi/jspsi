@@ -496,7 +496,11 @@ export async function generateInvitation(params: {
     // runs too late for the consent surface. The quick path (else) authors its own
     // payload from the inferred metadata and runs the same backstop there.
     if (params.metadata !== undefined)
-      assertPayloadSendDisclosed(linkageTerms.payload, params.metadata);
+      assertPayloadSendDisclosed(
+        linkageTerms.payload,
+        params.metadata,
+        linkageTerms.output,
+      );
     disclosedPayloadColumns = disclosedColumnNames(
       params.metadata ?? inferMetadata(columns),
     );
@@ -532,7 +536,11 @@ export async function generateInvitation(params: {
     disclosedPayloadColumns = disclosedColumnNames(metadata);
     // Mint-boundary backstop keeping the consent surface honest -- runs before
     // prepareForExchange, which checks the same invariant too late for the token.
-    assertPayloadSendDisclosed(linkageTerms.payload, metadata);
+    assertPayloadSendDisclosed(
+      linkageTerms.payload,
+      metadata,
+      linkageTerms.output,
+    );
   }
 
   // Bound the token's lifetime so an intercepted invitation cannot be accepted

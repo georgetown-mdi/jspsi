@@ -6,7 +6,7 @@ import {
   isDisclosedToPartner,
   disclosedColumnNames,
 } from "./config/metadata.js";
-import type { Payload } from "./config/linkageTerms.js";
+import type { Output, Payload } from "./config/linkageTerms.js";
 import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
 import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
@@ -205,6 +205,26 @@ export function preparePayload(
  * (metadata gates sending, not receiving) and is cross-checked against the
  * partner's advertised `send` in `validateCompatibility`.
  *
+ * The EMPTY case -- and only that case -- is gated on `output`. `runExchange`
+ * builds this party's payload only when the PARTNER is entitled to the result, so
+ * with `output.shareWithPartner` false nothing leaves the machine whatever the
+ * metadata discloses, and a disclosure control has nothing left to control: an
+ * empty `send` against disclosed metadata is then a pair the exchange runs to
+ * completion on, transmitting nothing. Refusing it would also put two
+ * contradictory statements on the acceptor's consent screen -- a refusal notice
+ * above a `columns you will send` line reading "no payload is sent". The
+ * NON-EMPTY case stays UNGATED in every direction: that comparison is an accuracy
+ * control over a dictionary that is exchanged with the partner, shown for
+ * consent, and written into the exchange record whatever the output direction, so
+ * a dictionary naming columns is held to the disclosed set even when the columns
+ * never move.
+ *
+ * `output` is this party's OWN declaration, and before `validateCompatibility`
+ * has compared it against the partner's mirror it is only that -- so this gate
+ * decides the coherence of the operator's own configuration, and the transmission
+ * gate in `runExchange` (which reads the partner's authenticated terms) stays the
+ * fail-closed backstop that actually keeps the columns off the wire.
+ *
  * Enforced at two points, both of which have the local metadata beside the
  * terms. `prepareForExchange` covers every exchange -- including the paths that
  * never mint an invitation (zero-setup, the acceptor, a hand-authored exchange
@@ -219,6 +239,10 @@ export function preparePayload(
  * are interpolated raw, matching `validateCompatibility`'s payload-mismatch
  * messages: an error is escaped once where it is rendered.
  *
+ * @param output This party's own output declaration, from the same
+ *   {@link LinkageTerms} the `payload` comes from. Required rather than optional so
+ *   every call site states the direction and the `shareWithPartner` reading lives
+ *   here alone.
  * @throws {UsageError} when a present `payload.send` does not name exactly the
  *   columns metadata discloses. A {@link UsageError} so the CLI classifies it as a
  *   configuration error (exit 64), not a transport failure.
@@ -226,9 +250,11 @@ export function preparePayload(
 export function assertPayloadSendDisclosed(
   payload: Payload | undefined,
   metadata: Metadata,
+  output: Output,
 ): void {
   const send = payload?.send;
   if (send === undefined) return;
+  if (send.length === 0 && !output.shareWithPartner) return;
   const sendNames = send.map((column) => column.name);
   const disclosed = disclosedColumnNames(metadata);
   const disclosedSet = new Set(disclosed);

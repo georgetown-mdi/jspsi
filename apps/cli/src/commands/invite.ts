@@ -537,7 +537,11 @@ export async function validateInvite(params: {
     // inferred from the exchange's input columns (unknown here), so that case is
     // left to the exchange-time check.
     if (configSource.metadata !== undefined)
-      assertPayloadSendDisclosed(configTerms.payload, configSource.metadata);
+      assertPayloadSendDisclosed(
+        configTerms.payload,
+        configSource.metadata,
+        configTerms.output,
+      );
 
     // Fail closed, before the token is minted, on a config whose authored
     // standardization contradicts its own linkage terms -- the mint-boundary

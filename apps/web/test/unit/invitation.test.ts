@@ -403,6 +403,7 @@ describe("generateInvitation", () => {
       assertPayloadSendDisclosed(
         token.linkageTerms.payload,
         inferMetadata(DISCLOSING_COLUMNS),
+        token.linkageTerms.output,
       ),
     ).not.toThrow();
 

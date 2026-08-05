@@ -956,10 +956,10 @@ describe("payload authoring", () => {
       expect(disclosed.has(column.name)).toBe(true);
     // A not-disclosed linkage column is never placed into send.
     expect(built.payload?.send?.some((c) => c.name === "ssn")).toBe(false);
-    // The exact core reject this guard keeps the operator clear of (202710475)
-    // accepts the editor's send against the same metadata.
+    // The exact core reject this guard keeps the operator clear of accepts the
+    // editor's send against the same metadata, in the direction the editor built.
     expect(() =>
-      assertPayloadSendDisclosed(built.payload, metadata),
+      assertPayloadSendDisclosed(built.payload, metadata, built.output),
     ).not.toThrow();
   });
 
