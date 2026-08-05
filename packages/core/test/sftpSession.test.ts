@@ -170,6 +170,16 @@ function hostKeyMockClient(keyBlob: Buffer): FileTransportClient {
   };
 }
 
+// A blob no reader can view: the byteLength runs past the underlying
+// ArrayBuffer, so hostKeyBlob's Uint8Array view throws before any fingerprint is
+// computed. This is the way into each verifier's catch branch, which composes a
+// refusal of its own from an error text nobody first-party chose.
+const UNREADABLE_BLOB = {
+  buffer: new ArrayBuffer(4),
+  byteOffset: 0,
+  byteLength: 64,
+} as unknown as Buffer;
+
 // The renderer's own cause-link separator, read back out of a two-link render
 // rather than restated here, so splitting a rendered chain into its links cannot
 // drift from the framing the renderer emits.
@@ -193,7 +203,14 @@ async function renderRefusal(
   config: SFTPConnectionConfig,
   keyType: string,
 ): Promise<string> {
-  const conn = new FileSyncConnection(hostKeyMockClient(hostKeyBlob(keyType)), {
+  return renderRefusalFromBlob(config, hostKeyBlob(keyType));
+}
+
+async function renderRefusalFromBlob(
+  config: SFTPConnectionConfig,
+  keyBlob: Buffer,
+): Promise<string> {
+  const conn = new FileSyncConnection(hostKeyMockClient(keyBlob), {
     verbose: -1,
   });
   const err: unknown = await conn.open(config).catch((e: unknown) => e);
@@ -338,6 +355,45 @@ for (const [label, render, recovery] of FLOODED_REFUSALS) {
     );
     // Flooding the fragments still leaves this branch's recovery step whole.
     expect(rendered).toContain(recovery);
+  });
+}
+
+// Each verifier refuses from a catch of its own when the presented key cannot be
+// read at all, and those refusals partition on the same rule as the two above:
+// the underlying error text is a fragment nobody first-party chose, so it takes a
+// link of its own and can consume nothing but itself. Refusal is what the catch
+// is for, so the fail-closed settle is pinned here too.
+const UNREADABLE_KEY_REFUSALS: Array<[string, SFTPConnectionConfig, string]> = [
+  [
+    "the no-pin branch",
+    { channel: "sftp", server: { host: "sftp.example.org" } },
+    "no host_key_fingerprint is pinned and the presented host key could not " +
+      "be read, so the connection is refused.",
+  ],
+  [
+    "the pinned branch",
+    {
+      channel: "sftp",
+      server: { host: "sftp.example.org", hostKeyFingerprint: PIN },
+    },
+    "the server's host key could not be verified, so the connection is refused.",
+  ],
+];
+
+for (const [label, config, summary] of UNREADABLE_KEY_REFUSALS) {
+  test(`an unreadable host key refuses on ${label} with the error text on its own link`, async () => {
+    const rendered = await renderRefusalFromBlob(config, UNREADABLE_BLOB);
+    const links = linksOf(rendered);
+
+    // The refusal reaches the operator whole, on the message's own link.
+    expect(links[0]).toBe(`SFTP host-key verification failed: ${summary}`);
+    // The error text is alone on the link behind it, behind a leading label.
+    expect(links[1]).toMatch(/^host key (read|verification) error: .+/);
+    // Still fail-closed, and still ahead of the transport error ssh2 rejected
+    // with, so the depth bound cannot drop the detail in its favour.
+    expect(links[links.length - 1]).toContain("Host denied");
+    for (const link of links)
+      expect(link.length).toBeLessThanOrEqual(MAX_RENDERED_LINK_LENGTH);
   });
 }
 
