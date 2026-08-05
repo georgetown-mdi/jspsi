@@ -85,7 +85,13 @@ BeforeAll {
                 -ArgumentList $Arguments -NoNewWindow -PassThru `
                 -RedirectStandardInput $inFile `
                 -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+            # Touch the handle before the wait: without it, the Start-Process
+            # wrapper can report ExitCode as null after a timed WaitForExit --
+            # the failure CI measured in this helper's first run. The
+            # parameterless WaitForExit afterwards settles the redirects.
+            $null = $process.Handle
             $exited = $process.WaitForExit($TimeoutSeconds * 1000)
+            if ($exited) { $process.WaitForExit() }
             if (-not $exited) {
                 $process.Kill()
                 $process.WaitForExit(10000) | Out-Null
@@ -137,6 +143,9 @@ Describe 'The -LoadFunctionsOnly guard' {
 
         $run.TimedOut | Should -BeFalse
         $run.Output | Should -Match 'psilink file-drop setup'
+        # A null exit must not satisfy "not zero": the guard would then pass
+        # vacuously on the same helper fault the dot-source test caught.
+        $run.Exit | Should -Not -BeNullOrEmpty
         $run.Exit | Should -Not -Be 0
     }
 }
