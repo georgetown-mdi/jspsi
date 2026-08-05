@@ -129,13 +129,26 @@ function Get-TestReason {
     $record = @($Test.ErrorRecord) | Select-Object -First 1
     if (-not $record) { return 'no error record on the failed test' }
 
+    $reason = [string] $record
     if ($record.PSObject.Properties.Match('DisplayErrorMessage').Count -gt 0 -and $record.DisplayErrorMessage) {
-        return [string] $record.DisplayErrorMessage
+        $reason = [string] $record.DisplayErrorMessage
+    } elseif ($record.Exception -and $record.Exception.Message) {
+        $reason = [string] $record.Exception.Message
     }
-    if ($record.Exception -and $record.Exception.Message) {
-        return [string] $record.Exception.Message
+
+    # The annotation is the only diagnostic that leaves the runner, so a
+    # thrown (non-assertion) failure must say where it threw.
+    $stack = $null
+    if ($record.PSObject.Properties.Match('DisplayStackTrace').Count -gt 0 -and $record.DisplayStackTrace) {
+        $stack = [string] $record.DisplayStackTrace
+    } elseif ($record.ScriptStackTrace) {
+        $stack = [string] $record.ScriptStackTrace
     }
-    return [string] $record
+    if ($stack) {
+        $firstFrame = @($stack -split "`r?`n")[0]
+        $reason = "$reason at $firstFrame"
+    }
+    return $reason
 }
 
 function Write-RigPremises {

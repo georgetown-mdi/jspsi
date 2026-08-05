@@ -87,9 +87,11 @@ BeforeAll {
                 -RedirectStandardOutput $outFile -RedirectStandardError $errFile
             # Touch the handle before the wait: without it, the Start-Process
             # wrapper can report ExitCode as null after a timed WaitForExit --
-            # the failure CI measured in this helper's first run. The
-            # parameterless WaitForExit afterwards settles the redirects.
-            $null = $process.Handle
+            # the failure CI measured in this helper's first run. Best-effort:
+            # a child that exited already can refuse the handle, and the Exit
+            # assertion downstream is what reports that case. The parameterless
+            # WaitForExit afterwards settles the redirects.
+            try { $null = $process.Handle } catch { }
             $exited = $process.WaitForExit($TimeoutSeconds * 1000)
             if ($exited) { $process.WaitForExit() }
             if (-not $exited) {
