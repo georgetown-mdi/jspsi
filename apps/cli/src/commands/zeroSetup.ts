@@ -579,7 +579,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // `connection` keeps any `@path` credential ref so finalizeBootstrap's save
       // persists the reference, not the secret; `liveConnection` resolves it for
       // the exchange itself. A missing or unreadable `@path` file is a UsageError
-      // here (exit 64), before any network activity.
+      // here (exit 64), before any credential is sent.
       liveConnection = resolveConnectionCredentials(connection);
       const identity = options.identity ?? userInfo().username;
       prepared = await prepareDataset(identity, input, linkageStrategy);

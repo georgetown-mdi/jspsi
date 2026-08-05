@@ -165,12 +165,12 @@ const ACCEPTANCE_OUTCOME: Record<AcceptMode, string> = {
  * not-yet-known line already says.
  *
  * That pair cannot run: `assertPayloadSendDisclosed` refuses it inside
- * `prepareForExchange`, before connecting, so without this the operator meets the
- * refusal only after consenting, writing files, and coordinating with a partner
- * -- while both facts were on the consent surface. It warns rather than refuses
- * on both paths, matching the grading {@link checkLinkageSatisfiability} already
- * applies; what the acceptance then does differs by path, so the warning states
- * it (see {@link ACCEPTANCE_OUTCOME}).
+ * `prepareForExchange`, before any data is sent, so without this the operator
+ * meets the refusal only after consenting, writing files, and coordinating with
+ * a partner -- while both facts were on the consent surface. It warns rather than
+ * refuses on both paths, matching the grading {@link checkLinkageSatisfiability}
+ * already applies; what the acceptance then does differs by path, so the warning
+ * states it (see {@link ACCEPTANCE_OUTCOME}).
  *
  * A NON-EMPTY declared `send` that disagrees with the disclosed set is a
  * different comparison with different remedies and is not covered here. The

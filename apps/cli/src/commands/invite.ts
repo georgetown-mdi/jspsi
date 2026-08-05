@@ -391,9 +391,9 @@ export async function validateInvite(params: {
     // the input columns), so the declared set equals what preparePayload
     // transmits. Carried on the token AND persisted into the saved config as
     // disclosedPayloadColumns, so a later recurring `psilink exchange` verifies
-    // its current metadata still discloses exactly this set before connecting
-    // (assertDisclosureMatchesCommitment) -- the send-side commitment the online
-    // path would otherwise keep only on the discarded token.
+    // its current metadata still discloses exactly this set before any data is
+    // sent (assertDisclosureMatchesCommitment) -- the send-side commitment the
+    // online path would otherwise keep only on the discarded token.
     const disclosedPayloadColumns = disclosedColumnsFor(
       builtDataSpec.metadata ?? inferMetadata(rows.columns),
     );
@@ -632,7 +632,7 @@ export async function validateInvite(params: {
   // what preparePayload will actually transmit. Carried on the token AND persisted
   // into the written config as disclosedPayloadColumns, so a later recurring
   // `psilink exchange` verifies its metadata still discloses exactly this set
-  // before connecting (assertDisclosureMatchesCommitment).
+  // before any data is sent (assertDisclosureMatchesCommitment).
   const disclosedPayloadColumns = disclosedColumnsFor(
     builtDataSpec.metadata ?? inferMetadata(rows.columns),
   );

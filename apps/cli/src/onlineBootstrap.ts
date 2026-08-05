@@ -743,7 +743,7 @@ export async function runOnlineBootstrap(params: {
   // keeps the `@path` so the saveConfig in the hook below persists the reference,
   // not the secret -- the @path is re-resolved at the next `psilink exchange`'s
   // config load. A missing or unreadable referenced file is a UsageError (exit
-  // 64) surfaced here, before the connection is opened. The cast restores the
+  // 64) surfaced here, before any credential is sent. The cast restores the
   // RunnableConnectionConfig narrowing the resolver widens to ConnectionConfig;
   // it is safe because the resolver preserves the channel (it only reads the SFTP
   // credential fields).
