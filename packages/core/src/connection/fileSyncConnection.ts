@@ -370,6 +370,20 @@ export interface FileTransportClient {
   /**
    * Options are defined by transport providers and must match their expected
    * names and types.
+   *
+   * Whether a client may be dialed again after its
+   * {@link FileTransportClient.end} is deliberately NOT part of this contract:
+   * it is each transport's own rule, and the two shipped ones differ.
+   * `LocalFSClient` holds no session -- its `connect()` is a read/write access
+   * check on a directory -- so it draws no distinction between a first call and
+   * a later one, which is what lets {@link FileSyncConnection.open} probe a
+   * split filedrop's second directory with a second call.
+   * {@link SSH2SFTPClientAdapter} memoizes the connection's terminal close and
+   * never clears it, so it throws on a dial once `end()` has latched; a repeat
+   * `connect()` over a session still live is legal there and replaces that
+   * session. A caller wanting the portable behavior builds a new client rather
+   * than re-dialing an ended one. Why the rule stays per-transport rather than
+   * binding here: D10 in docs/notes/sftp-adapter-state-machine.md.
    */
   connect: (options: Record<string, unknown>) => Promise<void>;
   /**
