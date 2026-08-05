@@ -1,0 +1,55 @@
+name: Windows Resolution Spike
+
+# Measures whether a GitHub windows-latest runner can host the drive-resolution
+# rig the file-drop guide has never had: an SMB share the runner serves itself, a
+# drive letter mapped to it, and a DFS namespace over it. The harness
+# (support/maintainer-notes/ci-resolution-rig.ps1 -- maintainer-facing, not part
+# of the operator guide folder) carries the questions and the reporting
+# contract; this file only gets it onto a Windows runner.
+#
+# The result IS the deliverable, so the job is green whatever the answers are: a
+# red check hides its annotations, and "no" is an answer worth having. The harness
+# always exits 0 and reports each measurement as a single-line ::notice
+# annotation, reserving ::error for the harness itself breaking. Read a run
+# through its annotations rather than its log:
+#
+#   gh api repos/<owner>/<repo>/check-runs/<check-run-id>/annotations
+#
+# No same-repo gate, unlike the workflows that hold credentials: the runner is a
+# throwaway VM, the job reads no secret, and the share and namespace it creates
+# live and die inside that VM with nothing this job elevates beyond what every
+# windows-latest job already holds.
+on:
+  pull_request:
+    branches: [main, staging]
+    paths:
+      - "support/maintainer-notes/ci-resolution-rig.ps1"
+      - ".github/workflows/windows_resolution.yaml"
+
+# Cancel a superseded run when a newer commit lands on the same PR/branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: the harness only needs its own checkout.
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: Measure drive and namespace resolution
+    runs-on: windows-latest
+    # Installing the DFS namespace role is the slow step; a hang there must not
+    # hold a runner for the default six hours.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      # Windows PowerShell 5.1 rather than pwsh: ServerManager, SmbShare, DFSN and
+      # the WScript.Network COM surface are the harness's subject matter, and 5.1
+      # is where they are native rather than reached through a compatibility
+      # session. `powershell -File` under cmd states the execution policy the run
+      # depends on instead of inheriting the image's.
+      - name: Measure loopback share, mapped drive, and DFS namespace
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\support\maintainer-notes\ci-resolution-rig.ps1
