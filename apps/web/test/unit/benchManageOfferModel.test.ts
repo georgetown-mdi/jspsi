@@ -23,7 +23,10 @@ import {
   webrtcLocatorFromEndpoint,
 } from "@bench/manageOfferModel";
 
-import type { ManagedDepositInputs } from "@bench/manageOfferModel";
+import type {
+  ManagedDepositInputs,
+  ManagedExchangeDocumentParts,
+} from "@bench/manageOfferModel";
 import type { WebRTCEndpoint } from "@psilink/core";
 
 // The inviter's own signaling location (window.location-derived) is already the
@@ -68,16 +71,13 @@ function depositInputs(
   overrides: Partial<ManagedDepositInputs> = {},
 ): ManagedDepositInputs {
   return {
-    side: "inviter",
-    exchangeFile: composeManagedDocument(
-      {
-        side: "inviter",
-        linkageTerms: inviterTerms,
-        metadata: inviterMetadata,
-        disclosedPayloadColumns: tokenDisclosedColumns,
-      },
-      webrtcLocatorFromEndpoint(inviterEndpoint),
-    ),
+    documentParts: {
+      side: "inviter",
+      linkageTerms: inviterTerms,
+      metadata: inviterMetadata,
+      disclosedPayloadColumns: tokenDisclosedColumns,
+    },
+    connection: webrtcLocatorFromEndpoint(inviterEndpoint),
     sharedSecret: generateSharedSecret(),
     choices: { label: "Riverbend quarterly" },
     ...overrides,
@@ -300,7 +300,7 @@ describe("buildManagedDeposit (inviter)", () => {
   test("deposits side inviter with the invitation's secret and composed document", () => {
     const secret = generateSharedSecret();
     const deposit = buildManagedDeposit(
-      depositInputs({ side: "inviter", sharedSecret: secret }),
+      depositInputs({ sharedSecret: secret }),
       Date.UTC(2026, 6, 15, 12, 0, 0),
     );
     expect(deposit.side).toBe("inviter");
@@ -359,18 +359,15 @@ describe("buildManagedDeposit (acceptor)", () => {
   function acceptorDeposit(tokenSet: Array<string> | undefined) {
     return buildManagedDeposit(
       {
-        side: "acceptor",
-        exchangeFile: composeManagedDocument(
-          {
-            side: "acceptor",
-            linkageTerms: acceptorTerms,
-            metadata: acceptorMetadata,
-            ...(tokenSet !== undefined
-              ? { expectedPayloadColumns: tokenSet }
-              : {}),
-          },
-          webrtcLocatorFromEndpoint(invitationEndpoint),
-        ),
+        documentParts: {
+          side: "acceptor",
+          linkageTerms: acceptorTerms,
+          metadata: acceptorMetadata,
+          ...(tokenSet !== undefined
+            ? { expectedPayloadColumns: tokenSet }
+            : {}),
+        },
+        connection: webrtcLocatorFromEndpoint(invitationEndpoint),
         sharedSecret: generateSharedSecret(),
         choices: { label: "Clinic A partnership" },
       },
@@ -416,6 +413,60 @@ describe("buildManagedDeposit (acceptor)", () => {
   test("a token with no set leaves the lock-in absent (lazy)", () => {
     const deposit = acceptorDeposit(undefined);
     expect(deposit.exchangeFile).not.toHaveProperty("expectedPayloadColumns");
+  });
+});
+
+// A deposit whose stored side disagrees with the side its document was composed
+// for stores an acceptor record carrying no consent record -- the silent pass the
+// field exists to prevent. The record's side and the document both come from the
+// one `side` in the deposit's parts, which is the single statement each bench
+// makes at its deposit call.
+describe("the deposit's side and its document", () => {
+  const connection = webrtcLocatorFromEndpoint(invitationEndpoint);
+
+  function depositFor(parts: ManagedExchangeDocumentParts) {
+    return buildManagedDeposit(
+      {
+        documentParts: parts,
+        connection,
+        sharedSecret: generateSharedSecret(),
+        choices: { label: "Clinic A partnership" },
+      },
+      Date.now(),
+    );
+  }
+
+  const acceptorParts: ManagedExchangeDocumentParts = {
+    side: "acceptor",
+    linkageTerms: acceptedTerms,
+    metadata: acceptorMetadataFixture,
+  };
+
+  test("an acceptor deposit stores side acceptor and a document that records its consent", () => {
+    const deposit = depositFor(acceptorParts);
+    expect(deposit.side).toBe("acceptor");
+    expect(deposit.exchangeFile.outboundPayloadConsent).toEqual({
+      status: "confirmed",
+      columns: ["visit_id"],
+    });
+  });
+
+  test("an inviter deposit stores side inviter and a document that records none", () => {
+    const deposit = depositFor({ ...acceptorParts, side: "inviter" });
+    expect(deposit.side).toBe("inviter");
+    expect(deposit.exchangeFile).not.toHaveProperty("outboundPayloadConsent");
+  });
+
+  test("the stored document is what the stored side composes, and only that", () => {
+    const deposit = depositFor(acceptorParts);
+    expect(deposit.exchangeFile).toEqual(
+      composeManagedDocument(acceptorParts, connection),
+    );
+    // The two sides compose different documents, so the agreement above is a
+    // property of the deposit rather than a shape both sides happen to share.
+    expect(deposit.exchangeFile).not.toEqual(
+      composeManagedDocument({ ...acceptorParts, side: "inviter" }, connection),
+    );
   });
 });
 

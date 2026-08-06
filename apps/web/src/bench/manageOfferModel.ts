@@ -84,7 +84,10 @@ export { MAX_TOKEN_MAX_AGE_DAYS };
  * locator, so this shape is transport-agnostic and identical for both sides. */
 export interface ManagedExchangeDocumentParts {
   /**
-   * This party's side of the partnership. Required, not optional: it decides
+   * This party's side of the partnership, and the deposit's ONE statement of it:
+   * {@link buildManagedDeposit} composes the document from these parts and records
+   * this same value as the record's `side`, so a deposit cannot store one side
+   * while carrying the other side's document. Required, not optional: it decides
    * whether the composed document carries an outbound-payload consent record, and
    * an ABSENT record is a silent pass at every later run -- so a composing surface
    * must state its side rather than omit it into that default (see
@@ -145,6 +148,10 @@ export interface ManagedExchangeDocumentParts {
  * its own set was authored at mint and pinned as `disclosedPayloadColumns` (see
  * docs/spec/FILE_SYNC.md, "The acceptor's own outbound consent").
  *
+ * {@link buildManagedDeposit} composes through this function rather than taking a
+ * composed document, so a completion surface never holds one to pair with a side
+ * of its own; it stays exported so the composition rules are the tested boundary.
+ *
  * @throws {ZodError} if the assembled document fails schema validation (a
  *   malformed locator, an out-of-range port).
  */
@@ -185,14 +192,16 @@ export interface ManageOfferChoices {
 }
 
 /** Everything a completion surface supplies to turn the offer into a deposit: the
- * party's side, its composed document, the invitation's secret, an optional
- * input-file handle where the platform yielded one, and the operator's choices. */
+ * parts of this party's document and the locator to compose it from, the
+ * invitation's secret, an optional input-file handle where the platform yielded
+ * one, and the operator's choices. */
 export interface ManagedDepositInputs {
-  /** This party's side of the partnership. */
-  side: ManagedExchangeSide;
-  /** This party's composed exchange-file document (see
-   * {@link composeManagedDocument}). */
-  exchangeFile: ExchangeSpec;
+  /** This party's document parts, carrying the deposit's one statement of its
+   * `side` (see {@link ManagedExchangeDocumentParts}). */
+  documentParts: ManagedExchangeDocumentParts;
+  /** The credential-free webrtc locator the document's connection block is
+   * composed from (see {@link webrtcLocatorFromEndpoint}). */
+  connection: WebRTCExchangeLocator;
   /** The invitation's shared secret -- the inviter's minted `sharedSecret`, the
    * acceptor's `token.sharedSecret`. The one-shot run discards its rotation, so
    * this stays the record's live secret until a managed re-run rotates it. */
@@ -205,10 +214,18 @@ export interface ManagedDepositInputs {
 }
 
 /**
- * Assemble the {@link NewManagedExchange} fields a deposit persists. The label is
- * carried verbatim -- its cap is enforced by the record schema at the store write
- * ({@link buildManagedExchangeRecord}), with {@link labelWithinCap} as the UI
- * gate. The max-age policy drives `expires`: when the operator opts in, `expires`
+ * Assemble the {@link NewManagedExchange} fields a deposit persists, composing
+ * this party's document from `documentParts` here rather than accepting a
+ * pre-composed one: the record's `side` and the document's side-dependent content
+ * (the acceptor's `outboundPayloadConsent`) are then read from a single stated
+ * side, so a record whose side disagrees with the document it stores has no
+ * representation at a call site.
+ *
+ * The label is carried verbatim -- its cap is enforced by the record schema at
+ * the store write ({@link buildManagedExchangeRecord}), with
+ * {@link labelWithinCap} as the UI gate.
+ *
+ * The max-age policy drives `expires`: when the operator opts in, `expires`
  * is stamped `now + tokenMaxAgeDays` through {@link rotationWriteBack} (reusing
  * the run-rotate date math and its guards, not duplicating them), so a
  * creation-time bound is applied exactly as a rotation would restamp it; when
@@ -221,6 +238,8 @@ export interface ManagedDepositInputs {
  *   stays pure and testable.
  * @throws {RangeError} (from {@link rotationWriteBack}) if `tokenMaxAgeDays` is
  *   not a positive integer or stamps an expiry outside the representable range.
+ * @throws {ZodError} (from {@link composeManagedDocument}) if the composed
+ *   document fails schema validation.
  */
 export function buildManagedDeposit(
   inputs: ManagedDepositInputs,
@@ -230,8 +249,11 @@ export function buildManagedDeposit(
   const stamp = rotationWriteBack(inputs.sharedSecret, tokenMaxAgeDays, now);
   return {
     label: inputs.choices.label,
-    exchangeFile: inputs.exchangeFile,
-    side: inputs.side,
+    exchangeFile: composeManagedDocument(
+      inputs.documentParts,
+      inputs.connection,
+    ),
+    side: inputs.documentParts.side,
     sharedSecret: inputs.sharedSecret,
     ...(inputs.inputFileHandle !== undefined
       ? { inputFileHandle: inputs.inputFileHandle }

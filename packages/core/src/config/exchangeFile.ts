@@ -159,9 +159,12 @@ export interface ExchangeSpecAssembly {
   /**
    * This party's consent to its OWN outbound payload set -- the record a later
    * run is held to before it connects (`assertOutboundPayloadConsented`). Absent
-   * for every party that is not an acceptor, whose own set is authored at mint;
-   * derived by the consenting surface through `deriveOutboundPayloadConsent`, so
-   * an assembled record always names the set the operator was shown.
+   * for every party that is not an acceptor, whose own set is authored at mint.
+   *
+   * Carried verbatim: the assembler neither derives this record nor checks it
+   * against the `metadata` assembled beside it. Naming the set the operator was
+   * shown is the CALLER's obligation -- derive the record through
+   * `deriveOutboundPayloadConsent` from the same metadata this call persists.
    */
   outboundPayloadConsent?: OutboundPayloadConsent;
 }

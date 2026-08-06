@@ -84,7 +84,6 @@ import {
 } from "./inviterModel";
 import {
   buildManagedDeposit,
-  composeManagedDocument,
   webrtcLocatorFromEndpoint,
 } from "./manageOfferModel";
 import { downloadSampleCsvs, sampleInviterFile } from "./sampleData";
@@ -434,28 +433,24 @@ export function InviterBench() {
       const connection = webrtcLocatorFromEndpoint(
         webrtcEndpointFromLocation(invitationLocation()),
       );
-      const exchangeFile = composeManagedDocument(
-        {
-          side: "inviter",
-          linkageTerms: invitation.linkageTerms,
-          ...(invitation.metadata !== undefined
-            ? { metadata: invitation.metadata }
-            : {}),
-          ...(invitation.standardization !== undefined
-            ? { standardization: invitation.standardization }
-            : {}),
-          // The token's own published set (including the strict empty set), so
-          // the persisted send-side commitment is the one the partner locked in
-          // -- never a re-derivation that could drift from it.
-          disclosedPayloadColumns: invitation.disclosedPayloadColumns,
-        },
-        connection,
-      );
       await createManagedExchange(
         buildManagedDeposit(
           {
-            side: "inviter",
-            exchangeFile,
+            documentParts: {
+              side: "inviter",
+              linkageTerms: invitation.linkageTerms,
+              ...(invitation.metadata !== undefined
+                ? { metadata: invitation.metadata }
+                : {}),
+              ...(invitation.standardization !== undefined
+                ? { standardization: invitation.standardization }
+                : {}),
+              // The token's own published set (including the strict empty set),
+              // so the persisted send-side commitment is the one the partner
+              // locked in -- never a re-derivation that could drift from it.
+              disclosedPayloadColumns: invitation.disclosedPayloadColumns,
+            },
+            connection,
             sharedSecret: invitation.sharedSecret,
             ...(sourceHandle !== undefined
               ? { inputFileHandle: sourceHandle }
