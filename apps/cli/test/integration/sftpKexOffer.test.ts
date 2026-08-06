@@ -610,7 +610,7 @@ describe("a server that accepts only algorithms this process cannot perform", ()
     const error = thrown as Error;
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toContain("X25519");
-    expect(error.message).toContain("server administrator");
+    expect(error.message).toContain("server's administrator");
     // ssh2's own account of the failure is kept, one cause link down.
     expect((error.cause as Error).message).toContain(
       "no matching key exchange algorithm",

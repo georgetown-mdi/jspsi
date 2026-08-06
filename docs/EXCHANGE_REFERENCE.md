@@ -810,7 +810,7 @@ Any other key (including `readyTimeout`, which is set from [`connection.options.
 
 #### Key-exchange algorithms and the host's crypto provider
 
-The SSH key-exchange algorithms psilink offers are always narrowed to those the running process can actually perform. On a host whose OpenSSL provider omits X25519 -- a FIPS-configured provider is the case that arises in practice -- every key exchange built on it is withheld from the offer, so the negotiation settles on an algorithm both ends can complete instead of on one that fails mid-handshake. This needs no configuration and no flag: psilink asks the crypto provider rather than looking for a "FIPS mode". On a host that can perform everything, the offer is unchanged.
+The SSH key-exchange algorithms psilink offers are always narrowed to exclude those built on a primitive it probes for and the running process cannot perform -- today that means X25519, the one primitive in ssh2's offer whose absence is a failure mode in practice. On a host whose OpenSSL provider omits X25519 -- a FIPS-configured provider is the case that arises in practice -- every key exchange built on it is withheld from the offer, so the negotiation settles on an algorithm both ends can complete instead of on one that fails mid-handshake. This needs no configuration and no flag: psilink asks the crypto provider rather than looking for a "FIPS mode". On a host that can perform everything, the offer is unchanged.
 
 The narrowing applies to `algorithms.kex` set here as well -- offering an algorithm the process cannot perform is never useful. Three consequences to be aware of when you set it:
 

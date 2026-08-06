@@ -2498,12 +2498,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     this.assertTransitionHeld("ssh2-sftp-client's connect()", held);
     // Withhold the key-exchange algorithms this process cannot perform, at the
     // one point every dial passes through -- the first connect, core's host-key
-    // probe, and each recovery re-dial. Constraining here rather than in the
-    // public connect() is what covers the re-dial, which enters with the retained
-    // options and never through connect(); re-constraining options already
-    // constrained is a no-op (see constrainKexToPlatformCapabilities). On a host
-    // that can perform everything ssh2 offers, this returns its argument
-    // unchanged and no dial is altered.
+    // probe, each recovery re-dial, and the connection-per-poll cycle-start
+    // reconnect. Constraining here rather than in the public connect() is what
+    // covers the last two, which enter with the retained options and never
+    // through connect(); re-constraining options already constrained is a no-op
+    // (see constrainKexToPlatformCapabilities). What holds the "every" is this
+    // being the only path to ssh2's connect, rather than the list being
+    // complete. On a host that can perform everything ssh2 offers, this returns
+    // its argument unchanged and no dial is altered.
     const unavailablePrimitives = unavailableKexPrimitives();
     const options = constrainKexToPlatformCapabilities(
       requestedOptions,

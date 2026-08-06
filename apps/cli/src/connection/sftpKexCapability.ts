@@ -101,8 +101,11 @@ export function detectUnavailableKexPrimitives(
 }
 
 // Memoized because the answer cannot change within a process (a provider is not
-// swapped under a running program) and because every dial asks -- the first
-// connect, the host-key probe, and each mid-exchange recovery re-dial.
+// swapped under a running program) and because every dial asks. What makes that
+// "every" rather than a list is the chokepoint the constraint sits at, not an
+// enumeration of callers: the first connect, the host-key probe, each
+// mid-exchange recovery re-dial, and the connection-per-poll cycle-start
+// reconnect all reach ssh2 through `connectLocked`.
 let memoizedUnavailablePrimitives: readonly KexPrimitive[] | undefined;
 
 /**
@@ -133,11 +136,18 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 // A `remove` entry the operator wrote and one this module adds are the same
-// filter only if they read the same; a RegExp stringifies to its own literal, so
-// one comparison covers both kinds. It is what makes constraining an
-// already-constrained options object a no-op, which matters because the adapter
-// stores the options it dialed with and re-dials recovery attempts from them.
-const filterKey = (entry: unknown): string => String(entry);
+// filter only if they are the same KIND and read the same. The kind is
+// load-bearing rather than pedantry: a RegExp stringifies to its own literal, so
+// an operator entry of the string "/25519/i" reads identically to this module's
+// own /25519/i, and keying on the text alone would treat the module's removal as
+// already present and drop it. ssh2 matches a string `remove` entry exactly
+// (measured), so the operator's survivor would then remove nothing and the
+// unperformable algorithms would go back on the wire. Tagging the kind keeps the
+// two apart while still making a second constrain of the same options a no-op,
+// which matters because the adapter stores the options it dialed with and
+// re-dials from them.
+const filterKey = (entry: unknown): string =>
+  entry instanceof RegExp ? `re:${String(entry)}` : `raw:${String(entry)}`;
 
 const asArray = (value: unknown): unknown[] =>
   value === undefined ? [] : Array.isArray(value) ? value : [value];
@@ -276,13 +286,11 @@ function emptiedOperatorListError(
   // the operator has to act on. Composed raw -- the display sink escapes the
   // rendered chain once (see CONTRIBUTING.md, Operator-facing escaping).
   return new UsageError(
-    `connection.provider_options.algorithms.kex names only key-exchange ` +
-      `algorithms this process's crypto provider cannot perform (it does not ` +
-      `offer ${primitiveNames(unavailable)}), so the SFTP client has nothing ` +
-      `to offer the server and the connection is refused. Name at least one ` +
-      `algorithm that does not require ${primitiveNames(unavailable)}, or ` +
-      `remove the setting so psilink offers every algorithm ssh2 supports ` +
-      `except those.`,
+    `connection.provider_options.algorithms.kex names only key exchanges this ` +
+      `host cannot perform, its crypto provider offering no ` +
+      `${primitiveNames(unavailable)}. Name one that does not need ` +
+      `${primitiveNames(unavailable)}, or remove the setting to offer ssh2's ` +
+      `defaults minus those.`,
     {
       cause: new Error(
         `requested key-exchange algorithms: ${requested.join(", ")}`,
@@ -317,13 +325,10 @@ export function explainKexNegotiationFailure(
     return error;
   const names = primitiveNames(unavailable);
   return new Error(
-    `the SFTP server accepts no key-exchange algorithm this process can ` +
-      `perform. Its crypto provider does not offer ${names}, so the client ` +
-      `offered every algorithm ssh2 supports except those built on ` +
-      `${names} -- and the server accepts none of them. Ask the server ` +
-      `administrator to enable a key exchange outside ${names} (the ECDH and ` +
-      `Diffie-Hellman group exchanges are the usual ones), or run psilink on ` +
-      `a host whose crypto provider offers ${names}.`,
+    `the SFTP server accepts no key exchange this host can perform: its ` +
+      `crypto provider offers no ${names}. Ask the server's administrator to ` +
+      `enable an ECDH or Diffie-Hellman group exchange, or run psilink on a ` +
+      `host that provides ${names}.`,
     { cause: error },
   );
 }

@@ -1,6 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { UsageError } from "@psilink/core";
+import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  UsageError,
+  sanitizeErrorForDisplay,
+} from "@psilink/core";
 
 import {
   KEX_PRIMITIVES,
@@ -261,6 +265,23 @@ describe("constrainKexToPlatformCapabilities with X25519 unavailable", () => {
     });
   });
 
+  // A RegExp stringifies to its own literal, so an operator who writes that
+  // literal AS A STRING reads the same as this module's own matcher. Keying the
+  // dedupe on the text alone would take the module's removal for one already
+  // present and drop it -- and ssh2 matches a string `remove` entry exactly, so
+  // the survivor would remove nothing and the unperformable names would go back
+  // on the wire, silently.
+  test("keeps its own removal when an operator removes the same text as a string", () => {
+    const constrained = constrainKexToPlatformCapabilities(
+      { algorithms: { kex: { remove: [String(MISSING.matchesAlgorithm)] } } },
+      [MISSING],
+      sink(),
+    );
+    expect(constrained["algorithms"]).toEqual({
+      kex: { remove: ["/25519/i", MISSING.matchesAlgorithm] },
+    });
+  });
+
   test("normalizes a single-valued operator remove before merging", () => {
     const constrained = constrainKexToPlatformCapabilities(
       { algorithms: { kex: { remove: "ssh-rsa" } } },
@@ -348,7 +369,50 @@ describe("explainKexNegotiationFailure", () => {
     ]) as Error;
     expect(explained).not.toBe(negotiationFailure);
     expect(explained.message).toContain("X25519");
-    expect(explained.message).toContain("server administrator");
+    expect(explained.message).toContain("server's administrator");
     expect(explained.cause).toBe(negotiationFailure);
+  });
+});
+
+// Both messages this module composes are the operator's only instruction for a
+// connection that cannot be made to work by retrying, and the display sink caps
+// EACH link of a rendered cause chain at DEFAULT_MAX_DISPLAY_LENGTH. A message
+// written past that cap loses its tail, which is where the remedy sits -- so the
+// cap is asserted against the real sink rather than trusted to a reading.
+describe("what the operator actually reads", () => {
+  const renderedLinks = (error: unknown): string[] =>
+    sanitizeErrorForDisplay(error).split("\n");
+
+  test("the emptied-list refusal renders whole, remedy included", () => {
+    let thrown: unknown;
+    try {
+      constrainKexToPlatformCapabilities(
+        { algorithms: { kex: ["curve25519-sha256"] } },
+        [MISSING],
+        sink(),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(thrown);
+    expect(rendered).not.toContain("[truncated]");
+    expect(rendered).toContain("or remove the setting");
+    for (const link of renderedLinks(thrown))
+      expect(link.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
+  });
+
+  test("the no-common-key-exchange explanation renders whole, remedy included", () => {
+    const explained = explainKexNegotiationFailure(
+      new Error("Handshake failed: no matching key exchange algorithm"),
+      [MISSING],
+    );
+
+    const rendered = sanitizeErrorForDisplay(explained);
+    expect(rendered).not.toContain("[truncated]");
+    expect(rendered).toContain("or run psilink on a host that provides");
+    for (const link of renderedLinks(explained))
+      expect(link.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
   });
 });
