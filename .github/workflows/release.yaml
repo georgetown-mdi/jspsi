@@ -39,6 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      # The manifest-list digest, carried to the launcher job so the reference it
+      # stamps and the reference cosign signs below are the same value.
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v7
 
@@ -92,3 +96,76 @@ jobs:
         run: |
           cosign sign --yes --key env://COSIGN_PRIVATE_KEY \
             vdorie/psi-link@${{ steps.build.outputs.digest }}
+
+  # The host-side launchers are handed to an operator as plaintext and pin the
+  # image by digest rather than by tag, so a release copy runs exactly the
+  # manifest signed above. Filling that digest in is this job's whole purpose;
+  # everything it publishes is a file from this checkout with one line rewritten.
+  launchers:
+    name: Publish the stamped launchers
+    needs: publish
+    runs-on: ubuntu-latest
+    # The only job in this workflow that writes anything back to the repository,
+    # and it writes release assets alone.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Stamp the launchers with the signed digest
+        env:
+          PSILINK_DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          PSILINK_PLACEHOLDER='@@PSILINK_IMAGE_DIGEST@@'
+          mkdir -p launcher-assets
+
+          # A whole-line replacement, guarded on both sides. A launcher that no
+          # longer carries the expected line exactly once fails the release here
+          # rather than shipping a copy with nothing stamped into it, which the
+          # launcher itself would then refuse to run.
+          stamp() {
+            source_file="$1"
+            placeholder_line="$2"
+            stamped_line="$3"
+            found=$(grep -c -F -x -- "$placeholder_line" "$source_file" || true)
+            if [ "$found" != "1" ]; then
+              echo "::error::$source_file carries the digest placeholder line $found times, not once" >&2
+              exit 1
+            fi
+            awk -v placeholder="$placeholder_line" -v stamped="$stamped_line" \
+              '$0 == placeholder { print stamped; next } { print }' \
+              "$source_file" >"launcher-assets/$(basename "$source_file")"
+          }
+
+          stamp support/windows-network-filedrop/start-psilink.sh \
+            "PSILINK_IMAGE_DIGEST='@@PSILINK_IMAGE_DIGEST@@'" \
+            "PSILINK_IMAGE_DIGEST='${PSILINK_DIGEST}'"
+          stamp support/windows-network-filedrop/Start-Psilink.ps1 \
+            "\$PsilinkImageDigest = '@@PSILINK_IMAGE_DIGEST@@'" \
+            "\$PsilinkImageDigest = '${PSILINK_DIGEST}'"
+
+          # Start-Psilink.ps1 dot-sources this one for its path resolution, so
+          # the three travel as a unit. It carries no stamp of its own.
+          cp support/windows-network-filedrop/Setup-PsilinkFileDrop.ps1 launcher-assets/
+
+          if grep -R -l -F -- "${PSILINK_PLACEHOLDER}" launcher-assets; then
+            echo "::error::a stamped launcher still carries the placeholder" >&2
+            exit 1
+          fi
+          grep -F -- "${PSILINK_DIGEST}" launcher-assets/start-psilink.sh >/dev/null
+          grep -F -- "${PSILINK_DIGEST}" launcher-assets/Start-Psilink.ps1 >/dev/null
+
+      # A draft rather than a published release: the maintainer's own checklist
+      # step still writes the notes and attaches the SBOM (docs/RELEASES.md).
+      - name: Attach the launchers to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PSILINK_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$PSILINK_TAG" >/dev/null 2>&1; then
+            gh release create "$PSILINK_TAG" --draft --verify-tag \
+              --title "PSI-Link $PSILINK_TAG" --notes ''
+          fi
+          gh release upload "$PSILINK_TAG" launcher-assets/* --clobber

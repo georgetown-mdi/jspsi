@@ -25,6 +25,23 @@ saved under a name. Docker calls that a **volume**, and creating one is the only
 thing the setup script does. Run it once, before your first exchange; it takes
 about ten minutes.
 
+## Or let the launcher do all of it
+
+If what you want is the psilink console open in your browser, one script does
+everything on this page and then starts it: it asks for the folders, works out
+the server behind a network one, runs the same checks, makes the volume, and
+opens `http://127.0.0.1:3000`.
+
+Download it from a [psilink release](https://github.com/georgetown-mdi/jspsi/releases):
+`Start-Psilink.ps1` on Windows, with `Setup-PsilinkFileDrop.ps1` from the same
+release beside it, or `start-psilink.sh` on macOS or Linux, which you run with
+`bash start-psilink.sh`. A copy taken from anywhere else refuses to run, because
+only a release copy names the exact psilink image it will run.
+
+The rest of this page is the setup script on its own, which makes the volume and
+stops there. That is what you want if you run your exchanges from the command
+line, or if the launcher will not run here.
+
 ## What you need
 
 - **Docker Desktop, running.** The whale icon should be still, not animating.

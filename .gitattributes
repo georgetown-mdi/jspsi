@@ -18,3 +18,8 @@
 /support/windows-network-filedrop/cmd_psilink-probe.sh -text
 /support/windows-network-filedrop/cmd_psilink-credcheck.sh -text
 /support/windows-network-filedrop/cmd_psilink-volcheck.sh -text
+
+# The macOS/Linux launcher is delivered as a release asset and by checkout, and
+# bash refuses a script whose shebang line ends in a carriage return. It has no
+# run-time strip to fall back on, so the stored bytes are the whole of it.
+/support/windows-network-filedrop/start-psilink.sh -text
