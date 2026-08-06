@@ -658,8 +658,9 @@ psilink_rendezvous_directory() {
 # itself: it sees only the container's side of the mount, and this script picks
 # that side -- every folder is bound at the same /rendezvous, and a single-folder
 # run rendezvouses out of /data -- so the name has to be passed in beside it.
-# Prints nothing for a path with no last segment, the filesystem root; the
-# console's own fallback covers that.
+# Prints nothing for a path with no last segment, the filesystem root: that
+# empty value is passed on as it stands, which is what leaves the console with
+# no name for the folder at all.
 psilink_rendezvous_folder_name() {
   local directory name
   directory="$(psilink_rendezvous_directory)"
@@ -746,13 +747,15 @@ psilink_build_console_arguments() {
       --volume "$PSILINK_RENDEZVOUS_DIR:/rendezvous"
     )
   fi
-  # Passed whether or not a rendezvous mount is: a single-folder console
-  # rendezvouses out of the data mount, and that folder still has a name the
-  # partner's copy of the invitation should carry.
+  # Passed whether or not a rendezvous mount is, and whether or not a name could
+  # be derived. A single-folder console rendezvouses out of the data mount, and
+  # that folder still has a name the partner's copy of the invitation should
+  # carry; an empty value is what tells the console this script could not name
+  # the folder. Omitting the variable would instead have the console name the
+  # folder after the mount point THIS script picked -- "rendezvous" or "data",
+  # a name no partner could match.
   rendezvous_name="$(psilink_rendezvous_folder_name)"
-  if [ -n "$rendezvous_name" ]; then
-    PSILINK_CONSOLE_ARGUMENTS+=(--env "JOB_RENDEZVOUS_NAME=$rendezvous_name")
-  fi
+  PSILINK_CONSOLE_ARGUMENTS+=(--env "JOB_RENDEZVOUS_NAME=$rendezvous_name")
   PSILINK_CONSOLE_ARGUMENTS+=("$(psilink_image)" serve)
 }
 

@@ -313,10 +313,23 @@ describe("the shared folder's name passed to the console", () => {
     expect(args).toContain("JOB_RENDEZVOUS_NAME=County Exchange");
   });
 
-  it("passes no name for a folder that has none", () => {
-    const args = consoleArguments(makeWorkspace(), { PSILINK_DATA_ROOT: "/" });
+  it("passes an empty name for a folder that has none", () => {
+    // The filesystem root reduces to no name at all. The variable still travels,
+    // empty: leaving it out has the console name the folder after the mount point
+    // THIS launcher picked -- /data or /rendezvous -- and mint that as the name
+    // the partner is told to look for.
+    for (const folders of [
+      { PSILINK_DATA_ROOT: "/" },
+      {
+        PSILINK_DATA_ROOT: "/home/dana/psilink-work",
+        PSILINK_RENDEZVOUS_DIR: "/",
+      },
+    ]) {
+      const args = consoleArguments(makeWorkspace(), folders);
 
-    expect(args.join(" ")).not.toContain("JOB_RENDEZVOUS_NAME");
+      expect(args).toContain("JOB_RENDEZVOUS_NAME=");
+      expect(args.join(" ")).not.toMatch(/JOB_RENDEZVOUS_NAME=\S/);
+    }
   });
 });
 

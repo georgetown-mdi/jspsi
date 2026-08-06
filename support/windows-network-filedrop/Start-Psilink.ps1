@@ -705,7 +705,8 @@ function Get-RendezvousFolderName {
 
         Returns an empty string when there is no folder name to give: a drive
         root has none, and neither has a path this script could not read a last
-        segment out of. The console's own fallback is what covers that case;
+        segment out of. That empty string is passed to the console as it stands,
+        which is what leaves the console with no name for the folder at all;
         naming the drive letter instead would be a name no partner could match. #>
     param(
         [string] $Path = '',
@@ -733,9 +734,13 @@ function Get-ConsoleEngineArgs {
         operator's own folders.
 
         The rendezvous folder's name is passed whether or not a rendezvous mount
-        is: a single-folder console rendezvouses out of the data mount, and the
-        operator's folder still has a name the partner's copy of the invitation
-        should carry. #>
+        is, and whether or not this script could work one out. A single-folder
+        console rendezvouses out of the data mount, and the operator's folder
+        still has a name the partner's copy of the invitation should carry; an
+        empty value is what tells the console this script could not name the
+        folder. Omitting the variable would instead have the console name the
+        folder after the mount point THIS script picked -- "rendezvous" or
+        "data", a name no partner could match. #>
     param(
         [Parameter(Mandatory = $true)][string] $ContainerName,
         [Parameter(Mandatory = $true)][int] $ConsolePort,
@@ -755,9 +760,7 @@ function Get-ConsoleEngineArgs {
     if ($RendezvousMount) {
         $engineArgs += @('--env', 'JOB_RENDEZVOUS_DIR=/rendezvous', '--volume', "${RendezvousMount}:/rendezvous")
     }
-    if ($RendezvousName) {
-        $engineArgs += @('--env', "JOB_RENDEZVOUS_NAME=$RendezvousName")
-    }
+    $engineArgs += @('--env', "JOB_RENDEZVOUS_NAME=$RendezvousName")
     return $engineArgs + @((Get-PsilinkImage), 'serve')
 }
 

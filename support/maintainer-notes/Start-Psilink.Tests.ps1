@@ -463,11 +463,25 @@ Describe 'The console argument vector' {
         ($engineArgs -join ' ') | Should -Not -Match 'JOB_RENDEZVOUS_DIR'
     }
 
-    It 'passes no name when there is none to give' {
+    It 'passes an empty name when there is none to give' {
         $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
             -DataMount 'C:\work'
 
-        ($engineArgs -join ' ') | Should -Not -Match 'JOB_RENDEZVOUS_NAME'
+        # The variable travels empty rather than being left out: an omitted one
+        # has the console name the folder after the mount point THIS script
+        # picked, and mint that as the name the partner is told to look for.
+        $engineArgs | Should -Contain 'JOB_RENDEZVOUS_NAME='
+    }
+
+    It 'passes an empty name for a drive root, through the name it derives' {
+        # The whole path the launcher takes for a folder it cannot name, driven
+        # end to end: the drive root reduces to no name, and that is what reaches
+        # the vector.
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+            -DataMount 'D:\' -RendezvousName (Get-RendezvousFolderName -Path 'D:\')
+
+        $engineArgs | Should -Contain 'JOB_RENDEZVOUS_NAME='
+        ($engineArgs -join ' ') | Should -Not -Match 'JOB_RENDEZVOUS_NAME=\S'
     }
 }
 
