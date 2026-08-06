@@ -10,7 +10,7 @@ The verdict is a contract, not a formatted log: a launcher keys on the check ids
 
 ## The verdict document
 
-`--json` writes the verdict as exactly one line of JSON on stdout, and nothing else reaches stdout, so a capture or a pipe holds the verdict alone. It replaces the human check lines rather than accompanying them. Without `--json` no verdict document is produced at all: the check lines go to stderr as diagnostics, and the exit code carries the classification.
+`--json` writes the verdict as exactly one line of JSON on stdout, and nothing else reaches stdout, so a capture or a pipe holds the verdict alone. It replaces the human check lines rather than accompanying them. Without `--json` no verdict document is produced at all: the check lines go to stderr, and the exit code carries the classification. Those lines are a rendering for a person to read rather than log records, so they carry none of the `[timestamp] [level] [context]` prefix the CLI puts ahead of a diagnostic, and a launcher that collects and re-prints them passes on what the operator would have seen. They are written to the same destination the diagnostics are, so `--log-file` captures them, and `--log-level` admits or suppresses them exactly as it does a diagnostic.
 
 ```json
 {"version":1,"mode":"probe","overall":"fix_and_retry","checks":[{"id":"tcp_445","status":"ok"},{"id":"write","status":"fail","meaning":"this account can read the folder but not write to it.","action":"ask whoever administers the share for write permission on this folder."}]}
