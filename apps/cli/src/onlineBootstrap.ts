@@ -969,8 +969,8 @@ export async function runOnlineBootstrap(params: {
     // disk. Gated on: persistObservedReceivedPayload (only the inviter, which
     // learns its received set by observation; the online accept path knows its set
     // up front from the token and does not pass this), configWritten (a fresh
-    // config the hook actually wrote -- never the reuse path, which keeps the
-    // operator's config untouched, nor a hook that failed), and a non-empty
+    // config the hook actually wrote -- never the reuse path, whose in-place
+    // consent-record refreshes leave it false, nor a hook that failed), and a non-empty
     // observation (observedReceivedColumnsForSave drops the ambiguous empty case).
     // Unlike the hook's first saveConfig this write is deliberately NOT preceded by
     // a detectFileConflicts re-gate: it overwrites the config THIS run wrote at
@@ -1043,7 +1043,8 @@ export async function runOnlineBootstrap(params: {
  * both files were written. When a pre-existing config was reused
  * (`reuseExistingConfig`), the rotated key was saved and the config was kept,
  * refreshed only in its machine-managed consent records, so the message
- * reflects reuse rather than claiming a fresh write. When the config write failed at acceptance (`configWriteError` set),
+ * reflects reuse rather than claiming a fresh write. When the config write
+ * failed at acceptance (`configWriteError` set),
  * the rotated key was still saved but the config was not, so the message must
  * not claim otherwise -- the underlying error was already logged at error level
  * by `runProtocol`, so this only corrects the summary and points back to it. The

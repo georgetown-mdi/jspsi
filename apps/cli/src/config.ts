@@ -950,8 +950,9 @@ export function persistDisclosedPayloadColumns(
  * the acceptance it just made, which a later recurring `psilink exchange` holds
  * the received payload to ({@link reconcileReceivedPayload} in core).
  *
- * Used by the offline accept-reuse path, which keeps the operator's existing
- * config rather than rewriting it. Like {@link persistDisclosedPayloadColumns}
+ * Used by both accept-reuse paths -- offline, and the online hook's reuse
+ * branch -- which keep the operator's existing config rather than rewriting
+ * it. Like {@link persistDisclosedPayloadColumns}
  * -- its send-side twin -- and unlike {@link saveConfig}, which re-serializes the
  * whole spec and would strip comments, this edits the file in place through the
  * YAML document model so the operator's comments, key order, and formatting
