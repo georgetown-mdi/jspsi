@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { UsageError } from "@psilink/core";
+import { keyTypeFromBlob, UsageError } from "@psilink/core";
 import type { PresentedHostKey, SFTPConnectionConfig } from "@psilink/core";
 
 import {
@@ -36,6 +36,17 @@ function makeDeps(presented: PresentedHostKey): ProbeHostKeyDeps & {
 
 function rejectingDeps(error: unknown): ProbeHostKeyDeps {
   return { probe: () => Promise.reject(error) };
+}
+
+// A raw OpenSSH host-key blob naming `keyType`: a uint32 length prefix, the type
+// bytes, then key bytes. Nothing bounds what a server puts in the type field, so
+// the bytes are written here exactly as a hostile server would send them.
+function hostKeyBlobNaming(keyType: string): Uint8Array {
+  const type = new TextEncoder().encode(keyType);
+  const blob = new Uint8Array(4 + type.length + 32);
+  new DataView(blob.buffer).setUint32(0, type.length);
+  blob.set(type, 4);
+  return blob;
 }
 
 describe("buildProbeConfig parses the URL into a minimal connection", () => {
@@ -120,6 +131,66 @@ describe("probeHostKeyLines formats and validates the presented key", () => {
     expect(result.stdout).toBeUndefined();
     expect(result.summary).toContain(FP);
     expect(result.summary).toContain("ssh-ed25519");
+  });
+
+  test("neither output form carries a rejected key type's bytes", async () => {
+    // Both forms print whatever the probe observed, and what it observes is
+    // keyTypeFromBlob's output -- so the type is taken from the real primitive
+    // over a hostile blob rather than from a string chosen here. The console
+    // ingests the --json line, so the placeholder is what has to reach it.
+    const keyType = keyTypeFromBlob(
+      hostKeyBlobNaming("ssh-\x1b[31mevil\r\nINJECTED"),
+    );
+    const args = {
+      sftpUrl: "sftp://sftp.example.org",
+      connectTimeoutSeconds: 10,
+      verbosity: 0,
+    };
+
+    const json = await probeHostKeyLines(
+      { ...args, json: true },
+      makeDeps({ fingerprint: FP, keyType }),
+    );
+    const emitted = JSON.parse(json.stdout!) as { key_type: string };
+    expect(emitted.key_type).toMatch(/^\(unknown:[0-9a-f]+\)$/);
+    expect(json.stdout).not.toContain("INJECTED");
+
+    const human = await probeHostKeyLines(
+      { ...args, json: false },
+      makeDeps({ fingerprint: FP, keyType }),
+    );
+    expect(human.summary).toMatch(/presented a \(unknown:[0-9a-f]+\) host key/);
+    expect(human.summary).not.toContain("INJECTED");
+    // The comparison step the operator acts on is untouched.
+    expect(human.summary).toContain(FP);
+  });
+
+  test("both output forms carry a conforming key type verbatim", async () => {
+    const keyType = keyTypeFromBlob(
+      hostKeyBlobNaming("ecdsa-sha2-nistp521-cert-v01@openssh.com"),
+    );
+    const args = {
+      sftpUrl: "sftp://sftp.example.org",
+      connectTimeoutSeconds: 10,
+      verbosity: 0,
+    };
+
+    const json = await probeHostKeyLines(
+      { ...args, json: true },
+      makeDeps({ fingerprint: FP, keyType }),
+    );
+    expect(JSON.parse(json.stdout!)).toEqual({
+      fingerprint: FP,
+      key_type: "ecdsa-sha2-nistp521-cert-v01@openssh.com",
+    });
+
+    const human = await probeHostKeyLines(
+      { ...args, json: false },
+      makeDeps({ fingerprint: FP, keyType }),
+    );
+    expect(human.summary).toContain(
+      "presented a ecdsa-sha2-nistp521-cert-v01@openssh.com host key",
+    );
   });
 
   test("a non-canonical fingerprint is rejected before any line is produced", async () => {

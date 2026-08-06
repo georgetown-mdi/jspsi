@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import { reconcileHostKeyFingerprints } from "../src/hostKeyReconciliation";
+import { keyTypeFromBlob } from "../src/utils/sshHostKey";
 import { prepareForExchange, runExchange } from "../src/exchange";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
@@ -28,6 +29,17 @@ const KEY_RSA: PresentedHostKey = {
   fingerprint: "SHA256:" + "c".repeat(43),
   keyType: "ssh-rsa",
 };
+
+// What a party observes when the server names its key type `blobType`: the value
+// keyTypeFromBlob composes from those wire bytes, not a string chosen here, so
+// the reconciliation is driven with exactly what the verifier records.
+function observedKeyType(blobType: string): string {
+  const type = new TextEncoder().encode(blobType);
+  const blob = new Uint8Array(4 + type.length + 32);
+  new DataView(blob.buffer).setUint32(0, type.length);
+  blob.set(type, 4);
+  return keyTypeFromBlob(blob);
+}
 
 // --- reconcileHostKeyFingerprints (pure) -------------------------------------
 
@@ -70,9 +82,9 @@ test("a different-type difference adds the benign multiple-host-key case", () =>
 });
 
 test("a server-controlled key type is escaped before display", () => {
-  // keyType is decoded from the partner-advertised blob and stored unsanitized;
-  // the reconciliation must neutralise control bytes before they reach the
-  // operator's terminal.
+  // A partner's advertised keyType is parsed under a length bound alone and
+  // stored unsanitized, so the reconciliation must neutralise control bytes
+  // before they reach the operator's terminal.
   const hostile: PresentedHostKey = {
     fingerprint: KEY_RSA.fingerprint,
     keyType: "ssh-rsa\r\nINJECTED",
@@ -81,6 +93,43 @@ test("a server-controlled key type is escaped before display", () => {
   expect(msg).toBeDefined();
   expect(msg).not.toContain("\r");
   expect(msg).not.toContain("\n");
+});
+
+// The two parties' key types are compared verbatim, and equality is what selects
+// the narrower "rekey or interception" wording. The bound each party's locally
+// observed type passes through must therefore keep two DIFFERENT rejected types
+// apart -- a single shared placeholder would make a server show one party one
+// hostile type and the other a different one, and have the warning read as if
+// both had observed the same key type.
+test("two different rejected key types do not collapse into a same-type warning", () => {
+  const first: PresentedHostKey = {
+    fingerprint: KEY_ED25519.fingerprint,
+    keyType: observedKeyType("\x00first"),
+  };
+  const second: PresentedHostKey = {
+    fingerprint: KEY_RSA.fingerprint,
+    keyType: observedKeyType("\x00second"),
+  };
+
+  expect(first.keyType).not.toBe(second.keyType);
+  const msg = reconcileHostKeyFingerprints(first, second);
+  expect(msg).toBeDefined();
+  // The different-type branch: the benign multiple-host-key possibility is kept
+  // on the table, exactly as it is for two different legitimate types.
+  expect(msg).toMatch(/multiple host keys/);
+});
+
+test("one rejected key type observed by both parties reads as a same-type divergence", () => {
+  // The other half of the same property: the SAME rejected type on both sides
+  // still compares equal, so the narrower wording is not lost to the bound.
+  const keyType = observedKeyType("\x00same");
+  const msg = reconcileHostKeyFingerprints(
+    { fingerprint: KEY_ED25519.fingerprint, keyType },
+    { fingerprint: KEY_RSA.fingerprint, keyType },
+  );
+  expect(msg).toBeDefined();
+  expect(msg).not.toMatch(/multiple host keys/);
+  expect(msg).toMatch(/rotation/);
 });
 
 // --- runExchange wiring (end to end, real PSI) -------------------------------
@@ -173,4 +222,25 @@ test("a party that advertises no observed key never reports an injected one", as
   );
   expect(unauthenticated).toBeUndefined();
   expect(advertiser).toBeUndefined();
+});
+
+test("a rejected key type survives the partner's parse of the advertisement", async () => {
+  // The placeholder has to fit the bound the partner reads an advertised key
+  // type under, or the whole advertisement reads as malformed and the partner
+  // reconciles nothing -- which the real terms exchange, not a restated bound,
+  // is what settles here.
+  const observed: PresentedHostKey = {
+    fingerprint: KEY_ED25519.fingerprint,
+    keyType: observedKeyType("\x00".repeat(4096)),
+  };
+  const [initiator, responder] = await exchangeWithObservedKeys(
+    observed,
+    KEY_RSA,
+  );
+
+  for (const msg of [initiator, responder]) {
+    expect(msg).toBeDefined();
+    expect(msg).toContain(observed.keyType);
+    expect(msg).toContain(KEY_RSA.fingerprint);
+  }
 });

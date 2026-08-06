@@ -202,9 +202,105 @@ test("keyTypeFromBlob returns (unknown) when the length prefix has the high bit 
   expect(keyTypeFromBlob(blob)).toBe("(unknown)");
 });
 
-test("keyTypeFromBlob returns (unknown) for an invalid-UTF-8 type field", () => {
-  // typeLen = 3 with a lone continuation byte 0x80 (invalid UTF-8); the fatal
-  // TextDecoder throws and the catch yields "(unknown)" rather than U+FFFD.
+test("keyTypeFromBlob replaces an invalid-UTF-8 type field", () => {
+  // typeLen = 3 with lone continuation bytes (invalid UTF-8, and outside the
+  // accepted charset either way). The blob names a type, so this is the
+  // placeholder over those bytes rather than the malformed-blob "(unknown)".
   const blob = new Uint8Array([0, 0, 0, 3, 0x80, 0x80, 0x80]);
-  expect(keyTypeFromBlob(blob)).toBe("(unknown)");
+  expect(keyTypeFromBlob(blob)).toBe("(unknown:808080)");
+});
+
+// --- keyTypeFromBlob: the charset and length bound ---------------------------
+
+// A blob naming exactly `keyType`, so the bound is driven with the bytes a
+// server would put on the wire rather than a decoded string.
+function blobNamingType(keyType: string | Uint8Array): Uint8Array {
+  const type =
+    typeof keyType === "string" ? new TextEncoder().encode(keyType) : keyType;
+  const blob = new Uint8Array(4 + type.length + 32);
+  new DataView(blob.buffer).setUint32(0, type.length);
+  blob.set(type, 4);
+  return blob;
+}
+
+// The host-key type names in real-world use: the plain algorithms, the
+// security-key forms, and the certificate forms, which carry the `@` and `.`
+// the charset exists for. None of them changes on the way through the bound.
+const REAL_WORLD_KEY_TYPES = [
+  "ssh-ed25519",
+  "ssh-rsa",
+  "ssh-dss",
+  "rsa-sha2-256",
+  "rsa-sha2-512",
+  "ecdsa-sha2-nistp256",
+  "ecdsa-sha2-nistp384",
+  "ecdsa-sha2-nistp521",
+  "sk-ssh-ed25519@openssh.com",
+  "sk-ecdsa-sha2-nistp256@openssh.com",
+  "ssh-ed25519-cert-v01@openssh.com",
+  "ecdsa-sha2-nistp521-cert-v01@openssh.com",
+];
+
+test("keyTypeFromBlob returns every real-world key type verbatim", () => {
+  for (const keyType of REAL_WORLD_KEY_TYPES)
+    expect(keyTypeFromBlob(blobNamingType(keyType))).toBe(keyType);
+});
+
+test("keyTypeFromBlob accepts a 64-byte type and replaces a 65-byte one", () => {
+  // The length bound, at its edge: 64 bytes is the longest type carried
+  // verbatim, matching the bound a partner parses an advertised type under.
+  expect(keyTypeFromBlob(blobNamingType("a".repeat(64)))).toBe("a".repeat(64));
+  expect(keyTypeFromBlob(blobNamingType("a".repeat(65)))).toBe(
+    `(unknown:${"61".repeat(24)})`,
+  );
+});
+
+test("keyTypeFromBlob replaces a type carrying a byte outside the charset", () => {
+  // One ESC in an otherwise ordinary type is enough: the whole type is replaced
+  // by the hex of its leading bytes, so no byte of it reaches an operator.
+  expect(keyTypeFromBlob(blobNamingType("ssh-\x1b[31med25519"))).toBe(
+    "(unknown:7373682d1b5b33316d65643235353139)",
+  );
+  // A space is outside the charset too -- it is what keeps a PEM BEGIN marker
+  // out of the accepted range.
+  expect(keyTypeFromBlob(blobNamingType("ssh ed25519"))).toBe(
+    "(unknown:7373682065643235353139)",
+  );
+});
+
+test("keyTypeFromBlob maps two different rejected types to different placeholders", () => {
+  // The cross-party reconciliation compares the two parties' key types verbatim
+  // and narrows its wording when they are EQUAL, so collapsing every rejected
+  // type to one value would make two different hostile types compare equal.
+  const first = keyTypeFromBlob(blobNamingType("\x00first"));
+  const second = keyTypeFromBlob(blobNamingType("\x00second"));
+  expect(first).not.toBe(second);
+  expect(first).not.toBe("(unknown)");
+  expect(second).not.toBe("(unknown)");
+});
+
+test("keyTypeFromBlob's placeholder fits the bound a partner parses under", () => {
+  // The partner reads an advertised key type under z.string().max(64); a longer
+  // placeholder would make this party's advertisement read as malformed and drop
+  // the reconciliation entirely.
+  for (const type of [
+    new Uint8Array(1),
+    new Uint8Array(24).fill(0xff),
+    new Uint8Array(4096).fill(0xff),
+  ])
+    expect(keyTypeFromBlob(blobNamingType(type)).length).toBeLessThanOrEqual(
+      64,
+    );
+});
+
+test("keyTypeFromBlob's placeholder framing is not forgeable by a server", () => {
+  // The parentheses lie outside the accepted charset, so a server naming its key
+  // type after a placeholder gets a placeholder OVER those bytes rather than the
+  // string it chose -- there is no type a server can send to impersonate one.
+  const forged = "(unknown:00)";
+  expect(keyTypeFromBlob(blobNamingType(forged))).not.toBe(forged);
+  expect(keyTypeFromBlob(blobNamingType(forged))).toMatch(
+    /^\(unknown:[0-9a-f]+\)$/,
+  );
+  expect(keyTypeFromBlob(blobNamingType("(unknown)"))).not.toBe("(unknown)");
 });

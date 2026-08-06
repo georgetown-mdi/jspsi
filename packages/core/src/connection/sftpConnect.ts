@@ -40,14 +40,18 @@ export interface PresentedHostKey {
    */
   fingerprint: string;
   /**
-   * SSH key-type string decoded from the presented blob, e.g. `ssh-ed25519`.
-   * `(unknown)` when the blob is malformed (see {@link keyTypeFromBlob}).
+   * SSH key-type string, e.g. `ssh-ed25519`. A key this party observed carries
+   * whatever {@link keyTypeFromBlob} returned for the presented blob: the type
+   * verbatim within that function's charset and length bound, `(unknown:<hex>)`
+   * for a type outside it, or `(unknown)` for a blob naming no type.
    *
-   * Server-controlled and stored UNsanitized: it must reach an operator only
-   * through a display sink that escapes it -- {@link sanitizeForDisplay} at a log
-   * or console call site, or `sanitizeErrorForDisplay` when it is composed into
-   * an error -- as a hostile server can put control/BIDI bytes in the key type.
-   * The sibling `fingerprint` is base64 and needs no escaping.
+   * Stored UNsanitized: it must reach an operator only through a display sink
+   * that escapes it -- {@link sanitizeForDisplay} at a log or console call site,
+   * or `sanitizeErrorForDisplay` when it is composed into an error. The bound
+   * above applies only to a locally observed key; the PARTNER's advertised value
+   * arrives on this field through the terms exchange under a length bound alone
+   * (`protocolSetup.ts`), so it can still carry control/BIDI bytes. The sibling
+   * `fingerprint` is base64 and needs no escaping.
    */
   keyType: string;
 }

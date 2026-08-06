@@ -1,16 +1,95 @@
 import { sha256, bytesEqual } from "./crypto.js";
 
 /**
- * Parse the SSH key-type string from a raw OpenSSH host-key blob.
+ * The longest host-key type returned verbatim, in bytes. It matches the bound
+ * the PARTNER's advertised key type is parsed under (`protocolSetup.ts`), so a
+ * type this party accepts is always one the partner can read back for the
+ * cross-party reconciliation. Real-world types sit well inside it: the longest
+ * names are the certificate forms, around 40 bytes
+ * (`ecdsa-sha2-nistp521-cert-v01@openssh.com`).
+ */
+const MAX_KEY_TYPE_BYTES = 64;
+
+/**
+ * How many bytes of a non-conforming type the placeholder encodes. Chosen so the
+ * placeholder stays inside {@link MAX_KEY_TYPE_BYTES}: the `(unknown:` and `)`
+ * framing costs 10 characters, leaving room for 54 hex digits.
+ */
+const PLACEHOLDER_SOURCE_BYTES = 24;
+
+/** What a blob carrying no readable type at all yields. */
+const UNREADABLE_KEY_TYPE = "(unknown)";
+
+/**
+ * Whether a byte may appear in a host-key type returned verbatim: the charset
+ * `[A-Za-z0-9._@-]`, which covers the SSH algorithm names (`ssh-ed25519`,
+ * `ecdsa-sha2-nistp256`, `rsa-sha2-512`) plus the `@` and `.` a certificate type
+ * carries (`ssh-ed25519-cert-v01@openssh.com`). Every accepted byte is below
+ * 0x80, so an accepted sequence is its own UTF-8 encoding.
+ */
+function isAcceptedKeyTypeByte(byte: number): boolean {
+  return (
+    (byte >= 0x41 && byte <= 0x5a) || // A-Z
+    (byte >= 0x61 && byte <= 0x7a) || // a-z
+    (byte >= 0x30 && byte <= 0x39) || // 0-9
+    byte === 0x2e || // .
+    byte === 0x5f || // _
+    byte === 0x40 || // @
+    byte === 0x2d // -
+  );
+}
+
+/**
+ * The type as a string when every byte is accepted and the length is within
+ * bound, `undefined` otherwise. Each accepted byte is ASCII, so its code unit is
+ * its character and no decoder is involved.
+ */
+function acceptedKeyType(typeBytes: Uint8Array): string | undefined {
+  if (typeBytes.length > MAX_KEY_TYPE_BYTES) return undefined;
+  let type = "";
+  for (const byte of typeBytes) {
+    if (!isAcceptedKeyTypeByte(byte)) return undefined;
+    type += String.fromCharCode(byte);
+  }
+  return type;
+}
+
+/**
+ * The stand-in for a type the charset or length bound rejects: `(unknown:` plus
+ * the lowercase hex of the type's first {@link PLACEHOLDER_SOURCE_BYTES} bytes,
+ * plus `)`. Encoding the offending bytes rather than discarding them keeps two
+ * different rejected types distinguishable, which is what the cross-party
+ * reconciliation compares; the parentheses lie outside the accepted charset, so
+ * a server cannot name its key type a string that passes for one of these.
+ */
+function placeholderKeyType(typeBytes: Uint8Array): string {
+  let hex = "";
+  for (const byte of typeBytes.subarray(0, PLACEHOLDER_SOURCE_BYTES))
+    hex += byte.toString(16).padStart(2, "0");
+  return `(unknown:${hex})`;
+}
+
+/**
+ * Parse the SSH key-type string from a raw OpenSSH host-key blob, bounded so an
+ * operator-facing identifier taken off the wire carries neither arbitrary bytes
+ * nor arbitrary length.
  *
  * The blob wire format is a sequence of length-prefixed strings; the first
  * string is the key type (e.g. "ssh-ed25519", "ecdsa-sha2-nistp256",
- * "ssh-rsa"). Returns "(unknown)" when the blob is too short or malformed
- * rather than throwing, so a partial packet does not break the verifier's
- * error message.
+ * "ssh-rsa"). The value is server-chosen, so what is returned depends on what
+ * the type field holds:
+ *
+ * - At most {@link MAX_KEY_TYPE_BYTES} bytes, every one of them in
+ *   `[A-Za-z0-9._@-]`: the type verbatim. Every real-world key type qualifies.
+ * - Any other non-empty type: `(unknown:<hex>)`, encoding the type's leading
+ *   bytes (see {@link placeholderKeyType}). At most 58 characters, so it fits
+ *   the bound a partner parses an advertised key type under.
+ * - A blob carrying no type at all -- too short to hold a length prefix, or a
+ *   zero, oversized, or past-the-end one: `"(unknown)"` rather than a throw, so
+ *   a partial packet does not break the verifier's error message.
  */
 function keyTypeFromBlob(blob: Uint8Array): string {
-  if (blob.length < 4) return "(unknown)";
+  if (blob.length < 4) return UNREADABLE_KEY_TYPE;
   // The length prefix is a wire-format uint32. Coerce the bitwise-OR result to
   // unsigned with `>>> 0`: without it a first byte >= 0x80 sets the sign bit and
   // yields a negative `typeLen`, which slips past the `> blob.length - 4` bound
@@ -24,16 +103,11 @@ function keyTypeFromBlob(blob: Uint8Array): string {
     0;
   // A zero-length type is malformed -- every real OpenSSH blob names a
   // non-empty key type -- and a length past the blob is truncated. Both yield
-  // "(unknown)" rather than letting `subarray` decode an empty ("") or partial
+  // "(unknown)" rather than letting `subarray` read an empty ("") or partial
   // range into the operator-facing mismatch message.
-  if (typeLen === 0 || typeLen > blob.length - 4) return "(unknown)";
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(
-      blob.subarray(4, 4 + typeLen),
-    );
-  } catch {
-    return "(unknown)";
-  }
+  if (typeLen === 0 || typeLen > blob.length - 4) return UNREADABLE_KEY_TYPE;
+  const typeBytes = blob.subarray(4, 4 + typeLen);
+  return acceptedKeyType(typeBytes) ?? placeholderKeyType(typeBytes);
 }
 
 /**
@@ -128,10 +202,12 @@ export async function matchHostKeyFingerprint(
 }
 
 /**
- * Extract the SSH key-type string from a raw OpenSSH host-key blob.
+ * Extract the bounded SSH key-type string from a raw OpenSSH host-key blob.
  *
  * @internal Exported for use in the mismatch error message; the key type
  * names the algorithm (e.g. "ssh-ed25519") so an operator who needs to
  * re-pin against a different key type can identify it without a separate tool.
+ * The charset and length bound on what it returns is part of that contract --
+ * every consumer displays the value to an operator.
  */
 export { keyTypeFromBlob };

@@ -175,9 +175,10 @@ function assertCanonicalFingerprint(presented: PresentedHostKey): void {
 }
 
 /** The single stdout line the `--json` form emits: snake_case keys, the machine
- * form the console consumes. `keyType` is server-controlled bytes, so it is
- * carried as a JSON string value (JSON encoding escapes any control byte) and
- * re-validated at the console's trust boundary. */
+ * form the console consumes. `keyType` is the server's choice within core's
+ * charset and length bound, so it is carried as a JSON string value (JSON
+ * encoding escapes any control byte) and re-validated at the console's trust
+ * boundary. */
 function probeJsonLine(presented: PresentedHostKey): string {
   return JSON.stringify({
     fingerprint: presented.fingerprint,
@@ -186,9 +187,9 @@ function probeJsonLine(presented: PresentedHostKey): string {
 }
 
 /** The human-readable summary, mirroring the trust-prompt copy in
- * hostKeyTrust.ts. `keyType` is decoded straight from the server-controlled key
- * blob, so it is escaped before display, exactly as sftpSession.ts treats it;
- * the fingerprint is base64 and format-validated, and the host is already a bare
+ * hostKeyTrust.ts. `keyType` is the server's choice within core's bound, so it
+ * is escaped before display, exactly as sftpSession.ts treats it; the
+ * fingerprint is base64 and format-validated, and the host is already a bare
  * address but is escaped defensively too. */
 function probeHumanSummary(host: string, presented: PresentedHostKey): string {
   return (
