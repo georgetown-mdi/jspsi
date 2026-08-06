@@ -259,8 +259,17 @@ jobs:
 
           # Both parties write the same intersection, so a run that "succeeded"
           # while linking nothing is caught here rather than passing on exit 0.
+          #
+          # Counted from inside a container rather than on the runner: the CLI
+          # writes the result CSV owner-only (createOwnerOnlyWriteStream), the
+          # image carries no USER so the parties ran as root, and the bind mount
+          # puts a root-owned 0600 file in front of an unprivileged runner shell.
+          # Reading it as root preserves the mode the image actually ships with,
+          # where running the parties as the runner's uid would smoke something
+          # other than the published image.
           for party in a b; do
-            lines=$(wc -l <"$work/$party/output.csv")
+            lines=$(docker run --rm -v "$work/$party:/work:ro" \
+              --entrypoint sh ${{ matrix.tag }} -c 'wc -l </work/output.csv')
             echo "party $party wrote $lines lines of results"
             if [ "$lines" != "11" ]; then
               echo "party $party wrote $lines lines, expected 11 (a header and ten matched rows)" >&2
