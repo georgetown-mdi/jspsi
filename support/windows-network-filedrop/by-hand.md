@@ -14,10 +14,12 @@ network folder needs a volume at all. Which account to use is
 [the passwords page](passwords.md), and it is worth five minutes before you
 start, because that choice is the awkward one to undo.
 
-**The parts and steps below are numbered to match the script.** So when
-[troubleshooting](troubleshooting.md) says "step 3 fails", it means step 3
-here. Every step names the section that covers its failure, and you can stop
-reading this page at that point.
+**The parts and steps below are numbered to match the Command Prompt script.**
+So when [troubleshooting](troubleshooting.md) names a step, it is the one with
+that number here. The PowerShell script runs the checks that ship inside the
+psilink image, which name what they looked at rather than numbering it, and
+which ask the same questions in the same order. Every step names the section
+that covers its failure, and you can stop reading this page at that point.
 
 ## What you will need in front of you
 

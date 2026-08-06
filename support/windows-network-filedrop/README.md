@@ -57,7 +57,9 @@ line, or if the launcher will not run here.
 
 Try the **PowerShell script** first, listed below. If it refuses to run use the
 Command Prompt one instead and stay with it from then on. They ask the same
-questions and report the same failures.
+questions and catch the same failures, in slightly different words: the
+PowerShell one runs the checks that ship inside the psilink image, and the
+Command Prompt one carries its own copy of them.
 
 Where the two need different commands, this guide gives both, PowerShell first.
 A single block means the command is the same in either.
@@ -168,8 +170,11 @@ section for each failure, and it covers how to send the whole run to whoever is
 helping you.
 
 > **How far this has been tested.** Both versions have been run start to finish
-> on Windows 11 against a real file server, and the checks they run inside
-> Docker are verified against that server too. Neither has ever met a real DFS
-> namespace, which is why the script asks you to confirm the server it worked
-> out rather than trusting it. Corrections from a real environment are welcome,
-> and are worth more here than anywhere else in this repository.
+> on Windows 11 against a real file server. The checks the Command Prompt one
+> runs inside Docker were verified against that server. The PowerShell one runs
+> the checks that ship inside the psilink image, which are verified against a
+> real file server on every change to them, but it has not itself been run start
+> to finish in that form. Neither version has ever met a real DFS namespace, which
+> is why the script asks you to confirm the server it worked out rather than
+> trusting it. Corrections from a real environment are welcome, and are worth
+> more here than anywhere else in this repository.

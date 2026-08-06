@@ -25,9 +25,10 @@ import {
 // is attempted, in the two places the answer can differ: over the network as
 // smbclient sees it (`doctor probe`), and through the kernel as a mounted folder
 // (`doctor mount`). Its `--json` verdict is a stable contract, not a formatted
-// log -- the Windows setup script and the host-side launcher that follows it
-// loop on the check ids and the overall verdict, so a check keeps its id and a
-// caller reads `version` before anything else.
+// log -- the host-side launchers loop on the check ids and the overall verdict,
+// so a check keeps its id and a caller reads `version` before anything else. The
+// Windows setup script consumes the other half of the same contract: it prints
+// the human check lines as they are written and branches on the exit code alone.
 //
 // Its connection inputs come from the SMB_* environment, never flags: the
 // password must not become an argv value every `ps` on the machine can read, and

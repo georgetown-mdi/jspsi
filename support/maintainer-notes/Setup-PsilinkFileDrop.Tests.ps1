@@ -14,7 +14,9 @@
     Two halves:
 
       - Pure: UNC and device-prefix parsing, drive-kind classification, the
-        dialect map, and password masking. These need no rig and no rights.
+        dialect map, password masking, and that the switch defines the
+        credential and volume sequences the launcher reaches through it. These
+        need no rig and no rights.
       - Rig-backed: a share the runner serves itself over loopback, a drive
         letter mapped to it, and a standalone DFS namespace with a link into
         that share. Built the way support/maintainer-notes/ci-resolution-rig.ps1
@@ -138,6 +140,18 @@ Describe 'The -LoadFunctionsOnly guard' {
         # Exactly the one word: the setup flow announces itself with a banner
         # before it does anything, so any of it running shows up here.
         $stdout | Should -Be 'LOADED' -Because $shape
+    }
+
+    It 'defines the sequences Start-Psilink.ps1 dot-sources it for' {
+        # The launcher carries no copy of these: it calls them through the
+        # dot-source, so each has to sit above the guard rather than in the flow
+        # below it. A move past the guard leaves the launcher's network branch
+        # calling functions that are not there, on a path no test here reaches.
+        foreach ($name in 'Resolve-DropPath', 'Read-ShareCredential',
+                          'New-ShareVolume', 'Invoke-Docker', 'Hide-Secret') {
+            Get-Command $name -ErrorAction SilentlyContinue |
+                Should -Not -BeNullOrEmpty -Because $name
+        }
     }
 
     It 'leaves an ordinary run running the setup flow' {

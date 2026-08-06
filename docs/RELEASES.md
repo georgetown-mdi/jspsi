@@ -32,7 +32,7 @@ The single `vdorie/psi-link` image carries both roles: it runs headless as the C
 
 The hosted web deployment (`apps/web`) is a separate deployment to its hosting environment as part of CI/CD; it is not this image and is not distributed as a versioned artifact.
 
-The three launcher files are the host-side front door an operator runs to open the console: `start-psilink.sh` for macOS and Linux, `Start-Psilink.ps1` for Windows, and `Setup-PsilinkFileDrop.ps1`, which the Windows one dot-sources for its path resolution and which must sit beside it. They travel as one unit; see [Stamped launchers](#stamped-launchers) for what a release does to them.
+The three launcher files are the host-side front door an operator runs to open the console: `start-psilink.sh` for macOS and Linux, `Start-Psilink.ps1` for Windows, and `Setup-PsilinkFileDrop.ps1`, which the Windows one dot-sources for its path resolution, credential prompts and network-share volume, and which must sit beside it. They travel as one unit; see [Stamped launchers](#stamped-launchers) for what a release does to them.
 
 `@psilink/core` is not currently published to the npm registry. If that changes, add an npm row to the table above.
 

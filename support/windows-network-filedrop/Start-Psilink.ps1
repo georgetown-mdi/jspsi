@@ -859,46 +859,16 @@ if ($rendezvousResolved.Kind -eq 'Network') {
     }
 
     Show-Head 'Credentials for the file server'
-    Write-Host 'These are the credentials the CONTAINER will use. Windows signs you'
-    Write-Host 'in as yourself; Docker cannot borrow that.'
-    Write-Host ''
-    Show-Alert 'Prefer an account scoped to this share, or one you are prepared to'
-    Show-Note 'retire. Docker stores this password in cleartext in the volume'
-    Show-Note 'metadata and puts it on a command line while creating the volume.'
-    Show-Info ''
-    Show-Info 'See the passwords page, "Where the password ends up".'
-    Write-Host ''
-
-    $username = Read-Host 'Username'
-    $domain = Read-Host 'Domain (press Enter if you do not have one)'
-    if ($username -match '^(.+?)\\(.+)$') {
-        if (-not $domain) { $domain = $Matches[1] }
-        $username = $Matches[2]
-    }
-
-    $securePass = Read-Host 'Password' -AsSecureString
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePass)
-    # PtrToStringBSTR and not PtrToStringAuto: the buffer is UTF-16 and BSTR is
-    # the only one of the two that says so.
-    try { $plainPass = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
-    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-
-    if ([string]::IsNullOrEmpty($plainPass)) {
-        Show-Fail 'No password entered.'
-        Show-Note "See $PsilinkTroubleshootingUrl, 'The share never asks for a password'."
-        exit 1
-    }
-    # Docker separates mount options with commas, so a comma in the password
-    # ends the option and the rest becomes a malformed one. There is no escaping
-    # available: the local driver takes the credentials only as one
-    # comma-separated string. Said now rather than after the volume fails,
-    # because that failure text carries the tail of the password in the clear.
-    if ($plainPass.Contains(',')) {
-        Show-Fail 'That password contains a comma, and Docker cannot carry it.'
-        Show-Note 'Mount options are separated by commas and there is no way to'
-        Show-Note 'escape one. Use an account whose password has none.'
-        exit 1
-    }
+    # Read-ShareCredential, and New-ShareVolume below, come from the setup script
+    # dot-sourced above: those two sequences have been run against a real file
+    # server there, and a second copy here would be a second copy to drift. This
+    # branch cannot be reached without that dot-source, because classifying a
+    # folder as a network path is the setup script's own function.
+    $credential = Read-ShareCredential
+    if (-not $credential) { exit 1 }
+    $username = $credential.Username
+    $domain = $credential.Domain
+    $plainPass = $credential.Password
 
     $token = [Guid]::NewGuid().ToString('N')
 
@@ -933,54 +903,11 @@ if ($rendezvousResolved.Kind -eq 'Network') {
             Show-Note 'what it will make of them.'
         }
 
-        $device = "//$server/$share"
-        if ($subPath) { $device = "$device/$subPath" }
-        $options = "username=$username,password=$plainPass"
-        if ($domain) { $options = "$options,domain=$domain" }
-
-        # Existence is established from the volume list rather than from the
-        # exit code of an inspection: anything that stops the inspection running
-        # also exits non-zero, and reading that as "no such volume" walks past
-        # the guard and into the removal below.
-        $listed = Invoke-EngineQuiet -EngineArgs @('volume', 'ls', '--quiet')
-        $volumeExists = ($listed.ExitCode -eq 0 -and
-            (@($listed.Output -split '\r?\n' | Where-Object { $_.Trim() -eq $VolumeName }).Count -gt 0))
-        if ($volumeExists) {
-            # No quotes inside the template: Windows PowerShell strips them
-            # while building a native command line, and the engine then fails to
-            # parse it for every volume, disabling the check entirely.
-            $existing = Invoke-EngineQuiet -EngineArgs @('volume', 'inspect', '--format',
-                '{{.Driver}} {{.Options.type}}', $VolumeName)
-            if ($existing.ExitCode -ne 0 -or $existing.Output.Trim() -ne 'local cifs') {
-                Show-Fail "A volume called '$VolumeName' already exists and is not a"
-                Show-Note 'network-share volume. It has been left alone: removing it'
-                Show-Note 'could destroy something else on this PC. Run this again'
-                Show-Note 'with -VolumeName <another-name>.'
-                exit 1
-            }
-            # Creating over an existing name exits 0 and silently keeps the
-            # options the volume already has, so a run after a password change
-            # would go on using the old one.
-            $removed = Invoke-EngineQuiet -EngineArgs @('volume', 'rm', $VolumeName)
-            if ($removed.ExitCode -ne 0) {
-                Show-Fail "Could not replace the existing '$VolumeName' volume."
-                Show-Note 'A container is probably still using it. Stop any exchange'
-                Show-Note "that is running, then try again: $script:PsilinkEngine ps"
-                exit 1
-            }
-        }
-
-        $created = Invoke-EngineQuiet -EngineArgs @(
-            'volume', 'create', '--driver', 'local',
-            '--opt', 'type=cifs', '--opt', "device=$device", '--opt', "o=$options",
-            $VolumeName)
-        if ($created.ExitCode -ne 0) {
-            Show-Fail 'Could not create the volume.'
-            Write-Host ''
-            Write-Host ($created.Output.Replace($plainPass, '<password removed>'))
-            exit 1
-        }
-        Show-Ok 'Volume created.'
+        $volumeMade = New-ShareVolume -VolumeName $VolumeName `
+            -Server $server -Share $share -SubPath $subPath `
+            -Username $username -Password $plainPass -Domain $domain `
+            -Engine $script:PsilinkEngine
+        if (-not $volumeMade) { exit 1 }
         $rendezvousMount = $VolumeName
         $usingVolume = $true
 
@@ -999,6 +926,7 @@ if ($rendezvousResolved.Kind -eq 'Network') {
             Remove-Item "env:$name" -ErrorAction SilentlyContinue
         }
         $plainPass = $null
+        $credential = $null
     }
 } else {
     # A folder on this PC is bind-mounted as it stands, so the kernel's view is
