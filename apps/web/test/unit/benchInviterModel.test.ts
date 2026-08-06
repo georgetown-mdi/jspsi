@@ -36,7 +36,6 @@ import {
   isCliTransport,
   keySatisfiabilityFor,
   lifetimeLabel,
-  rendezvousLocatorName,
   resetToRecommended,
   reviewValidation,
   sealEditor,
@@ -1139,22 +1138,3 @@ describe("per-key dead-key verdict on the authoring surface", () => {
   });
 });
 
-describe("rendezvousLocatorName reduces a mount path to its folder name", () => {
-  test("returns the basename of a POSIX rendezvous path", () => {
-    // The partner-bound token must carry only the folder name, never the resolved
-    // absolute path, so a bare-host run does not leak the appliance's layout.
-    expect(rendezvousLocatorName("/srv/exchanges/psilink")).toBe("psilink");
-  });
-
-  test("ignores a trailing separator", () => {
-    expect(rendezvousLocatorName("/srv/exchanges/psilink/")).toBe("psilink");
-  });
-
-  test("returns the basename of a Windows rendezvous path", () => {
-    expect(rendezvousLocatorName("C:\\drops\\psilink")).toBe("psilink");
-  });
-
-  test("falls back to the trimmed input when there is no separator", () => {
-    expect(rendezvousLocatorName("psilink")).toBe("psilink");
-  });
-});

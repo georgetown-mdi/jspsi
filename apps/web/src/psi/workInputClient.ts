@@ -73,12 +73,15 @@ function profileErrorReasonOf(body: unknown): JobInputProfileUnavailableReason {
 }
 
 /** The console's rendezvous configuration read off `GET /api/jobs/rendezvous`: the
- * mounted directory a filedrop exchange runs against. `configured: false` (the env
- * var is unset, or the request failed) leaves the filedrop transport unavailable;
- * `path` is the advisory locator the inviter mints into the invitation. */
+ * mounted directory a filedrop exchange runs against. `configured: false` (no mount
+ * is resolved, the request failed, or the body named no locator) leaves the filedrop
+ * transport unavailable; `locator` is the advisory locator the inviter mints into the
+ * invitation, and `folderName` the shared folder's own name -- present only where the
+ * console can name it, and the only one of the two that may be shown as that name. */
 export interface JobRendezvousConfig {
   configured: boolean;
-  path?: string;
+  locator?: string;
+  folderName?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -236,10 +239,22 @@ async function probeJobRendezvous(
     const body: unknown = await response.json();
     if (!isRecord(body) || typeof body.configured !== "boolean") return null;
     if (!body.configured) return { configured: false };
-    const path = body.path;
-    if (typeof path !== "string" || path.length === 0)
+    const locator = body.locator;
+    // A configured mount the body names no locator for cannot mint an invitation,
+    // so it reads as unavailable rather than as a filedrop card that refuses at
+    // create time.
+    if (typeof locator !== "string" || locator.length === 0)
       return { configured: false };
-    return { configured: true, path };
+    const folderName = body.folderName;
+    return {
+      configured: true,
+      locator,
+      // A malformed name degrades to "the console cannot name the folder", which
+      // is the direction the accept kit is safe to fail in.
+      ...(typeof folderName === "string" && folderName.length > 0
+        ? { folderName }
+        : {}),
+    };
   } catch {
     return null;
   }

@@ -74,7 +74,6 @@ import {
   inviterLedgerRows,
   inviterRailFacts,
   isCliTransport,
-  rendezvousLocatorName,
   resetToRecommended,
   reviewValidation,
   sealEditor,
@@ -819,18 +818,25 @@ export function InviterBench() {
       connectionEndpoint = sftpEndpoint;
       kitEndpoint = sftpEndpoint;
     } else if (transport === "filedrop") {
-      // A console filedrop server-job carries the rendezvous directory's NAME (its
-      // basename) as the invitation's advisory locator, so the partner can confirm the
-      // shared folder without the token disclosing the appliance's absolute path. The
-      // mount is server-side; a missing path means the rendezvous state changed
-      // mid-create, so refuse rather than mint a code with no locator.
-      if (rendezvous?.path === undefined) return;
-      const filedropEndpoint = {
-        channel: "filedrop" as const,
-        path: rendezvousLocatorName(rendezvous.path),
+      // A console filedrop server-job carries a NAME as the invitation's advisory
+      // locator, never the appliance's absolute path; the server decides which name
+      // that is. The mount is server-side, so a missing locator means the rendezvous
+      // state changed mid-create: refuse rather than mint a code with none.
+      if (rendezvous?.locator === undefined) return;
+      connectionEndpoint = {
+        channel: "filedrop",
+        path: rendezvous.locator,
       };
-      connectionEndpoint = filedropEndpoint;
-      kitEndpoint = filedropEndpoint;
+      // The sheet is the one place that CALLS the locator the shared folder's name,
+      // so it gets the name only where the console has one; where the locator is
+      // the mount point it was bound at, the sheet says nothing rather than
+      // asking the partner to match a name that is not the folder's.
+      kitEndpoint = {
+        channel: "filedrop",
+        ...(rendezvous.folderName === undefined
+          ? {}
+          : { path: rendezvous.folderName }),
+      };
     }
     setMinting(true);
     setCreateAlert(undefined);

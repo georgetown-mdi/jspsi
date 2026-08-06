@@ -2,7 +2,6 @@ import { Alert, Button, Group, Radio, Stack, Text } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
 import { SftpConnectionCard } from "./SftpConnectionCard";
-import { rendezvousLocatorName } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type { DirectTransport } from "./directExchangeModel";
@@ -88,14 +87,21 @@ export function DirectServerSection({
           onAuthored={onAuthorConnection}
           onCleared={onClearConnection}
         />
-      ) : rendezvousConfigured && rendezvous.path !== undefined ? (
+      ) : rendezvousConfigured ? (
         <Text size="sm">
-          Runs through the shared directory{" "}
-          <span className={styles.mono}>
-            {rendezvousLocatorName(rendezvous.path)}
-          </span>{" "}
-          on this appliance. Point your partner's console at the same synced
-          folder.
+          {/* Named only where the console can name the shared folder: where the
+              rendezvous mount point was chosen by a launcher rather than by the
+              operator, it names the launcher's layout, not their folder. */}
+          {rendezvous?.folderName === undefined ? (
+            <>Runs through the shared directory mounted on this appliance.</>
+          ) : (
+            <>
+              Runs through the shared directory{" "}
+              <span className={styles.mono}>{rendezvous.folderName}</span> on
+              this appliance.
+            </>
+          )}{" "}
+          Point your partner's console at the same synced folder.
         </Text>
       ) : (
         <Alert
