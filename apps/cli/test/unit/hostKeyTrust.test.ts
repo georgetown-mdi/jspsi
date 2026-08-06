@@ -419,10 +419,10 @@ const CONFIG_LABEL = "configuration file: ";
 
 // Refuse through establishHostKeyTrust and render what the operator sees:
 // sanitizeErrorForDisplay over the whole cause chain, which is the boundary
-// every CLI sink shows a thrown error at (`exitWithError` and `runOrExit` in
-// src/util/cli.ts, and src/index.ts's last-resort catch, all of which call it;
-// nothing between the throw and them re-wraps a bare `.message`). The real
-// renderer, not a stub: the per-link cap is the whole subject.
+// every CLI sink shows a thrown error at. That each sink renders the chain
+// rather than a bare `.message` -- what delivers a recovery step composed onto a
+// cause link -- is held by errorSinkCauseChain.test.ts. The real renderer here,
+// not a stub: the per-link cap is the whole subject.
 async function refuse(options: {
   persistence: HostKeyPersistence;
   host?: string;
