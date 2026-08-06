@@ -67,6 +67,27 @@ describe("accept kit, per-channel shape", () => {
   });
 });
 
+describe("accept kit, the account the container runs as", () => {
+  test("gives the Linux ownership step, on both channels, before any command", () => {
+    for (const endpoint of [FILEDROP, SFTP]) {
+      const text = sheet(endpoint);
+      // The image runs as uid 1000, so a bind-mounted folder owned by anyone
+      // else is unwritable and the partner's accept fails on its first write.
+      expect(text).toContain("numbered 1000");
+      expect(text).toContain("chown 1000:1000 .");
+      // The alternative, for a partner who cannot change the owner.
+      expect(text).toContain('--user "$(id -u):$(id -g)"');
+      // Docker Desktop is what the sheet assumes and asks nothing of the
+      // partner, so the step must not read as required everywhere.
+      expect(text).toContain("Docker Desktop on Windows and macOS needs");
+      // It qualifies every command on the sheet, so it comes before the first.
+      expect(text.indexOf("chown 1000:1000 .")).toBeLessThan(
+        text.indexOf("docker run"),
+      );
+    }
+  });
+});
+
 describe("accept kit, filedrop routing", () => {
   test("offers the network-drive/DFS launcher branch", () => {
     const text = sheet(FILEDROP);
