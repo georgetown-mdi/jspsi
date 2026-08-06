@@ -1,5 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,11 +45,21 @@ afterEach(() => {
   workdir = undefined;
 });
 
+// The shells the preamble is driven under. This container's /bin/sh is dash,
+// while Amazon Linux 2023's is bash, so the image runs the script under a shell
+// the dev container does not have -- both are driven rather than assuming the
+// two agree.
+const SHELLS = [
+  ["/bin/sh", "the dev container's /bin/sh"],
+  ["/bin/bash", "bash, which is /bin/sh in the image"],
+].filter(([path]) => existsSync(path));
+
 // Runs the real entrypoint with a `node` on PATH that echoes its own argv and
 // the given text and then exits with the given status, standing in for the
 // engagement probe the image ships. Returns everything the preamble wrote to
 // stderr.
 function runPreamble({
+  shell = "/bin/sh",
   probeOutput = "",
   exitCode = 0,
   moduleVersion = CERTIFIED_MODULE,
@@ -65,7 +81,7 @@ function runPreamble({
     chmodSync(openssl, 0o755);
   }
 
-  const result = spawnSync("sh", [ENTRYPOINT, "--help"], {
+  const result = spawnSync(shell, [ENTRYPOINT, "--help"], {
     encoding: "utf8",
     env: {
       ...process.env,
@@ -76,80 +92,89 @@ function runPreamble({
   return result.stderr;
 }
 
-describe("the FIPS entrypoint's provider report", () => {
-  it("names the image's pinned module when the probe exits zero", () => {
-    const stderr = runPreamble({ exitCode: 0 });
+// The preamble's own wording for the success line, asserted against instead of
+// the shorter "FIPS provider active:". The failure path replays the probe's
+// whole transcript into the same stream, so a negative assertion on a fragment
+// the probe could also emit would redden for a reason unrelated to the preamble.
+const SERVED_SENTENCE = "this container's crypto is served by";
 
-    expect(stderr).toContain("[psilink] FIPS provider active:");
-    expect(stderr).toContain(CERTIFIED_MODULE);
-  });
+for (const [shell, label] of SHELLS) {
+  describe(`the FIPS entrypoint's provider report under ${label}`, () => {
+    const run = (options = {}) => runPreamble({ ...options, shell });
 
-  it("reports the version the image baked in, not one read back at run time", () => {
-    // The build asserted the installed module reports FIPS_MODULE_VERSION, so
-    // the runtime line repeats a fact rather than parsing a claim. A stub
-    // reporting some other module is exactly what the old parse would have
-    // believed.
-    const stderr = runPreamble({
-      exitCode: 0,
-      moduleVersion: "9.9.9-baked-into-the-image",
-      probeOutput: 'IMAGE_ENGAGEMENT_JSON: {"verdict":"ENGAGED"}',
+    it("names the image's pinned module when the probe exits zero", () => {
+      const stderr = run({ exitCode: 0 });
+
+      expect(stderr).toContain(SERVED_SENTENCE);
+      expect(stderr).toContain(CERTIFIED_MODULE);
     });
 
-    expect(stderr).toContain("module 9.9.9-baked-into-the-image");
-    expect(stderr).not.toContain(CERTIFIED_MODULE);
-  });
+    it("reports the version the image baked in, not one read back at run time", () => {
+      // The build asserted that the installed module reports
+      // FIPS_MODULE_VERSION, so the runtime line repeats a fact rather than
+      // reading one back. A probe printing some other module string must not
+      // move it.
+      const stderr = run({
+        exitCode: 0,
+        moduleVersion: "9.9.9-baked-into-the-image",
+        probeOutput: 'IMAGE_ENGAGEMENT_JSON: {"verdict":"ENGAGED"}',
+      });
 
-  it("keeps the probe's transcript off the success path", () => {
-    const stderr = runPreamble({
-      exitCode: 0,
-      probeOutput: "IMAGE ENGAGEMENT VERDICT: ENGAGED",
+      expect(stderr).toContain("module 9.9.9-baked-into-the-image");
+      expect(stderr).not.toContain(CERTIFIED_MODULE);
     });
 
-    expect(stderr).not.toContain("IMAGE ENGAGEMENT VERDICT");
-  });
+    it("keeps the probe's transcript off the success path", () => {
+      const stderr = run({
+        exitCode: 0,
+        probeOutput: "IMAGE ENGAGEMENT VERDICT: ENGAGED",
+      });
 
-  it("warns and replays the probe's reasons when the probe exits non-zero", () => {
-    const stderr = runPreamble({
-      exitCode: 1,
-      probeOutput: "- fips.so was not mapped into the process",
+      expect(stderr).not.toContain("IMAGE ENGAGEMENT VERDICT");
     });
 
-    expect(stderr).toContain("[psilink] WARNING:");
-    expect(stderr).toContain(
-      "This image's cryptography is not running in the module it was built around.",
-    );
-    expect(stderr).toContain("- fips.so was not mapped into the process");
-    expect(stderr).not.toContain("FIPS provider active:");
-  });
+    it("warns and replays the probe's reasons when the probe exits non-zero", () => {
+      const stderr = run({
+        exitCode: 1,
+        probeOutput: "- fips.so was not mapped into the process",
+      });
 
-  it("runs the probe the image ships, by its in-image path", () => {
-    // The stub echoes its argv, and the failure path replays that. The path
-    // asserted here is the one scripts/dockerfile-freeze.test.mjs requires the
-    // runtime stage to COPY, which is what binds the two files together.
-    const stderr = runPreamble({ exitCode: 1 });
+      expect(stderr).toContain("[psilink] WARNING:");
+      expect(stderr).toContain(
+        "This image's cryptography is not running in the module it was built around.",
+      );
+      expect(stderr).toContain("- fips.so was not mapped into the process");
+      expect(stderr).not.toContain(SERVED_SENTENCE);
+    });
 
-    expect(stderr).toContain("ran: /app/fips-probe/image-engagement.mjs");
-  });
+    it("runs the probe the image ships, by its in-image path", () => {
+      // The stub echoes its argv, and the failure path replays that. The path
+      // asserted here is the one scripts/dockerfile-freeze.test.mjs requires
+      // the runtime stage to COPY, which is what binds the two files together.
+      const stderr = run({ exitCode: 1 });
 
-  // The regression this pins is the whole reason the report was rebuilt: the
-  // Amazon Linux `openssl` CLI is a different libcrypto from the one inside the
-  // `node` binary that runs psilink, so a provider it reports as active says
-  // nothing about the consumer psilink uses. Nothing in the preamble may consult
-  // it, whatever it says.
-  it("does not believe the system openssl over the probe", () => {
-    const stderr = runPreamble({
-      exitCode: 1,
-      opensslOutput: `Providers:
+      expect(stderr).toContain("ran: /app/fips-probe/image-engagement.mjs");
+    });
+
+    // The Amazon Linux `openssl` CLI is a different libcrypto from the one
+    // inside the `node` binary that runs psilink, so a provider it reports as
+    // active says nothing about the consumer psilink uses. The preamble must
+    // not consult it, whatever it says.
+    it("does not believe the system openssl over the probe", () => {
+      const stderr = run({
+        exitCode: 1,
+        opensslOutput: `Providers:
   fips
     name: OpenSSL FIPS Provider
     version: ${CERTIFIED_MODULE}
     status: active`,
-    });
+      });
 
-    expect(stderr).toContain("[psilink] WARNING:");
-    expect(stderr).not.toContain("FIPS provider active:");
+      expect(stderr).toContain("[psilink] WARNING:");
+      expect(stderr).not.toContain(SERVED_SENTENCE);
+    });
   });
-});
+}
 
 // The probe the preamble's verdict comes from, run as the committed file rather
 // than as a reimplementation of its legs.
@@ -294,9 +319,10 @@ describe("the Node tarball checksum check", () => {
 
   // --ignore-missing skips manifest lines whose file is absent, so the name the
   // build fetched being absent from the manifest must not read as success. The
-  // reason is asserted, not just the exit status: coreutils rejects a malformed
-  // manifest with a different message and the same non-zero exit, which is what
-  // an earlier version of this case was actually measuring.
+  // reason is asserted rather than the exit status alone: coreutils rejects a
+  // malformed manifest with a different message and the same non-zero exit, so
+  // the status by itself cannot tell a skipped-to-empty run from a rejected
+  // manifest.
   it("fails, for want of a verified file, when the tarball's name is absent from the manifest", () => {
     const result = checkManifest({
       manifest: `${OTHER_ARCH}  node-v26.7.0-linux-s390x.tar.xz\n`,
