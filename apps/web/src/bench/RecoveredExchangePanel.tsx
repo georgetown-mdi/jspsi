@@ -308,9 +308,11 @@ export function RecoveredExchangePanel() {
           )}
         </>
       )}
-      {finished && outputs !== undefined && (
-        <RecurringHandoff jobId={attachment.jobId} collapsible />
-      )}
+      {/* Available for as long as the appliance holds the job, collapsed
+          throughout on this compact panel -- the run seats' rule, less the
+          expanded completion render this panel has no room for. A stopped
+          (failed or cancelled) run has nothing to graduate. */}
+      {!stopped && <RecurringHandoff jobId={attachment.jobId} collapsible />}
       <Group mt="md">
         {running && (
           <Button variant="default" onClick={stop}>

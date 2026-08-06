@@ -210,7 +210,11 @@ export function DirectRunSection({
           )}
         </>
       )}
-      {done && jobId !== undefined && <RecurringHandoff jobId={jobId} />}
+      {/* Available from job creation onward, collapsed until the run completes
+          -- the inviter seat's rule, applied identically here. */}
+      {jobId !== undefined && failure === undefined && (
+        <RecurringHandoff jobId={jobId} collapsible={!done} />
+      )}
       {(done || failure?.category === "output") && (
         <AnotherExchangeFoot onNavigate={onAbandon} confirmBeforeLeave />
       )}

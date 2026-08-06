@@ -550,7 +550,7 @@ describe("console strand recovery panel", () => {
       .toBeVisible();
   });
 
-  test("the running render offers no graduation disclosure", async () => {
+  test("the running render already offers the collapsed graduation disclosure", async () => {
     persistAttachment("job-live");
     stubRecoveryApi({
       jobId: "job-live",
@@ -567,10 +567,17 @@ describe("console strand recovery panel", () => {
       )
       .toBeInTheDocument();
 
-    // Even with a hand-off available on the appliance, graduation is a
-    // finished-only affordance: the running render never mounts the disclosure.
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(graduationToggle().query()).toBeNull();
+    // The hand-off is composed at job creation and served for the record's
+    // lifetime, so it is reachable while the run is still in flight -- collapsed,
+    // so a running exchange still leads.
+    await expect.element(graduationToggle()).toBeInTheDocument();
+    expect(graduationToggle().element().getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    await graduationToggle().click();
+    await expect
+      .element(page.getByText("0 2 * * *", { exact: false }))
+      .toBeVisible();
   });
 
   test("the stopped render offers no graduation disclosure", async () => {

@@ -21,6 +21,7 @@ import { InviterBench } from "@bench/InviterBench";
 import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
 
+import { captureDownloads } from "./captureDownloads";
 import { renderApp } from "./renderApp";
 
 import type { PreparedExchange } from "@psilink/core";
@@ -251,45 +252,6 @@ async function reachReviewCreate() {
   await expect
     .element(page.getByRole("heading", { level: 1 }))
     .toHaveTextContent("Review & create");
-}
-
-// The download the save handler triggers: a synthetic anchor is created,
-// clicked, and removed within one turn, so a DOM query cannot catch it. Capture
-// it at click time -- the download filename and the blob text the object URL
-// points at, read back before the deferred revoke.
-interface CapturedDownload {
-  fileName: string;
-  text: string;
-}
-function captureDownloads(): {
-  captured: Array<CapturedDownload>;
-  restore: () => void;
-} {
-  const captured: Array<CapturedDownload> = [];
-  const original = HTMLAnchorElement.prototype.click;
-  HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement) {
-    if (this.download !== "" && this.href.startsWith("blob:")) {
-      const href = this.href;
-      const fileName = this.download;
-      // The blob is still alive here (revoke is deferred well past the click);
-      // pull its text synchronously enough via the object URL.
-      captured.push({ fileName, text: "" });
-      const index = captured.length - 1;
-      void fetch(href)
-        .then((response) => response.text())
-        .then((text) => {
-          captured[index].text = text;
-        });
-    }
-    // Do not invoke the real click: a jsdom/browser navigation to a blob URL is
-    // pointless here and can warn. The capture above is the whole point.
-  };
-  return {
-    captured,
-    restore: () => {
-      HTMLAnchorElement.prototype.click = original;
-    },
-  };
 }
 
 // stagesFor reads only the linkage terms off the prepared exchange (the unit
@@ -2150,6 +2112,37 @@ describe("inviter bench", () => {
     } finally {
       downloads.restore();
     }
+  });
+
+  // The partner accept kit is a console affordance: it stands where the console
+  // mints an invitation for a partner who accepts from the command line. The
+  // hosted build mints no such invitation -- a WebRTC partner accepts in their
+  // browser, and a CLI transport here saves an exchange file instead -- so
+  // neither hosted surface offers it.
+  const ACCEPT_KIT_BUTTON = "Download instructions for your partner";
+
+  test("the hosted WebRTC share screen offers no partner accept kit", async () => {
+    await createSealedInvitation();
+    await expect
+      .element(page.getByRole("heading", { name: "Share this invitation" }))
+      .toBeInTheDocument();
+    expect(page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).query()).toBe(
+      null,
+    );
+  });
+
+  test("the hosted save surface offers no partner accept kit", async () => {
+    await reachReviewCreate();
+    await page
+      .getByLabelText("Over SFTP, run by the psilink command-line tool")
+      .click();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Save your exchange file");
+    expect(page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).query()).toBe(
+      null,
+    );
   });
 
   test("re-saving after an edit re-mints the code and file atomically", async () => {
