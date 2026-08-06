@@ -13,20 +13,52 @@ import { describe, expect, it } from "vitest";
 const here = dirname(fileURLToPath(import.meta.url));
 const dockerfile = readFileSync(resolve(here, "..", "Dockerfile"), "utf8");
 
-// Fold "\"-continued lines into one logical instruction, then drop blanks and
-// comments. The fold removes the backslash and the newline and inserts nothing,
-// which is what Docker's own parser does: a continuation with no space before
-// the backslash joins two tokens into one, and reading it as two would let a
-// command below match as something the build does not run.
+// Drop comment lines, then fold "\"-continued lines into one logical
+// instruction. That order is the load-bearing half: fold first and a comment
+// line's own trailing backslash joins the instruction below it into the comment,
+// which drops that instruction -- an ownership change among them -- from every
+// assertion in this file while the build still runs it.
+//
+// The fold removes the backslash and the newline and inserts nothing, which is
+// what Docker's own parser does: a continuation with no space before the
+// backslash joins two tokens into one, and reading it as two would let a command
+// below match as something the build does not run. What the fold cannot settle
+// from here is a "#" reaching an instruction, and the refusal below is why it
+// does not have to.
 const instructions = dockerfile
+  .split("\n")
+  .filter((line) => !line.trim().startsWith("#"))
+  .join("\n")
   .replace(/\\\r?\n/g, "")
   .split("\n")
   .map((line) => line.trim())
-  .filter((line) => line !== "" && !line.startsWith("#"))
+  .filter((line) => line !== "")
   .map((line) => {
     const [, inst, rest] = line.match(/^(\S+)\s*(.*)$/);
     return { inst: inst.toUpperCase(), rest };
   });
+
+// The instruction classes this file reads. Every other class is refused rather
+// than modeled, because ownership and content both ride only the instructions
+// parsed below: ADD names itself here, since it takes the same --chown and
+// --chmod flags COPY does and can fetch a remote source, so a single
+// `ADD --chown=node:node ... /app/x` in either stage would hand the runtime
+// account a path under /app -- and pull in something the lockfile does not
+// pin -- while every assertion in this file, all of which read COPY and RUN,
+// still passed. The Dockerfile uses nothing outside this list; a build that needs
+// another class extends it, where the review reads the instruction rather than a
+// verdict about it.
+const REVIEWED_INSTRUCTIONS = [
+  "ARG",
+  "COPY",
+  "ENTRYPOINT",
+  "ENV",
+  "EXPOSE",
+  "FROM",
+  "RUN",
+  "USER",
+  "WORKDIR",
+];
 
 const lastFromIndex = instructions.reduce(
   (last, { inst }, index) => (inst === "FROM" ? index : last),
@@ -158,6 +190,15 @@ const PARSED_OWNERSHIP_VERB = /^(?:chown|chgrp|chmod)\s/;
 // refused outright rather than modeled: a build that needs one has to extend
 // this test, where the review reads the argv rather than a verdict about it.
 const ANY_OWNERSHIP_VERB = /\b(?:chown|chgrp|chmod|install|setfacl)\b/;
+// The dash-leading tokens that parse reads on one of those verbs: -R (or
+// --recursive), and --reference=FILE, which is what moves the first operand from
+// an owner or a mode to a path. Any other is refused rather than classified,
+// because a mode is
+// spelled like a flag: `chmod -R -w /app` takes the write bit off /app, and a
+// parse that reads every dash-leading token as an option drops the mode, takes
+// /app for the mode instead, and hands the guard below an empty path set. The
+// stage passes -R alone.
+const READ_OWNERSHIP_FLAGS = /^(?:-R|--recursive|--reference=\S+)$/;
 
 // A chown/chgrp/chmod's path operands: its argv less the command name, its
 // flags, and its first operand, which is the owner, group, or mode -- unless a
@@ -180,6 +221,32 @@ const ownershipCommands = runtimeShellCommands
   });
 
 describe("Dockerfile dependency freeze", () => {
+  it("uses ADD nowhere, nor any other instruction class this file does not parse", () => {
+    expect(
+      instructions
+        .filter(({ inst }) => inst === "ADD")
+        .map(({ inst, rest }) => `${inst} ${rest}`),
+    ).toEqual([]);
+    expect(
+      [...new Set(instructions.map(({ inst }) => inst))].filter(
+        (inst) => !REVIEWED_INSTRUCTIONS.includes(inst),
+      ),
+    ).toEqual([]);
+  });
+
+  it("carries no # inside an instruction, so this parse and Docker's cannot disagree", () => {
+    // Comment lines are gone before the fold above, so a "#" reaching an
+    // instruction is either text Docker takes literally mid-line or a form whose
+    // reading depends on where each parser thinks the instruction ended. The
+    // Dockerfile has none, and refusing one is what keeps the fold from having to
+    // agree with Docker about a case no build here exercises.
+    expect(
+      instructions
+        .filter(({ inst, rest }) => inst.includes("#") || rest.includes("#"))
+        .map(({ inst, rest }) => `${inst} ${rest}`),
+    ).toEqual([]);
+  });
+
   it("installs only with npm ci, never npm install", () => {
     expect(dockerfile).not.toMatch(/\bnpm\s+install\b/);
     expect(builderRuns.some((run) => /\bnpm ci\b/.test(run))).toBe(true);
@@ -416,6 +483,22 @@ describe("Dockerfile runtime layout", () => {
             !PARSED_OWNERSHIP_VERB.test(command),
         )
         .map(({ command }) => command),
+    ).toEqual([]);
+    // The same refusal one altitude down, over the argv of the ones it does
+    // read: a dash-leading token outside the two the parse understands decides
+    // which operand is the mode and which are paths, so it is refused rather
+    // than guessed at.
+    expect(
+      ownershipCommands.flatMap(({ command }) =>
+        command
+          .split(" ")
+          .slice(1)
+          .filter(
+            (token) =>
+              token.startsWith("-") && !READ_OWNERSHIP_FLAGS.test(token),
+          )
+          .map((token) => `${token} in: ${command}`),
+      ),
     ).toEqual([]);
   });
 

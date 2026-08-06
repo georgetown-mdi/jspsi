@@ -81,6 +81,13 @@ install, the shipped tree is the `--omit=dev` one, the runtime stage runs no npm
 at all and installs exactly the one reviewed OS package, and the copied layout
 keeps the workspace links and the PSI worker entry where the CLI resolves them.
 
+Those invariants are read off `COPY` and `RUN`, so the test refuses every other
+instruction class outright, in either stage, rather than modeling it. `ADD` is
+the one that names itself: it fetches a remote source and takes the same
+`--chown`/`--chmod` flags `COPY` does, so it can both pull in a build input the
+lockfile does not pin and land files with an ownership no assertion here reads. A
+build that needs another class extends the test's reviewed list in the same diff.
+
 The `node:26-alpine` base image is digest-pinned in both stages to its
 multi-arch index digest, so the Node runtime and Alpine userland beneath the
 frozen `node_modules` no longer drift between rebuilds. The tradeoff is that a
