@@ -1,15 +1,17 @@
 name: Image Smoke
 
-# Pull-request smoke test for the combined CLI + web-console appliance image
-# (the same Dockerfile release.yaml ships). Release builds the image only at a
-# version tag, so this is the sole pre-merge check that the image actually builds
-# and that both of its roles run: the headless CLI and the `serve` web console.
+# Pull-request smoke test for the container images this repository ships: the
+# default CLI + web-console appliance image (the same Dockerfile release.yaml
+# ships) and the FIPS variant (Dockerfile.fips, which is built and smoked here
+# but published nowhere). Release builds the default image only at a version
+# tag, so this is the sole pre-merge check that either image actually builds and
+# that both of its roles run: the headless CLI and the `serve` web console.
 #
-# It builds single-arch (native amd64, no QEMU) and loads the image into the
+# It builds single-arch (native amd64, no QEMU) and loads each image into the
 # runner's Docker so it can run it -- deliberately faster and simpler than the
 # release job's multi-arch build+push, since nothing is published here.
 #
-# Scoped by path to changes that can affect the image. If this is made a required
+# Scoped by path to changes that can affect an image. If this is made a required
 # status check, configure branch protection so a path-skipped run does not block
 # an unrelated PR -- a skipped required check otherwise stays pending.
 on:
@@ -17,7 +19,10 @@ on:
     branches: [main, staging]
     paths:
       - "Dockerfile"
+      - "Dockerfile.fips"
+      - "openssl-fips-only.cnf"
       - "docker-entrypoint.sh"
+      - "docker-entrypoint-fips.sh"
       - ".dockerignore"
       - "apps/**"
       - "packages/**"
@@ -30,6 +35,10 @@ on:
       # containerised install would otherwise surface first at a release tag.
       - ".npmrc"
       - "package.json"
+      # The FIPS leg runs both harnesses out of this directory, and the exchange
+      # leg feeds the containers these CSVs.
+      - "support/fips-probe/**"
+      - "test_data/**"
       - ".github/workflows/image_smoke.yaml"
 
 # Cancel a superseded run when a newer commit lands on the same PR/branch.
@@ -43,8 +52,25 @@ permissions:
 
 jobs:
   smoke:
-    name: Build and smoke the image
+    name: Build and smoke the ${{ matrix.variant }} image
     runs-on: ubuntu-latest
+    # The FIPS leg's exchange step runs a real two-party exchange over a polled
+    # file drop, so this bound is well above the default-image leg's needs.
+    timeout-minutes: 60
+    strategy:
+      # One image failing to build says nothing about the other, and the FIPS
+      # leg's findings are the more expensive to re-run.
+      fail-fast: false
+      matrix:
+        include:
+          - variant: default
+            dockerfile: Dockerfile
+            tag: psi-link:smoke
+            fips: "false"
+          - variant: fips
+            dockerfile: Dockerfile.fips
+            tag: psi-link:fips-smoke
+            fips: "true"
     steps:
       - uses: actions/checkout@v7
 
@@ -57,22 +83,25 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # Single-arch, load into the runner's Docker so the smoke steps can run it.
-      # No push, no QEMU, no multi-arch -- that is the release job's concern.
+      # Single-arch, load into the runner's Docker so the smoke steps can run
+      # it. No push, no QEMU, no multi-arch -- that is the release job's
+      # concern. The cache is scoped per variant: the two images share no layer,
+      # so one scope would have them evicting each other.
       - name: Build image (amd64, load into local Docker)
         uses: docker/build-push-action@v7
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           load: true
           push: false
-          tags: psi-link:smoke
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ matrix.tag }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 
       # Role 1: the headless CLI still runs. `--help` is a read-only invocation
       # that exits 0 (no exchange, no key material, no network).
       - name: Smoke the CLI role
-        run: docker run --rm psi-link:smoke --help
+        run: docker run --rm ${{ matrix.tag }} --help
 
       # Role 2: the web console server comes up and serves. Start it detached in
       # `serve` mode, poll the root URL until it answers HTTP 200 within a bounded
@@ -82,7 +111,7 @@ jobs:
       - name: Smoke the serve role
         run: |
           set -euo pipefail
-          cid=$(docker run -d -p 3000:3000 psi-link:smoke serve)
+          cid=$(docker run -d -p 3000:3000 ${{ matrix.tag }} serve)
           echo "started server container $cid"
 
           ok=false
@@ -109,8 +138,126 @@ jobs:
       # that setup path: the probe checks for it and stops before it reaches the
       # share when it is missing, so an image published without it strands that
       # setup entirely. `command -v` resolves it from PATH and needs no network
-      # and no server. The entrypoint
-      # is overridden because it dispatches its argv to the CLI, as the setup
-      # scripts override it for the same reason.
+      # and no server. It is `apk add samba-client` on the default image and
+      # `dnf install samba-client` on the variant; this assertion is the same on
+      # both. The entrypoint is overridden because it dispatches its argv to the
+      # CLI, as the setup scripts override it for the same reason.
       - name: Smoke the file-drop probe tooling
-        run: docker run --rm --entrypoint sh psi-link:smoke -c 'command -v smbclient'
+        run: docker run --rm --entrypoint sh ${{ matrix.tag }} -c 'command -v smbclient'
+
+      # The variant's entrypoint preamble reads the activated provider and the
+      # host kernel's FIPS mode and reports both on every run. An operator's
+      # only cheap window into what their deployment is actually running, so a
+      # preamble that silently stopped reporting would be a real regression.
+      - name: Smoke the FIPS entrypoint report
+        if: matrix.fips == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm ${{ matrix.tag }} --help >entrypoint.out 2>&1
+          cat entrypoint.out
+          grep -q 'FIPS provider active' entrypoint.out
+          grep -q 'host kernel' entrypoint.out
+
+      # Does the configuration the image SHIPS engage the provider? The probe
+      # below answers a stronger question but answers it about configurations it
+      # writes itself, so it cannot answer this one. `crypto.getFips()` is no
+      # substitute: it returns 1 with no module loaded at all. The script fails
+      # unless fips.so is mapped into the process, an AES-256-GCM round trip at
+      # the product's own call shape succeeds, and both an MD5 digest and a
+      # below-minimum RSA keygen -- which no FIPS provider serves -- fail beside
+      # it.
+      - name: Assert the shipped configuration engages the FIPS provider
+        if: matrix.fips == 'true'
+        run: |
+          docker run --rm \
+            -v "$PWD/support/fips-probe:/probe:ro" \
+            --entrypoint node ${{ matrix.tag }} /probe/image-engagement.mjs
+
+      # The four-leg attribution, including the causal controls the step above
+      # deliberately does not run: the provider is broken (its config MAC
+      # corrupted, then its module truncated) and the same AES call re-run, so a
+      # success that never depended on the provider is caught. The harness wants
+      # a prefix laid out as $PREFIX/lib/ossl-modules/fips.so and
+      # $PREFIX/ssl/fipsmodule.cnf; Amazon Linux 2023 ships no fipsmodule.cnf
+      # and its `openssl fipsinstall` is disabled, so the stand-in carries only
+      # the section header and no module-mac line. The harness reports its own
+      # S4a break ineffective on that basis and grades on S4b instead, which is
+      # what it is designed to do. It exits 0 whatever it measures, so the
+      # verdict is read from PROBE_JSON rather than from the exit status.
+      - name: Attribute the engagement with causal controls
+        if: matrix.fips == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/support/fips-probe:/probe:ro" \
+            -e PROBE_PREFIX=/tmp/probe-prefix \
+            -e PROBE_TMP=/tmp/probe-tmp \
+            -e PROBE_OPENSSL_TAG=amzn2023-cert5021 \
+            --entrypoint sh ${{ matrix.tag }} -c '
+              set -eu
+              mkdir -p "$PROBE_PREFIX/lib/ossl-modules" "$PROBE_PREFIX/ssl" "$PROBE_TMP"
+              ln -s "$OPENSSL_MODULES/fips.so" "$PROBE_PREFIX/lib/ossl-modules/fips.so"
+              printf "[fips_sect]\nactivate = 1\n" >"$PROBE_PREFIX/ssl/fipsmodule.cnf"
+              exec node /probe/webcrypto-probe.mjs
+            ' >probe.out 2>&1 || true
+          grep -F 'PROBE_JSON:' probe.out || { cat probe.out; exit 1; }
+          if ! grep -qF '"verdict":"ENGAGED"' probe.out; then
+            echo "the FIPS engagement probe did not reach an ENGAGED verdict" >&2
+            cat probe.out >&2
+            exit 1
+          fi
+
+      # A full two-party exchange inside the built variant: two containers of
+      # the image, a working directory each, and one shared volume they drop
+      # files into. This is the only end-to-end run either image gets -- every
+      # other step here starts a process and asks it a question -- and it is
+      # what would catch a FIPS configuration that engages the provider and then
+      # denies the exchange an algorithm it needs partway through.
+      #
+      # `--linkage-strategy single-pass` for the round count, not the strategy:
+      # measured against this drop transport, the default cascade's twelve
+      # polled rounds take 5m36s to the single pass's 40s, and both run the same
+      # handshake, AEAD, key schedule and PSI code.
+      #
+      # SFTP is deliberately not exercised: the variant cannot reach a server
+      # offering only curve25519 key exchange, which is a documented limitation
+      # rather than a regression (docs/notes/fips-variant-image.md).
+      - name: Run a full exchange end-to-end in the image
+        if: matrix.fips == 'true'
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          mkdir -p "$work/a" "$work/b" "$work/share"
+          cp test_data/fake_data_1.csv "$work/a/input.csv"
+          cp test_data/fake_data_2.csv "$work/b/input.csv"
+
+          for party in a b; do
+            docker run -d --name "exchange-$party" \
+              -v "$work/$party:/work" -v "$work/share:/share" \
+              ${{ matrix.tag }} \
+              --linkage-strategy single-pass file:///share input.csv output.csv
+          done
+
+          codes=$(timeout 900 docker wait exchange-a exchange-b || true)
+          echo "party exit codes: $codes"
+          for party in a b; do
+            echo "--- party $party ---"
+            docker logs "exchange-$party" 2>&1 || true
+          done
+          docker rm -f exchange-a exchange-b >/dev/null 2>&1 || true
+
+          if [ "$codes" != "$(printf '0\n0')" ]; then
+            echo "an exchange party did not exit 0" >&2
+            exit 1
+          fi
+
+          # Both parties write the same intersection, so a run that "succeeded"
+          # while linking nothing is caught here rather than passing on exit 0.
+          for party in a b; do
+            lines=$(wc -l <"$work/$party/output.csv")
+            echo "party $party wrote $lines lines of results"
+            if [ "$lines" != "11" ]; then
+              echo "party $party wrote $lines lines, expected 11 (a header and ten matched rows)" >&2
+              exit 1
+            fi
+          done

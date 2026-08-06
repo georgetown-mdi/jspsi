@@ -1,21 +1,26 @@
 # FIPS provider probe
 
-A throwaway measurement harness, not part of the product and not a field guide.
-It answers three questions about an OpenSSL FIPS provider running beside the
-Node in psilink's shipped container base:
+A measurement harness, not part of the product and not a field guide. Nothing
+here is asserted from documentation, and nothing here ships inside an image: it
+is mounted into one at run time.
+
+Two of its scripts answer three questions about an OpenSSL FIPS provider running
+beside the Node in a psilink container base:
 
 1. Is X25519 among the FIPS provider's key-exchange algorithms?
 2. Is Ed25519 among its signature algorithms?
 3. Does `crypto.subtle` in that image's Node engage a configured FIPS provider
    for AES-256-GCM?
 
-Every answer is the output of a command run inside the image. Nothing here is
-asserted from documentation, and nothing here ships: the root `Dockerfile`, the
-packages and the apps are untouched.
+Every answer is the output of a command run inside the image.
+`.github/workflows/fips_provider_probe.yaml` runs both over two provider builds
+and commits the transcripts; what follows is the same run by hand, so a claim
+made from a transcript can be re-measured without CI.
 
-`.github/workflows/fips_provider_probe.yaml` runs the whole thing over two
-provider builds and commits the transcripts. What follows is the same run by
-hand, so a claim made from a transcript can be re-measured without CI.
+The third script, `image-engagement.mjs`, is a gate rather than a spike.
+`.github/workflows/image_smoke.yaml` runs it inside the built FIPS variant image
+on every pull request that can affect that image, and a non-zero exit fails the
+build.
 
 ## Running it
 
@@ -57,6 +62,27 @@ reports. A 3.0.x `fips.so` under that Node is the cross-load configuration --
 the one an actual FIPS deployment of this image would have to work -- and the
 probe labels a run as such from the two versions it reads at runtime.
 
+## Running it against the FIPS variant image
+
+That image carries its own vendor-supplied provider, so nothing is built here.
+Mount this directory into it and run the gate against the configuration the
+image ships:
+
+```sh
+docker build -f Dockerfile.fips -t psi-link:fips .
+docker run --rm -v "$PWD/support/fips-probe:/probe:ro" \
+  --entrypoint node psi-link:fips /probe/image-engagement.mjs
+```
+
+`webcrypto-probe.mjs` runs there too, for the causal controls, but it wants a
+prefix laid out as `$PREFIX/lib/ossl-modules/fips.so` and
+`$PREFIX/ssl/fipsmodule.cnf`. Amazon Linux 2023 ships no `fipsmodule.cnf` and
+its `openssl fipsinstall` is disabled, so the stand-in carries only
+`[fips_sect]` and `activate = 1`. With no `module-mac` line to corrupt the probe
+reports its own S4a break ineffective and grades on S4b (the truncated module)
+instead, which is what it is designed to do.
+`.github/workflows/image_smoke.yaml` has the exact invocation.
+
 ## What each file does
 
 - `Dockerfile` -- fetches and builds the OpenSSL release named by `OPENSSL_TAG`
@@ -74,6 +100,14 @@ probe labels a run as such from the two versions it reads at runtime.
   under fips that is also an absence under default is the listing command's, not
   the provider's.
 - `webcrypto-probe.mjs` -- question 3, described below.
+- `image-engagement.mjs` -- the same attribution legs as question 3, minus the
+  causal controls, asked of an image's OWN shipped configuration. The probe
+  above writes the configurations it measures, which is what makes its verdict
+  attributable and also why it cannot answer this: it replaces the arrangement
+  an operator gets. This script replaces nothing, takes no arguments, and exits
+  non-zero unless `fips.so` is mapped into the process, an AES-256-GCM round
+  trip at the product's own call shape succeeds, and an MD5 digest and a
+  below-minimum RSA keygen both fail beside it.
 - `README.md` -- this file.
 
 ## How question 3 is settled

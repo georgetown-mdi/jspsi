@@ -75,11 +75,13 @@ vendored `@openmined/psi.js` tarball participates as the committed bytes in
 sidecar remains the integrity check (see above).
 
 The structural invariants are enforced by `scripts/dockerfile-freeze.test.mjs`
-(run by `npm run test:scripts`, a CI static check): every install is `npm ci`,
-the lockfile and the root `.npmrc` are copied into the builder before the first
+(run by `npm run test:scripts`, a CI static check), over both `Dockerfile` and
+the FIPS variant's `Dockerfile.fips` alike: every install is `npm ci`, the
+lockfile and the root `.npmrc` are copied into the builder before the first
 install, the shipped tree is the `--omit=dev` one, the runtime stage runs no npm
-at all and installs exactly the one reviewed OS package, and the copied layout
-keeps the workspace links and the PSI worker entry where the CLI resolves them.
+at all, each file's OS-package installs are exactly the reviewed set, and the
+copied layout keeps the workspace links and the PSI worker entry where the CLI
+resolves them.
 
 The `node:26-alpine` base image is digest-pinned in both stages to its
 multi-arch index digest, so the Node runtime and Alpine userland beneath the
@@ -135,11 +137,14 @@ setup-time probe, over a share the operator is testing, never by the CLI or the
 console during a run.
 
 Two checks bound it. `scripts/dockerfile-freeze.test.mjs` holds every
-`apk`/`apt`/`pip` install in the runtime stage to that one instruction by
-literal, the way it holds the `.npmrc` COPY, so a second install or a wider spec
-on that line reddens rather than shipping; a runtime-stage fetch by some other
-route -- curl and extract, or another language's package manager -- is outside
-what it sees. `image_smoke.yaml` asserts the built image provides
+`apk`/`apt`/`apt-get`/`dnf`/`microdnf`/`yum`/`pip` instruction in the file to a
+per-file list of literals, the way it holds the `.npmrc` COPY, so a second
+install or a wider spec on one of those lines reddens rather than shipping. It
+reads the whole file rather than the runtime stage alone, because both images
+build their runtime stage `FROM` an earlier stage of their own and a package
+installed there ships just as surely. A fetch by some other route -- curl and
+extract, `rpm` driven directly, or another language's package manager -- is
+outside what it sees. `image_smoke.yaml` asserts each built image provides
 `smbclient` (`docker run --rm --entrypoint sh <image> -c 'command -v smbclient'`),
 so a build that resolved the package away fails the pull request rather than an
 operator's setup run.
@@ -190,6 +195,111 @@ whatever the tag resolves to at pull time -- and that pull happens on exactly th
 HTTPS-intercepting networks the probe exists to diagnose. A digest, or a released
 version tag, is what would make a substituted image detectable there; how a
 separately downloaded script would learn either is the open part.
+
+## The FIPS variant image's pins
+
+`Dockerfile.fips` builds a second image on Amazon Linux 2023 carrying the
+CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution. It is
+not published; why it exists, what may be claimed of it, and what stops working
+inside it are in
+[fips-variant-image.md](../notes/fips-variant-image.md). Everything above about
+the npm freeze applies to it unchanged -- same lockfile, same `npm ci`, same
+`--omit=dev` runtime tree, same freeze test. What follows is what it pins
+beyond that, and the second OS-package inventory that comes with it.
+
+**Four pins, three of them enforced at build time.**
+
+| Pin | Value | How it is held |
+| --- | --- | --- |
+| Release snapshot | `--releasever=2023.12.20260727` on every `dnf` transaction | Frozen literal in `scripts/dockerfile-freeze.test.mjs` |
+| Provider package and version | `openssl-fips-provider-certified` at `3.0.8-1.amzn2023.0.1` | `rpm -qf` on the installed `fips.so`, asserted in the build |
+| Module version string | `3.0.8-d694bfa693b76001` | `openssl list -providers` read back, asserted in the build |
+| Base image | `amazonlinux:2023`, by tag | Not pinned; see below |
+
+The release-snapshot pin is for reproducibility rather than for the certificate:
+AWS retains superseded NVRs, and a dated snapshot is immutable while
+`--releasever=latest` accumulates. Sampled across AWS's published snapshots,
+every snapshot from the packages' first appearance (between `2023.6.20250107`
+and `2023.7.20250428`) onward still resolves and still serves both certified
+NVRs, from a content-addressed blobstore.
+
+The module-version pin is the one that cannot be skipped. Ten NVRs share the
+`openssl-fips-provider-latest` package name and carry ten different modules with
+ten different `fips.so` hashes, exactly one of them certified, so the package
+name settles nothing:
+
+    3.2.2-1.amzn2023.0.1 -> 3.2.2-799901ad7ab41d45   <- the one certificate 5438 names
+    3.2.2-1.amzn2023.0.2 -> 3.2.2-6a2d04a6952ab14a
+    3.5.5-1.amzn2023.0.5 -> 3.5.5-f06cf76f53649b34   <- stock in amazonlinux:2023
+    3.5.7-2.amzn2023.0.1 -> 3.5.7-89ade9f4d5e93a4c
+
+The `-certified` name this image uses is a different package with one published
+NVR, so a `dnf update` has nothing to move it to; the assertion is what catches
+a future one that is not certified.
+
+**The base image is not digest-pinned, unlike the default image's.** The
+snapshot pin covers the package layer and not the base rootfs, and the two are
+coupled: a base far newer than the pinned snapshot can put that snapshot's
+packages in conflict with what the base already carries. Adding the digest needs
+a `docker buildx imagetools inspect amazonlinux:2023` from a network-capable
+session, and is open.
+
+**What the build fetches, beyond the npm tree.** Two mirrors rather than the
+default image's one:
+
+- `dnf` from the pinned Amazon Linux snapshot, for `tar`, `gzip`, `xz`,
+  `findutils`, `libatomic`, `samba-client`, `openssl`, and the provider swap.
+  RPM signatures are verified against the key the base image carries.
+- `nodejs.org`, for the official Node 26 tarball and its `SHASUMS256.txt`. Amazon
+  Linux 2023 packages nodejs20, nodejs22 and nodejs24 only and the root
+  `package.json` requires `>=26`, and `libatomic` is the one shared library the
+  stock image lacks for that binary (without it `node` exits 127). The checksum
+  file is fetched over the same channel as the tarball, so this is an integrity
+  check and not a provenance one; the two ways to close that are in
+  [fips-variant-image.md](../notes/fips-variant-image.md).
+
+`smbclient` comes from `samba-client` here rather than from Alpine's package of
+the same name, at 4.17.12, so `image_smoke.yaml`'s `command -v smbclient`
+assertion holds against both images unchanged. It costs 53 packages on this
+base against Alpine's 45, including `systemd`, `dbus`, `pam`,
+`cryptsetup-libs`, `device-mapper` and `util-linux` -- a heavier closure, and
+one that includes an init system.
+
+**The second inventory.** These figures are a measurement of the reference build
+this image was derived from, on `aarch64`, against the Alpine image built the
+same day. They are the right order of magnitude rather than exact for what
+`Dockerfile.fips` produces: the reference additionally installed `binutils`
+(29,160,927 bytes installed) to read the module version out of `fips.so` with
+`strings`, which this build does not need because it reads the version back
+through `openssl list` instead. Nothing has been measured on `x86_64`.
+
+| | Alpine image | FIPS variant (reference build) |
+| --- | --- | --- |
+| Image size | 575,506,781 bytes (576 MB) | 1,055,721,059 bytes (1056 MB) |
+| OS packages | 63 | 167 |
+| Packages carrying a GPL-3.0 or LGPL-3.0 term | the 6 samba ones | 39 |
+
+Where the 480 MB goes: the two base rootfs are almost the same weight
+(`amazonlinux:2023` 183 MB, `node:26-alpine` 178 MB), but Amazon Linux bundles
+no Node, so the 222 MB tarball is additive, and its dependency closures are
+fatter -- glibc/libgcc/libstdc++ 67 MB, `python3` (in the base image, for `dnf`)
+55 MB, the samba client stack 44 MB, `systemd` (a `samba-client` dependency)
+31 MB, `dnf`/`rpm`/`libsolv`/`librepo` 11 MB. The certified `fips.so` itself is
+1.2 MB.
+
+**The licence consequence is wider than the default image's, and is open.** The
+GPL-3.0 finding recorded above for Alpine's `samba-client` reappears here on
+`samba-client`, `samba-client-libs`, `samba-common`, `samba-common-libs`,
+`libsmbclient` and `libwbclient`, and is joined by a GPLv3 base userland
+Alpine's busybox and musl do not have: `bash`, `coreutils-single`, `diffutils`,
+`findutils`, `gawk`, `grep`, `gzip`, `sed`, `tar`, `readline`, `gdbm-libs`,
+`gnupg2-minimal`, `gnutls`, `libtasn1`, `libassuan`, plus the LGPL-3.0 samba
+record stores (`libtalloc`, `libtdb`, `libtevent`, `libldb`). `libgcc`,
+`libstdc++`, `libatomic` and `libgomp` carry
+"GPL-3.0-or-later WITH GCC-exception-3.1", the runtime exception, which is the
+normal case for a linked C++ runtime. Whether that breadth changes this
+project's distribution posture is a licensing call rather than a measurement,
+and it is not settled here.
 
 ## The install-script policy (`allowScripts`)
 

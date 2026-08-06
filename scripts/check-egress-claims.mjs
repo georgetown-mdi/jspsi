@@ -147,7 +147,12 @@ export const SCANNED_ROOTS = [
 ];
 
 /** Shipped files that build or run the container, outside any scanned tree. */
-export const SCANNED_FILES = ["Dockerfile", "docker-entrypoint.sh"];
+export const SCANNED_FILES = [
+  "Dockerfile",
+  "docker-entrypoint.sh",
+  "Dockerfile.fips",
+  "docker-entrypoint-fips.sh",
+];
 
 /**
  * Absolute URL literals that do not contradict PRIVACY.md, each with the reason
@@ -184,6 +189,12 @@ export const ALLOWLIST = [
     match: "exact",
     reason:
       "XML namespace identifier inside an inline SVG data URI; a namespace name, never fetched",
+  },
+  {
+    url: "https://nodejs.org/dist",
+    match: "prefix",
+    reason:
+      "the FIPS variant image's build fetches the official Node runtime tarball and its checksum file from here, because Amazon Linux 2023 packages no Node 26; what the build fetches, not a connection the running container makes, and the same class as the Alpine mirror the default image's one apk install reaches",
   },
   {
     url: "https://github.com/georgetown-mdi/jspsi",

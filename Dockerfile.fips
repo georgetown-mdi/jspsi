@@ -1,0 +1,180 @@
+# The FIPS variant image: the same two-stage build as the root Dockerfile, on
+# Amazon Linux 2023 instead of Alpine, carrying the CMVP-validated OpenSSL FIPS
+# provider AWS publishes for that distribution. It is a separate artifact from
+# the default image, which stays on node:26-alpine; see
+# docs/notes/fips-variant-image.md for what may and may not be claimed of it and
+# for what does not work in it.
+#
+# Both stages share the same Amazon Linux base so the production `npm ci` runs
+# on the same glibc userland the runtime stage has: @openmined/psi.js ships
+# separate musl and glibc prebuilds, so building on one libc and running on the
+# other is not safe.
+#
+# The deployment profile is one build-time source of truth shared by both
+# stages, exactly as in the root Dockerfile.
+ARG VITE_DEPLOYMENT_PROFILE=console
+
+# Amazon Linux 2023 packages nodejs20, nodejs22 and nodejs24 only, and the root
+# package.json requires >=26, so the runtime comes from the official tarball.
+ARG NODE_VERSION=v26.7.0
+
+# The Amazon Linux release snapshot every dnf transaction below resolves
+# against. AWS retains superseded NVRs -- both certified provider packages are
+# still served by every snapshot since they first appeared -- so pinning the
+# snapshot as well as the package NVR is what makes the provider layer
+# reproducible rather than a function of the build date.
+ARG AL2023_RELEASEVER=2023.12.20260727
+
+# CMVP certificate 5021. The package and version pin which build is installed;
+# the module version string is what the module itself reports. Ten NVRs share
+# the openssl-fips-provider-latest package name with ten different modules, only
+# one of them certified, so a package name alone proves nothing. Both are
+# asserted against the built image below, and a mismatch fails the build.
+ARG FIPS_PROVIDER_PACKAGE=openssl-fips-provider-certified
+ARG FIPS_PROVIDER_VERSION=3.0.8-1.amzn2023.0.1
+ARG FIPS_MODULE_VERSION=3.0.8-d694bfa693b76001
+
+FROM amazonlinux:2023 AS nodebase
+ARG NODE_VERSION
+ARG AL2023_RELEASEVER
+# libatomic is the one shared library the stock Amazon Linux 2023 image lacks for
+# the official Node binary: without it node exits 127 on a missing
+# libatomic.so.1. tar, gzip and xz unpack the tarball below.
+RUN dnf -y --releasever=${AL2023_RELEASEVER} install tar gzip xz findutils libatomic && dnf clean all
+# The tarball's checksum is verified against the release's own SHASUMS256.txt,
+# which is fetched over the same channel as the tarball -- an integrity check,
+# not a provenance one. What that does and does not buy, and the two ways to
+# close it, are in docs/notes/fips-variant-image.md.
+RUN set -eux; \
+  arch="$(uname -m)"; \
+  case "$arch" in \
+  x86_64) node_arch=x64 ;; \
+  aarch64) node_arch=arm64 ;; \
+  *) echo "unsupported architecture $arch" >&2; exit 1 ;; \
+  esac; \
+  cd /tmp; \
+  curl -fsSLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
+  curl -fsSLO "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt"; \
+  grep " node-${NODE_VERSION}-linux-${node_arch}.tar.xz\$" SHASUMS256.txt | sha256sum -c -; \
+  mkdir -p /opt/node; \
+  tar -xJf "node-${NODE_VERSION}-linux-${node_arch}.tar.xz" -C /opt/node --strip-components=1; \
+  rm -f "node-${NODE_VERSION}-linux-${node_arch}.tar.xz" SHASUMS256.txt
+ENV PATH=/opt/node/bin:$PATH
+RUN node --version && npm --version
+
+FROM nodebase AS builder
+
+WORKDIR /build
+
+COPY .npmrc package.json package-lock.json ./
+COPY packages/core/package.json packages/core/
+COPY apps/cli/package.json apps/cli/
+COPY apps/web/package.json apps/web/
+COPY lib lib
+# npm ci resolves nothing: it installs exactly the committed lockfile (including
+# each registry package's integrity hash) and fails if a manifest disagrees with
+# it, so an image rebuild cannot drift from the tree CI tested. The root .npmrc
+# copied in above puts the install-script policy in force here as it is locally
+# and in CI; what that does and does not reach is in
+# docs/spec/DEPENDENCY_PINS.md.
+RUN --mount=type=cache,target=/root/.npm \
+  npm ci -w packages/core -w apps/cli -w apps/web
+
+COPY tsconfig.base.json tsconfig.json ./
+COPY packages/core/*.ts packages/core/tsconfig.json packages/core/
+COPY packages/core/src packages/core/src/
+COPY apps/cli/tsconfig.json apps/cli/*.ts apps/cli/
+COPY apps/cli/src apps/cli/src/
+# @psilink/core must be built before the web build: apps/web consumes it from its
+# built dist/ (a file: workspace dependency), so build core and the CLI first.
+RUN npm run build -w packages/core -w apps/cli
+
+COPY apps/web/vite.config.ts apps/web/nitro.config.ts apps/web/postcss.config.cjs apps/web/tsconfig.json apps/web/
+COPY apps/web/src apps/web/src/
+COPY apps/web/server apps/web/server/
+COPY apps/web/public apps/web/public/
+ARG VITE_DEPLOYMENT_PROFILE
+ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
+RUN npm run build -w apps/web
+
+# Rebuild node_modules production-only (npm ci empties it first): the identical
+# lockfile-exact resolution minus devDependencies, ready to ship as-is.
+RUN --mount=type=cache,target=/root/.npm \
+  npm ci --omit=dev -w packages/core -w apps/cli
+
+FROM nodebase
+
+ARG AL2023_RELEASEVER
+ARG FIPS_PROVIDER_PACKAGE
+ARG FIPS_PROVIDER_VERSION
+ARG FIPS_MODULE_VERSION
+
+# samba-client provides smbclient for the Windows file-drop setup scripts'
+# SMB probe, as apk add samba-client does in the root Dockerfile; the openssl
+# CLI is what reads the loaded provider back, in the assertion below and in the
+# entrypoint's per-run report.
+RUN dnf -y --releasever=${AL2023_RELEASEVER} install samba-client openssl && dnf clean all
+# `swap`, not `install` or `downgrade`. The stock amazonlinux:2023 already ships
+# openssl-fips-provider-latest at an uncertified 3.5.5, and its fips.so is the
+# same file path: a plain install fails the transaction test on an RPM FILE
+# conflict, which --allowerasing does not resolve, and removing the incumbent
+# first takes openssl-libs (and with it dnf) out of the image, because both
+# packages Provide the virtual openssl-libs requires. `swap` does both halves in
+# one transaction.
+RUN dnf -y --releasever=${AL2023_RELEASEVER} swap openssl-fips-provider-latest ${FIPS_PROVIDER_PACKAGE}-${FIPS_PROVIDER_VERSION} && dnf clean all
+# The two assertions that make the certificate claim checkable rather than
+# prose, each answering a question the other cannot. Which package put the
+# module there -- asked of the installed fips.so itself rather than of the
+# package database, so a second provider landing on that path is caught. And
+# which module the loader actually activates -- which reports the certificate's
+# module version string, and which runs the module's own integrity self-test as
+# a side effect, since a fips.so whose bytes do not match its embedded MAC never
+# reaches `status: active`.
+RUN set -eux; \
+  owner="$(rpm -qf --qf '%{NAME} %{VERSION}-%{RELEASE}' /usr/lib64/ossl-modules/fips.so)"; \
+  echo "installed FIPS module comes from: ${owner}"; \
+  test "${owner}" = "${FIPS_PROVIDER_PACKAGE}-so ${FIPS_PROVIDER_VERSION}"; \
+  reported="$(openssl list -providers -provider fips \
+  | awk '/^[[:space:]]*fips$/ { seen = 1; next } \
+         seen && $1 == "version:" { version = $2 } \
+         seen && $1 == "status:" { print version, $2; exit }')"; \
+  echo "activated FIPS provider: ${reported}"; \
+  test "${reported}" = "${FIPS_MODULE_VERSION} active"
+
+# Activates the FIPS and base providers and NOT the default provider, with
+# fips=yes as the default property, so an algorithm the certified module does
+# not carry fails rather than falling back to an uncertified implementation.
+# Every dnf transaction above runs before this file is in force: the fips-only
+# configuration breaks dnf's own Python, which hashes with blake2s.
+COPY openssl-fips-only.cnf /etc/psilink/fips-only.cnf
+
+WORKDIR /app
+COPY --from=builder /build/node_modules node_modules
+COPY --from=builder /build/packages/core/package.json packages/core/
+COPY --from=builder /build/packages/core/dist packages/core/dist/
+COPY --from=builder /build/apps/cli/package.json apps/cli/
+COPY --from=builder /build/apps/cli/dist/index.js apps/cli/dist/index.js
+# The PSI crypto worker entry must sit beside the CLI entry: psiWorkerHost.ts
+# resolves it as `<__dirname>/psiWorker.worker.js`, and without it createPsiEngine
+# silently falls back to the in-process engine.
+COPY --from=builder /build/apps/cli/dist/psiWorker.worker.js apps/cli/dist/psiWorker.worker.js
+COPY --from=builder /build/apps/web/.output apps/web/.output
+
+ARG VITE_DEPLOYMENT_PROFILE
+ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
+ENV JOB_CLI_BINARY=/app/apps/cli/dist/index.js
+
+EXPOSE 3000
+
+# Two scripts: the FIPS preamble reports the provider and the host's FIPS-mode
+# state and then hands off to the same dispatch script the default image runs,
+# so both images serve the CLI and `serve` roles identically.
+COPY docker-entrypoint.sh docker-entrypoint-fips.sh /app/
+RUN chmod +x /app/docker-entrypoint.sh /app/docker-entrypoint-fips.sh
+
+ENV OPENSSL_CONF=/etc/psilink/fips-only.cnf
+ENV OPENSSL_MODULES=/usr/lib64/ossl-modules
+
+WORKDIR /work
+
+ENTRYPOINT ["/app/docker-entrypoint-fips.sh"]
