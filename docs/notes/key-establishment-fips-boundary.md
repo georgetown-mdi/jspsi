@@ -163,6 +163,14 @@ P-256, and the extract-then-expand as `KDA HKDF SP800-56Cr2`.
 - That the certificate attests the composition. The schedule above the shared
   secret is an application composition of approved operations, and that
   distinction must not be collapsed.
+- That the key-confirmation round conforms to SP 800-56A Rev 3. Its
+  construction is modelled on that document's bilateral key confirmation, but
+  section 5.9.2 offers the feature for "any key-agreement scheme in which each
+  party is required to own a static key-establishment key pair", and this
+  handshake has no static keys -- its authentication anchor is the pre-shared
+  secret. Read directly from the publication; the citation this project carried
+  before pointed additionally at section 6.2.1.5, which is key confirmation for
+  a C(1e, 2s) scheme and further still from this handshake's shape.
 
 **The composition disclosure is required on either path**, and it outlives the
 migration: a protocol composed in JavaScript above primitive calls yields
