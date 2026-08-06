@@ -92,7 +92,7 @@ export function DirectServerSection({
           {/* Named only where the console can name the shared folder: where the
               rendezvous mount point was chosen by a launcher rather than by the
               operator, it names the launcher's layout, not their folder. */}
-          {rendezvous?.folderName === undefined ? (
+          {rendezvous.folderName === undefined ? (
             <>Runs through the shared directory mounted on this appliance.</>
           ) : (
             <>

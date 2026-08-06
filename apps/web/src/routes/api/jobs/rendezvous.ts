@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { gateJobRoute } from "@jobs/routeSupport";
-import { jobJsonResponse } from "@jobs/gate";
 import {
   resolveJobRendezvousLocator,
   useJobRendezvousDir,
   useJobRendezvousFolderName,
 } from "@jobs/jobRendezvous";
+import { gateJobRoute } from "@jobs/routeSupport";
+import { jobJsonResponse } from "@jobs/gate";
 
 /**
  * `GET /api/jobs/rendezvous` -- report whether a filedrop exchange can run here and
