@@ -7,10 +7,7 @@ import {
   sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
-import {
-  installCapturedLogsInterceptor,
-  withCapturedLogs,
-} from "@psilink/core/testing";
+import { withCapturedLogs } from "@psilink/core/testing";
 
 import {
   createEventStreamEmitter,
@@ -149,11 +146,11 @@ const SINK_PROBES: SinkProbe[] = [
   {
     name: "runOrExit (apps/cli/src/util/cli.ts)",
     drive: async (error) => {
-      // runOrExit builds its logger inside the catch, so installing the
-      // interceptor here still precedes the getLogger call that must route
-      // through it -- loglevel binds a logger's methods from the factory live at
-      // creation, and this name has none yet.
-      installCapturedLogsInterceptor();
+      // runOrExit builds its logger inside the catch, so the getLogger call
+      // happens within the callback below -- after withCapturedLogs has
+      // installed the interceptor. loglevel binds a logger's methods from the
+      // factory live at creation, so a name materialized earlier would bypass
+      // capture and deliver nothing here.
       exitThrows();
       const [, captured] = await withCapturedLogs(
         async () => {
