@@ -380,7 +380,7 @@ Describe 'Get-ScriptParameterName' {
 }
 
 Describe 'The engine wrappers' {
-    It 'answer a name that is not a command without borrowing an earlier code' {
+    It 'answers a name that is not a command without borrowing an earlier code' {
         # A native command run first, leaving a 0 in $LASTEXITCODE, so that the
         # answers below cannot have been taken from there -- a 0 would read as
         # an engine that ran and was happy. What such a call does without the
@@ -399,7 +399,7 @@ Describe 'The engine wrappers' {
         $captured.Output | Should -Match 'psilink-no-such-engine'
     }
 
-    It 'report an empty engine name the same way' {
+    It 'reports an empty engine name the same way' {
         # The name is empty until Find-ContainerEngine has chosen one.
         & cmd /c exit 0
 
@@ -407,7 +407,7 @@ Describe 'The engine wrappers' {
         (Invoke-EngineCapture -Engine '' -EngineArgs @('version')).ExitCode | Should -Not -Be 0
     }
 
-    It 'skip an engine that is not there rather than choosing it' {
+    It 'skips an engine that is not there rather than choosing it' {
         Find-ContainerEngine -Candidates @('psilink-no-such-engine') | Should -BeNullOrEmpty
     }
 }

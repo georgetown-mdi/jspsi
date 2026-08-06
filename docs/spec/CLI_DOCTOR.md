@@ -129,13 +129,3 @@ backstop for such residue.
 
 The marker file is the single deliberately persistent artifact: the probe
 leaves it behind, and `doctor mount` consumes it on a matching cross-check.
-
-## Coverage limits
-
-The checks this document specifies are what CI exercises against a real Samba
-server. The Command Prompt setup variant
-(`support/windows-network-filedrop/cmd_Setup-PsilinkFileDrop.cmd`) does not
-invoke `psilink doctor`: it runs its own container-side checks
-(`cmd_psilink-probe.sh`, `cmd_psilink-credcheck.sh`, `cmd_psilink-volcheck.sh`
-beside it), which that coverage does not reach. Parity between the doctor's
-battery and those scripts is maintained by hand, not asserted by a test.

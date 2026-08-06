@@ -65,7 +65,8 @@ CI leg drives them against a real Samba server and a real CIFS mount on every
 change to them -- the `smb-doctor` job in
 `.github/workflows/cli_build_and_test.yaml`, which is where that coverage now
 lives. The Command Prompt script still carries its own copy of both checks, and
-its state is recorded in `cmd_windows-network-filedrop.md`.
+its state is recorded in `cmd_windows-network-filedrop.md`; parity between the
+doctor's battery and that copy is maintained by hand, not asserted by a test.
 
 **The container half was verified against a real Samba server**, driven through
 the here-string the script then carried rather than a paraphrase of it.
