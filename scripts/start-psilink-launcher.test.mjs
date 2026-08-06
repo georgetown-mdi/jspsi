@@ -266,6 +266,26 @@ describe("the sourcing contract", () => {
   });
 });
 
+describe("option validation", () => {
+  it("refuses a port outside 1-65535, before touching the engine", () => {
+    const workspace = makeWorkspace();
+    installEngine(workspace, "docker");
+    const launcher = stampedLauncher(workspace);
+
+    for (const port of ["0", "65536", "999999999999999999999"]) {
+      const run = runLauncher(workspace, launcher, [
+        "--data-root",
+        workspace.dataDir,
+        "--port",
+        port,
+      ]);
+      expect(run.status).not.toBe(0);
+      expect(run.stdout).toMatch(/between 1 and 65535/);
+    }
+    expect(engineCalls(workspace)).toBe("");
+  });
+});
+
 describe("the verdict reader", () => {
   const read = (workspace, document, snippet) =>
     sourced(
@@ -355,6 +375,19 @@ describe("the verdict reader", () => {
     const run = read(workspace, "docker: command not found", "echo READ");
 
     expect(run.stdout.trim()).toBe("REFUSED");
+  });
+
+  it("drops a raw carriage return from container text", () => {
+    const workspace = makeWorkspace();
+    // A raw CR is not JSON-escaped prose: it reaches the byte filter directly,
+    // and left alone it rewrites the terminal line it lands on.
+    const run = sourced(
+      workspace,
+      `psilink_say_from_container "$(printf 'before\\rafter')" | cat -v`,
+    );
+
+    expect(run.status).toBe(0);
+    expect(run.stdout.trim()).toBe("beforeafter");
   });
 
   it("finds a check by its id rather than its position", () => {
@@ -453,6 +486,29 @@ describe("the doctor loop", () => {
 
     expect(run.status).not.toBe(0);
     expect(run.stdout).toMatch(/Stopping without starting the console/);
+    expect(engineCalls(workspace)).not.toMatch(/serve/);
+  });
+
+  it("stops rather than loops when stdin closes during the retry prompt", () => {
+    const workspace = makeWorkspace();
+    installEngine(workspace, "docker");
+    stageVerdict(workspace, 1, 78, FIX_AND_RETRY);
+    const launcher = stampedLauncher(workspace);
+
+    // No input at all: a run without a TTY whose verdict stays fix_and_retry
+    // must stop after one battery, not spin the engine on a prompt nobody
+    // will answer.
+    const run = runLauncher(workspace, launcher, [
+      "--data-root",
+      workspace.dataDir,
+      "--no-browser",
+    ]);
+
+    expect(run.status).not.toBe(0);
+    const doctorRuns = engineCalls(workspace)
+      .split("\n")
+      .filter((line) => line.includes("doctor"));
+    expect(doctorRuns).toHaveLength(1);
     expect(engineCalls(workspace)).not.toMatch(/serve/);
   });
 

@@ -80,7 +80,7 @@ psilink_note() { printf '        %s\n' "$*"; }
 # below has already turned every escaped control character into a space, so this
 # covers the raw ones only.
 psilink_say_from_container() {
-  printf '%s\n' "$1" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177'
+  printf '%s\n' "$1" | LC_ALL=C tr -d '\000-\010\013-\037\177'
 }
 
 # Prompt, and read one line into PSILINK_ANSWER. A closed input -- a run with
@@ -97,12 +97,12 @@ psilink_ask() {
 }
 
 # $1 prompt, $2 default ('yes' or 'no'). Anything unrecognised takes the
-# default, and so does a closed input.
+# default. A closed input answers no whatever the default: a caller that
+# re-asks on its default would otherwise spin on a prompt nobody will answer.
 psilink_confirm() {
   local prompt="$1" fallback="$2"
   if ! psilink_ask "$prompt"; then
-    [ "$fallback" = 'yes' ]
-    return $?
+    return 1
   fi
   case "$PSILINK_ANSWER" in
     [Yy] | [Yy][Ee][Ss]) return 0 ;;
@@ -810,6 +810,11 @@ psilink_parse_options() {
                 return 1
                 ;;
             esac
+            # The length guard keeps the range test inside [ ]'s integer width.
+            if [ "${#2}" -gt 5 ] || [ "$2" -lt 1 ] || [ "$2" -gt 65535 ]; then
+              psilink_bad "--port takes a port between 1 and 65535, not '$2'."
+              return 1
+            fi
             PSILINK_PORT="$2"
             ;;
         esac

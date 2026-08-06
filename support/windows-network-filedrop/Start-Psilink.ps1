@@ -108,7 +108,7 @@ function Show-FromContainer {
         sequence as a command and nothing downstream re-checks it. #>
     param([string] $Text)
 
-    Write-Host ("        " + ($Text -replace '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', ' '))
+    Write-Host ("        " + ($Text -replace '[\x00-\x08\x0b-\x1f\x7f]', ' '))
 }
 
 # ==========================================================================
@@ -750,14 +750,25 @@ Write-Host 'from your own files, which is worth doing once this works.'
 if (-not $DataRoot) {
     Write-Host ''
     $answer = Read-Host 'Use one folder for everything? [Y/n]'
-    $DataRoot = Select-HostFolder -Prompt 'The folder this exchange works in'
+    $splitFolders = $answer -and $answer -notmatch '^\s*(y|yes)\s*$'
+    $dataRootPrompt = 'The folder this exchange works in'
+    if ($splitFolders) { $dataRootPrompt = 'The working folder (key file and results)' }
+    $DataRoot = Select-HostFolder -Prompt $dataRootPrompt
     if (-not $DataRoot) {
         Show-Fail 'No folder chosen.'
         exit 1
     }
-    if ($answer -and $answer -notmatch '^\s*(y|yes)\s*$') {
+    if ($splitFolders) {
         $InputDir = Select-HostFolder -Prompt 'The folder holding your input CSVs'
+        if (-not $InputDir) {
+            Show-Fail 'No folder chosen.'
+            exit 1
+        }
         $RendezvousDir = Select-HostFolder -Prompt 'The folder shared with your partner'
+        if (-not $RendezvousDir) {
+            Show-Fail 'No folder chosen.'
+            exit 1
+        }
     }
 }
 
@@ -838,7 +849,7 @@ if ($rendezvousResolved.Kind -eq 'Network') {
     $answer = Read-Host 'Are those correct? [Y/n]'
     if ($answer -and $answer -notmatch '^\s*(y|yes)\s*$') {
         $suggestion = Resolve-DfsSuggestion -NamespaceServer $server -NamespaceShare $share
-        if (-not $suggestion.Accepted) { exit 0 }
+        if (-not $suggestion.Accepted) { exit 1 }
         $server = $suggestion.Server
         $share = $suggestion.Share
         Write-Host ''
@@ -1029,21 +1040,28 @@ if ($started.ExitCode -ne 0) {
     exit 1
 }
 
-$url = "http://127.0.0.1:$Port"
-if (Wait-ForConsole -ConsolePort $Port) {
-    Show-Ok "The console is at $url"
-    if (-not $NoBrowser) { Start-Process $url | Out-Null }
-    Write-Host ''
-    Show-Info 'Leave this window open while you use it.'
-} else {
-    Show-Fail "Nothing answered on $url."
-    Write-Host ''
-    Write-Host (Invoke-EngineQuiet -EngineArgs @('logs', $containerName)).Output
-}
+# The finally is what stops the detached container when Ctrl-C lands in the
+# wait below. A window closed outright kills this process with no finally, so
+# the on-screen line names the by-hand stop for that case.
+try {
+    $url = "http://127.0.0.1:$Port"
+    if (Wait-ForConsole -ConsolePort $Port) {
+        Show-Ok "The console is at $url"
+        if (-not $NoBrowser) { Start-Process $url | Out-Null }
+        Write-Host ''
+        Show-Info 'Leave this window open while you use it.'
+        Show-Info "If it closes without stopping the console, run: $script:PsilinkEngine stop $containerName"
+    } else {
+        Show-Fail "Nothing answered on $url."
+        Write-Host ''
+        Write-Host (Invoke-EngineQuiet -EngineArgs @('logs', $containerName)).Output
+    }
 
-Write-Host ''
-Read-Host 'Press Enter to stop the console' | Out-Null
-Invoke-EngineQuiet -EngineArgs @('stop', $containerName) | Out-Null
+    Write-Host ''
+    Read-Host 'Press Enter to stop the console' | Out-Null
+} finally {
+    Invoke-EngineQuiet -EngineArgs @('stop', $containerName) | Out-Null
+}
 Write-Host ''
 Write-Host 'The console has stopped.'
 if ($usingVolume) {

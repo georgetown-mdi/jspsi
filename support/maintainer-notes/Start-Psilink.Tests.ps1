@@ -232,6 +232,19 @@ Describe 'Read-DoctorVerdict' {
     }
 }
 
+Describe 'Show-FromContainer' {
+    It 'blanks a raw carriage return rather than letting it rewrite the line' {
+        # A raw CR is not JSON-escaped prose -- the decoder never saw it -- so
+        # it reaches the byte filter directly, and left alone it pulls the
+        # cursor back over classified output already on the line.
+        $records = Show-FromContainer -Text ('before' + [char]13 + 'after') 6>&1
+        $text = @($records | ForEach-Object { [string] $_ }) -join ''
+
+        $text | Should -Match 'before after'
+        $text | Should -Not -Match ([string] [char]13)
+    }
+}
+
 Describe 'Select-DoctorChecks' {
     BeforeAll {
         $script:Verdict = Read-DoctorVerdict -Json (
