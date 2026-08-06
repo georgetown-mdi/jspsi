@@ -72,15 +72,18 @@ paths. The in-process backend adds two surfaces a real `sshd` cannot offer:
   idle caps that drop a live session, one-shot drops armed on the Nth further
   operation or on a wall clock, a withheld-close mode that consumes the client's
   FIN and sends nothing back, leaving it in half-close, and a handshake stall
-  that accepts the TCP connection and never writes a byte, so a dial hangs
-  established but never ready. A live session can also be made to VANISH: from
-  that moment the server neither answers nor closes it, so the client sees no
-  `end`, no `close` and no further byte, and can learn of it only from its own
-  liveness deadline. Unlike the withheld close it fires against a session that
-  has asked for nothing, and it composes with the caps, so a server can both cap
-  sessions and never close one cleanly. Every vanished session is released at
-  teardown -- a socket silenced on both halves cannot answer the `end()` the
-  backend's `stop()` uses to close it.
+  that accepts the TCP connection and writes nothing past the identification
+  string ssh2 has already sent by then, so the key exchange never comes and a
+  dial hangs established but never ready. A live session can also be made to
+  VANISH: from that moment the server neither answers nor closes it, so the
+  client sees no `end`, no `close` and no further byte, and can learn of it only
+  from its own liveness deadline. Unlike the withheld close it fires against a
+  session that has asked for nothing, and it composes with the caps, so a server
+  can both cap sessions and never close one cleanly. Every vanished session is
+  released at teardown -- a socket silenced on both halves cannot answer the
+  `end()` the backend's `stop()` uses to close it -- and any release that reaches
+  one hands back both halves at once, so no case can measure over a session that
+  is half itself again.
 - Rename-tear staging, on the same hub. The op-count drops arm a teardown as a
   request is counted and defer it, so whether that request's filesystem work ran
   before the connection went is a race; these cut at a named point inside the

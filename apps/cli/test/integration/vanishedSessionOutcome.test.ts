@@ -1,4 +1,6 @@
+import { once } from "node:events";
 import fsp from "node:fs/promises";
+import net from "node:net";
 import path from "node:path";
 
 import { expect, test } from "vitest";
@@ -47,6 +49,17 @@ const QUIET_OBSERVATION_MS = 5_000;
 // Each idle boundary costs the release's own close bound before the forced close
 // lands, and the stalled cases cost the deadline above.
 const TEST_TIMEOUT_MS = 120_000;
+
+// How long the stalled second connection is watched for the key exchange a
+// served connection answers an identification string with at once. Loopback
+// turns that round trip around immediately, so silence across this window is
+// the stall holding that socket rather than an answer still on its way.
+const STALLED_SILENCE_MS = 500;
+
+// The bound on anything a release case waits for the server to do. Every one of
+// them is loopback work the release triggers at once; the bound is here so a
+// case that never gets it fails loudly instead of running to the file's timeout.
+const SERVER_RESPONSE_WAIT_MS = 10_000;
 
 // The two emitters a client learns of a lost session from: the ssh2 Client and
 // the socket beneath it. Both are internals, which is the point -- a vanished
@@ -143,6 +156,51 @@ function watchForLostSession(adapter: SSH2SFTPClientAdapter): QuietCensus {
 
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
+
+// Wait on something the server does, and fail naming it rather than letting a
+// case go on reading a state that never arrived.
+async function waitFor(ready: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + SERVER_RESPONSE_WAIT_MS;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await delay(25);
+  }
+}
+
+/** A bare TCP connection to the test server, and what the server sent it. */
+interface SecondConnection {
+  /** Bytes the server has written to it since it was dialed. */
+  bytesFromServer(): number;
+  /** Send an SSH identification string, which is what draws the key exchange. */
+  sendIdentification(): void;
+  close(): void;
+}
+
+// Dial the server without speaking SSH: the backend accepts and tracks this
+// connection like any other, so a control armed at accept time takes hold of its
+// socket, but it never authenticates, so it never becomes the established
+// session the vanish targets. It is the OTHER connection each release case
+// needs -- the one a per-control stop is called for, while the vanish holds a
+// different one.
+async function dialSecondConnection(
+  host: string,
+  port: number,
+): Promise<SecondConnection> {
+  const socket = net.connect(port, host);
+  let received = 0;
+  socket.on("data", (chunk: Buffer) => {
+    received += chunk.length;
+  });
+  socket.on("error", () => {});
+  await once(socket, "connect");
+  return {
+    bytesFromServer: () => received,
+    sendIdentification: () => {
+      socket.write("SSH-2.0-psilinkprobe\r\n");
+    },
+    close: () => socket.destroy(),
+  };
+}
 
 interface VanishFixture {
   srv: Awaited<ReturnType<typeof startInProcessSftpServer>>;
@@ -445,6 +503,123 @@ inProcessOnly(
     } finally {
       census.stop();
       srv.sessionControls.dropActiveAfterMs(0);
+      await cleanup();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+// The vanish silences its socket in the same pools the withheld-close and
+// stalled-handshake controls draw from, so stopping either of those is a release
+// path that reaches a vanished session it was never aimed at. These two cases
+// hold that release to all-or-nothing over the wire: afterwards the vanished
+// session both answers again AND can be hung up by the server, the two halves
+// the vanish took together. A half-released session -- answering but unclosable,
+// or closable but mute -- is neither the black hole a case measures over nor a
+// working session, so anything read from it would mean nothing.
+inProcessOnly(
+  "unstalling another connection's dial releases a vanished session whole",
+  async () => {
+    const { srv, adapter, remote, cleanup } = await startVanishFixture(
+      "stall-release-vanished",
+    );
+    const census = watchForLostSession(adapter);
+    srv.sessionControls.stallHandshakeOnConnect = true;
+    const stalled = await dialSecondConnection(
+      srv.handle.host,
+      srv.handle.port,
+    );
+    try {
+      // ssh2 writes the server's identification string as it constructs the
+      // connection, before any control can reach that socket, so the stall is
+      // measured by what does NOT follow it: this dial sends its own
+      // identification and no key exchange comes back.
+      await waitFor(
+        () => stalled.bytesFromServer() > 0,
+        "the server's identification string",
+      );
+      const identificationBytes = stalled.bytesFromServer();
+      stalled.sendIdentification();
+      await delay(STALLED_SILENCE_MS);
+      expect(stalled.bytesFromServer()).toBe(identificationBytes);
+
+      srv.sessionControls.vanishActiveSession();
+      srv.sessionControls.stopStallingHandshakes();
+
+      // The same dial once the stall is stopped: the key exchange the muted one
+      // never got, so that socket really was in the pool this stop drains -- the
+      // pool the vanish mutes the established session's socket into.
+      const unstalled = await dialSecondConnection(
+        srv.handle.host,
+        srv.handle.port,
+      );
+      unstalled.sendIdentification();
+      await waitFor(
+        () => unstalled.bytesFromServer() > identificationBytes,
+        "the unstalled dial's key exchange",
+      );
+      unstalled.close();
+
+      // The vanished session's write is its own again: an operation completes,
+      // and the server's bytes reach the client.
+      await expect(adapter.exists(remote)).resolves.toBe(true);
+      expect(census.bytesFromServer()).toBeGreaterThan(0);
+      // And so are its closers, which is the half a stop of the muted pool alone
+      // would leave faked: the server can end this session and the client hears
+      // it go.
+      srv.sessionControls.dropActiveAfterMs(1);
+      await waitFor(
+        () => census.heard.includes("client:close"),
+        "the close the server sends the released session",
+      );
+      expect(census.heard).toContain("socket:close");
+    } finally {
+      census.stop();
+      stalled.close();
+      await cleanup();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "releasing another connection's withheld close releases a vanished session whole",
+  async () => {
+    const { srv, adapter, remote, cleanup } = await startVanishFixture(
+      "withhold-release-vanished",
+    );
+    const census = watchForLostSession(adapter);
+    srv.sessionControls.withholdCloseOnDisconnect = true;
+    const held = await dialSecondConnection(srv.handle.host, srv.handle.port);
+    try {
+      // Served normally -- this control takes only the closers -- so what is
+      // measured here is that the server accepted this connection while the
+      // control was armed, which is what hands its closers to the pool the
+      // vanish silences into. The case does not rest on that: the vanished
+      // socket is in that pool by the vanish alone, and this connection is only
+      // why a suite would call the stop at all.
+      await waitFor(
+        () => held.bytesFromServer() > 0,
+        "the second connection's identification string",
+      );
+
+      srv.sessionControls.vanishActiveSession();
+      srv.sessionControls.stopWithholdingCloses();
+
+      // Here it is the write that a stop of the silenced pool alone would leave
+      // muted: this operation would then reach a server that answers into
+      // nothing and would end on the adapter's stall deadline instead.
+      await expect(adapter.exists(remote)).resolves.toBe(true);
+      expect(census.bytesFromServer()).toBeGreaterThan(0);
+      srv.sessionControls.dropActiveAfterMs(1);
+      await waitFor(
+        () => census.heard.includes("client:close"),
+        "the close the server sends the released session",
+      );
+      expect(census.heard).toContain("socket:close");
+    } finally {
+      census.stop();
+      held.close();
       await cleanup();
     }
   },

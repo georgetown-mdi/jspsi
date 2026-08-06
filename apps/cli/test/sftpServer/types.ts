@@ -276,10 +276,12 @@ export interface SftpSessionControls {
   withholdCloseOnDisconnect: boolean;
   /**
    * Accept the TCP connection and never complete the SSH handshake: while set,
-   * each newly accepted connection's socket is stopped from ever writing, so the
-   * server's identification string and key exchange never reach the client and a
+   * each newly accepted connection's socket is stopped from ever writing, so a
    * dial hangs, established but never ready, until the client's own connect
-   * deadline (ssh2's `readyTimeout`) expires. This is the partner server a dial
+   * deadline (ssh2's `readyTimeout`) expires. The mute takes hold as the
+   * connection is accepted, which is after ssh2 has written the server's
+   * identification string, so the client hears that one line and nothing after
+   * it -- the key exchange never reaches it. This is the partner server a dial
    * spends its whole budget against. Read as each connection is accepted, so it
    * governs every connection established while it is set and leaves earlier ones
    * untouched; false by default. In-process only, like the fault hooks: a native

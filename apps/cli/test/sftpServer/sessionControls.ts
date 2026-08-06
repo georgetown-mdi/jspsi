@@ -453,9 +453,10 @@ export function createSftpSessionControls(): SftpSessionControlHub {
       // The client's disconnect is served normally right up to the close this
       // then ignores.
       if (hub.withholdCloseOnDisconnect) silenceClosers(socket);
-      // Muted before the server's SSH identification string, so the client's
-      // handshake cannot advance past waiting for it and the dial waits out its
-      // own connect deadline.
+      // Muted as the connection is accepted, which is after ssh2 has written the
+      // server's identification string and before its key exchange: the client
+      // hears that one line and nothing after it, so its handshake cannot
+      // advance and the dial waits out its own connect deadline.
       if (hub.stallHandshakeOnConnect) muteWrites(socket);
     },
 
