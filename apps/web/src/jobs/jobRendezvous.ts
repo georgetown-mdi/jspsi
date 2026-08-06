@@ -110,8 +110,9 @@ export function resolveJobRendezvousFolderName(
  * The advisory locator a filedrop invitation minted on this console carries: the
  * shared folder's name where the console can name it, else the rendezvous
  * mount's own last segment, which names nothing about the host machine and is
- * what the partner's CLI remaps anyway. Undefined only when no rendezvous
- * directory is configured, where the filedrop transport is unavailable.
+ * what the partner's CLI remaps anyway. Undefined when no rendezvous directory
+ * is configured, and for the one configured mount that reduces to no segment at
+ * all (the filesystem root).
  *
  * The two are separate because only the first is safe to PRINT as the shared
  * folder's name: the accept kit and the console's own confirm line take the
