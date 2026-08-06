@@ -11,9 +11,10 @@ import { sha256, bytesEqual } from "./crypto.js";
 const MAX_KEY_TYPE_BYTES = 64;
 
 /**
- * How many bytes of a non-conforming type the placeholder encodes. Chosen so the
- * placeholder stays inside {@link MAX_KEY_TYPE_BYTES}: the `(unknown:` and `)`
- * framing costs 10 characters, leaving room for 54 hex digits.
+ * How many bytes of a non-conforming type the placeholder encodes. The
+ * `(unknown:` and `)` framing costs 10 characters, so {@link MAX_KEY_TYPE_BYTES}
+ * admits 27 source bytes at most; 24 encodes to 48 hex digits for a placeholder
+ * of 58, keeping headroom under the bound rather than sitting against it.
  */
 const PLACEHOLDER_SOURCE_BYTES = 24;
 
