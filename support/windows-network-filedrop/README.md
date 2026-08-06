@@ -171,10 +171,10 @@ helping you.
 
 > **How far this has been tested.** Both versions have been run start to finish
 > on Windows 11 against a real file server. The checks the Command Prompt one
-> runs inside Docker were verified against that server; the PowerShell one now
-> runs the checks that ship inside the psilink image, which are verified against
-> a real file server on every change to them, but it has not been run start to
-> finish in that form. Neither version has ever met a real DFS namespace, which
+> runs inside Docker were verified against that server. The PowerShell one runs
+> the checks that ship inside the psilink image, which are verified against a
+> real file server on every change to them, but it has not itself been run start
+> to finish in that form. Neither version has ever met a real DFS namespace, which
 > is why the script asks you to confirm the server it worked out rather than
 > trusting it. Corrections from a real environment are welcome, and are worth
 > more here than anywhere else in this repository.
