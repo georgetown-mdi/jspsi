@@ -36,6 +36,11 @@ import { triggerBlobDownload } from "@components/blobDownload";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
 import {
+  DEFAULT_PSILINK_IMAGE_TAG,
+  acceptKitFileName,
+  buildAcceptKit,
+} from "./acceptKit";
+import {
   EMPTY_SAVE_FIELDS,
   endpointRequestFor,
   exchangeFileInputFor,
@@ -123,6 +128,7 @@ import type {
   JobRendezvousConfig,
   ProfiledJobInput,
 } from "@psi/workInputClient";
+import type { AcceptKitEndpoint } from "./acceptKit";
 import type { BenchCoverageInput } from "@components/useNonEmptyRates";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { DisclosureChoice } from "@psi/metadataEditing";
@@ -222,6 +228,14 @@ export function InviterBench() {
   const [reading, setReading] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [invitation, setInvitation] = useState<GeneratedInvitation>();
+  // The rendezvous locator minted into the current invitation, held so the
+  // partner's accept kit prints back exactly the locator the token carries.
+  // Set only where an invitation is minted for a partner who accepts from the
+  // command line (a console sftp/filedrop run); undefined otherwise, which is
+  // what withholds the kit from a WebRTC exchange and from the hosted build
+  // (whose CLI transports route to the save surface and mint nothing here).
+  const [acceptKitEndpoint, setAcceptKitEndpoint] =
+    useState<AcceptKitEndpoint>();
   const [minting, setMinting] = useState(false);
   const [createAlert, setCreateAlert] = useState<IntakeAlert>();
   const [expertMode, setExpertMode] = useState(false);
@@ -402,6 +416,7 @@ export function InviterBench() {
       current === undefined ? current : unsealEditor(current),
     );
     setInvitation(undefined);
+    setAcceptKitEndpoint(undefined);
     setSavedExchange(undefined);
     setManageStatus("idle");
     goTo("review");
@@ -733,6 +748,7 @@ export function InviterBench() {
     setDemoActive(false);
     setSavedExchange(undefined);
     setInvitation(undefined);
+    setAcceptKitEndpoint(undefined);
     setManageStatus("idle");
     goTo("file");
   }
@@ -797,9 +813,15 @@ export function InviterBench() {
     // the fetch had not resolved or reported none; refuse rather than mint a
     // code with no rendezvous.
     let connectionEndpoint: ConnectionEndpointRequest | undefined;
+    // The accept kit's locator is the SAME value minted into the token, taken
+    // from the one place it is built, so the sheet can print back only what the
+    // partner's own invitation already carries.
+    let kitEndpoint: AcceptKitEndpoint | undefined;
     if (transport === "sftp") {
       if (sftpConnection == null) return;
-      connectionEndpoint = sftpEndpointForConnection(sftpConnection);
+      const sftpEndpoint = sftpEndpointForConnection(sftpConnection);
+      connectionEndpoint = sftpEndpoint;
+      kitEndpoint = sftpEndpoint;
     } else if (transport === "filedrop") {
       // A console filedrop server-job carries the rendezvous directory's NAME (its
       // basename) as the invitation's advisory locator, so the partner can confirm the
@@ -807,10 +829,12 @@ export function InviterBench() {
       // mount is server-side; a missing path means the rendezvous state changed
       // mid-create, so refuse rather than mint a code with no locator.
       if (rendezvous?.path === undefined) return;
-      connectionEndpoint = {
-        channel: "filedrop",
+      const filedropEndpoint = {
+        channel: "filedrop" as const,
         path: rendezvousLocatorName(rendezvous.path),
       };
+      connectionEndpoint = filedropEndpoint;
+      kitEndpoint = filedropEndpoint;
     }
     setMinting(true);
     setCreateAlert(undefined);
@@ -827,6 +851,7 @@ export function InviterBench() {
       });
       setEditor(sealEditor(editor));
       setInvitation(minted);
+      setAcceptKitEndpoint(kitEndpoint);
       setManageStatus("idle");
       goTo("share");
     } catch (error) {
@@ -936,6 +961,23 @@ export function InviterBench() {
     } finally {
       setSaving(false);
     }
+  }
+
+  // Write the partner's accept kit to disk through the same blob download the
+  // exchange-file save uses. The sheet is composed from the minted locator and a
+  // fixed image tag alone: it carries no secret, no invitation token (the
+  // partner pastes their own copy over the sheet's placeholder), and nothing
+  // else from this machine.
+  function downloadAcceptKit() {
+    if (acceptKitEndpoint === undefined) return;
+    triggerBlobDownload(
+      acceptKitFileName(new Date()),
+      buildAcceptKit({
+        endpoint: acceptKitEndpoint,
+        imageTag: DEFAULT_PSILINK_IMAGE_TAG,
+      }),
+      "text/plain",
+    );
   }
 
   const linkable = editor !== undefined && editor.draft.keys.length > 0;
@@ -1271,6 +1313,9 @@ export function InviterBench() {
               failure={failure}
               warnings={warnings}
               partnerAcceptsByCli={isCliTransport(transport)}
+              onDownloadAcceptKit={
+                acceptKitEndpoint === undefined ? undefined : downloadAcceptKit
+              }
               serverJob={chosenRunMode === "server-job"}
               jobId={jobId}
               reattached={reattached}

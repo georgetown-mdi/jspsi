@@ -18,9 +18,10 @@ const RECURRING_EXCHANGE_DOC_URL =
   "https://github.com/georgetown-mdi/jspsi/blob/main/docs/CLI.md#recurring-exchange";
 
 /**
- * The recurring-run hand-off panel, shown in the completed-run block of every
- * console server-job seat (invite, accept, and Direct) and, collapsed, on the
- * strand-recovery panel's finished render. It fetches the job's portable,
+ * The recurring-run hand-off panel, available on every console server-job seat
+ * (invite, accept, Direct, and strand recovery) from job creation onward --
+ * collapsed until the run completes, absent on a failed or stopped run. It
+ * fetches the job's portable,
  * secret-free hand-off from `GET /api/jobs/:jobId/handoff` and lays out exactly
  * what the operator carries from this prototyped run to a scheduled `psilink`
  * command line: the config or command template (the portable values from this run
@@ -98,7 +99,7 @@ function HandoffBody({ handoff }: { handoff: JobHandoff }) {
   return (
     <>
       <p className={styles.small}>
-        This exchange ran here as a prototype. To run the recurring production
+        This exchange runs here as a prototype. To run the recurring production
         version, run it from the command line with cron (Linux/macOS) or Task
         Scheduler (Windows). What carried over from this run is filled in below;
         set the file paths for the machine that will run the schedule.
@@ -174,10 +175,13 @@ function ConfigSteps({
             Copy the shared secret into that folder
           </p>
           <p className={styles.small}>
-            This run wrote its shared secret to .psilink.key in the exchange
+            This run writes its shared secret to .psilink.key in the exchange
             folder. Copy that file into the same folder as psilink.yaml,
             readable only by you (chmod 600 on Linux/macOS). The secret rotates
-            after each successful run, so copy the current file.
+            at each run's handshake, before any data moves -- even a run that
+            later failed has usually rotated it -- so take your copy from the
+            file as it stands after your last run here, never from an earlier
+            one.
           </p>
         </li>
       )}

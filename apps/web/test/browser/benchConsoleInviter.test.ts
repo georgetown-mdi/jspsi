@@ -15,8 +15,10 @@ import { decodeInvitation } from "@psilink/core";
 import { InviterBench } from "@bench/InviterBench";
 import styles from "@bench/bench.module.css";
 
+import { captureDownloads } from "./captureDownloads";
 import { renderApp } from "./renderApp";
 
+import type { CapturedDownload } from "./captureDownloads";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
@@ -1111,5 +1113,160 @@ describe("console inviter re-attaches on a busy create", () => {
         api.captured.some((r) => r.url === "/api/jobs/job-live/events"),
       ).toBe(true),
     );
+  });
+});
+
+describe("console inviter partner accept kit", () => {
+  const ACCEPT_KIT_BUTTON = "Download instructions for your partner";
+  const SHEET_PREFIX = "psilink-accept-instructions-";
+
+  /** The instruction sheet the share step just wrote, once the capture has read
+   * its blob back. */
+  async function capturedSheet(
+    downloads: ReturnType<typeof captureDownloads>,
+  ): Promise<CapturedDownload> {
+    await vi.waitFor(() => {
+      const entry = downloads.captured.find((item) =>
+        item.fileName.startsWith(SHEET_PREFIX),
+      );
+      expect(entry?.text.length).toBeGreaterThan(0);
+    });
+    return downloads.captured.find((item) =>
+      item.fileName.startsWith(SHEET_PREFIX),
+    ) as CapturedDownload;
+  }
+
+  test("an sftp share step writes a sheet carrying the locator, no secret, no token", async () => {
+    const downloads = captureDownloads();
+    try {
+      stubJobApi({
+        sftp: {
+          configured: true,
+          host: "dr.example.gov",
+          port: 2222,
+          path: "/drops/psilink",
+        },
+      });
+      mount(createElement(InviterBench));
+      await reachReviewCreate();
+      await page.getByRole("button", { name: "Create the invitation" }).click();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Your invitation is ready");
+
+      await page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).click();
+      const sheet = await capturedSheet(downloads);
+      expect(sheet.fileName).toMatch(
+        /^psilink-accept-instructions-\d{4}-\d{2}-\d{2}\.txt$/,
+      );
+
+      // The sheet names the same rendezvous the token carries, and the field
+      // the partner fills in themselves.
+      expect(sheet.text).toContain("SFTP server:    dr.example.gov:2222");
+      expect(sheet.text).toContain("Directory:      /drops/psilink");
+      expect(sheet.text).toContain("REPLACE_WITH_SSH_USERNAME");
+
+      // What it must never carry: the minted secret or the token itself. The
+      // partner pastes their own copy over the placeholder.
+      await page.getByRole("button", { name: "Show full code" }).click();
+      const encoded = (
+        document.querySelector(`.${styles.revealArea}`) as HTMLTextAreaElement
+      ).value;
+      const token = await decodeInvitation(encoded);
+      expect(sheet.text).toContain("PASTE_YOUR_INVITATION");
+      expect(sheet.text).not.toContain(encoded);
+      expect(sheet.text).not.toContain(token.sharedSecret);
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("a filedrop share step writes the folder-routing sheet with the folder name only", async () => {
+    const downloads = captureDownloads();
+    try {
+      stubJobApi({
+        sftp: { configured: false },
+        rendezvous: { configured: true, path: "/srv/exchanges/psilink" },
+      });
+      mount(createElement(InviterBench));
+      await reachReviewCreate();
+      await page.getByRole("button", { name: "Create the invitation" }).click();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Your invitation is ready");
+
+      await page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).click();
+      const sheet = await capturedSheet(downloads);
+
+      // Both routing branches: the launcher for a network drive or DFS path,
+      // and the direct docker commands for a folder Docker can open.
+      expect(sheet.text).toContain("A. A Windows network drive or a DFS path");
+      expect(sheet.text).toContain("Start-Psilink.ps1");
+      expect(sheet.text).toContain("B. A folder that syncs on this PC");
+      expect(sheet.text).toContain("accept PASTE_YOUR_INVITATION");
+
+      // The appliance's absolute rendezvous path stays off the sheet exactly as
+      // it stays off the token: the shared folder's name is the whole locator.
+      expect(sheet.text).toContain("Shared folder:  psilink");
+      expect(sheet.text).not.toContain("/srv/exchanges");
+    } finally {
+      downloads.restore();
+    }
+  });
+});
+
+describe("console inviter recurring hand-off availability", () => {
+  const SHARE_HANDOFF = {
+    mode: "exchange",
+    channel: "sftp",
+    usedKeyFile: true,
+    credentialPasted: false,
+    template: {
+      kind: "config",
+      yaml: "connection:\n  channel: sftp\n  server:\n    host: sftp.example.gov\n",
+    },
+  };
+
+  test("the hand-off is reachable from job creation, collapsed until the run completes", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      handoff: SHARE_HANDOFF,
+    });
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Your invitation is ready");
+
+    // Still on the share screen, before any protocol stage: the hand-off the
+    // appliance composed at job creation is already reachable, behind a
+    // collapsed disclosure so the share step still leads.
+    const toggle = page.getByRole("button", {
+      name: /run this on a schedule/i,
+    });
+    await expect.element(toggle).toBeInTheDocument();
+    expect(toggle.element().getAttribute("aria-expanded")).toBe("false");
+    await toggle.click();
+    await expect
+      .element(page.getByText("0 2 * * *", { exact: false }))
+      .toBeVisible();
+
+    // At completion it becomes the full panel under its own heading.
+    await vi.waitFor(() =>
+      expect(api.captured.some((r) => r.url === "/api/jobs/job-7/events")).toBe(
+        true,
+      ),
+    );
+    api.emitEvent({ v: 1, type: "result", resultWritten: true });
+    api.closeEvents();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange complete");
+    await expect
+      .element(
+        page.getByRole("heading", { name: "Run this exchange on a schedule" }),
+      )
+      .toBeInTheDocument();
   });
 });

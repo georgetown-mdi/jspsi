@@ -48,6 +48,7 @@ export function InviterExchangeSection({
   failure,
   warnings,
   partnerAcceptsByCli,
+  onDownloadAcceptKit,
   serverJob,
   jobId,
   reattached,
@@ -70,6 +71,11 @@ export function InviterExchangeSection({
    * (tokenFromInput), so the bare code adds nothing but a second secret to
    * leave on screen. */
   partnerAcceptsByCli: boolean;
+  /** Write the partner's accept kit -- the printable instruction sheet sent
+   * alongside the invitation -- to the operator's disk. Omitted wherever no kit
+   * applies: a WebRTC partner accepts in their browser and needs none, and the
+   * hosted build's CLI transports mint on the save surface rather than here. */
+  onDownloadAcceptKit?: () => void;
   /** Whether this run executes on the console appliance (a server-job run) rather
    * than in this browser. On the appliance the CLI child conducts the exchange
    * while the tab stays open, so the keep-open callout names the running exchange
@@ -223,6 +229,20 @@ export function InviterExchangeSection({
                 value={invitation.encoded}
               />
             )}
+            {onDownloadAcceptKit !== undefined && (
+              <>
+                <p className={styles.small}>
+                  Your partner accepts from the command line, which reads the
+                  invitation code, not the link -- send them the code, with
+                  these instructions alongside it. The sheet takes them from
+                  Docker Desktop to accepting and carries no secret, so it can
+                  travel any way that suits them.
+                </p>
+                <Button variant="default" onClick={onDownloadAcceptKit}>
+                  Download instructions for your partner
+                </Button>
+              </>
+            )}
             <p className={styles.small}>
               <strong>
                 This invitation expires{" "}
@@ -297,8 +317,13 @@ export function InviterExchangeSection({
           )}
         </>
       )}
-      {phase === "done" && serverJob && jobId !== undefined && (
-        <RecurringHandoff jobId={jobId} />
+      {/* The hand-off is composed at job creation and served for the record's
+          lifetime, so the panel stands from the moment the appliance holds the
+          job: collapsed while the run is still in flight (graduation is not the
+          job at hand yet), expanded once the run completes and it is. It drops
+          on a failure, whose surface offers its own one way forward. */}
+      {serverJob && jobId !== undefined && failure === undefined && (
+        <RecurringHandoff jobId={jobId} collapsible={phase !== "done"} />
       )}
       {(phase === "done" || failure?.category === "output") && (
         <AnotherExchangeFoot

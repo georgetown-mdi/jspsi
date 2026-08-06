@@ -275,8 +275,10 @@ export function AcceptorExchangeSection({
           )}
         </>
       )}
-      {phase === "done" && serverJob && jobId !== undefined && (
-        <RecurringHandoff jobId={jobId} />
+      {/* Available from job creation onward, collapsed until the run completes
+          -- the inviter seat's rule, applied identically here. */}
+      {serverJob && jobId !== undefined && failure === undefined && (
+        <RecurringHandoff jobId={jobId} collapsible={phase !== "done"} />
       )}
       {(phase === "done" || failure?.category === "output") && (
         <AnotherExchangeFoot
