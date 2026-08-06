@@ -324,14 +324,14 @@ quoting is load-bearing in both.
 docker volume create --driver local `
   --opt type=cifs `
   --opt 'device=//fs-04.agency.gov/exchange$/dropbox' `
-  --opt 'o=username=yourname,password=YOURPASSWORD,domain=AGENCY' `
+  --opt 'o=username=yourname,password=YOURPASSWORD,uid=1000,gid=1000,domain=AGENCY' `
   psilink-sync
 ```
 
 **Command Prompt:**
 
 ```text
-docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=yourname,password=YOURPASSWORD,domain=AGENCY" psilink-sync
+docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=yourname,password=YOURPASSWORD,uid=1000,gid=1000,domain=AGENCY" psilink-sync
 ```
 
 Things to get right:
@@ -339,6 +339,11 @@ Things to get right:
 - **Forward slashes**, and the server, share and subfolder run together:
   `\\fs-04\exchange$\dropbox` becomes `//fs-04/exchange$/dropbox`.
 - **Drop `,domain=AGENCY`** if you have no domain.
+- **Keep `uid=1000,gid=1000`.** psilink runs in the container as an
+  unprivileged account numbered 1000, and a Windows file server serves no
+  ownership the mount can read, so without these two the whole folder appears
+  to belong to somebody else and every write is refused -- the check below
+  says the volume mounted and then would not take a file.
 - **In PowerShell the quotes must be single ones.** Double quotes let it expand
   `$/dropbox` as a variable name, and the path silently changes; a `$` in the
   password does the same to the credentials, producing a login failure that

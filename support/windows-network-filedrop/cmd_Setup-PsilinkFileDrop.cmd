@@ -383,8 +383,14 @@ rem carries "&", "|", ">", "%", "^", ";", "(" and a space through intact. A
 rem double quote is the one character that cannot be carried, which is why the
 rem check above refuses it -- unquoted, it ends the argument and docker creates
 rem an unnamed volume instead of the one asked for.
-set "VOL_OPTS=username=%SMB_USERNAME%,password=%SMB_PASS%"
-if defined SMB_DOMAINNAME set "VOL_OPTS=username=%SMB_USERNAME%,password=%SMB_PASS%,domain=%SMB_DOMAINNAME%"
+rem uid/gid are what make the mount writable from the psilink image, which
+rem runs as an unprivileged account (uid 1000). A Windows SMB server serves no
+rem Unix ownership for the client to read, so without them the whole tree
+rem presents as owned by root and every write is refused inside the container.
+rem They map ownership rather than switching enforcement off, which is what the
+rem blunter "noperm" would do.
+set "VOL_OPTS=username=%SMB_USERNAME%,password=%SMB_PASS%,uid=1000,gid=1000"
+if defined SMB_DOMAINNAME set "VOL_OPTS=username=%SMB_USERNAME%,password=%SMB_PASS%,uid=1000,gid=1000,domain=%SMB_DOMAINNAME%"
 call :dialect_opt
 
 docker volume create --driver local --opt type=cifs --opt "device=%DEVICE%" --opt "o=%VOL_OPTS%" "%VOLUME_NAME%" >"%WORK%" 2>&1

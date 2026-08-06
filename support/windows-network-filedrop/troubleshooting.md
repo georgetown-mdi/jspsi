@@ -387,18 +387,23 @@ check the script runs, one at a time, with what each one establishes --
 docker volume create --driver local `
   --opt type=cifs `
   --opt 'device=//fs-04.agency.gov/exchange$/dropbox' `
-  --opt 'o=username=USER,password=PASS,domain=AGENCY' `
+  --opt 'o=username=USER,password=PASS,uid=1000,gid=1000,domain=AGENCY' `
   psilink-sync
 ```
 
 **Command Prompt:**
 
 ```text
-docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=USER,password=PASS,domain=AGENCY" psilink-sync
+docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=USER,password=PASS,uid=1000,gid=1000,domain=AGENCY" psilink-sync
 ```
 
 Note the forward slashes in `device`, and that `\\fs-04\exchange$\dropbox`
-becomes `//fs-04/exchange$/dropbox`. The quotes are load-bearing in both, for
+becomes `//fs-04/exchange$/dropbox`. `uid=1000,gid=1000` is not optional:
+psilink runs in the container as an unprivileged account numbered 1000, and a
+Windows file server serves no ownership the mount can read, so a volume created
+without them mounts and then refuses every write.
+
+The quotes are load-bearing in both, for
 different reasons. In PowerShell they must be single quotes: without them it
 expands `$/dropbox` as a variable and the path silently changes, and a `$` in
 the password does the same to the credentials -- producing a login failure that

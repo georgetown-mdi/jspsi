@@ -163,6 +163,8 @@ What this asks of you is bind-mount ownership. A bind mount keeps its host direc
 
   Watch the read side too: a working directory or input file that no other account can read (mode `0700`, `0600`) is unreadable inside the container even when it is yours on the host.
 
+- **A CIFS network-share volume** -- the Docker volume the Windows file-drop setup creates over `//server/share` -- has no host ownership to pass through: a Windows SMB server serves no Unix owner for the mount to read, so the client presents the whole tree as owned by whatever the volume's `uid=` and `gid=` mount options name, and root when they name nothing. The volume must therefore pin `uid=1000,gid=1000`, which is what `Setup-PsilinkFileDrop.ps1` and its Command Prompt counterpart create it with; a volume made by hand without them mounts and then refuses every write. Ownership is mapped rather than enforcement switched off, so the share's own access control still decides what the mount credential may do.
+
 **Running as your own account instead.** Where changing the directory's ownership is not an option, run the container as yourself:
 
 ```sh
