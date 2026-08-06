@@ -74,6 +74,30 @@ test("configureLogging: applies the resolved level before building the logger", 
   expect(fs.readFileSync(logPath, "utf8")).toBe("");
 });
 
+test("configureLogging: writePlainLine reaches the log file with no prefix", () => {
+  // A command's operator-facing rendering goes to the destination the logger
+  // writes to -- so --log-file captures it -- but as a line of its own rather
+  // than a log record: no timestamp, level, or context ahead of it, and one
+  // newline after it.
+  const logPath = path.join(tmpDir, "plain.log");
+  const { log, writePlainLine, close } = configureLogging({
+    logLevel: logLibrary.levels.INFO,
+    logFile: logPath,
+    name: "configlog-plain-file",
+  });
+  try {
+    writePlainLine("OK: the share opened.");
+    log.info("a diagnostic beside it");
+  } finally {
+    close();
+  }
+  const lines = fs.readFileSync(logPath, "utf8").split("\n");
+  expect(lines[0]).toBe("OK: the share opened.");
+  // The prefixed line beside it is untouched, so the two are distinguishable in
+  // one capture rather than the sink having dropped the prefix wholesale.
+  expect(lines[1]).toMatch(/\[INFO\] \[configlog-plain-file\] a diagnostic/);
+});
+
 // --- stderr-sink branch (logFile undefined) ----------------------------------
 
 test("configureLogging: without a logFile, routes diagnostics to stderr, never stdout", () => {
@@ -97,6 +121,26 @@ test("configureLogging: without a logFile, routes diagnostics to stderr, never s
   expect(stdoutWrites.join("")).toBe("");
   // No file is opened on the stderr branch.
   expect(fs.readdirSync(tmpDir)).toHaveLength(0);
+});
+
+test("configureLogging: writePlainLine reaches stderr, never stdout, with no prefix", () => {
+  // Without a log file the plain writer follows the diagnostics to stderr, so
+  // stdout stays reserved for result data -- the --json verdict a doctor run
+  // pipes -- and a rendering an operator reads is not spliced into it.
+  const { stdoutWrites, stderrWrites, restore } = captureStdio();
+  const { writePlainLine, close } = configureLogging({
+    logLevel: logLibrary.levels.INFO,
+    logFile: undefined,
+    name: "configlog-plain-stderr",
+  });
+  try {
+    writePlainLine("ALL CHECKS PASSED");
+  } finally {
+    close();
+    restore();
+  }
+  expect(stderrWrites.join("")).toBe("ALL CHECKS PASSED\n");
+  expect(stdoutWrites.join("")).toBe("");
 });
 
 // --- an unopenable --log-file surfaces as a UsageError -----------------------

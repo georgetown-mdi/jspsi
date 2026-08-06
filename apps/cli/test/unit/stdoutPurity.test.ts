@@ -317,7 +317,10 @@ test("doctor mount without --json: stdout is empty, the check lines go to stderr
 
     expect(stdout).toBe("");
     expect(stderr).toContain("OK: ");
-    expect(stderr).toMatch(DIAGNOSTIC_PREFIX);
+    // The check lines are a rendering an operator reads, not log records, so
+    // they land on stderr without the diagnostic prefix (pinned, with the
+    // --log-file and --log-level halves, in doctorRendering.test.ts).
+    expect(stderr).not.toMatch(DIAGNOSTIC_PREFIX);
   } finally {
     process.exitCode = previousExitCode;
     fs.rmSync(dir, { recursive: true, force: true });

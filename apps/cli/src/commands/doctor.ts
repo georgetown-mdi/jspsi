@@ -108,7 +108,11 @@ async function runDoctor(
       throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
     return resolved;
   });
-  const { log, close: closeLogging } = parseOrExit(() =>
+  const {
+    log,
+    writePlainLine,
+    close: closeLogging,
+  } = parseOrExit(() =>
     configureLogging({
       logLevel,
       logFile: singleValue(argv, "log-file") as string | undefined,
@@ -127,7 +131,7 @@ async function runDoctor(
             (singleValue(argv, "directory") as string).replace(/\\/g, "/"),
             readSmbMountInput(process.env),
           );
-    emit(report, argv["json"] === true, log);
+    emit(report, argv["json"] === true, log, writePlainLine);
     // Not process.exit: the verdict may still be draining to a pipe, and the
     // exit code is the caller's whole machine-readable answer when --json is
     // not in use.
@@ -145,20 +149,32 @@ async function runDoctor(
 /**
  * Write the verdict. The `--json` document is the command's result, so it goes
  * to stdout (one line, `console.log`), keeping a capture or pipe clean; the
- * human check lines are a diagnostic and route through the logger to stderr.
- * They carry server-controlled bytes -- an NT_STATUS token and smbclient's own
- * output -- so they are escaped at that sink; the JSON form needs no escaping,
- * since JSON string encoding already escapes every control byte and its consumer
- * re-validates at its own boundary.
+ * human check lines go to the logger's own destination -- stderr, or a
+ * `--log-file` -- but as a rendering rather than log records, so they carry no
+ * `[ISO] [LEVEL] [CONTEXT]` prefix: an operator reads them in an 80-column
+ * console, and a host-side setup launcher collects and re-prints them there, so
+ * roughly 50 columns of prefix wraps every line of the verdict they are asked to
+ * pass on. They carry server-controlled bytes -- an NT_STATUS token and
+ * smbclient's own output -- so they are escaped at that sink; the JSON form needs
+ * no escaping, since JSON string encoding already escapes every control byte and
+ * its consumer re-validates at its own boundary.
+ *
+ * Dropping the prefix does not exempt them from `--log-level`: they are written
+ * only when the level admits the `info` they were logged at, so `--log-level
+ * silent` still leaves the exit code as the whole answer, and a level that
+ * suppresses them suppresses the whole rendering rather than half of it.
  */
 function emit(
   report: DoctorReport,
   json: boolean,
-  log: { info: (message: string) => void },
+  log: { getLevel: () => logLibrary.LogLevelNumbers },
+  writePlainLine: (line: string) => void,
 ): void {
   if (json) {
     console.log(verdictJson(report));
     return;
   }
-  for (const line of verdictLines(report)) log.info(sanitizeForDisplay(line));
+  if (log.getLevel() > logLibrary.levels.INFO) return;
+  for (const line of verdictLines(report))
+    writePlainLine(sanitizeForDisplay(line));
 }

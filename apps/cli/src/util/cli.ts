@@ -311,6 +311,21 @@ export interface LogSink {
    * sink, close the underlying descriptor; best-effort and idempotent.
    */
   close(): void;
+  /**
+   * Write one line to wherever this sink sends diagnostics -- stderr, or the
+   * `--log-file` descriptor -- carrying no `[ISO] [LEVEL] [CONTEXT]` prefix. It
+   * is for text a command renders for a person to read rather than as a
+   * diagnostic record: the prefix is about 50 columns wide, so a rendering an
+   * operator reads in an 80-column console (or a host-side launcher re-prints
+   * verbatim) wraps on every line. Routing it through the sink rather than
+   * straight to `process.stderr` is what keeps `--log-file` capturing it, which
+   * is the difference from {@link writePromptLine}.
+   *
+   * The trailing newline is appended here, and the write is guarded exactly as a
+   * prefixed line's is -- a failure is reported (file sink) or dropped (stderr),
+   * never thrown back at the caller.
+   */
+  writePlain(line: string): void;
 }
 
 /**
@@ -331,6 +346,11 @@ export interface LogSink {
  * sinks route every level uniformly -- and level filtering happens upstream in
  * loglevel (it installs `noop` for methods below the active level), so
  * `--log-level silent` never reaches `writeLine`.
+ *
+ * {@link LogSink.writePlain} feeds the same `writeLine` with no prefix ahead of
+ * it, so an operator-facing line lands on the sink's destination alongside the
+ * prefixed ones -- a `--log-file` captures both -- with no second stream binding
+ * to keep in step.
  */
 function installLogSink(
   writeLine: (line: string) => void,
@@ -341,6 +361,9 @@ function installLogSink(
     writeLine(util.format(prefix, ...args) + "\n"),
   );
   return {
+    writePlain(line: string): void {
+      writeLine(line + "\n");
+    },
     close(): void {
       // Restore the prior sink first, then run onClose (the file sink closes its
       // descriptor there). Because core resolves the sink per log call, restoring
@@ -504,6 +527,14 @@ export interface ConfiguredLogging {
   /** The command's logger, created after the sink is installed and the level applied. */
   log: ReturnType<typeof getLogger>;
   /**
+   * Write one line to the same destination `log` writes to -- stderr, or the
+   * `--log-file` -- with no `[ISO] [LEVEL] [CONTEXT]` prefix, for a rendering a
+   * command produces for a person to read (see {@link LogSink.writePlain}).
+   * Level filtering is loglevel's, so it does not apply here: a caller that wants
+   * its rendering silenced with the logger reads `log.getLevel()` and decides.
+   */
+  writePlainLine(line: string): void;
+  /**
    * Restore the diagnostic sink in place before the redirect and, for the file
    * sink, close the underlying descriptor; best-effort and idempotent. A handler
    * calls this in its `finally`; the error path's `process.exit` bypasses it, but
@@ -518,9 +549,11 @@ export interface ConfiguredLogging {
  * {@link configureStderrLogging}), apply the resolved `logLevel`, and build the
  * logger named `name` -- in that order, because core's sink must be installed and
  * the level set before {@link getLogger} constructs the logger that inherits
- * them. Returns the logger plus a single `close` that restores the prior sink and
- * releases any file descriptor, so a handler installs and tears down its logging
- * through one call rather than repeating the sink/level/getLogger/close sequence.
+ * them. Returns the logger, a prefix-free writer onto the same destination
+ * ({@link ConfiguredLogging.writePlainLine}), and a single `close` that restores
+ * the prior sink and releases any file descriptor, so a handler installs and
+ * tears down its logging through one call rather than repeating the
+ * sink/level/getLogger/close sequence.
  *
  * `logLevel` and `logFile` are resolved by the caller -- through
  * {@link LOG_LEVELS} inline, or `parseCommonBootstrapArgs` -- so this helper does
@@ -542,7 +575,11 @@ export function configureLogging(params: {
       : configureStderrLogging();
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger(name);
-  return { log, close: () => sink.close() };
+  return {
+    log,
+    writePlainLine: (line: string) => sink.writePlain(line),
+    close: () => sink.close(),
+  };
 }
 
 // Write the whole buffer to `fd`, looping over a partial write. fs.writeSync on a
