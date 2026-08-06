@@ -112,9 +112,11 @@ function rendezvousLines(endpoint: AcceptKitEndpoint): Array<string> {
 }
 
 /** The image reference the sheet's `docker run` lines name. The tag is public
- * release metadata, not a disclosure. */
+ * release metadata, not a disclosure; it passes the same printable filter as
+ * the locator, so the sheet's ASCII contract holds by construction for every
+ * value the exported input type admits. */
 function imageReference(imageTag: string): string {
-  return `${PSILINK_IMAGE_REPOSITORY}:${imageTag}`;
+  return `${PSILINK_IMAGE_REPOSITORY}:${printable(imageTag)}`;
 }
 
 /** The accept command, unindented; each caller indents it to its own step.
@@ -257,8 +259,9 @@ function filedropBody(imageTag: string): Array<string> {
     "   named invitation.txt next to your CSV and write @invitation.txt in",
     "   its place.",
     "",
-    '   On Windows PowerShell, replace "$PWD" with the folder\'s full path,',
-    `   for example -v "C:\\Users\\you\\exchange":${WORK_MOUNT}`,
+    '   On Windows PowerShell, replace "$PWD" with the folder\'s full path in',
+    "   every command on this sheet, for example",
+    `   -v "C:\\Users\\you\\exchange":${WORK_MOUNT}`,
     "",
     "2. Point psilink at your own copy of the shared folder. Accepting wrote",
     "   the folder's name as your partner sees it; what psilink needs is",
@@ -305,8 +308,9 @@ function sftpBody(imageTag: string): Array<string> {
     "   named invitation.txt next to your CSV and write @invitation.txt in",
     "   its place.",
     "",
-    '   On Windows PowerShell, replace "$PWD" with the folder\'s full path,',
-    `   for example -v "C:\\Users\\you\\exchange":${WORK_MOUNT}`,
+    '   On Windows PowerShell, replace "$PWD" with the folder\'s full path in',
+    "   every command on this sheet, for example",
+    `   -v "C:\\Users\\you\\exchange":${WORK_MOUNT}`,
     "",
     "2. Fill in your credentials. Accepting wrote psilink.yaml with the",
     "   server and directory taken from the invitation; two things are yours",

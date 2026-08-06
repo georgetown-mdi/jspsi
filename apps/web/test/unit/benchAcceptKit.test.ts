@@ -170,6 +170,13 @@ describe("accept kit, printable-ASCII enforcement", () => {
     });
     expect(text).toContain("SFTP server:    h?llo?example.gov");
     expect(text).toContain("Directory:      /drops?/psi?link");
+    // The tag is the other representable input; it passes the same filter, so
+    // the contract holds by construction rather than resting on the call site.
+    const hostileTag = sheet(
+      { channel: "filedrop", path: "psilink" },
+      "1.0-é\nX",
+    );
+    expect(hostileTag).toContain("docker.io/vdorie/psi-link:1.0-??X");
     for (const ch of text) {
       const code = ch.charCodeAt(0);
       expect(code === 10 || (code >= 32 && code <= 126)).toBe(true);
@@ -243,7 +250,7 @@ describe("accept kit invariants", () => {
 });
 
 describe("accept kit filename", () => {
-  test("stamps the local calendar day of the mint", () => {
+  test("stamps the local calendar day of the download click", () => {
     expect(acceptKitFileName(new Date(2026, 1, 3, 9, 30))).toBe(
       "psilink-accept-instructions-2026-02-03.txt",
     );
