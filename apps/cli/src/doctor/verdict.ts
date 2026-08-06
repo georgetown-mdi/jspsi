@@ -176,24 +176,29 @@ const MAX_DETAIL_LINES = 24;
 const MAX_DETAIL_CHARS = 2000;
 
 /**
- * Redaction runs HERE, on the whole detail, rather than on the lines this
+ * Redaction runs HERE, over the whole detail, rather than over the lines this
  * returns: a private-key block arrives from the tool in its canonical multi-line
  * form, so splitting first leaves every line but the `BEGIN` one carrying no
- * marker for a later per-line pass to match, and the body renders verbatim. The
- * rendering's sink is the CLI's plain-line writer, which bypasses core's
- * prefixer and so has no per-argument strip behind it, making this the only
- * place a pass runs on the way to a `--log-file`. Redacting before the slice is
- * safe for the budget because the replacement never lengthens its input, and
- * failing closed past a dangling `BEGIN` costs only more tool output -- the
- * check's own MEANING and ACTION text is composed as separate lines.
+ * marker, and the body renders verbatim. The rendering escapes and redacts again
+ * per rendered line, but that pass sees one line at a time and so cannot catch a
+ * body this one leaves behind; the rendering's sink is the CLI's plain-line
+ * writer, which bypasses core's prefixer, so there is no third pass behind
+ * either. Redacting before the slice is safe for the budget because the
+ * replacement never lengthens its input, and failing closed past a dangling
+ * `BEGIN` costs only more tool output -- the check's own MEANING and ACTION text
+ * is composed as separate lines.
  *
  * @internal exported for testing
  */
 export function clampDetail(detail: string): string[] {
-  const truncated = redactPrivateKeyMaterial(detail).slice(0, MAX_DETAIL_CHARS);
+  const redacted = redactPrivateKeyMaterial(detail);
+  const truncated = redacted.slice(0, MAX_DETAIL_CHARS);
   const lines = truncated.split("\n").filter((line) => line.trim().length > 0);
   const kept = lines.slice(0, MAX_DETAIL_LINES);
-  if (kept.length < lines.length || truncated.length < detail.length)
+  // Against the REDACTED length, not the raw one: the replacement is shorter
+  // than the shortest marker it stands in for, so measuring the raw input would
+  // report a cut whenever a block was replaced and nothing was dropped.
+  if (kept.length < lines.length || truncated.length < redacted.length)
     kept.push("... (output truncated)");
   return kept;
 }

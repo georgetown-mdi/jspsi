@@ -233,8 +233,8 @@ describe("tool output behind a failure is bounded", () => {
   test("replaces a whole multi-line key block from the tool output", () => {
     // The tool hands the block over in its canonical form, with real newlines.
     // Splitting before redacting would leave a marker on the BEGIN line alone
-    // and render every body line verbatim -- and this rendering's sink runs no
-    // pass behind this one.
+    // and render every body line verbatim; the per-rendered-line pass the sink
+    // applies afterwards sees one line at a time and so cannot catch the body.
     const clamped = clampDetail(
       "smbclient said:\n" +
         "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
@@ -249,6 +249,21 @@ describe("tool output behind a failure is bounded", () => {
     expect(rendered).not.toContain("b3BlbnNzaC1rZXktdjEA");
     expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
     expect(rendered).toContain("smbclient said:");
+  });
+
+  test("replacing a block does not by itself report the output as truncated", () => {
+    // The bound is measured against the stripped text: the replacement is
+    // shorter than the marker it stands in for, so measuring the raw input
+    // would tell the operator their output was cut whenever a block was
+    // replaced -- and they are asked to pass that rendering on.
+    const clamped = clampDetail(
+      "hello\n" +
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+        "SECRETBODY\n" +
+        "-----END OPENSSH PRIVATE KEY-----\n" +
+        "bye",
+    );
+    expect(clamped).toEqual(["hello", "[redacted private key]", "bye"]);
   });
 
   test("a dangling key marker takes the rest of the tool output, not the check's own text", () => {
