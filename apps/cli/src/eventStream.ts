@@ -4,8 +4,8 @@ import {
   ConnectionError,
   OperatorConfigError,
   UsageError,
+  redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
-  sanitizeForDisplay,
 } from "@psilink/core";
 import type { ExchangeStageDefinition } from "@psilink/core";
 
@@ -204,12 +204,14 @@ export function buildStagesEvent(
     v: EVENT_STREAM_VERSION,
     type: "stages",
     // A stage label derives from linkage-key names the PARTNER may have authored,
-    // so sanitize it exactly as protocol.ts does before a label reaches stderr.
-    // The id is this party's own constant vocabulary from describeExchangeStages,
-    // but it is echoed on the wire in the same format, so sanitize it uniformly.
+    // so redact and escape it exactly as protocol.ts does before a label reaches
+    // stderr; leaving fd 3 on the escape alone would make the persisted route the
+    // weaker of the two. The id is this party's own constant vocabulary from
+    // describeExchangeStages, but it is echoed on the wire in the same format, so
+    // it takes the same pass uniformly.
     stages: stages.map(({ id, label }) => ({
-      id: sanitizeForDisplay(id),
-      label: sanitizeForDisplay(label),
+      id: redactAndSanitizeForDisplay(id),
+      label: redactAndSanitizeForDisplay(label),
     })),
   };
 }
@@ -219,8 +221,8 @@ export function buildStageEvent(id: string, label: string): StageEvent {
   return {
     v: EVENT_STREAM_VERSION,
     type: "stage",
-    id: sanitizeForDisplay(id),
-    label: sanitizeForDisplay(label),
+    id: redactAndSanitizeForDisplay(id),
+    label: redactAndSanitizeForDisplay(label),
   };
 }
 
@@ -242,12 +244,32 @@ export function buildStageEndEvent(
   return {
     v: EVENT_STREAM_VERSION,
     type: "stageEnd",
-    // The id echoes a partner-authorable stage identifier, sanitized exactly as
-    // the stage event's id is.
-    id: sanitizeForDisplay(id),
+    // The id echoes a partner-authorable stage identifier, taking the same pass
+    // as the stage event's id.
+    id: redactAndSanitizeForDisplay(id),
     durationMs: toCount(durationMs),
   };
 }
+
+/**
+ * Display cap for a warning event's message, above the per-value default.
+ *
+ * A warning is a COMPOSITION, not a value: first-party explanation and recovery
+ * text around fragments each already escaped and capped where they were
+ * interpolated. The per-value default is sized for one fragment, so applying it
+ * to the composition truncates the composition's own instruction -- and the
+ * host-key divergence warning is exactly the warning a supervisor that discards
+ * stderr has nothing else to read. The stderr log path delivers that warning
+ * whole; this path must not deliver less of it.
+ *
+ * Sized to admit that warning with every fragment at its own cap and escaped a
+ * second time here (a second pass doubles an already-doubled backslash), rather
+ * than to the length the copy happens to have. What holds the size is the check
+ * that renders the divergence warning with all four fragments flooded -- both
+ * parties' key types and both fingerprints -- and fails unless its explanation
+ * and its re-pin instruction both survive.
+ */
+const WARNING_MESSAGE_MAX_LENGTH = 4096;
 
 /** Build a warning event from a non-fatal warning message. */
 export function buildWarningEvent(message: string): WarningEvent {
@@ -255,8 +277,15 @@ export function buildWarningEvent(message: string): WarningEvent {
     v: EVENT_STREAM_VERSION,
     type: "warning",
     // Terms-exchange warnings can embed partner-authored column names, so
-    // sanitize before the text reaches the stream.
-    message: sanitizeForDisplay(message),
+    // sanitize before the text reaches the stream. Redaction first, mirroring
+    // the log sink: this stream is a persisted machine sink too, and its error
+    // event is already redacted (sanitizeErrorForDisplay), so the warning is
+    // where the stream would otherwise carry key material in the clear. Both
+    // live warning sources redact per fragment where they compose, so the
+    // fail-closed dangling rule has nothing left to consume here.
+    message: redactAndSanitizeForDisplay(message, {
+      maxLength: WARNING_MESSAGE_MAX_LENGTH,
+    }),
   };
 }
 

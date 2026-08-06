@@ -340,17 +340,20 @@ export interface LogSink {
  * including the ones core and the CLI construct at import time (`cleaning`,
  * `file-utils`) before a command runs -- the moment it is installed, with no
  * creation-order constraint. core's `setLogPrefixer` hands the sink the assembled
- * `[ISO] [LEVEL] [CONTEXT]` prefix and the raw message arguments; `util.format`
- * renders them into one line exactly as `console.log` would, and `writeLine`
- * appends the newline and delivers it. The `methodName` is unused here -- both CLI
- * sinks route every level uniformly -- and level filtering happens upstream in
- * loglevel (it installs `noop` for methods below the active level), so
- * `--log-level silent` never reaches `writeLine`.
+ * `[ISO] [LEVEL] [CONTEXT]` prefix and the message arguments, already stripped of
+ * private-key blocks; `util.format` renders them into one line exactly as
+ * `console.log` would, and `writeLine` appends the newline and delivers it. The
+ * `methodName` is unused here -- both CLI sinks route every level uniformly --
+ * and level filtering happens upstream in loglevel (it installs `noop` for
+ * methods below the active level), so `--log-level silent` never reaches
+ * `writeLine`.
  *
  * {@link LogSink.writePlain} feeds the same `writeLine` with no prefix ahead of
  * it, so an operator-facing line lands on the sink's destination alongside the
  * prefixed ones -- a `--log-file` captures both -- with no second stream binding
- * to keep in step.
+ * to keep in step. It does NOT pass through core's prefixer, so the per-argument
+ * private-key strip above does not run on it: a caller composing a fragment
+ * somebody else chose redacts it at the composition site or not at all.
  */
 function installLogSink(
   writeLine: (line: string) => void,

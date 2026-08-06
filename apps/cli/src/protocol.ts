@@ -13,7 +13,7 @@ import {
   PeerAbortError,
   ReceiptVerificationError,
   isPeerWaitTimeout,
-  sanitizeForDisplay,
+  redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
 import type {
@@ -860,7 +860,9 @@ export async function runProtocol(
         // so escape it before it reaches the operator's terminal -- the filedrop
         // twin of the SFTP host below. A split config has no single `path`; show
         // the inbound directory it reads the peer's files from instead.
-        sanitizeForDisplay(connection.path ?? connection.inboundPath ?? ""),
+        redactAndSanitizeForDisplay(
+          connection.path ?? connection.inboundPath ?? "",
+        ),
       );
     } else {
       log.info(
@@ -868,7 +870,7 @@ export async function runProtocol(
         // The SFTP host is partner-controlled on an offline-accept-seeded config
         // (it comes from the invitation endpoint, charset-unconstrained), so
         // escape it before it reaches the operator's terminal.
-        sanitizeForDisplay(connection.server.host),
+        redactAndSanitizeForDisplay(connection.server.host),
         "with options",
         connection.options,
       );
@@ -1223,7 +1225,9 @@ export async function runProtocol(
           // reaching the terminal, like this file's other stderr sites. The
           // emitter applies the same escape before the pair reaches fd 3.
           log.info(
-            sanitizeForDisplay(label.charAt(0).toLowerCase() + label.slice(1)),
+            redactAndSanitizeForDisplay(
+              label.charAt(0).toLowerCase() + label.slice(1),
+            ),
           );
           // Close the previous stage's timing before entering this one, then
           // start the clock for the new stage. The emitter sanitizes the id.
@@ -1234,8 +1238,11 @@ export async function runProtocol(
         onWarning: (msg: string) => {
           // Terms-exchange warnings can embed partner-authored column names,
           // so the text goes through the display-boundary escape here and
-          // inside the emitter alike.
-          log.warn("terms exchange:", sanitizeForDisplay(msg));
+          // inside the emitter alike. Redaction leads the escape for the same
+          // reason it does everywhere else: escaping first can truncate a whole
+          // key block into a dangling marker at the display cap, which the
+          // prefixer's pass then fails closed on for the rest of the argument.
+          log.warn("terms exchange:", redactAndSanitizeForDisplay(msg));
           emit((e) => e.warning(msg));
         },
         // A host-key divergence is a security signal, not a terms warning, so
@@ -1272,7 +1279,7 @@ export async function runProtocol(
           // reaches the operator's terminal/logs.
           log.info(
             "terms agreed, partner identity:",
-            sanitizeForDisplay(partnerTerms.identity),
+            redactAndSanitizeForDisplay(partnerTerms.identity),
           );
           log.info("role:", resolvedRole);
         },

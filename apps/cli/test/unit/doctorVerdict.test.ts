@@ -229,4 +229,59 @@ describe("tool output behind a failure is bounded", () => {
       "NT_STATUS_ACCESS_DENIED",
     ]);
   });
+
+  test("replaces a whole multi-line key block from the tool output", () => {
+    // The tool hands the block over in its canonical form, with real newlines.
+    // Splitting before redacting would leave a marker on the BEGIN line alone
+    // and render every body line verbatim; the per-rendered-line pass the sink
+    // applies afterwards sees one line at a time and so cannot catch the body.
+    const clamped = clampDetail(
+      "smbclient said:\n" +
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+        "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAA\n" +
+        "SECRETBODYSECRETBODYSECRETBODYSECRETBODYSECRETBO\n" +
+        "-----END OPENSSH PRIVATE KEY-----\n" +
+        "end of output",
+    );
+    const rendered = clamped.join("\n");
+    expect(rendered).toContain("[redacted private key]");
+    expect(rendered).not.toContain("SECRETBODY");
+    expect(rendered).not.toContain("b3BlbnNzaC1rZXktdjEA");
+    expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+    expect(rendered).toContain("smbclient said:");
+  });
+
+  test("replacing a block does not by itself report the output as truncated", () => {
+    // The bound is measured against the stripped text: the replacement is
+    // shorter than the marker it stands in for, so measuring the raw input
+    // would tell the operator their output was cut whenever a block was
+    // replaced -- and they are asked to pass that rendering on.
+    const clamped = clampDetail(
+      "hello\n" +
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+        "SECRETBODY\n" +
+        "-----END OPENSSH PRIVATE KEY-----\n" +
+        "bye",
+    );
+    expect(clamped).toEqual(["hello", "[redacted private key]", "bye"]);
+  });
+
+  test("a dangling key marker takes the rest of the tool output, not the check's own text", () => {
+    const lines = verdictLines(
+      report([
+        {
+          id: "smb_mount",
+          status: "fail",
+          summary: "the share did not mount.",
+          detail: "-----BEGIN RSA PRIVATE KEY-----\nMIIEow" + "A".repeat(40),
+          meaning: "the credentials were refused.",
+          action: "check the password file and run this again.",
+        },
+      ]),
+    ).join("\n");
+    expect(lines).toContain("[redacted private key]");
+    expect(lines).not.toContain("MIIEow");
+    expect(lines).toContain("the credentials were refused.");
+    expect(lines).toContain("check the password file and run this again.");
+  });
 });

@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import { reconcileHostKeyFingerprints } from "../src/hostKeyReconciliation";
+import { redactPrivateKeyMaterial } from "../src/utils/sanitizeErrorForDisplay";
 import { keyTypeFromBlob } from "../src/utils/sshHostKey";
 import { prepareForExchange, runExchange } from "../src/exchange";
 import { createMessagePipe } from "../src/connection/messageConnection";
@@ -79,6 +80,74 @@ test("a different-type difference adds the benign multiple-host-key case", () =>
   // mischaracterised as an attack.
   expect(msg).toMatch(/multiple host keys/);
   expect(msg).toMatch(/interception/);
+});
+
+// --- the four fragments against the sinks' own private-key pass ---------------
+// Every fragment this warning names is composed AHEAD of the explanation and the
+// re-pin instruction, and both of its sinks -- the log line and the fd-3 warning
+// event -- redact the whole composed string. That pass is fail-closed past a
+// BEGIN marker with no END, so without redaction WHERE EACH FRAGMENT IS
+// INTERPOLATED the party this warning is about could delete the warning about
+// itself. The partner's advertised values are the reachable half: the terms
+// exchange parses them under a length bound alone (100 for the fingerprint, 64
+// for the key type), and the marker is 35 characters.
+
+const PEM_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
+const REPIN_INSTRUCTION = "re-pin it on both sides";
+
+function expectSurvivesTheSinkPass(msg: string | undefined): void {
+  expect(msg).toBeDefined();
+  // The sink applies exactly this function to the whole rendered line.
+  const atSink = redactPrivateKeyMaterial(msg!);
+  expect(atSink).toMatch(/interception/);
+  expect(atSink).toContain(REPIN_INSTRUCTION);
+  expect(atSink).toContain("[redacted private key]");
+}
+
+test("a marker planted in the partner's key type keeps the warning whole", () => {
+  expectSurvivesTheSinkPass(
+    reconcileHostKeyFingerprints(KEY_ED25519, {
+      fingerprint: KEY_RSA.fingerprint,
+      keyType: PEM_MARKER,
+    }),
+  );
+});
+
+test("a marker planted in the partner's fingerprint keeps the warning whole", () => {
+  expectSurvivesTheSinkPass(
+    reconcileHostKeyFingerprints(KEY_ED25519, {
+      fingerprint: PEM_MARKER,
+      keyType: KEY_RSA.keyType,
+    }),
+  );
+});
+
+test("markers planted in every fragment at once keep the warning whole", () => {
+  // The same-type branch, whose two fragments are both fingerprints, with the
+  // local side carrying a marker too -- unreachable through keyTypeFromBlob's
+  // charset bound for a key type, but nothing bounds a caller of this function.
+  expectSurvivesTheSinkPass(
+    reconcileHostKeyFingerprints(
+      { fingerprint: `${PEM_MARKER}-local`, keyType: PEM_MARKER },
+      { fingerprint: `${PEM_MARKER}-partner`, keyType: PEM_MARKER },
+    ),
+  );
+});
+
+test("a charset-conforming marker lookalike reaches the operator verbatim", () => {
+  // `keyTypeFromBlob` admits `[A-Za-z0-9._@-]` only, so a real marker (which
+  // carries spaces) can never arrive in a LOCAL key type. Its hyphenated
+  // lookalike passes that bound AND matches no redaction pattern, so it renders
+  // as itself. The cost is operator confusion, not disclosure; a stated limit in
+  // docs/spec/CHANNEL_SECURITY.md, not a bug the patterns should widen to catch.
+  const lookalike = observedKeyType("-----BEGIN-OPENSSH-PRIVATE-KEY-----");
+  expect(lookalike).toBe("-----BEGIN-OPENSSH-PRIVATE-KEY-----");
+  const msg = reconcileHostKeyFingerprints(
+    { fingerprint: KEY_ED25519.fingerprint, keyType: lookalike },
+    KEY_RSA,
+  );
+  expect(msg).toContain(lookalike);
+  expect(redactPrivateKeyMaterial(msg!)).toContain(REPIN_INSTRUCTION);
 });
 
 test("a server-controlled key type is escaped before display", () => {
@@ -222,6 +291,19 @@ test("a party that advertises no observed key never reports an injected one", as
   );
   expect(unauthenticated).toBeUndefined();
   expect(advertiser).toBeUndefined();
+});
+
+test("a marker advertised over the wire cannot delete the re-pin instruction", async () => {
+  // Reachability settled by the real terms exchange rather than by restating the
+  // advertisement's bounds: the partner puts a BEGIN marker in both of its
+  // advertised fields, and what each party reconciles is what its own parse
+  // admitted.
+  const [initiator, responder] = await exchangeWithObservedKeys(KEY_ED25519, {
+    fingerprint: PEM_MARKER,
+    keyType: PEM_MARKER,
+  });
+
+  for (const msg of [initiator, responder]) expectSurvivesTheSinkPass(msg);
 });
 
 test("a rejected key type survives the partner's parse of the advertisement", async () => {

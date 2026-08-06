@@ -2,10 +2,14 @@ import { describe, expect, test } from "vitest";
 
 import {
   sanitizeErrorForDisplay,
+  redactAndSanitizeForDisplay,
   redactPrivateKeyMaterial,
   MAX_ERROR_CAUSE_DEPTH,
 } from "../src/utils/sanitizeErrorForDisplay";
-import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
+import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  sanitizeForDisplay,
+} from "../src/utils/sanitizeForDisplay";
 import {
   ConnectionError,
   asConnectionError,
@@ -373,5 +377,55 @@ describe("sanitizeErrorForDisplay", () => {
       expect(out).not.toContain("then first-party text");
       expect(out).toContain("the next link is out of reach");
     });
+  });
+});
+
+describe("redactAndSanitizeForDisplay", () => {
+  const RECOVERY = "Confirm the fingerprint out-of-band before trusting it.";
+
+  test("redacts before escaping, so the display cap cannot strand a marker", () => {
+    // The order is the whole contract. Escaping first fits the raw armor to the
+    // cap, which cuts the END marker off a block that would otherwise have
+    // matched whole -- leaving a dangling marker for the sink's own pass to fail
+    // closed on, taking the first-party text behind it. Redacting first replaces
+    // the block with something far shorter than the cap, so that text survives.
+    const armor = "A".repeat(DEFAULT_MAX_DISPLAY_LENGTH - 80);
+    const composed =
+      `-----BEGIN OPENSSH PRIVATE KEY-----${armor}` +
+      `-----END OPENSSH PRIVATE KEY----- ${RECOVERY}`;
+
+    const out = redactAndSanitizeForDisplay(composed);
+    expect(out).toContain("[redacted private key]");
+    expect(out).not.toContain(armor.slice(0, 24));
+    expect(out).toContain(RECOVERY);
+
+    // Not vacuous: the escape-first order this function exists to prevent loses
+    // that recovery text at the same input.
+    const escapedFirst = redactPrivateKeyMaterial(sanitizeForDisplay(composed));
+    expect(escapedFirst).not.toContain(RECOVERY);
+  });
+
+  test("escapes exactly once, so a backslash is doubled and not quadrupled", () => {
+    // Redaction is not escaping and must not become a second altitude: a
+    // fragment crossing this helper reaches the operator with the same backslash
+    // count sanitizeForDisplay alone would give it.
+    const fragment = "C:\\keys\\id_ed25519";
+    expect(redactAndSanitizeForDisplay(fragment)).toBe(
+      sanitizeForDisplay(fragment),
+    );
+  });
+
+  test("leaves text carrying no key material exactly as the escape alone would", () => {
+    for (const fragment of ["", "ssh-ed25519", "SHA256:abc/def+ghi="]) {
+      expect(redactAndSanitizeForDisplay(fragment)).toBe(
+        sanitizeForDisplay(fragment),
+      );
+    }
+  });
+
+  test("honors a caller's display cap", () => {
+    expect(redactAndSanitizeForDisplay("x".repeat(50), { maxLength: 10 })).toBe(
+      sanitizeForDisplay("x".repeat(50), { maxLength: 10 }),
+    );
   });
 });

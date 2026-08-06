@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { getLogger } from "./utils/logger.js";
 import { StandardizationTermsError } from "./errors.js";
-import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
+import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
 import {
   compileLinearRegex,
   coerceToPatternString,
@@ -1567,7 +1567,7 @@ export function buildKeyStrings(
 
   if (result.size > KEY_STRING_WARN_THRESHOLD) {
     logger.warn(
-      `row ${index}, key "${sanitizeForDisplay(key.name)}": cross-product produced ` +
+      `row ${index}, key "${redactAndSanitizeForDisplay(key.name)}": cross-product produced ` +
         `${result.size} key strings (>${KEY_STRING_WARN_THRESHOLD}); fan-out ` +
         "in dual-party-output exchanges may degrade privacy guarantees",
     );

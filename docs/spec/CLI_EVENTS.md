@@ -75,7 +75,7 @@ Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWar
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `message` | string | The warning text. Sanitized -- it can embed partner-authored column names. |
+| `message` | string | The warning text. Sanitized and redacted -- it can embed partner-authored column names (see [Sanitization](#sanitization)). |
 
 ```json
 {"v":1,"type":"warning","message":"partner disclosed a column not in the agreed set"}
@@ -151,8 +151,9 @@ A run interrupted by `SIGINT` or `SIGTERM` exits through the signal handler's `p
 
 No unsanitized partner- or server-controlled string reaches an event. Every free-text field is escaped at construction, using the same display-boundary sanitizers stderr uses, so a hostile value cannot inject a control sequence, a bidi override, a spoofed NDJSON line break, or a confusable character into a supervisor's parser or terminal:
 
-- Stage `label` and `id` (on both the `stage` and `stageEnd` events) and the `warning` `message` derive from linkage-key names and terms text the **partner** may have authored, so they are passed through `sanitizeForDisplay` (`packages/core/src/utils/sanitizeForDisplay.ts`) -- exactly as `protocol.ts` sanitizes the same strings before they reach stderr. Every code point outside printable ASCII is rewritten to a visible `\xHH` / `\uHHHH` / `\u{HHHHH}` escape, so a raw ESC (`\x1b`, the ANSI-sequence driver), a `U+202E` right-to-left override, a newline, a zero-width character, and a homoglyph are all neutralized.
+- Stage `label` and `id` (on both the `stage` and `stageEnd` events) and the `warning` `message` derive from linkage-key names and terms text the **partner** may have authored, so they are passed through `redactAndSanitizeForDisplay` -- the private-key strip and then `sanitizeForDisplay` (`packages/core/src/utils/sanitizeForDisplay.ts`), exactly as `protocol.ts` treats the same strings before they reach stderr, so neither route is the weaker one. Every code point outside printable ASCII is rewritten to a visible `\xHH` / `\uHHHH` / `\u{HHHHH}` escape, so a raw ESC (`\x1b`, the ANSI-sequence driver), a `U+202E` right-to-left override, a newline, a zero-width character, and a homoglyph are all neutralized.
 - The `error` `message` is rendered by `sanitizeErrorForDisplay`, which walks the error's `cause` chain, escapes each link through `sanitizeForDisplay`, and strips PEM/OpenSSH private-key blocks -- the same rendering stderr and `--log-file` receive.
+- The `warning` `message` is stripped of PEM/OpenSSH private-key blocks before it is escaped, as the stage `label` and `id` above are and as the `error` `message` already was, so every free-text field of this stream is redacted alike; a persisted event stream is the same class of sink as `--log-file`. Its escape runs under a display cap sized for a whole composed warning rather than for a single value (4096 output characters), because the cross-party host-key divergence notice is the warning a supervisor that discards stderr has nothing else to read, and the per-value cap cuts it before its recovery instruction. The values interpolated INTO a warning still carry the per-value cap where they were composed.
 - The numeric fields carry no free text: the `stageEnd` `durationMs` and the `metrics` counters (`recordsProcessed`, `transportRetries`, `reconnects`) are this party's own integers, floored to a non-negative whole number at construction so a malformed value cannot produce an out-of-contract field. No partner-controlled string rides any metric event.
 - The enum-like fields (`type`, `category`, and the stage `id` values the CLI itself defines) are this party's own closed vocabulary, not partner-derived, so a consumer can trust them as discriminants. They are still routed through the same escape uniformly, since they are echoed on the wire in the same string form.
 

@@ -141,6 +141,25 @@ test("--json is untouched: one verdict line on stdout, no check lines anywhere",
   expect(stderr).toBe("");
 });
 
+test("a key marker in the operator's own mount path costs that line its predicate", async () => {
+  // The rendering escapes and redacts per rendered LINE, and a summary composes
+  // an operator-supplied value ahead of its own predicate, so the fail-closed
+  // rule takes the predicate with the value. These bytes are the operator's own
+  // and no partner reaches them, so the cost stands and is pinned here rather
+  // than closed; CHANNEL_SECURITY.md records it as the second pass's price.
+  const marked = path.join(tmpDir, "-----BEGIN RSA PRIVATE KEY-----");
+  fs.mkdirSync(marked);
+  const { stderr } = await runMount({ directory: marked });
+
+  expect(stderr).toContain("[redacted private key]");
+  expect(stderr).not.toContain("BEGIN RSA PRIVATE KEY");
+  const redactedLine = nonEmptyLines(stderr).find((line) =>
+    line.includes("[redacted private key]"),
+  );
+  expect(redactedLine).toBeDefined();
+  expect(redactedLine).not.toContain("is readable");
+});
+
 test("a diagnostic that is not the check rendering keeps its prefix", async () => {
   // A marker that is not a plain identifier is a usage error, reported through
   // the logger before any check runs -- a log record, so it carries the prefix

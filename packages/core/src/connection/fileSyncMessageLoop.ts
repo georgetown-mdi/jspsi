@@ -33,8 +33,10 @@
 
 import { v4 as uuidv4 } from "uuid";
 
-import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
-import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay";
+import {
+  redactAndSanitizeForDisplay,
+  redactPrivateKeyMaterial,
+} from "../utils/sanitizeErrorForDisplay";
 import { parseBoundedJson } from "../utils/boundedJson";
 import type { getLoggerForVerbosity } from "../utils/logger";
 import {
@@ -497,8 +499,8 @@ export class FileSyncMessageLoop {
           deps
             .log()
             .debug(
-              `[${deps.role()}] waiting for ack ${sanitizeForDisplay(expectedAck)} ` +
-                `from ${sanitizeForDisplay(deps.peerId()!)}`,
+              `[${deps.role()}] waiting for ack ${redactAndSanitizeForDisplay(expectedAck)} ` +
+                `from ${redactAndSanitizeForDisplay(deps.peerId()!)}`,
             );
           // Check for the ack before the deadline, so an ack already on disk is
           // honored even if the TTL elapsed in the same instant. This is the
@@ -659,8 +661,8 @@ export class FileSyncMessageLoop {
       deps
         .log()
         .warn(
-          `[${deps.role()}] unexpected file ${sanitizeForDisplay(name)} in ` +
-            `${sanitizeForDisplay(path)} during the ` +
+          `[${deps.role()}] unexpected file ${redactAndSanitizeForDisplay(name)} in ` +
+            `${redactAndSanitizeForDisplay(path)} during the ` +
             "exchange; continuing (unexpected_files: warn). If this directory is " +
             "dedicated to the exchange, this may be a conflict copy, a partial " +
             "download, or another session sharing the path.",
@@ -719,7 +721,7 @@ export class FileSyncMessageLoop {
         .log()
         .trace(
           `[${deps.role()}] polling for message from ` +
-            `${sanitizeForDisplay(peerId)}`,
+            `${redactAndSanitizeForDisplay(peerId)}`,
         );
       // Detect via a pattern scan rather than an exact-name exists(): the
       // message filename now encodes a per-message byte count (and optionally
@@ -934,7 +936,7 @@ export class FileSyncMessageLoop {
           deps
             .log()
             .trace(
-              `[${deps.role()}] ${sanitizeForDisplay(messageFile.name)} is ` +
+              `[${deps.role()}] ${redactAndSanitizeForDisplay(messageFile.name)} is ` +
                 `${messageFile.size}/` +
                 `${declaredSize} bytes; waiting for full sync`,
             );
@@ -944,7 +946,7 @@ export class FileSyncMessageLoop {
             .log()
             .debug(
               `[${deps.role()}] getting message ` +
-                `${sanitizeForDisplay(messageFile.name)}`,
+                `${redactAndSanitizeForDisplay(messageFile.name)}`,
             );
 
           reachedGet = true;
@@ -1096,7 +1098,7 @@ export class FileSyncMessageLoop {
               deps
                 .log()
                 .debug(
-                  `[${deps.role()}] wrote ack ${sanitizeForDisplay(ackName)} for ` +
+                  `[${deps.role()}] wrote ack ${redactAndSanitizeForDisplay(ackName)} for ` +
                     `seq=${validatedMessage.seq}`,
                 );
             }
@@ -1126,7 +1128,7 @@ export class FileSyncMessageLoop {
               .log()
               .debug(
                 `[${deps.role()}] deleting message ` +
-                  `${sanitizeForDisplay(messageFile.name)}`,
+                  `${redactAndSanitizeForDisplay(messageFile.name)}`,
               );
             try {
               await deps.client().delete(inPath);
@@ -1159,11 +1161,11 @@ export class FileSyncMessageLoop {
                 if (deleteErr instanceof UsageError) throw deleteErr;
                 deps.log().warn(
                   `[${deps.role()}] failed to delete ` +
-                    `${sanitizeForDisplay(messageFile.name)}; ` +
+                    `${redactAndSanitizeForDisplay(messageFile.name)}; ` +
                     "please notify the administrator that manual cleanup " +
                     // The delete error's message re-embeds the peer filename via
                     // the operation path; escape it like the name above it.
-                    `may be required: ${sanitizeForDisplay(errMessage(deleteErr))}`,
+                    `may be required: ${redactAndSanitizeForDisplay(errMessage(deleteErr))}`,
                 );
               }
             }
@@ -1216,7 +1218,7 @@ export class FileSyncMessageLoop {
           deps
             .log()
             .warn(
-              `[${deps.role()}] message from ${sanitizeForDisplay(peerId)} ` +
+              `[${deps.role()}] message from ${redactAndSanitizeForDisplay(peerId)} ` +
                 "disappeared between list and get; " +
                 (deps.options().retainFiles
                   ? "unexpected in retain mode (files are never deleted) -- " +
@@ -1274,7 +1276,7 @@ export class FileSyncMessageLoop {
             .log()
             .debug(
               `[${deps.role()}] idle-boundary session release failed: ` +
-                sanitizeForDisplay(errMessage(releaseErr)),
+                redactAndSanitizeForDisplay(errMessage(releaseErr)),
             );
         }
         this.poller = setTimeout(

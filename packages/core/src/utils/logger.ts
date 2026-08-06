@@ -1,5 +1,7 @@
 import logLibrary from "loglevel";
 
+import { redactPrivateKeyMaterial } from "./sanitizeErrorForDisplay";
+
 const { getLevel } = logLibrary;
 
 const PREFIXED = Symbol("prefixed");
@@ -11,7 +13,9 @@ const logLevels = logLibrary.levels;
  * where prefixed loggers send their diagnostic output -- the CLI routes it to
  * stderr, or to a `--log-file`. It receives the loglevel method name (so a sink
  * may route by level), the assembled `[ISO] [LEVEL] [CONTEXT]` prefix, and the
- * raw message arguments; the sink owns formatting (e.g. Node's `util.format`),
+ * message arguments -- unformatted, and with private-key blocks stripped out of
+ * the string ones (see {@link setLogPrefixer}); the sink owns formatting (e.g.
+ * Node's `util.format`),
  * which keeps core free of any runtime-specific formatting or stream API and so
  * safe to import in the browser. Left unset -- the default -- diagnostic output
  * keeps loglevel's per-level `console` routing, the behavior the web app relies
@@ -108,6 +112,25 @@ export const setLogPrefixer = (logger: logLibrary.Logger) => {
 
       const prefix = `[${timestamp}] [${levelLabel}] [${context}]`;
 
+      // Private-key redaction backstop for every diagnostic line, applied here
+      // rather than in a consumer's sink so it covers both routings below: the
+      // CLI's stderr and --log-file, and the browser console the web app keeps.
+      // A line logged before a consumer installs its sink takes the rawMethod
+      // branch, which a sink-side pass would miss entirely.
+      //
+      // Per ARGUMENT, and only where the argument is a string: the sink receives
+      // raw `unknown[]` and owns its own formatting, so an object argument is
+      // passed through by reference and prints exactly as it would without this.
+      // The per-argument boundary is also the reach limit -- key material split
+      // across two arguments of one call is not seen here, just as the per-link
+      // pass does not see one split across two cause-chain links. Joining the
+      // arguments first would close that at the cost of letting a dangling
+      // marker in one argument consume every argument behind it, which is the
+      // suppression this pass must not introduce.
+      const redactedArgs = messageArgs.map((arg) =>
+        typeof arg === "string" ? redactPrivateKeyMaterial(arg) : arg,
+      );
+
       // Resolve the sink at CALL time, not at logger-creation time. rawMethod was
       // frozen to the console leaf when this logger was built; reading the sink
       // here instead lets a consumer installed later (the CLI, after some loggers
@@ -116,9 +139,9 @@ export const setLogPrefixer = (logger: logLibrary.Logger) => {
       // the default per-level console routing is exactly as before.
       const sink = diagnosticSink;
       if (sink !== undefined) {
-        sink(methodName, prefix, messageArgs);
+        sink(methodName, prefix, redactedArgs);
       } else {
-        rawMethod(prefix, ...messageArgs);
+        rawMethod(prefix, ...redactedArgs);
       }
     };
   };

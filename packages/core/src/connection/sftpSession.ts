@@ -26,8 +26,10 @@
 // getter) so its public and test surface is unchanged.
 
 import type { getLoggerForVerbosity } from "../utils/logger";
-import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
-import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay";
+import {
+  redactAndSanitizeForDisplay,
+  redactPrivateKeyMaterial,
+} from "../utils/sanitizeErrorForDisplay";
 import {
   computeHostKeyFingerprint,
   matchHostKeyFingerprint,
@@ -222,7 +224,7 @@ export class SftpSession {
           .log()
           .warn(
             `[${this.deps.role()}] ignoring connection.providerOptions.` +
-              `${sanitizeForDisplay(key)}: not in the allowed set of SFTP ` +
+              `${redactAndSanitizeForDisplay(key)}: not in the allowed set of SFTP ` +
               `transport-tuning options. The connection target, credentials, ` +
               `and host-key verification are set from connection.server and ` +
               `cannot be overridden here; any other key is dropped as a ` +
@@ -268,7 +270,7 @@ export class SftpSession {
           .log()
           .warn(
             `[${this.deps.role()}] ignoring connection.providerOptions.algorithms.` +
-              `${sanitizeForDisplay(subKey)}: only ` +
+              `${redactAndSanitizeForDisplay(subKey)}: only ` +
               `${[...SFTP_ALGORITHMS_ALLOWED_SUBKEYS].join("/")} may be tuned ` +
               `here (host-key-type negotiation is not operator-overridable)`,
           );

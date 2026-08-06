@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, expect, test } from "vitest";
+import logLibrary from "loglevel";
 import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
@@ -23,6 +24,9 @@ import {
 } from "../../src/hostKeyTrust";
 import { applyConnectionOverrides } from "../../src/config";
 import { connectionOverridesFrom } from "../../src/optionDefinitions";
+import { snapshotDiagnosticSinkAndLevel } from "../loggingTestSupport";
+
+snapshotDiagnosticSinkAndLevel();
 
 // establishHostKeyTrust gates the interactive prompt on stdin being a TTY. The
 // tests drive that flag deterministically and restore it afterward; the
@@ -853,4 +857,89 @@ test("every refusal link installs its cause non-enumerably", async () => {
     expect(Object.keys(link)).not.toContain("cause");
   }
   expect(JSON.stringify(chain[1])).toBe("{}");
+});
+
+// --- the log and prompt lines against the sinks' private-key pass ------------
+// The configured host reaches the trust warning, the confirm question, and the
+// pin lines, and on an offline-accept-seeded config it is the PARTNER's, copied
+// verbatim out of the invitation endpoint under no format bound. It is composed
+// AHEAD of the out-of-band verification step, and the log sink redacts the whole
+// line, fail-closed past a BEGIN marker with no END -- so the step survives only
+// because the fragment is redacted where it is interpolated.
+
+const VERIFY_STEP =
+  "Verify this matches the server's published fingerprint out-of-band";
+
+test("a marker in the configured host cannot delete the verify step or the prompt", async () => {
+  const conn = sftpConn(undefined, `${PEM_MARKER}.example.org`);
+  const questions: string[] = [];
+  const deps: HostKeyTrustDeps = {
+    probe: () => Promise.resolve({ fingerprint: FP, keyType: "ssh-ed25519" }),
+    confirm: (question) => {
+      questions.push(question);
+      return Promise.resolve(true);
+    },
+  };
+  process.stdin.isTTY = true;
+  logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+  const lines = await withCapturedDiagnostics(() =>
+    establishHostKeyTrust(
+      conn,
+      {
+        verbosity: -1,
+        loggerName: "host-redaction-ephemeral",
+        persistence: { mode: "ephemeral" },
+      },
+      deps,
+    ),
+  );
+
+  const warning = lines.find((line) => line.includes("The authenticity of"));
+  expect(warning).toBeDefined();
+  expect(warning).toContain(REDACTED);
+  expect(warning).toContain(VERIFY_STEP);
+  expect(warning).toContain(FP);
+  // The confirm question is its own sink and keeps its subject.
+  expect(questions).toHaveLength(1);
+  expect(questions[0]).toContain(REDACTED);
+  expect(questions[0]).toContain("Trust this host key for");
+  // The ephemeral pin line states what is NOT saved, behind the same host.
+  const pinned = lines.find((line) => line.includes("[INFO]"));
+  expect(pinned).toContain(REDACTED);
+  expect(pinned).toContain("it is not saved");
+});
+
+test("a marker in the config path cannot delete the pin line's assurance", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-hkt-redact-"));
+  try {
+    const configPath = path.join(dir, `${PEM_MARKER}.yaml`);
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: sftp\n  server:\n    host: sftp.example.org\n",
+    );
+    const conn = sftpConn();
+    const deps = makeDeps({ confirm: true });
+    process.stdin.isTTY = true;
+    logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+    const lines = await withCapturedDiagnostics(() =>
+      establishHostKeyTrust(
+        conn,
+        {
+          verbosity: -1,
+          loggerName: "host-redaction-write-now",
+          persistence: { mode: "write-now", configPath },
+        },
+        deps,
+      ),
+    );
+
+    const pinned = lines.find((line) => line.includes("[INFO]"));
+    expect(pinned).toBeDefined();
+    expect(pinned).toContain(REDACTED);
+    expect(pinned).toContain(
+      "future connections will verify it automatically.",
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

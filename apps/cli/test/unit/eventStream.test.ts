@@ -256,6 +256,21 @@ test("sanitizes a hostile warning message", () => {
   expect(event.message).toContain("\\u202e");
 });
 
+test("redacts private-key material carried in a warning message", () => {
+  // The fd-3 stream is a persisted machine sink like --log-file, and its error
+  // event is already redacted, so the warning is the one text field that would
+  // otherwise carry key material in the clear. Driven with a raw block rather
+  // than a live warning source, since both live sources redact per fragment
+  // where they compose -- this pins the backstop, not their composition.
+  const body = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAAB";
+  const event = buildWarningEvent(
+    `key file rejected: -----BEGIN OPENSSH PRIVATE KEY-----\n${body}\n` +
+      `-----END OPENSSH PRIVATE KEY-----`,
+  );
+  expect(event.message).toContain("[redacted private key]");
+  expect(event.message).not.toContain(body);
+});
+
 test("sanitizes hostile error text through the display boundary", () => {
   const event = buildErrorEvent(new Error(ESC_INJECTION), "run");
   expect(event.message).not.toContain("\x1b");

@@ -5,7 +5,8 @@ import {
   parseDateInputDropsEveryRecord,
   pipelineAlwaysDrops,
 } from "./standardization.js";
-import { displayText, sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
+import { displayText } from "./utils/sanitizeForDisplay.js";
+import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
 
 import type { InvitationToken } from "./config/invitation.js";
 import type {
@@ -417,9 +418,14 @@ export interface InvitationFieldSummary {
  * from a decoded {@link InvitationToken}. Every partner-controlled value (the
  * self-asserted identity, linkage-key names, legal-agreement text, payload
  * column names, and the schema-validated date fields) is passed through
- * {@link sanitizeForDisplay} here, at the one boundary, so neither acceptance
- * surface -- the web consent screen nor the CLI accept prompt -- re-derives the
- * escaping. Neither renderer's own defenses suffice: React's JSX escaping covers
+ * {@link redactAndSanitizeForDisplay} here, at the one boundary, so neither
+ * acceptance surface -- the web consent screen nor the CLI accept prompt --
+ * re-derives the escaping. The redaction half is what the CLI prompt's route
+ * needs: it also goes to a log line (`consentSurfaceSink` in
+ * `apps/cli/src/invitationDisplay.ts`), where the sink's own private-key pass
+ * would otherwise let a marker planted in a key or column name consume the
+ * consent text composed after it on the same line.
+ * Neither renderer's own defenses suffice: React's JSX escaping covers
  * HTML metacharacters, and a terminal none, but neither covers the control, bidi,
  * zero-width, or homoglyph characters this neutralizes. The dates cannot carry
  * such characters today (the
@@ -581,7 +587,7 @@ function allowedCharactersClass(field: LinkageField): Displayable | undefined {
     constraints.allowedCharacters === undefined
   )
     return undefined;
-  return sanitizeForDisplay(constraints.allowedCharacters);
+  return redactAndSanitizeForDisplay(constraints.allowedCharacters);
 }
 
 /**
@@ -681,12 +687,12 @@ function summarizeTransform(
   const entries = Object.entries(step.params ?? {});
   const shown = entries.slice(0, MAX_DISPLAYED_PARAMS);
   const params = shown.map((entry) =>
-    sanitizeForDisplay(`${entry[0]}: ${describeParamValue(entry[1])}`),
+    redactAndSanitizeForDisplay(`${entry[0]}: ${describeParamValue(entry[1])}`),
   );
   if (entries.length > MAX_DISPLAYED_PARAMS)
     params.push(displayText`... ${entries.length - MAX_DISPLAYED_PARAMS} more`);
   const summary: InvitationTransformSummary = {
-    function: sanitizeForDisplay(step.function),
+    function: redactAndSanitizeForDisplay(step.function),
     params,
   };
   // A literal slice phrase leads in place of the function name where it is
@@ -900,14 +906,14 @@ function summarizeKey(
     const type = fieldByName.get(fieldName);
     return type !== undefined
       ? FIELD_TYPE_LABELS[type]
-      : sanitizeForDisplay(fieldName);
+      : redactAndSanitizeForDisplay(fieldName);
   };
 
   const compactLabelForField = (fieldName: string): Displayable => {
     const type = fieldByName.get(fieldName);
     return type !== undefined
       ? COMPACT_FIELD_TYPE_LABELS[type]
-      : sanitizeForDisplay(fieldName);
+      : redactAndSanitizeForDisplay(fieldName);
   };
 
   const elements: Array<InvitationKeyElementSummary> = key.elements.map(
@@ -1023,7 +1029,7 @@ function summarizeKey(
 
   return {
     id: key.name,
-    name: sanitizeForDisplay(key.name),
+    name: redactAndSanitizeForDisplay(key.name),
     elements,
     headerFields,
     hasSwap,
@@ -1063,7 +1069,7 @@ export function summarizeInvitation(
   const endpoint = source.connectionEndpoint;
   const connectionPath =
     endpoint?.channel === "filedrop" && endpoint.path !== undefined
-      ? sanitizeForDisplay(endpoint.path)
+      ? redactAndSanitizeForDisplay(endpoint.path)
       : undefined;
 
   const fieldByName = new Map(
@@ -1116,7 +1122,7 @@ export function summarizeInvitation(
       const label =
         type !== undefined
           ? COMPACT_FIELD_TYPE_LABELS[type]
-          : sanitizeForDisplay(element.field);
+          : redactAndSanitizeForDisplay(element.field);
       if (seenMatchedFields.has(label)) continue;
       seenMatchedFields.add(label);
       matchedFields.push(label);
@@ -1130,7 +1136,7 @@ export function summarizeInvitation(
   // unimplemented). The *Applied flags below carry that gap to the renderer; the
   // displayed terms are what the acceptor agrees to.
   const summary: InvitationSummary = {
-    invitingParty: sanitizeForDisplay(terms.identity),
+    invitingParty: redactAndSanitizeForDisplay(terms.identity),
     algorithm: terms.algorithm,
     psiCApplied: APPLIED_SETTINGS.psiC,
     linkageStrategy: terms.linkageStrategy,
@@ -1145,9 +1151,11 @@ export function summarizeInvitation(
 
   if (terms.legalAgreement !== undefined) {
     summary.legalAgreement = {
-      reference: sanitizeForDisplay(terms.legalAgreement.reference),
-      purpose: sanitizeForDisplay(terms.legalAgreement.purpose),
-      expirationDate: sanitizeForDisplay(terms.legalAgreement.expirationDate),
+      reference: redactAndSanitizeForDisplay(terms.legalAgreement.reference),
+      purpose: redactAndSanitizeForDisplay(terms.legalAgreement.purpose),
+      expirationDate: redactAndSanitizeForDisplay(
+        terms.legalAgreement.expirationDate,
+      ),
     };
   }
 
@@ -1189,16 +1197,16 @@ export function summarizeInvitation(
   const receive = (terms.payload?.receive ?? []).map((column) => column.name);
   if (sendDeclared || receiveDeclared) {
     summary.payload = {
-      send: send.map((name) => sanitizeForDisplay(name)),
+      send: send.map((name) => redactAndSanitizeForDisplay(name)),
       sendDeclared,
       sendFromCarriedSubset,
-      receive: receive.map((name) => sanitizeForDisplay(name)),
+      receive: receive.map((name) => redactAndSanitizeForDisplay(name)),
       receiveDeclared,
     };
   }
 
   if (source.expires !== undefined)
-    summary.expires = sanitizeForDisplay(source.expires);
+    summary.expires = redactAndSanitizeForDisplay(source.expires);
 
   if (connectionPath !== undefined) summary.connectionPath = connectionPath;
 
