@@ -28,7 +28,8 @@ folder and reading the DFS tab.
   over it, and prints the `docker run` command.
 - `Start-Psilink.ps1` -- the launcher: the same ground plus starting the console
   and opening it. It dot-sources the setup script with `-LoadFunctionsOnly` for
-  the resolution rather than carrying a second copy, which is why the two travel
+  the path resolution, the credential prompts and the CIFS volume sequence
+  rather than carrying a second copy of any of them, which is why the two travel
   together and why a release publishes both.
 - `start-psilink.sh` -- the launcher for macOS and Linux. It shares only the
   doctor verdict contract with the PowerShell one; there is no resolution
@@ -187,17 +188,32 @@ or reaches a network.
 
 `Start-Psilink.ps1` is covered only by `Start-Psilink.Tests.ps1`, which is
 entirely pure: the verdict reader against the same fixtures, the release stamp,
-the DFS candidate selection, and the console's argument vector. Its flow has
+the DFS candidate selection, and the console's argument vector. The credential
+and volume sequences it now shares with the setup script are covered there only
+as far as being defined by `-LoadFunctionsOnly`, which is what the launcher
+depends on; neither is executed by any suite, because both prompt or reach an
+engine. Its flow has
 never been executed anywhere -- not the folder picker or its typed fallback, the
 prompts, the credentials, the volume, the detached container, or the port wait.
 A first real-Windows pass should start with the picker in a session whose
 language mode really is constrained, which is the one branch chosen from
 documentation rather than measurement, and with the DFS offer.
 
-The launcher's CIFS volume options are the setup script's, and like them have
-only ever been driven against docker. The launcher says so on screen before
-creating the volume under any other engine rather than predicting what podman
-will make of them.
+The launcher's CIFS volume options are the setup script's -- since 5 August 2026
+literally, through `New-ShareVolume`, which the launcher calls with `-Engine`
+naming whichever engine it found. Its credential prompts, its password-comma
+refusal and its volume replace-or-refuse sequence are the setup script's copies
+too, reached through the same dot-source: the launcher's own copies of all three
+were deleted rather than kept in step. Neither script's volume options have been
+driven against anything but docker, and the launcher still says so on screen
+before creating the volume under any other engine rather than predicting what
+podman will make of them.
+
+What that sharing costs the launcher, and what to look at first on a real
+Windows pass: it now prints the setup script's fuller credential preamble and
+its longer refusals, names the device it is creating the volume for, and says
+that Docker mounts the volume the first time it is used. Nothing there changes
+what it does.
 
 Still unverified: the Windows-containers branch, which needs Docker Desktop
 switched to Windows containers to reach -- only the `{{.Server.Os}}` parse it

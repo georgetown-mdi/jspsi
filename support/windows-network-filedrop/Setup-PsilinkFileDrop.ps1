@@ -131,13 +131,20 @@ function Invoke-Docker {
         advanced function, so PowerShell binds docker's own short flags to the
         common parameters first -- "-v" becomes -Verbose and never reaches
         docker, which then reads the volume spec as the image name and fails
-        with "invalid reference format". #>
-    param([Parameter(Mandatory = $true)][string[]] $DockerArgs)
+        with "invalid reference format".
+
+        -Engine names the command to run, for the launcher, which reaches this
+        through the shared volume sequence below and may have chosen podman.
+        This script itself asks for docker and nothing else. #>
+    param(
+        [Parameter(Mandatory = $true)][string[]] $DockerArgs,
+        [string] $Engine = 'docker'
+    )
 
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $lines = & docker @DockerArgs 2>&1 | ForEach-Object { "$_" }
+        $lines = & $Engine @DockerArgs 2>&1 | ForEach-Object { "$_" }
         return @{ Output = ($lines -join [Environment]::NewLine); ExitCode = $LASTEXITCODE }
     }
     finally { $ErrorActionPreference = $previous }
@@ -161,6 +168,186 @@ function Get-DialectMountVersion {
 
     $versMap = @{ 'SMB3' = '3.1.1'; 'SMB2' = '2.1'; 'NT1' = '1.0' }
     return $versMap[$Dialect]
+}
+
+# ==========================================================================
+# The credentials and the volume
+#
+# Both are shared with Start-Psilink.ps1, which dot-sources this script and
+# needs the same two sequences: one copy, run against a real file server,
+# rather than two that drift apart.
+# ==========================================================================
+
+function Read-ShareCredential {
+    <#  The account the CONTAINER signs in to the share with, asked of the
+        operator, together with the two refusals and the warning that have to
+        happen before Docker is asked to carry the password.
+
+        -Username and -Domain are answers already in hand; an empty one is
+        asked for. -DomainSupplied distinguishes "there is no domain, do not
+        ask" from "not answered yet", which an empty string cannot.
+
+        Returns a hashtable with Username, Domain and Password, or nothing when
+        the password is one Docker cannot carry -- the caller stops rather than
+        this ending the script, so each caller keeps its own exit code. #>
+    param(
+        [string] $Username = '',
+        [string] $Domain = '',
+        [switch] $DomainSupplied
+    )
+
+    Write-Host 'These are the credentials the CONTAINER will use to reach the share.'
+    Write-Host 'Windows signs you in to it as yourself; Docker cannot borrow that, so'
+    Write-Host 'it needs a username and password of its own.'
+    Write-Host ''
+    Write-Warn 'Prefer an account scoped to this share, or one you are prepared to'
+    Write-Note 'retire. Docker stores this password in cleartext in the volume'
+    Write-Note 'metadata and puts it on a command line while creating the volume.'
+    Write-Note 'Do not use a domain administrator account, and do not use one whose'
+    Write-Note 'password protects anything else you care about.'
+    Write-Info ''
+    Write-Info 'See the passwords page, "Where the password ends up".'
+    Write-Host ''
+
+    if (-not $Username) { $Username = Read-Host 'Username' }
+    if (-not $DomainSupplied) {
+        $Domain = Read-Host 'Domain (press Enter if you do not have one)'
+    }
+    if ($Username -match '^(.+?)\\(.+)$') {
+        if (-not $Domain) { $Domain = $Matches[1] }
+        $Username = $Matches[2]
+        Write-Note "Using domain '$Domain' and username '$Username'."
+    }
+
+    $securePass = Read-Host 'Password' -AsSecureString
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePass)
+    # PtrToStringBSTR and not PtrToStringAuto: the buffer is UTF-16 and BSTR is the
+    # only one of the two that says so. Auto happens to pick the right reader on
+    # Windows and picks UTF-8 elsewhere, where it truncates the password at the
+    # first character without complaining.
+    try   { $plainPass = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+
+    if ([string]::IsNullOrEmpty($plainPass)) {
+        Write-Bad 'No password entered.'
+        Write-Note 'If you never type a password when opening this folder in Explorer,'
+        Write-Note 'Windows signs you in automatically and this approach may not work at'
+        Write-Note 'all. Read the troubleshooting page, "The share never asks for a'
+        Write-Note 'password", first.'
+        return
+    }
+
+    # Docker separates mount options with commas, so a comma in the password ends
+    # the option and the rest becomes a malformed option of its own. There is no
+    # escaping available: the local driver takes the credentials only as one
+    # comma-separated string. Said now rather than after the volume fails, because
+    # the failure text carries the tail of the password in the clear.
+    if ($plainPass.Contains(',')) {
+        Write-Bad 'That password contains a comma, and Docker cannot carry it.'
+        Write-Note 'Mount options are separated by commas, so the password is cut off at'
+        Write-Note 'the first one and the mount fails with "invalid argument". There is'
+        Write-Note 'no way to quote or escape it -- this is a limit of Docker volumes,'
+        Write-Note 'not of psilink, and doing it by hand hits exactly the same wall.'
+        Write-Info ''
+        Write-Info 'Use an account whose password has no comma. The troubleshooting'
+        Write-Info 'page has a ready-made request for one, under "What to ask your'
+        Write-Info 'IT department for".'
+        return
+    }
+
+    if ($plainPass -ne $plainPass.TrimStart()) {
+        Write-Warn 'That password begins with a space.'
+        Write-Note 'The credentials file the checks use drops leading spaces, so it will'
+        Write-Note 'be tried without one and reported as a wrong password. If the checks'
+        Write-Note 'below say LOGON_FAILURE, that is why, and it is not your mistake.'
+    }
+
+    return @{ Username = $Username; Domain = $Domain; Password = $plainPass }
+}
+
+function New-ShareVolume {
+    <#  Create the Docker volume that mounts //Server/Share[/SubPath] over
+        CIFS, replacing one an earlier run of this script made and refusing one
+        it did not.
+
+        -MountVersion is the "vers=" option for a pinned dialect, empty to let
+        the mount negotiate. Returns $true when the volume is there to be
+        mounted, and $false when the reason it is not has been printed. #>
+    param(
+        [Parameter(Mandatory = $true)][string] $VolumeName,
+        [Parameter(Mandatory = $true)][string] $Server,
+        [Parameter(Mandatory = $true)][string] $Share,
+        [string] $SubPath = '',
+        [Parameter(Mandatory = $true)][string] $Username,
+        [string] $Password = '',
+        [string] $Domain = '',
+        [string] $MountVersion = '',
+        [string] $Engine = 'docker'
+    )
+
+    $device = "//$Server/$Share"
+    if ($SubPath) { $device = "$device/$SubPath" }
+
+    $opts = "username=$Username,password=$Password"
+    if ($Domain)       { $opts = "$opts,domain=$Domain" }
+    if ($MountVersion) { $opts = "$opts,vers=$MountVersion" }
+
+    # Existence is established from the volume list rather than from the exit
+    # code of the inspection below. Anything that stops the inspection running
+    # -- a template Docker will not parse, a daemon that answers oddly -- also
+    # exits non-zero, and reading that as "no such volume" walks straight past
+    # the guard and into the removal further down.
+    $listed = Invoke-Docker -Engine $Engine -DockerArgs @('volume', 'ls', '--quiet')
+    $volumeExists = ($listed.ExitCode -eq 0 -and
+        (@($listed.Output -split '\r?\n' | Where-Object { $_.Trim() -eq $VolumeName }).Count -gt 0))
+
+    if ($volumeExists) {
+        # No quotes inside the template. Windows PowerShell strips them while
+        # building a native command line, so "{{index .Options """type"""}}"
+        # reaches Docker as {{index .Options type}} and fails to parse -- for
+        # every volume, which disables the check entirely.
+        $existing = Invoke-Docker -Engine $Engine -DockerArgs @('volume', 'inspect', '--format',
+                                                                '{{.Driver}} {{.Options.type}}', $VolumeName)
+        if ($existing.ExitCode -ne 0 -or $existing.Output.Trim() -ne 'local cifs') {
+            Write-Bad "A Docker volume called '$VolumeName' already exists and was not"
+            Write-Note 'made by this script -- it is not a network-share volume. It has'
+            Write-Note 'been left alone; removing it could destroy data belonging to'
+            Write-Note 'something else on this PC.'
+            Write-Info ''
+            Write-Info 'Run this script again with -VolumeName <another-name>, or remove'
+            Write-Info "that volume yourself if you are certain: $Engine volume rm $VolumeName"
+            return $false
+        }
+        # docker volume create on an existing name exits 0 and silently keeps
+        # the options the volume already has, so a run after a password change
+        # would quietly go on using the old one. Removing it first is what
+        # makes a re-run mean anything.
+        $removed = Invoke-Docker -Engine $Engine -DockerArgs @('volume', 'rm', $VolumeName)
+        if ($removed.ExitCode -ne 0) {
+            Write-Bad "Could not replace the existing '$VolumeName' volume."
+            Write-Host ''
+            Write-Host (Hide-Secret -Text $removed.Output -Secret $Password)
+            Write-Host ''
+            Write-Note 'A container is probably still using it. Stop any exchange that is'
+            Write-Note "running, then try again: $Engine ps"
+            return $false
+        }
+        Write-Info "Replaced the existing '$VolumeName' volume."
+    }
+
+    Write-Host "Creating volume '$VolumeName' for $device"
+    $create = Invoke-Docker -Engine $Engine -DockerArgs @(
+        'volume', 'create', '--driver', 'local',
+        '--opt', 'type=cifs', '--opt', "device=$device", '--opt', "o=$opts",
+        $VolumeName)
+    if ($create.ExitCode -ne 0) {
+        Write-Bad 'Could not create the volume.'
+        Write-Host ''
+        Write-Host (Hide-Secret -Text $create.Output -Secret $Password)
+        return $false
+    }
+    Write-Good 'Volume created. Docker mounts it the first time it is used.'
+    return $true
 }
 
 # ==========================================================================
@@ -497,71 +684,12 @@ if (-not $explicitTarget -and -not $SkipConfirm) {
 # ==========================================================================
 Write-Head 'Part 2: credentials for the file server'
 
-Write-Host 'These are the credentials the CONTAINER will use to reach the share.'
-Write-Host 'Windows signs you in to it as yourself; Docker cannot borrow that, so'
-Write-Host 'it needs a username and password of its own.'
-Write-Host ''
-Write-Warn 'Prefer an account scoped to this share, or one you are prepared to'
-Write-Note 'retire. Docker stores this password in cleartext in the volume'
-Write-Note 'metadata and puts it on a command line while creating the volume.'
-Write-Note 'Do not use a domain administrator account, and do not use one whose'
-Write-Note 'password protects anything else you care about.'
-Write-Info ''
-Write-Info 'See the passwords page, "Where the password ends up".'
-Write-Host ''
-
-if (-not $Username) { $Username = Read-Host 'Username' }
-if (-not $PSBoundParameters.ContainsKey('Domain')) {
-    $Domain = Read-Host 'Domain (press Enter if you do not have one)'
-}
-if ($Username -match '^(.+?)\\(.+)$') {
-    if (-not $Domain) { $Domain = $Matches[1] }
-    $Username = $Matches[2]
-    Write-Note "Using domain '$Domain' and username '$Username'."
-}
-
-$securePass = Read-Host 'Password' -AsSecureString
-$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePass)
-# PtrToStringBSTR and not PtrToStringAuto: the buffer is UTF-16 and BSTR is the
-# only one of the two that says so. Auto happens to pick the right reader on
-# Windows and picks UTF-8 elsewhere, where it truncates the password at the
-# first character without complaining.
-try   { $plainPass = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
-finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-
-if ([string]::IsNullOrEmpty($plainPass)) {
-    Write-Bad 'No password entered.'
-    Write-Note 'If you never type a password when opening this folder in Explorer,'
-    Write-Note 'Windows signs you in automatically and this approach may not work at'
-    Write-Note 'all. Read the troubleshooting page, "The share never asks for a'
-    Write-Note 'password", first.'
-    exit 1
-}
-
-# Docker separates mount options with commas, so a comma in the password ends
-# the option and the rest becomes a malformed option of its own. There is no
-# escaping available: the local driver takes the credentials only as one
-# comma-separated string. Said now rather than after the volume fails, because
-# the failure text carries the tail of the password in the clear.
-if ($plainPass.Contains(',')) {
-    Write-Bad 'That password contains a comma, and Docker cannot carry it.'
-    Write-Note 'Mount options are separated by commas, so the password is cut off at'
-    Write-Note 'the first one and the mount fails with "invalid argument". There is'
-    Write-Note 'no way to quote or escape it -- this is a limit of Docker volumes,'
-    Write-Note 'not of psilink, and doing it by hand hits exactly the same wall.'
-    Write-Info ''
-    Write-Info 'Use an account whose password has no comma. The troubleshooting'
-    Write-Info 'page has a ready-made request for one, under "What to ask your'
-    Write-Info 'IT department for".'
-    exit 1
-}
-
-if ($plainPass -ne $plainPass.TrimStart()) {
-    Write-Warn 'That password begins with a space.'
-    Write-Note 'The credentials file the checks use drops leading spaces, so it will'
-    Write-Note 'be tried without one and reported as a wrong password. If the checks'
-    Write-Note 'below say LOGON_FAILURE, that is why, and it is not your mistake.'
-}
+$credential = Read-ShareCredential -Username $Username -Domain $Domain `
+    -DomainSupplied:($PSBoundParameters.ContainsKey('Domain'))
+if (-not $credential) { exit 1 }
+$Username  = $credential.Username
+$Domain    = $credential.Domain
+$plainPass = $credential.Password
 
 # ==========================================================================
 # Part 3: test the share from inside a container
@@ -648,78 +776,20 @@ try {
     # ======================================================================
     Write-Head 'Part 4: creating the Docker volume'
 
-    $device = "//$Server/$Share"
-    if ($SubPath) { $device = "$device/$SubPath" }
-
-    $opts = "username=$Username,password=$plainPass"
-    if ($Domain)  { $opts = "$opts,domain=$Domain" }
-    if ($Dialect) {
-        $opts = "$opts,vers=$(Get-DialectMountVersion -Dialect $Dialect)"
-        if ($Dialect -eq 'NT1') {
-            Write-Warn 'The Docker VM kernel is built without SMB1, so the mount below'
-            Write-Note 'will be refused however well the checks went. -Dialect NT1 is'
-            Write-Note 'useful for diagnosis only. If the server speaks nothing newer,'
-            Write-Note 'ask IT for a scheduled mirror to a local folder instead -- the'
-            Write-Note 'troubleshooting page has the request, under "What to ask'
-            Write-Note 'your IT department for".'
-        }
+    if ($Dialect -eq 'NT1') {
+        Write-Warn 'The Docker VM kernel is built without SMB1, so the mount below'
+        Write-Note 'will be refused however well the checks went. -Dialect NT1 is'
+        Write-Note 'useful for diagnosis only. If the server speaks nothing newer,'
+        Write-Note 'ask IT for a scheduled mirror to a local folder instead -- the'
+        Write-Note 'troubleshooting page has the request, under "What to ask'
+        Write-Note 'your IT department for".'
     }
 
-    # Existence is established from the volume list rather than from the exit
-    # code of the inspection below. Anything that stops the inspection running
-    # -- a template Docker will not parse, a daemon that answers oddly -- also
-    # exits non-zero, and reading that as "no such volume" walks straight past
-    # the guard and into the removal further down.
-    $listed = Invoke-Docker -DockerArgs @('volume', 'ls', '--quiet')
-    $volumeExists = ($listed.ExitCode -eq 0 -and
-        (@($listed.Output -split '\r?\n' | Where-Object { $_.Trim() -eq $VolumeName }).Count -gt 0))
-
-    if ($volumeExists) {
-        # No quotes inside the template. Windows PowerShell strips them while
-        # building a native command line, so "{{index .Options """type"""}}"
-        # reaches Docker as {{index .Options type}} and fails to parse -- for
-        # every volume, which disables the check entirely.
-        $existing = Invoke-Docker -DockerArgs @('volume', 'inspect', '--format',
-                                                '{{.Driver}} {{.Options.type}}', $VolumeName)
-        if ($existing.ExitCode -ne 0 -or $existing.Output.Trim() -ne 'local cifs') {
-            Write-Bad "A Docker volume called '$VolumeName' already exists and was not"
-            Write-Note 'made by this script -- it is not a network-share volume. It has'
-            Write-Note 'been left alone; removing it could destroy data belonging to'
-            Write-Note 'something else on this PC.'
-            Write-Info ''
-            Write-Info 'Run this script again with -VolumeName <another-name>, or remove'
-            Write-Info "that volume yourself if you are certain: docker volume rm $VolumeName"
-            exit 8
-        }
-        # docker volume create on an existing name exits 0 and silently keeps
-        # the options the volume already has, so a run after a password change
-        # would quietly go on using the old one. Removing it first is what
-        # makes a re-run mean anything.
-        $removed = Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName)
-        if ($removed.ExitCode -ne 0) {
-            Write-Bad "Could not replace the existing '$VolumeName' volume."
-            Write-Host ''
-            Write-Host (Hide-Secret -Text $removed.Output -Secret $plainPass)
-            Write-Host ''
-            Write-Note 'A container is probably still using it. Stop any exchange that is'
-            Write-Note "running, then try again: docker ps"
-            exit 8
-        }
-        Write-Info "Replaced the existing '$VolumeName' volume."
-    }
-
-    Write-Host "Creating volume '$VolumeName' for $device"
-    $create = Invoke-Docker -DockerArgs @(
-        'volume', 'create', '--driver', 'local',
-        '--opt', 'type=cifs', '--opt', "device=$device", '--opt', "o=$opts",
-        $VolumeName)
-    if ($create.ExitCode -ne 0) {
-        Write-Bad 'Could not create the volume.'
-        Write-Host ''
-        Write-Host (Hide-Secret -Text $create.Output -Secret $plainPass)
-        exit 8
-    }
-    Write-Good 'Volume created. Docker mounts it the first time it is used.'
+    $volumeMade = New-ShareVolume -VolumeName $VolumeName `
+        -Server $Server -Share $Share -SubPath $SubPath `
+        -Username $Username -Password $plainPass -Domain $Domain `
+        -MountVersion (Get-DialectMountVersion -Dialect $Dialect)
+    if (-not $volumeMade) { exit 8 }
 
     # The kernel-side half of the checks, run over the real mount rather than
     # over smbclient, which refuses a rename onto an existing file whatever the
@@ -802,6 +872,7 @@ finally {
         Remove-Item "env:$v" -ErrorAction SilentlyContinue
     }
     $plainPass = $null
+    $credential = $null
 }
 
 # ==========================================================================
