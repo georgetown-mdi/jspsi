@@ -971,7 +971,9 @@ export function AcceptorBench() {
   // absent = lazy), exactly as the CLI accept persists it, so a managed re-run
   // fails closed if the partner transmits a set diverging from what was
   // consented to here. This party's OWN outbound set -- the one the columns step
-  // showed -- is recorded as the document's outboundPayloadConsent, derived by the
+  // showed -- is recorded as the document's outboundPayloadConsent when its
+  // mirrored terms share with the partner (with shareWithPartner false nothing
+  // is recorded, and nothing is transmitted to confirm), derived by the
   // composer from the same metadata persisted beside it, so a later run that
   // resolves a different set refuses before connecting rather than transmitting
   // it silently. The secret is the invitation's; the one-shot run discards

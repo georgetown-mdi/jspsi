@@ -341,8 +341,8 @@ export interface ManagedExchangeFileComposition {
   /** This party's receive-side lock-in. */
   expectedPayloadColumns?: Array<string>;
   /** This party's consent to its own outbound payload set. Absent for a party
-   * that records none -- every side but the acceptor (see
-   * {@link ../bench/manageOfferModel.ts}). */
+   * that records none -- every side but the acceptor, whose record the bench's
+   * deposit builder derives at composition. */
   outboundPayloadConsent?: OutboundPayloadConsent;
 }
 

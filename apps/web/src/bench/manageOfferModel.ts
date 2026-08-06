@@ -218,8 +218,10 @@ export interface ManagedDepositInputs {
  * this party's document from `documentParts` here rather than accepting a
  * pre-composed one: the record's `side` and the document's side-dependent content
  * (the acceptor's `outboundPayloadConsent`) are then read from a single stated
- * side, so a record whose side disagrees with the document it stores has no
- * representation at a call site.
+ * side, so no deposit built here can state divergent sides. The bound is this
+ * builder's callers: a record reconstructed from an imported artifact
+ * (`managedExchangeImport`) carries the artifact's own side and document
+ * verbatim, so its coherence rests on the artifact, not on this builder.
  *
  * The label is carried verbatim -- its cap is enforced by the record schema at
  * the store write ({@link buildManagedExchangeRecord}), with
