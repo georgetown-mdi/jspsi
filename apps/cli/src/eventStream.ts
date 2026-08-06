@@ -6,7 +6,6 @@ import {
   UsageError,
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
-  sanitizeForDisplay,
 } from "@psilink/core";
 import type { ExchangeStageDefinition } from "@psilink/core";
 
@@ -205,12 +204,14 @@ export function buildStagesEvent(
     v: EVENT_STREAM_VERSION,
     type: "stages",
     // A stage label derives from linkage-key names the PARTNER may have authored,
-    // so sanitize it exactly as protocol.ts does before a label reaches stderr.
-    // The id is this party's own constant vocabulary from describeExchangeStages,
-    // but it is echoed on the wire in the same format, so sanitize it uniformly.
+    // so redact and escape it exactly as protocol.ts does before a label reaches
+    // stderr; leaving fd 3 on the escape alone would make the persisted route the
+    // weaker of the two. The id is this party's own constant vocabulary from
+    // describeExchangeStages, but it is echoed on the wire in the same format, so
+    // it takes the same pass uniformly.
     stages: stages.map(({ id, label }) => ({
-      id: sanitizeForDisplay(id),
-      label: sanitizeForDisplay(label),
+      id: redactAndSanitizeForDisplay(id),
+      label: redactAndSanitizeForDisplay(label),
     })),
   };
 }
@@ -220,8 +221,8 @@ export function buildStageEvent(id: string, label: string): StageEvent {
   return {
     v: EVENT_STREAM_VERSION,
     type: "stage",
-    id: sanitizeForDisplay(id),
-    label: sanitizeForDisplay(label),
+    id: redactAndSanitizeForDisplay(id),
+    label: redactAndSanitizeForDisplay(label),
   };
 }
 
@@ -243,9 +244,9 @@ export function buildStageEndEvent(
   return {
     v: EVENT_STREAM_VERSION,
     type: "stageEnd",
-    // The id echoes a partner-authorable stage identifier, sanitized exactly as
-    // the stage event's id is.
-    id: sanitizeForDisplay(id),
+    // The id echoes a partner-authorable stage identifier, taking the same pass
+    // as the stage event's id.
+    id: redactAndSanitizeForDisplay(id),
     durationMs: toCount(durationMs),
   };
 }
@@ -264,8 +265,9 @@ export function buildStageEndEvent(
  * Sized to admit that warning with every fragment at its own cap and escaped a
  * second time here (a second pass doubles an already-doubled backslash), rather
  * than to the length the copy happens to have. What holds the size is the check
- * that renders the divergence warning with all four fragments flooded and fails
- * unless its explanation and its re-pin instruction both survive.
+ * that renders the divergence warning with all four fragments flooded -- both
+ * parties' key types and both fingerprints -- and fails unless its explanation
+ * and its re-pin instruction both survive.
  */
 const WARNING_MESSAGE_MAX_LENGTH = 4096;
 

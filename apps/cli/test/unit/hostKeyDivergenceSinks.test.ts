@@ -50,8 +50,11 @@ const EXPLANATION = /interception/;
 const INSTRUCTION = "re-pin it on both sides";
 
 /** The real divergence message for a partner advertising `partner`. */
-function divergence(partner: PresentedHostKey): string {
-  const msg = reconcileHostKeyFingerprints(LOCAL_KEY, partner);
+function divergence(
+  partner: PresentedHostKey,
+  local: PresentedHostKey = LOCAL_KEY,
+): string {
+  const msg = reconcileHostKeyFingerprints(local, partner);
   expect(msg).toBeDefined();
   return msg!;
 }
@@ -144,12 +147,19 @@ test("a benign divergence reaches the event stream whole, not truncated", () => 
   // per-value default cuts this warning mid-explanation, taking the instruction
   // an appliance supervisor that discards stderr has nothing else to read. The
   // fragments are flooded to their own display cap here, so the size is held by
-  // this assertion rather than by the copy's current length.
+  // this assertion rather than by the copy's current length. All FOUR the
+  // composition interpolates are flooded, both parties' key types and both
+  // fingerprints, which is the worst case the cap has to admit; the two sides
+  // differ so the reconciliation still finds a divergence to warn about.
   const flooded: PresentedHostKey = {
     fingerprint: "‮".repeat(100),
     keyType: "‮".repeat(64),
   };
-  const message = warnToEventStream(divergence(flooded));
+  const floodedLocal: PresentedHostKey = {
+    fingerprint: "‭".repeat(100),
+    keyType: "‭".repeat(64),
+  };
+  const message = warnToEventStream(divergence(flooded, floodedLocal));
   expect(message).toMatch(EXPLANATION);
   // The composition runs to its own last byte. Each fragment still truncates at
   // its own cap -- that bound is untouched -- so what is asserted is that the
