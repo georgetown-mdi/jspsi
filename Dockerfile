@@ -56,7 +56,16 @@ COPY apps/web/public apps/web/public/
 # bundle; the runtime stage exports the same ARG so the server gate matches it.
 ARG VITE_DEPLOYMENT_PROFILE
 ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
-RUN npm run build -w apps/web
+# The release version reaches the client bundle the same way, so the `docker run`
+# lines the console's partner accept kit prints name this image rather than the
+# floating tag. It is read from the apps/cli manifest copied above -- the
+# canonical release version this image is tagged with (docs/RELEASES.md) --
+# rather than taken as a build argument, which could disagree with it. Scoped to
+# this RUN because it is a build input for the client bundle, not runtime
+# configuration like the profile above; a tree carrying no release version
+# yields a value the kit falls back from (apps/web/src/bench/acceptKit.ts).
+RUN VITE_PSILINK_VERSION="$(node -p "require('/build/apps/cli/package.json').version")" \
+  npm run build -w apps/web
 
 # Rebuild node_modules production-only (npm ci empties it first): the identical
 # lockfile-exact resolution minus devDependencies, ready to ship as-is.

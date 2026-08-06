@@ -40,6 +40,7 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
   isConsoleBuild: () => true,
+  psilinkVersion: () => undefined,
 }));
 
 // The console disables the browser transport; nothing here drives it.

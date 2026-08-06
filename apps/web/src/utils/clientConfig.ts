@@ -19,6 +19,7 @@ interface Env {
   PEERJS_DEBUG_LEVEL: number;
   LOG_LEVEL: keyof LogLevel;
   DEPLOYMENT_PROFILE: DeploymentProfile;
+  PSILINK_VERSION: string;
 }
 
 const schema: JSONSchemaType<Env> = {
@@ -50,6 +51,18 @@ const schema: JSONSchemaType<Env> = {
       type: "string",
       enum: ["hosted", "console"],
       default: "hosted",
+    },
+    PSILINK_VERSION: {
+      // The release version of the image this build ships in, baked in from
+      // the canonical `apps/cli/package.json` version by the image build (see
+      // the Dockerfile and docs/RELEASES.md). Empty in the continuously
+      // deployed hosted build and in any web build outside the image build,
+      // which pass no value. A docker build of the repo bakes whatever version
+      // the manifest holds -- on a non-release tree, the last published
+      // release -- so a value here names the release the manifest carried at
+      // build time, not a promise that this build is that release.
+      type: "string",
+      default: "",
     },
   },
 };
@@ -86,6 +99,14 @@ export function deploymentProfile(): DeploymentProfile {
  * `console`), whose server runs a filedrop exchange rather than the browser. */
 export function isConsoleBuild(): boolean {
   return deploymentProfile() === "console";
+}
+
+/** The release version of the image this build ships in, or undefined when it
+ * carries none. A released console image is the one build that carries one; it
+ * is what the partner accept kit names its `docker run` image by, so the
+ * partner runs the version that minted their invitation. */
+export function psilinkVersion(): string | undefined {
+  return config.PSILINK_VERSION === "" ? undefined : config.PSILINK_VERSION;
 }
 
 export { ConfigManager };
