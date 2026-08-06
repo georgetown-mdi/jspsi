@@ -49,6 +49,11 @@ import {
   withSlowOperationWarning,
 } from "./sftpLivenessGuard";
 import { SFTP_TCP_KEEPALIVE_DELAY_MS, SftpHeartbeat } from "./sftpHeartbeat";
+import {
+  constrainKexToPlatformCapabilities,
+  explainKexNegotiationFailure,
+  unavailableKexPrimitives,
+} from "./sftpKexCapability";
 
 // A single entry as ssh2's SFTPWrapper.readdir reports it. Only the fields the
 // transport consumes are typed; ssh2 supplies more (longname, the rest of
@@ -2487,10 +2492,24 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // while already holding (the lock is not reentrant, so neither may re-enter
   // through connect()).
   private async connectLocked(
-    options: Record<string, unknown>,
+    requestedOptions: Record<string, unknown>,
     held: HeldSessionTransition,
   ): Promise<void> {
     this.assertTransitionHeld("ssh2-sftp-client's connect()", held);
+    // Withhold the key-exchange algorithms this process cannot perform, at the
+    // one point every dial passes through -- the first connect, core's host-key
+    // probe, and each recovery re-dial. Constraining here rather than in the
+    // public connect() is what covers the re-dial, which enters with the retained
+    // options and never through connect(); re-constraining options already
+    // constrained is a no-op (see constrainKexToPlatformCapabilities). On a host
+    // that can perform everything ssh2 offers, this returns its argument
+    // unchanged and no dial is altered.
+    const unavailablePrimitives = unavailableKexPrimitives();
+    const options = constrainKexToPlatformCapabilities(
+      requestedOptions,
+      unavailablePrimitives,
+      this.log,
+    );
     // Read before the dial, because the dial is what makes it live: whether a
     // generation this dial ends was ended by the dial or was already gone when it
     // started is the difference between this side replacing a session and the
@@ -2523,35 +2542,46 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // the metrics summary; the flag ties the count to the retry loop's own
     // re-issue decision without a separate counter.
     let connectAttempted = false;
-    await retryPromise(
-      () => {
-        if (connectAttempted) this.ledger.countConnectRetry();
-        connectAttempted = true;
-        return this.client.connect(connectOptions);
-      },
-      maxReconnects,
-      1_000,
-      (err) => {
-        // The teardown latch, read BETWEEN attempts for the same reason
-        // runTransition reads it before a transition's body: once end() has
-        // latched, nothing may establish a session the teardown will not close. It
-        // is what stops the abandoning teardown's forced destroy from being undone
-        // by this loop -- the destroy cuts the attempt short with an unexpected
-        // close, and a re-attempt mints a FRESH socket, keeping a torn-down
-        // connection and a process that exits by drain alive for the remainder of
-        // the dial budget (measured: a re-dial 1 s after the destroy, on a socket
-        // reading writable again).
-        if (this.closing) return false;
-        // Host-key verification failure is terminal: the server is actively
-        // presenting a different or unknown key, so retrying the key exchange
-        // against the same server changes nothing. ssh2's "Host denied
-        // (verification failed)" is wrapped by ssh2-sftp-client as a new Error
-        // with the same message (prefixed with the listener context); match on the
-        // stable message fragment from kex.js rather than a code that is not set
-        // on the error object.
-        return !(err instanceof Error && err.message.includes("Host denied"));
-      },
-    );
+    try {
+      await retryPromise(
+        () => {
+          if (connectAttempted) this.ledger.countConnectRetry();
+          connectAttempted = true;
+          return this.client.connect(connectOptions);
+        },
+        maxReconnects,
+        1_000,
+        (err) => {
+          // The teardown latch, read BETWEEN attempts for the same reason
+          // runTransition reads it before a transition's body: once end() has
+          // latched, nothing may establish a session the teardown will not close.
+          // It is what stops the abandoning teardown's forced destroy from being
+          // undone by this loop -- the destroy cuts the attempt short with an
+          // unexpected close, and a re-attempt mints a FRESH socket, keeping a
+          // torn-down connection and a process that exits by drain alive for the
+          // remainder of the dial budget (measured: a re-dial 1 s after the
+          // destroy, on a socket reading writable again).
+          if (this.closing) return false;
+          // Host-key verification failure is terminal: the server is actively
+          // presenting a different or unknown key, so retrying the key exchange
+          // against the same server changes nothing. ssh2's "Host denied
+          // (verification failed)" is wrapped by ssh2-sftp-client as a new Error
+          // with the same message (prefixed with the listener context); match on
+          // the stable message fragment from kex.js rather than a code that is not
+          // set on the error object.
+          return !(err instanceof Error && err.message.includes("Host denied"));
+        },
+      );
+    } catch (err) {
+      // A key-exchange negotiation that found nothing in common is re-raised
+      // naming the platform capability that withheld the algorithms, so the
+      // operator is not left reading ssh2's bare "no matching key exchange
+      // algorithm" as a server misconfiguration. Outside the retry loop rather
+      // than inside it, so the predicate above still classifies ssh2's own error
+      // text; on a host that can perform everything ssh2 offers, and for every
+      // other failure, the rejection passes through untouched.
+      throw explainKexNegotiationFailure(err, unavailablePrimitives);
+    }
 
     // A dial reaching here with a generation still live ended that generation,
     // and the session reading taken before the dial is what says how. A session
