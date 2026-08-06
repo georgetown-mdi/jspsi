@@ -218,17 +218,31 @@ and they mean different things:
   once the other side has read it. Without delete rights the folder fills up
   and a second exchange will not start.
 
-When the volume is what refused, the operation is not named: either the account
-can open the folder but not create files in it, or the share is out of space.
-Check the free space first, since that is the one you can see.
+For the three checks above, ask for full change rights on the folder -- item 2
+of the [IT request](#what-to-ask-your-it-department-for).
 
-Either way, ask for full change rights on the folder -- item 2 of the
-[IT request](#what-to-ask-your-it-department-for).
+When the volume is what refused, the operation is not named, and there are three
+things it can be:
 
-Mount options such as `file_mode` and `dir_mode` cannot fix any of these. They
+- **The volume was created without `uid=1000,gid=1000`.** psilink runs in the
+  container as an account numbered 1000, and a Windows file server serves no
+  ownership the mount can read, so a volume made without those options presents
+  the share as belonging to someone else and refuses every write. Re-run the
+  setup script: it re-creates the volume with the options, without asking. A
+  volume made by hand, or by an earlier copy of the script, is the one that has
+  this gap; [Doing it by hand](#doing-it-by-hand) shows the full command.
+- **The share is out of space.** Check this first, since it is the one you can
+  see.
+- **The account can open the folder but not create files in it.** Item 2 of the
+  [IT request](#what-to-ask-your-it-department-for) again.
+
+Mount options such as `file_mode` and `dir_mode` cannot fix a share whose own
+permissions refuse you -- the three named checks, and the last cause above. They
 only change how permissions **look** inside the container; the server still
-decides what is allowed. Neither does `-Dialect`: if the share was reached, the
-dialect is not what is refusing you.
+decides what is allowed. `uid` and `gid` are the exception, and only for the
+first cause: they decide which account the mount is presented to, which is a
+question the server does not answer. Neither does `-Dialect` fix any of this: if
+the share was reached, the dialect is not what is refusing you.
 
 ## The volume will not mount
 

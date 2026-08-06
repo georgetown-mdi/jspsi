@@ -152,13 +152,21 @@ The single published image `vdorie/psi-link` runs in either of two roles dependi
 
 Both roles run unprivileged, as the image's `node` account: **uid 1000, gid 1000**. Nothing in an exchange holds the privilege to write outside what you mounted, and the program files inside the container belong to `root`, so the running process cannot rewrite its own code.
 
-What this asks of you is bind-mount ownership. A bind mount keeps its host directory's ownership inside the container, so every directory the container writes -- `/work` for the CLI, and the data, input, and rendezvous mounts for the console appliance -- has to be writable by uid 1000, and every file it reads has to be readable by it.
+What this asks of you is bind-mount ownership. A bind mount keeps its host directory's ownership inside the container, so every directory the container writes -- `/work` for the CLI, and the data, input, and rendezvous mounts for the console appliance -- has to be writable by uid 1000, and every file it reads has to be readable by it. Which case below applies is decided by the container engine, not by the operating system: Docker Desktop is available for Linux too.
 
-- **Docker Desktop (macOS and Windows)** presents a bind mount to whichever user the container runs as, so there is nothing to do: the commands in this document and in the quickstart work as written.
-- **Linux** passes the host directory's real ownership through. An account that is itself uid 1000 -- the usual case on a single-user workstation -- already works. Otherwise hand the working directory to that uid once, before the first run:
+- **Docker Desktop**, on macOS, Windows, or Linux, presents a bind mount to whichever user the container runs as, so there is nothing to do: the commands in this document and in the quickstart work as written.
+- **Docker Engine on Linux** passes the host directory's real ownership through. A directory created by an account that is itself uid 1000 -- the usual case on a single-user workstation -- is already owned by the account the container runs as. Otherwise hand the working directory to that uid once, before the first run:
 
   ```sh
-  chown 1000:1000 /host/work
+  sudo chown 1000:1000 /host/work
+  ```
+
+  The `sudo` is load-bearing: giving a file away to another uid is privileged, and without it the command answers `Operation not permitted`.
+
+  **If you have run this image before**, the directory needs more than that. Earlier images ran as root, so any `psilink.yaml`, `.psilink.key`, or results file already in the directory belongs to root at mode `0600`: unreadable to uid 1000 whatever the directory around them says, and untouched by a chown of the directory alone. Hand the contents over with it:
+
+  ```sh
+  sudo chown -R 1000:1000 /host/work
   ```
 
   Watch the read side too: a working directory or input file that no other account can read (mode `0700`, `0600`) is unreadable inside the container even when it is yours on the host.
@@ -172,6 +180,14 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work vdorie/psi-link excha
 ```
 
 Two things come with that choice. The container then runs as an account the image knows nothing about, so the per-user signing identity -- what `psilink fingerprint` creates, under the home directory rather than the working directory -- has nowhere it can be written; add `--env HOME=/work` to put it in the mounted directory, where it also outlives `--rm`. And the console appliance writes container-internal state belonging to uid 1000, so `serve` wants the `chown` route rather than this one.
+
+**What a mis-owned mount looks like.** The failure names `EACCES` and the path it could not write, and where it lands depends on the command:
+
+- `psilink exchange` stops up front, at the key-file preflight, with `keyFilePath parent directory /work is not writable: EACCES: permission denied, ...`. It stops there deliberately, before any key exchange, so nothing is half-done.
+- `psilink accept` has no such preflight: the terms are displayed and confirmed, and the write that follows fails with `EACCES: permission denied, open '/work/psilink.yaml.tmp.1'` and exit 69. Nothing is spent -- the invitation is still good -- but the ownership has to be fixed and `accept` run again.
+- An existing `psilink.yaml` that the container cannot read fails earlier still, at config load: `config file /work/psilink.yaml could not be read: EACCES: permission denied, open '/work/psilink.yaml'`. That is the upgrade case above -- the file is root's, from a previous run -- and the recursive `chown` is what clears it.
+
+In all three the remedy is ownership, not mode: a `chmod` on a directory or file the container's account does not own changes nothing it can reach.
 
 ### Running the CLI
 
