@@ -3,6 +3,8 @@
 // an operator reads. The two are built from one record set so a check cannot be
 // reported one way to a script and another way to a person.
 
+import { redactPrivateKeyMaterial } from "@psilink/core";
+
 /**
  * Schema version of the `--json` verdict. A consumer reads this field first and
  * refuses a version it does not know; every additive field is compatible within
@@ -173,9 +175,22 @@ export function verdictJson(report: DoctorReport): string {
 const MAX_DETAIL_LINES = 24;
 const MAX_DETAIL_CHARS = 2000;
 
-/** @internal exported for testing */
+/**
+ * Redaction runs HERE, on the whole detail, rather than on the lines this
+ * returns: a private-key block arrives from the tool in its canonical multi-line
+ * form, so splitting first leaves every line but the `BEGIN` one carrying no
+ * marker for a later per-line pass to match, and the body renders verbatim. The
+ * rendering's sink is the CLI's plain-line writer, which bypasses core's
+ * prefixer and so has no per-argument strip behind it, making this the only
+ * place a pass runs on the way to a `--log-file`. Redacting before the slice is
+ * safe for the budget because the replacement never lengthens its input, and
+ * failing closed past a dangling `BEGIN` costs only more tool output -- the
+ * check's own MEANING and ACTION text is composed as separate lines.
+ *
+ * @internal exported for testing
+ */
 export function clampDetail(detail: string): string[] {
-  const truncated = detail.slice(0, MAX_DETAIL_CHARS);
+  const truncated = redactPrivateKeyMaterial(detail).slice(0, MAX_DETAIL_CHARS);
   const lines = truncated.split("\n").filter((line) => line.trim().length > 0);
   const kept = lines.slice(0, MAX_DETAIL_LINES);
   if (kept.length < lines.length || truncated.length < detail.length)
