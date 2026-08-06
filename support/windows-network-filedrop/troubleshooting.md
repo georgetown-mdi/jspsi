@@ -40,9 +40,13 @@ genuinely differ. Sending output to a file there sends the questions with it,
 leaving you typing at a blank screen with nothing to say what is being asked.
 Copy out of the window instead.
 
-The script runs in four numbered parts, and the checks inside part 3 are
-numbered separately, steps 1 to 6. A "step" on this page is always one of those
-checks.
+Both scripts run in four numbered parts. What runs inside part 3 differs. The
+PowerShell script runs the checks that ship inside the psilink image, which name
+what they looked at rather than numbering it: every line begins `OK:`, `WARN:`,
+`FAIL:` or `SKIP:`, and a `FAIL:` carries its own MEANING and ACTION. The
+Command Prompt script carries its own copy of those checks, numbered steps 1 to
+6. The sections below name both, and a "step" on this page is always one of the
+Command Prompt script's.
 
 Where the two shells need different commands, both are given: the PowerShell one
 first, the Command Prompt one after, matching
@@ -99,7 +103,8 @@ Use an account whose password has neither -- it is item 1 of the
 
 ## The container cannot find the server
 
-Step 1 fails.
+The name check fails -- `FAIL: cannot resolve 'fileserver'`, or step 1 in the
+Command Prompt script.
 
 The hidden Linux computer looks up server names on its own, and does not know
 your agency's shortcuts. A short name like `fileserver` can work perfectly in
@@ -128,7 +133,9 @@ mount it this way at all. See [Synced folders](#synced-folders).
 
 ## The container cannot reach the server
 
-Step 2 fails, or the checks report that the connection stopped responding.
+The port check fails -- `FAIL: cannot reach fileserver:445`, or step 2 in the
+Command Prompt script -- or the checks report that the connection stopped
+responding.
 
 Remember that the file server sees the hidden Linux computer as a different
 machine. Three things commonly stop *it* while File Explorer keeps working:
@@ -189,17 +196,19 @@ agency grant, and the script says so and carries on.
 
 ## The share opens but the folder does not
 
-`NT_STATUS_ACCESS_DENIED` at step 5, after step 4 succeeded. Access to a share
-does not imply access to every folder inside it. Ask for rights on the
+`NT_STATUS_ACCESS_DENIED` on the folder inside the share, after the share itself
+opened -- steps 5 and 4 in the Command Prompt script. Access to a share does not
+imply access to every folder inside it. Ask for rights on the
 file-drop folder specifically -- item 2 of the
 [IT request](#what-to-ask-your-it-department-for).
 
 ## The folder cannot be written to
 
-Step 6 fails, or the volume mounts and then refuses the write.
+A write, rename, or delete check fails -- step 6 in the Command Prompt script --
+or the volume mounts and then refuses the write.
 
-When step 6 is what failed, the message names which of the three operations
-failed, and they mean different things:
+When it is one of those three checks, the message names which operation failed,
+and they mean different things:
 
 - **Could not create a file.** The account has read but not write access.
 - **Created a file but could not rename it.** Create rights without the delete
@@ -248,7 +257,7 @@ The script reports that a file it left in the folder is not visible through the
 volume.
 
 The checks reach the folder one way and the volume mounts it another. This is
-the only step that compares the two. When they disagree, the server, share or
+the only check that compares the two. When they disagree, the server, share or
 subfolder is wrong somewhere -- most often a DFS path.
 
 [Read the real path from Windows](#reading-the-real-path-from-windows) and pass
@@ -275,8 +284,9 @@ run or another operator left that one, and it settles nothing about this folder.
 
 The script prints its own MEANING and ACTION for every code in this table, so
 the table is for looking one up afterwards rather than for diagnosing. If your
-code is not here, the script printed the server's own message on screen just
-above the code. That text, plus what you were doing, is what to put in a ticket.
+code is not here, the server's own message is on screen with it, indented under
+the line naming the code. That text, plus what you were doing, is what to put in
+a ticket.
 
 ## What to ask your IT department for
 

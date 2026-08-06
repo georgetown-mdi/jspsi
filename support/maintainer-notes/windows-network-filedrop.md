@@ -23,8 +23,9 @@ folder and reading the DFS tab.
 
 - `Setup-PsilinkFileDrop.ps1` -- takes the folder path as the user sees it in
   Explorer plus network credentials, resolves the server, share and subfolder,
-  asks the operator to confirm them, tests the share from inside a container,
-  creates the volume, tests it, and prints the `docker run` command.
+  asks the operator to confirm them, runs `psilink doctor probe` against the
+  share from inside a container, creates the volume, runs `psilink doctor mount`
+  over it, and prints the `docker run` command.
 - `Start-Psilink.ps1` -- the launcher: the same ground plus starting the console
   and opening it. It dot-sources the setup script with `-LoadFunctionsOnly` for
   the resolution rather than carrying a second copy, which is why the two travel
@@ -40,17 +41,34 @@ folder and reading the DFS tab.
 The Command Prompt script and its three container-side shell scripts have their
 own notes, [`cmd_windows-network-filedrop.md`](cmd_windows-network-filedrop.md).
 
-The container-side diagnostic lives only as a here-string inside the script. A
-second, hand-maintained copy of it used to sit beside the script for reading;
-it drifted -- it read `SMB_VERS` where the script exported `SMB_DIALECT`, so
-running it with the script's own environment silently ignored the dialect --
-and was removed rather than resynchronised. Anything that needs a standalone
-copy should generate it from the here-string and fail on drift.
+The PowerShell script carries no container-side diagnostic of its own; the
+Command Prompt one carries three shell scripts, and its notes cover them. The
+diagnostic used to live as a here-string inside `Setup-PsilinkFileDrop.ps1`, and
+a second, hand-maintained copy of it used to sit beside the script for reading;
+that copy drifted -- it read `SMB_VERS` where the script exported `SMB_DIALECT`,
+so running it with the script's own environment silently ignored the dialect --
+and was removed rather than resynchronised. The lesson outlived both: a second
+copy of a diagnostic is a copy that drifts, which is the argument that eventually
+moved the whole battery into the image.
 
 ## State
 
-**The container half is verified against a real Samba server**, driven through
-the script's own here-string rather than a paraphrase of it. Confirmed: the
+**The PowerShell script's own container-side diagnostics are gone, 5 August
+2026.** Both here-strings -- the smbclient probe and the volume check -- were
+deleted, and the script runs the image's `psilink doctor probe` and
+`psilink doctor mount` instead, branching on their exit codes (0, 78, 69) rather
+than parsing anything. Everything recorded below about those here-strings is the
+record of code that no longer exists in this script. The behaviour each finding
+produced is carried by the doctor batteries in `apps/cli/src/doctor/`, whose own
+CI leg drives them against a real Samba server and a real CIFS mount on every
+change to them -- the `smb-doctor` job in
+`.github/workflows/cli_build_and_test.yaml`, which is where that coverage now
+lives. The Command Prompt script still carries its own copy of both checks, and
+its state is recorded in `cmd_windows-network-filedrop.md`.
+
+**The container half was verified against a real Samba server**, driven through
+the here-string the script then carried rather than a paraphrase of it.
+Confirmed: the
 happy path end to end; `NT_STATUS_LOGON_FAILURE` on a wrong password;
 `BAD_NETWORK_NAME` on a wrong share; a share root that refuses to list while
 the target subfolder works, which now continues rather than aborting; recovery
@@ -61,8 +79,9 @@ a missing environment variable; a dialect the server refuses, reported as a
 negotiation failure rather than as an NTLM policy problem; and the free-space
 warning on a share reporting zero blocks available.
 
-Four defects found by review and fixed against that server, each reproduced
-before and after:
+Four defects were found by review and fixed against that server, each reproduced
+before and after. Each is carried by the doctor battery that replaced the
+here-string, which is the reason they are still worth reading:
 
 - **An empty status was read as success.** `status_of` scrapes for an
   `NT_STATUS_` token, and a transport that dies before the server answers
@@ -80,7 +99,10 @@ before and after:
   and takes `EEXIST` from the server. Note the residue: both map to an SMB
   create with `FILE_CREATE` disposition, so `mkdir` is a proxy for the
   `O_CREAT|O_EXCL` that `createExclusive` actually uses, and a share
-  arbitrating the two differently still slips through.
+  arbitrating the two differently still slips through. That residue is gone from
+  this script's path, because `doctor mount` issues the `O_EXCL` open itself
+  rather than a proxy for it; it stands for the Command Prompt copy, which still
+  uses `mkdir`.
 - **The stale sweep cleared names the probe never wrote.** It listed
   `psilink-write-probe.tmp`; the write stage created `psilink-probe-$$.tmp`.
   Seeding `psilink-probe-9.tmp.renamed` on a fully writable share produced
@@ -99,12 +121,12 @@ maximum protocol only and the client minimum stays at `SMB2_02`. Adding
 `--option="client min protocol=NT1"` negotiates successfully. The option name
 takes spaces, not underscores.
 
-**The volume half is verified over a real CIFS mount**: the marker file the
+**The volume half was verified over a real CIFS mount**: the marker file the
 container checks leave behind is visible through a volume mounting the same
 directory and absent through one mounting a different directory, which is what
 catches a wrong server, share or subfolder before an exchange does. Exclusive
 create is honoured, re-measured through `mkdir` after the `set -C` finding
-below: the original reading here was taken with a test that never issued a
+above: the original reading here was taken with a test that never issued a
 syscall, so it confirmed the shell rather than the share and would have read
 the same against a share that honours nothing. A POSIX rename onto an existing
 file succeeds -- note that smbclient's own `rename` refuses that,
@@ -184,15 +206,21 @@ question of docker alone, for the same reason.
 
 Unverified on Windows since that pass, the whole delta: the branch that
 reports a volume which mounted and then refused the write, split out of the
-"could not be mounted" verdict it used to share. It is PowerShell that the
-Windows run never executed. Everything else changed since is either
-container-side -- the probe and the volume-check body, verified against a real
-Samba server and a real CIFS mount -- or the CRLF strip, which that run made
-itself. The branch is reached only on a path that has already failed, so the
-cost of it being wrong is a wrong message rather than a wrong outcome, but it
-has not been run there and the next Windows pass should start with it.
+"could not be mounted" verdict it used to share; and, since 5 August 2026, both
+`docker run` calls that used to carry a here-string -- the argument vectors that
+invoke `doctor probe` and `doctor mount`, the exit codes the script branches on,
+and the collected-then-printed output that replaced the streamed probe. It is
+PowerShell that the Windows run never executed. Everything else changed since is
+either container-side -- the checks themselves, now the image's and covered by
+its own CI leg -- or the CRLF strip, which that run made itself and which went
+with the here-strings. The write-refusal branch is reached only on a path that
+has already failed, so the cost of it being wrong is a wrong message rather than
+a wrong outcome; the doctor calls are on the happy path, so a wrong argument
+vector there stops every run. The next Windows pass should start with a working
+share, which is what exercises them.
 
-A later pass ran the script as it now stands, from Windows against the same
+A later pass ran the script in the form it had on 30 July 2026, from Windows
+against the same
 kind of rig, with no options and answering its prompts: a full setup ending in
 a mounted volume, including the message changes made since `7396cc73`. It does
 not reach the branch above -- everything worked, and that branch is only
@@ -389,9 +417,13 @@ print the server's share list and step 5 the drop folder's listing. The runbook
 asks the operator to send the run to whoever is helping them, which for a
 supported deployment is us -- and we are not a party to their
 exchange, so an agency's share names and the filenames in a record-linkage drop
-folder are things we should not end up holding. Step 3 now reports only whether
-the named share was among those offered, and step 5 an entry count. Nothing
-downstream read either: `report_space` parses `LISTING`, not what was printed.
+folder are things we should not end up holding. Step 3 was cut to whether the
+named share was among those offered, and step 5 to an entry count. Nothing
+downstream read either: `report_space` parsed `LISTING`, not what was printed.
+The doctor's `authentication` and `subdirectory` checks report the same two
+derived facts and no listing, and its JSON verdict withholds the tool output
+behind a failure for the same reason -- so this decision survived the move into
+the image rather than needing to be retaken.
 
 Reducing at source rather than warning the operator to review the log is
 deliberate. A warning cannot protect the recipient, since it leaves the decision
@@ -578,11 +610,13 @@ Everything else runs on one machine with Docker and no special rights:
   calling scope; the script has no `-Password` or `-Credential` parameter.
   `-SkipConfirm` suppresses the confirmation prompt but not the credential
   ones.
-- **The container checks on their own.** Extract the `$probe` here-string and
-  run it in `vdorie/psi-link:latest` under `--entrypoint sh` with `SMB_SERVER`,
-  `SMB_SHARE`, `SMB_PATH`, `SMB_USER`, `SMB_PASS`, `SMB_DOMAIN`, `SMB_DIALECT`,
-  `SMB_MARKER` and `SMB_TOKEN` set. That is how the container half above was
-  verified.
+- **The container checks on their own.** `docker run --rm --env SMB_SERVER ...
+  vdorie/psi-link:latest doctor probe`, with `SMB_SERVER`, `SMB_SHARE`,
+  `SMB_PATH`, `SMB_USER`, `SMB_PASS`, `SMB_DOMAIN`, `SMB_DIALECT`, `SMB_MARKER`
+  and `SMB_TOKEN` set: the same environment the script exports, and the same
+  command it runs. `doctor mount /rz` over the volume is the other half. The
+  here-string extraction this entry used to describe is what the container half
+  above was verified through, and there is no longer a here-string to extract.
 
 ## Field notes: the DFS mock attempt, 28 July 2026
 
