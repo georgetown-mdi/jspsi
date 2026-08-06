@@ -201,10 +201,10 @@ export async function establishHostKeyTrust(
   // closing. A genuine connect failure (unreachable host) propagates as-is.
   const presented = await deps.probe(connection, verbosity);
 
-  // presented.keyType is decoded straight from the server-controlled key blob,
-  // so escape it before it reaches the operator's terminal/log (the same
-  // treatment fileSyncConnection's verifiers give keyTypeFromBlob). The
-  // fingerprint is base64.
+  // presented.keyType is the server's choice within the bound core's
+  // keyTypeFromBlob applies, so escape it before it reaches the operator's
+  // terminal/log (the same treatment fileSyncConnection's verifiers give it).
+  // The fingerprint is base64.
   log.warn(
     `The authenticity of host ${hostDisplay} cannot be established: no ` +
       `host_key_fingerprint is pinned. It presented a ` +

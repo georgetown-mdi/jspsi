@@ -141,8 +141,8 @@ test("buildConnectOptions omits credentials when includeCredentials is false and
 });
 
 // A raw OpenSSH host-key blob: a uint32 length prefix, the key-type string, and
-// the key bytes. The type is decoded verbatim out of the blob the server sent,
-// so it is server-controlled text with no bound on its bytes or its length.
+// the key bytes. Nothing bounds what a server puts in the type field, so it is
+// written here exactly as sent and keyTypeFromBlob decides what is composed.
 function hostKeyBlob(keyType: string): Buffer<ArrayBuffer> {
   const type = Buffer.from(keyType, "utf8");
   const header = Buffer.alloc(4);
@@ -238,13 +238,11 @@ const renderNoPinRefusal = (
 ): Promise<string> =>
   renderRefusal({ channel: "sftp", server: { host } }, keyType);
 
-// The three shapes a server can choose its key type in. It is decoded from the
-// blob under no allowlist and no length bound, so each is free: a benign type, a
-// type long enough to exhaust a display budget on its own, and a type carrying a
-// PEM BEGIN marker (the shape the composition-site redaction exists for, whose
-// fail-closed reach runs to the end of the link it lands on). Under the
-// provenance partition none of them shares a link with first-party text, so none
-// can reach what the operator has to act on.
+// The three shapes a server can put in the type field: a benign type, one long
+// enough to have exhausted a display budget on its own, and one carrying a PEM
+// BEGIN marker. keyTypeFromBlob replaces the latter two before they are
+// composed, and under the provenance partition none of the three shares a link
+// with first-party text, so none can reach what the operator has to act on.
 const SERVER_CHOSEN_KEY_TYPES: Array<[string, string]> = [
   ["a benign key type", "ssh-ed25519"],
   ["an over-length key type", "X".repeat(4096)],
@@ -321,9 +319,11 @@ test("a partner-supplied host at its schema's full length spends only its own li
 // each link truncates on its own budget, and the whole rendered output stays
 // inside the renderer's depth bound times that budget. A non-empty pin set
 // selects the mismatch verifier, so the two branches cannot be flooded by one
-// config and each floods the fragments IT composes -- the partner-chosen host
-// and the server-chosen key type on the no-pin branch, the operator-chosen pin
-// set and the key type on the mismatch branch.
+// config and each floods the fragments IT composes -- the partner-chosen host on
+// the no-pin branch, the operator-chosen pin set on the mismatch branch. The
+// server-chosen key type is flooded too, though keyTypeFromBlob bounds it before
+// composition; what a flood of it must not do is disturb the fragments that are
+// still unbounded here.
 const FLOODED_REFUSALS: Array<[string, () => Promise<string>, string]> = [
   [
     "the no-pin refusal",
@@ -454,52 +454,92 @@ test("the refusal's detail links sit ahead of the transport error, inside the de
   expect(rendered).toContain("does not match any of the 2 pinned fingerprints");
 });
 
+// The key type is the one fragment on these refusals that is bounded before it
+// is composed: keyTypeFromBlob returns a type outside its charset or length bound
+// as a placeholder encoding the leading bytes, so what the operator reads is
+// first-party framing whatever the server put in the type field. The whole link
+// is read, so a composition that appended the server's bytes behind the
+// placeholder -- or a widened bound that let them through -- fails here.
+const TYPE_LINK_PREFIX = "presented host key type: ";
+const PLACEHOLDER_TYPE_LINK =
+  /^presented host key type: \(unknown:[0-9a-f]+\)$/;
+
+const typeLinkOf = (rendered: string): string | undefined =>
+  linksOf(rendered).find((link) => link.startsWith(TYPE_LINK_PREFIX));
+
+// A rejected type and the fragments of it no refusal may render: an ANSI/CRLF
+// injection, a whole private key sliced into the type field, and a type inside
+// the charset but one byte past the length bound.
+const REJECTED_KEY_TYPES: Array<[string, string, string[]]> = [
+  ["a control-laden type", "ssh-\x1b[31mevil\r\nINJECTED", ["INJECTED"]],
+  [
+    "a type carrying a sliced private key",
+    "-----BEGIN OPENSSH PRIVATE KEY-----\nc2gtcnNhAAAAAwEAAQ==\nQ1n3QqzB2rN",
+    ["BEGIN OPENSSH", "c2gtcnNhAAAAAwEAAQ", "Q1n3QqzB2rN"],
+  ],
+  [
+    "a conforming type one byte past the length bound",
+    "X".repeat(65),
+    ["XXXXXXXX"],
+  ],
+];
+
+// Each branch composes the type link itself, so both are driven with the same
+// types; the first-party text asserted alongside is the step that branch's
+// operator has to act on.
+const REFUSAL_BRANCHES: Array<
+  [string, (keyType: string) => Promise<string>, string]
+> = [
+  [
+    "the no-pin refusal",
+    renderNoPinRefusal,
+    "set connection.server.host_key_fingerprint to pin it",
+  ],
+  [
+    "the pinned-mismatch refusal",
+    renderMismatch,
+    "which does not match the pinned fingerprint",
+  ],
+];
+
+for (const [branch, render, firstPartyStep] of REFUSAL_BRANCHES) {
+  for (const [label, keyType, fragments] of REJECTED_KEY_TYPES) {
+    test(`${branch} names a placeholder rather than ${label}`, async () => {
+      const rendered = await render(keyType);
+
+      expect(typeLinkOf(rendered)).toMatch(PLACEHOLDER_TYPE_LINK);
+      for (const fragment of fragments)
+        expect(rendered).not.toContain(fragment);
+      expect(rendered).toContain(firstPartyStep);
+    });
+  }
+
+  test(`${branch} names a conforming key type verbatim`, async () => {
+    // A long real-world certificate type. Nothing about a legitimate key type
+    // changes on the way to the operator: the bound only replaces what falls
+    // outside it.
+    const keyType = "ecdsa-sha2-nistp521-cert-v01@openssh.com";
+    const rendered = await render(keyType);
+
+    expect(typeLinkOf(rendered)).toBe(`${TYPE_LINK_PREFIX}${keyType}`);
+    expect(rendered).toContain(firstPartyStep);
+  });
+}
+
 // Redaction at the composition site is a convention over every server- and
 // partner-controlled fragment, kept whether or not the partition already
-// contains the fragment's reach. What it buys the operator is the same either
-// way: no armor from a key sliced into the type ever renders.
-test("a sliced key in the type does not suppress the no-pin refusal", async () => {
+// contains the fragment's reach. The configured host is where a sliced key can
+// still arrive on these refusals -- on the acceptor route it is copied verbatim
+// out of the partner's invitation endpoint -- and no armor of it ever renders.
+test("a sliced key in the configured host does not suppress the no-pin refusal", async () => {
   const rendered = await renderNoPinRefusal(
+    "ssh-ed25519",
     "-----BEGIN OPENSSH PRIVATE KEY-----\nc2gtcnNhAAAAAwEAAQ==\nQ1n3QqzB2rN",
   );
 
   expect(rendered).toContain("[redacted private key]");
   expect(rendered).not.toContain("c2gtcnNhAAAAAwEAAQ==");
   expect(rendered).toContain("It presented fingerprint SHA256:");
-});
-
-test("a host key type carrying a sliced key does not suppress the mismatch detail", async () => {
-  // A key type is length-prefixed bytes, not a token: it can carry line breaks,
-  // and a whole key sliced into it is the shape the redaction exists for. Both
-  // the marker and every line of armor behind it go, and the comparison stays.
-  const rendered = await renderMismatch(
-    "-----BEGIN RSA PRIVATE KEY-----\nc2gtcnNhAAAAAwEAAQ==\nQ1n3QqzB2rN0m8oL7v",
-  );
-  expect(rendered).toContain("[redacted private key]");
-  expect(rendered).not.toContain("c2gtcnNhAAAAAwEAAQ");
-  expect(rendered).not.toContain("Q1n3QqzB2rN0m8oL7v");
-  expect(rendered).toContain("which does not match the pinned fingerprint");
-});
-
-// The separator forms a sliced key can arrive in. A key that reached an error
-// through a folded YAML scalar carries spaces where its line breaks were, and
-// one carried in a single-line JSON scalar may carry no separator at all -- so
-// the redaction cannot key on line structure and stay closed.
-test("a sliced key in the host key type is redacted whatever joins its armor", async () => {
-  const body = [
-    "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtz",
-    "Wq1n3QqzB2rN0m8oL7vC5xY6aJ4kD1gH2sF3dP9uT8iR6eW0yA==",
-  ];
-  for (const separator of ["\n", "\r\n", " ", "\t", ""]) {
-    const rendered = await renderMismatch(
-      `-----BEGIN OPENSSH PRIVATE KEY-----${separator}${body.join(separator)}`,
-    );
-    expect(rendered).toContain("[redacted private key]");
-    for (const line of body) {
-      expect(rendered).not.toContain(line.slice(0, 24));
-      expect(rendered).not.toContain(line.slice(-24));
-    }
-  }
 });
 
 test("buildConnectOptions always sets readyTimeout: the default when unset, the configured value otherwise", () => {

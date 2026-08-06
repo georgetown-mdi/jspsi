@@ -331,8 +331,9 @@ export class SftpSession {
               // so the presented fingerprint equals it -- reuse it rather than
               // re-hash on every connect. With several pins this is the one the
               // server actually presented, which is what the partner compares.
-              // keyTypeFromBlob is server-controlled and stored UNsanitized;
-              // the reconciliation escapes it before display.
+              // keyTypeFromBlob bounds the type's charset and length, but the
+              // value within that bound is still the server's and is stored
+              // UNsanitized; the reconciliation escapes it before display.
               this.observedHostKey = {
                 fingerprint: matched,
                 keyType: keyTypeFromBlob(blob),
@@ -343,8 +344,7 @@ export class SftpSession {
               // anyway) rather than widen matchHostKeyFingerprint's contract to
               // also surface the digest of a non-matching key.
               const presented = await computeHostKeyFingerprint(blob);
-              // keyTypeFromBlob decodes UTF-8 straight from the
-              // server-controlled blob under no allowlist and no length bound,
+              // The type is the server's choice within keyTypeFromBlob's bound,
               // so it rides a link of its own and is escaped where the error is
               // rendered. It is redacted where it is interpolated, per the
               // composition-site convention in docs/spec/CHANNEL_SECURITY.md.

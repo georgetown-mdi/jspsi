@@ -6,9 +6,12 @@ import { afterEach, expect, test } from "vitest";
 import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  getDiagnosticSink,
+  keyTypeFromBlob,
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ERROR_CAUSE_DEPTH,
   sanitizeErrorForDisplay,
+  setDiagnosticSink,
   UsageError,
 } from "@psilink/core";
 import type { ConnectionConfig, PresentedHostKey } from "@psilink/core";
@@ -370,6 +373,94 @@ test("escapes a control-laden key type in the prompt path (no throw)", async () 
     deps,
   );
   if (conn.channel === "sftp") expect(conn.server.hostKeyFingerprint).toBe(FP);
+});
+
+// A raw OpenSSH host-key blob naming `keyType`: a uint32 length prefix, the type
+// bytes, then key bytes. Nothing bounds what a server puts in the type field, so
+// the bytes are written here exactly as a hostile server would send them.
+function hostKeyBlobNaming(keyType: string): Uint8Array {
+  const type = new TextEncoder().encode(keyType);
+  const blob = new Uint8Array(4 + type.length + 32);
+  new DataView(blob.buffer).setUint32(0, type.length);
+  blob.set(type, 4);
+  return blob;
+}
+
+/** Collect every diagnostic line the callback's run emits, sink restored after. */
+async function withCapturedDiagnostics(
+  run: () => Promise<void>,
+): Promise<string[]> {
+  const lines: string[] = [];
+  const previous = getDiagnosticSink();
+  setDiagnosticSink((_method, prefix, args) =>
+    lines.push([prefix, ...args.map((arg) => String(arg))].join(" ")),
+  );
+  try {
+    await run();
+  } finally {
+    setDiagnosticSink(previous);
+  }
+  return lines;
+}
+
+test("the trust prompt names the bounded key type, never the server's bytes", async () => {
+  // The prompt shows whatever the probe observed, and what the probe observes is
+  // keyTypeFromBlob's output -- so the type is taken from the real primitive over
+  // a hostile blob rather than from a string chosen here. A key type outside the
+  // accepted charset reaches the operator as the placeholder, and none of the
+  // server's own bytes reach the terminal at all.
+  const conn = sftpConn();
+  const deps = makeDeps({
+    confirm: true,
+    keyType: keyTypeFromBlob(hostKeyBlobNaming("ssh-\x1b[31mevil\r\nINJECTED")),
+  });
+  process.stdin.isTTY = true;
+  const lines = await withCapturedDiagnostics(() =>
+    establishHostKeyTrust(
+      conn,
+      {
+        verbosity: -1,
+        loggerName: "psilink",
+        persistence: { mode: "ephemeral" },
+      },
+      deps,
+    ),
+  );
+
+  const prompt = lines.find((line) =>
+    line.includes("The authenticity of host"),
+  );
+  expect(prompt).toBeDefined();
+  expect(prompt).toMatch(/presented a \(unknown:[0-9a-f]+\) host key/);
+  expect(prompt).not.toContain("INJECTED");
+  // The step the operator acts on is untouched: the fingerprint they verify
+  // out-of-band still reads whole.
+  expect(prompt).toContain(FP);
+});
+
+test("the trust prompt names a conforming key type verbatim", async () => {
+  const keyType = "ecdsa-sha2-nistp521-cert-v01@openssh.com";
+  const conn = sftpConn();
+  const deps = makeDeps({
+    confirm: true,
+    keyType: keyTypeFromBlob(hostKeyBlobNaming(keyType)),
+  });
+  process.stdin.isTTY = true;
+  const lines = await withCapturedDiagnostics(() =>
+    establishHostKeyTrust(
+      conn,
+      {
+        verbosity: -1,
+        loggerName: "psilink",
+        persistence: { mode: "ephemeral" },
+      },
+      deps,
+    ),
+  );
+
+  expect(
+    lines.find((line) => line.includes("The authenticity of host")),
+  ).toContain(`presented a ${keyType} host key`);
 });
 
 // --- the refusals at the rendered boundary -----------------------------------
