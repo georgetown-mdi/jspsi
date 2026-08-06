@@ -36,12 +36,16 @@ const builder = instructions.slice(0, lastFromIndex);
 const runtime = instructions.slice(lastFromIndex);
 
 // Resolve the runtime stage's COPY destinations against the WORKDIR in effect
-// at each instruction, so assertions hold absolute in-image paths.
+// at each instruction, so assertions hold absolute in-image paths. Each RUN is
+// kept with that same WORKDIR, since a path operand it writes relative resolves
+// against it too.
 const runtimeCopies = [];
+const runtimeRunsWithCwd = [];
 {
   let cwd = "/";
   for (const { inst, rest } of runtime) {
     if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
+    if (inst === "RUN") runtimeRunsWithCwd.push({ run: rest, cwd });
     if (inst !== "COPY") continue;
     const tokens = rest.split(/\s+/);
     const flags = tokens.filter((t) => t.startsWith("--"));
@@ -89,9 +93,7 @@ const npmrcCopies = instructions
 // this line, ships unreviewed while the sentence still reads as one package.
 const EXPECTED_OS_INSTALL = "RUN apk add --no-cache samba-client";
 const OS_PACKAGE_MANAGER = /\b(apk|apt|apt-get|pip|pip3)\b/;
-const runtimeRuns = runtime
-  .filter(({ inst }) => inst === "RUN")
-  .map(({ rest }) => rest);
+const runtimeRuns = runtimeRunsWithCwd.map(({ run }) => run);
 
 // The account both roles run as, and the one instruction that makes the image
 // habitable for it, frozen by literal the way the OS install above is. Which
@@ -122,28 +124,50 @@ const withinWritableTree = (path) =>
 const EXPECTED_MODE_CHANGE_OUTSIDE = "chmod +x /app/docker-entrypoint.sh";
 
 // Each runtime RUN read as the several commands it runs, split on the operators
-// that separate one from the next. This reads the instruction text: ownership a
-// RUN assigns through a variable, or inside a script it invokes, is outside it,
-// as is anything the base image already did.
-const runtimeShellCommands = runtimeRuns.flatMap((run) =>
+// that separate one from the next, each carrying the WORKDIR its instruction
+// runs under. This reads the instruction text, so what it does NOT reach is:
+// ownership a RUN assigns through a shell variable holding the verb or the path
+// (`$SETUP /app`, `chown -R node:node "$DIR"`), ownership assigned inside a
+// script the RUN invokes rather than on the instruction line, a verb outside the
+// enumerated set below, and anything the base image already did.
+const runtimeShellCommands = runtimeRunsWithCwd.flatMap(({ run, cwd }) =>
   normalize(run)
     .split(/&&|\|\||[;|]/)
     .map((command) => command.trim())
-    .filter((command) => command !== ""),
+    .filter((command) => command !== "")
+    .map((command) => ({ command, cwd })),
 );
 
-// A chown/chmod's path operands: its argv less the command name, its flags, and
-// its first operand, which is the owner or the mode.
+// The ownership verbs the parse below reads: their path operands are extracted
+// and tested against the writable trees.
+const PARSED_OWNERSHIP_VERB = /^(?:chown|chgrp|chmod)\s/;
+// The verbs that hand a path to an account by a route that parse does not read
+// -- install's -o/-g/-m, setfacl's ACL entry -- plus any of the parsed ones
+// reached other than as a command's leading word (`sh -c 'chown ...'`, `xargs
+// chown`, `find ... -exec chgrp`). The stage runs none of these, so they are
+// refused outright rather than modeled: a build that needs one has to extend
+// this test, where the review reads the argv rather than a verdict about it.
+const ANY_OWNERSHIP_VERB = /\b(?:chown|chgrp|chmod|install|setfacl)\b/;
+
+// A chown/chgrp/chmod's path operands: its argv less the command name, its
+// flags, and its first operand, which is the owner, group, or mode -- unless a
+// --reference flag supplied that instead, in which case every operand is a
+// path. Each is resolved against the instruction's WORKDIR, so a relative
+// operand and a `..` traversal (`/work/../app`) are tested as the path the
+// build would write rather than as the text the author typed.
 const ownershipCommands = runtimeShellCommands
-  .filter((command) => /^(?:chown|chmod)\s/.test(command))
-  .map((command) => ({
-    command,
-    paths: command
-      .split(" ")
-      .slice(1)
-      .filter((token) => !token.startsWith("-"))
-      .slice(1),
-  }));
+  .filter(({ command }) => PARSED_OWNERSHIP_VERB.test(command))
+  .map(({ command, cwd }) => {
+    const argv = command.split(" ").slice(1);
+    const operands = argv.filter((token) => !token.startsWith("-"));
+    const pathOperands = argv.some((token) => token.startsWith("--reference"))
+      ? operands
+      : operands.slice(1);
+    return {
+      command,
+      paths: pathOperands.map((path) => posix.resolve(cwd, path)),
+    };
+  });
 
 describe("Dockerfile dependency freeze", () => {
   it("installs only with npm ci, never npm install", () => {
@@ -368,15 +392,33 @@ describe("Dockerfile runtime layout", () => {
     );
   });
 
+  it("assigns ownership only through the forms the two tests below parse", () => {
+    // The guard on those tests reads a leading chown/chgrp/chmod and its
+    // operands. Every other way an instruction can name one of those verbs --
+    // wrapped in `sh -c`, driven by xargs or find, or written as install or
+    // setfacl -- is refused here, so an ownership change cannot reach /app by
+    // taking a form the parse skips over.
+    expect(
+      runtimeShellCommands
+        .filter(
+          ({ command }) =>
+            ANY_OWNERSHIP_VERB.test(command) &&
+            !PARSED_OWNERSHIP_VERB.test(command),
+        )
+        .map(({ command }) => command),
+    ).toEqual([]);
+  });
+
   it("gives that user no path outside those directories, so /app stays root-owned", () => {
-    // Every chown in the stage, and every COPY that assigns ownership as it
-    // lands. A path outside the two writable trees is code, or a mount point,
-    // that the entrypoint's own process could then rewrite.
-    const chownedPaths = ownershipCommands
-      .filter(({ command }) => command.startsWith("chown "))
+    // Every chown and chgrp in the stage, and every COPY that assigns ownership
+    // as it lands. A path outside the two writable trees is code, or a mount
+    // point, that the entrypoint's own process could then rewrite -- a group
+    // handed over no less than an owner, since the account carries its group.
+    const handedOverPaths = ownershipCommands
+      .filter(({ command }) => /^(?:chown|chgrp) /.test(command))
       .flatMap(({ paths }) => paths);
-    expect(chownedPaths.length).toBeGreaterThan(0);
-    expect(chownedPaths.filter((path) => !withinWritableTree(path))).toEqual(
+    expect(handedOverPaths.length).toBeGreaterThan(0);
+    expect(handedOverPaths.filter((path) => !withinWritableTree(path))).toEqual(
       [],
     );
     expect(
