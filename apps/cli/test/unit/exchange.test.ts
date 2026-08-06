@@ -1163,6 +1163,14 @@ function writeInput(contents: string): string {
   return input;
 }
 
+// prepareDataset takes where an outbound-payload confirmation would be recorded
+// and how the surface asking for it is routed. None of the specs below carries a
+// consent record, so the confirmation is a no-op and the context is inert; the
+// gate itself is covered in outboundPayloadConsent.test.ts.
+function consentContext(): { configPath: string; logFile: string | undefined } {
+  return { configPath: configFile, logFile: undefined };
+}
+
 test("prepareDataset: blocks (UsageError) naming the field when the CSV satisfies no linkage key", async () => {
   // A first_name-only CSV cannot produce the ssn field the lone key needs, so the
   // run must stop with a usage error rather than reach a silent empty exchange.
@@ -1171,6 +1179,7 @@ test("prepareDataset: blocks (UsageError) naming the field when the CSV satisfie
     { linkageTerms: ssnOnlyTerms },
     "Test Party",
     input,
+    consentContext(),
   ).catch((e: unknown) => e);
   expect(err).toBeInstanceOf(UsageError);
   expect((err as Error).message).toMatch(
@@ -1187,6 +1196,7 @@ test("prepareDataset: warns naming the unsatisfied field and proceeds when only 
     { linkageTerms: ssnAndNameDobTerms },
     "Test Party",
     input,
+    consentContext(),
   );
   expect(prepared).toBeDefined();
   expect(
@@ -1204,7 +1214,12 @@ test("prepareDataset: an explicit standardization remap satisfies a field the co
   // key is unsatisfiable and the run blocks...
   const input = writeInput("ssn_source\n123456789\n");
   await expect(
-    prepareDataset({ linkageTerms: ssnOnlyTerms }, "Test Party", input),
+    prepareDataset(
+      { linkageTerms: ssnOnlyTerms },
+      "Test Party",
+      input,
+      consentContext(),
+    ),
   ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
 
   // ...but a remap binding ssn <- ssn_source makes the field producible, so the
@@ -1228,6 +1243,7 @@ test("prepareDataset: an explicit standardization remap satisfies a field the co
     },
     "Test Party",
     input,
+    consentContext(),
   );
   expect(prepared).toBeDefined();
   expect(mockState.warnings).toHaveLength(0);
@@ -1238,7 +1254,12 @@ test("prepareDataset: an explicit metadata type satisfies a column whose name do
   // is unsatisfiable and the run blocks...
   const input = writeInput("patient_number\n123456789\n");
   await expect(
-    prepareDataset({ linkageTerms: ssnOnlyTerms }, "Test Party", input),
+    prepareDataset(
+      { linkageTerms: ssnOnlyTerms },
+      "Test Party",
+      input,
+      consentContext(),
+    ),
   ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
 
   // ...but the config's explicit metadata types patient_number as ssn, exactly as
@@ -1258,6 +1279,7 @@ test("prepareDataset: an explicit metadata type satisfies a column whose name do
     },
     "Test Party",
     input,
+    consentContext(),
   );
   expect(prepared).toBeDefined();
   expect(mockState.warnings).toHaveLength(0);
@@ -1280,6 +1302,7 @@ test("prepareDataset: an explicit metadata type that retypes the column away blo
       },
       "Test Party",
       input,
+      consentContext(),
     ),
   ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
 });
@@ -1299,6 +1322,7 @@ test("prepareDataset: a committed payload.receive locks in the expected received
     { linkageTerms: terms },
     "Test Party",
     input,
+    consentContext(),
   );
   expect(prepared.expectedPayloadColumns).toEqual(["diagnosis", "notes"]);
 });
@@ -1309,6 +1333,7 @@ test("prepareDataset: a config without payload.receive locks in nothing (lazy)",
     { linkageTerms: ssnAndNameDobTerms },
     "Test Party",
     input,
+    consentContext(),
   );
   expect(prepared.expectedPayloadColumns).toBeUndefined();
 });
@@ -1328,6 +1353,7 @@ test("prepareDataset: the top-level expectedPayloadColumns is the canonical lock
     { linkageTerms: terms, expectedPayloadColumns: ["diagnosis", "notes"] },
     "Test Party",
     input,
+    consentContext(),
   );
   expect(prepared.expectedPayloadColumns).toEqual(["diagnosis", "notes"]);
 });
@@ -1340,6 +1366,7 @@ test("prepareDataset: an empty expectedPayloadColumns locks in the strict empty 
     { linkageTerms: ssnAndNameDobTerms, expectedPayloadColumns: [] },
     "Test Party",
     input,
+    consentContext(),
   );
   expect(prepared.expectedPayloadColumns).toEqual([]);
 });

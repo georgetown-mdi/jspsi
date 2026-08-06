@@ -1819,6 +1819,44 @@ test("runOnlineBootstrap persists the acceptor's up-front token received set int
   }
 });
 
+test("runOnlineBootstrap persists the acceptor's own outbound consent into the fresh config", async () => {
+  // The send-side sibling of the lock-in above, known at the same moment (it is the
+  // set the acceptance displayed), so it rides the same first write. Without it the
+  // fresh config would leave the acceptor's own disclosure unrecorded and a later
+  // `psilink exchange` would transmit whatever its CSV happened to disclose.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      outboundPayloadConsent: { status: "confirmed", columns: ["diagnosis"] },
+    });
+    const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    expect(written.outbound_payload_consent).toEqual({
+      status: "confirmed",
+      columns: ["diagnosis"],
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap omits the outbound consent when the caller passes none", async () => {
+  // The online INVITER, which authored its own set at mint and pins it as
+  // disclosedPayloadColumns instead: no consent record, so its runs stay lazy.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap(onlineBootstrapParams(configPath));
+    const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    expect(written.outbound_payload_consent).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runOnlineBootstrap persists an empty token set as a strict receive-nothing lock-in", async () => {
   // Unlike the observe path (which drops an ambiguous empty observation), an empty
   // DISCLOSED subset carried by the token is a real "receive nothing" lock-in the

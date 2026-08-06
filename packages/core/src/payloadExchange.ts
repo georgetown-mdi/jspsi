@@ -8,6 +8,7 @@ import {
 } from "./config/metadata.js";
 import type { Output, Payload } from "./config/linkageTerms.js";
 import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
+import type { OutboundPayloadConsent } from "./config/outboundPayloadConsent.js";
 import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
 import type { CommittedPayload } from "./exchangeRecord.js";
@@ -196,7 +197,12 @@ export function preparePayload(
  * Only an ABSENT `payload.send` is the deliberate exception (early return): the
  * guided and default paths author no dictionary while metadata still transmits,
  * and the cross-party mirror is lazy on an unauthored `receive`, so holding an
- * unauthored dictionary to equality would reject every such exchange. A
+ * unauthored dictionary to equality would reject every such exchange. That
+ * exception is what leaves an ACCEPTOR's own outbound set -- absent here, inferred
+ * from its CSV header -- unauthored by any party;
+ * {@link assertOutboundPayloadConsented} covers that case instead, from the
+ * acceptor's own recorded confirmation rather than from a dictionary nobody wrote.
+ * A
  * PRESENT-but-empty dictionary is NOT that case -- it is an explicit "I disclose
  * nothing", so every disclosed column is an under-declaration -- matching the
  * absent/empty semantics `disclosedPayloadColumns` and `expectedPayloadColumns`
@@ -408,6 +414,188 @@ export function assertDisclosureMatchesCommitment(
       `abort as a payload disclosure mismatch (a failure attributed to the ` +
       `partner) after data has begun moving. ${remedies.join(" ")}`,
   );
+}
+
+/**
+ * What this party's recorded {@link OutboundPayloadConsent} says about the column
+ * set the run it is about to make would actually transmit. Produced by
+ * {@link assessOutboundPayloadConsent}; a front end reads it to show and confirm
+ * the set, and {@link assertOutboundPayloadConsented} turns the one blocking case
+ * into a refusal.
+ */
+export type OutboundPayloadConsentVerdict =
+  | {
+      /** Nothing to check: no consent record, or nothing is transmitted at all. */
+      status: "not-required";
+      reason: "no-record" | "nothing-transmitted";
+    }
+  | {
+      /** The resolved set is exactly the one this party confirmed. */
+      status: "current";
+      columns: string[];
+    }
+  | OutboundPayloadConsentConfirmationRequired;
+
+/** The one blocking {@link OutboundPayloadConsentVerdict} case. */
+export interface OutboundPayloadConsentConfirmationRequired {
+  status: "confirmation-required";
+  /**
+   * `unconfirmed` -- a `pending` record: this party has never confirmed a set.
+   * `changed` -- a `confirmed` record the resolved set no longer matches.
+   */
+  reason: "unconfirmed" | "changed";
+  /** The set this run would transmit, resolved from this party's own metadata. */
+  columns: string[];
+  /** The previously confirmed set; `undefined` for `unconfirmed`. */
+  confirmed: string[] | undefined;
+  /** Columns this run would transmit that were not confirmed. */
+  added: string[];
+  /** Confirmed columns this run would no longer transmit. */
+  removed: string[];
+}
+
+/**
+ * Compare this party's recorded consent to its own outbound payload set against
+ * the set its CURRENT metadata would actually transmit.
+ *
+ * The resolved set is {@link disclosedColumnNames} over the metadata -- exactly
+ * what {@link preparePayload} transmits -- so a front end that shows this verdict
+ * cannot overstate or understate what leaves the machine. The comparison is by
+ * membership (as {@link assertPayloadSendDisclosed}'s is), not by order: metadata
+ * order decides the order columns are transmitted in but not WHICH are, and a
+ * reordered input header is not a change of disclosure.
+ *
+ * Two cases need no confirmation and are reported as such rather than silently
+ * passing:
+ * - No consent record (the field absent). Every non-acceptor is here -- an
+ *   inviter authored its own set at mint and pinned it as
+ *   `disclosedPayloadColumns`, a zero-setup or hand-authored config never
+ *   consented to one -- so this is the lazy path that leaves prior behavior
+ *   untouched.
+ * - `output.shareWithPartner` false. `runExchange` builds this party's payload
+ *   only when the PARTNER is entitled to the result, so nothing leaves the machine
+ *   whatever the metadata discloses and there is no disclosure to confirm. This is
+ *   the same output gate {@link assertPayloadSendDisclosed} applies to its empty
+ *   case, and it matches what an acceptance displays for that invitation shape
+ *   (no column set at all, since none is transmitted).
+ *
+ * Narrowing is a mismatch exactly as widening is. The confirmed set is what the
+ * exchange record and the partner-facing consent surface state, so a run that
+ * transmits FEWER columns than were confirmed still transmits a set no party
+ * chose; both directions are reported, and the front end asks again.
+ */
+export function assessOutboundPayloadConsent(
+  consent: OutboundPayloadConsent | undefined,
+  metadata: Metadata,
+  output: Output,
+): OutboundPayloadConsentVerdict {
+  if (consent === undefined)
+    return { status: "not-required", reason: "no-record" };
+  if (!output.shareWithPartner)
+    return { status: "not-required", reason: "nothing-transmitted" };
+  const columns = disclosedColumnNames(metadata);
+  if (consent.status === "pending")
+    return {
+      status: "confirmation-required",
+      reason: "unconfirmed",
+      columns,
+      confirmed: undefined,
+      added: [],
+      removed: [],
+    };
+  const confirmedSet = new Set(consent.columns);
+  const resolvedSet = new Set(columns);
+  const added = columns.filter((name) => !confirmedSet.has(name));
+  const removed = consent.columns.filter((name) => !resolvedSet.has(name));
+  if (added.length === 0 && removed.length === 0)
+    return { status: "current", columns };
+  return {
+    status: "confirmation-required",
+    reason: "changed",
+    columns,
+    confirmed: consent.columns,
+    added,
+    removed,
+  };
+}
+
+/**
+ * The refusal for a blocking {@link OutboundPayloadConsentVerdict}, built here so
+ * the fail-closed backstop ({@link assertOutboundPayloadConsented}) and a front end
+ * that refuses after showing the set cannot state the condition two ways.
+ *
+ * The column names are this party's OWN (metadata- and config-derived) and are
+ * interpolated raw, like the sibling guards': an error is escaped once where it is
+ * rendered. The remedies name no command, since both a CLI run and a browser
+ * acceptance reach this; the surface that catches it supplies its own invocation.
+ *
+ * A {@link UsageError} so the CLI classifies it as a local configuration error
+ * (exit 64) -- self-attributed and pre-connection -- rather than a transport
+ * failure (69).
+ */
+export function outboundPayloadConsentRefusal(
+  verdict: OutboundPayloadConsentConfirmationRequired,
+): UsageError {
+  const shown =
+    verdict.columns.length === 0
+      ? "no columns"
+      : `[${verdict.columns.join(", ")}]`;
+  if (verdict.reason === "unconfirmed")
+    return new UsageError(
+      `this exchange has not confirmed which of its own columns it sends to the ` +
+        `partner for matched records, and would send ${shown}. Accepting an ` +
+        `invitation settles what you RECEIVE; what you SEND comes from your own ` +
+        `input file, so it is confirmed separately and was not confirmed when ` +
+        `this exchange was accepted (no input file was named then, or its ` +
+        `columns could not satisfy the linkage keys). Run the exchange from an ` +
+        `interactive terminal, where the columns are shown and confirmed before ` +
+        `anything connects, or accept the invitation again naming your input ` +
+        `file, which confirms them at that point.`,
+    );
+  const changes: string[] = [];
+  if (verdict.added.length > 0)
+    changes.push(
+      `it would now send ${verdict.added.length > 1 ? "columns" : "a column"} ` +
+        `you did not confirm ([${verdict.added.join(", ")}])`,
+    );
+  if (verdict.removed.length > 0)
+    changes.push(
+      `it would no longer send ${verdict.removed.length > 1 ? "columns" : "a column"} ` +
+        `you did confirm ([${verdict.removed.join(", ")}])`,
+    );
+  return new UsageError(
+    `the columns this exchange sends to the partner for matched records are not ` +
+      `the ones you confirmed for it: ${changes.join(" and ")}. Your input file ` +
+      `decides the set, so a changed file changes your disclosure -- and the ` +
+      `exchange record and your partner's consent surface state the confirmed ` +
+      `set, so a narrower one is a mismatch no less than a wider one. Run the ` +
+      `exchange from an interactive terminal to review and confirm ${shown}, or ` +
+      `use the input file whose columns you confirmed.`,
+  );
+}
+
+/**
+ * Fail closed, before connecting, on an outbound payload set this party has not
+ * confirmed -- the run-boundary backstop behind {@link assessOutboundPayloadConsent}.
+ *
+ * Enforced from `prepareForExchange`, so every path that prepares an exchange
+ * inherits it whether or not its front end ran the confirmation flow. A front end
+ * that DOES run one (showing the resolved set and asking) records the answer, so
+ * this passes; one that does not -- an unattended run, a caller that skipped the
+ * flow -- refuses here rather than transmitting a set neither party chose. It is a
+ * no-op for every party with no consent record on file, which is every non-acceptor.
+ *
+ * @throws {UsageError} when a recorded consent does not cover the set this run
+ *   would transmit. See {@link outboundPayloadConsentRefusal}.
+ */
+export function assertOutboundPayloadConsented(
+  consent: OutboundPayloadConsent | undefined,
+  metadata: Metadata,
+  output: Output,
+): void {
+  const verdict = assessOutboundPayloadConsent(consent, metadata, output);
+  if (verdict.status !== "confirmation-required") return;
+  throw outboundPayloadConsentRefusal(verdict);
 }
 
 /**

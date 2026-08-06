@@ -16,6 +16,7 @@ import type {
   ExchangeSpec,
   InvitationToken,
   LinkageTerms,
+  OutboundPayloadConsent,
   PreparedExchange,
 } from "@psilink/core";
 
@@ -23,6 +24,7 @@ import {
   diffLinkageTerms,
   formatReconcileDiffs,
   persistExpectedPayloadColumns,
+  persistOutboundPayloadConsent,
   type ReconcileDiff,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
@@ -609,14 +611,37 @@ export async function handler(argv: Arguments): Promise<void> {
       // The acceptor's own outbound-send set: the columns this party will disclose
       // to the partner for matched records, derived from its own resolved metadata
       // via the same isDisclosedToPartner predicate preparePayload transmits on, so
-      // the prompt cannot overstate what leaves this machine. undefined when the
-      // resolved spec carries no metadata (offline accept with no input file, or an
-      // input whose columns cannot satisfy the invitation's keys) -- the not-yet-
-      // known case the display forward-references.
+      // the prompt cannot overstate what leaves this machine.
+      //
+      // The online path reads it off the PREPARED exchange -- the very object this
+      // invocation transmits from -- rather than off the written spec, so the set
+      // shown is the set sent even where the spec carries no metadata of its own
+      // (an input that satisfies only some linkage keys drops it, and the run then
+      // infers one from the same CSV). The offline path has no prepared exchange to
+      // read: it writes a configuration and stops, so an absent spec metadata is
+      // genuinely not-yet-known and the display forward-references it.
       const ownOutboundSend =
-        ready.dataSpec.metadata !== undefined
-          ? disclosedColumnNames(ready.dataSpec.metadata)
-          : undefined;
+        ready.mode === "online"
+          ? disclosedColumnNames(ready.prepared.metadata)
+          : ready.dataSpec.metadata !== undefined
+            ? disclosedColumnNames(ready.dataSpec.metadata)
+            : undefined;
+      // This party's consent to its OWN outbound set, recorded into the
+      // configuration this acceptance writes so a later run cannot transmit a set no
+      // party chose. What is recorded is exactly what the prompt below shows (or
+      // what --consent-to-terms records advance consent to), so the two cannot
+      // differ. `pending` where the set is not resolvable here: the first run that
+      // can resolve it shows and confirms it before connecting, and an unattended
+      // run refuses instead. Nothing at all where the invitation gives the inviting
+      // party no result -- the payload step then transmits nothing whatever the
+      // input holds, so there is no disclosure to consent to, matching the display's
+      // no-payload line and the run-time check's own output gate.
+      const outboundPayloadConsent: OutboundPayloadConsent | undefined = !ready
+        .dataSpec.linkageTerms.output.shareWithPartner
+        ? undefined
+        : ownOutboundSend === undefined
+          ? { status: "pending" }
+          : { status: "confirmed", columns: ownOutboundSend };
       // Rendered through a sink that knows whether the prompt below will run: when
       // it will, the terms reach the terminal it asks on even when the operator
       // routed diagnostics to a --log-file or above info, so consent is never asked
@@ -682,6 +707,11 @@ export async function handler(argv: Arguments): Promise<void> {
           // the invitation carried no disclosed subset. No-op on the reuse path,
           // which keeps the operator's config untouched.
           expectedReceivedPayloadColumns: ready.token.disclosedPayloadColumns,
+          // Record this party's consent to its own outbound set in the same fresh
+          // write, so a later `psilink exchange` from this configuration is held to
+          // the columns just consented to here. No-op on the reuse path, which
+          // writes no fresh config and records it surgically below instead.
+          outboundPayloadConsent,
         });
         logOnlineBootstrapOutcome(log, {
           configFile: options.configFile,
@@ -705,6 +735,13 @@ export async function handler(argv: Arguments): Promise<void> {
         // metadata-unknown mint).
         ...(ready.token.disclosedPayloadColumns !== undefined
           ? { expectedPayloadColumns: ready.token.disclosedPayloadColumns }
+          : {}),
+        // This party's consent to its own outbound set (see its derivation above),
+        // so the later `psilink exchange` sends exactly what was consented to here
+        // or stops to ask. Omitted -- and the run left ungated -- only where nothing
+        // is transmitted to the partner at all.
+        ...(outboundPayloadConsent !== undefined
+          ? { outboundPayloadConsent }
           : {}),
       };
       // When reusing a pre-existing config, provisionConfigAndKey ignores `spec`
@@ -735,6 +772,17 @@ export async function handler(argv: Arguments): Promise<void> {
           configPath,
           ready.token.disclosedPayloadColumns,
         );
+        // Refresh this party's own outbound-set consent in the reused config for the
+        // same reason: the operator has just re-consented on THIS acceptance, so the
+        // record is rewritten to what they were shown here rather than left at a
+        // prior acceptance's value. Where this acceptance could not resolve the set
+        // it records `pending`, which asks at the first run that can -- and where
+        // nothing is transmitted at all it removes the field, rather than leaving a
+        // stale record to be enforced against a set it never described. The kept
+        // config's own metadata is what the later run resolves from, so a config
+        // whose stored metadata discloses something other than what was shown here
+        // is exactly what that run stops to ask about.
+        persistOutboundPayloadConsent(configPath, outboundPayloadConsent);
         log.info(
           `reused the existing configuration at ${configPath}; it already matches ` +
             "the invitation, so the connection and linkage settings are unchanged.",

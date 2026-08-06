@@ -34,6 +34,7 @@ import {
   toCommittedPayload,
   assertPayloadSendDisclosed,
   assertDisclosureMatchesCommitment,
+  assertOutboundPayloadConsented,
   reconcileReceivedPayload,
 } from "./payloadExchange.js";
 import type { PayloadWireMessage } from "./payloadExchange.js";
@@ -230,6 +231,31 @@ export function resolveLinkageCardinality(
 }
 
 /**
+ * The metadata and linkage terms an exchange resolves from its spec: the config's
+ * own where it carries them, else the ones derived from this run's input columns.
+ *
+ * This is the single definition {@link prepareForExchange} itself uses, exported so
+ * a front end that must inspect either BEFORE preparing -- the outbound-payload
+ * confirmation, which shows the set this run would transmit and records the
+ * operator's answer into the config prepare then reads -- resolves them exactly as
+ * the run does. A front end deriving its own would be free to drift from what is
+ * actually transmitted, which is the whole property that confirmation rests on.
+ */
+export function resolveExchangeInputs(
+  exchangeDataSpec: ExchangeDataSpec,
+  identity: string,
+  columnNames: Array<string>,
+): { metadata: Metadata; linkageTerms: LinkageTerms } {
+  const metadata = exchangeDataSpec.metadata ?? inferMetadata(columnNames);
+  return {
+    metadata,
+    linkageTerms:
+      exchangeDataSpec.linkageTerms ??
+      getDefaultLinkageTerms(identity, metadata),
+  };
+}
+
+/**
  * Prepare a local dataset for a PSI exchange.
  *
  * Given raw CSV rows and exchange parameters, this function:
@@ -261,9 +287,11 @@ export function prepareForExchange(
 ): PreparedExchange {
   const log = getLogger("exchange");
 
-  const metadata = exchangeDataSpec.metadata ?? inferMetadata(columnNames);
-  const linkageTerms =
-    exchangeDataSpec.linkageTerms ?? getDefaultLinkageTerms(identity, metadata);
+  const { metadata, linkageTerms } = resolveExchangeInputs(
+    exchangeDataSpec,
+    identity,
+    columnNames,
+  );
 
   // Fail closed on a count-only (`psi-c`) algorithm before connecting: no
   // count-only run path exists, so a `psi-c` run would reveal matched identifiers
@@ -308,6 +336,21 @@ export function prepareForExchange(
   assertDisclosureMatchesCommitment(
     exchangeDataSpec.disclosedPayloadColumns,
     metadata,
+  );
+
+  // Fail closed on an outbound payload set this party has not confirmed. An
+  // acceptor's own send set is authored by no party -- the invitation authors the
+  // inviter's send, the mirror leaves the acceptor's absent, and the set is
+  // resolved from its own CSV header -- so a recorded confirmation is what makes it
+  // chosen rather than inferred. A front end that shows the set and asks records
+  // the answer and passes here; one that does not refuses, before connecting,
+  // rather than transmit a set neither party chose. A no-op for every party with no
+  // consent record, which is every non-acceptor. See
+  // assertOutboundPayloadConsented.
+  assertOutboundPayloadConsented(
+    exchangeDataSpec.outboundPayloadConsent,
+    metadata,
+    linkageTerms.output,
   );
 
   // Pre-flight the single-pass dataset ceiling, before connecting. This is a

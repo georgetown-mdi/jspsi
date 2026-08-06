@@ -1732,18 +1732,18 @@ test("displayInvitation: the empty and not-yet-known outbound-send cases avoid a
   );
   expect(outboundSendEntries(empty.split("\n"))).toEqual([]);
   // Not-yet-known: no metadata at prompt time, so the line says the set is not
-  // known rather than claiming any count -- and names what actually settles it.
-  // Nothing on this path asks the acceptor to confirm the set later, unlike the
-  // web acceptor, which chooses its file on the consent screen itself, so the line
-  // must not point ahead to a confirmation psilink never gives.
+  // known rather than claiming any count -- and names what actually settles it,
+  // including the confirmation the run stops for and the refusal an unattended run
+  // gets instead. The forward reference is only honest while that checkpoint
+  // exists, so it is pinned here beside the acceptance that records it as pending.
   const unknown = renderDisplayInvitation(log, base, undefined);
   expect(unknown).toContain(`${OUTBOUND_SEND_LABEL}: not yet known`);
   expect(unknown).toContain(
-    "    Determined from your input file when the exchange runs; psilink does " +
-      "not ask you to confirm it again.",
+    "    Determined from your input file when the exchange runs, which shows " +
+      "the columns and asks you to confirm them before it connects; a run with " +
+      "no terminal to ask on refuses instead of sending them.",
   );
   expect(unknown).not.toContain("(none)");
-  expect(unknown).not.toContain("you will confirm");
   expect(outboundSendEntries(unknown.split("\n"))).toEqual([]);
 });
 
@@ -3093,6 +3093,184 @@ test("handler: offline accept-reuse writes an empty consented set verbatim (stri
       ),
     ).toThrow(/payload disclosure mismatch/);
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- handler: the acceptance records consent to its OWN outbound set ---------
+
+// The acceptor's outbound column set is authored by no party: the invitation
+// authors the inviter's send, the mirror leaves the acceptor's own send absent,
+// and the set comes from its input columns. These pin that the acceptance records
+// what it showed, in each of the three shapes an acceptance can be in, so a later
+// run has something to hold itself to.
+
+/** An offline-accept CSV whose header discloses one payload column. */
+function fixtureWithPayloadColumn(): ReturnType<typeof offlineAcceptFixture> {
+  const fixture = offlineAcceptFixture();
+  fs.writeFileSync(
+    fixture.input,
+    "first_name,last_name,dob,ssn,diagnosis\n" +
+      "Alice,Smith,1990-01-02,123456789,A\n",
+  );
+  return fixture;
+}
+
+/**
+ * Run the offline accept handler on a fresh config (no pre-existing file), with
+ * --consent-to-terms so the confirmation prompt is skipped, and return the written
+ * config's text. `input` is omitted for the accept-with-no-input-file case.
+ */
+async function runOfflineAcceptFresh(params: {
+  configFile: string;
+  keyFile: string;
+  input?: string;
+  token?: InvitationToken;
+}): Promise<string> {
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const encoded = await encodeInvitation(
+      params.token ?? sampleToken(FUTURE()),
+    );
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: params.input !== undefined ? [encoded, params.input] : [encoded],
+      "consent-to-terms": true,
+      "config-file": params.configFile,
+      "key-file": params.keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+    return fs.readFileSync(params.configFile, "utf8");
+  } finally {
+    exit.mockRestore();
+  }
+}
+
+test("handler: an acceptance that resolves its outbound set records it as confirmed", async () => {
+  // The set is resolvable here, so what the display showed is what is recorded --
+  // and it is the disclosed set, not every column in the file: the four linkage
+  // columns are not transmitted, diagnosis is.
+  const { dir, input, configFile, keyFile } = fixtureWithPayloadColumn();
+  try {
+    const raw = await runOfflineAcceptFresh({ configFile, keyFile, input });
+    expect(parseExchangeSpec(YAML.parse(raw)).outboundPayloadConsent).toEqual({
+      status: "confirmed",
+      columns: ["diagnosis"],
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: an acceptance with no input file records the set as pending", async () => {
+  // The case the display forward-references: nothing here can resolve the set, so
+  // the record says so rather than being absent (which would leave the run lazy)
+  // or guessing a set. The first run that can resolve it asks.
+  const { dir, configFile, keyFile } = offlineAcceptFixture();
+  try {
+    const raw = await runOfflineAcceptFresh({ configFile, keyFile });
+    expect(parseExchangeSpec(YAML.parse(raw)).outboundPayloadConsent).toEqual({
+      status: "pending",
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: an acceptance that transmits nothing records no consent", async () => {
+  // An invitation that gives the inviting party no result: the payload step
+  // transmits nothing whatever the input holds, so there is no disclosure to
+  // consent to and no record to enforce -- matching the display, which names no
+  // column set for this shape either.
+  const { dir, input, configFile, keyFile } = fixtureWithPayloadColumn();
+  try {
+    const base = sampleToken(FUTURE());
+    const raw = await runOfflineAcceptFresh({
+      configFile,
+      keyFile,
+      input,
+      token: {
+        ...base,
+        linkageTerms: {
+          ...base.linkageTerms,
+          output: { expectsOutput: false, shareWithPartner: true },
+        },
+      },
+    });
+    expect(raw).not.toContain("outbound_payload_consent");
+    expect(
+      parseExchangeSpec(YAML.parse(raw)).outboundPayloadConsent,
+    ).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: offline accept-reuse refreshes the outbound consent, preserving operator content", async () => {
+  // A re-acceptance is a fresh consent to a freshly displayed set, so the kept
+  // config's record is rewritten to it rather than left at a prior acceptance's
+  // value -- the same reasoning as the received-payload lock-in beside it, and the
+  // same surgical write.
+  const { dir, input, configFile } = fixtureWithPayloadColumn();
+  try {
+    writeExistingConfig(configFile);
+    fs.appendFileSync(
+      configFile,
+      "# operator-authored note\n" +
+        "outbound_payload_consent:\n  status: confirmed\n  columns:\n" +
+        "    - stale_col\n",
+    );
+    const raw = await runOfflineAcceptReuse({
+      configFile,
+      input,
+      disclosed: undefined,
+    });
+    expect(raw).toContain("# operator-authored note");
+    expect(raw).not.toContain("stale_col");
+    expect(parseExchangeSpec(YAML.parse(raw)).outboundPayloadConsent).toEqual({
+      status: "confirmed",
+      columns: ["diagnosis"],
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: online accept forwards its own outbound consent to runOnlineBootstrap", async () => {
+  // The online sibling of the offline write: the set is known before the handshake
+  // (it is what the display showed), so it rides the acceptance's first config
+  // write. runOnlineBootstrap is mocked here so no connection is opened; its own
+  // tests cover the write.
+  const { dir, input, configFile, keyFile } = fixtureWithPayloadColumn();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: ["sftp://host/drop", encoded, input],
+      "consent-to-terms": true,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+    expect(
+      runOnlineBootstrapMock.mock.calls[0][0].outboundPayloadConsent,
+    ).toEqual({ status: "confirmed", columns: ["diagnosis"] });
+  } finally {
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

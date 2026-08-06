@@ -8,6 +8,7 @@ import {
   getLogger,
   loadCSVFile,
   prepareForExchange,
+  resolveExchangeInputs,
   sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -39,6 +40,7 @@ import {
   defaultSigningIdentityPath,
   loadSigningIdentity,
 } from "../signingIdentityFile";
+import { confirmOutboundPayloadConsent } from "../outboundPayloadConsent";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
 import {
@@ -625,11 +627,25 @@ export function tokenExpiringAdvisory(
   );
 }
 
+/**
+ * Where a run records an outbound-payload confirmation, and how the surface that
+ * asks for it is routed. Required rather than optional: the confirmation is the
+ * only thing standing between an unconfirmed acceptance and a disclosure no party
+ * chose, so a caller cannot omit it and silently lose the gate.
+ */
+export interface OutboundConsentContext {
+  /** The config this run loaded, where a confirmation is written back. */
+  configPath: string;
+  /** The operator's `--log-file`, so the surface routes like every diagnostic. */
+  logFile: string | undefined;
+}
+
 /** @internal exported for testing */
 export async function prepareDataset(
   exchangeDataSpec: ExchangeDataSpec,
   identity: string,
   input: string,
+  outboundConsent: OutboundConsentContext,
 ): Promise<PreparedExchange> {
   const log = getLogger("exchange");
 
@@ -663,6 +679,26 @@ export async function prepareDataset(
       exchangeDataSpec.standardization,
       exchangeDataSpec.metadata,
     );
+
+  // Show and confirm this party's OWN outbound columns before anything connects,
+  // when the exchange carries a consent record its current set does not satisfy --
+  // an acceptance that could not resolve the set at accept time, or one whose input
+  // file has changed since. The inputs are resolved through the same seam
+  // prepareForExchange resolves them from, so what is confirmed is what the run
+  // would transmit; a confirmation is recorded in the config and folded into
+  // `exchangeDataSpec`, and an unconfirmable or declined set refuses here. Runs
+  // before prepareForExchange only so the confirmation can precede its fail-closed
+  // backstop (assertOutboundPayloadConsented); a party with no consent record --
+  // every non-acceptor -- passes through untouched.
+  const resolved = resolveExchangeInputs(exchangeDataSpec, identity, columns);
+  await confirmOutboundPayloadConsent({
+    spec: exchangeDataSpec,
+    metadata: resolved.metadata,
+    output: resolved.linkageTerms.output,
+    configPath: outboundConsent.configPath,
+    logFile: outboundConsent.logFile,
+    log,
+  });
 
   const prepared = prepareForExchange(
     exchangeDataSpec,
@@ -858,7 +894,10 @@ export async function handler(argv: Arguments): Promise<void> {
 
     let prepared: PreparedExchange;
     try {
-      prepared = await prepareDataset(exchangeDataSpec, identity, input);
+      prepared = await prepareDataset(exchangeDataSpec, identity, input, {
+        configPath: options.configFile,
+        logFile,
+      });
     } catch (err) {
       // A usage error (exit 64) -- the `-`-at-an-interactive-terminal rejection
       // openInputSource raises is a UsageError carrying no exitCode -- must map to

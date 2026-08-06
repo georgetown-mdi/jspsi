@@ -79,24 +79,27 @@ function marked(label: string, fact: ConsentFactId): string {
 
 /**
  * The wording the outbound-send line carries when the acceptor's own disclosed set
- * is not yet determined at prompt time -- no input file (offline accept without
- * one) or an input whose columns cannot satisfy the invitation's linkage keys, both
- * of which leave the resolved spec without metadata.
+ * is not yet determined at prompt time -- an offline acceptance with no input file,
+ * or one whose columns cannot satisfy the invitation's linkage keys, both of which
+ * leave the resolved spec without metadata and leave this acceptance nothing to
+ * prepare from.
  *
- * It states what actually happens next on THIS path, which is not what happens on
- * the web: there the acceptor chooses its file on the same screen and confirms the
- * exact column set before consenting, so the web's forward reference can promise a
- * confirmation. Nothing asks again here. The set is resolved when `psilink
- * exchange` reads the input file (from the config's metadata if one was written,
- * else inferred from the CSV header), and it is sent without a further prompt --
- * so the line says that rather than pointing ahead to a checkpoint that does not
- * exist.
+ * It states what actually happens next on THIS path: the acceptance records that
+ * the set is unconfirmed, and `psilink exchange` resolves it from the input file it
+ * is given (from the config's metadata if one was written, else inferred from the
+ * CSV header) and shows it for confirmation before it connects. So the line points
+ * ahead to a checkpoint that exists, in the register the web's own forward
+ * reference uses -- there the acceptor chooses its file on the same screen and
+ * confirms the set before consenting; here the same confirmation is simply deferred
+ * to the run that can resolve it. The unattended case is named too, because it is
+ * the one where the answer is a refusal rather than a question.
  */
 const OUTBOUND_SEND_FORWARD_REFERENCE = {
   value: "not yet known",
   note:
-    "Determined from your input file when the exchange runs; psilink does not " +
-    "ask you to confirm it again.",
+    "Determined from your input file when the exchange runs, which shows the " +
+    "columns and asks you to confirm them before it connects; a run with no " +
+    "terminal to ask on refuses instead of sending them.",
 };
 
 /**

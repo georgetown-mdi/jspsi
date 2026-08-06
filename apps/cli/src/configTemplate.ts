@@ -254,6 +254,18 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 # omit the field if you made no such commitment.
 # disclosed_payload_columns:
 #   - matched_record_id
+
+# outbound_payload_consent: your own record of the columns you confirmed you send
+# to the partner. 'psilink accept' fills this in from the set it showed you, and
+# an exchange that resolves a different set stops and asks again before it
+# connects rather than sending it; you rarely set it by hand. status is confirmed
+# (with the columns) or pending, which asks at the first run that can resolve
+# them. Omit the field for an exchange whose outbound columns you authored
+# yourself, such as one you invited a partner to.
+# outbound_payload_consent:
+#   status: confirmed
+#   columns:
+#     - matched_record_id
 `;
 
 // The commented metadata + standardization block shown only when no input file

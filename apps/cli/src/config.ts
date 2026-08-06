@@ -6,6 +6,7 @@ import type {
   ExchangeSpec,
   LinkageTerms,
   Metadata,
+  OutboundPayloadConsent,
   Standardization,
 } from "@psilink/core";
 import {
@@ -996,6 +997,60 @@ export function persistExpectedPayloadColumns(
       // value is not reliably wrapped by setIn across versions); setIn creates or
       // overwrites the single top-level key, leaving everything else untouched.
       doc.setIn(["expected_payload_columns"], doc.createNode(columns));
+    },
+  );
+  writeFileOwnerOnly(configPath, serialized);
+}
+
+/**
+ * Write, overwrite, or remove the top-level `outbound_payload_consent` in an
+ * existing `psilink.yaml`. This is this party's consent to its OWN outbound set
+ * (its own column namespace): the columns it confirmed it sends to the partner for
+ * matched records, or the `pending` marker recorded when an acceptance could not
+ * resolve them yet. A later `psilink exchange` holds the set it would actually
+ * transmit to this record ({@link assertOutboundPayloadConsented} in core).
+ *
+ * Used by the two paths that keep an existing config rather than writing a fresh
+ * one -- the accept-reuse path, and the run that resolves and confirms a `pending`
+ * record in place. Like {@link persistDisclosedPayloadColumns} and
+ * {@link persistExpectedPayloadColumns} -- and unlike {@link saveConfig}, which
+ * re-serializes the whole spec and would strip comments -- this edits the file in
+ * place through the YAML document model so the operator's comments, key order, and
+ * formatting survive: the record is one machine-managed field, not operator prose.
+ *
+ * `consent === undefined` REMOVES the field (deleteIn), never leaves a stale
+ * value: an acceptance that transmits nothing to the partner records no consent
+ * (there is no disclosure to consent to), so any record from a prior acceptance
+ * must be cleared rather than silently retained and later enforced against a
+ * different set.
+ *
+ * The columns are this party's own (metadata-derived), non-secret, but the file is
+ * rewritten with the same owner-only permissions {@link saveConfig} uses (a config
+ * may carry an SFTP credential). The keys are written snake_case to match the
+ * on-disk convention; `status` and `columns` are single words either way. Throws if
+ * the file cannot be read or parsed -- the caller has just read the same file, so a
+ * failure here is unexpected and must not be silently swallowed (it would leave the
+ * operator believing their confirmation was recorded, and be asked again next run).
+ */
+export function persistOutboundPayloadConsent(
+  configPath: string,
+  consent: OutboundPayloadConsent | undefined,
+): void {
+  // Parse, edit, and re-serialize through the sensitive-file chokepoint (see
+  // persistHostKeyFingerprint), preserving the operator's comments and key order
+  // on this surgical one-field write.
+  const serialized = editSensitiveYamlDocument(
+    fs.readFileSync(configPath, "utf8"),
+    `config file ${configPath}`,
+    (doc) => {
+      if (consent === undefined) {
+        doc.deleteIn(["outbound_payload_consent"]);
+        return;
+      }
+      // createNode turns the JS object into a proper YAML mapping node (a bare
+      // value is not reliably wrapped by setIn across versions); setIn creates or
+      // overwrites the single top-level key, leaving everything else untouched.
+      doc.setIn(["outbound_payload_consent"], doc.createNode(consent));
     },
   );
   writeFileOwnerOnly(configPath, serialized);

@@ -27,6 +27,7 @@ import type {
   FileSyncOptions,
   LinkageStrategy,
   LinkageTerms,
+  OutboundPayloadConsent,
   PreparedExchange,
   SFTPConnectionConfig,
   WebRTCConnectionConfig,
@@ -687,6 +688,18 @@ export async function runOnlineBootstrap(params: {
    * observe path's unbounded source).
    */
   expectedReceivedPayloadColumns?: string[];
+  /**
+   * The ACCEPTOR's consent to its OWN outbound payload set, to persist into the
+   * freshly-written config so a later recurring `psilink exchange` sends exactly
+   * the columns consented to here or stops to ask (assertOutboundPayloadConsented).
+   * The send-side counterpart of `expectedReceivedPayloadColumns` above, and known
+   * at the same moment -- what the acceptance displayed -- so it rides the same
+   * first write. `undefined` persists no field, which is the online INVITER (its
+   * own set is authored at mint and pinned as `disclosedPayloadColumns`) and an
+   * acceptance that transmits nothing to its partner. No-op on the reuse path,
+   * which writes no fresh config.
+   */
+  outboundPayloadConsent?: OutboundPayloadConsent;
 }): Promise<{ configWriteError?: unknown }> {
   // The two received-payload persistence inputs are mutually exclusive by design:
   // the online ACCEPTOR passes expectedReceivedPayloadColumns (its set is known up
@@ -838,6 +851,12 @@ export async function runOnlineBootstrap(params: {
           ...(params.expectedReceivedPayloadColumns !== undefined
             ? { expectedPayloadColumns: params.expectedReceivedPayloadColumns }
             : {}),
+          // The acceptor's own outbound-set consent rides the same write, from the
+          // same moment: the set was displayed and consented to before this
+          // handshake, so it is known here exactly as the received lock-in above is.
+          ...(params.outboundPayloadConsent !== undefined
+            ? { outboundPayloadConsent: params.outboundPayloadConsent }
+            : {}),
         });
         configWritten = true;
       },
@@ -885,6 +904,14 @@ export async function runOnlineBootstrap(params: {
             connection: params.connection,
             ...params.dataSpec,
             expectedPayloadColumns: observedLockIn,
+            // Carried through this second full-spec write as well: it re-serializes
+            // the config the hook wrote, so omitting it would silently drop a
+            // recorded outbound consent and leave the next run ungated. No caller
+            // sets both today (this path is the inviter's), which is why it is
+            // carried rather than guarded against.
+            ...(params.outboundPayloadConsent !== undefined
+              ? { outboundPayloadConsent: params.outboundPayloadConsent }
+              : {}),
           });
         } catch (err) {
           getLogger(params.loggerName).warn(

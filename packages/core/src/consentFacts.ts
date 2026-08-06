@@ -65,11 +65,13 @@ export const CONSENT_FACTS = {
     reason:
       "The acceptor's own disclosure, derived from its resolved metadata " +
       "through the same predicate the payload step transmits on, so no column " +
-      "outside the displayed set leaves the machine under the configuration " +
-      "this acceptance writes. A bound with one limit: it does not reach an " +
-      "acceptance that keeps a configuration already on disk, whose stored " +
-      "metadata the exchange runs on and which nothing compares against the " +
-      "input this line is rendered from.",
+      "outside the displayed set leaves the machine. The acceptance records the " +
+      "displayed set as this party's consent to it, and a run whose own resolved " +
+      "set differs -- including one on a configuration already on disk, whose " +
+      "stored metadata this line is not rendered from -- stops and asks rather " +
+      "than transmit a set that was never shown. Where the set is not resolvable " +
+      "at acceptance the line says so, and the same confirmation is taken at the " +
+      "first run that can resolve it.",
   },
   invitingParty: {
     basis: "trust-contingent",
