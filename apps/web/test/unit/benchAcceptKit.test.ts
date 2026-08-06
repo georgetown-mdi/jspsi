@@ -54,10 +54,28 @@ describe("accept kit, per-channel shape", () => {
     expect(text).not.toContain("Shared folder:");
     expect(text).toContain("could not put a name to the shared folder");
     expect(text).toContain("Use the folder you and your partner");
-    // The rest of the filedrop sheet is unchanged -- it is only the name that
-    // is missing, not the route to accepting.
+    // The route to accepting is unchanged -- it is only the name that is
+    // missing -- and the guidance blocks stay pinned.
     expect(text).toContain("WHICH KIND OF FOLDER IS YOURS?");
     expect(text).toContain(INVITATION_PLACEHOLDER);
+  });
+
+  test("the folder step names no partner name where the sheet has none", () => {
+    // The token always carries a locator, so accepting writes SOMETHING; on this
+    // branch it is the console's own mount point. The step that replaces it must
+    // not tell the partner it is their partner's name for the folder.
+    const text = sheet({ channel: "filedrop" });
+    expect(text).not.toContain("your partner's own name for the folder");
+    expect(text).toContain("a placeholder for the folder, not a name either");
+    // The replacement it directs is the same one the named branch directs.
+    expect(text).toContain("path: /sync");
+  });
+
+  test("the folder step names the partner's own name where the sheet has one", () => {
+    const text = sheet(FILEDROP);
+    expect(text).toContain("your partner's own name for the folder");
+    expect(text).not.toContain("a placeholder for the folder");
+    expect(text).toContain("path: /sync");
   });
 
   test("an sftp sheet names the channel and the server locator", () => {

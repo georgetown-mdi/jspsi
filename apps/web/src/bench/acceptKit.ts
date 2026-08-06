@@ -237,9 +237,35 @@ function opening(endpoint: AcceptKitEndpoint): Array<string> {
   ];
 }
 
+/**
+ * The opening of the step that repoints psilink at the partner's own copy of
+ * the shared folder, which turns on whether the sheet could name that folder.
+ * Named, accepting wrote the inviter's name for it. Unnamed, what accepting
+ * wrote is the console's own mount point -- the token always carries a locator
+ * -- so the step calls it a placeholder rather than a name either side chose,
+ * and directs the same replacement.
+ */
+function repointStepOpening(named: boolean): Array<string> {
+  return named
+    ? [
+        "2. Point psilink at your own copy of the shared folder. Accepting wrote",
+        "   your partner's own name for the folder; what psilink needs is where",
+        "   that folder is on your machine. Open psilink.yaml and set:",
+      ]
+    : [
+        "2. Point psilink at your own copy of the shared folder. Accepting wrote",
+        "   a placeholder for the folder, not a name either of you chose; what",
+        "   psilink needs is where that folder is on your machine. Open",
+        "   psilink.yaml and set:",
+      ];
+}
+
 /** The filedrop routing decision: a network drive or DFS path needs the
  * launcher, any folder Docker can open takes the direct commands. */
-function filedropBody(version: string | undefined): Array<string> {
+function filedropBody(
+  version: string | undefined,
+  named: boolean,
+): Array<string> {
   return [
     ...heading("STEP 1 -- WHICH KIND OF FOLDER IS YOURS?"),
     "The answer decides everything below. Pick one.",
@@ -316,9 +342,7 @@ function filedropBody(version: string | undefined): Array<string> {
     "   every command on this sheet, for example",
     `   -v "C:\\Users\\you\\exchange":${WORK_MOUNT}`,
     "",
-    "2. Point psilink at your own copy of the shared folder. Accepting wrote",
-    "   your partner's own name for the folder; what psilink needs is where",
-    "   that folder is on your machine. Open psilink.yaml and set:",
+    ...repointStepOpening(named),
     "",
     "     connection:",
     "       channel: filedrop",
@@ -449,7 +473,7 @@ export function buildAcceptKit({
   const lines = [
     ...opening(endpoint),
     ...(endpoint.channel === "filedrop"
-      ? filedropBody(version)
+      ? filedropBody(version, endpoint.path !== undefined)
       : sftpBody(version)),
     ...closing(version),
   ];
