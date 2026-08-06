@@ -372,6 +372,15 @@ trust anchor for a Node runtime, so this is the correct shape of answer rather
 than a weak one -- but it is a provenance record, not a runtime claim, and
 nothing re-checks it on a rebuild.
 
+Both committed hashes were confirmed a second time on 2026-08-06, from a
+different machine than the one that resolved them, against the same signed
+manifest and a key fetched from `nodejs/release-keys`: the manifest verified
+`Good signature` and both literals matched it. Two environments agreeing rules
+out a transcription slip between resolution and commit, which is the failure a
+pinned hash cannot otherwise show. The base-image digest has no such second
+reading -- Docker Hub is not reachable from the development container and no
+`docker` is installed there -- so it rests on the resolving host alone.
+
 ## What is not settled
 
 - **Which standard revision certificate 5021 carries**, as above. It gates any

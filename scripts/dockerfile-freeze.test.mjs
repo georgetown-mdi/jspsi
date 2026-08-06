@@ -533,9 +533,28 @@ describe("Dockerfile.fips base image and Node runtime pins", () => {
     expect(nodeFetch.rest).toMatch(
       /echo "\$\{node_sha256\} +node-\$\{NODE_VERSION\}-linux-\$\{node_arch\}\.tar\.xz" \| sha256sum -c -/,
     );
+  });
+
+  it("fetches no checksum file anywhere in the build", () => {
     // A checksum file fetched beside the tarball would be served by whatever
-    // served the tarball, and would make the literals above decorative.
-    expect(nodeFetch.rest).not.toContain("SHASUMS256.txt");
+    // served the tarball, and would make the literals above decorative. Asserted
+    // over every RUN rather than over the one that fetches the tarball: the
+    // instruction that reintroduces it need not be the instruction that fetches.
+    for (const { inst, rest } of image.instructions) {
+      if (inst !== "RUN") continue;
+      expect(rest).not.toContain("SHASUMS256.txt");
+    }
+  });
+
+  it("aborts the layer when the checksum fails rather than carrying on", () => {
+    // The pin rests on the checker's non-zero exit reaching `set -e`, and two
+    // edits defang it without touching a hash, so every assertion above stays
+    // green through both: appending `|| true` to the checker, and dropping the
+    // `e` from `set -eux`, after which a FAILED checksum prints and the RUN
+    // walks on into `tar`. These two are what hold the property the literals are
+    // for.
+    expect(normalize(nodeFetch.rest)).toMatch(/^set -eux;/);
+    expect(normalize(nodeFetch.rest)).toMatch(/\| sha256sum -c -;/);
   });
 
   it("carries those hashes as literals rather than as overridable ARGs", () => {
