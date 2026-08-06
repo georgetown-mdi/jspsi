@@ -45,6 +45,12 @@ RUN dnf -y --releasever=${AL2023_RELEASEVER} install tar gzip xz findutils libat
 # which is fetched over the same channel as the tarball -- an integrity check,
 # not a provenance one. What that does and does not buy, and the two ways to
 # close it, are in docs/notes/fips-variant-image.md.
+#
+# --ignore-missing is what lets the manifest be checked whole: it lists every
+# artifact of the release and only the one tarball fetched here is on disk. It
+# fails closed in both directions that matter -- a mismatched tarball exits
+# non-zero, and so does a tarball whose name the manifest does not carry, which
+# reports that no file was verified.
 RUN set -eux; \
   arch="$(uname -m)"; \
   case "$arch" in \
@@ -55,7 +61,7 @@ RUN set -eux; \
   cd /tmp; \
   curl -fsSLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
   curl -fsSLO "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt"; \
-  grep " node-${NODE_VERSION}-linux-${node_arch}.tar.xz\$" SHASUMS256.txt | sha256sum -c -; \
+  sha256sum -c --ignore-missing SHASUMS256.txt; \
   mkdir -p /opt/node; \
   tar -xJf "node-${NODE_VERSION}-linux-${node_arch}.tar.xz" -C /opt/node --strip-components=1; \
   rm -f "node-${NODE_VERSION}-linux-${node_arch}.tar.xz" SHASUMS256.txt

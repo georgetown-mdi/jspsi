@@ -216,6 +216,16 @@ beyond that, and the second OS-package inventory that comes with it.
 | Module version string | `3.0.8-d694bfa693b76001` | `openssl list -providers` read back, asserted in the build |
 | Base image | `amazonlinux:2023`, by tag | Not pinned; see below |
 
+The three asserted pins are build `ARG`s, and each is consumed by both the
+`dnf swap` that installs the module and the assertion that checks it. A build
+driven by hand with `--build-arg` therefore moves the install and the assertion
+together and comes out green carrying a different module: the assertions catch a
+package layer that drifts under the committed values, not an operator who
+changes those values. What holds the committed defaults themselves is
+`scripts/dockerfile-freeze.test.mjs`, which pins all three as literals, and no
+CI path passes a build-arg -- `image_smoke.yaml` passes none, and the release
+workflow does not build this image.
+
 The release-snapshot pin is for reproducibility rather than for the certificate:
 AWS retains superseded NVRs, and a dated snapshot is immutable while
 `--releasever=latest` accumulates. Sampled across AWS's published snapshots,
@@ -272,6 +282,19 @@ same day. They are the right order of magnitude rather than exact for what
 (29,160,927 bytes installed) to read the module version out of `fips.so` with
 `strings`, which this build does not need because it reads the version back
 through `openssl list` instead. Nothing has been measured on `x86_64`.
+
+**The variant's setuid/setgid surface is unmeasured.** The Alpine inventory above
+records that surface, the command that produces it, and why the one setgid
+binary it found is not a boundary today. No equivalent measurement exists for
+this image, whose closure is materially larger and carries `systemd`, `pam`,
+`cryptsetup-libs`, `device-mapper` and `util-linux`. The Alpine reasoning --
+that the container runs as uid 0 with no `USER`, so a setgid helper grants
+nothing that being root does not already grant -- applies here for the same
+reason, and that is the ground the gap sits on rather than a measurement. Run
+
+    find / -xdev -type f \( -perm -2000 -o -perm -4000 \) -exec ls -l {} +
+
+against the first built image and record the result here beside the Alpine one.
 
 | | Alpine image | FIPS variant (reference build) |
 | --- | --- | --- |

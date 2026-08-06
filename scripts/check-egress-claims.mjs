@@ -107,14 +107,15 @@
 // SCANNED_ROOTS is source that ships or runs, not all TypeScript. Beside the
 // app and library trees and the web app's static assets it carries
 // apps/web/server, the Nitro entry point the deployed server boots (named by
-// apps/web/nitro.config.ts). SCANNED_FILES carries the two shipped files that
-// sit at the repository root rather than in a tree: docker-entrypoint.sh, which
-// runs inside the container the "no other network connection" claim is about
-// (it is the image ENTRYPOINT), and the Dockerfile, which reaches a different
-// class -- what the image build fetches rather than what the running container
-// connects to -- scanned anyway, because a `RUN curl` or `ADD https://...`
-// pulling a third party into the image is what a reviewer of that claim wants
-// shown.
+// apps/web/nitro.config.ts). SCANNED_FILES carries the shipped files that sit
+// at the repository root rather than in a tree, for both images: the two
+// entrypoints, docker-entrypoint.sh and docker-entrypoint-fips.sh, which run
+// inside the container the "no other network connection" claim is about (each
+// is its image's ENTRYPOINT), and the two Dockerfiles, Dockerfile and
+// Dockerfile.fips, which reach a different class -- what the image build
+// fetches rather than what the running container connects to -- scanned anyway,
+// because a `RUN curl` or `ADD https://...` pulling a third party into the
+// image is what a reviewer of that claim wants shown.
 //
 // Deliberately outside both: the build and test configuration at each workspace
 // root and the sibling test/ trees; and apps/web/deploy, whose nginx and
