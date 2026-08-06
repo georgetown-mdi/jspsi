@@ -14,7 +14,6 @@ import {
   ReceiptVerificationError,
   isPeerWaitTimeout,
   redactAndSanitizeForDisplay,
-  sanitizeForDisplay,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
 import type {
@@ -1239,8 +1238,11 @@ export async function runProtocol(
         onWarning: (msg: string) => {
           // Terms-exchange warnings can embed partner-authored column names,
           // so the text goes through the display-boundary escape here and
-          // inside the emitter alike.
-          log.warn("terms exchange:", sanitizeForDisplay(msg));
+          // inside the emitter alike. Redaction leads the escape for the same
+          // reason it does everywhere else: escaping first can truncate a whole
+          // key block into a dangling marker at the display cap, which the
+          // prefixer's pass then fails closed on for the rest of the argument.
+          log.warn("terms exchange:", redactAndSanitizeForDisplay(msg));
           emit((e) => e.warning(msg));
         },
         // A host-key divergence is a security signal, not a terms warning, so
