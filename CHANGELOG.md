@@ -20,6 +20,7 @@ This changelog is a reader's summary of what PSI-Link does and how that changes 
 - Authenticated CLI exchanges configured with a signing identity (`signing` block, certificate mode) also produce a dual-signed exchange receipt: both parties sign the same terms and data-flow facts and swap signatures over the connection, each verifying the partner's pinned certificate before its signature, for a third-party-verifiable record of the data flow. See `docs/spec/PROTOCOL.md` and `docs/spec/EXCHANGE_RECORD.md`.
 - The `single-pass` linkage strategy batches every agreed linkage key into one PSI exchange, keeping the round-trip count constant in the key count for a high-latency channel, as a consented disclosure tradeoff against the default per-key `cascade`. See `docs/EXCHANGE_REFERENCE.md` and `docs/spec/PROTOCOL.md`.
 - The PSI engine selects a native N-API backend when a prebuilt addon is present for the running platform, falling back to WASM; the browser always uses WASM. It is a performance accelerator with byte-identical wire output. See `docs/spec/PROTOCOL.md`.
+- Host-side console launchers, published stamped as release assets: `Start-Psilink.ps1` (Windows) and `start-psilink.sh` (macOS and Linux) collect the exchange folders, run the container's own `psilink doctor` checks against them, start the web console against the release image pinned by digest, and open the browser. Plaintext, no network of their own, no persistence, no auto-update. See `docs/RELEASES.md` and the setup page in `support/windows-network-filedrop/README.md`.
 
 ### Changed
 
