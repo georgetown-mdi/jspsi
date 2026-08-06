@@ -734,15 +734,20 @@ export async function handler(argv: Arguments): Promise<void> {
           }),
           eventStream: options.eventStream,
           reuseExistingConfig: ready.reuseExistingConfig,
-          // Persist the consented received-column lock-in into the fresh config so
-          // the later `psilink exchange` enforces it, the online sibling of the
-          // offline path's expectedPayloadColumns write below. The set is known up
-          // front from the token (in the inviter's namespace), so it rides the
-          // acceptance hook's first write; reconcileReceivedPayload then fails closed
-          // on a divergent received payload. Absent -- and reconciled lazily -- when
-          // the invitation carried no disclosed subset. No-op on the reuse path,
-          // which keeps the operator's config untouched.
-          expectedReceivedPayloadColumns: ready.token.disclosedPayloadColumns,
+          // Persist the consented received-column lock-in so the later `psilink
+          // exchange` enforces it, the online sibling of the offline path's
+          // expectedPayloadColumns write below. The set is known up front from the
+          // token (in the inviter's namespace), so it rides the acceptance hook's
+          // first write on a fresh config and refreshes the kept config's field
+          // surgically on the reuse path -- the operator has just re-consented on
+          // THIS acceptance, and a prior acceptance's set left standing would
+          // false-abort the next recurring exchange. reconcileReceivedPayload then
+          // fails closed on a divergent received payload. Consented columns of
+          // undefined -- an invitation carrying no disclosed subset -- record no
+          // lock-in and remove a stale one, leaving the exchange to reconcile lazily.
+          receivedPayloadLockIn: {
+            consentedColumns: ready.token.disclosedPayloadColumns,
+          },
           // Record this party's consent to its own outbound set in the same fresh
           // write, so a later `psilink exchange` from this configuration is held to
           // the columns just consented to here. The reuse path writes no fresh
