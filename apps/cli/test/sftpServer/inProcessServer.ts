@@ -237,7 +237,13 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     });
 
     client.on("ready", () => {
-      sessionControls.onConnectionReady(client);
+      // The socket goes with the connection so a mid-exchange control can reach
+      // an established session's transport; at accept time the hub has no
+      // connection to key it on.
+      sessionControls.onConnectionReady(
+        client,
+        (client as unknown as SocketBearingConnection)._sock,
+      );
       client.on("session", (acceptSession) => {
         const session = acceptSession();
         session.on("sftp", (acceptSftp) => {
@@ -333,6 +339,9 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
       // either, so it is handed its write back on the same terms.
       sessionControls.stopWithholdingCloses();
       sessionControls.stopStallingHandshakes();
+      // A vanished session is silenced on both halves at once, so it cannot
+      // answer that end() either.
+      sessionControls.restoreVanishedSessions();
       // Release any probe parked on a consumption that is no longer coming, so a
       // held reply does not outlive the server it was served by.
       sessionControls.renameTear.reset();

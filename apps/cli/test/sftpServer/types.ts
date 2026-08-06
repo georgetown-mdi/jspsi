@@ -296,6 +296,42 @@ export interface SftpSessionControls {
    */
   stopStallingHandshakes(): void;
   /**
+   * Make the currently established session VANISH: from this call on, nothing
+   * the server produces for it reaches the wire and the server can no longer
+   * close it, so a client with an operation outstanding never gets its reply and
+   * a client with nothing outstanding sees a session that simply went quiet. No
+   * FIN, no reset, no ssh2 `'end'` or `'close'` -- the partner appliance that
+   * stopped answering without hanging up, which the adapter can only discover by
+   * its own liveness deadline.
+   *
+   * Distinct from {@link withholdCloseOnDisconnect}, which is armed before a
+   * connection is accepted and fires only in response to the client's own
+   * disconnect: this one is invoked mid-exchange against a live session that has
+   * asked for nothing. It composes with the caps -- a capped session that is
+   * also vanished is ended server-side while the client hears nothing of it.
+   *
+   * Throws when no session is established or its socket cannot be reached,
+   * rather than silently doing nothing: a test whose vanish quietly missed would
+   * assert "the client heard nothing" against a server that was answering all
+   * along. In-process only, like the fault hooks.
+   */
+  vanishActiveSession(): void;
+  /**
+   * Bring every vanished session back: hand the real write and the real closers
+   * back to each socket {@link vanishActiveSession} silenced, so the connection
+   * can be closed from either side again. The backend's own `stop()` calls this
+   * before ending its connections -- a vanished socket cannot answer that end(),
+   * which would leave `server.close()` waiting forever -- and a test calls it
+   * before its own teardown for the same reason.
+   *
+   * A socket the withheld-close or stalled-handshake control silenced as well is
+   * released here too: each replaced method is held in one place, so whichever
+   * of these releases reaches a socket first hands the real one back. That keeps
+   * teardown terminating regardless of the order the controls are stopped in;
+   * re-arm a control that is still wanted afterwards.
+   */
+  restoreVanishedSessions(): void;
+  /**
    * Stop withholding closes entirely: clear {@link withholdCloseOnDisconnect} so
    * later connections close normally, and hand the real closers back to every
    * socket already silenced. Clearing the flag alone does neither of those for a
