@@ -158,14 +158,24 @@ Decided since, by the owner, and recorded here because it changes how the rows a
 - **FIPS 140-3 is the target standard**, on the grounds that 140-2 is being retired. That forecloses X25519 inside the module: under 4985 it is Non-Approved and Not Allowed, so its "allowed" status under 140-2 is not something to build on.
 - **The Alpine base is expected to give way**, dropping musl, since no certificate reaches it.
 
+Settled since, and recorded in [fips-variant-image.md](fips-variant-image.md):
+
+- **Which certificate and base pair.** Certificate 5021 on `amazonlinux:2023`,
+  installed by `dnf swap` and asserted against the built image. What makes a
+  pairing reachable at all is Management Manual 7.9.2's Level 1 porting route,
+  which needs no vendor action -- the vendor-affirmation tables alone say the
+  opposite, and that is the trap.
+
 Still open:
 
-- **Which certificate and base pair**, given that matching a distribution is not sufficient on 4985 and the vendor certificates trade that problem for a dependence on the vendor's own distribution and tested hardware.
-- **Whether any reachable pairing is a 140-3 certificate**, which the vendor certificates have to be read individually to answer.
+- **Which standard revision certificate 5021 carries.** The project's target is
+  140-3, but whether 5021's validation is 140-2 or 140-3 has to be read off the
+  certificate itself and has not been. This gates any published wording naming a
+  revision, so it is a precondition of the tag rather than of the image.
 
 ## What this means for the items downstream
 
-- Shipping a validated provider in the image: the mechanism works -- the module loads, serves, and is attributable -- but no certificate covers the Alpine base, and the target certificate affirms no environments beyond the twelve it tested. The deliverable is a base change, and the harder part of it is that matching a distribution does not by itself put the image inside a tested environment.
+- Shipping a validated provider in the image: delivered as a separate `-fips` variant on `amazonlinux:2023` rather than as a change to the default image, which stays on Alpine. The base change this note anticipated is what it took, and the harder part it named -- that matching a distribution does not by itself put the image inside a tested environment -- is answered by the Level 1 porting route rather than by the match. The variant's own record, including what may and may not be claimed of it, is in [fips-variant-image.md](fips-variant-image.md).
 - Documenting a FIPS deployment profile for SFTP: the provider build determines the surviving SSH algorithm set. That is now measured, not assumed.
 - Rewriting the FIPS and SC-13 claims in [COMPLIANCE.md](../COMPLIANCE.md): the current text says the modules in use are not FIPS 140-validated, which remains accurate. The rewrite's real work is the approved / allowed / not-allowed distinction above -- the SC-13 row draws it for the Ed25519 of receipt signing and leaves X25519's entry undistinguished, conflating algorithm-standard approval with module-certificate approval. Both things are true at once and the document has to say so.
 - Moving Ed25519 receipt signing off pure JS: the provider carries Ed25519, but every certificate places it outside approved mode, and under the targeted 140-3 certificate it is Not Allowed outright. Routing signing through the provider is therefore off the table -- it would take the module out of approved mode for that operation. The remaining fork is ECDSA, which is approved, or keeping the pure-JS implementation and disclosing it, which costs nothing in module terms because an algorithm run outside the module does not change the module's mode. That fork is settled -- the choice of ECDSA over P-256 through `crypto.subtle`, and what a scoped FIPS claim may and may not say about receipt signing, is recorded in [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md).
