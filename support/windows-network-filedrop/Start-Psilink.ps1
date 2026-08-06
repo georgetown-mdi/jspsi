@@ -153,8 +153,30 @@ function Assert-PsilinkImageStamp {
 # The container engine
 # ==========================================================================
 
+function Test-EngineCommand {
+    <#  Whether a name is a command this session can run. An empty name is
+        answered here rather than passed on: Get-Command refuses one while its
+        parameters are being bound, which -ErrorAction cannot soften, and the
+        engine name is empty until one has been found. #>
+    param([string] $Engine)
+
+    if ([string]::IsNullOrWhiteSpace($Engine)) { return $false }
+    return [bool](Get-Command $Engine -ErrorAction SilentlyContinue)
+}
+
+function New-AbsentEngineResult {
+    <#  The answer the two wrappers give for an engine that is not there, in the
+        shape a run of one returns. #>
+    param([string] $Engine)
+
+    $named = $Engine
+    if ([string]::IsNullOrWhiteSpace($named)) { $named = '(no engine)' }
+    return @{ Ran = $false; Output = "$named is not a command on this PC."; ExitCode = 127 }
+}
+
 function Invoke-EngineQuiet {
-    <#  Run the engine and return its combined output and exit code.
+    <#  Run the engine and return whether it ran at all, its combined output,
+        and its exit code.
 
         The engine is never called with a bare "2>&1" outside this function,
         because Windows PowerShell 5.1 turns every stderr line of a native
@@ -163,6 +185,14 @@ function Invoke-EngineQuiet {
         record throw. Docker writes routine, expected messages to stderr ("no
         such volume" when removing one that was never created), so the redirect
         has to happen with the preference relaxed.
+
+        A name that is not a command on this PC is answered here rather than
+        called: calling one raises CommandNotFoundException, which the relaxed
+        preference does not soften and nothing here catches, so a run would end
+        on a raw .NET error instead of the message the flow means to print. Ran
+        is what tells that apart from an engine that ran and exited: 127 is the
+        shell convention for a command that is not there, and a container that
+        exits 127 reports the same code.
 
         The arguments are one explicit array rather than loose trailing words: a
         function that collects remaining arguments is an advanced function, so
@@ -173,11 +203,13 @@ function Invoke-EngineQuiet {
         [string] $Engine = $script:PsilinkEngine
     )
 
+    if (-not (Test-EngineCommand -Engine $Engine)) { return (New-AbsentEngineResult -Engine $Engine) }
+
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
         $lines = & $Engine @EngineArgs 2>&1 | ForEach-Object { "$_" }
-        return @{ Output = ($lines -join [Environment]::NewLine); ExitCode = $LASTEXITCODE }
+        return @{ Ran = $true; Output = ($lines -join [Environment]::NewLine); ExitCode = $LASTEXITCODE }
     } finally { $ErrorActionPreference = $previous }
 }
 
@@ -185,14 +217,22 @@ function Invoke-EngineCapture {
     <#  Run the engine, capture its standard output, and let its standard error
         reach the console. The doctor's --json verdict is the whole of its
         standard output and its log lines are the whole of its standard error,
-        so merging the two would put log text into the document being parsed. #>
-    param([Parameter(Mandatory = $true)][string[]] $EngineArgs)
+        so merging the two would put log text into the document being parsed.
+
+        A name that is not a command on this PC is answered without calling it,
+        for the reason Invoke-EngineQuiet gives. #>
+    param(
+        [Parameter(Mandatory = $true)][string[]] $EngineArgs,
+        [string] $Engine = $script:PsilinkEngine
+    )
+
+    if (-not (Test-EngineCommand -Engine $Engine)) { return (New-AbsentEngineResult -Engine $Engine) }
 
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $lines = & $script:PsilinkEngine @EngineArgs
-        return @{ Output = (($lines | ForEach-Object { "$_" }) -join "`n"); ExitCode = $LASTEXITCODE }
+        $lines = & $Engine @EngineArgs
+        return @{ Ran = $true; Output = (($lines | ForEach-Object { "$_" }) -join "`n"); ExitCode = $LASTEXITCODE }
     } finally { $ErrorActionPreference = $previous }
 }
 
@@ -676,6 +716,22 @@ function Get-ConsoleEngineArgs {
     return $engineArgs + @((Get-PsilinkImage), 'serve')
 }
 
+# ==========================================================================
+# The setup script's functions
+# ==========================================================================
+
+function Get-ScriptParameterName {
+    <#  The parameter names a script declares, read out of the file itself
+        rather than from a list kept here: it is the two param() blocks that
+        collide when this script dot-sources the other, so the names they
+        collide over are theirs to state and not this script's to remember. #>
+    param([string] $Path)
+
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref] $null, [ref] $null)
+    if (-not $ast -or -not $ast.ParamBlock) { return @() }
+    return @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+}
+
 # Everything above defines something; everything below runs the launcher. A
 # dot-source that asked for the definitions alone stops here.
 if ($LoadFunctionsOnly) { return }
@@ -731,7 +787,35 @@ if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
     Show-Note 'server behind a mapped drive or a network path. Without it, only'
     Show-Note 'a folder on this PC can be used.'
 } else {
+    # A dot-source runs the other script's own param() block in this scope. Left
+    # alone, that resets every name the two scripts share -- -VolumeName -- to
+    # the setup script's default, discarding what the operator typed here, and
+    # leaves the rest of its parameters behind as variables this script never
+    # declared. Both are undone around the dot-source, and the names come from
+    # asking each script for its own parameters rather than from a list kept by
+    # hand, so that a parameter added to either one later cannot collide in
+    # silence.
+    $launcherParameterNames = @(Get-ScriptParameterName -Path $PSCommandPath)
+    $launcherParameterValues = @{}
+    foreach ($name in $launcherParameterNames) {
+        $held = Get-Variable -Name $name -Scope 0 -ErrorAction SilentlyContinue
+        if ($held) { $launcherParameterValues[$name] = $held.Value }
+    }
+    $importedNames = @()
+    foreach ($name in @(Get-ScriptParameterName -Path $setupScript)) {
+        if ($launcherParameterNames -contains $name) { continue }
+        if (Get-Variable -Name $name -Scope 0 -ErrorAction SilentlyContinue) { continue }
+        $importedNames += $name
+    }
+
     . $setupScript -LoadFunctionsOnly
+
+    foreach ($name in @($launcherParameterValues.Keys)) {
+        Set-Variable -Name $name -Scope 0 -Value $launcherParameterValues[$name]
+    }
+    foreach ($name in $importedNames) {
+        Remove-Variable -Name $name -Scope 0 -ErrorAction SilentlyContinue
+    }
     $canResolveNetworkPaths = $true
 }
 

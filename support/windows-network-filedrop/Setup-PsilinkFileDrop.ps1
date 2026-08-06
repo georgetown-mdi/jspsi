@@ -113,8 +113,8 @@ function Hide-Secret {
 }
 
 function Invoke-Docker {
-    <#  Runs docker and returns a hashtable of its combined output and exit
-        code.
+    <#  Runs docker and returns a hashtable of whether it ran at all, its
+        combined output, and its exit code.
 
         Docker is never called with a bare "2>&1" in this script, because
         Windows PowerShell 5.1 turns every stderr line of a native program
@@ -133,6 +133,14 @@ function Invoke-Docker {
         docker, which then reads the volume spec as the image name and fails
         with "invalid reference format".
 
+        A name that is not a command on this PC is answered here rather than
+        called: calling one raises CommandNotFoundException, which the relaxed
+        preference does not soften and nothing here catches, so a run would end
+        on a raw .NET error instead of the message the flow means to print. Ran
+        is what tells that apart from an engine that ran and exited: 127 is the
+        shell convention for a command that is not there, and a container that
+        exits 127 reports the same code.
+
         -Engine names the command to run, for the launcher, which reaches this
         through the shared volume sequence below and may have chosen podman.
         This script itself asks for docker and nothing else. #>
@@ -141,11 +149,19 @@ function Invoke-Docker {
         [string] $Engine = 'docker'
     )
 
+    # An empty name is answered here rather than passed on: Get-Command refuses
+    # one while its parameters are being bound, which -ErrorAction cannot soften.
+    if ([string]::IsNullOrWhiteSpace($Engine) -or -not (Get-Command $Engine -ErrorAction SilentlyContinue)) {
+        $named = $Engine
+        if ([string]::IsNullOrWhiteSpace($named)) { $named = '(no engine)' }
+        return @{ Ran = $false; Output = "$named is not a command on this PC."; ExitCode = 127 }
+    }
+
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
         $lines = & $Engine @DockerArgs 2>&1 | ForEach-Object { "$_" }
-        return @{ Output = ($lines -join [Environment]::NewLine); ExitCode = $LASTEXITCODE }
+        return @{ Ran = $true; Output = ($lines -join [Environment]::NewLine); ExitCode = $LASTEXITCODE }
     }
     finally { $ErrorActionPreference = $previous }
 }
@@ -354,6 +370,36 @@ function New-ShareVolume {
 # Path resolution: Explorer-visible path -> real server, share, subdirectory
 # ==========================================================================
 
+function Get-NetUseRemoteName {
+    <#  The UNC root `net use` reports for a drive letter, or $null when it
+        reports none.
+
+        Resolve-MappedDrive's third method, in a function of its own so that it
+        can be driven on its own: the two methods before it answer whenever they
+        can, so on a machine where either works nothing reaches this one through
+        them, and a suite that only drove Resolve-MappedDrive would leave it
+        unexecuted.
+
+        The catch is load-bearing rather than defensive. `net use` writes to
+        standard error for a letter it does not hold, and the redirect turns
+        that into a terminating record while this script runs at
+        $ErrorActionPreference = 'Stop' -- so "nothing is mapped there" arrives
+        as a throw rather than as the non-zero exit code the line above reads.
+        A letter that is mapped writes nothing there and answers normally. #>
+    param([string] $Letter)
+
+    try {
+        $netUse = & net use "${Letter}:" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            foreach ($line in $netUse) {
+                if ($line -match '\\\\[^\s]+') { return $Matches[0] }
+            }
+        }
+    } catch { }
+
+    return $null
+}
+
 function Resolve-MappedDrive {
     <#  Given 'Z', return the UNC root it maps to, or $null if it is not a
         mapped network drive. Three independent methods, because which ones are
@@ -378,16 +424,7 @@ function Resolve-MappedDrive {
         if ($conn -and $conn.RemoteName) { return $conn.RemoteName }
     } catch { }
 
-    try {
-        $netUse = & net use "${Letter}:" 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            foreach ($line in $netUse) {
-                if ($line -match '\\\\[^\s]+') { return $Matches[0] }
-            }
-        }
-    } catch { }
-
-    return $null
+    return (Get-NetUseRemoteName -Letter $Letter)
 }
 
 function Get-DriveKind {

@@ -152,7 +152,14 @@ already a CIFS volume made by this script, and already something else.
 `Resolve-MappedDrive` was exercised against a real Windows drive mapping in an
 earlier revision and all three of its lookup methods returned the UNC root; the
 mapping was served over WebDAV rather than SMB, because Windows' own
-file-sharing service holds port 445. The function is unchanged since.
+file-sharing service holds port 445. Its third method sits in
+`Get-NetUseRemoteName` so that a suite can reach it at all: the two before it
+answer whenever they can, so on a machine where either works nothing reaches the
+third through them. That method is driven in CI over the rig's mapped letter,
+where it returns the UNC root at `$ErrorActionPreference = 'Stop'`, and over a
+letter nothing is mapped to, where `net use` writes to standard error and the
+redirect turns that into a throw rather than the non-zero exit code the function
+reads -- which is what its catch is for.
 
 **The SMB-served mapped drive and the DFS namespace are covered in CI as of 5
 August 2026.** `Setup-PsilinkFileDrop.Tests.ps1` drives the script's own
@@ -162,21 +169,29 @@ classifies as a network drive; a letter mapped to a link in a standalone DFS
 namespace resolves to the namespace path rather than to the server holding the
 data, which is the answer the confirmation prompt exists to have the operator
 correct; and a fixed local path classifies as local. The same suite covers UNC
-and device-prefix parsing, the dialect map, and password masking without a rig.
-It reaches those functions by dot-sourcing the script with `-LoadFunctionsOnly`,
-a switch that defines the functions and stops before the setup flow; two of its
-tests hold that switch to its contract from both sides, since a guard that
-swallowed the flow would leave every operator with a script that does nothing.
-Nothing past resolution is covered -- the prompts, the container checks and the
-volume are verified by the passes above and by nothing else.
+and device-prefix parsing, the dialect map, password masking, and `Invoke-Docker`
+-- against a name that is not a command, against an empty one, and against a
+command that writes to standard error and exits non-zero -- without a rig. Two
+of its cases hold the interpreter premises those wrappers are written against
+rather than leaving them in comments: at `$ErrorActionPreference = 'Stop'` a
+native program's redirected standard error is a terminating record whatever its
+exit code says, and calling a name that is not a command raises
+`CommandNotFoundException` even under the relaxed preference the wrappers run
+their calls at. It reaches those functions by dot-sourcing the script with
+`-LoadFunctionsOnly`, a switch that defines the functions and stops before the
+setup flow; two of its tests hold that switch to its contract from both sides,
+since a guard that swallowed the flow would leave every operator with a script
+that does nothing. Of what lies past resolution, the credential and volume
+sequences are reached only through the launcher's suite below; the container
+checks are verified by the passes above and by nothing else.
 `ci-resolution-tests.ps1` runs the suites and reports them as check-run
 annotations, which is all a reader of a CI run can see.
 
-**The launchers, as of 5 August 2026: the shell one is driven end to end, the
-PowerShell one has never been run.** `scripts/start-psilink-launcher.test.mjs`
-drives `start-psilink.sh` on Linux CI against a stub engine on PATH -- a real
-process reading the real argument vector, so the mounts and the publish binding
-are asserted as the engine receives them. Covered: the unstamped refusal, and
+**The launchers, as of 6 August 2026: both are driven end to end against a stub
+engine.** `scripts/start-psilink-launcher.test.mjs` drives `start-psilink.sh` on
+Linux CI against a stub engine on PATH -- a real process reading the real
+argument vector, so the mounts and the publish binding are asserted as the
+engine receives them. Covered: the unstamped refusal, and
 that it happens before the engine is touched at all; the sourcing contract from
 both sides; the verdict reader (absent versus null, prose holding a brace, a
 comma and a quote, an escaped control character rendered as a space, a check
@@ -186,18 +201,33 @@ not retried; a refused verdict version; the docker-then-podman order; and one
 pass reaching the console. Nothing there pulls the real image, opens a browser,
 or reaches a network.
 
-`Start-Psilink.ps1` is covered only by `Start-Psilink.Tests.ps1`, which is
-entirely pure: the verdict reader against the same fixtures, the release stamp,
-the DFS candidate selection, and the console's argument vector. The credential
-and volume sequences it now shares with the setup script are covered there only
-as far as being defined by `-LoadFunctionsOnly`, which is what the launcher
-depends on; neither is executed by any suite, because both prompt or reach an
-engine. Its flow has
-never been executed anywhere -- not the folder picker or its typed fallback, the
-prompts, the credentials, the volume, the detached container, or the port wait.
-A first real-Windows pass should start with the picker in a session whose
-language mode really is constrained, which is the one branch chosen from
-documentation rather than measurement, and with the DFS offer.
+`Start-Psilink.ps1` is covered by `Start-Psilink.Tests.ps1`, most of it purely:
+the verdict reader against the same fixtures, the release stamp, the DFS
+candidate selection, the console's argument vector, the parameter-name reader
+the dot-source protects itself with, and both engine wrappers against a name
+that is not a command and against an empty one.
+
+Its network flow is driven end to end on the runner: a stamped copy of the
+launcher, the setup script beside it, a stub `docker.cmd` first on a PATH
+holding no other engine, and a listener the suite itself holds open on the
+console's port. That run answers the confirmation prompt from a redirected
+standard input, creates the volume, runs the `doctor mount` battery over it,
+starts the detached container and waits for the port -- and asserts that the
+`-VolumeName` the operator passed reaches the volume, the battery, the console's
+rendezvous mount and the removal line the run prints, none of them carrying the
+setup script's default in its place. One substitution: the copy of the setup
+script beside the launcher answers `Read-ShareCredential` from a definition of
+its own, because `Read-Host -AsSecureString` reads the console rather than a
+redirected standard input, which the suite holds as a case of its own. Nothing
+else is stubbed, and the `param()` block whose collision the run is there to
+catch is the real one.
+
+Still unexecuted anywhere: the folder picker and its typed fallback, the DFS
+offer, the constrained-language branch, the credential prompt itself, and every
+path that needs a real engine or a real share. A first real-Windows pass should
+start with the picker in a session whose language mode really is constrained,
+which is the one branch chosen from documentation rather than measurement, and
+with the DFS offer.
 
 The launcher's CIFS volume options are the setup script's -- since 5 August 2026
 literally, through `New-ShareVolume`, which the launcher calls with `-Engine`

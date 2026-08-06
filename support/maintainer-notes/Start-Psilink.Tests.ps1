@@ -36,13 +36,18 @@ BeforeAll {
 
             $PSHOME rather than the bare name, and a temporary file rather than
             the console for standard input, so that a guard which failed and let
-            the flow reach a prompt ends the run rather than blocking it. #>
-        param([string[]] $Arguments, [int] $TimeoutSeconds = 60)
+            the flow reach a prompt ends the run rather than blocking it.
+            -InputLines fills that file for a run that is meant to reach the
+            prompts; a run given none still ends at the first one it reaches. #>
+        param([string[]] $Arguments, [string[]] $InputLines = @(), [int] $TimeoutSeconds = 60)
 
         $outFile = [IO.Path]::GetTempFileName()
         $errFile = [IO.Path]::GetTempFileName()
         $inFile = [IO.Path]::GetTempFileName()
         try {
+            if (@($InputLines).Count -gt 0) {
+                Set-Content -LiteralPath $inFile -Value $InputLines -Encoding Ascii
+            }
             $process = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') `
                 -ArgumentList $Arguments -NoNewWindow -PassThru `
                 -RedirectStandardInput $inFile `
@@ -351,6 +356,62 @@ Describe 'Select-DfsCandidate' {
     }
 }
 
+Describe 'Get-ScriptParameterName' {
+    It 'reads the parameter names out of the script beside this one' {
+        # What the launcher protects itself with across the dot-source: the
+        # names come from the two param() blocks rather than from a list.
+        $names = Get-ScriptParameterName -Path (Join-Path (Split-Path -Parent $launcherScript) 'Setup-PsilinkFileDrop.ps1')
+
+        $names | Should -Contain 'VolumeName'
+        $names | Should -Contain 'Server'
+        $names | Should -Contain 'LoadFunctionsOnly'
+    }
+
+    It 'reads its own' {
+        $names = Get-ScriptParameterName -Path $launcherScript
+
+        $names | Should -Contain 'VolumeName'
+        $names | Should -Contain 'Port'
+        # Common parameters belong to CmdletBinding rather than to the param()
+        # block, and neither script's flow has a variable of its own to protect
+        # from them.
+        $names | Should -Not -Contain 'Verbose'
+    }
+}
+
+Describe 'The engine wrappers' {
+    It 'answer a name that is not a command without borrowing an earlier code' {
+        # A native command run first, leaving a 0 in $LASTEXITCODE, so that the
+        # answers below cannot have been taken from there -- a 0 would read as
+        # an engine that ran and was happy. What such a call does without the
+        # guard, raise rather than answer, has a case of its own in the setup
+        # script's suite.
+        & cmd /c exit 0
+
+        $quiet = Invoke-EngineQuiet -Engine 'psilink-no-such-engine' -EngineArgs @('version')
+        $captured = Invoke-EngineCapture -Engine 'psilink-no-such-engine' -EngineArgs @('version')
+
+        $quiet.Ran | Should -Be $false
+        $quiet.ExitCode | Should -Not -Be 0
+        $quiet.Output | Should -Match 'psilink-no-such-engine'
+        $captured.Ran | Should -Be $false
+        $captured.ExitCode | Should -Not -Be 0
+        $captured.Output | Should -Match 'psilink-no-such-engine'
+    }
+
+    It 'report an empty engine name the same way' {
+        # The name is empty until Find-ContainerEngine has chosen one.
+        & cmd /c exit 0
+
+        (Invoke-EngineQuiet -Engine '' -EngineArgs @('version')).Ran | Should -Be $false
+        (Invoke-EngineCapture -Engine '' -EngineArgs @('version')).ExitCode | Should -Not -Be 0
+    }
+
+    It 'skip an engine that is not there rather than choosing it' {
+        Find-ContainerEngine -Candidates @('psilink-no-such-engine') | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'The console argument vector' {
     It 'publishes to host loopback and keeps nothing' {
         $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
@@ -383,5 +444,170 @@ Describe 'The console argument vector' {
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_DIR=/rendezvous'
         # A named volume mounts by name exactly as a host path does.
         $engineArgs | Should -Contain 'psilink-sync:/rendezvous'
+    }
+}
+
+Describe 'The network flow, driven against a stub engine' {
+    BeforeAll {
+        $script:FlowRoot = Join-Path $env:TEMP ('psilink-launcher-flow-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:FlowBin = Join-Path $script:FlowRoot 'bin'
+        $script:FlowStub = Join-Path $script:FlowRoot 'stub'
+        $script:FlowData = Join-Path $script:FlowRoot 'data'
+        foreach ($directory in @($script:FlowRoot, $script:FlowBin, $script:FlowStub, $script:FlowData)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+        $script:FlowCalls = Join-Path $script:FlowStub 'calls.log'
+
+        # An engine that records the argument vector it is handed and answers
+        # every doctor battery with a verdict that blocks nothing. A .cmd rather
+        # than something this session could run itself: the launcher reaches its
+        # engine as a native command, and the exit code and the merged streams
+        # it reads back are properties of that.
+        Set-Content -LiteralPath (Join-Path $script:FlowBin 'docker.cmd') -Encoding Ascii -Value @(
+            '@echo off',
+            'echo %* >> "%PSILINK_STUB_DIR%\calls.log"',
+            'echo %* | findstr /c:"doctor" >nul',
+            'if not errorlevel 1 echo {"version":1,"mode":"mount","overall":"ok","checks":[]}',
+            'exit /b 0')
+
+        # The launcher refuses to run unstamped, so the copy under test carries
+        # a digest. The setup script travels with it: the launcher requires one
+        # beside itself, and the dot-source of it is what this drives.
+        $source = Get-Content -Raw -LiteralPath $launcherScript
+        $placeholderLine = "`$PsilinkImageDigest = '@@PSILINK_IMAGE_DIGEST@@'"
+        $stamped = $source.Replace($placeholderLine, "`$PsilinkImageDigest = '$script:StampedDigest'")
+        if ($stamped -eq $source) { throw 'the launcher no longer carries the digest line this suite stamps' }
+        $script:FlowLauncher = Join-Path $script:FlowRoot 'Start-Psilink.ps1'
+        [IO.File]::WriteAllText($script:FlowLauncher, $stamped)
+
+        # The credential prompt is the one part of the flow that cannot be
+        # driven, which the case below holds as a check: it reads the console
+        # rather than a redirected standard input. The copy beside the launcher
+        # answers it from a definition of its own and is otherwise the script
+        # itself -- the param() block whose collision this drives is the real
+        # one, and so are the resolution and volume sequences.
+        $setupScript = Join-Path (Split-Path -Parent $launcherScript) 'Setup-PsilinkFileDrop.ps1'
+        $setupSource = Get-Content -Raw -LiteralPath $setupScript
+        $guardLine = "if (`$LoadFunctionsOnly) { return }"
+        $answeredCredential = @(
+            'function Read-ShareCredential {',
+            "    return @{ Username = 'psilinkci'; Domain = ''; Password = 'hunter2' }",
+            '}',
+            '') -join [Environment]::NewLine
+        $patched = $setupSource.Replace($guardLine, $answeredCredential + $guardLine)
+        if ($patched -eq $setupSource) { throw 'the setup script no longer carries the guard line this suite patches' }
+        [IO.File]::WriteAllText((Join-Path $script:FlowRoot 'Setup-PsilinkFileDrop.ps1'), $patched)
+
+        # Something has to answer on the console's port for the flow to reach
+        # its end: the stub engine exits rather than holding one open.
+        $script:FlowListener = New-Object -TypeName Net.Sockets.TcpListener `
+            -ArgumentList ([Net.IPAddress]::Loopback, 0)
+        $script:FlowListener.Start()
+        $script:FlowPort = ([Net.IPEndPoint] $script:FlowListener.LocalEndpoint).Port
+    }
+
+    AfterAll {
+        if ($script:FlowListener) { $script:FlowListener.Stop() }
+        Remove-Item -LiteralPath $script:FlowRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'reads an ordinary prompt from a redirected standard input' {
+        # The premise the flow below is driven on: a prompt this suite could not
+        # answer would hang a launcher that is behaving perfectly.
+        $probe = Join-Path $script:FlowRoot 'probe-prompt.ps1'
+        Set-Content -LiteralPath $probe -Encoding Ascii -Value @(
+            '$ErrorActionPreference = ''Stop''',
+            '$answer = Read-Host ''Answer''',
+            'Write-Output ("READ:" + $answer)')
+
+        $run = Start-LauncherChild -Arguments @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$probe`"") `
+            -InputLines @('psilinkci') -TimeoutSeconds 60
+
+        $run.TimedOut | Should -BeFalse
+        ([string] $run.Output) | Should -Match 'READ:psilinkci'
+    }
+
+    It 'cannot read a password prompt from a redirected standard input' {
+        # Why the copy of the setup script under test answers the credential
+        # prompt from a definition of its own: -AsSecureString reads the console
+        # itself, so a redirected standard input answers nothing and the run
+        # waits. Held as a check rather than stated in a comment, so that a
+        # Windows PowerShell which does read it fails here rather than leaving
+        # the flow test carrying a substitution nobody needs.
+        $probe = Join-Path $script:FlowRoot 'probe-password.ps1'
+        Set-Content -LiteralPath $probe -Encoding Ascii -Value @(
+            '$ErrorActionPreference = ''Stop''',
+            '$secure = Read-Host ''Password'' -AsSecureString',
+            'Write-Output ("READ:" + $secure.Length)')
+
+        $run = Start-LauncherChild -Arguments @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$probe`"") `
+            -InputLines @('hunter2') -TimeoutSeconds 20
+
+        $run.TimedOut | Should -BeTrue
+        ([string] $run.Output) | Should -Not -Match 'READ:'
+    }
+
+    It 'carries -VolumeName through the dot-source to every later use of it' {
+        # The launcher dot-sources the setup script for its resolution,
+        # credential and volume sequences, and that runs the setup script's own
+        # param() block in the launcher's scope. What the operator typed here
+        # has to survive it.
+        $volumeName = 'psilinkci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+
+        $originalPath = $env:PATH
+        $originalStubDir = $env:PSILINK_STUB_DIR
+        try {
+            # The stub first and nothing else that could answer behind it: a
+            # runner with a real engine installed must not be reached by this.
+            $env:PATH = @($script:FlowBin,
+                (Join-Path $env:SystemRoot 'System32'),
+                $env:SystemRoot,
+                (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0')) -join ';'
+            $env:PSILINK_STUB_DIR = $script:FlowStub
+            $run = Start-LauncherChild -Arguments @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script:FlowLauncher`"",
+                '-DataRoot', "`"$script:FlowData`"",
+                '-RendezvousDir', '\\psilink-ci-server\exchange\drop',
+                '-VolumeName', $volumeName,
+                '-Port', $script:FlowPort,
+                '-NoBrowser') `
+                -InputLines @('y', '', '', '') -TimeoutSeconds 150
+        } finally {
+            $env:PATH = $originalPath
+            if ($null -eq $originalStubDir) {
+                Remove-Item 'env:PSILINK_STUB_DIR' -ErrorAction SilentlyContinue
+            } else {
+                $env:PSILINK_STUB_DIR = $originalStubDir
+            }
+        }
+
+        $calls = ''
+        if (Test-Path -LiteralPath $script:FlowCalls) {
+            $calls = [string] (Get-Content -LiteralPath $script:FlowCalls -Raw)
+        }
+        $output = [string] $run.Output
+        # The failure annotation is the only diagnostic that leaves the runner,
+        # so every assertion below carries the run's shape and its tail.
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$(@($calls -split '\r?\n').Count) tail=" +
+            (($output.Substring([Math]::Max(0, $output.Length - 300))) -replace '\s+', ' ')
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $output | Should -Match 'The console is at' -Because $shape
+
+        $created = @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }) -join ' :: '
+        $checked = @($calls -split '\r?\n' | Where-Object { $_ -like '*doctor mount*' }) -join ' :: '
+        $served = @($calls -split '\r?\n' | Where-Object { $_ -like '*serve*' }) -join ' :: '
+
+        $created | Should -BeLike "*$volumeName*" -Because $shape
+        $checked | Should -BeLike "*--volume ${volumeName}:/rz*" -Because $shape
+        $served | Should -BeLike "*--volume ${volumeName}:/rendezvous*" -Because $shape
+        $output | Should -BeLike "*volume rm $volumeName*" -Because $shape
+
+        # The setup script's default for the same parameter name, which its
+        # param() block puts in place of what the operator typed.
+        $calls | Should -Not -BeLike '*psilink-sync*' -Because $shape
+        $output | Should -Not -BeLike '*psilink-sync*' -Because $shape
     }
 }
