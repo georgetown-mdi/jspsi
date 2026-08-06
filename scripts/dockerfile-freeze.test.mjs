@@ -138,6 +138,16 @@ const runtimeShellCommands = runtimeRunsWithCwd.flatMap(({ run, cwd }) =>
     .map((command) => ({ command, cwd })),
 );
 
+// The builder stage's commands, read the same way. Its files cross into the
+// runtime stage through `COPY --from=builder`, so ownership assigned there is
+// on the same footing as ownership assigned here.
+const builderShellCommands = builderRuns.flatMap((run) =>
+  normalize(run)
+    .split(/&&|\|\||[;|]/)
+    .map((command) => command.trim())
+    .filter((command) => command !== ""),
+);
+
 // The ownership verbs the parse below reads: their path operands are extracted
 // and tested against the writable trees.
 const PARSED_OWNERSHIP_VERB = /^(?:chown|chgrp|chmod)\s/;
@@ -406,6 +416,24 @@ describe("Dockerfile runtime layout", () => {
             !PARSED_OWNERSHIP_VERB.test(command),
         )
         .map(({ command }) => command),
+    ).toEqual([]);
+  });
+
+  it("assigns no ownership in the builder stage, whose files the runtime copies in", () => {
+    // `COPY --from=builder` carries the builder's files into /app, and what
+    // ownership they arrive with is Docker's rule rather than this file's to
+    // model. The route is closed instead: the builder assigns no ownership at
+    // all, so nothing crosses the stage boundary already handed to an account.
+    expect(
+      builderShellCommands.filter((command) =>
+        ANY_OWNERSHIP_VERB.test(command),
+      ),
+    ).toEqual([]);
+    expect(
+      builder
+        .filter(({ inst }) => inst === "COPY")
+        .flatMap(({ rest }) => rest.split(/\s+/))
+        .filter((token) => /^--(?:chown|chmod)/.test(token)),
     ).toEqual([]);
   });
 
