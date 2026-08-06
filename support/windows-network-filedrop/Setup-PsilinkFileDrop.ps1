@@ -742,11 +742,23 @@ try {
     }
     if ($probeExit -eq 64) {
         Write-Head 'Could not run the checks'
-        Write-Bad 'The checks refused the values this script gave them.'
-        Write-Note 'Nothing was tested. This is a defect in Setup-PsilinkFileDrop.ps1'
-        Write-Note 'rather than a problem with your share or your credentials.'
-        Write-Info ''
-        Write-Info 'Please report it, with the message above and the command you ran.'
+        Write-Bad 'The checks refused the values they were given. Nothing was tested.'
+        if ($explicitTarget) {
+            # -Server and -Share are forwarded as typed, so an operator's own
+            # values reach this refusal; the resolved path never does.
+            Write-Note "Check what you passed: a path separator in -Server '$Server' or"
+            Write-Note "-Share '$Share' (a subfolder belongs in -SubPath instead), a"
+            Write-Note "leading '-', or a stray control character is refused before"
+            Write-Note 'anything is tested.'
+            Write-Info ''
+            Write-Info 'If those look right, this is a defect in Setup-PsilinkFileDrop.ps1;'
+            Write-Info 'please report it, with the message above and the command you ran.'
+        } else {
+            Write-Note 'This is a defect in Setup-PsilinkFileDrop.ps1 rather than a'
+            Write-Note 'problem with your share or your credentials.'
+            Write-Info ''
+            Write-Info 'Please report it, with the message above and the command you ran.'
+        }
         exit $probeExit
     }
     if ($probeExit -eq 69) {
@@ -869,13 +881,33 @@ try {
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
     }
-    if ($test.ExitCode -ne 0) {
+    if ($test.ExitCode -eq 64) {
+        # Unlike part 3, no operator value reaches this battery: the marker,
+        # token, and mount directory are all generated here.
+        Write-Bad 'The checks refused the values this script gave them.'
+        Write-Note 'Nothing was established about the folder. This is a defect in'
+        Write-Note 'Setup-PsilinkFileDrop.ps1; please report it, with the message'
+        Write-Note 'above and the command you ran.'
+        Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
+        exit 9
+    }
+    if ($test.ExitCode -eq 78) {
         Write-Bad 'The volume mounted, but the folder is not usable for an exchange.'
         Write-Note 'The share was reached, so this is not a mount or a dialect'
         Write-Note 'problem and -Dialect will not change it. Follow the ACTION above.'
         Write-Info ''
         Write-Info 'The troubleshooting page explains every one of these in more detail:'
         Write-Info 'https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md'
+        Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
+        exit 9
+    }
+    if ($test.ExitCode -ne 0) {
+        # Part 3 returned 0 from the same image, so it carries the checks; a
+        # code outside their set here points the other way from part 3's arm.
+        Write-Bad "The checks answered with an exit code this script does not know ($($test.ExitCode))."
+        Write-Note 'Nothing has been established about the folder either way. The'
+        Write-Note 'likeliest cause is an image newer than this script -- look for a'
+        Write-Note 'newer copy of this script wherever you downloaded it.'
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
     }
