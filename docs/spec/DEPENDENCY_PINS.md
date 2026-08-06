@@ -169,15 +169,19 @@ the install reports exactly `-rwxr-sr-x 1 root shadow /usr/sbin/unix_chkpwd` and
 no setuid file at all -- on the built `arm64` image, and at `x86_64` on the
 pinned base plus that one instruction. It sits beside the PAM helpers `faillock`,
 `mkhomedir_helper`, `pam_namespace_helper`, `pam_timestamp_check` and
-`pwhistory_helper`, none of them setgid. The setgid bit is a real boundary here:
-the runtime stage declares `USER node`, so a process in the image is uid 1000 and
-group `shadow` is something it does not otherwise hold. What bounds exploitability
-is therefore a single property of the image rather than of the package --
-`/etc/shadow` carries no usable hash (`root` is `*`, every other account `!`), so
-`unix_chkpwd` has nothing to verify against. Nothing stands behind that one
-property, so re-measure it if a change gives any account in the image a password
-hash, or if the image gains a second setgid or any setuid file; the `find` above
-settles both.
+`pwhistory_helper`, none of them setgid. The runtime stage declares `USER node`,
+so the process the setgid bit would elevate is unprivileged and the bit has to be
+read as a boundary rather than as the formality it is for uid 0. What bounds
+exploitability is a single measured property of the image rather than of the
+package -- `/etc/shadow` carries no usable hash (`root` is `*`, every other
+account `!`), so `unix_chkpwd` has nothing to verify against. Whether that
+account already carries group `shadow`, which would make the bit grant it nothing
+in the first place, is not measured here and nothing rests on it;
+`docker run --rm --entrypoint id <image> -Gn node` settles it against a built
+image. Nothing stands behind the one property that does carry the conclusion, so
+re-measure it if a change gives any account in the image a password hash, or if
+the image gains a second setgid or any setuid file; the `find` above settles
+both.
 
 **The helper image the setup scripts run the probe in is a mutable tag.** It is
 `vdorie/psi-link:latest` in both scripts, and floating it is deliberate: the
