@@ -211,24 +211,34 @@ beyond that, and the second OS-package inventory that comes with it.
 
 | Pin | Value | How it is held |
 | --- | --- | --- |
-| Release snapshot | `--releasever=2023.12.20260727` on every `dnf` transaction | Frozen literal in `scripts/dockerfile-freeze.test.mjs` |
+| Release snapshot | `--releasever=2023.12.20260727` on every `dnf` transaction | Shape-checked as a dated snapshot in `scripts/dockerfile-freeze.test.mjs` |
 | Provider package and version | `openssl-fips-provider-certified` at `3.0.8-1.amzn2023.0.1` | `rpm -qf` on the installed `fips.so`, asserted in the build |
 | Module version string | `3.0.8-d694bfa693b76001` | `openssl list -providers` read back, asserted in the build |
 | Base image | `amazonlinux:2023`, by tag | Not pinned; see below |
 
-The three asserted pins are build `ARG`s, and each is consumed by both the
-`dnf swap` that installs the module and the assertion that checks it. A build
-driven by hand with `--build-arg` therefore moves the install and the assertion
-together and comes out green carrying a different module: the assertions catch a
-package layer that drifts under the committed values, not an operator who
-changes those values. What holds the committed defaults themselves is
+All three asserted pins are build `ARG`s, so what the assertions catch is a
+package layer that drifts under the committed values rather than an operator who
+changes those values. The three do not move together, and that is what keeps a
+partial override from passing. The `dnf swap` and the `rpm -qf` assertion both
+read `FIPS_PROVIDER_PACKAGE` and `FIPS_PROVIDER_VERSION`, so overriding those
+moves the install and its own check in step; `FIPS_MODULE_VERSION` appears in no
+`dnf` line and is read only by the read-back assertion. A build driven by hand
+with `--build-arg` over the install pins alone therefore installs a different
+NVR, satisfies the `rpm -qf` half, and fails on the module version the loader
+reports -- it goes red, not green. A green build carrying a different module
+takes an override of the module version as well, which is a statement of which
+module was intended. What holds the committed defaults themselves is
 `scripts/dockerfile-freeze.test.mjs`, which pins all three as literals, and no
 CI path passes a build-arg -- `image_smoke.yaml` passes none, and the release
 workflow does not build this image.
 
 The release-snapshot pin is for reproducibility rather than for the certificate:
 AWS retains superseded NVRs, and a dated snapshot is immutable while
-`--releasever=latest` accumulates. Sampled across AWS's published snapshots,
+`--releasever=latest` accumulates. That is why the freeze test holds its shape
+rather than its value: the property worth guarding is that the build names a
+dated snapshot at all, and a deliberate bump to a newer one should not have to
+edit the test. Unlike the rows below it, then, this pin's exact value is held by
+review rather than by a check. Sampled across AWS's published snapshots,
 every snapshot from the packages' first appearance (between `2023.6.20250107`
 and `2023.7.20250428`) onward still resolves and still serves both certified
 NVRs, from a content-addressed blobstore.

@@ -25,8 +25,12 @@
 # each of the three host tiers, is in docs/notes/fips-variant-image.md.
 set -e
 
+# The scan is anchored to the fips block: a provider header (the only one-field
+# line that is not "Providers:") sets `seen` for fips and clears it for every
+# other provider, so a fips block carrying no status line cannot borrow the
+# version or the status of whichever provider is listed next.
 provider=$(openssl list -providers 2>/dev/null |
-  awk '/^[[:space:]]*fips$/ { seen = 1; next }
+  awk 'NF == 1 && index($1, ":") == 0 { seen = ($1 == "fips"); next }
        seen && $1 == "version:" { version = $2 }
        seen && $1 == "status:" { print version, $2; exit }') || provider=""
 

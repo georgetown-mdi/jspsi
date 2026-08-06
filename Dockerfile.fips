@@ -47,10 +47,9 @@ RUN dnf -y --releasever=${AL2023_RELEASEVER} install tar gzip xz findutils libat
 # close it, are in docs/notes/fips-variant-image.md.
 #
 # --ignore-missing is what lets the manifest be checked whole: it lists every
-# artifact of the release and only the one tarball fetched here is on disk. It
-# fails closed in both directions that matter -- a mismatched tarball exits
-# non-zero, and so does a tarball whose name the manifest does not carry, which
-# reports that no file was verified.
+# artifact of the release and only the one tarball fetched here is on disk. That
+# this fails closed rather than skipping its way to success is driven against the
+# real sha256sum in scripts/docker-entrypoint-fips.test.mjs.
 RUN set -eux; \
   arch="$(uname -m)"; \
   case "$arch" in \
@@ -141,7 +140,7 @@ RUN set -eux; \
   echo "installed FIPS module comes from: ${owner}"; \
   test "${owner}" = "${FIPS_PROVIDER_PACKAGE}-so ${FIPS_PROVIDER_VERSION}"; \
   reported="$(openssl list -providers -provider fips \
-  | awk '/^[[:space:]]*fips$/ { seen = 1; next } \
+  | awk 'NF == 1 && index($1, ":") == 0 { seen = ($1 == "fips"); next } \
          seen && $1 == "version:" { version = $2 } \
          seen && $1 == "status:" { print version, $2; exit }')"; \
   echo "activated FIPS provider: ${reported}"; \
