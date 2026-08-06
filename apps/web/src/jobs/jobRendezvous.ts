@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { JOB_DATA_ROOT_ENV } from "./gate";
+import { browseSegment } from "./workInputName";
 
 /**
  * The environment variable naming the operator-mounted rendezvous directory a
@@ -27,8 +28,8 @@ export const JOB_RENDEZVOUS_DIR_ENV = "JOB_RENDEZVOUS_DIR";
  * Unset is the operator-authored mount, where the mount point IS the operator's
  * naming and its last segment is the folder's name. A value that is not a bare
  * folder name -- empty, `.`/`..`, or carrying a path separator, a control
- * character, or more than {@link MAX_RENDEZVOUS_FOLDER_NAME_LENGTH} characters
- * -- leaves the console with no name rather than falling back to the mount
+ * character, or more than the shared segment rule's 255 characters
+ * ({@link browseSegment}) -- leaves the console with no name rather than falling back to the mount
  * point, because a caller that set this variable has already said the mount
  * point does not name the folder.
  *
@@ -36,12 +37,6 @@ export const JOB_RENDEZVOUS_DIR_ENV = "JOB_RENDEZVOUS_DIR";
  * in the invitation's locator and on the accept kit.
  */
 export const JOB_RENDEZVOUS_NAME_ENV = "JOB_RENDEZVOUS_NAME";
-
-/** The longest shared-folder name the console will carry. A folder name, not a
- * path: the common filesystem per-component limit is the natural bound, and it
- * is far under the endpoint schema's path cap, so a name that passes here can
- * never be what fails a mint. */
-const MAX_RENDEZVOUS_FOLDER_NAME_LENGTH = 255;
 
 declare global {
   var jobRendezvousDirConfig:
@@ -76,16 +71,13 @@ function lastPathSegment(dirPath: string): string {
 /** A bare folder name, or undefined when the value cannot be one. Nothing here
  * is a security boundary -- the value is the operator's own -- but a name that
  * carries a separator would put a path fragment in the partner's invitation,
- * and one that is empty or a relative-path segment names no folder at all. */
+ * and one that is empty or a relative-path segment names no folder at all.
+ * The shape rule is {@link browseSegment}, the single-segment predicate the
+ * job surfaces share so their callers cannot drift; a folder name keeps its
+ * leading dot, exactly as a browse segment does. */
 function usableFolderName(value: string): string | undefined {
   const name = value.trim();
-  if (name.length === 0 || name.length > MAX_RENDEZVOUS_FOLDER_NAME_LENGTH)
-    return undefined;
-  if (name === "." || name === "..") return undefined;
-  if (/[/\\]/.test(name)) return undefined;
-  // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x1f\x7f]/.test(name)) return undefined;
-  return name;
+  return browseSegment(name) ? name : undefined;
 }
 
 /**

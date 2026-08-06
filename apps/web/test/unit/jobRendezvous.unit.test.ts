@@ -4,6 +4,10 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
+import { MAX_ENDPOINT_PATH_LENGTH } from "@psilink/core";
+
+import { MAX_INPUT_NAME_LENGTH } from "@jobs/workInputName";
+
 import {
   rendezvousStartupWarnings,
   resolveJobRendezvousDir,
@@ -85,6 +89,14 @@ function locatorFor(env: NodeJS.ProcessEnv): {
 }
 
 describe("the shared folder's name the invitation is minted from", () => {
+  test("a name the segment rule admits can never be what fails a mint", () => {
+    // The folder-name bound rides the shared segment rule's 255-character cap;
+    // the endpoint schema's path cap is what a mint enforces. The inequality is
+    // the load-bearing fact: were it to flip, an admitted name could fail the
+    // mint it feeds.
+    expect(MAX_INPUT_NAME_LENGTH).toBeLessThan(MAX_ENDPOINT_PATH_LENGTH);
+  });
+
   test("a launcher-mounted console names the folder the launcher passed", () => {
     // The launcher binds whatever folder the operator picked at its own fixed
     // mount point, so the mount point names the launcher's layout and the folder's
