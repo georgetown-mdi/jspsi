@@ -1473,6 +1473,31 @@ test("a marker in a dropped providerOptions key does not delete the guidance", a
   expect(line?.message).toContain("default-deny precaution");
 });
 
+test("a marker in a dropped algorithms sub-key does not delete the guidance", async () => {
+  // The same ordering hazard one level down: the sub-key filter composes the
+  // rejected sub-key ahead of the list of what may be tuned and of the reason
+  // host-key-type negotiation is not among them. A key reaching the top-level
+  // allowlist branch never enters this filter, so this composition needs its
+  // own delivery to pin it.
+  const [, logs] = await withCapturedLogs(async () => {
+    await captureSftpConnectOptions({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      providerOptions: {
+        algorithms: { "-----BEGIN A PRIVATE KEY-----": ["aes256-ctr"] },
+      },
+    });
+  });
+  const line = logs.find(
+    (l) =>
+      l.level === "WARN" && l.message.includes("providerOptions.algorithms."),
+  );
+  expect(line).toBeDefined();
+  expect(line?.message).toContain("[redacted private key]");
+  expect(line?.message).toContain("may be tuned");
+  expect(line?.message).toContain("not operator-overridable");
+});
+
 // --- open (filedrop) ---------------------------------------------------------
 
 test("open sets path and marks connected for filedrop config", async () => {
