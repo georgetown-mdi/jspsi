@@ -94,17 +94,17 @@ function heading(title: string): Array<string> {
 function rendezvousLines(endpoint: AcceptKitEndpoint): Array<string> {
   if (endpoint.channel === "filedrop")
     return [
-      `  Shared folder:  ${endpoint.path}`,
+      `  Shared folder:  ${printable(endpoint.path)}`,
       "",
       "That is the folder's name as your partner sees it. Yours is the same",
       "folder reached your own way -- check the name matches before you go on.",
     ];
   const port = endpoint.port === undefined ? "" : `:${endpoint.port}`;
   return [
-    `  SFTP server:    ${endpoint.host}${port}`,
+    `  SFTP server:    ${printable(endpoint.host)}${port}`,
     ...(endpoint.path === undefined
       ? []
-      : [`  Directory:      ${endpoint.path}`]),
+      : [`  Directory:      ${printable(endpoint.path)}`]),
     "",
     "The invitation carries the same locator. Check it against what you were",
     "told to expect before you accept.",
@@ -117,12 +117,22 @@ function imageReference(imageTag: string): string {
   return `${PSILINK_IMAGE_REPOSITORY}:${imageTag}`;
 }
 
-/** The accept command, unindented; each caller indents it to its own step. */
+/** The accept command, unindented; each caller indents it to its own step.
+ * The CSV positional is part of the primary form: it is what makes the
+ * consent display list the columns the partner would send, rather than
+ * deferring that list to the exchange run. */
 function acceptCommand(imageTag: string): string {
   return (
     `docker run --rm -it -v "$PWD":${WORK_MOUNT} ` +
-    `${imageReference(imageTag)} accept ${INVITATION_PLACEHOLDER}`
+    `${imageReference(imageTag)} accept ${INVITATION_PLACEHOLDER} your-file.csv`
   );
+}
+
+/** Interpolated operator-authored text, held to the sheet's printable-ASCII
+ * contract: any byte outside printable ASCII renders as '?', so the stated
+ * invariant is enforced here rather than assumed of the console's inputs. */
+function printable(value: string): string {
+  return value.replace(/[^\x20-\x7e]/g, "?");
 }
 
 /** The shared opening: what this is, what the partner needs, and where the
@@ -160,10 +170,11 @@ function opening(endpoint: AcceptKitEndpoint): Array<string> {
     "",
     ...heading("WHAT YOU ARE AGREEING TO"),
     "Not on this sheet, deliberately. Accepting prints your partner's linkage",
-    "terms -- what records are matched on, which of your columns are sent,",
-    "which you receive, and who gets the result -- and asks you to confirm",
-    "them. That display is the thing to read before you answer; this sheet",
-    "only gets you to it.",
+    "terms -- what records are matched on, what you receive, and who gets",
+    "the result -- and asks you to confirm them. Run accept with your CSV",
+    "file named, as the commands below do, and the display also lists which",
+    "of your columns would be sent. That display is the thing to read before",
+    "you answer; this sheet only gets you to it.",
     "",
     ...heading("WHERE YOU WILL MEET"),
     ...rendezvousLines(endpoint),
@@ -218,16 +229,17 @@ function filedropBody(imageTag: string): Array<string> {
     "",
     "Why you can trust those files: they are plaintext PowerShell scripts,",
     "meant to be read, so your IT department can review every line before",
-    "you run one. Take them from the release page above and nowhere else --",
-    "a copy from anywhere else refuses to run, because only a release copy",
-    "names the exact psilink image it will start.",
+    "you run one. Take them from the release page above and nowhere else:",
+    "that is where the release publishes them together, and the release",
+    "copy of Start-Psilink.ps1 names the exact psilink image it starts, so",
+    "what it runs is what that release built.",
     "",
     ...heading("B -- A FOLDER DOCKER CAN OPEN"),
     "Two commands, both run from the folder that holds your CSV file. Use a",
     "folder of your own, not the shared folder itself: accepting writes",
     "psilink.yaml and .psilink.key (your key file) beside your CSV, and",
-    "anything inside the shared folder is readable by everyone with access",
-    "to it.",
+    "anything inside the shared folder can be read and changed by everyone",
+    "with access to it.",
     "",
     "1. Accept the invitation. This prints the terms, asks you to confirm,",
     "   and on a yes writes psilink.yaml and .psilink.key into the folder:",
@@ -236,8 +248,10 @@ function filedropBody(imageTag: string): Array<string> {
     "",
     `   Replace ${INVITATION_PLACEHOLDER} with the invitation code your`,
     "   partner sent -- the long block of letters and numbers, not the web",
-    "   link. Adding your CSV file name after it also checks your columns",
-    "   against the terms before you are asked to confirm.",
+    "   link -- and your-file.csv with your CSV file's name. Naming your",
+    "   file is what lets the display list the columns you would send",
+    "   before you confirm; without it, that list is worked out from your",
+    "   file only when the exchange runs, and you are not asked again.",
     "",
     "   To keep the code out of your command history, save it into a file",
     "   named invitation.txt next to your CSV and write @invitation.txt in",
@@ -282,8 +296,10 @@ function sftpBody(imageTag: string): Array<string> {
     "",
     `   Replace ${INVITATION_PLACEHOLDER} with the invitation code your`,
     "   partner sent -- the long block of letters and numbers, not the web",
-    "   link. Adding your CSV file name after it also checks your columns",
-    "   against the terms before you are asked to confirm.",
+    "   link -- and your-file.csv with your CSV file's name. Naming your",
+    "   file is what lets the display list the columns you would send",
+    "   before you confirm; without it, that list is worked out from your",
+    "   file only when the exchange runs, and you are not asked again.",
     "",
     "   To keep the code out of your command history, save it into a file",
     "   named invitation.txt next to your CSV and write @invitation.txt in",
@@ -316,8 +332,8 @@ function sftpBody(imageTag: string): Array<string> {
     "         runs, so the secret stays out of psilink.yaml, out of your",
     "         shell history, and out of process listings.",
     "",
-    "   Your partner never sees either one: the credential is between you",
-    "   and the server.",
+    "   psilink never sends either one to your partner: your credential",
+    "   goes only from your machine to the server.",
     "",
     "3. Run the exchange. Docker sees only what you mount, so the command",
     "   also mounts the folder holding your credential file, read-only:",
@@ -352,9 +368,8 @@ function closing(imageTag: string): Array<string> {
     "    nothing is lost by starting again.",
     "  * Every command prints what it did and which files it wrote.",
     "  * Your input file itself is never sent. psilink reads it in the folder",
-    "    you mounted, sends only the protocol messages and the values the",
-    "    terms you accepted call for, and writes the result beside your",
-    "    input.",
+    "    you mounted and writes the result beside your input; what goes to",
+    "    your partner is what the accept display describes.",
     "",
     ...heading("REFERENCE"),
     "  Command-line reference:",

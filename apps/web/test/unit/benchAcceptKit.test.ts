@@ -89,7 +89,7 @@ describe("accept kit, filedrop routing", () => {
     expect(text).toContain("B. A folder that syncs on this PC");
     expect(text).toContain(
       `docker run --rm -it -v "$PWD":/work docker.io/vdorie/psi-link:1.4.2 ` +
-        `accept ${INVITATION_PLACEHOLDER}`,
+        `accept ${INVITATION_PLACEHOLDER} your-file.csv`,
     );
     expect(text).toContain(
       'docker run --rm -v "$PWD":/work -v "/path/to/your/shared/folder":' +
@@ -104,7 +104,7 @@ describe("accept kit, sftp configuration section", () => {
     const text = sheet(SFTP);
     expect(text).toContain(
       `docker run --rm -it -v "$PWD":/work docker.io/vdorie/psi-link:1.4.2 ` +
-        `accept ${INVITATION_PLACEHOLDER}`,
+        `accept ${INVITATION_PLACEHOLDER} your-file.csv`,
     );
     // The exchange command carries the read-only secrets mount, and the
     // credential fill-in section precedes it: the sheet is read top to bottom.
@@ -119,9 +119,11 @@ describe("accept kit, sftp configuration section", () => {
     expect(text).toContain("password (or private_key)");
     expect(text).toContain("password: '@/run/secrets/sftp-password'");
     expect(text).toContain("A value beginning with @ is read from that file");
-    // The credential is the partner's to supply and never crosses to the inviter.
+    // The credential is the partner's to supply; the sheet claims only what
+    // psilink enforces -- no transmission to the partner -- not what the
+    // counterparty might separately know.
     expect(text).toContain("never carries credentials");
-    expect(text).toContain("Your partner never sees either one");
+    expect(text).toContain("never sends either one to your partner");
   });
 
   test("keeps the key-file permission note to one sentence", () => {
@@ -153,6 +155,25 @@ describe("accept kit, version tag", () => {
 
   test("the documented default is the floating release tag", () => {
     expect(DEFAULT_PSILINK_IMAGE_TAG).toBe("latest");
+  });
+});
+
+describe("accept kit, printable-ASCII enforcement", () => {
+  test("a locator carrying control and non-ASCII bytes renders as printable ASCII", () => {
+    // The invariant is enforced at the interpolation point, not assumed of
+    // the console's inputs: the only free-text fields the sheet interpolates
+    // are the operator-authored host and path.
+    const text = sheet({
+      channel: "sftp",
+      host: "héllo\nexample.gov",
+      path: "/drops/psi–link",
+    });
+    expect(text).toContain("SFTP server:    h?llo?example.gov");
+    expect(text).toContain("Directory:      /drops?/psi?link");
+    for (const ch of text) {
+      const code = ch.charCodeAt(0);
+      expect(code === 10 || (code >= 32 && code <= 126)).toBe(true);
+    }
   });
 });
 
