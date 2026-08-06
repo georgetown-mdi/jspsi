@@ -47,9 +47,9 @@ const PSILINK_IMAGE_REPOSITORY = "docker.io/vdorie/psi-link";
  * The image tag the sheet names when nothing supplies a version-matched one.
  * The web build exposes no version of its own -- its only build-time signal is
  * `VITE_DEPLOYMENT_PROFILE` -- so the sheet falls back to the floating tag the
- * release publishes alongside `X.Y.Z` (`docs/RELEASES.md`), the same deliberate
- * float the host-side launchers' documented default carries. Wire a real
- * version through {@link AcceptKitInput.imageTag} if the build ever exposes one.
+ * release publishes alongside `X.Y.Z` (`docs/RELEASES.md`), the same floating
+ * tag the setup script's own `docker run` commands name. Wire a real version
+ * through {@link AcceptKitInput.imageTag} if the build ever exposes one.
  */
 export const DEFAULT_PSILINK_IMAGE_TAG = "latest";
 
@@ -233,6 +233,10 @@ function filedropBody(imageTag: string): Array<string> {
     "   link. Adding your CSV file name after it also checks your columns",
     "   against the terms before you are asked to confirm.",
     "",
+    "   To keep the code out of your command history, save it into a file",
+    "   named invitation.txt next to your CSV and write @invitation.txt in",
+    "   its place.",
+    "",
     '   On Windows PowerShell, replace "$PWD" with the folder\'s full path,',
     `   for example -v "C:\\Users\\you\\exchange":${WORK_MOUNT}`,
     "",
@@ -274,6 +278,10 @@ function sftpBody(imageTag: string): Array<string> {
     "   partner sent -- the long block of letters and numbers, not the web",
     "   link. Adding your CSV file name after it also checks your columns",
     "   against the terms before you are asked to confirm.",
+    "",
+    "   To keep the code out of your command history, save it into a file",
+    "   named invitation.txt next to your CSV and write @invitation.txt in",
+    "   its place.",
     "",
     '   On Windows PowerShell, replace "$PWD" with the folder\'s full path,',
     `   for example -v "C:\\Users\\you\\exchange":${WORK_MOUNT}`,
@@ -335,8 +343,9 @@ function closing(imageTag: string): Array<string> {
     "  * Invitations expire. If yours has, ask your partner for a new one --",
     "    nothing is lost by starting again.",
     "  * Every command prints what it did and which files it wrote.",
-    "  * Your file is never uploaded anywhere. psilink reads it in the folder",
-    "    you mounted and writes the result beside it.",
+    "  * Your input file itself is never sent. psilink reads it in the folder",
+    "    you mounted, sends only the protocol messages and the columns the",
+    "    terms you confirmed name, and writes the result beside your input.",
     "",
     ...heading("REFERENCE"),
     "  Command-line reference:",

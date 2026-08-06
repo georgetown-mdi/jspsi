@@ -18,9 +18,10 @@ const RECURRING_EXCHANGE_DOC_URL =
   "https://github.com/georgetown-mdi/jspsi/blob/main/docs/CLI.md#recurring-exchange";
 
 /**
- * The recurring-run hand-off panel, shown in the completed-run block of every
- * console server-job seat (invite, accept, and Direct) and, collapsed, on the
- * strand-recovery panel's finished render. It fetches the job's portable,
+ * The recurring-run hand-off panel, available on every console server-job seat
+ * (invite, accept, Direct, and strand recovery) from job creation onward --
+ * collapsed until the run completes, absent on a failed or stopped run. It
+ * fetches the job's portable,
  * secret-free hand-off from `GET /api/jobs/:jobId/handoff` and lays out exactly
  * what the operator carries from this prototyped run to a scheduled `psilink`
  * command line: the config or command template (the portable values from this run
@@ -174,10 +175,12 @@ function ConfigSteps({
             Copy the shared secret into that folder
           </p>
           <p className={styles.small}>
-            This run wrote its shared secret to .psilink.key in the exchange
-            folder. Copy that file into the same folder as psilink.yaml,
-            readable only by you (chmod 600 on Linux/macOS). The secret rotates
-            after each successful run, so copy the current file.
+            This run writes its shared secret to .psilink.key in the exchange
+            folder. After the run finishes, copy that file into the same folder
+            as psilink.yaml, readable only by you (chmod 600 on Linux/macOS).
+            The secret rotates when a run completes, so a copy taken mid-run
+            goes stale -- always copy the file as it stands after the latest
+            run.
           </p>
         </li>
       )}
