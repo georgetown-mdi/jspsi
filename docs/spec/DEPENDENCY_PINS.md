@@ -279,21 +279,28 @@ stale -- which makes the composite occurrence transitively tracked.
 `scripts/check-action-pin-drift.mjs` (`npm run check:action-pin-drift`, a CI
 static check in `static_checks.yaml`) holds it rather than prose. It parses every
 workflow and every `action.yml` with the `yaml` package, walks each document for
-`uses:` values (skipping `./` local and `docker://` references), and fails on two
-conditions: an action named in both trees carrying differing refs anywhere it
-appears, and a composite pin naming an action no workflow uses. The second is
-what keeps the mirror from being satisfied vacuously -- a composite-only action
-has no occurrence on the configured path at all, so it fails closed and the
-decision (mirror the pin into a workflow, or extend Dependabot coverage to
-`.github/actions` deliberately) is made explicitly rather than by omission.
+`uses:` values (skipping `./` local and `docker://` references, which name no
+remote action), and fails on three conditions: an action named in both trees
+carrying differing refs anywhere it appears, a composite pin naming an action no
+workflow uses, and a remote reference naming no ref at all. The second is what
+keeps the mirror from being satisfied vacuously -- a composite-only action has no
+occurrence on the configured path at all, so it fails closed and the decision
+(mirror the pin into a workflow, or extend Dependabot coverage to
+`.github/actions` deliberately) is made explicitly rather than by omission. The
+third closes the same gap one layer down: an unpinned reference (`uses:
+actions/setup-node`, a trailing `@` with nothing after it, or a leading `@`)
+fixes no version, so nothing in the repository determines which code the step
+runs and no release or advisory has an occurrence to surface on -- it cannot
+stand as either side of the mirror. Whether GitHub itself rejects that shape is
+unverified, and the rule does not rest on it: if GitHub does, the rule never
+fires.
 
 The comparison is textual. `@v7` agreeing with `@v7` says nothing about what
 either tag resolves to, so a floating major moving under both occurrences is
 outside the check, as is anything about which paths Dependabot in fact scans --
 it enforces this repo's mirror invariant and confirms no tool's coverage. It
-reads `uses:` references only, so an action reached another way, or a reference
-carrying no `@ref`, is invisible to it, and its ref-agreement rule binds only
-actions appearing in both trees.
+reads `uses:` references only, so an action reached another way is invisible to
+it, and its ref-agreement rule binds only actions appearing in both trees.
 
 ## The crossws peer conflict blocks the release SBOM
 
