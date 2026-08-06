@@ -118,7 +118,7 @@ function recoveryLead(
  * finished, or stopped (failed/cancelled) -- the re-attached run's timeline
  * (replayed through the same run-state fold the hooks use), the appliance download
  * hrefs on a finished run only, the collapsed "run this on a schedule" graduation
- * hand-off alongside those delivered results (self-gated away when the hand-off is
+ * hand-off on any run that is not stopped (self-gated away when the hand-off is
  * unavailable), "Stop this exchange" while running, and "Discard" (behind a
  * confirm, since it is an irreversible removal of appliance-only data) always.
  *

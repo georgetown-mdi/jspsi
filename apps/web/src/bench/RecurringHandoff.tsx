@@ -98,7 +98,7 @@ function HandoffBody({ handoff }: { handoff: JobHandoff }) {
   return (
     <>
       <p className={styles.small}>
-        This exchange ran here as a prototype. To run the recurring production
+        This exchange runs here as a prototype. To run the recurring production
         version, run it from the command line with cron (Linux/macOS) or Task
         Scheduler (Windows). What carried over from this run is filled in below;
         set the file paths for the machine that will run the schedule.

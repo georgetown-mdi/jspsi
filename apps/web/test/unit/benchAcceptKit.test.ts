@@ -75,9 +75,12 @@ describe("accept kit, filedrop routing", () => {
     expect(text).toContain(RELEASES_URL);
     expect(text).toContain("Start-Psilink.ps1");
     expect(text).toContain("Setup-PsilinkFileDrop.ps1");
-    expect(text).toContain("start-psilink.sh");
+    // The launcher branch is Windows-only: the shell launcher does no share
+    // resolution, so a macOS/Linux partner is routed to mount-then-B instead.
+    expect(text).not.toContain("start-psilink.sh");
+    expect(text).toContain("it is situation B below");
     // Why the files are readable rather than opaque, for the partner's IT.
-    expect(text).toContain("plaintext PowerShell and shell");
+    expect(text).toContain("plaintext PowerShell scripts");
     expect(text).toContain("review every line");
   });
 
@@ -103,9 +106,14 @@ describe("accept kit, sftp configuration section", () => {
       `docker run --rm -it -v "$PWD":/work docker.io/vdorie/psi-link:1.4.2 ` +
         `accept ${INVITATION_PLACEHOLDER}`,
     );
+    // The exchange command carries the read-only secrets mount, and the
+    // credential fill-in section precedes it: the sheet is read top to bottom.
     expect(text).toContain(
-      'docker run --rm -it -v "$PWD":/work docker.io/vdorie/psi-link:1.4.2 ' +
-        "exchange your-file.csv results.csv",
+      'docker run --rm -it -v "$PWD":/work -v "/your/secrets":/run/secrets:ro ' +
+        "docker.io/vdorie/psi-link:1.4.2 exchange your-file.csv results.csv",
+    );
+    expect(text.indexOf("username: REPLACE_WITH_SSH_USERNAME")).toBeLessThan(
+      text.indexOf("exchange your-file.csv"),
     );
     expect(text).toContain("username: REPLACE_WITH_SSH_USERNAME");
     expect(text).toContain("password (or private_key)");
