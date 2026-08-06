@@ -251,7 +251,9 @@ export function InviterBench() {
   const [sftpSaveFilePreferred, setSftpSaveFilePreferred] = useState(false);
   // The console's rendezvous mount, fetched once on a console build. Undefined before
   // it resolves; `configured` gates the filedrop transport (offered iff a directory is
-  // mounted) and `path` is the advisory locator minted into a filedrop invitation.
+  // mounted), `locator` is the advisory locator minted into a filedrop invitation, and
+  // `folderName` is the shared folder's own name, present only where the console has
+  // one to show as the folder's name.
   const [rendezvous, setRendezvous] = useState<JobRendezvousConfig>();
   const [demoActive, setDemoActive] = useState(false);
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
