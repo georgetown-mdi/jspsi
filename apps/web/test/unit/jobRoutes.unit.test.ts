@@ -17,6 +17,7 @@ import { Route as EventsRoute } from "../../src/routes/api/jobs/$jobId/events";
 import { Route as JobRoute } from "../../src/routes/api/jobs/$jobId/index";
 import { Route as KeysRoute } from "../../src/routes/api/jobs/$jobId/keys";
 import { Route as RecordRoute } from "../../src/routes/api/jobs/$jobId/record";
+import { Route as RendezvousRoute } from "../../src/routes/api/jobs/rendezvous";
 import { Route as ResultRoute } from "../../src/routes/api/jobs/$jobId/result";
 import { Route as SftpProbeRoute } from "../../src/routes/api/jobs/sftp/probe";
 import { Route as SftpRoute } from "../../src/routes/api/jobs/sftp/index";
@@ -976,6 +977,74 @@ describe("GET /api/jobs/sftp", () => {
       params: { jobId: "sftp" },
     })) as Response;
     expect(response.status).toBe(404);
+  });
+});
+
+/** GET /api/jobs/rendezvous with a loopback Host. */
+async function getRendezvous(): Promise<Response> {
+  return (await handlersOf(RendezvousRoute).GET({
+    request: jobRequest("http://localhost/api/jobs/rendezvous"),
+    params: {},
+  })) as Response;
+}
+
+describe("GET /api/jobs/rendezvous names the shared folder", () => {
+  test("is 404 when the API is disabled", async () => {
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    expect((await getRendezvous()).status).toBe(404);
+  });
+
+  test("carries the launcher-passed folder name as both locator and name", async () => {
+    enableJobApi();
+    vi.stubEnv("JOB_RENDEZVOUS_NAME", "agency-a-agency-b");
+    const response = await getRendezvous();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      configured: true,
+      locator: "agency-a-agency-b",
+      folderName: "agency-a-agency-b",
+    });
+  });
+
+  test("names an operator-authored mount by its own last segment", async () => {
+    const root = enableJobApi();
+    const mount = path.join(root, "agency-drop");
+    fs.mkdirSync(mount, { recursive: true });
+    vi.stubEnv("JOB_RENDEZVOUS_DIR", mount);
+    expect(await (await getRendezvous()).json()).toEqual({
+      configured: true,
+      locator: "agency-drop",
+      folderName: "agency-drop",
+    });
+  });
+
+  test("reports a locator with no name where it cannot name the folder", async () => {
+    enableJobApi();
+    vi.stubEnv("JOB_RENDEZVOUS_NAME", "..");
+    const body = (await (await getRendezvous()).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(body.configured).toBe(true);
+    expect(body.folderName).toBeUndefined();
+    expect(typeof body.locator).toBe("string");
+  });
+
+  test("never carries the resolved mount path", async () => {
+    const root = enableJobApi();
+    const mount = path.join(root, "agency-drop");
+    fs.mkdirSync(mount, { recursive: true });
+    vi.stubEnv("JOB_RENDEZVOUS_DIR", mount);
+    vi.stubEnv("JOB_RENDEZVOUS_NAME", "agency-a-agency-b");
+    const body = await (await getRendezvous()).text();
+    expect(body).not.toContain(mount);
+    expect(body).not.toContain(root);
+    // Not merely absent by value: no field carries a path at all.
+    expect(Object.keys(JSON.parse(body) as object)).toEqual([
+      "configured",
+      "locator",
+      "folderName",
+    ]);
   });
 });
 
