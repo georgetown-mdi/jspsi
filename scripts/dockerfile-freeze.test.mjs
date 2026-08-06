@@ -93,6 +93,20 @@ const runtimeRuns = runtime
   .filter(({ inst }) => inst === "RUN")
   .map(({ rest }) => rest);
 
+// The account both roles run as, and the one instruction that makes the image
+// habitable for it, frozen by literal the way the OS install above is. Which
+// directories are handed over is the whole substance of running unprivileged:
+// /work is where the CLI writes its result and rotated key file, and the console
+// cannot boot at all without a scratch directory under root-owned /run. Prose in
+// docs/DEPLOYMENT.md tells operators the uid a bind mount must be writable by, so
+// a silent change of it, or of what the account may write, is a change to
+// documented deployment behavior rather than an implementation detail.
+const RUNTIME_USER = "node";
+const EXPECTED_WRITABLE_SETUP =
+  "RUN mkdir -p /work /run/psilink/sftp-credentials " +
+  "&& chown -R node:node /work /run/psilink " +
+  "&& chmod -R 700 /run/psilink";
+
 describe("Dockerfile dependency freeze", () => {
   it("installs only with npm ci, never npm install", () => {
     expect(dockerfile).not.toMatch(/\bnpm\s+install\b/);
@@ -287,6 +301,32 @@ describe("Dockerfile runtime layout", () => {
     // and createPsiEngine silently falls back to the in-process engine.
     expect(allRuntimeDests).toContain(
       posix.join(posix.dirname(cliEntryPath), "psiWorker.worker.js"),
+    );
+  });
+
+  it("drops to a single non-root runtime user for both roles", () => {
+    const users = runtime
+      .filter(({ inst }) => inst === "USER")
+      .map(({ rest }) => normalize(rest));
+    expect(users).toEqual([RUNTIME_USER]);
+  });
+
+  it("declares that user after the last build step, so the ENTRYPOINT inherits it", () => {
+    // A USER ahead of a COPY or RUN would either fail the build or leave the
+    // dropped account owning /app; one after the last of them, with no second
+    // USER to undo it, is what makes the entrypoint's node process unprivileged.
+    const userIndex = runtime.findIndex(({ inst }) => inst === "USER");
+    const lastBuildStep = runtime.reduce(
+      (last, { inst }, index) =>
+        inst === "RUN" || inst === "COPY" ? index : last,
+      -1,
+    );
+    expect(userIndex).toBeGreaterThan(lastBuildStep);
+  });
+
+  it("hands that user every directory the container writes", () => {
+    expect(runtimeRuns.map((run) => `RUN ${normalize(run)}`)).toContain(
+      EXPECTED_WRITABLE_SETUP,
     );
   });
 

@@ -134,7 +134,7 @@ The endpoint contract, the request schema, the working-directory layout and file
 
 ### Mounted work-input directory
 
-The console lists this party's input CSVs out of `JOB_INPUT_DIR`, falling back to `JOB_DATA_ROOT` when that variable is unset -- so a single-folder console, one mount with only `JOB_DATA_ROOT` set, lists inputs out of the data root. It profiles the file the operator selects -- its columns, a bounded per-column sample of values, and per-field coverage -- and the CLI then reads that same file in place when it runs the exchange. The listing is non-recursive: it shows only the files directly in the directory, so mount the directory that holds the CSVs, not a parent, and dot-prefixed files and subdirectories (the per-job working directories) are not shown. No copy is made and nothing is written back to the input directory. Set `JOB_INPUT_DIR` to give the inputs their own mount, which you can mount read-only; because the container runs as root, a read-only mount is what keeps a root process from writing to the operator's source data.
+The console lists this party's input CSVs out of `JOB_INPUT_DIR`, falling back to `JOB_DATA_ROOT` when that variable is unset -- so a single-folder console, one mount with only `JOB_DATA_ROOT` set, lists inputs out of the data root. It profiles the file the operator selects -- its columns, a bounded per-column sample of values, and per-field coverage -- and the CLI then reads that same file in place when it runs the exchange. The listing is non-recursive: it shows only the files directly in the directory, so mount the directory that holds the CSVs, not a parent, and dot-prefixed files and subdirectories (the per-job working directories) are not shown. No copy is made and nothing is written back to the input directory. Set `JOB_INPUT_DIR` to give the inputs their own mount, which you can mount read-only. The container's own account (see [The user the image runs as](#the-user-the-image-runs-as)) cannot write a source directory it does not own, so ownership is the first thing standing between the appliance and the operator's data; a read-only mount states that intent at the mount as well, rather than leaving it to rest on host ownership alone. The inputs must still be readable by that account.
 
 A shared-directory (`filedrop`) exchange runs over the rendezvous directory at `JOB_RENDEZVOUS_DIR`, which the remote partner writes into over the synced folder; it too falls back to `JOB_DATA_ROOT` when unset, so the single-folder console rendezvouses out of the data root. Setting `JOB_RENDEZVOUS_DIR` to a dedicated mount -- separate from, and not nested with, the working directory that holds your key, input, and results -- is recommended, because the rendezvous directory is partner-writable: a dedicated mount keeps the partner's write access to the rendezvous mailbox and away from your own secrets. The console warns at job start when the rendezvous path overlaps the work-input directory or the data root (as it does in the single-folder layout), but the operator's own directory layout is theirs to choose, so the exchange still runs; a dedicated rendezvous directory is the reliable safeguard, not a requirement.
 
@@ -147,6 +147,29 @@ For local development and integration testing, the project's test suite stands u
 ## Docker deployment
 
 The single published image `vdorie/psi-link` runs in either of two roles depending on its first argument; there is no separate console image.
+
+### The user the image runs as
+
+Both roles run unprivileged, as the image's `node` account: **uid 1000, gid 1000**. Nothing in an exchange holds the privilege to write outside what you mounted, and the program files inside the container belong to `root`, so the running process cannot rewrite its own code.
+
+What this asks of you is bind-mount ownership. A bind mount keeps its host directory's ownership inside the container, so every directory the container writes -- `/work` for the CLI, and the data, input, and rendezvous mounts for the console appliance -- has to be writable by uid 1000, and every file it reads has to be readable by it.
+
+- **Docker Desktop (macOS and Windows)** presents a bind mount to whichever user the container runs as, so there is nothing to do: the commands in this document and in the quickstart work as written.
+- **Linux** passes the host directory's real ownership through. An account that is itself uid 1000 -- the usual case on a single-user workstation -- already works. Otherwise hand the working directory to that uid once, before the first run:
+
+  ```sh
+  chown 1000:1000 /host/work
+  ```
+
+  Watch the read side too: a working directory or input file that no other account can read (mode `0700`, `0600`) is unreadable inside the container even when it is yours on the host.
+
+**Running as your own account instead.** Where changing the directory's ownership is not an option, run the container as yourself:
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work vdorie/psi-link exchange input.csv
+```
+
+Two things come with that choice. The container then runs as an account the image knows nothing about, so the per-user signing identity -- what `psilink fingerprint` creates, under the home directory rather than the working directory -- has nowhere it can be written; add `--env HOME=/work` to put it in the mounted directory, where it also outlives `--rm`. And the console appliance writes container-internal state belonging to uid 1000, so `serve` wants the `chown` route rather than this one.
 
 ### Running the CLI
 
@@ -191,10 +214,12 @@ docker run --rm \
 
 Automated deployment tooling -- CI runners, container entrypoints, Kubernetes init containers, and orchestration scripts -- must not leave `.psilink.key` readable by other processes or users. Violating this rule defeats the application-layer authentication that protects recurring exchanges.
 
+Owner-only and the container's identity are one question here, not two: a `0600` file grants nothing to anyone but its owner, so the account the container runs as (see [The user the image runs as](#the-user-the-image-runs-as)) has to be that owner. A key file owned by some other uid is not merely unwritable from inside the container -- it is unreadable, and the exchange fails before it starts.
+
 **Inject via a secrets manager, not the image.** Never copy `.psilink.key` into a container image layer; image layers are readable by anyone with pull access to the registry. Instead, mount the file at runtime:
 
-- **Docker**: mount the key file as a named secret or a host-path bind mount with `--mount type=bind,src=/host/path/.psilink.key,dst=/work/.psilink.key`. Do not mount it read-only; the CLI must be able to write the rotated token after each successful exchange. Set the file's permissions to `0600` on the host before the container starts.
-- **Kubernetes**: use a `Secret` volume with `defaultMode: 0600`. Do not use a `ConfigMap` for the key file.
+- **Docker**: mount the key file as a named secret or a host-path bind mount with `--mount type=bind,src=/host/path/.psilink.key,dst=/work/.psilink.key`. Do not mount it read-only; the CLI must be able to write the rotated token after each successful exchange. Set the file to mode `0600` and owner uid 1000 on the host before the container starts.
+- **Kubernetes**: use a `Secret` volume with `defaultMode: 0600`. Do not use a `ConfigMap` for the key file. Set the pod's `securityContext` so the projected file belongs to the identity the container runs as; a `0600` file the container's uid does not own is unreadable to it.
 - **CI runners**: write the token to a temporary file with `install -m 0600 /dev/stdin .psilink.key <<< "$TOKEN"` (bash) or `printf '%s' "$TOKEN" | install -m 0600 /dev/stdin .psilink.key` (POSIX sh) rather than `echo "$TOKEN" > .psilink.key`, which may leave a world-readable file depending on the runner's umask.
 
 **Separate read-only config from read-write secrets.** If the working directory (containing `psilink.yaml` and input data) is mounted read-only - for example to prevent the container from modifying source data - mount a separate read-write volume for the key file and use `--key-file` to redirect the CLI:

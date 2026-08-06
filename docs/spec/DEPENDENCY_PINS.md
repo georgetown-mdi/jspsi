@@ -169,13 +169,15 @@ the install reports exactly `-rwxr-sr-x 1 root shadow /usr/sbin/unix_chkpwd` and
 no setuid file at all -- on the built `arm64` image, and at `x86_64` on the
 pinned base plus that one instruction. It sits beside the PAM helpers `faillock`,
 `mkhomedir_helper`, `pam_namespace_helper`, `pam_timestamp_check` and
-`pwhistory_helper`, none of them setgid. Exploitability rests on two properties
-of this image rather than on the package: it declares no `USER`, so a process in
-it is already uid 0 and a setgid-`shadow` helper grants nothing that opening the
-file would not, and `/etc/shadow` carries no usable hash (`root` is `*`, every
-other account `!`), so `unix_chkpwd` has nothing to verify against. Both would
-need revisiting if the image dropped to a non-root `USER`: at that point the
-helper is a real privilege boundary rather than a redundant one.
+`pwhistory_helper`, none of them setgid. The setgid bit is a real boundary here:
+the runtime stage declares `USER node`, so a process in the image is uid 1000 and
+group `shadow` is something it does not otherwise hold. What bounds exploitability
+is therefore a single property of the image rather than of the package --
+`/etc/shadow` carries no usable hash (`root` is `*`, every other account `!`), so
+`unix_chkpwd` has nothing to verify against. Nothing stands behind that one
+property, so re-measure it if a change gives any account in the image a password
+hash, or if the image gains a second setgid or any setuid file; the `find` above
+settles both.
 
 **The helper image the setup scripts run the probe in is a mutable tag.** It is
 `vdorie/psi-link:latest` in both scripts, and floating it is deliberate: the

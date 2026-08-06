@@ -22,10 +22,13 @@ export const SFTP_CREDENTIAL_SCRATCH_DIR = "/run/psilink/sftp-credentials";
 
 /**
  * A server-side override for the scratch directory, defaulting to
- * {@link SFTP_CREDENTIAL_SCRATCH_DIR}. The container image runs as root and uses
- * the default; a non-root deployment (or the integration harness, which runs the
- * built server as an ordinary user) points it at a writable, non-partner-syncable
- * location instead. It is server-side configuration, never derived from a request,
+ * {@link SFTP_CREDENTIAL_SCRATCH_DIR}. The container image ships that default
+ * directory owned by the unprivileged account it runs as, so it uses the default;
+ * a deployment running under some other account (or the integration harness, which
+ * runs the built server as an ordinary user) points it at a writable,
+ * non-partner-syncable location instead, since the fixed default sits under
+ * root-owned `/run` and cannot be created at boot. It is server-side
+ * configuration, never derived from a request,
  * and the boot containment assertion guards it exactly as it does the default -- a
  * value inside the data root or rendezvous mount refuses the boot.
  */

@@ -30,6 +30,10 @@ on:
       # containerised install would otherwise surface first at a release tag.
       - ".npmrc"
       - "package.json"
+      # The CLI smoke below runs a real exchange over these two synthetic
+      # inputs, so a change to their schema breaks it here rather than in a
+      # release build.
+      - "test_data/**"
       - ".github/workflows/image_smoke.yaml"
 
 # Cancel a superseded run when a newer commit lands on the same PR/branch.
@@ -69,20 +73,149 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The image runs unprivileged, and every other step here would pass just as
+      # happily as uid 0 -- so a dropped or widened USER line is invisible to all
+      # of them and needs its own assertion. The uid is not merely non-zero but
+      # the exact one docs/DEPLOYMENT.md tells operators to chown a bind mount to.
+      - name: Smoke the container's identity
+        run: |
+          set -euo pipefail
+          uid=$(docker run --rm --entrypoint id psi-link:smoke -u)
+          gid=$(docker run --rm --entrypoint id psi-link:smoke -g)
+          echo "the image runs as uid $uid, gid $gid"
+          if [ "$uid" != 1000 ] || [ "$gid" != 1000 ]; then
+            echo "expected uid 1000 and gid 1000, the pair docs/DEPLOYMENT.md documents" >&2
+            exit 1
+          fi
+
       # Role 1: the headless CLI still runs. `--help` is a read-only invocation
       # that exits 0 (no exchange, no key material, no network).
       - name: Smoke the CLI role
         run: docker run --rm psi-link:smoke --help
+
+      # Role 1, for real: an invitation, an acceptance, and both halves of an
+      # exchange over a shared folder, every command in a container running as
+      # the unprivileged user. `--help` proves nothing about the change this
+      # guards -- writing does. /work is an operator-supplied bind mount that
+      # carries its HOST ownership into the container, so the result CSV and the
+      # rotated key file land only if the ownership docs/DEPLOYMENT.md asks a
+      # Linux operator for is the ownership the image actually needs; the chown
+      # below is that documented step, performed literally.
+      #
+      # single-pass keeps the round-trip count constant instead of one round per
+      # linkage key, which is what keeps this to seconds; the strategy is a
+      # consented disclosure tradeoff, and these are synthetic inputs.
+      - name: Smoke the CLI role over a writable bind mount
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/cli-smoke"
+          mkdir -p "$work/inviter" "$work/acceptor" "$work/drop"
+          cp test_data/fake_data_1.csv "$work/inviter/input.csv"
+          cp test_data/fake_data_2.csv "$work/acceptor/input.csv"
+          # The parent stays the runner's, so the steps below can still stat what
+          # the container writes; the mounts themselves go to the image's uid.
+          sudo chown -R 1000:1000 "$work/inviter" "$work/acceptor" "$work/drop"
+
+          # Both parties' configuration is written with an SFTP placeholder
+          # connection block. This replaces that block with the shared folder,
+          # and runs in the image because the file it edits belongs to the
+          # container's user rather than to this runner.
+          printf '%s\n' \
+            '/^connection:/ { print "connection:"; print "  channel: filedrop"; print "  path: /drop"; skip = 1; next }' \
+            'skip && /^[ \t]/ { next }' \
+            '{ skip = 0; print }' \
+            > "$work/repoint.awk"
+          repoint() {
+            docker run --rm \
+              -v "$work/$1":/work -v "$work/repoint.awk":/repoint.awk:ro \
+              --entrypoint sh psi-link:smoke -c '
+                set -e
+                awk -f /repoint.awk /work/psilink.yaml > /work/psilink.yaml.repointed
+                mv /work/psilink.yaml.repointed /work/psilink.yaml
+                chmod 600 /work/psilink.yaml
+              '
+          }
+          cli() {
+            local party="$1"
+            shift
+            docker run --rm \
+              -v "$work/$party":/work -v "$work/drop":/drop \
+              psi-link:smoke "$@"
+          }
+
+          # The invitation is the command's stdout; its human log is on stderr.
+          invitation=$(cli inviter invite input.csv --linkage-strategy single-pass)
+          repoint inviter
+          key_before=$(sudo sha256sum "$work/inviter/.psilink.key" | cut -d " " -f 1)
+
+          cli acceptor accept "$invitation" input.csv --consent-to-terms
+          repoint acceptor
+
+          inviter_cid=$(docker run -d \
+            -v "$work/inviter":/work -v "$work/drop":/drop \
+            psi-link:smoke exchange input.csv output.csv --polling-frequency 1s)
+          acceptor_cid=$(docker run -d \
+            -v "$work/acceptor":/work -v "$work/drop":/drop \
+            psi-link:smoke exchange input.csv output.csv --polling-frequency 1s)
+          echo "started exchange halves $inviter_cid and $acceptor_cid"
+
+          # Each half waits for the other, so both must be running before either
+          # can finish; the timeout keeps a stalled rendezvous from hanging the job.
+          inviter_rc=$(timeout 300 docker wait "$inviter_cid" || echo timed-out)
+          acceptor_rc=$(timeout 300 docker wait "$acceptor_cid" || echo timed-out)
+          docker logs "$inviter_cid" || true
+          docker logs "$acceptor_cid" || true
+          docker rm -f "$inviter_cid" "$acceptor_cid" >/dev/null 2>&1 || true
+          if [ "$inviter_rc" != 0 ] || [ "$acceptor_rc" != 0 ]; then
+            echo "an exchange half did not exit 0 (inviter=$inviter_rc, acceptor=$acceptor_rc)" >&2
+            exit 1
+          fi
+
+          # The owner-only write path, under the non-root uid: every artifact the
+          # exchange put in the bind mount is mode 0600 and belongs to that uid.
+          for artifact in \
+            inviter/output.csv inviter/.psilink.key \
+            acceptor/output.csv acceptor/.psilink.key
+          do
+            mode=$(stat -c "%a" "$work/$artifact")
+            owner=$(stat -c "%u" "$work/$artifact")
+            echo "$artifact: mode $mode, owner uid $owner"
+            if [ "$mode" != 600 ] || [ "$owner" != 1000 ]; then
+              echo "$artifact must be mode 600 owned by uid 1000" >&2
+              exit 1
+            fi
+          done
+
+          # The rotated token is written back after a successful exchange, so a
+          # mount the container user cannot write would fail here even though the
+          # exchange itself had already succeeded.
+          key_after=$(sudo sha256sum "$work/inviter/.psilink.key" | cut -d " " -f 1)
+          if [ "$key_before" = "$key_after" ]; then
+            echo "the rotated token was not written back to the bind mount" >&2
+            exit 1
+          fi
 
       # Role 2: the web console server comes up and serves. Start it detached in
       # `serve` mode, poll the root URL until it answers HTTP 200 within a bounded
       # timeout, then tear the container down. Both exits -- the timeout-failure
       # branch (after dumping logs) and the success fall-through -- remove the
       # container by hand; there is no separate teardown step to rely on.
+      #
+      # JOB_DATA_ROOT turns the job API on, which is what makes this a smoke of
+      # the console appliance rather than of the web UI alone: enabling it puts
+      # the fail-closed credential-scratch setup in the startup path, and that
+      # setup writes under root-owned /run. An unprivileged server refuses to
+      # boot there unless the image prepared the directory for it, so this step
+      # would time out rather than answer.
       - name: Smoke the serve role
         run: |
           set -euo pipefail
-          cid=$(docker run -d -p 3000:3000 psi-link:smoke serve)
+          data="$RUNNER_TEMP/serve-smoke"
+          mkdir -p "$data"
+          sudo chown 1000:1000 "$data"
+          cid=$(docker run -d -p 3000:3000 \
+            --env JOB_DATA_ROOT=/data -v "$data":/data \
+            psi-link:smoke serve)
           echo "started server container $cid"
 
           ok=false

@@ -81,6 +81,8 @@ docker run \
 
 Because the only content accessible to the container is what is in `WORK_PATH`, we recommend making a new directory and placing the file you wish to link in it.
 
+The container runs unprivileged, as uid 1000. Docker Desktop on Mac and Windows arranges for the mounted directory to be reachable by it, so the commands above work as written. On Linux the directory keeps its own ownership, so give it to that uid once -- `chown 1000:1000 WORK_PATH` -- if your account is not itself uid 1000. See [The user the image runs as](docs/DEPLOYMENT.md#the-user-the-image-runs-as) for the alternative of running the container as your own account.
+
 The output file is a CSV giving the linkage between the two parties' records. See [Output](docs/spec/PROTOCOL.md#output) for the exact column layout and naming rules.
 
 To practice before using real data, the repository provides two synthetic input files in [`test_data/`](test_data/); each party uses one.
