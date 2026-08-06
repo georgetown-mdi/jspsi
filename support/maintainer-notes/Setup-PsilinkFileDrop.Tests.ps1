@@ -352,6 +352,94 @@ Describe 'Hide-Secret' {
     }
 }
 
+Describe 'Invoke-Docker' {
+    BeforeAll {
+        $script:EngineStubRoot = Join-Path $env:TEMP ('psilink-engine-stub-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        New-Item -ItemType Directory -Path $script:EngineStubRoot -Force | Out-Null
+
+        # A native command that answers on both streams and exits non-zero,
+        # which is the engine's own routine behaviour: docker writes "no such
+        # volume" to standard error on every first run.
+        $script:NoisyEngine = Join-Path $script:EngineStubRoot 'noisy.cmd'
+        Set-Content -LiteralPath $script:NoisyEngine -Encoding Ascii -Value @(
+            '@echo off',
+            'echo answered on stdout',
+            'echo grumbled on stderr 1>&2',
+            'exit /b 3')
+    }
+
+    AfterAll {
+        Remove-Item -LiteralPath $script:EngineStubRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'answers a name that is not a command without borrowing an earlier code' {
+        # A native command run first, leaving a 0 in $LASTEXITCODE, so that the
+        # answer below cannot have been taken from there -- a 0 would read as an
+        # engine that ran and was happy. What the call itself does without the
+        # guard is the case two below.
+        & cmd /c exit 0
+
+        $result = Invoke-Docker -Engine 'psilink-no-such-engine' -DockerArgs @('version')
+
+        $result.Ran | Should -Be $false
+        $result.ExitCode | Should -Not -Be 0
+        $result.Output | Should -Match 'psilink-no-such-engine'
+    }
+
+    It 'reports an empty engine name the same way' {
+        & cmd /c exit 0
+
+        $result = Invoke-Docker -Engine '' -DockerArgs @('version')
+
+        $result.Ran | Should -Be $false
+        $result.ExitCode | Should -Not -Be 0
+    }
+
+    It 'carries a stderr-writing command''s output and code back rather than throwing' {
+        # The preference the script runs under, restated here because it is the
+        # whole reason the redirect inside Invoke-Docker relaxes it.
+        $ErrorActionPreference = 'Stop'
+
+        $result = Invoke-Docker -Engine $script:NoisyEngine -DockerArgs @('ignored')
+
+        $result.Ran | Should -Be $true
+        $result.ExitCode | Should -Be 3
+        $result.Output | Should -Match 'answered on stdout'
+        $result.Output | Should -Match 'grumbled on stderr'
+    }
+
+    It 'would end the run on a redirected stderr line without the relaxed preference' {
+        # The premise the relaxed preference inside Invoke-Docker exists for,
+        # held as a check rather than asserted in a comment: at 'Stop', Windows
+        # PowerShell turns a native program's redirected standard error into a
+        # terminating record, whatever its exit code says.
+        $ErrorActionPreference = 'Stop'
+        $threw = $false
+
+        try { $null = & $script:NoisyEngine 2>&1 } catch { $threw = $true }
+
+        $threw | Should -BeTrue
+    }
+
+    It 'would end the run on a name that is not a command without the guard' {
+        # The premise the guard stands in for: the call raises rather than
+        # answering, and the relaxed preference the wrapper runs under does not
+        # soften it -- so a wrapper without the guard never returns anything a
+        # caller could report.
+        $ErrorActionPreference = 'Continue'
+        $threw = $false
+        $raised = ''
+
+        try { & 'psilink-no-such-engine' 'version' } catch {
+            $threw = $true
+            $raised = $_.Exception.GetType().Name
+        }
+
+        $threw | Should -BeTrue
+        $raised | Should -Be 'CommandNotFoundException'
+    }
+}
+
 Describe 'Resolution over a live SMB rig' {
     BeforeAll {
         $global:PsilinkRigPremises = [ordered]@{
@@ -528,6 +616,43 @@ Describe 'Resolution over a live SMB rig' {
         # reach it is why the script asks the operator to confirm what it worked
         # out, and why a DFS path is the case it names when it asks.
         $resolved.Share | Should -Not -Be $dataShareName
+    }
+
+    It 'reads the UNC root back out of net use for a mapped letter' {
+        # Resolve-MappedDrive's third method, driven on its own: the two before
+        # it answer first on this runner, so nothing else executes it.
+        $mappedLetter | Should -Not -BeNullOrEmpty -Because 'the rig has to map a letter before this can be asked'
+        # The preference the script itself runs under. A native command whose
+        # standard error is redirected is where 'Stop' would end the run.
+        $ErrorActionPreference = 'Stop'
+
+        $root = Get-NetUseRemoteName -Letter $mappedLetter
+
+        $root | Should -Not -BeNullOrEmpty
+        $root.TrimEnd('\') | Should -Be $dataUnc
+    }
+
+    It 'answers nothing for a letter nothing is mapped to' {
+        $letter = Find-FreeDriveLetter -Exclude @($mappedLetter, $dfsLetter)
+        $letter | Should -Not -BeNullOrEmpty
+        $ErrorActionPreference = 'Stop'
+
+        Get-NetUseRemoteName -Letter $letter | Should -BeNullOrEmpty
+    }
+
+    It 'reaches an unmapped letter as a throw rather than as an exit code' {
+        # Why the catch inside Get-NetUseRemoteName is load-bearing: net use
+        # writes to standard error for a letter it does not hold, and at 'Stop'
+        # the redirect turns that into a terminating record before the exit
+        # code above it is ever read.
+        $letter = Find-FreeDriveLetter -Exclude @($mappedLetter, $dfsLetter)
+        $letter | Should -Not -BeNullOrEmpty
+        $ErrorActionPreference = 'Stop'
+        $threw = $false
+
+        try { $null = & net use "${letter}:" 2>$null } catch { $threw = $true }
+
+        $threw | Should -BeTrue
     }
 
     AfterAll {
