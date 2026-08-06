@@ -812,10 +812,11 @@ Any other key (including `readyTimeout`, which is set from [`connection.options.
 
 The SSH key-exchange algorithms psilink offers are always narrowed to those the running process can actually perform. On a host whose OpenSSL provider omits X25519 -- a FIPS-configured provider is the case that arises in practice -- every key exchange built on it is withheld from the offer, so the negotiation settles on an algorithm both ends can complete instead of on one that fails mid-handshake. This needs no configuration and no flag: psilink asks the crypto provider rather than looking for a "FIPS mode". On a host that can perform everything, the offer is unchanged.
 
-The narrowing applies to `algorithms.kex` set here as well -- offering an algorithm the process cannot perform is never useful. Two consequences to be aware of when you set it:
+The narrowing applies to `algorithms.kex` set here as well -- offering an algorithm the process cannot perform is never useful. Three consequences to be aware of when you set it:
 
 - If some of the algorithms you list survive, the rest are dropped with a warning naming how many and why.
 - If **none** survives, the connection is refused with an error rather than falling back to the defaults. List at least one algorithm outside the unavailable set, or remove the setting and let psilink offer everything else.
+- An **empty** list is not an empty offer: SSH reads it as "algorithms unspecified", so psilink warns that the setting selects nothing and offers the defaults minus the unavailable algorithms, exactly as if you had left it out.
 
 When a server accepts only algorithms this host cannot perform -- a server restricted to `curve25519-sha256`, reached from a host without X25519 -- no configuration can bridge it. The connection fails with an error naming the missing primitive, so the remedy (a key exchange enabled server-side, or a different host) is clear rather than reading as a server misconfiguration.
 

@@ -217,6 +217,27 @@ describe("constrainKexToPlatformCapabilities with X25519 unavailable", () => {
     expect(error.message).not.toContain("curve25519-sha256");
   });
 
+  test("replaces an operator list that arrives empty, which offers nothing", () => {
+    // An empty list drops no algorithm, so the filter has nothing to reject and
+    // the refusal is not the answer -- but forwarding it would restore ssh2's
+    // full defaults, X25519 included (driven on the wire in
+    // test/integration/sftpKexOffer.test.ts). The removal modifier is what an
+    // empty list means to ssh2, minus what this process cannot perform.
+    const log = sink();
+    const constrained = constrainKexToPlatformCapabilities(
+      { algorithms: { kex: [] } },
+      [MISSING],
+      log,
+    );
+    expect(constrained["algorithms"]).toEqual({
+      kex: { remove: [MISSING.matchesAlgorithm] },
+    });
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn.mock.calls[0]?.[0]).toContain(
+      "connection.provider_options.algorithms.kex",
+    );
+  });
+
   test("merges the removal into an operator's modifier object", () => {
     const constrained = constrainKexToPlatformCapabilities(
       {

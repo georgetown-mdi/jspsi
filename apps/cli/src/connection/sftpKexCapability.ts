@@ -170,7 +170,9 @@ interface WarnSink {
  * - An operator LIST: filtered directly, since a list replaces ssh2's defaults
  *   outright and a modifier cannot reach into it. An emptied list is refused
  *   rather than forwarded -- ssh2 reads an empty list as "unspecified" and falls
- *   back to the very defaults the filter just rejected (measured).
+ *   back to the very defaults the filter just rejected (measured). A list that
+ *   ARRIVES empty rejects nothing and so is not refused: it takes the removal
+ *   modifier, which is ssh2's own reading of it minus the unperformable entries.
  * - An operator MODIFIER: the removal merged into its own `remove`, which ssh2
  *   applies after `append`/`prepend` (measured), so an unperformable algorithm
  *   cannot be re-added by the entry beside it.
@@ -205,8 +207,22 @@ function constrainKexValue(
   const unperformable = (name: unknown): boolean =>
     typeof name === "string" &&
     unavailable.some((entry) => entry.matchesAlgorithm.test(name));
+  const removals = unavailable.map((entry) => entry.matchesAlgorithm);
 
   if (Array.isArray(requested)) {
+    // An empty list drops nothing, so the filter below would hand it back
+    // untouched and ssh2 would read it as "unspecified" and restore its full
+    // defaults (measured) -- the algorithms this module exists to withhold.
+    if (requested.length === 0) {
+      log.warn(
+        `connection.provider_options.algorithms.kex is an empty list, which ` +
+          `selects nothing rather than restricting the offer: the default ` +
+          `key-exchange algorithms apply. Offering those minus the ones ` +
+          `requiring ${primitiveNames(unavailable)}, which this process's ` +
+          `crypto provider does not offer.`,
+      );
+      return { remove: removals };
+    }
     const kept = requested.filter((name) => !unperformable(name));
     const dropped = requested.filter(unperformable);
     if (dropped.length === 0) return requested;
@@ -222,7 +238,6 @@ function constrainKexValue(
     return kept;
   }
 
-  const removals = unavailable.map((entry) => entry.matchesAlgorithm);
   if (requested === undefined) return { remove: removals };
 
   if (isPlainObject(requested)) {

@@ -1,4 +1,6 @@
+import fsp from "node:fs/promises";
 import net from "node:net";
+import path from "node:path";
 
 import ssh2 from "ssh2";
 import {
@@ -10,7 +12,9 @@ import {
   test,
   vi,
 } from "vitest";
+import { withCapturedLogs } from "@psilink/core/testing";
 
+import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
 import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
 
 // What the SFTP client actually OFFERS, read off the wire from the client's own
@@ -20,9 +24,11 @@ import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
 // The unit suite pins the OPTIONS the constraint produces; only the installed
 // ssh2 can say what those options mean, and every claim about that is settled by
 // driving it here rather than by reading its source (CLAUDE.md). Nothing below
-// predicts ssh2's behaviour: the listener answers the SSH identification string
+// predicts ssh2's behaviour: each listener answers the SSH identification string
 // and then decodes the one unencrypted packet ssh2 sends, so what is asserted is
-// the byte sequence ssh2 put on the socket.
+// the byte sequence ssh2 put on the socket. The dials that have to complete a
+// handshake -- the host-key probe and the recovery re-dial -- read the same
+// packet from a relay in front of the suite's real server.
 //
 // Why the verdict is forced rather than produced by a FIPS host: the only lever
 // available in this image is `crypto.setFips(true)`, and it is NOT a model of a
@@ -58,8 +64,20 @@ vi.mock("../../src/connection/sftpKexCapability", async (importOriginal) => {
 
 const { SSH2SFTPClientAdapter } =
   await import("../../src/connection/ssh2SftpAdapter");
+const { probeHostKeyLines } = await import("../../src/commands/probeHostKey");
 
+const SSH_MSG_DISCONNECT = 1;
 const SSH_MSG_KEXINIT = 20;
+const SSH_DISCONNECT_PROTOCOL_ERROR = 2;
+
+// Only the in-process backend can be told to cut a session mid-operation (see
+// test/sftpServer/types.ts), which is what the recovery re-dial needs.
+const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
+
+// A transfer long enough that the cut below lands inside the READ run rather than
+// at its edges, and the re-dial's budget for the read that follows it.
+const TRANSFER_BYTES = 512 * 1024;
+const RECOVERY_TIMEOUT_MS = 60_000;
 
 // The ten name-lists an SSH_MSG_KEXINIT carries, in wire order (RFC 4253 7.1).
 // Only the first is read; the rest are skipped to reach nothing, so this decodes
@@ -132,23 +150,150 @@ function createKexinitReader(): {
   return { port, offered, close: () => server.close() };
 }
 
+/**
+ * A relay in front of a REAL SFTP server that records the key-exchange
+ * algorithms of every dial that passes through it and otherwise copies bytes
+ * both ways. The reader above answers only the identification string, so a dial
+ * it reads can never do work; this reads the offer of a dial that goes on to
+ * complete its handshake -- and of the re-dial that follows a dropped session.
+ */
+function createKexinitRecordingProxy(target: { host: string; port: number }): {
+  port: Promise<number>;
+  offers: string[][];
+  close: () => Promise<void>;
+} {
+  const offers: string[][] = [];
+  let resolvePort!: (port: number) => void;
+  const port = new Promise<number>((resolve) => (resolvePort = resolve));
+
+  const server = net.createServer((client) => {
+    const upstream = net.connect(target.port, target.host);
+    // Either side going takes the other with it: a session the server drops has
+    // to reach the client as a closed socket, or the adapter's recovery would
+    // wait out its deadline for a close this relay swallowed.
+    const cut = (): void => {
+      client.destroy();
+      upstream.destroy();
+    };
+    for (const socket of [client, upstream]) {
+      socket.on("error", cut);
+      socket.on("close", cut);
+    }
+    upstream.on("data", (chunk: Buffer) => client.write(chunk));
+
+    let sniffed = Buffer.alloc(0);
+    let identificationConsumed = false;
+    let recorded = false;
+    client.on("data", (chunk: Buffer) => {
+      upstream.write(chunk);
+      if (recorded) return;
+      sniffed = Buffer.concat([sniffed, chunk]);
+      if (!identificationConsumed) {
+        const end = sniffed.indexOf("\n");
+        if (end === -1) return;
+        sniffed = sniffed.subarray(end + 1);
+        identificationConsumed = true;
+      }
+      if (sniffed.length < 4) return;
+      const packetLength = sniffed.readUInt32BE(0);
+      if (sniffed.length < 4 + packetLength) return;
+      const paddingLength = sniffed.readUInt8(4);
+      offers.push(
+        decodeOfferedKexAlgorithms(
+          sniffed.subarray(5, 4 + packetLength - paddingLength),
+        ),
+      );
+      recorded = true;
+    });
+  });
+  server.listen(0, "127.0.0.1", () => {
+    resolvePort((server.address() as net.AddressInfo).port);
+  });
+  return {
+    port,
+    offers,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+/**
+ * A listener that answers the identification string and then sends one
+ * `SSH_MSG_DISCONNECT` carrying a description of the caller's choosing -- the
+ * server-controlled text ssh2 renders into its `Client` error message. Written
+ * on the wire rather than through ssh2's `Server`, which offers no seam for the
+ * description.
+ */
+function createDisconnectingServer(description: string): {
+  port: Promise<number>;
+  close: () => void;
+} {
+  let resolvePort!: (port: number) => void;
+  const port = new Promise<number>((resolve) => (resolvePort = resolve));
+  const uint32 = (value: number): Buffer => {
+    const encoded = Buffer.alloc(4);
+    encoded.writeUInt32BE(value);
+    return encoded;
+  };
+  const server = net.createServer((socket) => {
+    socket.write("SSH-2.0-psilink-disconnecting-listener\r\n");
+    socket.once("data", () => {
+      const reason = Buffer.from(description, "utf8");
+      const payload = Buffer.concat([
+        Buffer.from([SSH_MSG_DISCONNECT]),
+        uint32(SSH_DISCONNECT_PROTOCOL_ERROR),
+        uint32(reason.length),
+        reason,
+        uint32(0), // language tag
+      ]);
+      // RFC 4253 6: length field, padding length, payload and padding total a
+      // multiple of 8, with at least 4 bytes of padding.
+      const block = 8 - ((payload.length + 5) % 8);
+      const padding = Buffer.alloc(block < 4 ? block + 8 : block);
+      socket.write(
+        Buffer.concat([
+          uint32(payload.length + padding.length + 1),
+          Buffer.from([padding.length]),
+          payload,
+          padding,
+        ]),
+      );
+    });
+    socket.on("error", () => {});
+  });
+  server.listen(0, "127.0.0.1", () => {
+    resolvePort((server.address() as net.AddressInfo).port);
+  });
+  return { port, close: () => server.close() };
+}
+
+// The two names ssh2 appends outside the offer it filters: the `ext-info` marker
+// and the Terrapin (CVE-2023-48795) strict-key-exchange marker. Losing either to
+// the constraint would trade a handshake failure for a downgraded handshake.
+const APPENDED_MARKERS = ["ext-info-c", "kex-strict-c-v00@openssh.com"];
+
 // One dial's worth of connect options: no retries, so a listener that never
 // completes a handshake costs one attempt rather than the default budget.
-const dialOptions = (port: number): Record<string, unknown> => ({
+const dialOptions = (
+  port: number,
+  algorithms?: Record<string, unknown>,
+): Record<string, unknown> => ({
   host: "127.0.0.1",
   port,
   username: "probe",
   password: "probe",
   readyTimeout: 5_000,
   maxReconnectAttempts: 0,
+  ...(algorithms === undefined ? {} : { algorithms }),
 });
 
-async function offeredByAdapter(): Promise<string[]> {
+async function offeredByAdapter(
+  algorithms?: Record<string, unknown>,
+): Promise<string[]> {
   const reader = createKexinitReader();
   const adapter = new SSH2SFTPClientAdapter();
   try {
     const port = await reader.port;
-    await adapter.connect(dialOptions(port)).catch(() => {});
+    await adapter.connect(dialOptions(port, algorithms)).catch(() => {});
     return await reader.offered;
   } finally {
     await adapter.end().catch(() => {});
@@ -156,7 +301,9 @@ async function offeredByAdapter(): Promise<string[]> {
   }
 }
 
-async function offeredByBareSsh2(): Promise<string[]> {
+async function offeredByBareSsh2(
+  algorithms?: Record<string, unknown>,
+): Promise<string[]> {
   const reader = createKexinitReader();
   try {
     const port = await reader.port;
@@ -168,10 +315,13 @@ async function offeredByBareSsh2(): Promise<string[]> {
       username: "probe",
       password: "probe",
       readyTimeout: 5_000,
+      ...(algorithms === undefined
+        ? {}
+        : { algorithms: algorithms as ssh2.Algorithms }),
     });
-    const algorithms = await reader.offered;
+    const offered = await reader.offered;
     client.end();
-    return algorithms;
+    return offered;
   } finally {
     reader.close();
   }
@@ -208,12 +358,14 @@ describe("the key-exchange offer on the wire", () => {
     expect(negotiable).toContain("ecdh-sha2-nistp256");
   });
 
-  test("the strict-key-exchange marker survives the constraint", () => {
-    // ssh2 appends the Terrapin (CVE-2023-48795) strict-kex marker to whatever
-    // list is offered. Losing it to the constraint would trade a handshake
-    // failure for a downgraded handshake, which is strictly worse.
-    expect(bare).toContain("kex-strict-c-v00@openssh.com");
-    expect(constrained).toContain("kex-strict-c-v00@openssh.com");
+  test("the appended markers survive the constraint", () => {
+    // ssh2 appends these to whatever list is offered, outside the filtering the
+    // constraint reaches. The shapes an operator's own algorithms.kex takes are
+    // driven in the describe below.
+    for (const marker of APPENDED_MARKERS) {
+      expect(bare).toContain(marker);
+      expect(constrained).toContain(marker);
+    }
   });
 
   test("the constraint subtracts from ssh2's offer and adds nothing to it", () => {
@@ -222,6 +374,85 @@ describe("the key-exchange offer on the wire", () => {
     // have would be psilink choosing a key-exchange algorithm.
     expect(constrained.every((name) => bare.includes(name))).toBe(true);
     expect(constrained).toEqual(bare.filter((name) => !/25519/i.test(name)));
+  });
+});
+
+describe("the offer shapes an operator's own algorithms.kex takes", () => {
+  // The describe above drives the default shape -- no operator algorithms.kex at
+  // all. The other two shapes the constraint accepts reach ssh2 as a filtered
+  // list and as a merged modifier, and each has to arrive on the wire withholding
+  // X25519 while still carrying what ssh2 appends outside its filtering.
+
+  test("an explicit list is offered filtered, markers and all", async () => {
+    const [offered, logs] = await withCapturedLogs(() =>
+      offeredByAdapter({
+        kex: [
+          "curve25519-sha256",
+          "ecdh-sha2-nistp256",
+          "diffie-hellman-group14-sha256",
+        ],
+      }),
+    );
+    expect(offered).toEqual([
+      "ecdh-sha2-nistp256",
+      "diffie-hellman-group14-sha256",
+      ...APPENDED_MARKERS,
+    ]);
+    expect(logs.map((entry) => entry.message).join("\n")).toContain("X25519");
+  });
+
+  test("a modifier's own append cannot re-add what the constraint removed", async () => {
+    // ssh2 applies `remove` after `append`/`prepend` -- the premise merging the
+    // constraint's removal into an operator's modifier rests on, and the reason
+    // an operator cannot put an unperformable algorithm back by naming it.
+    const offered = await offeredByAdapter({
+      kex: {
+        append: ["curve25519-sha256"],
+        prepend: ["curve25519-sha256@libssh.org"],
+      },
+    });
+    expect(offered.filter((name) => /25519/i.test(name))).toEqual([]);
+    expect(offered).toContain("ecdh-sha2-nistp256");
+    for (const marker of APPENDED_MARKERS) expect(offered).toContain(marker);
+  });
+
+  test("a list that arrives empty offers the defaults minus X25519", async () => {
+    // An empty list names nothing to drop, so the filter has nothing to refuse --
+    // and forwarding it would restore ssh2's full defaults (driven below).
+    const [offered, logs] = await withCapturedLogs(() =>
+      offeredByAdapter({ kex: [] }),
+    );
+    expect(offered.filter((name) => /25519/i.test(name))).toEqual([]);
+    expect(offered).toContain("ecdh-sha2-nistp256");
+    for (const marker of APPENDED_MARKERS) expect(offered).toContain(marker);
+    expect(logs.map((entry) => entry.message).join("\n")).toContain(
+      "connection.provider_options.algorithms.kex",
+    );
+  });
+});
+
+describe("what ssh2 makes of a kex value psilink must not forward", () => {
+  // The measured ssh2 behaviour the refusal and the empty-list replacement exist
+  // for: these values are read as *unspecified* and restore the full defaults,
+  // X25519 included. Driven against bare ssh2 because the constraint's whole job
+  // is that they never reach it from psilink.
+  let bare: string[];
+
+  beforeAll(async () => {
+    bare = await offeredByBareSsh2();
+  });
+
+  test("an empty explicit list restores every default, X25519 included", async () => {
+    const offered = await offeredByBareSsh2({ kex: [] });
+    expect(offered).toEqual(bare);
+    expect(offered.some((name) => /25519/i.test(name))).toBe(true);
+  });
+
+  test("a value that is neither a list nor a modifier is inert", async () => {
+    expect(await offeredByBareSsh2({ kex: "ecdh-sha2-nistp256" })).toEqual(
+      bare,
+    );
+    expect(await offeredByBareSsh2({ kex: null })).toEqual(bare);
   });
 });
 
@@ -247,6 +478,94 @@ describe("the constrained offer against a real SFTP server", () => {
       await adapter.end().catch(() => {});
     }
   });
+
+  test("the host-key probe dials constrained and still reads the key", async () => {
+    // The probe is one of the dial paths the constraint sits at connectLocked to
+    // cover, and it reaches the wire through core rather than through a direct
+    // adapter.connect(). Reading the server's real fingerprint through the relay
+    // is what says the constrained offer negotiated as far as host-key
+    // presentation, not merely that the offer was constrained.
+    const server = inject("sftpServer");
+    const relay = createKexinitRecordingProxy(server);
+    try {
+      const result = await probeHostKeyLines({
+        sftpUrl: `sftp://127.0.0.1:${await relay.port}`,
+        connectTimeoutSeconds: 10,
+        json: true,
+        verbosity: -1,
+      });
+      const parsed = JSON.parse(result.stdout ?? "{}") as {
+        fingerprint: string;
+      };
+      expect(parsed.fingerprint).toBe(server.hostKeyFingerprint);
+      expect(relay.offers).toHaveLength(1);
+      expect(relay.offers[0]!.filter((name) => /25519/i.test(name))).toEqual(
+        [],
+      );
+      for (const marker of APPENDED_MARKERS)
+        expect(relay.offers[0]).toContain(marker);
+    } finally {
+      await relay.close();
+    }
+  });
+
+  inProcessOnly(
+    "the recovery re-dial offers exactly what the first dial offered",
+    async () => {
+      // The other dial path at connectLocked: a re-dial entered with the RETAINED
+      // options, which are already constrained. Constraining them again has to be
+      // a no-op -- a compounded or dropped constraint would show up as a second
+      // offer differing from the first. The unit suite pins that in memory; this
+      // is the pair of offers on the wire, from a session the server really cut.
+      const srv = await startInProcessSftpServer();
+      const relay = createKexinitRecordingProxy(srv.handle);
+      const adapter = new SSH2SFTPClientAdapter();
+      const dir = await fsp.mkdtemp(path.join(srv.handle.backingDir, "kex-"));
+      await fsp.writeFile(
+        path.join(dir, "transfer.bin"),
+        Buffer.alloc(TRANSFER_BYTES, 7),
+      );
+      try {
+        await adapter.connect({
+          host: "127.0.0.1",
+          port: await relay.port,
+          username: srv.handle.usera.username,
+          password: srv.handle.usera.password,
+          readyTimeout: 5_000,
+          maxReconnectAttempts: 2,
+        });
+        const [read] = await withCapturedLogs(
+          async () => {
+            // Cut the session inside the read the adapter is running, which is what
+            // sends it through the recovery re-dial.
+            srv.sessionControls.dropActiveAfterOps(3);
+            return adapter.get(
+              `${srv.handle.remoteRoot}/${path.basename(dir)}/transfer.bin`,
+              { maxBytes: 4 * TRANSFER_BYTES },
+            );
+          },
+          (level) => level === "WARN" || level === "ERROR",
+        );
+        expect(read).toHaveLength(TRANSFER_BYTES);
+        expect(adapter.midExchangeReconnectCount).toBe(1);
+
+        expect(relay.offers).toHaveLength(2);
+        for (const offer of relay.offers) {
+          expect(offer.filter((name) => /25519/i.test(name))).toEqual([]);
+          for (const marker of APPENDED_MARKERS)
+            expect(offer).toContain(marker);
+        }
+        expect(relay.offers[1]).toEqual(relay.offers[0]);
+      } finally {
+        srv.sessionControls.dropActiveAfterOps(0);
+        await adapter.end().catch(() => {});
+        await relay.close();
+        await fsp.rm(dir, { recursive: true, force: true });
+        await srv.stop();
+      }
+    },
+    RECOVERY_TIMEOUT_MS,
+  );
 });
 
 describe("a server that accepts only algorithms this process cannot perform", () => {
@@ -296,5 +615,33 @@ describe("a server that accepts only algorithms this process cannot perform", ()
     expect((error.cause as Error).message).toContain(
       "no matching key exchange algorithm",
     );
+  });
+
+  test("a server that writes the failure message itself supplies no byte of the diagnostic", async () => {
+    // The message fragment the diagnostic keys on is inside ssh2's rendering of
+    // the server's own SSH_MSG_DISCONNECT description, so a server writes it
+    // verbatim -- and reaches the same diagnostic anyway by restricting its offer
+    // as the case above does, with no message control at all. What the match must
+    // not do is let the server's bytes into psilink's own advice: the top-level
+    // message is composed from constants, and the server's text stays one cause
+    // link down, where the display sink escapes it.
+    const marker = "SERVER SUPPLIED THIS";
+    const hostile = createDisconnectingServer(
+      `Handshake failed: no matching key exchange algorithm -- ${marker}`,
+    );
+    const adapter = new SSH2SFTPClientAdapter();
+    let thrown: unknown;
+    try {
+      await adapter.connect(dialOptions(await hostile.port));
+    } catch (err) {
+      thrown = err;
+    } finally {
+      await adapter.end().catch(() => {});
+      hostile.close();
+    }
+    const error = thrown as Error;
+    expect(error.message).toContain("X25519");
+    expect(error.message).not.toContain(marker);
+    expect((error.cause as Error).message).toContain(marker);
   });
 });
