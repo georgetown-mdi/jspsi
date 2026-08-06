@@ -55,9 +55,12 @@ const schema: JSONSchemaType<Env> = {
     PSILINK_VERSION: {
       // The release version of the image this build ships in, baked in from
       // the canonical `apps/cli/package.json` version by the image build (see
-      // the Dockerfile and docs/RELEASES.md). Empty in every build that is not
-      // a released image -- a development build, and the continuously deployed
-      // hosted deployment, neither of which carries a release version.
+      // the Dockerfile and docs/RELEASES.md). Empty in the continuously
+      // deployed hosted build and in any web build outside the image build,
+      // which pass no value. A docker build of the repo bakes whatever version
+      // the manifest holds -- on a non-release tree, the last published
+      // release -- so a value here names the release the manifest carried at
+      // build time, not a promise that this build is that release.
       type: "string",
       default: "",
     },

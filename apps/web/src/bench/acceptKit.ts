@@ -62,7 +62,10 @@ const DEFAULT_PSILINK_IMAGE_TAG = "latest";
  * and build suffixes (`docs/RELEASES.md`). The build's value is interpolated
  * only when it matches, so an absent, partial, or malformed one names the
  * floating tag rather than reaching the sheet -- and `0.0.0`, the marker the
- * manifests that carry no release version hold, is excluded with it.
+ * manifests that carry no release version hold, is excluded with it. The
+ * image build reads the CLI manifest, which never holds `0.0.0`; the carve-out
+ * guards a build mis-wired to the unversioned web or root manifest, not a
+ * value the production build path delivers.
  */
 const RELEASE_VERSION =
   /^(?!0\.0\.0(?:[-+]|$))\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
