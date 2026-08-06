@@ -212,7 +212,7 @@ function opening(endpoint: AcceptKitEndpoint): Array<string> {
     "",
     "  chown 1000:1000 .",
     "",
-    "If you cannot change its owner, add --user \"$(id -u):$(id -g)\" to every",
+    'If you cannot change its owner, add --user "$(id -u):$(id -g)" to every',
     "command below instead. Docker Desktop on Windows and macOS needs",
     "neither: it hands the folder to whoever the container runs as.",
     "",
