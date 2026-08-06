@@ -143,8 +143,12 @@ jobs:
               psi-link:smoke "$@"
           }
 
-          # The invitation is the command's stdout; its human log is on stderr.
-          invitation=$(cli inviter invite input.csv --linkage-strategy single-pass)
+          # The invitation is the command's stdout. Its stderr log repeats the
+          # whole invitation -- the shared secret with it -- in the "your partner
+          # accepts with" line, and this job's log is public, so that stream is
+          # dropped rather than captured. A failure still fails the step through
+          # the command's exit status under `set -e`.
+          invitation=$(cli inviter invite input.csv --linkage-strategy single-pass 2>/dev/null)
           repoint inviter
           key_before=$(sudo sha256sum "$work/inviter/.psilink.key" | cut -d " " -f 1)
 
@@ -171,20 +175,28 @@ jobs:
             exit 1
           fi
 
-          # The owner-only write path, under the non-root uid: every artifact the
-          # exchange put in the bind mount is mode 0600 and belongs to that uid.
-          for artifact in \
-            inviter/output.csv inviter/.psilink.key \
-            acceptor/output.csv acceptor/.psilink.key
+          # The owner-only write path, under the non-root uid: every file the
+          # exchange left in a bind mount is mode 0600 and belongs to that uid.
+          # The mounts are walked rather than a list of names checked, so an
+          # artifact the CLI gains later -- a record, a key sidecar -- is covered
+          # without editing this step. input.csv is skipped as the one file this
+          # step itself placed there.
+          artifacts=$(sudo find "$work/inviter" "$work/acceptor" -type f \
+            ! -name input.csv | sort)
+          if [ -z "$artifacts" ]; then
+            echo "the exchange left no files in either bind mount" >&2
+            exit 1
+          fi
+          while IFS= read -r artifact
           do
-            mode=$(stat -c "%a" "$work/$artifact")
-            owner=$(stat -c "%u" "$work/$artifact")
-            echo "$artifact: mode $mode, owner uid $owner"
+            mode=$(sudo stat -c "%a" "$artifact")
+            owner=$(sudo stat -c "%u" "$artifact")
+            echo "${artifact#"$work"/}: mode $mode, owner uid $owner"
             if [ "$mode" != 600 ] || [ "$owner" != 1000 ]; then
-              echo "$artifact must be mode 600 owned by uid 1000" >&2
+              echo "${artifact#"$work"/} must be mode 600 owned by uid 1000" >&2
               exit 1
             fi
-          done
+          done <<< "$artifacts"
 
           # The rotated token is written back after a successful exchange, so a
           # mount the container user cannot write would fail here even though the

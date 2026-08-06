@@ -103,6 +103,13 @@ describe("accept kit, the account the container runs as", () => {
       // need it, and the sheet names the symptom the others will see.
       expect(text).toContain(`sudo ${CHOWN}`);
       expect(text).toContain("Operation not permitted");
+      // 1000 is a uid, and on a shared machine it may be another person's:
+      // the fallback hands them the folder and everything psilink writes in
+      // it, so the sheet says whose folder it becomes before the reader runs
+      // the command.
+      const consequence = text.split(`sudo ${CHOWN}`)[1];
+      expect(consequence).toContain("a number, not a name");
+      expect(consequence).toContain("share with other people");
     }
   });
 

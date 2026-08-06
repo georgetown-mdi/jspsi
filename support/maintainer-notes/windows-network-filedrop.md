@@ -67,9 +67,16 @@ by-hand copies of the command in `by-hand.md` and `troubleshooting.md`.
 check off wholesale; mapping the ownership is the narrower of the two and is
 what these carry.
 
-This is read off the documented mount-option semantics, not measured: no CI leg
-mounts CIFS at all -- the resolution workflow drives the script's resolution
-functions on a Windows runner and never reaches part 4 -- and the runs recorded
+This is read off the documented mount-option semantics, not measured. CI does
+mount CIFS -- `cli_build_and_test.yaml`'s `smb-doctor` job mounts a local-driver
+`type=cifs` Docker volume and, separately, a kernel `mount -t cifs`, both against
+the Samba rig it stands up -- but neither leg measures this mapping. Both name
+`uid=$(id -u)`, the runner's own account rather than 1000; the volume leg runs
+its check in a stock `node` image rather than the published unprivileged one; and
+a Samba server can be made to serve the Unix extensions a native Windows server
+never does, which is the case these options exist for. The Windows side does not
+reach the mount either: the resolution workflow drives the script's resolution
+functions on a Windows runner and stops before part 4. And the runs recorded
 below reached "the volume mounts and psilink can write to it" while the image
 still ran as root, where the DAC override made the mapping irrelevant. That is
 why a working share passed before and why it is not evidence now.
