@@ -461,23 +461,35 @@ const ORDINARY_CONFIG_PATH = "/etc/psilink.yaml";
 
 // The sizes the configured host arrives in. On the acceptor route it is the
 // PARTNER's, copied verbatim out of the invitation endpoint into the written
-// config (connectionFromEndpoint), and the operator-config schema bounds it
-// neither in length nor in format -- so the invitation schema's own
-// MAX_ENDPOINT_HOST_LENGTH is a floor on what can arrive, not a ceiling.
-const HOSTS: Array<[string, string]> = [
-  ["an ordinary host", ORDINARY_HOST],
+// config (connectionFromEndpoint), and SFTPServerSchema bounds `server.host` by
+// `min(1)` alone -- no maximum, no format -- so the invitation schema's own
+// MAX_ENDPOINT_HOST_LENGTH bounds only what an INVITATION can carry, and a
+// hand-written or partner-derived config admits any length above it.
+// Each row carries whether the delivery is wide enough to overrun its own link,
+// so a delivery that stops overrunning stops measuring what it was added for.
+const HOSTS: Array<[string, string, boolean]> = [
+  ["an ordinary host", ORDINARY_HOST, false],
   [
     "a partner-supplied host at the invitation schema's full length",
     "h".repeat(MAX_ENDPOINT_HOST_LENGTH),
+    true,
   ],
-  ["a host past every budget", "h".repeat(50_000)],
+  // Between the invitation bound and the flood: long enough to overrun a link's
+  // display budget on its own, short enough that a config carrying it looks
+  // unremarkable.
+  ["a host past the invitation schema's bound", "h".repeat(412), true],
+  ["a host past every budget", "h".repeat(50_000), true],
 ];
 
 // The operator's own config path is unbounded too, so it is varied on the same
 // axis: an over-long one must spend its own link and nothing else.
-const CONFIG_PATHS: Array<[string, string]> = [
-  ["an ordinary config path", ORDINARY_CONFIG_PATH],
-  ["a config path past its budget", `/${"d".repeat(50_000)}/psilink.yaml`],
+const CONFIG_PATHS: Array<[string, string, boolean]> = [
+  ["an ordinary config path", ORDINARY_CONFIG_PATH, false],
+  [
+    "a config path past its budget",
+    `/${"d".repeat(50_000)}/psilink.yaml`,
+    true,
+  ],
 ];
 
 // The two persistence shapes that name a config path. Both must render the same
@@ -493,8 +505,8 @@ const CONFIG_BEARING_MODES: Array<
 ];
 
 for (const [modeLabel, persistenceFor] of CONFIG_BEARING_MODES)
-  for (const [hostLabel, host] of HOSTS)
-    for (const [pathLabel, configPath] of CONFIG_PATHS)
+  for (const [hostLabel, host, hostOverruns] of HOSTS)
+    for (const [pathLabel, configPath, pathOverruns] of CONFIG_PATHS)
       test(`the non-interactive refusal (${modeLabel}) renders its recovery whole under ${hostLabel} and ${pathLabel}`, async () => {
         const { links, error, connection, probeCalls } = await refuse({
           persistence: persistenceFor(configPath),
@@ -505,11 +517,18 @@ for (const [modeLabel, persistenceFor] of CONFIG_BEARING_MODES)
         // budget nobody else can spend.
         expect(links[0]).toBe(NON_INTERACTIVE_SUMMARY);
         expect(links[1]).toBe(RECOVERY_WITH_CONFIG);
-        // Each unbounded fragment sits alone behind its own first-party label.
+        // Each unbounded fragment sits alone behind its own first-party label,
+        // and a fragment wider than a link spends its own budget and no other.
         expect(links[2]?.startsWith(CONFIG_LABEL)).toBe(true);
         expect(links[2]).toContain(configPath.slice(0, 32));
+        expect(links[2]?.includes(DISPLAY_TRUNCATION_MARKER)).toBe(
+          pathOverruns,
+        );
         expect(links[3]?.startsWith(HOST_LABEL)).toBe(true);
         expect(links[3]).toContain(host.slice(0, 16));
+        expect(links[3]?.includes(DISPLAY_TRUNCATION_MARKER)).toBe(
+          hostOverruns,
+        );
         // Enforcement is untouched: still a UsageError (exit 64), still no
         // probe, still nothing pinned.
         expect(error).toBeInstanceOf(UsageError);
@@ -518,9 +537,9 @@ for (const [modeLabel, persistenceFor] of CONFIG_BEARING_MODES)
           expect(connection.server.hostKeyFingerprint).toBeUndefined();
       });
 
-for (const [hostLabel, host] of HOSTS)
+for (const [hostLabel, host, hostOverruns] of HOSTS)
   test(`the non-interactive refusal (ephemeral) renders its recovery whole under ${hostLabel}`, async () => {
-    const { links, error, connection, probeCalls } = await refuse({
+    const { rendered, links, error, connection, probeCalls } = await refuse({
       persistence: { mode: "ephemeral" },
       host,
     });
@@ -528,18 +547,20 @@ for (const [hostLabel, host] of HOSTS)
     expect(links[0]).toBe(NON_INTERACTIVE_SUMMARY);
     expect(links[1]).toBe(RECOVERY_WITHOUT_CONFIG);
     expect(links[2]?.startsWith(HOST_LABEL)).toBe(true);
-    // Nothing to name, so nothing is named: the ephemeral shape interpolates no
-    // path and grows no link for one.
-    expect(links.some((link) => link.startsWith(CONFIG_LABEL))).toBe(false);
+    expect(links[2]?.includes(DISPLAY_TRUNCATION_MARKER)).toBe(hostOverruns);
+    // Nothing to name, so nothing is named: the ephemeral shape carries no
+    // config path at all, so no link -- and no empty or `undefined` label --
+    // is grown for one.
+    expect(rendered).not.toContain(CONFIG_LABEL);
     expect(error).toBeInstanceOf(UsageError);
     expect(probeCalls).toBe(0);
     if (connection.channel === "sftp")
       expect(connection.server.hostKeyFingerprint).toBeUndefined();
   });
 
-for (const [hostLabel, host] of HOSTS)
+for (const [hostLabel, host, hostOverruns] of HOSTS)
   test(`the declined-trust refusal renders whole under ${hostLabel}`, async () => {
-    const { links, error, connection } = await refuse({
+    const { rendered, links, error, connection } = await refuse({
       persistence: { mode: "ephemeral" },
       host,
       interactive: true,
@@ -547,6 +568,8 @@ for (const [hostLabel, host] of HOSTS)
 
     expect(links[0]).toBe(DECLINED_SUMMARY);
     expect(links[1]?.startsWith(HOST_LABEL)).toBe(true);
+    expect(links[1]?.includes(DISPLAY_TRUNCATION_MARKER)).toBe(hostOverruns);
+    expect(rendered).not.toContain(CONFIG_LABEL);
     expect(error).toBeInstanceOf(UsageError);
     if (connection.channel === "sftp")
       expect(connection.server.hostKeyFingerprint).toBeUndefined();
@@ -629,19 +652,114 @@ for (const [label, render, firstPartyText] of FLOODED_REFUSALS)
     );
   });
 
-test("a control-laden host is escaped at the boundary and reaches no first-party link", async () => {
+test("a control-laden host is escaped at the boundary and cannot forge a link", async () => {
   // The host is composed raw (the display boundary escapes the rendered chain
-  // once); a hostile one must neither break the flow nor spill an ANSI sequence
-  // or a forged log line, and its own link is where it lands.
+  // once); a hostile one must neither break the flow nor spill an ANSI sequence,
+  // a bidi override, or a forged log line, and its own link is where it lands.
   const { rendered, links } = await refuse({
     persistence: { mode: "save-with-config", configPath: ORDINARY_CONFIG_PATH },
-    host: "sftp\x1b[31m.example.org\nnot-an-error: forged",
+    // The bidi override is written as an escape rather than a literal: a raw RLO
+    // in a source file is itself the hazard this delivery measures.
+    host:
+      "sftp\x1b[31m.example.org\nnot-an-error: forged\r\ncaused by: forged" +
+      "\x00\u202e",
   });
 
-  expect(rendered).not.toContain("\x1b");
+  for (const raw of ["\x1b", "\r", "\x00", "\u202e"])
+    expect(rendered).not.toContain(raw);
   expect(links[0]).toBe(NON_INTERACTIVE_SUMMARY);
   expect(links[1]).toBe(RECOVERY_WITH_CONFIG);
   expect(links[3]).toBe(
-    `${HOST_LABEL}sftp\\x1b[31m.example.org\\x0anot-an-error: forged`,
+    `${HOST_LABEL}sftp\\x1b[31m.example.org\\x0anot-an-error: forged\\x0d` +
+      `\\x0acaused by: forged\\x00\\u202e`,
   );
+  // Non-forgeable framing: the separator's newline is the only one the render
+  // contains, so a host carrying `caused by: ` text of its own adds no link and
+  // cannot pass its bytes off as a further step in the chain.
+  expect(links.length).toBe(4);
+  expect(rendered.split("\n").length).toBe(links.length);
+});
+
+// The private-key redaction is fail-closed past a truncated block: it replaces
+// from a BEGIN marker to the end of the LINK the marker lands on. So a marker
+// planted in a chooser's fragment is what would consume first-party text sharing
+// that link, and each chooser's fragment is delivered one -- alone and with text
+// around it -- and measured at the rendered boundary. Core pins its own refusals
+// on the same deliveries (packages/core/test/sftpSession.test.ts).
+const PEM_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
+const KEY_BODY = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAAB";
+const REDACTED = "[redacted private key]";
+
+test("a bare PEM marker as the host is redacted on the host's own link", async () => {
+  const { rendered, links } = await refuse({
+    persistence: { mode: "save-with-config", configPath: ORDINARY_CONFIG_PATH },
+    host: PEM_MARKER,
+  });
+
+  expect(links[0]).toBe(NON_INTERACTIVE_SUMMARY);
+  expect(links[1]).toBe(RECOVERY_WITH_CONFIG);
+  expect(links[2]).toBe(`${CONFIG_LABEL}${ORDINARY_CONFIG_PATH}`);
+  expect(links[3]).toBe(`${HOST_LABEL}${REDACTED}`);
+  expect(rendered).not.toContain("PRIVATE KEY");
+});
+
+test("a sliced key in the host is redacted with the surrounding text kept", async () => {
+  const { rendered, links } = await refuse({
+    persistence: { mode: "save-with-config", configPath: ORDINARY_CONFIG_PATH },
+    host: `${ORDINARY_HOST} ${PEM_MARKER}\n${KEY_BODY}\ntrailing`,
+  });
+
+  expect(links[0]).toBe(NON_INTERACTIVE_SUMMARY);
+  expect(links[1]).toBe(RECOVERY_WITH_CONFIG);
+  expect(links[3]).toBe(`${HOST_LABEL}${ORDINARY_HOST} ${REDACTED}`);
+  expect(rendered).not.toContain(KEY_BODY.slice(0, 24));
+  expect(rendered).not.toContain("trailing");
+});
+
+test("a sliced key in the config path is redacted on the config path's own link", async () => {
+  const { rendered, links } = await refuse({
+    persistence: {
+      mode: "write-now",
+      configPath: `/etc/${PEM_MARKER}${KEY_BODY}/psilink.yaml`,
+    },
+    host: ORDINARY_HOST,
+  });
+
+  expect(links[0]).toBe(NON_INTERACTIVE_SUMMARY);
+  expect(links[1]).toBe(RECOVERY_WITH_CONFIG);
+  expect(links[2]).toBe(`${CONFIG_LABEL}/etc/${REDACTED}`);
+  expect(rendered).not.toContain(KEY_BODY.slice(0, 24));
+  // The reach stops at the link boundary: each link is redacted on its own, so
+  // a marker in the config path cannot swallow the host link behind it.
+  expect(links[3]).toBe(`${HOST_LABEL}${ORDINARY_HOST}`);
+});
+
+// Every link carries its `cause` the way the two-argument Error constructor
+// would, so a sink that enumerates or serializes a refusal rather than rendering
+// it through sanitizeErrorForDisplay sees the same shape at every depth as it
+// does at the top.
+const causeChainOf = (error: unknown): object[] => {
+  const chain: object[] = [];
+  let link: unknown = error;
+  while (typeof link === "object" && link !== null) {
+    chain.push(link);
+    link = (link as { cause?: unknown }).cause;
+  }
+  return chain;
+};
+
+test("every refusal link installs its cause non-enumerably", async () => {
+  const { error } = await refuse({
+    persistence: { mode: "save-with-config", configPath: ORDINARY_CONFIG_PATH },
+  });
+
+  const chain = causeChainOf(error);
+  expect(chain.length).toBe(4);
+  for (const link of chain) {
+    expect(Object.getOwnPropertyDescriptor(link, "cause")?.enumerable).toBe(
+      false,
+    );
+    expect(Object.keys(link)).not.toContain("cause");
+  }
+  expect(JSON.stringify(chain[1])).toBe("{}");
 });

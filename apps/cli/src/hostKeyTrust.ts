@@ -60,15 +60,23 @@ export interface HostKeyTrustDeps {
  * remove the cap: fixed copy that outgrows a budget truncates just the same, so
  * what each link measures at the rendered boundary is pinned by test.
  *
- * Each link is assembled with `Object.assign` rather than the two-argument
- * `Error` constructor: this app's emit target predates `ErrorOptions`, so the
- * direct form typechecks against the test config's newer lib and then fails the
- * build.
+ * Each link installs its `cause` with `Object.defineProperty` rather than the
+ * two-argument `Error` constructor -- this app's emit target predates
+ * `ErrorOptions`, so the direct form typechecks against the test config's newer
+ * lib and then fails the build -- using the descriptor that constructor would
+ * have set, so a link matches the `UsageError` above it for any sink that
+ * enumerates or serializes a thrown error rather than rendering it.
  */
 const hostKeyRefusal = (summary: string, details: string[]): UsageError =>
   new UsageError(summary, {
     cause: details.reduceRight<unknown>(
-      (cause, detail) => Object.assign(new Error(detail), { cause }),
+      (cause, detail) =>
+        Object.defineProperty(new Error(detail), "cause", {
+          value: cause,
+          writable: true,
+          configurable: true,
+          enumerable: false,
+        }),
       undefined,
     ),
   });
@@ -145,18 +153,19 @@ export async function establishHostKeyTrust(
   const host = connection.server.host;
   const hostDisplay = sanitizeForDisplay(host);
   // On an offline-accept-seeded config the host is the PARTNER's, copied
-  // verbatim out of the invitation endpoint (connectionFromEndpoint), and the
-  // operator-config schema bounds it neither in length nor in format -- so it
-  // rides a labelled link of its own in every refusal below rather than sharing
-  // one with the text the operator has to act on. Redacted where it is
-  // interpolated, per the composition-site convention in
-  // docs/spec/CHANNEL_SECURITY.md.
+  // verbatim out of the invitation endpoint (connectionFromEndpoint), and
+  // SFTPServerSchema bounds it neither in length nor in format; the config path
+  // is the operator's own, and unbounded too. Each therefore rides a labelled
+  // link of its own in the refusals below rather than sharing one with the text
+  // the operator has to act on, and each is passed through the private-key
+  // redaction where it is interpolated (docs/spec/CHANNEL_SECURITY.md).
   const hostDetail = `configured host: ${redactPrivateKeyMaterial(host)}`;
   // The config the operator would pin into / where the pin will be saved; absent
-  // for an ephemeral (one-off, no --save) run, which the messages adapt to. It
-  // is the operator's own unbounded path, so it too takes a link of its own.
-  const configPath =
-    persistence.mode === "ephemeral" ? undefined : persistence.configPath;
+  // for an ephemeral (one-off, no --save) run, which the messages adapt to.
+  const configDetail =
+    persistence.mode === "ephemeral"
+      ? undefined
+      : `configuration file: ${redactPrivateKeyMaterial(persistence.configPath)}`;
 
   // stdin must be an interactive terminal to prompt. The strict `!== true` test
   // mirrors openInputSource: isTTY is `undefined` (not `false`) for a pipe, a
@@ -168,13 +177,13 @@ export async function establishHostKeyTrust(
       `no host_key_fingerprint is pinned for this SFTP server and this run ` +
         `is not interactive, so its identity cannot be confirmed; refusing ` +
         `to connect.`,
-      configPath !== undefined
+      configDetail !== undefined
         ? [
             `Run once from an interactive terminal to review and pin the ` +
               `presented key, or pin it out-of-band by setting ` +
               `connection.server.host_key_fingerprint in the configuration ` +
               `below.`,
-            `configuration file: ${configPath}`,
+            configDetail,
             hostDetail,
           ]
         : [
