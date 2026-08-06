@@ -4,7 +4,7 @@ title: "What a FIPS Provider Offers in the Shipped Image"
 
 # What a FIPS provider offers in the shipped image
 
-*Status: measurement, plus two decisions taken on it. This note records what an OpenSSL FIPS provider carries and reaches inside the container image PSI-Link ships, and what the CMVP certificates approve, so the container, compliance, and crypto items can cite a measurement instead of a belief. The owner has since set FIPS 140-3 as the target standard and accepted that the Alpine base will likely give way; which certificate and base pair, and whether to pursue a FIPS claim at all, remain open. See [docs/notes/README.md](README.md).*
+*Status: measurement, plus two decisions taken on it. This note records what an OpenSSL FIPS provider carries and reaches inside the container image PSI-Link ships, and what the CMVP certificates approve, so the container, compliance, and crypto items can cite a measurement instead of a belief. The owner has since set FIPS 140-3 as the target standard and accepted that the Alpine base will likely give way. Which certificate and base pair is now settled -- AWS's certificate 5021, a 140-3 validation, on `amazonlinux:2023`, shipped as a separate variant image -- and whether to pursue a FIPS claim at all remains open. See [docs/notes/README.md](README.md).*
 
 Three unverified facts gated the whole FIPS thread: whether the provider we would ship carries X25519 key agreement, whether it carries Ed25519 signing, and whether Node's WebCrypto in the shipped image engages a configured FIPS provider at all. All three are now measured by running the real tool in an image built on this repo's `Dockerfile` runtime base. Two of the answers invert the assumption they replace.
 
@@ -165,13 +165,13 @@ Settled since, and recorded in [fips-variant-image.md](fips-variant-image.md):
   pairing reachable at all is Management Manual 7.9.2's Level 1 porting route,
   which needs no vendor action -- the vendor-affirmation tables alone say the
   opposite, and that is the trap.
-
-Still open:
-
-- **Which standard revision certificate 5021 carries.** The project's target is
-  140-3, but whether 5021's validation is 140-2 or 140-3 has to be read off the
-  certificate itself and has not been. This gates any published wording naming a
-  revision, so it is a precondition of the tag rather than of the image.
+- **Which standard revision certificate 5021 carries.** FIPS 140-3, at overall
+  Security Level 1, read off its own security policy -- which validates module
+  version `3.0.8-d694bfa693b76001`, the one the image pins, and names 140-2
+  nowhere. That is the project's target standard, so wording naming the revision
+  may name 140-3. The reading rests on the policy document alone; the CMVP
+  certificate page was not reachable to corroborate it
+  ([fips-variant-image.md](fips-variant-image.md)).
 
 ## What this means for the items downstream
 

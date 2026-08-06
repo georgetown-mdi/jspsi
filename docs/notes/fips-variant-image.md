@@ -139,13 +139,21 @@ the wording safe under both. The construction with both authority and precedent
 is Red Hat's: name what the artifact does, condition it on the deployment, and
 attach the sanctioned short form if a short form is wanted.
 
-One thing to settle before any wording that names a standard revision is
-published: **which revision certificate 5021 was validated under is not
-established by anything measured here.** The certificate is Active with a
-2030-05-25 sunset and the module loads, self-tests and serves; whether its
-validation is FIPS 140-2 or FIPS 140-3 has to be read off the certificate
-itself, and the project's target standard is 140-3
-([fips-provider-surface.md](fips-provider-surface.md)).
+**Certificate 5021 is a FIPS 140-3 validation**, which is the project's target
+standard ([fips-provider-surface.md](fips-provider-surface.md)), so wording that
+names the revision may name 140-3. Read off the certificate's own security
+policy: "Amazon Linux 2023 OpenSSL FIPS Provider -- FIPS 140-3 Non-Proprietary
+Security Policy", document version 1.2 of 2025-05-14, prepared by atsec for
+Amazon Web Services, validating module version `3.0.8-d694bfa693b76001` -- the
+version this image pins -- at overall Security Level 1 against
+FIPS 140-3. The document names 140-3 throughout and 140-2 nowhere. The
+certificate is Active with a 2030-05-25 sunset.
+
+The limit on that reading: it rests on the security policy document alone. The
+CMVP certificate page was not reachable to cross-check it, so a second source has
+not been consulted. The policy is the authoritative document for a validation and
+is unambiguous here, but a published claim naming the revision is resting on one
+reading rather than two.
 
 ## The three tiers a claim has to distinguish
 
@@ -383,8 +391,10 @@ reading -- Docker Hub is not reachable from the development container and no
 
 ## What is not settled
 
-- **Which standard revision certificate 5021 carries**, as above. It gates any
-  wording that names one.
+- **A second reading of certificate 5021's standard revision.** The security
+  policy names FIPS 140-3 unambiguously (above), so the question that gated
+  wording is answered; what is unsettled is only that the CMVP certificate page
+  has not been consulted to corroborate it.
 - **Whether `openssl-libs` 3.5.x loading the certified 3.0.8 module is inside
   the validation.** It is measured to load, self-test and serve, and AWS's own
   packaging permits the pairing -- the certified package declares
