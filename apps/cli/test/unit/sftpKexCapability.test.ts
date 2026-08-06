@@ -380,39 +380,68 @@ describe("explainKexNegotiationFailure", () => {
 // written past that cap loses its tail, which is where the remedy sits -- so the
 // cap is asserted against the real sink rather than trusted to a reading.
 describe("what the operator actually reads", () => {
-  const renderedLinks = (error: unknown): string[] =>
-    sanitizeErrorForDisplay(error).split("\n");
+  // The TOP link is the one that must survive whole: it carries the remedy. The
+  // cause link deliberately may not -- it carries the operator's own algorithm
+  // list, which is unbounded, and splitting it off is what keeps the remedy out
+  // of its way. Asserting over every link would therefore assert something
+  // input-dependent rather than the property being held.
+  const topLink = (error: unknown): string =>
+    sanitizeErrorForDisplay(error).split("\n")[0]!;
 
-  test("the emptied-list refusal renders whole, remedy included", () => {
-    let thrown: unknown;
+  const refusalOver = (unavailable: readonly KexPrimitive[]): unknown => {
     try {
       constrainKexToPlatformCapabilities(
         { algorithms: { kex: ["curve25519-sha256"] } },
-        [MISSING],
+        unavailable,
         sink(),
       );
     } catch (error) {
-      thrown = error;
+      return error;
     }
+    throw new Error("expected the emptied-list refusal to throw");
+  };
+
+  const explanationOver = (unavailable: readonly KexPrimitive[]): unknown =>
+    explainKexNegotiationFailure(
+      new Error("Handshake failed: no matching key exchange algorithm"),
+      unavailable,
+    );
+
+  test("the emptied-list refusal renders whole, remedy included", () => {
+    const thrown = refusalOver([MISSING]);
 
     expect(thrown).toBeInstanceOf(UsageError);
-    const rendered = sanitizeErrorForDisplay(thrown);
-    expect(rendered).not.toContain("[truncated]");
-    expect(rendered).toContain("or remove the setting");
-    for (const link of renderedLinks(thrown))
-      expect(link.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
+    expect(topLink(thrown)).not.toContain("[truncated]");
+    expect(topLink(thrown)).toContain("or remove the setting");
+    expect(topLink(thrown).length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
   });
 
   test("the no-common-key-exchange explanation renders whole, remedy included", () => {
-    const explained = explainKexNegotiationFailure(
-      new Error("Handshake failed: no matching key exchange algorithm"),
-      [MISSING],
-    );
+    const explained = explanationOver([MISSING]);
 
-    const rendered = sanitizeErrorForDisplay(explained);
-    expect(rendered).not.toContain("[truncated]");
-    expect(rendered).toContain("or run psilink on a host that provides");
-    for (const link of renderedLinks(explained))
-      expect(link.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
+    expect(topLink(explained)).not.toContain("[truncated]");
+    expect(topLink(explained)).toContain(
+      "or run psilink on a host that provides",
+    );
+    expect(topLink(explained).length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+  });
+
+  // Driven off KEX_PRIMITIVES rather than the fixture above, because each
+  // message interpolates the primitive names TWICE: a second entry added to that
+  // list, with a name much longer than X25519, would push the remedy back out of
+  // the cap -- the regression these cases exist to catch. Bound to the shipped
+  // list, the check grows with it instead of going quietly stale.
+  test("both messages still fit the cap for the primitives actually shipped", () => {
+    for (const rendered of [
+      topLink(refusalOver(KEX_PRIMITIVES)),
+      topLink(explanationOver(KEX_PRIMITIVES)),
+    ]) {
+      expect(rendered).not.toContain("[truncated]");
+      expect(rendered.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
+    }
   });
 });
