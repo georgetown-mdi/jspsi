@@ -126,9 +126,9 @@ describe("the shared folder's name the invitation is minted from", () => {
   });
 
   test("an operator-authored mount reduces a Windows-authored path", () => {
-    expect(
-      resolveJobRendezvousFolderName({}, "C:\\drops\\psilink"),
-    ).toBe("psilink");
+    expect(resolveJobRendezvousFolderName({}, "C:\\drops\\psilink")).toBe(
+      "psilink",
+    );
   });
 
   test.each([
@@ -140,21 +140,27 @@ describe("the shared folder's name the invitation is minted from", () => {
     ["a Windows path", "drops\\psilink"],
     ["a control character", "psi\u0007link"],
     ["longer than a filesystem name", "x".repeat(256)],
-  ])("a %s name leaves the console unable to name the folder", (_label, name) => {
-    // Deliberately NOT falling back to the mount point: a caller that set the
-    // variable has already said the mount point does not name the folder.
+  ])(
+    "a %s name leaves the console unable to name the folder",
+    (_label, name) => {
+      // Deliberately NOT falling back to the mount point: a caller that set the
+      // variable has already said the mount point does not name the folder.
+      expect(
+        locatorFor({
+          JOB_RENDEZVOUS_DIR: "/rendezvous",
+          JOB_RENDEZVOUS_NAME: name,
+        }),
+      ).toEqual({ folderName: undefined, locator: "rendezvous" });
+    },
+  );
+
+  test("a name at the length limit is still a name", () => {
+    const name = "x".repeat(255);
     expect(
       locatorFor({
         JOB_RENDEZVOUS_DIR: "/rendezvous",
         JOB_RENDEZVOUS_NAME: name,
       }),
-    ).toEqual({ folderName: undefined, locator: "rendezvous" });
-  });
-
-  test("a name at the length limit is still a name", () => {
-    const name = "x".repeat(255);
-    expect(
-      locatorFor({ JOB_RENDEZVOUS_DIR: "/rendezvous", JOB_RENDEZVOUS_NAME: name }),
     ).toEqual({ folderName: name, locator: name });
   });
 

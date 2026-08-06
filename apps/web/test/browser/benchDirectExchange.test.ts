@@ -696,6 +696,47 @@ describe("direct exchange transport step", () => {
       .element(page.getByLabelText("A shared directory", { exact: false }))
       .toBeDisabled();
   });
+
+  test("names the shared directory the console reported a name for", async () => {
+    stubJobApi({
+      sftp: { configured: false },
+      rendezvous: {
+        configured: true,
+        locator: "agency-a-agency-b",
+        folderName: "agency-a-agency-b",
+      },
+    });
+    mount(createElement(DirectExchangeBench));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await page
+      .getByRole("radio", { name: "A shared directory", exact: false })
+      .click();
+    await expect
+      .element(page.getByText("agency-a-agency-b", { exact: false }))
+      .toBeInTheDocument();
+  });
+
+  test("names no shared directory where the console could not name one", async () => {
+    // The mount point a launcher chose is not the folder's name, so the line
+    // says only that the exchange runs through the mounted directory.
+    stubJobApi({
+      sftp: { configured: false },
+      rendezvous: { configured: true, locator: "rendezvous" },
+    });
+    mount(createElement(DirectExchangeBench));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await page
+      .getByRole("radio", { name: "A shared directory", exact: false })
+      .click();
+    await expect
+      .element(
+        page.getByText("Runs through the shared directory mounted on this"),
+      )
+      .toBeInTheDocument();
+    expect(page.getByText("rendezvous", { exact: true }).query()).toBeNull();
+  });
 });
 
 describe("direct exchange host-key probe (direct ceremony)", () => {

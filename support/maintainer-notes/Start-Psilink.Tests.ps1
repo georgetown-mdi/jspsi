@@ -445,6 +445,65 @@ Describe 'The console argument vector' {
         # A named volume mounts by name exactly as a host path does.
         $engineArgs | Should -Contain 'psilink-sync:/rendezvous'
     }
+
+    It 'passes the shared folder name beside a rendezvous mount' {
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+            -DataMount 'C:\work' -RendezvousMount 'psilink-sync' -RendezvousName 'agency-a-agency-b'
+
+        $engineArgs | Should -Contain 'JOB_RENDEZVOUS_NAME=agency-a-agency-b'
+    }
+
+    It 'passes the shared folder name with no rendezvous mount at all' {
+        # A single-folder console rendezvouses out of the data mount, which the
+        # container sees as /data: the operator's folder still has a name.
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+            -DataMount 'C:\work' -RendezvousName 'county-exchange'
+
+        $engineArgs | Should -Contain 'JOB_RENDEZVOUS_NAME=county-exchange'
+        ($engineArgs -join ' ') | Should -Not -Match 'JOB_RENDEZVOUS_DIR'
+    }
+
+    It 'passes no name when there is none to give' {
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+            -DataMount 'C:\work'
+
+        ($engineArgs -join ' ') | Should -Not -Match 'JOB_RENDEZVOUS_NAME'
+    }
+}
+
+Describe 'The shared folder name the console is told' {
+    It 'names a folder on this PC by its own last segment' {
+        Get-RendezvousFolderName -Path 'C:\Users\dana\Egnyte\agency-a-agency-b' |
+            Should -Be 'agency-a-agency-b'
+    }
+
+    It 'ignores a trailing separator, and reads either one' {
+        Get-RendezvousFolderName -Path 'C:\drops\studyA\' | Should -Be 'studyA'
+        Get-RendezvousFolderName -Path 'C:/drops/studyA' | Should -Be 'studyA'
+    }
+
+    It 'names a share subfolder rather than the mount the volume is bound at' {
+        # The network shape mounts a named volume, so no host path reaches the
+        # container at all: the share is where the name has to come from.
+        Get-RendezvousFolderName -Share 'exchange' -SubPath 'agency-a/agency-b' |
+            Should -Be 'agency-b'
+    }
+
+    It 'names the share itself when the folder is the share root' {
+        Get-RendezvousFolderName -Share 'exchange' | Should -Be 'exchange'
+    }
+
+    It 'gives no name for a drive root, which has none' {
+        # Naming it 'D:' would ask the partner to match a drive letter that means
+        # nothing on their machine; the console degrades to no name instead.
+        Get-RendezvousFolderName -Path 'D:\' | Should -BeNullOrEmpty
+        Get-RendezvousFolderName -Path 'D:' | Should -BeNullOrEmpty
+    }
+
+    It 'gives no name for a path it could read no segment out of' {
+        Get-RendezvousFolderName -Path '' | Should -BeNullOrEmpty
+        Get-RendezvousFolderName -Path '\' | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'The network flow, driven against a stub engine' {

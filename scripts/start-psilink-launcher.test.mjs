@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -263,6 +263,60 @@ describe("the sourcing contract", () => {
 
     expect(run.stdout).toMatch(/psilink console/);
     expect(run.status).not.toBe(0);
+  });
+});
+
+describe("the shared folder's name passed to the console", () => {
+  /** The console argument vector the launcher would hand the engine, one
+   * argument per line, for the folders given. */
+  function consoleArguments(workspace, folders) {
+    const assignments = Object.entries(folders)
+      .map(([name, value]) => `${name}='${value}'`)
+      .join("\n");
+    const run = sourced(
+      workspace,
+      `${assignments}\nPSILINK_CONTAINER_NAME=psilink-console-1\nPSILINK_PORT=3000\n` +
+        'psilink_build_console_arguments\nprintf "%s\\n" "${PSILINK_CONSOLE_ARGUMENTS[@]}"',
+    );
+    expect(run.status).toBe(0);
+    return run.stdout.trim().split("\n");
+  }
+
+  it("names the rendezvous folder the operator picked", () => {
+    // The container is shown /rendezvous whatever folder was picked, so the
+    // folder's own name has to travel beside the mount.
+    const args = consoleArguments(makeWorkspace(), {
+      PSILINK_DATA_ROOT: "/home/dana/psilink-work",
+      PSILINK_RENDEZVOUS_DIR: "/home/dana/Egnyte/agency-a-agency-b",
+    });
+
+    expect(args).toContain("JOB_RENDEZVOUS_DIR=/rendezvous");
+    expect(args).toContain("JOB_RENDEZVOUS_NAME=agency-a-agency-b");
+  });
+
+  it("names the working folder when it is the only one", () => {
+    // A single-folder console rendezvouses out of the data mount, which the
+    // container sees as /data -- a name no partner could match.
+    const args = consoleArguments(makeWorkspace(), {
+      PSILINK_DATA_ROOT: "/home/dana/county-exchange",
+    });
+
+    expect(args.join(" ")).not.toContain("JOB_RENDEZVOUS_DIR");
+    expect(args).toContain("JOB_RENDEZVOUS_NAME=county-exchange");
+  });
+
+  it("keeps a folder name carrying a space in one argument", () => {
+    const args = consoleArguments(makeWorkspace(), {
+      PSILINK_DATA_ROOT: "/home/dana/Shared Drive/County Exchange/",
+    });
+
+    expect(args).toContain("JOB_RENDEZVOUS_NAME=County Exchange");
+  });
+
+  it("passes no name for a folder that has none", () => {
+    const args = consoleArguments(makeWorkspace(), { PSILINK_DATA_ROOT: "/" });
+
+    expect(args.join(" ")).not.toContain("JOB_RENDEZVOUS_NAME");
   });
 });
 
@@ -692,5 +746,10 @@ describe("starting the console", () => {
     // left to fall back to JOB_DATA_ROOT rather than mounted a second time.
     expect(serveRun).not.toContain("JOB_INPUT_DIR");
     expect(serveRun).not.toContain("JOB_RENDEZVOUS_DIR");
+    // The folder's own name still travels: the container sees only /data, which
+    // is this launcher's name for it rather than the operator's.
+    expect(serveRun).toContain(
+      `--env JOB_RENDEZVOUS_NAME=${basename(workspace.dataDir)}`,
+    );
   }, 45_000);
 });

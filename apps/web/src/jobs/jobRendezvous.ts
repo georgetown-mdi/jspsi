@@ -45,8 +45,7 @@ const MAX_RENDEZVOUS_FOLDER_NAME_LENGTH = 255;
 
 declare global {
   var jobRendezvousDirConfig:
-    | { resolvedDir?: string; folderName?: string }
-    | undefined;
+    { resolvedDir?: string; folderName?: string } | undefined;
 }
 
 /** Resolve the rendezvous directory to an absolute path from

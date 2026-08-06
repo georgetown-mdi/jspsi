@@ -388,7 +388,9 @@ describe("fetchJobRendezvous", () => {
     // The mount is usable and the invitation can carry the locator; only the
     // shared folder's own name is missing, which the accept kit degrades on.
     const fetchImpl = vi.fn(() =>
-      Promise.resolve(jsonResponse({ configured: true, locator: "rendezvous" })),
+      Promise.resolve(
+        jsonResponse({ configured: true, locator: "rendezvous" }),
+      ),
     );
     expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
       configured: true,

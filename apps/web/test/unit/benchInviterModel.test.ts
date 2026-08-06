@@ -1137,4 +1137,3 @@ describe("per-key dead-key verdict on the authoring surface", () => {
     expect(reviewValidation(dead).canGenerate).toBe(true);
   });
 });
-
