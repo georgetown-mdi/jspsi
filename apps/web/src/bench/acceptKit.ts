@@ -2,8 +2,8 @@
  * The partner's accept kit: one plaintext, printable, ASCII instruction sheet
  * the inviter downloads at mint time and sends alongside the invitation, for a
  * partner who accepts through the command-line tool (the `sftp` and `filedrop`
- * channels). It assumes the partner has Docker Desktop or can get it, and
- * nothing else.
+ * channels). It assumes the partner has Docker -- Desktop or Engine -- or can
+ * get it, and nothing else.
  *
  * Pure: explicit inputs in, one string out -- no React, no I/O, no clock -- so
  * the sheet's whole contract is pinned by unit tests. Its partner-facing
@@ -198,23 +198,53 @@ function opening(endpoint: AcceptKitEndpoint): Array<string> {
     "to the channel it arrived on. This sheet carries no secret of any kind.",
     "",
     ...heading("WHAT YOU NEED"),
-    "Docker Desktop, installed and running (docker.com). Nothing else:",
+    "Docker, installed and running. Docker Desktop (docker.com) is the",
+    "usual way to get it, on Windows, macOS, and Linux alike. Nothing else:",
     "psilink runs as a container, so there is nothing to install; what it",
     "writes stays in the folders you mount below.",
     "",
     "Every command below is a single line, even where it wraps on screen.",
     "On Windows, run the commands from PowerShell, not Command Prompt.",
     "",
-    "On Linux, one thing first. psilink runs inside the container as an",
-    "ordinary user numbered 1000, and a folder you mount keeps the owner it",
-    "has on your machine, so give the folder that holds your CSV file to",
-    "that user once, from inside it:",
+    ...heading("WHICH DOCKER DO YOU HAVE?"),
+    "  * Docker Desktop, on Windows, macOS, or Linux: nothing to do here.",
+    "    Skip to the next section.",
+    "  * Docker Engine on Linux -- the docker your distribution packages:",
+    "    read the rest of this section first.",
     "",
-    "  chown 1000:1000 .",
+    "On Docker Engine, psilink can hit 'permission denied' the moment it",
+    "tries to write in a folder you gave it. That is because psilink runs",
+    "inside the container as a user numbered 1000 rather than as you, while",
+    "a folder you mount keeps the owner it has on your machine.",
     "",
-    'If you cannot change its owner, add --user "$(id -u):$(id -g)" to every',
-    "command below instead. Docker Desktop on Windows and macOS needs",
-    "neither: it hands the folder to whoever the container runs as.",
+    "One flag settles it. Add it to every command on this sheet, straight",
+    "after the word run:",
+    "",
+    '  --user "$(id -u):$(id -g)"',
+    "",
+    "That runs psilink as you: every folder you can use, it can use --",
+    ...(endpoint.channel === "filedrop"
+      ? [
+          "the folder holding your CSV file and your own copy of the shared",
+          "folder -- and everything it writes stays yours afterwards.",
+        ]
+      : [
+          "the folder holding your CSV file and the folder holding your",
+          "password file -- and everything it writes stays yours afterwards.",
+        ]),
+    "",
+    "If you cannot change the commands, the other way is to hand a single",
+    "folder over to user 1000. From inside the folder that holds your CSV",
+    ...(endpoint.channel === "filedrop"
+      ? ["file -- your own folder, never the shared one -- run:"]
+      : ["file, run:"]),
+    "",
+    "  sudo chown 1000:1000 .",
+    "",
+    "If that asks for a password you do not have, or answers",
+    "'Operation not permitted', use the flag above instead. It also covers",
+    "only the folder you run it in, so any other folder a command below",
+    "mounts needs its own answer.",
     "",
     ...heading("WHAT YOU ARE AGREEING TO"),
     "Not on this sheet, deliberately. Accepting prints your partner's linkage",
