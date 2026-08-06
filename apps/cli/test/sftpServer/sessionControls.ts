@@ -16,10 +16,10 @@ export interface DroppableConnection {
 }
 
 /**
- * The slice of a connection's transport socket the withheld-close control
- * reaches: the two methods that would otherwise close it from the server side.
- * Narrowing to this lets the hub be driven by a stub in its own unit test, with
- * no live socket.
+ * The slice of a connection's transport socket the silencing controls reach to
+ * stop it closing: the two methods that would otherwise close it from the server
+ * side. Narrowing to this lets the hub be driven by a stub in its own unit test,
+ * with no live socket.
  */
 export interface ClosableSocket {
   end(...args: unknown[]): unknown;
@@ -27,10 +27,9 @@ export interface ClosableSocket {
 }
 
 /**
- * A connection's transport socket as the accept-time controls reach it: the two
- * closers the withheld-close control replaces, plus the one write the
- * stalled-handshake control replaces (every server-side byte of the SSH
- * identification exchange and key exchange goes through it).
+ * A connection's transport socket as the silencing controls reach it: the two
+ * closers plus the one write every server-side byte goes through, from the SSH
+ * identification exchange to each SFTP reply.
  */
 export interface ControlledSocket extends ClosableSocket {
   write(...args: unknown[]): unknown;
