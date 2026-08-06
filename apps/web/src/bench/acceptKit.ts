@@ -25,6 +25,8 @@
  * path -- see `rendezvousLocatorName`). Credential-free by construction, as the
  * invitation endpoint it is copied from is.
  */
+import { PLACEHOLDER_SSH_USERNAME } from "@psilink/core";
+
 export type AcceptKitEndpoint =
   | { channel: "sftp"; host: string; port?: number; path?: string }
   | { channel: "filedrop"; path: string };
@@ -150,8 +152,8 @@ function opening(endpoint: AcceptKitEndpoint): Array<string> {
     "",
     ...heading("WHAT YOU NEED"),
     "Docker Desktop, installed and running (docker.com). Nothing else:",
-    "psilink runs as a container, so there is nothing to install and nothing",
-    "left behind afterwards.",
+    "psilink runs as a container, so there is nothing to install; what it",
+    "writes stays in the folders you mount below.",
     "",
     "Every command below is a single line, even where it wraps on screen.",
     "On Windows, run the commands from PowerShell, not Command Prompt.",
@@ -221,7 +223,11 @@ function filedropBody(imageTag: string): Array<string> {
     "names the exact psilink image it will start.",
     "",
     ...heading("B -- A FOLDER DOCKER CAN OPEN"),
-    "Two commands, both run from the folder that holds your CSV file.",
+    "Two commands, both run from the folder that holds your CSV file. Use a",
+    "folder of your own, not the shared folder itself: accepting writes",
+    "psilink.yaml and .psilink.key (your key file) beside your CSV, and",
+    "anything inside the shared folder is readable by everyone with access",
+    "to it.",
     "",
     "1. Accept the invitation. This prints the terms, asks you to confirm,",
     "   and on a yes writes psilink.yaml and .psilink.key into the folder:",
@@ -290,7 +296,9 @@ function sftpBody(imageTag: string): Array<string> {
     "   server and directory taken from the invitation; two things are yours",
     "   to supply, because an invitation never carries credentials:",
     "",
-    "     username: REPLACE_WITH_SSH_USERNAME",
+    // The placeholder is core's own constant, so the sheet cannot drift from
+    // what accept actually seeds into psilink.yaml.
+    `     username: ${PLACEHOLDER_SSH_USERNAME}`,
     "         Replace this placeholder with the account the SFTP server",
     "         accepts for you.",
     "",
@@ -344,8 +352,9 @@ function closing(imageTag: string): Array<string> {
     "    nothing is lost by starting again.",
     "  * Every command prints what it did and which files it wrote.",
     "  * Your input file itself is never sent. psilink reads it in the folder",
-    "    you mounted, sends only the protocol messages and the columns the",
-    "    terms you confirmed name, and writes the result beside your input.",
+    "    you mounted, sends only the protocol messages and the values the",
+    "    terms you accepted call for, and writes the result beside your",
+    "    input.",
     "",
     ...heading("REFERENCE"),
     "  Command-line reference:",

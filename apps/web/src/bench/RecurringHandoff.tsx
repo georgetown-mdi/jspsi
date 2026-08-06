@@ -176,11 +176,12 @@ function ConfigSteps({
           </p>
           <p className={styles.small}>
             This run writes its shared secret to .psilink.key in the exchange
-            folder. After the run finishes, copy that file into the same folder
-            as psilink.yaml, readable only by you (chmod 600 on Linux/macOS).
-            The secret rotates when a run completes, so a copy taken mid-run
-            goes stale -- always copy the file as it stands after the latest
-            run.
+            folder. Copy that file into the same folder as psilink.yaml,
+            readable only by you (chmod 600 on Linux/macOS). The secret rotates
+            at each run's handshake, before any data moves -- even a run that
+            later failed has usually rotated it -- so take your copy from the
+            file as it stands after your last run here, never from an earlier
+            one.
           </p>
         </li>
       )}
