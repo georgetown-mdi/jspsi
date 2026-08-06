@@ -268,15 +268,27 @@ test("keyTypeFromBlob replaces a type carrying a byte outside the charset", () =
   );
 });
 
-test("keyTypeFromBlob maps two different rejected types to different placeholders", () => {
+test("keyTypeFromBlob separates rejected types that differ within the placeholder's 24 source bytes", () => {
   // The cross-party reconciliation compares the two parties' key types verbatim
-  // and narrows its wording when they are EQUAL, so collapsing every rejected
-  // type to one value would make two different hostile types compare equal.
+  // and narrows its wording when they are EQUAL, so two rejected types that
+  // differ inside the bytes the placeholder encodes stay different values.
   const first = keyTypeFromBlob(blobNamingType("\x00first"));
   const second = keyTypeFromBlob(blobNamingType("\x00second"));
   expect(first).not.toBe(second);
   expect(first).not.toBe("(unknown)");
   expect(second).not.toBe("(unknown)");
+});
+
+test("keyTypeFromBlob collapses rejected types that differ only past those 24 bytes", () => {
+  // The far side of the same boundary: the placeholder encodes 24 source bytes,
+  // so types agreeing over all of them are one value however far they diverge
+  // after it -- the bound under which the separation above holds.
+  const sharedPrefix = "\x00" + "a".repeat(23);
+  const collapsed = keyTypeFromBlob(blobNamingType(sharedPrefix + "first"));
+  expect(collapsed).toBe(`(unknown:00${"61".repeat(23)})`);
+  expect(keyTypeFromBlob(blobNamingType(sharedPrefix + "second"))).toBe(
+    collapsed,
+  );
 });
 
 test("keyTypeFromBlob's placeholder fits the bound a partner parses under", () => {

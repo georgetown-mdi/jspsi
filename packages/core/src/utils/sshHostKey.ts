@@ -59,9 +59,14 @@ function acceptedKeyType(typeBytes: Uint8Array): string | undefined {
  * The stand-in for a type the charset or length bound rejects: `(unknown:` plus
  * the lowercase hex of the type's first {@link PLACEHOLDER_SOURCE_BYTES} bytes,
  * plus `)`. Encoding the offending bytes rather than discarding them keeps two
- * different rejected types distinguishable, which is what the cross-party
- * reconciliation compares; the parentheses lie outside the accepted charset, so
- * a server cannot name its key type a string that passes for one of these.
+ * rejected types that differ within those bytes distinguishable, which is what
+ * the cross-party reconciliation compares; two that share a
+ * {@link PLACEHOLDER_SOURCE_BYTES}-byte prefix do collapse to one placeholder,
+ * a limit stated in docs/spec/CHANNEL_SECURITY.md (SFTP host-key verification)
+ * rather than a defect, since an adversary who wants two observed types to
+ * compare equal can present `ssh-ed25519`. The parentheses lie outside the
+ * accepted charset, so a server cannot name its key type a string that passes
+ * for one of these.
  */
 function placeholderKeyType(typeBytes: Uint8Array): string {
   let hex = "";
