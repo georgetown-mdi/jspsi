@@ -756,12 +756,27 @@ try {
         Write-Note 'produced one never ran.'
         exit $probeExit
     }
-    if ($probeExit -ne 0) {
+    if ($probeExit -eq 78) {
         Write-Head 'Not ready yet'
         Write-Bad 'The file drop is not usable from Docker. Follow the ACTION above.'
         Write-Info ''
         Write-Info 'The troubleshooting page explains every one of these in more detail:'
         Write-Info 'https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md'
+        exit $probeExit
+    }
+    # Anything else is not a verdict at all: the codes above are the whole set
+    # the checks produce. An image too old to carry them answers here, which is
+    # the one cause worth naming -- the image is fetched only when it is
+    # missing, so an old copy is never refreshed by running this again.
+    if ($probeExit -ne 0) {
+        Write-Head 'Could not run the checks'
+        Write-Bad "The checks answered with an exit code this script does not know ($probeExit)."
+        Write-Note 'Nothing has been established about your file drop. The likeliest'
+        Write-Note 'cause is a copy of the psilink image that predates these checks,'
+        Write-Note 'because the image is fetched only when it is missing, never to'
+        Write-Note 'refresh one already on this PC.'
+        Write-Info ''
+        Write-Info 'Run "docker pull vdorie/psi-link:latest" and try again.'
         exit $probeExit
     }
     Write-Good 'The share is reachable, writable, and supports rename.'
