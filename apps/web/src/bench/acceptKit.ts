@@ -13,9 +13,11 @@
  * The sheet is a DISCLOSURE SURFACE: whatever it interpolates is written to
  * disk and handed to the partner. Exactly two dynamic values are representable
  * here, each justified where it is interpolated -- the rendezvous locator the
- * invitation already carries, and the public image tag. Everything else is
- * fixed text, so no secret, no invitation token, and no path from the inviter's
- * machine or container can reach the sheet by construction.
+ * invitation already carries, which is free text held to the sheet's ASCII
+ * contract by {@link printable}, and this build's public release version, which
+ * is interpolated only in the release shape {@link RELEASE_VERSION} admits.
+ * Everything else is fixed text, so no secret, no invitation token, and no path
+ * from the inviter's machine or container can reach the sheet by construction.
  */
 
 /**
@@ -35,9 +37,11 @@ export type AcceptKitEndpoint =
 export interface AcceptKitInput {
   /** The rendezvous locator minted into the invitation. */
   endpoint: AcceptKitEndpoint;
-  /** The published image tag the sheet's `docker run` lines name; see
-   * {@link DEFAULT_PSILINK_IMAGE_TAG}. */
-  imageTag: string;
+  /** The release version this build carries, which decides both the image tag
+   * the sheet's commands name and the release page it links; see
+   * {@link releaseVersion}. Absent, or in any shape but a release version, the
+   * sheet names {@link DEFAULT_PSILINK_IMAGE_TAG} and the releases index. */
+  version?: string;
 }
 
 /** The published image the sheet's commands run. Named with its registry in
@@ -46,14 +50,22 @@ export interface AcceptKitInput {
 const PSILINK_IMAGE_REPOSITORY = "docker.io/vdorie/psi-link";
 
 /**
- * The image tag the sheet names when nothing supplies a version-matched one.
- * The web build exposes no version of its own -- its only build-time signal is
- * `VITE_DEPLOYMENT_PROFILE` -- so the sheet falls back to the floating tag the
- * release publishes alongside `X.Y.Z` (`docs/RELEASES.md`), the same floating
- * tag the setup script's own `docker run` commands name. Wire a real version
- * through {@link AcceptKitInput.imageTag} if the build ever exposes one.
+ * The image tag the sheet names when the build carries no release version -- a
+ * development or hosted build, neither of which is a published image. It is the
+ * floating tag the release publishes alongside `X.Y.Z` (`docs/RELEASES.md`),
+ * the same floating tag the setup script's own `docker run` commands name.
  */
-export const DEFAULT_PSILINK_IMAGE_TAG = "latest";
+const DEFAULT_PSILINK_IMAGE_TAG = "latest";
+
+/**
+ * The shape a release version has: `X.Y.Z` with semver's optional prerelease
+ * and build suffixes (`docs/RELEASES.md`). The build's value is interpolated
+ * only when it matches, so an absent, partial, or malformed one names the
+ * floating tag rather than reaching the sheet -- and `0.0.0`, the marker the
+ * manifests that carry no release version hold, is excluded with it.
+ */
+const RELEASE_VERSION =
+  /^(?!0\.0\.0(?:[-+]|$))\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /** The release page the launcher files are downloaded from; the same URL the
  * launchers themselves carry. */
@@ -111,22 +123,42 @@ function rendezvousLines(endpoint: AcceptKitEndpoint): Array<string> {
   ];
 }
 
+/** This build's release version, or undefined when it carries none. The one
+ * gate on the value: everything below interpolates the result, so nothing the
+ * build supplies reaches the sheet without matching {@link RELEASE_VERSION}. */
+function releaseVersion(version: string | undefined): string | undefined {
+  return version !== undefined && RELEASE_VERSION.test(version)
+    ? version
+    : undefined;
+}
+
 /** The image reference the sheet's `docker run` lines name. The tag is public
- * release metadata, not a disclosure; it passes the same printable filter as
- * the locator, so the sheet's ASCII contract holds by construction for every
- * value the exported input type admits. */
-function imageReference(imageTag: string): string {
-  return `${PSILINK_IMAGE_REPOSITORY}:${printable(imageTag)}`;
+ * release metadata, not a disclosure: a released image is named by its own
+ * version, so the partner runs the build their invitation was minted by, and
+ * any other build names the floating tag. */
+function imageReference(version: string | undefined): string {
+  return `${PSILINK_IMAGE_REPOSITORY}:${version ?? DEFAULT_PSILINK_IMAGE_TAG}`;
+}
+
+/** The release page the launcher files are downloaded from: this build's own
+ * release when it carries a version, so the partner takes the launchers from
+ * the release that mints their invitation, else the index whose newest entry is
+ * what the floating tag resolves to. Release tags are `vX.Y.Z`
+ * (`docs/RELEASES.md`). */
+function releasePageUrl(version: string | undefined): string {
+  return version === undefined
+    ? PSILINK_RELEASES_URL
+    : `${PSILINK_RELEASES_URL}/tag/v${version}`;
 }
 
 /** The accept command, unindented; each caller indents it to its own step.
  * The CSV positional is part of the primary form: it is what makes the
  * consent display list the columns the partner would send, rather than
  * deferring that list to the exchange run. */
-function acceptCommand(imageTag: string): string {
+function acceptCommand(version: string | undefined): string {
   return (
     `docker run --rm -it -v "$PWD":${WORK_MOUNT} ` +
-    `${imageReference(imageTag)} accept ${INVITATION_PLACEHOLDER} your-file.csv`
+    `${imageReference(version)} accept ${INVITATION_PLACEHOLDER} your-file.csv`
   );
 }
 
@@ -186,7 +218,7 @@ function opening(endpoint: AcceptKitEndpoint): Array<string> {
 
 /** The filedrop routing decision: a network drive or DFS path needs the
  * launcher, any folder Docker can open takes the direct commands. */
-function filedropBody(imageTag: string): Array<string> {
+function filedropBody(version: string | undefined): Array<string> {
   return [
     ...heading("STEP 1 -- WHICH KIND OF FOLDER IS YOURS?"),
     "The answer decides everything below. Pick one.",
@@ -208,7 +240,7 @@ function filedropBody(imageTag: string): Array<string> {
     "",
     "Download both files from the psilink release page:",
     "",
-    `  ${PSILINK_RELEASES_URL}`,
+    `  ${releasePageUrl(version)}`,
     "",
     "  Start-Psilink.ps1",
     "  Setup-PsilinkFileDrop.ps1  (must sit beside it)",
@@ -246,7 +278,7 @@ function filedropBody(imageTag: string): Array<string> {
     "1. Accept the invitation. This prints the terms, asks you to confirm,",
     "   and on a yes writes psilink.yaml and .psilink.key into the folder:",
     "",
-    `     ${acceptCommand(imageTag)}`,
+    `     ${acceptCommand(version)}`,
     "",
     `   Replace ${INVITATION_PLACEHOLDER} with the invitation code your`,
     "   partner sent -- the long block of letters and numbers, not the web",
@@ -275,7 +307,7 @@ function filedropBody(imageTag: string): Array<string> {
     "",
     `     docker run --rm -v "$PWD":${WORK_MOUNT} ` +
       `-v "/path/to/your/shared/folder":${SYNC_MOUNT} ` +
-      `${imageReference(imageTag)} exchange your-file.csv results.csv`,
+      `${imageReference(version)} exchange your-file.csv results.csv`,
     "",
     "   Replace your-file.csv with your CSV file's name. The matched result",
     "   is written to results.csv beside your input. You and your partner",
@@ -287,7 +319,7 @@ function filedropBody(imageTag: string): Array<string> {
 /** The SFTP body: accept, fill in the credentials acceptance leaves open, then
  * run -- in that order, because the exchange command only works after the
  * fill-in and a reader follows the sheet top to bottom. */
-function sftpBody(imageTag: string): Array<string> {
+function sftpBody(version: string | undefined): Array<string> {
   return [
     ...heading("THE THREE STEPS"),
     "The commands run from the folder that holds your CSV file.",
@@ -295,7 +327,7 @@ function sftpBody(imageTag: string): Array<string> {
     "1. Accept the invitation. This prints the terms, asks you to confirm,",
     "   and on a yes writes psilink.yaml and .psilink.key into the folder:",
     "",
-    `     ${acceptCommand(imageTag)}`,
+    `     ${acceptCommand(version)}`,
     "",
     `   Replace ${INVITATION_PLACEHOLDER} with the invitation code your`,
     "   partner sent -- the long block of letters and numbers, not the web",
@@ -344,7 +376,7 @@ function sftpBody(imageTag: string): Array<string> {
     "",
     `     docker run --rm -it -v "$PWD":${WORK_MOUNT} ` +
       `-v "/your/secrets":/run/secrets:ro ` +
-      `${imageReference(imageTag)} exchange your-file.csv results.csv`,
+      `${imageReference(version)} exchange your-file.csv results.csv`,
     "",
     '   Replace "/your/secrets" with the folder that holds your credential',
     "   file, and your-file.csv with your CSV file's name. The matched",
@@ -361,7 +393,7 @@ function sftpBody(imageTag: string): Array<string> {
 
 /** The shared closing: recovery, the privacy reassurance, and the reference
  * links. */
-function closing(imageTag: string): Array<string> {
+function closing(version: string | undefined): Array<string> {
   return [
     ...heading("KEEPING THE KEY FILE"),
     "Accepting writes .psilink.key holding the shared secret: keep it",
@@ -379,7 +411,7 @@ function closing(imageTag: string): Array<string> {
     "  Command-line reference:",
     `    ${PSILINK_CLI_DOC_URL}`,
     "  psilink image used above:",
-    `    ${imageReference(imageTag)}`,
+    `    ${imageReference(version)}`,
     "",
   ];
 }
@@ -388,13 +420,17 @@ function closing(imageTag: string): Array<string> {
  * Build the accept kit for one minted invitation. The output is printable
  * ASCII with a trailing newline, addressed to the partner.
  */
-export function buildAcceptKit({ endpoint, imageTag }: AcceptKitInput): string {
+export function buildAcceptKit({
+  endpoint,
+  version: buildVersion,
+}: AcceptKitInput): string {
+  const version = releaseVersion(buildVersion);
   const lines = [
     ...opening(endpoint),
     ...(endpoint.channel === "filedrop"
-      ? filedropBody(imageTag)
-      : sftpBody(imageTag)),
-    ...closing(imageTag),
+      ? filedropBody(version)
+      : sftpBody(version)),
+    ...closing(version),
   ];
   return `${lines.join("\n")}\n`;
 }

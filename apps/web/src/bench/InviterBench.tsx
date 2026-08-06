@@ -24,7 +24,7 @@ import { fetchSftpConnection } from "@psi/serverJobExchangeDriver";
 import { invitationLocation } from "@psi/invitationLocation";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 
-import { isConsoleBuild } from "@utils/clientConfig";
+import { isConsoleBuild, psilinkVersion } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import {
@@ -36,11 +36,6 @@ import { triggerBlobDownload } from "@components/blobDownload";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
 import {
-  DEFAULT_PSILINK_IMAGE_TAG,
-  acceptKitFileName,
-  buildAcceptKit,
-} from "./acceptKit";
-import {
   EMPTY_SAVE_FIELDS,
   endpointRequestFor,
   exchangeFileInputFor,
@@ -50,6 +45,7 @@ import {
   saveRailNote,
   saveTrustFooter,
 } from "./saveExchangeModel";
+import { acceptKitFileName, buildAcceptKit } from "./acceptKit";
 import {
   availableTransports,
   cleaningCoverageProblems,
@@ -964,17 +960,17 @@ export function InviterBench() {
   }
 
   // Write the partner's accept kit to disk through the same blob download the
-  // exchange-file save uses. The sheet is composed from the minted locator and a
-  // fixed image tag alone: it carries no secret, no invitation token (the
-  // partner pastes their own copy over the sheet's placeholder), and nothing
-  // else from this machine.
+  // exchange-file save uses. The sheet is composed from the minted locator and
+  // this build's own release version alone: it carries no secret, no invitation
+  // token (the partner pastes their own copy over the sheet's placeholder), and
+  // nothing else from this machine.
   function downloadAcceptKit() {
     if (acceptKitEndpoint === undefined) return;
     triggerBlobDownload(
       acceptKitFileName(new Date()),
       buildAcceptKit({
         endpoint: acceptKitEndpoint,
-        imageTag: DEFAULT_PSILINK_IMAGE_TAG,
+        version: psilinkVersion(),
       }),
       "text/plain",
     );

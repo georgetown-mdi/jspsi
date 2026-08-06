@@ -3,7 +3,6 @@ import { Readable } from "node:stream";
 import { describe, expect, test } from "vitest";
 
 import {
-  DEFAULT_PSILINK_IMAGE_TAG,
   INVITATION_PLACEHOLDER,
   acceptKitFileName,
   buildAcceptKit,
@@ -22,8 +21,8 @@ const SFTP: AcceptKitEndpoint = {
   path: "/drops/psilink",
 };
 
-function sheet(endpoint: AcceptKitEndpoint, imageTag = "1.4.2"): string {
-  return buildAcceptKit({ endpoint, imageTag });
+function sheet(endpoint: AcceptKitEndpoint, version = "1.4.2"): string {
+  return buildAcceptKit({ endpoint, version });
 }
 
 /** The launcher branch's tell: the release page the three files come from. */
@@ -138,23 +137,63 @@ describe("accept kit, sftp configuration section", () => {
   });
 });
 
-describe("accept kit, version tag", () => {
-  test("interpolates the given tag into every image reference", () => {
+describe("accept kit, release version", () => {
+  /** Every image the sheet's commands name, in order. */
+  function imageReferences(text: string): Array<string> {
+    return text.match(/docker\.io\/vdorie\/psi-link\S*/g) ?? [];
+  }
+
+  test("a build carrying a version names it in every image reference", () => {
     for (const endpoint of [FILEDROP, SFTP]) {
       const text = sheet(endpoint, "0.9.1");
-      expect(text).toContain("docker.io/vdorie/psi-link:0.9.1");
-      expect(text).not.toContain(
-        `docker.io/vdorie/psi-link:${DEFAULT_PSILINK_IMAGE_TAG}`,
-      );
-      // Every reference carries the tag; none is left bare.
-      const references = text.match(/docker\.io\/vdorie\/psi-link\S*/g) ?? [];
+      // Every reference carries the version; none is left bare or floating.
+      const references = imageReferences(text);
       expect(references.length).toBeGreaterThan(0);
-      for (const reference of references) expect(reference).toContain(":0.9.1");
+      for (const reference of references)
+        expect(reference).toBe("docker.io/vdorie/psi-link:0.9.1");
     }
   });
 
-  test("the documented default is the floating release tag", () => {
-    expect(DEFAULT_PSILINK_IMAGE_TAG).toBe("latest");
+  test("a build carrying no version names the floating tag", () => {
+    for (const endpoint of [FILEDROP, SFTP]) {
+      const references = imageReferences(buildAcceptKit({ endpoint }));
+      expect(references.length).toBeGreaterThan(0);
+      for (const reference of references)
+        expect(reference).toBe("docker.io/vdorie/psi-link:latest");
+    }
+  });
+
+  test("a version in any shape but a release version falls back to the floating tag", () => {
+    // An empty, partial, placeholder, or malformed value names the floating
+    // tag rather than reaching the sheet: no image reference is left empty,
+    // truncated, or naming a tag no release published.
+    for (const version of [
+      "",
+      "undefined",
+      "0.0.0",
+      "0.0.0-rc.1",
+      "1.4",
+      "v1.4.2",
+      "X.Y.Z",
+      "1.4.2 ",
+      "1.4.2/../evil",
+    ]) {
+      const references = imageReferences(sheet(FILEDROP, version));
+      expect(references.length).toBeGreaterThan(0);
+      for (const reference of references)
+        expect(reference).toBe("docker.io/vdorie/psi-link:latest");
+    }
+  });
+
+  test("the release link follows the same value the tag does", () => {
+    // The launcher branch sends the partner to a release page: this build's own
+    // release when it carries a version, so the launchers they download match
+    // the image the sheet names, and the index otherwise.
+    expect(sheet(FILEDROP, "0.9.1")).toContain(`${RELEASES_URL}/tag/v0.9.1\n`);
+    const unversioned = buildAcceptKit({ endpoint: FILEDROP });
+    expect(unversioned).toContain(`${RELEASES_URL}\n`);
+    expect(unversioned).not.toContain(`${RELEASES_URL}/tag/`);
+    expect(sheet(FILEDROP, "X.Y.Z")).not.toContain(`${RELEASES_URL}/tag/`);
   });
 });
 
@@ -170,13 +209,16 @@ describe("accept kit, printable-ASCII enforcement", () => {
     });
     expect(text).toContain("SFTP server:    h?llo?example.gov");
     expect(text).toContain("Directory:      /drops?/psi?link");
-    // The tag is the other representable input; it passes the same filter, so
-    // the contract holds by construction rather than resting on the call site.
-    const hostileTag = sheet(
+    // The build's version is the other representable input; it is interpolated
+    // only in the release shape, so a value carrying non-ASCII bytes reaches
+    // neither the image reference nor the release link, and the sheet it
+    // produces is printable ASCII like any other.
+    const hostileVersion = sheet(
       { channel: "filedrop", path: "psilink" },
-      "1.0-é\nX",
+      "1.0.0-é\nX",
     );
-    expect(hostileTag).toContain("docker.io/vdorie/psi-link:1.0-??X");
+    expect(hostileVersion).toContain("docker.io/vdorie/psi-link:latest");
+    expect(hostileVersion).toMatch(/^[\x20-\x7e\n]*$/);
     for (const ch of text) {
       const code = ch.charCodeAt(0);
       expect(code === 10 || (code >= 32 && code <= 126)).toBe(true);
@@ -203,10 +245,7 @@ describe("accept kit invariants", () => {
       location,
       connectionEndpoint: endpoint,
     });
-    const text = buildAcceptKit({
-      endpoint,
-      imageTag: DEFAULT_PSILINK_IMAGE_TAG,
-    });
+    const text = buildAcceptKit({ endpoint, version: "1.4.2" });
 
     expect(text).toContain(INVITATION_PLACEHOLDER);
     expect(text).not.toContain(minted.sharedSecret);
