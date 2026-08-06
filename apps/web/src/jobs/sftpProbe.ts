@@ -42,6 +42,14 @@ export const PROBE_SIGKILL_GRACE_MS = 5_000;
  */
 const PROBE_STDOUT_CAP = 4096;
 
+// The two `key_type` bounds below mirror core's `MAX_KEY_TYPE_BYTES` (64) and
+// `isAcceptedKeyTypeByte` (`[A-Za-z0-9._@-]`), whose record is
+// docs/spec/CHANNEL_SECURITY.md (SFTP host-key verification: the presented key
+// type, and the cross-party reconciliation that reads it). Duplicating those
+// values rather than importing them is deliberate and must stay that way: this
+// is a re-validation of a distrusted child process's stdout at a trust
+// boundary, so what it checks has to be what this side is willing to accept,
+// independent of the producer that emitted the value.
 /** The maximum accepted `key_type` length. Server-controlled bytes, so it is
  * length- and charset-checked at this trust boundary. */
 const MAX_KEY_TYPE_LENGTH = 64;
