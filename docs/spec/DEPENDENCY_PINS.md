@@ -358,12 +358,17 @@ GPL-3.0 finding recorded above for Alpine's `samba-client` reappears here on
 Alpine's busybox and musl do not have: `bash`, `coreutils-single`, `diffutils`,
 `findutils`, `gawk`, `grep`, `gzip`, `sed`, `tar`, `readline`, `gdbm-libs`,
 `gnupg2-minimal`, `gnutls`, `libtasn1`, `libassuan`, plus the LGPL-3.0 samba
-record stores (`libtalloc`, `libtdb`, `libtevent`, `libldb`). `libgcc`,
-`libstdc++`, `libatomic` and `libgomp` carry
+record stores (`libtalloc`, `libtdb`, `libtevent`, `libldb`). Four more carry an
+unconditional v3 term from elsewhere in the closure: `binutils`,
+`elfutils-debuginfod-client`, `libidn2` and `mpfr`. `libgcc`, `libstdc++`,
+`libatomic` and `libgomp` carry
 "GPL-3.0-or-later WITH GCC-exception-3.1", the runtime exception, which is the
-normal case for a linked C++ runtime. Whether that breadth changes this
-project's distribution posture is a licensing call rather than a measurement,
-and it is not settled here.
+normal case for a linked C++ runtime. The remaining six of the 39 --
+`elfutils-libelf`, `elfutils-libs`, `elfutils-default-yama-scope`, `gmp`,
+`libunistring` and `nettle` -- offer a GPLv2-or-later arm beside the LGPLv3 one,
+so they carry a v3 term only under the arm taken. Whether that breadth changes
+this project's distribution posture is a licensing call rather than a
+measurement, and it is not settled here.
 
 ## The install-script policy (`allowScripts`)
 
