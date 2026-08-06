@@ -44,6 +44,7 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
   isConsoleBuild: () => true,
+  psilinkVersion: () => undefined,
 }));
 
 vi.mock("@psi/rendezvous", () => ({

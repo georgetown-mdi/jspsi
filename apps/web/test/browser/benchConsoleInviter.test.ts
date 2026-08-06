@@ -46,6 +46,7 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
   isConsoleBuild: () => true,
+  psilinkVersion: () => undefined,
 }));
 
 // Stub the rendezvous module: importing it runs a top-level config load that reads
