@@ -846,8 +846,10 @@ export async function runOnlineBootstrap(params: {
           // same rationale as the offline reuse branch's writes, at this hook's
           // same post-handshake timing as the fresh write below. Each is gated on
           // its own caller's input and caught independently, so one failure
-          // neither skips the other nor is fatal: like the observed-payload write
-          // below, the exchange has completed and the kept config stands.
+          // neither skips the other nor is fatal: this hook runs after the
+          // handshake but before the data exchange, and a failed record write
+          // must not abort a viable run -- the kept config retains its prior
+          // state, and runProtocol treats a hook throw as non-fatal.
           //
           // The received lock-in follows the ACCEPTANCE's decision, so its gate
           // is the presence of a lock-in at all: consented columns of undefined
@@ -863,12 +865,12 @@ export async function runOnlineBootstrap(params: {
               );
             } catch (err) {
               getLogger(params.loggerName).warn(
-                `the exchange succeeded and the existing configuration at ` +
+                `the exchange continues and the existing configuration at ` +
                   `${params.configPath} stands, but recording the columns you ` +
                   `consented to receive in it failed; the next 'psilink ` +
-                  `exchange' holds the received payload to the previously ` +
-                  `recorded set and aborts if your partner now discloses a ` +
-                  `different one: ` +
+                  `exchange' holds the received payload to the set that ` +
+                  `configuration already records, and checks it against no ` +
+                  `consented set if it records none: ` +
                   sanitizeErrorForDisplay(err),
               );
             }
@@ -887,7 +889,7 @@ export async function runOnlineBootstrap(params: {
               );
             } catch (err) {
               getLogger(params.loggerName).warn(
-                `the exchange succeeded and the existing configuration at ` +
+                `the exchange continues and the existing configuration at ` +
                   `${params.configPath} stands, but recording your ` +
                   `outbound-column confirmation in it failed; the next ` +
                   `'psilink exchange' compares against the previously ` +
@@ -1039,9 +1041,9 @@ export async function runOnlineBootstrap(params: {
 /**
  * Log the post-exchange outcome of an online invite/accept run. On a clean run
  * both files were written. When a pre-existing config was reused
- * (`reuseExistingConfig`), only the rotated key was saved and the config was
- * left untouched, so the message reflects that rather than claiming a fresh
- * write. When the config write failed at acceptance (`configWriteError` set),
+ * (`reuseExistingConfig`), the rotated key was saved and the config was kept,
+ * refreshed only in its machine-managed consent records, so the message
+ * reflects reuse rather than claiming a fresh write. When the config write failed at acceptance (`configWriteError` set),
  * the rotated key was still saved but the config was not, so the message must
  * not claim otherwise -- the underlying error was already logged at error level
  * by `runProtocol`, so this only corrects the summary and points back to it. The

@@ -549,9 +549,10 @@ function reconcileAcceptConfig(params: {
   log.info(
     conn.warnings.length === 0
       ? `the existing configuration at ${configPath} matches ${against}; ` +
-          "it will be reused unchanged."
-      : `the existing configuration at ${configPath} will be reused unchanged; ` +
-          "the connection differences above apply to this exchange only.",
+          "it will be reused with its connection and linkage settings unchanged."
+      : `the existing configuration at ${configPath} will be reused with its ` +
+          "connection and linkage settings unchanged; the connection " +
+          "differences above apply to this exchange only.",
   );
   // The kept config's own output terms ride back with the verdict: the later
   // run is governed by them, and this diff deliberately compares no output
