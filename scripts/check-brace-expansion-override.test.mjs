@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   admits,
+  aliasedIdentities,
   assess,
   declaredRanges,
   installedVersions,
@@ -55,6 +56,16 @@ function lockfile(
 }
 
 const linesOf = (manifest, lock) => assess(manifest, lock).lines.join("\n");
+
+/**
+ * A lockfile that passes the check -- one requirer capped below the installed
+ * copy -- with the given entries laid over it.
+ */
+function lockfileWith(entries) {
+  const lock = lockfile(["^2.0.2"]);
+  Object.assign(lock.packages, entries);
+  return lock;
+}
 
 describe("range semantics", () => {
   it("reads the caret line the override sits on", () => {
@@ -167,6 +178,126 @@ describe("lockfile reading", () => {
   });
 });
 
+describe("npm aliases", () => {
+  it("refuses an installed copy the alias hides behind another directory", () => {
+    const lock = lockfileWith({
+      "node_modules/@scope/tool/node_modules/brace-expansion-v2": {
+        name: "brace-expansion",
+        version: "2.0.1",
+      },
+    });
+    expect(aliasedIdentities(lock)).toEqual([
+      {
+        path: "node_modules/@scope/tool/node_modules/brace-expansion-v2",
+        name: "brace-expansion",
+        directory: "brace-expansion-v2",
+      },
+    ]);
+    const verdict = assess(OVERRIDE, lock);
+    expect(verdict.ok).toBe(false);
+    const message = verdict.lines.join("\n");
+    expect(message).toContain("npm alias");
+    expect(message).toContain(
+      'node_modules/@scope/tool/node_modules/brace-expansion-v2 installs "brace-expansion" under the name "brace-expansion-v2"',
+    );
+    expect(message).toContain("scripts/check-brace-expansion-override.mjs");
+  });
+
+  it("refuses a declared range the alias hides behind another key", () => {
+    const lock = lockfileWith({
+      "node_modules/aliasing-requirer": {
+        version: "1.0.0",
+        devDependencies: { "brace-expansion-v2": "npm:brace-expansion@^2.0.0" },
+      },
+    });
+    const verdict = assess(OVERRIDE, lock);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.lines.join("\n")).toContain(
+      'node_modules/aliasing-requirer (devDependencies) declares "brace-expansion-v2" as "npm:brace-expansion@^2.0.0"',
+    );
+  });
+
+  it("refuses an alias pointing the other way, off the package's own name", () => {
+    const installedElsewhere = assess(
+      OVERRIDE,
+      lockfileWith({
+        "node_modules/brace-expansion": {
+          name: "brace-expansion-fork",
+          version: TARGET,
+        },
+      }),
+    );
+    expect(installedElsewhere.ok).toBe(false);
+    expect(installedElsewhere.lines.join("\n")).toContain(
+      'node_modules/brace-expansion installs "brace-expansion-fork"',
+    );
+
+    const declaredElsewhere = assess(
+      OVERRIDE,
+      lockfileWith({
+        "node_modules/aliasing-requirer": {
+          version: "1.0.0",
+          dependencies: {
+            "brace-expansion": "npm:brace-expansion-fork@^2.0.0",
+          },
+        },
+      }),
+    );
+    expect(declaredElsewhere.ok).toBe(false);
+    expect(declaredElsewhere.lines.join("\n")).toContain(
+      'declares "brace-expansion" as "npm:brace-expansion-fork@^2.0.0"',
+    );
+  });
+
+  it("leaves an alias between two other packages alone", () => {
+    const lock = lockfileWith({
+      "node_modules/@tanstack/start-server-core": {
+        version: "1.0.0",
+        dependencies: { "h3-v2": "npm:h3@2.0.1-rc.20" },
+      },
+      "node_modules/@tanstack/start-server-core/node_modules/h3-v2": {
+        name: "h3",
+        version: "2.0.1-rc.20",
+      },
+    });
+    expect(aliasedIdentities(lock)).toEqual([]);
+    expect(assess(OVERRIDE, lock).ok).toBe(true);
+  });
+
+  it("reads the aliased name off the spec rather than matching its prefix", () => {
+    expect(
+      aliasedIdentities(
+        lockfileWith({
+          "node_modules/aliasing-requirer": {
+            version: "1.0.0",
+            dependencies: {
+              "be-fork": "npm:brace-expansion-fork@^2.0.0",
+              scoped: "npm:@scope/brace-expansion@^2.0.0",
+            },
+          },
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      aliasedIdentities(
+        lockfileWith({
+          "node_modules/aliasing-requirer": {
+            version: "1.0.0",
+            dependencies: { "be-any": "npm:brace-expansion" },
+          },
+        }),
+      ),
+    ).toEqual([
+      {
+        path: "node_modules/aliasing-requirer",
+        field: "dependencies",
+        dependency: "be-any",
+        range: "npm:brace-expansion",
+      },
+    ]);
+  });
+});
+
 describe("the verdict", () => {
   it("holds while a requirer caps below the installed version", () => {
     const verdict = assess(OVERRIDE, lockfile(["^2.0.2", "^5.0.5"]));
@@ -272,6 +403,10 @@ describe("the real repository", () => {
       readRootJson("package-lock.json"),
     );
     expect(verdict.ok, verdict.lines.join("\n")).toBe(true);
+  });
+
+  it("ties no name to brace-expansion through an alias", () => {
+    expect(aliasedIdentities(readRootJson("package-lock.json"))).toEqual([]);
   });
 
   it("exits 0 from the CLI entry point", () => {

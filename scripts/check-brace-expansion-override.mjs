@@ -39,6 +39,14 @@
 //     is held to node-semver's own answers rather than to this reading of the
 //     grammar: re-drive it against `semver.satisfies` over every range the
 //     committed lockfile declares before widening or altering a comparator.
+//   - It identifies an installed copy by the directory it sits in and an edge by
+//     the name it is declared under. npm's alias form
+//     (`some-key: "npm:brace-expansion@range"`) parts both from the package's own
+//     identity, which the lockfile then carries in the entry's `name` field
+//     alone, so an alias tying `brace-expansion` to another name -- in either
+//     direction -- is REFUSED by name rather than read. An alias between two
+//     other packages, the shape the committed tree already carries, is left
+//     alone.
 //   - It reads the override's presence, not its spec: any `overrides` entry on
 //     the name stands, whatever form it takes.
 
@@ -49,6 +57,7 @@ import { fileURLToPath } from "node:url";
 export const PACKAGE = "brace-expansion";
 
 const NM = "node_modules/";
+const ALIAS_PREFIX = "npm:";
 const DEPENDENCY_FIELDS = [
   "dependencies",
   "devDependencies",
@@ -181,11 +190,65 @@ export function admits(range, version) {
   return sets.some((set) => set.every((comparator) => comparator(target)));
 }
 
-/** The name a lockfile entry is installed under, which is the name an edge names. */
+/** The directory name a lockfile entry installs under. */
 const installedAs = (path) =>
   path.includes(NM) ? path.slice(path.lastIndexOf(NM) + NM.length) : path;
 
-/** Every version the committed lockfile installs under `PACKAGE`, deduplicated. */
+/**
+ * The package an `npm:` alias spec names, which is everything before the `@`
+ * that opens its range. A scoped name's own leading `@` is not that separator,
+ * and a spec naming no range is the package name entire.
+ */
+const aliasTarget = (spec) => {
+  const rest = spec.slice(ALIAS_PREFIX.length);
+  const separator = rest.lastIndexOf("@");
+  return separator > 0 ? rest.slice(0, separator) : rest;
+};
+
+/**
+ * Every record in which the committed lockfile ties `PACKAGE` to a name that is
+ * not its own, in either direction: an entry whose `name` field disagrees with
+ * the directory it installs under, and a dependency map's `npm:` alias spec
+ * whose key disagrees with the package it names. An aliased install carries its
+ * true identity in that `name` field alone, so neither the directory nor the map
+ * key can see it, and both are what the rest of this check reads by. An alias
+ * between two packages that are neither of them `PACKAGE` is none of this
+ * check's business.
+ */
+export function aliasedIdentities(lock) {
+  const aliased = [];
+  for (const [path, entry] of Object.entries(lock.packages)) {
+    const directory = installedAs(path);
+    const name = entry?.name;
+    if (
+      typeof name === "string" &&
+      name !== directory &&
+      (name === PACKAGE || directory === PACKAGE)
+    ) {
+      aliased.push({ path, name, directory });
+    }
+    for (const field of DEPENDENCY_FIELDS) {
+      for (const [dependency, range] of Object.entries(entry?.[field] ?? {})) {
+        if (typeof range !== "string" || !range.startsWith(ALIAS_PREFIX)) {
+          continue;
+        }
+        const target = aliasTarget(range);
+        if (
+          target !== dependency &&
+          (target === PACKAGE || dependency === PACKAGE)
+        ) {
+          aliased.push({ path, field, dependency, range });
+        }
+      }
+    }
+  }
+  return aliased;
+}
+
+/**
+ * Every version the committed lockfile installs in a `PACKAGE` directory,
+ * deduplicated.
+ */
 export function installedVersions(lock) {
   const versions = new Set();
   for (const [path, entry] of Object.entries(lock.packages)) {
@@ -196,7 +259,10 @@ export function installedVersions(lock) {
   return [...versions].sort();
 }
 
-/** Every `PACKAGE` range the committed lockfile declares, as `{path, field, range}`. */
+/**
+ * Every range the committed lockfile declares under the `PACKAGE` key, as
+ * `{path, field, range}`.
+ */
 export function declaredRanges(lock) {
   const ranges = [];
   for (const [path, entry] of Object.entries(lock.packages)) {
@@ -210,6 +276,11 @@ export function declaredRanges(lock) {
 
 const describe = ({ path, field, range }) =>
   `${path || "<root>"} (${field}) declares ${JSON.stringify(range)}`;
+
+const describeAlias = (alias) =>
+  alias.field === undefined
+    ? `${alias.path || "<root>"} installs ${JSON.stringify(alias.name)} under the name ${JSON.stringify(alias.directory)}`
+    : `${alias.path || "<root>"} (${alias.field}) declares ${JSON.stringify(alias.dependency)} as ${JSON.stringify(alias.range)}`;
 
 const DROP_IT = [
   `The root "${PACKAGE}" override is dead weight: drop it from package.json,`,
@@ -243,6 +314,19 @@ export function assess(manifest, lock) {
         refusal(
           "the lockfile carries no `packages` map, so nothing here can be read from it",
         ),
+      ],
+    };
+  }
+
+  const aliased = aliasedIdentities(lock);
+  if (aliased.length > 0) {
+    return {
+      ok: false,
+      lines: [
+        refusal(
+          `${aliased.length} lockfile record${aliased.length === 1 ? "" : "s"} tie${aliased.length === 1 ? "s" : ""} ${PACKAGE} to another name through an npm alias, and this check reads a copy by the directory it installs in and an edge by the name it is declared under`,
+        ),
+        ...aliased.map(describeAlias),
       ],
     };
   }
