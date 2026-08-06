@@ -281,6 +281,22 @@ describe("SFTP session controls: stalled handshake", () => {
     controls.stallHandshakeOnConnect = true;
     expect(() => controls.onConnectionAccepted(undefined)).not.toThrow();
   });
+
+  test("stopping one control leaves the other's hold on a socket in place", () => {
+    // A socket accepted under both controls is silenced on both halves; stopping
+    // one hands back only the half it took.
+    const controls = createSftpSessionControls();
+    const { socket, end, write } = stubSocket();
+    controls.withholdCloseOnDisconnect = true;
+    controls.stallHandshakeOnConnect = true;
+    controls.onConnectionAccepted(socket);
+    controls.stopStallingHandshakes();
+
+    socket.write("x");
+    socket.end();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(end).not.toHaveBeenCalled();
+  });
 });
 
 describe("SFTP session controls: vanished session", () => {
@@ -419,6 +435,69 @@ describe("SFTP session controls: vanished session", () => {
     b.socket.write("x");
     expect(b.end).toHaveBeenCalledTimes(1);
     expect(b.write).toHaveBeenCalledTimes(1);
+  });
+
+  test("stopping the stall control releases a vanished socket in full", () => {
+    // The stall control and the vanish share one pool of muted sockets, so the
+    // stop that unblocks a later dial reaches a session vanished on another
+    // connection. Handing back only the write it finds there would leave that
+    // socket answering again while still impossible to close.
+    const controls = createSftpSessionControls();
+    const stalled = stubSocket();
+    controls.stallHandshakeOnConnect = true;
+    controls.onConnectionAccepted(stalled.socket);
+    const vanished = stubSocket();
+    controls.onConnectionReady(stubConnection().conn, vanished.socket);
+    controls.vanishActiveSession();
+
+    controls.stopStallingHandshakes();
+
+    vanished.socket.write("x");
+    vanished.socket.end();
+    vanished.socket.destroy();
+    expect(vanished.write).toHaveBeenCalledTimes(1);
+    expect(vanished.end).toHaveBeenCalledTimes(1);
+    expect(vanished.destroy).toHaveBeenCalledTimes(1);
+    stalled.socket.write("x");
+    expect(stalled.write).toHaveBeenCalledTimes(1);
+
+    // The released socket is no longer vanished, so a control re-armed on it is
+    // not silently disarmed by the next restore.
+    controls.withholdCloseOnDisconnect = true;
+    controls.onConnectionAccepted(vanished.socket);
+    controls.restoreVanishedSessions();
+    vanished.socket.end();
+    expect(vanished.end).toHaveBeenCalledTimes(1);
+  });
+
+  test("stopping the withheld-close control releases a vanished socket in full", () => {
+    // The mirror image: the withheld-close control and the vanish share one pool
+    // of silenced closers, and a socket left closable but mute is no more usable
+    // a measurement than one left mute but closable.
+    const controls = createSftpSessionControls();
+    const silenced = stubSocket();
+    controls.withholdCloseOnDisconnect = true;
+    controls.onConnectionAccepted(silenced.socket);
+    const vanished = stubSocket();
+    controls.onConnectionReady(stubConnection().conn, vanished.socket);
+    controls.vanishActiveSession();
+
+    controls.stopWithholdingCloses();
+
+    vanished.socket.write("x");
+    vanished.socket.end();
+    vanished.socket.destroy();
+    expect(vanished.write).toHaveBeenCalledTimes(1);
+    expect(vanished.end).toHaveBeenCalledTimes(1);
+    expect(vanished.destroy).toHaveBeenCalledTimes(1);
+    silenced.socket.end();
+    expect(silenced.end).toHaveBeenCalledTimes(1);
+
+    controls.stallHandshakeOnConnect = true;
+    controls.onConnectionAccepted(vanished.socket);
+    controls.restoreVanishedSessions();
+    vanished.socket.write("y");
+    expect(vanished.write).toHaveBeenCalledTimes(1);
   });
 });
 

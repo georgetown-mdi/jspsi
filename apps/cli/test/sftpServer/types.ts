@@ -293,6 +293,12 @@ export interface SftpSessionControls {
    * connection already accepted under it. The backend's own `stop()` calls this
    * before ending its connections, for the same reason it stops withholding
    * closes: a muted socket cannot answer the disconnect that ends it.
+   *
+   * A session {@link vanishActiveSession} muted is in that pool as well, and is
+   * released WHOLE here -- its closers with its write, and it counts as vanished
+   * no longer -- so unstalling one connection's dial cannot leave another's
+   * session answering again but still impossible to close. Re-arm a vanish that
+   * is still wanted afterwards.
    */
   stopStallingHandshakes(): void;
   /**
@@ -329,6 +335,11 @@ export interface SftpSessionControls {
    * of these releases reaches a socket first hands the real one back. That keeps
    * teardown terminating regardless of the order the controls are stopped in;
    * re-arm a control that is still wanted afterwards.
+   *
+   * The release runs whole or not at all in the other direction too: because the
+   * vanish silences its socket in the pools those two controls draw from,
+   * {@link stopWithholdingCloses} and {@link stopStallingHandshakes} each finish
+   * the vanish release they reach rather than leaving half of one standing.
    */
   restoreVanishedSessions(): void;
   /**
@@ -340,6 +351,12 @@ export interface SftpSessionControls {
    * since a client's `end()` awaits a close a silenced server never sends -- and
    * a teardown typically dials once more (the pre-drain reconnect), which the
    * flag would silence in turn.
+   *
+   * A session {@link vanishActiveSession} silenced is in that pool as well, and
+   * is released WHOLE here -- its write with its closers, and it counts as
+   * vanished no longer -- so releasing one connection's withheld close cannot
+   * leave another's session closable but still mute. Re-arm a vanish that is
+   * still wanted afterwards.
    */
   stopWithholdingCloses(): void;
   /**

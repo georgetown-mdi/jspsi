@@ -208,6 +208,22 @@ export function createSftpSessionControls(): SftpSessionControlHub {
     socket.write = real.write;
     mutedSockets.delete(socket);
   };
+
+  // Hand every vanished socket back BOTH halves the vanish took. A vanish mutes
+  // a socket's write and silences its closers in one act, and it silences them
+  // in the pools the withheld-close and stalled-handshake controls draw from, so
+  // a release of either of those reaches a vanished socket too and has to finish
+  // the job: a socket answering again while still impossible to close -- or the
+  // reverse -- is neither the black hole a case measured over nor a real socket,
+  // and nothing read from it would mean anything. Every release path ends here,
+  // so a vanished socket is wholly silenced or wholly its own.
+  const releaseVanished = (): void => {
+    for (const socket of vanishedSockets) {
+      restoreWrites(socket);
+      restoreClosers(socket);
+    }
+    vanishedSockets.clear();
+  };
   // Request-meter state. `inFlight` holds one reqid -> opcode map per live SFTP
   // session; the maps are cleared in place on reset() so a recorder keeps its
   // reference across windows.
@@ -446,11 +462,17 @@ export function createSftpSessionControls(): SftpSessionControlHub {
     stopWithholdingCloses(): void {
       hub.withholdCloseOnDisconnect = false;
       for (const socket of [...silencedSockets.keys()]) restoreClosers(socket);
+      // A vanished socket's closers are in that pool, so the loop above has just
+      // half-released every vanished session; the rest of each release follows.
+      releaseVanished();
     },
 
     stopStallingHandshakes(): void {
       hub.stallHandshakeOnConnect = false;
       for (const socket of [...mutedSockets.keys()]) restoreWrites(socket);
+      // The same on the muted half: a vanish mutes as well as silences, so this
+      // loop reaches every vanished session too.
+      releaseVanished();
     },
 
     vanishActiveSession(): void {
@@ -474,11 +496,7 @@ export function createSftpSessionControls(): SftpSessionControlHub {
     },
 
     restoreVanishedSessions(): void {
-      for (const socket of vanishedSockets) {
-        restoreWrites(socket);
-        restoreClosers(socket);
-      }
-      vanishedSockets.clear();
+      releaseVanished();
     },
 
     onConnectionReady(
