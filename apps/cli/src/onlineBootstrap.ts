@@ -714,8 +714,9 @@ export async function runOnlineBootstrap(params: {
    * at the same moment -- what the acceptance displayed -- so it rides the same
    * first write. `undefined` persists no field, which is the online INVITER (its
    * own set is authored at mint and pinned as `disclosedPayloadColumns`) and an
-   * acceptance that transmits nothing to its partner. No-op on the reuse path,
-   * which writes no fresh config.
+   * acceptance that transmits nothing to its partner. On the reuse path the
+   * record is refreshed in place on the kept config, beside the
+   * `receivedPayloadLockIn` refresh.
    */
   outboundPayloadConsent?: OutboundPayloadConsent;
 }): Promise<{ configWriteError?: unknown }> {
