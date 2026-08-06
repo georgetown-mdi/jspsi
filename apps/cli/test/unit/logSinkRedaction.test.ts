@@ -169,3 +169,35 @@ test("a non-string log argument renders unchanged at both sinks", () => {
     expect(rendered).toContain("[ 1, 2 ]");
   }
 });
+
+test("the console fallthrough redacts too, and passes non-strings by reference", () => {
+  // With no sink installed the prefixer takes its rawMethod branch -- the
+  // default per-level console routing the web app keeps, and the CLI's own
+  // routing for any line logged before a command installs its sink. Placing the
+  // pass in the prefixer rather than in a consumer's sink is what covers this
+  // branch, so it is pinned rather than left to the sink-installed path.
+  const key = `${BEGIN_MARKER}\n${ARMOR_LINES.join("\n")}\n${END_MARKER}`;
+  const payload = { rows: 3 };
+  const seen: unknown[][] = [];
+  const previous = getDiagnosticSink();
+  setDiagnosticSink(undefined);
+  const consoleWarn = console.warn;
+  console.warn = (...args: unknown[]) => void seen.push(args);
+  try {
+    logLibrary.setDefaultLevel(logLibrary.levels.TRACE);
+    (
+      getLogger(`log-redaction-console-${uid++}`).warn as (
+        ...a: unknown[]
+      ) => void
+    )(`could not load key: ${key}`, payload);
+  } finally {
+    console.warn = consoleWarn;
+    setDiagnosticSink(previous);
+  }
+
+  expect(seen).toHaveLength(1);
+  // [prefix, string argument, object argument]
+  expect(seen[0][1]).toContain("[redacted private key]");
+  expect(seen[0][1]).not.toContain(ARMOR_LINES[0].slice(0, 24));
+  expect(seen[0][2]).toBe(payload);
+});

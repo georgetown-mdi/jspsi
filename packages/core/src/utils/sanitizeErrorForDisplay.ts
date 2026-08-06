@@ -127,6 +127,15 @@ export function redactPrivateKeyMaterial(text: string): string {
  * second altitude (see CONTRIBUTING.md, Operator-facing escaping) -- so a
  * fragment routed into an `Error` instead keeps composing RAW and is escaped by
  * {@link sanitizeErrorForDisplay} where the chain is rendered.
+ *
+ * Do NOT fit a length budget by comparing this against {@link sanitizeForDisplay}
+ * at the same `maxLength`: this can return the LONGER of the two. The escape
+ * admits a code point only when its whole escape fits, so replacing a block with
+ * the much shorter marker can let a later code point fit that the escape-only
+ * form had to stop before -- measured at up to the longest escape minus one. It
+ * is {@link redactPrivateKeyMaterial} that never lengthens its input, and that is
+ * the function the budgeted callers fit over (the rendezvous entry guard, and the
+ * host-key refusals, which redact raw and escape once at the renderer).
  */
 export function redactAndSanitizeForDisplay(
   value: string,
