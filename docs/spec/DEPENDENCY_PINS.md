@@ -462,7 +462,15 @@ runs, or as one more `invalid` edge in the dev-inclusive walks above.
 whose `minimatch` accepts `brace-expansion@^5`, or `minimatch` widens the `^2`
 range on its 5.x or 9.x lines. Either one makes the override redundant, and
 dropping it restores a valid dev-scoped tree along with the dev-inclusive
-`npm sbom`.
+`npm sbom`. `scripts/check-brace-expansion-override.mjs`
+(`npm run check:brace-expansion-override`, a CI static check in
+`static_checks.yaml`) is what watches for that, rather than the trigger resting
+on someone remembering it: it fails once the committed lockfile declares no
+`brace-expansion` range excluding the version it installs, which is the state
+either move leaves behind. It reads the two committed files and nothing else, so
+what it reports is what the lockfile declares and not what npm would resolve with
+the override gone -- confirming a removal still means regenerating the lockfile
+and re-running `npm audit --package-lock-only` against it.
 
 ## Upgrading the SFTP Stack (ssh2 / ssh2-sftp-client)
 

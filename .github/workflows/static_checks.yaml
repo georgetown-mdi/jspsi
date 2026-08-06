@@ -95,6 +95,15 @@ jobs:
       # workflow alone. A composite pin no workflow mirrors fails closed.
       - name: Action pin drift
         run: npm run check:action-pin-drift
+      # The root brace-expansion override answers an advisory no bump on the
+      # dependency path can reach, and its exit condition is an upstream release
+      # rather than anything in this repo. This fails once the committed lockfile
+      # declares no brace-expansion range excluding the version it installs --
+      # the state in which the override overrules nothing and is only costing the
+      # invalid dev edge and the latent major recorded in
+      # docs/spec/DEPENDENCY_PINS.md.
+      - name: brace-expansion override
+        run: npm run check:brace-expansion-override
       # apps/web/src/routeTree.gen.ts is generated but checked in, so a fresh
       # clone can typecheck, lint, build, and test the web app with no
       # generation step. The cost is that every web-tooling run rewrites it: a
