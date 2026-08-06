@@ -107,6 +107,44 @@ const EXPECTED_WRITABLE_SETUP =
   "&& chown -R node:node /work /run/psilink " +
   "&& chmod -R 700 /run/psilink";
 
+// The other half of that claim: /app is NOT among them, so the process reads and
+// executes its own code without being able to rewrite it. The Dockerfile says so
+// in a comment, which cannot hold it -- a `--chown` on a COPY, or one path added
+// to the chown above, hands the code to the account the entrypoint runs as and
+// reads as ordinary housekeeping in a diff.
+const WRITABLE_TREES = ["/work", "/run/psilink"];
+const withinWritableTree = (path) =>
+  WRITABLE_TREES.some((tree) => path === tree || path.startsWith(`${tree}/`));
+
+// The one mode change outside those trees, frozen by literal the way the OS
+// install above is: the entrypoint script has to be executable, and the bit says
+// nothing about who owns it.
+const EXPECTED_MODE_CHANGE_OUTSIDE = "chmod +x /app/docker-entrypoint.sh";
+
+// Each runtime RUN read as the several commands it runs, split on the operators
+// that separate one from the next. This reads the instruction text: ownership a
+// RUN assigns through a variable, or inside a script it invokes, is outside it,
+// as is anything the base image already did.
+const runtimeShellCommands = runtimeRuns.flatMap((run) =>
+  normalize(run)
+    .split(/&&|\|\||[;|]/)
+    .map((command) => command.trim())
+    .filter((command) => command !== ""),
+);
+
+// A chown/chmod's path operands: its argv less the command name, its flags, and
+// its first operand, which is the owner or the mode.
+const ownershipCommands = runtimeShellCommands
+  .filter((command) => /^(?:chown|chmod)\s/.test(command))
+  .map((command) => ({
+    command,
+    paths: command
+      .split(" ")
+      .slice(1)
+      .filter((token) => !token.startsWith("-"))
+      .slice(1),
+  }));
+
 describe("Dockerfile dependency freeze", () => {
   it("installs only with npm ci, never npm install", () => {
     expect(dockerfile).not.toMatch(/\bnpm\s+install\b/);
@@ -328,6 +366,47 @@ describe("Dockerfile runtime layout", () => {
     expect(runtimeRuns.map((run) => `RUN ${normalize(run)}`)).toContain(
       EXPECTED_WRITABLE_SETUP,
     );
+  });
+
+  it("gives that user no path outside those directories, so /app stays root-owned", () => {
+    // Every chown in the stage, and every COPY that assigns ownership as it
+    // lands. A path outside the two writable trees is code, or a mount point,
+    // that the entrypoint's own process could then rewrite.
+    const chownedPaths = ownershipCommands
+      .filter(({ command }) => command.startsWith("chown "))
+      .flatMap(({ paths }) => paths);
+    expect(chownedPaths.length).toBeGreaterThan(0);
+    expect(chownedPaths.filter((path) => !withinWritableTree(path))).toEqual(
+      [],
+    );
+    expect(
+      runtimeCopies
+        .filter(({ flags }) => flags.some((f) => f.startsWith("--chown")))
+        .flatMap(({ dests }) => dests)
+        .filter((dest) => !withinWritableTree(dest)),
+    ).toEqual([]);
+  });
+
+  it("changes no mode outside those directories but the entrypoint's executable bit", () => {
+    // A mode is the other way the account reaches what it must not write: a
+    // group- or world-writable /app needs no chown to be rewritable. Outside the
+    // writable trees the whole set of mode changes is held to the reviewed
+    // literal rather than to a reading of what each mode grants.
+    expect(
+      ownershipCommands
+        .filter(
+          ({ command, paths }) =>
+            command.startsWith("chmod ") &&
+            paths.some((path) => !withinWritableTree(path)),
+        )
+        .map(({ command }) => command),
+    ).toEqual([EXPECTED_MODE_CHANGE_OUTSIDE]);
+    expect(
+      runtimeCopies
+        .filter(({ flags }) => flags.some((f) => f.startsWith("--chmod")))
+        .flatMap(({ dests }) => dests)
+        .filter((dest) => !withinWritableTree(dest)),
+    ).toEqual([]);
   });
 
   it("runs the web server entry, under a copied directory, for the serve role", () => {
