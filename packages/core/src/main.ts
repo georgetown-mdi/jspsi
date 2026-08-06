@@ -79,6 +79,7 @@ export * from "./config/invitation";
 export * from "./config/endpointProducer";
 export * from "./config/exchangeFile";
 export * from "./config/metadata";
+export * from "./config/outboundPayloadConsent";
 export * from "./config/signing";
 export * from "./signingIdentity";
 export * from "./standardization";

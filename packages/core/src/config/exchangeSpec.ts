@@ -10,6 +10,7 @@ import {
 import { AuthenticationSchema, ConnectionConfigSchema } from "./connection.js";
 import { StandardizationSchema } from "./standardization.js";
 import { MetadataSchema } from "./metadata.js";
+import { OutboundPayloadConsentSchema } from "./outboundPayloadConsent.js";
 import { SigningConfigSchema } from "./signing.js";
 import { boundedArray } from "../utils/boundedArray.js";
 
@@ -104,6 +105,18 @@ export const ExchangeSpecSchema = z.object({
     MAX_PAYLOAD_ENTRIES,
     `disclosedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
   ).optional(),
+  // Optional local record of this party's consent to its OWN outbound payload set,
+  // the third per-party local field beside the two above and never exchanged. It is
+  // written by an ACCEPTANCE, whose outbound set no party authors: the invitation
+  // authors the inviter's send and the mirror leaves the acceptor's own send absent,
+  // so the set comes from this party's input columns and would otherwise be inferred
+  // rather than chosen. Absent means no consent record (an inviter, a zero-setup run,
+  // a hand-authored config), which changes nothing; `pending` and `confirmed` are
+  // enforced before connecting by assertOutboundPayloadConsented. Distinct from
+  // disclosedPayloadColumns above, which records a promise made TO THE PARTNER (which
+  // locked it in) rather than a choice made BY this party, and which an acceptance
+  // does not set. See config/outboundPayloadConsent.ts.
+  outboundPayloadConsent: OutboundPayloadConsentSchema.optional(),
 });
 
 export type ExchangeSpec = z.infer<typeof ExchangeSpecSchema>;

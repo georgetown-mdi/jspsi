@@ -26,6 +26,7 @@ import type {
 import {
   loadConfigLinkageSource,
   persistDisclosedPayloadColumns,
+  persistOutboundPayloadConsent,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
 import { resolveRecordOutput } from "../recordFile";
@@ -782,6 +783,14 @@ export async function handler(argv: Arguments): Promise<void> {
           ready.configPath,
           ready.disclosedPayloadColumns,
         );
+        // The outbound-consent record is the acceptor-role sibling of the
+        // commitment above, and this mint re-establishes the config as the
+        // INVITING side, whose outbound set is the commitment itself: an
+        // acceptor-era record left behind would go stale against re-edited
+        // metadata and refuse a later unattended run with remedy text about
+        // re-accepting. Removed on the same no-field-lags-this-mint rule the
+        // commitment refresh follows; a no-op where no record exists.
+        persistOutboundPayloadConsent(ready.configPath, undefined);
 
         printInvitation(ready.invitation, undefined);
         log.info(

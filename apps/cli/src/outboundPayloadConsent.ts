@@ -1,0 +1,193 @@
+import {
+  assessOutboundPayloadConsent,
+  outboundPayloadConsentRefusal,
+  sanitizeForDisplay,
+  UsageError,
+} from "@psilink/core";
+import type {
+  ExchangeDataSpec,
+  Metadata,
+  Output,
+  OutboundPayloadConsentConfirmationRequired,
+  getLogger,
+} from "@psilink/core";
+
+import { persistOutboundPayloadConsent } from "./config";
+import {
+  consentSurfaceSink,
+  type ConsentSurfaceSink,
+} from "./invitationDisplay";
+import { promptConfirm } from "./util/cli";
+
+/**
+ * The heading the run-time outbound-consent surface leads with. It names when the
+ * question is being asked -- before anything connects -- because that is what
+ * makes answering it consequential rather than a notice after the fact.
+ */
+const OUTBOUND_CONSENT_HEADING =
+  "Before this exchange connects, confirm what it will send:";
+
+/**
+ * The label the column list carries, spelled to match the acceptance display's
+ * `columns you will send (enforced)` line: an operator confirming here is
+ * answering for the same fact that display named, so it is named the same way.
+ */
+const OUTBOUND_CONSENT_COLUMNS_LABEL = "columns you will send (enforced)";
+
+/**
+ * The lead-in for each of the two ways a confirmation comes to be asked for. The
+ * unconfirmed one names no particular cause: an acceptance leaves the set
+ * unconfirmed both when it was given no input file and when the file it was given
+ * could not satisfy the linkage keys.
+ */
+const OUTBOUND_CONSENT_REASONS = {
+  unconfirmed:
+    "Accepting the invitation settled what you receive; what you send comes " +
+    "from your own input file, and was not settled then.",
+  changed:
+    "Your input file decides this set, and it is not the set you confirmed for " +
+    "this exchange.",
+} as const;
+
+/** The label above the columns a changed set adds, and the one above what it drops. */
+const OUTBOUND_CONSENT_ADDED_LABEL = "not confirmed before";
+const OUTBOUND_CONSENT_REMOVED_LABEL = "confirmed before, no longer sent";
+
+/** The question asked once the set has been shown. */
+const OUTBOUND_CONSENT_QUESTION =
+  "Send these columns to your partner for matched records?";
+
+/**
+ * Render the set this run would transmit, and what changed about it, through
+ * `emit`. Every column name is escaped at this sink: unlike the names composed
+ * into {@link outboundPayloadConsentRefusal}'s message (an error, escaped once
+ * where it is rendered), these reach the terminal as plain lines with no error to
+ * carry them. They are this party's own CSV header, not partner-controlled, but a
+ * header is untrusted enough to be worth neutralizing before it addresses a
+ * terminal the next line asks a question on.
+ */
+function displayOutboundColumns(
+  emit: ConsentSurfaceSink,
+  verdict: OutboundPayloadConsentConfirmationRequired,
+): void {
+  emit(OUTBOUND_CONSENT_HEADING);
+  emit(`  ${OUTBOUND_CONSENT_REASONS[verdict.reason]}`);
+  if (verdict.columns.length === 0)
+    emit(`  ${OUTBOUND_CONSENT_COLUMNS_LABEL}: (none) -- only matched records`);
+  else {
+    emit(`  ${OUTBOUND_CONSENT_COLUMNS_LABEL}:`);
+    for (const column of verdict.columns)
+      emit(`    - ${sanitizeForDisplay(column)}`);
+  }
+  // The two differences are listed separately rather than folded into the set
+  // above: an operator re-confirming needs to see what moved, and a column that
+  // disappeared cannot be shown in a list of what is sent.
+  if (verdict.added.length > 0) {
+    emit(`  ${OUTBOUND_CONSENT_ADDED_LABEL}:`);
+    for (const column of verdict.added)
+      emit(`    - ${sanitizeForDisplay(column)}`);
+  }
+  if (verdict.removed.length > 0) {
+    emit(`  ${OUTBOUND_CONSENT_REMOVED_LABEL}:`);
+    for (const column of verdict.removed)
+      emit(`    - ${sanitizeForDisplay(column)}`);
+  }
+}
+
+/**
+ * Show and confirm the columns this run would send to the partner, before it
+ * connects, when the exchange carries an outbound-payload consent record its
+ * current set does not satisfy.
+ *
+ * A no-op for every exchange with no consent record -- which is every party that
+ * is not an acceptor -- and for one whose resolved set is exactly what was
+ * confirmed. Where a confirmation IS owed, the outcome depends on whether anything
+ * can answer:
+ *
+ * - INTERACTIVE (standard input is a terminal): the set is shown and the question
+ *   asked. A yes records the confirmation in the config -- so later runs are held
+ *   to it and ask again if it changes -- and updates `spec` in place, so the
+ *   fail-closed backstop in `prepareForExchange` reads the answer just given. A no
+ *   refuses; nothing is written and nothing connects.
+ * - NON-INTERACTIVE (a cron run, a piped stdin, a `-` CSV that already claims it):
+ *   nothing can answer a prompt, so this refuses with the shared refusal rather
+ *   than reading end-of-file and treating that as a decline the operator never
+ *   made. The refusal names the set and how to confirm it.
+ *
+ * The interactivity test is strict (`isTTY === true`), matching `openInputSource`:
+ * `isTTY` is `undefined` rather than `false` for a pipe, a redirect, or
+ * `/dev/null`, so a strict test can never mistake one of those for a terminal that
+ * could answer.
+ *
+ * The set is rendered through {@link consentSurfaceSink}, the same routing the
+ * acceptance display uses: every line goes to the log, and when a prompt follows,
+ * to the terminal it asks on as well -- so the columns cannot be routed to a
+ * `--log-file` while the question is asked somewhere they are not.
+ *
+ * @throws {UsageError} when the confirmation is owed and cannot be given, or is
+ *   declined (exit 64) -- a local configuration decision, before any connection,
+ *   distinct from a transport failure.
+ */
+export async function confirmOutboundPayloadConsent(params: {
+  /**
+   * The spec this run prepares from. Read for its consent record and UPDATED IN
+   * PLACE on a confirmation, so the prepare-time backstop sees the answer.
+   */
+  spec: ExchangeDataSpec;
+  /** The metadata this run resolved -- the source of what it would transmit. */
+  metadata: Metadata;
+  /** This party's own output declaration, from the terms this run resolved. */
+  output: Output;
+  /** Where a confirmation is recorded; the config this run loaded. */
+  configPath: string;
+  /** The operator's `--log-file`, for the surface's routing. */
+  logFile: string | undefined;
+  log: ReturnType<typeof getLogger>;
+}): Promise<void> {
+  const { spec, metadata, output, configPath, logFile, log } = params;
+  const verdict = assessOutboundPayloadConsent(
+    spec.outboundPayloadConsent,
+    metadata,
+    output,
+  );
+  if (verdict.status !== "confirmation-required") return;
+
+  const interactive = process.stdin.isTTY === true;
+  displayOutboundColumns(
+    consentSurfaceSink({ log, logFile, willPrompt: interactive }),
+    verdict,
+  );
+  if (!interactive) throw outboundPayloadConsentRefusal(verdict);
+
+  if (!(await promptConfirm(OUTBOUND_CONSENT_QUESTION)))
+    throw new UsageError(
+      "the columns this exchange would send were not confirmed, so it did not " +
+        "run and nothing was sent. Narrow what your input file discloses -- " +
+        "leave the column out of it, or mark it not transmitted in the " +
+        "configuration's metadata (is_payload: false, or the ignored role) -- " +
+        "and run again.",
+    );
+
+  const confirmed = { status: "confirmed" as const, columns: verdict.columns };
+  try {
+    persistOutboundPayloadConsent(configPath, confirmed);
+  } catch (err) {
+    // A failed record write is a local configuration fault, not a transport
+    // failure: classify it as usage (exit 64) like the sibling config writes,
+    // name the path, and keep the cause on the chain. Nothing was sent -- the
+    // refusal precedes the connection -- and the confirmation is re-asked on
+    // the next run rather than assumed.
+    throw new UsageError(
+      `you confirmed the columns, but the confirmation could not be recorded ` +
+        `in ${configPath}, so the exchange did not run and nothing was sent. ` +
+        `Fix the file or its permissions and run again; you will be asked to ` +
+        `confirm again.`,
+      { cause: err },
+    );
+  }
+  spec.outboundPayloadConsent = confirmed;
+  log.info(
+    `recorded your confirmation in ${configPath}; later runs of this exchange ` +
+      "send exactly these columns and ask again if that set changes.",
+  );
+}
