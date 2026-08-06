@@ -5,7 +5,7 @@ import {
   FileSyncConnection,
   HOST_KEY_FINGERPRINT_REGEX,
   UsageError,
-  sanitizeForDisplay,
+  redactAndSanitizeForDisplay,
 } from "@psilink/core";
 import type { PresentedHostKey, SFTPConnectionConfig } from "@psilink/core";
 
@@ -190,13 +190,15 @@ function probeJsonLine(presented: PresentedHostKey): string {
  * hostKeyTrust.ts. `keyType` is the server's choice within core's bound, so it
  * is escaped before display, exactly as sftpSession.ts treats it; the
  * fingerprint is base64 and format-validated, and the host is already a bare
- * address but is escaped defensively too. */
+ * address but is escaped defensively too. Both sit ahead of the out-of-band
+ * verification step, so each is redacted where it is interpolated and the log
+ * sink's own pass cannot consume that step. */
 function probeHumanSummary(host: string, presented: PresentedHostKey): string {
   return (
-    `${sanitizeForDisplay(host)} presented a ` +
-    `${sanitizeForDisplay(presented.keyType)} host key with fingerprint ` +
-    `${presented.fingerprint}. Verify it matches the server's published ` +
-    `fingerprint out-of-band before pinning it.`
+    `${redactAndSanitizeForDisplay(host)} presented a ` +
+    `${redactAndSanitizeForDisplay(presented.keyType)} host key with ` +
+    `fingerprint ${presented.fingerprint}. Verify it matches the server's ` +
+    `published fingerprint out-of-band before pinning it.`
   );
 }
 

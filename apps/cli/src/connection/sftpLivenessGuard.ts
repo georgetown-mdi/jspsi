@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import {
   TransportOperationStalledError,
   redactPrivateKeyMaterial,
-  sanitizeForDisplay,
+  redactAndSanitizeForDisplay,
 } from "@psilink/core";
 
 /**
@@ -418,7 +418,7 @@ export function withSlowOperationWarning<T>(
     // The path can carry a peer-supplied filename (a get/put of a partner file),
     // so escape it before it reaches the operator's terminal.
     options.log.warn(
-      `SFTP ${options.operation} of ${sanitizeForDisplay(options.path)} is ` +
+      `SFTP ${options.operation} of ${redactAndSanitizeForDisplay(options.path)} is ` +
         `still running after ` +
         `${elapsedMs} ms${observed ? ` (${observed})` : ""}; this may be a ` +
         "slow transfer or an unresponsive server",

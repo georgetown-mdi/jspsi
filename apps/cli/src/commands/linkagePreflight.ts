@@ -3,7 +3,7 @@ import {
   disclosedColumnNames,
   getLogger,
   inferMetadata,
-  sanitizeForDisplay,
+  redactAndSanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
@@ -66,7 +66,9 @@ export function checkLinkageSatisfiability(
   // dead key still counts as shape-satisfiable. Key names are partner-sourced on
   // the accept path, so sanitize each like the unsatisfied-field names below.
   if (deadKeys.length > 0) {
-    const names = deadKeys.map((k) => sanitizeForDisplay(k.name)).join(", ");
+    const names = deadKeys
+      .map((k) => redactAndSanitizeForDisplay(k.name))
+      .join(", ");
     log.warn(
       `${deadKeys.length} of the ${messaging.source}'s linkage keys can never ` +
         `match -- a cleaning step drops every record (${names}); those keys ` +
@@ -108,7 +110,7 @@ export function checkLinkageSatisfiability(
 
   log.warn(
     `the CSV cannot satisfy all of the ${messaging.source}'s linkage fields` +
-      detail((token) => sanitizeForDisplay(token)) +
+      detail((token) => redactAndSanitizeForDisplay(token)) +
       "; keys that require those fields will be inactive for this exchange.",
   );
 }
@@ -198,7 +200,9 @@ export function warnColumnsTheInvitationWillNotAccept(params: {
   log.warn(
     "the invitation declares that the inviting party will accept no payload " +
       "columns, but your input file discloses columns to send:\n" +
-      disclosed.map((name) => `  - ${sanitizeForDisplay(name)}`).join("\n") +
+      disclosed
+        .map((name) => `  - ${redactAndSanitizeForDisplay(name)}`)
+        .join("\n") +
       "\nThe exchange this acceptance configures refuses to run, before any " +
       `data is sent, while the two disagree. ${ACCEPTANCE_OUTCOME[mode]} Set the ` +
       "metadata for those columns not to transmit (is_payload: false or role " +

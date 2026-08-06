@@ -27,7 +27,7 @@
 import { v4 as uuidv4 } from "uuid";
 
 import type { getLoggerForVerbosity } from "../utils/logger";
-import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
+import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay";
 import { toBase64Url, fromBase64Url, bytesEqual } from "../utils/crypto";
 import { parseBoundedJson } from "../utils/boundedJson";
 import { TransportOperationStalledError } from "../errors";
@@ -383,7 +383,7 @@ export class AbortMarkerSubsystem {
     if (listed.size > ABORT_MARKER_MAX_BYTES) {
       this.deps.log.debug(
         `[${this.deps.role()}] ignoring oversized abort marker ` +
-          `${sanitizeForDisplay(markerName)} (${listed.size} bytes)`,
+          `${redactAndSanitizeForDisplay(markerName)} (${listed.size} bytes)`,
       );
       return false;
     }

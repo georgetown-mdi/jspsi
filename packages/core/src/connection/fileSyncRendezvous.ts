@@ -38,7 +38,10 @@ import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
 } from "../utils/sanitizeForDisplay";
-import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay";
+import {
+  redactAndSanitizeForDisplay,
+  redactPrivateKeyMaterial,
+} from "../utils/sanitizeErrorForDisplay";
 import {
   parseBoundedJson,
   JsonStructureBoundError,
@@ -876,7 +879,7 @@ export class FileSyncRendezvous {
         .warn(
           `[${deps.id()}] --force-retain-sweep: permanently deleting a ` +
             `retain-mode audit transcript (${toDelete.length} protocol file(s)) ` +
-            `in ${sanitizeForDisplay(dirsDisplay)}. This is destructive and ` +
+            `in ${redactAndSanitizeForDisplay(dirsDisplay)}. This is destructive and ` +
             `irreversible; the prior ` +
             "transcript will be lost. Only use --force-retain-sweep when you " +
             "intend to discard it.",
@@ -891,8 +894,8 @@ export class FileSyncRendezvous {
       .log()
       .info(
         `[${deps.id()}] sweeping ${toDelete.length} protocol file(s) at ` +
-          `${sanitizeForDisplay(dirsDisplay)} (--sweep-exchange-files): ` +
-          `${toDelete.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
+          `${redactAndSanitizeForDisplay(dirsDisplay)} (--sweep-exchange-files): ` +
+          `${toDelete.map((f) => redactAndSanitizeForDisplay(f.name)).join(", ")}`,
       );
     // allSettled, not all: await every delete before reporting, so a single
     // rejection does not leave the others running unobserved while synchronize()
@@ -954,7 +957,7 @@ export class FileSyncRendezvous {
         `[${deps.role()}] found ${files.length} file(s)` +
           `${
             files.length > 0
-              ? `: ${fileNames.map((n) => sanitizeForDisplay(n)).join(", ")}`
+              ? `: ${fileNames.map((n) => redactAndSanitizeForDisplay(n)).join(", ")}`
               : ""
           }`,
       );
@@ -1039,7 +1042,7 @@ export class FileSyncRendezvous {
           `[${deps.id()}] sweeping ${orphanedTempFiles.length} orphaned temp ` +
             "file(s) left by a prior crashed exchange: " +
             `${orphanedTempFiles
-              .map((f) => sanitizeForDisplay(f.name))
+              .map((f) => redactAndSanitizeForDisplay(f.name))
               .join(", ")}`,
         );
       await Promise.all(
@@ -1070,7 +1073,7 @@ export class FileSyncRendezvous {
             "publish(es) left in place (a concurrently starting peer's write, " +
             "or residue from a prior crashed publish): " +
             `${helloTempFiles
-              .map((f) => sanitizeForDisplay(f.name))
+              .map((f) => redactAndSanitizeForDisplay(f.name))
               .join(", ")}`,
         );
       helloTempFiles.forEach((file) => ignored.add(file.name));
@@ -1139,7 +1142,7 @@ export class FileSyncRendezvous {
             `[${deps.id()}] sweeping ${leftoverAbortFiles.length} leftover abort ` +
               "marker(s) from a prior failed exchange: " +
               `${leftoverAbortFiles
-                .map((f) => sanitizeForDisplay(f.name))
+                .map((f) => redactAndSanitizeForDisplay(f.name))
                 .join(", ")}`,
           );
         await Promise.all(
@@ -1186,8 +1189,8 @@ export class FileSyncRendezvous {
         .log()
         .info(
           `[${deps.id()}] tolerating ${foreignFiles.length} foreign file(s) ` +
-            `present at entry in ${sanitizeForDisplay(scope.inboundPath)}: ` +
-            `${foreignFiles.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
+            `present at entry in ${redactAndSanitizeForDisplay(scope.inboundPath)}: ` +
+            `${foreignFiles.map((f) => redactAndSanitizeForDisplay(f.name)).join(", ")}`,
         );
 
     // Split mode: the OUTBOUND directory must be as fresh as the inbound one --
@@ -1213,8 +1216,8 @@ export class FileSyncRendezvous {
           .info(
             `[${deps.id()}] sweeping ${outOrphans.length} orphaned temp file(s) ` +
               "left by a prior crashed exchange in the outbound directory " +
-              `${sanitizeForDisplay(outboundPath)}: ` +
-              `${outOrphans.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
+              `${redactAndSanitizeForDisplay(outboundPath)}: ` +
+              `${outOrphans.map((f) => redactAndSanitizeForDisplay(f.name)).join(", ")}`,
           );
         await Promise.all(
           outOrphans.map((file) =>
@@ -1239,8 +1242,8 @@ export class FileSyncRendezvous {
           .info(
             `[${deps.id()}] tolerating ${outForeign.length} foreign file(s) ` +
               `present at entry in the outbound directory ` +
-              `${sanitizeForDisplay(outboundPath)}: ` +
-              `${outForeign.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
+              `${redactAndSanitizeForDisplay(outboundPath)}: ` +
+              `${outForeign.map((f) => redactAndSanitizeForDisplay(f.name)).join(", ")}`,
           );
     }
 
@@ -1318,7 +1321,7 @@ export class FileSyncRendezvous {
       .log()
       .debug(
         `[joiner] arriving via ${deps.id()}${JOINING_SUFFIX} sentinel, ` +
-          `deleting discovered ${sanitizeForDisplay(otherFile.name)}`,
+          `deleting discovered ${redactAndSanitizeForDisplay(otherFile.name)}`,
       );
 
     // I5: read the peer hello body through the partial-sync gate before
@@ -1387,7 +1390,7 @@ export class FileSyncRendezvous {
               .debug(
                 `[joiner] advertise-hello write failed (attempt ` +
                   `${attempt}/${ADVERTISE_HELLO_RETRY_ATTEMPTS}); retrying: ` +
-                  `${sanitizeForDisplay(errMessage(writeErr))}`,
+                  `${redactAndSanitizeForDisplay(errMessage(writeErr))}`,
               );
             try {
               await deps.wait(deps.options().pollingFrequency);
@@ -1421,7 +1424,7 @@ export class FileSyncRendezvous {
               .debug(
                 `[joiner] could not advertise hello on mismatch after ` +
                   `${ADVERTISE_HELLO_RETRY_ATTEMPTS} attempts; peer may time out ` +
-                  `instead of fast-failing: ${sanitizeForDisplay(errMessage(writeErr))}`,
+                  `instead of fast-failing: ${redactAndSanitizeForDisplay(errMessage(writeErr))}`,
               );
           }
         }
@@ -1666,7 +1669,7 @@ export class FileSyncRendezvous {
               .log()
               .debug(
                 `[${deps.role()}] writing handshake ack for ` +
-                  `${sanitizeForDisplay(peerHello.name)}`,
+                  `${redactAndSanitizeForDisplay(peerHello.name)}`,
               );
             const ackName = await deps.writeAck(outboundPath, peerHelloStem);
             ackPath = `${outboundPath}/${ackName}`;
@@ -1734,7 +1737,7 @@ export class FileSyncRendezvous {
               .log()
               .trace(
                 `[${deps.role()}] waiting for peer ack ` +
-                  `${sanitizeForDisplay(peerAckName)}`,
+                  `${redactAndSanitizeForDisplay(peerAckName)}`,
               );
             await deps.wait(deps.options().pollingFrequency);
             continue;
@@ -1758,7 +1761,7 @@ export class FileSyncRendezvous {
             .log()
             .debug(
               `[${deps.role()}] lockless rendezvous complete with ` +
-                `${sanitizeForDisplay(peerId)}`,
+                `${redactAndSanitizeForDisplay(peerId)}`,
             );
 
           // Do NOT clear responsibleFiles: hello and ack remain so
@@ -1866,7 +1869,7 @@ export class FileSyncRendezvous {
                 .log()
                 .debug(
                   `[${deps.role()}] peer is mid-arrival ` +
-                    `(${sanitizeForDisplay(joiningName)}); awaiting completion`,
+                    `(${redactAndSanitizeForDisplay(joiningName)}); awaiting completion`,
                 );
             } else if (now - joiningSeenAt > deps.options().joinerRecoveryMs) {
               // The window is a lower bound, not exact: the check runs once
@@ -2039,7 +2042,7 @@ export class FileSyncRendezvous {
           deps
             .log()
             .debug(
-              `[${deps.role()}] parsed ${sanitizeForDisplay(lockFile.name)}`,
+              `[${deps.role()}] parsed ${redactAndSanitizeForDisplay(lockFile.name)}`,
             );
 
           await deps
@@ -2107,7 +2110,7 @@ export class FileSyncRendezvous {
           deps
             .log()
             .debug(
-              `[${deps.role()}] detected ${sanitizeForDisplay(otherFile.name)}; ` +
+              `[${deps.role()}] detected ${redactAndSanitizeForDisplay(otherFile.name)}; ` +
                 `deleting it`,
             );
 
@@ -2170,7 +2173,7 @@ export class FileSyncRendezvous {
             .log()
             .debug(
               `[${deps.role()}] attempting to create ` +
-                `${sanitizeForDisplay(lockName)}`,
+                `${redactAndSanitizeForDisplay(lockName)}`,
             );
 
           // Pre-emptively track lockName in delete mode: if createExclusive
@@ -2188,7 +2191,7 @@ export class FileSyncRendezvous {
               .log()
               .debug(
                 `[${deps.role()}] created lock file ` +
-                  `${sanitizeForDisplay(lockName)}; waiting for ` +
+                  `${redactAndSanitizeForDisplay(lockName)}; waiting for ` +
                   "peer to finalize handshake",
               );
 

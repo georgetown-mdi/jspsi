@@ -1,5 +1,9 @@
 import { errorMessage } from "../connection/messageConnection";
 import { sanitizeForDisplay } from "./sanitizeForDisplay";
+import type {
+  Displayable,
+  SanitizeForDisplayOptions,
+} from "./sanitizeForDisplay";
 
 /**
  * Maximum number of links {@link sanitizeErrorForDisplay} walks down an error's
@@ -96,6 +100,39 @@ export function redactPrivateKeyMaterial(text: string): string {
   return text
     .replace(PRIVATE_KEY_BLOCK, REDACTED_PRIVATE_KEY)
     .replace(PRIVATE_KEY_DANGLING, REDACTED_PRIVATE_KEY);
+}
+
+/**
+ * Prepare a fragment somebody else chose -- a partner-, server-, or
+ * operator-supplied value -- for interpolation into a line that reaches a log,
+ * console, or prompt sink: {@link redactPrivateKeyMaterial} first, then
+ * {@link sanitizeForDisplay}. This is the composition-site half of the
+ * private-key assignment, and it pairs with the per-argument pass the log
+ * prefixer applies at the sink (`setLogPrefixer` in `./logger`).
+ *
+ * Redacting BEFORE escaping is what bounds the fail-closed dangling rule to the
+ * fragment that carried the marker. Applied here, a planted marker no longer
+ * exists when the sink's pass runs, so that pass cannot consume the first-party
+ * explanation or recovery step composed behind the fragment -- the failure the
+ * sink pass would otherwise introduce on every line whose fragments come first.
+ * The order also matters within this function: escaping first would truncate a
+ * long fragment at the display cap, and a `BEGIN` whose `END` was cut off is a
+ * dangling marker where a whole block stood.
+ *
+ * Use it wherever {@link sanitizeForDisplay} would be used on a log- or
+ * prompt-bound fragment, uniformly rather than by position: "this fragment is
+ * last on its line, so nothing follows it to lose" is a property that no check
+ * holds and that a later copy edit silently breaks. Escaping still happens
+ * exactly once -- this is the same single {@link sanitizeForDisplay} call, not a
+ * second altitude (see CONTRIBUTING.md, Operator-facing escaping) -- so a
+ * fragment routed into an `Error` instead keeps composing RAW and is escaped by
+ * {@link sanitizeErrorForDisplay} where the chain is rendered.
+ */
+export function redactAndSanitizeForDisplay(
+  value: string,
+  options?: SanitizeForDisplayOptions,
+): Displayable {
+  return sanitizeForDisplay(redactPrivateKeyMaterial(value), options);
 }
 
 /**

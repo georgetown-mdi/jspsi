@@ -1,4 +1,4 @@
-import { getLogger } from "@psilink/core";
+import { getLogger, redactAndSanitizeForDisplay } from "@psilink/core";
 
 import { MAX_INPUT_CSV_LENGTH } from "./intent";
 
@@ -130,8 +130,12 @@ function rejectDisallowedHost(
     (LOOPBACK_HOSTNAMES.has(hostname) || config.allowedHosts.has(hostname))
   )
     return null;
+  // The Host header is the request's to choose and is composed ahead of the
+  // remedy that follows it, so it crosses the display boundary here rather than
+  // reaching the console's log as raw bytes.
   log.warn(
-    `Refused a job-API request with Host "${host ?? "(absent)"}": not a ` +
+    `Refused a job-API request with Host ` +
+      `"${redactAndSanitizeForDisplay(host ?? "(absent)")}": not a ` +
       "loopback address. If you deliberately front the console behind a proxy " +
       `or a LAN name, add that hostname to ${JOB_ALLOWED_HOSTS_ENV}.`,
   );

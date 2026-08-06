@@ -1,7 +1,7 @@
 import {
   FileSyncConnection,
+  redactAndSanitizeForDisplay,
   redactPrivateKeyMaterial,
-  sanitizeForDisplay,
   UsageError,
   getLogger,
 } from "@psilink/core";
@@ -151,7 +151,7 @@ export async function establishHostKeyTrust(
   // rendered cause chain once, and the log/prompt lines, whose call sites are
   // themselves that value's display sink.
   const host = connection.server.host;
-  const hostDisplay = sanitizeForDisplay(host);
+  const hostDisplay = redactAndSanitizeForDisplay(host);
   // On an offline-accept-seeded config the host is the PARTNER's, copied
   // verbatim out of the invitation endpoint (connectionFromEndpoint), and
   // SFTPServerSchema bounds it neither in length nor in format; the config path
@@ -208,10 +208,10 @@ export async function establishHostKeyTrust(
   log.warn(
     `The authenticity of host ${hostDisplay} cannot be established: no ` +
       `host_key_fingerprint is pinned. It presented a ` +
-      `${sanitizeForDisplay(presented.keyType)} host key with fingerprint ` +
-      `${presented.fingerprint}. Verify this matches the server's published ` +
-      `fingerprint out-of-band if you can; confirming pins it for this ` +
-      `connection.`,
+      `${redactAndSanitizeForDisplay(presented.keyType)} host key with ` +
+      `fingerprint ${presented.fingerprint}. Verify this matches the server's ` +
+      `published fingerprint out-of-band if you can; confirming pins it for ` +
+      `this connection.`,
   );
   const trusted = await deps.confirm(`Trust this host key for ${hostDisplay}?`);
   if (!trusted)
@@ -232,8 +232,8 @@ export async function establishHostKeyTrust(
       persistHostKeyFingerprint(persistence.configPath, presented.fingerprint);
       log.info(
         `pinned ${hostDisplay}'s host key (${presented.fingerprint}) to ` +
-          `${persistence.configPath}; future connections will verify it ` +
-          `automatically.`,
+          `${redactAndSanitizeForDisplay(persistence.configPath)}; future ` +
+          `connections will verify it automatically.`,
       );
       break;
     case "save-with-config":
@@ -241,9 +241,9 @@ export async function establishHostKeyTrust(
       // after the handshake; no separate write here.
       log.info(
         `trusted ${hostDisplay}'s host key (${presented.fingerprint}); it ` +
-          `will be ` +
-          `saved to ${persistence.configPath} and verified automatically on ` +
-          `future connections.`,
+          `will be saved to ` +
+          `${redactAndSanitizeForDisplay(persistence.configPath)} and ` +
+          `verified automatically on future connections.`,
       );
       break;
     case "ephemeral":

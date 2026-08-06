@@ -3,8 +3,10 @@ import { v4 as uuidv4 } from "uuid";
 
 import { getLoggerForVerbosity } from "../utils/logger";
 import { pathsResolveToSameDir } from "../utils/pathCompare";
-import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
-import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay";
+import {
+  redactAndSanitizeForDisplay,
+  redactPrivateKeyMaterial,
+} from "../utils/sanitizeErrorForDisplay";
 import {
   DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
@@ -667,7 +669,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // fallback covers the post-handshake/close window where close() nulls this.path;
   // a display sink only ever runs with it set, so the fallback never shows.
   private get displayPath(): string {
-    return sanitizeForDisplay(this.path ?? "");
+    return redactAndSanitizeForDisplay(this.path ?? "");
   }
 
   // The directory self-written files go to: the configured outbound directory
@@ -822,7 +824,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // embeds a partner-controlled path (both the SFTP and filedrop
             // adapters concatenate the operation path into their error text), so
             // escape it before it reaches the operator's log.
-            sanitizeForDisplay(errMessage(this.bufferedError)),
+            redactAndSanitizeForDisplay(errMessage(this.bufferedError)),
         );
         if (
           incoming instanceof Error &&
@@ -1021,9 +1023,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             "directory after normalization; they must be distinct",
         );
       this.log.debug(
-        `[${this.role}] opening local path ${sanitizeForDisplay(inboundDir)}` +
+        `[${this.role}] opening local path ${redactAndSanitizeForDisplay(inboundDir)}` +
           (split
-            ? ` (inbound) and ${sanitizeForDisplay(outboundDir)} (outbound)`
+            ? ` (inbound) and ${redactAndSanitizeForDisplay(outboundDir)} (outbound)`
             : ""),
       );
       const connectTimeoutMs =
@@ -1133,13 +1135,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // marker, so neither needs escaping.
       this.log.debug(
         `[${this.role}] connecting to ` +
-          `${sanitizeForDisplay(config.server.host)}${portString}` +
+          `${redactAndSanitizeForDisplay(config.server.host)}${portString}` +
           `${usernameString}, path: ${this.displayPath}` +
           // Name the outbound directory too in split mode, so a misconfigured
           // outbound path is diagnosable from the connect log rather than only
           // at the first write. Mirrors the filedrop open() log above.
           (split
-            ? ` (inbound), outbound: ${sanitizeForDisplay(outboundDir)}`
+            ? ` (inbound), outbound: ${redactAndSanitizeForDisplay(outboundDir)}`
             : ""),
       );
       try {
@@ -1203,7 +1205,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     const responsibleFilesString =
       this.responsibleFiles.size > 0
         ? `: ${[...this.responsibleFiles]
-            .map((name) => sanitizeForDisplay(name))
+            .map((name) => redactAndSanitizeForDisplay(name))
             .join(", ")}`
         : "";
     this.log.debug(
@@ -1432,7 +1434,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         };
         try {
           if (await filePresent()) {
-            // lastSentFile is NOT routed through sanitizeForDisplay, unlike the
+            // lastSentFile is NOT routed through the display boundary, unlike the
             // partner/server-reachable strings elsewhere in close(). It is this
             // party's own message filename (set only from send()'s outName, never
             // adopted from a listing), whose sole non-numeric input is this.id --
@@ -1488,7 +1490,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           // peerId), so a delete error's message can carry partner bytes via the
           // path; escape it.
           `[${this.role}] cleanup during close: ` +
-            `${sanitizeForDisplay(errMessage(err))}`,
+            `${redactAndSanitizeForDisplay(errMessage(err))}`,
         );
       }
     }
@@ -1507,7 +1509,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         await this.client.end();
       } catch (err: unknown) {
         this.log.debug(
-          `[${this.role}] end() during close: ${sanitizeForDisplay(errMessage(err))}`,
+          `[${this.role}] end() during close: ${redactAndSanitizeForDisplay(errMessage(err))}`,
         );
       }
     }
@@ -1627,7 +1629,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
 
     this.log.info(
-      `[${this.role}] synchronizing at path ${sanitizeForDisplay(dirsDisplay)}`,
+      `[${this.role}] synchronizing at path ${redactAndSanitizeForDisplay(dirsDisplay)}`,
     );
 
     return { inboundPath, outboundPath, split, dirsDisplay };

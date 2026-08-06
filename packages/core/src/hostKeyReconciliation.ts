@@ -1,4 +1,4 @@
-import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
+import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
 import type { PresentedHostKey } from "./connection/fileSyncConnection.js";
 
 /**
@@ -33,9 +33,13 @@ import type { PresentedHostKey } from "./connection/fileSyncConnection.js";
  * The fingerprint comparison is a plain string equality, not a constant-time
  * compare: a host key and its fingerprint are both public, and the result drives
  * only a warning, not a trust decision. Both key types and both fingerprints are
- * routed through {@link sanitizeForDisplay} before they enter the message,
- * because the partner's advertised values arrive over the wire and a server's
- * key type is server-controlled (see {@link PresentedHostKey.keyType}).
+ * routed through {@link redactAndSanitizeForDisplay} before they enter the
+ * message, because the partner's advertised values arrive over the wire under a
+ * length bound alone and a server's key type is server-controlled (see
+ * {@link PresentedHostKey.keyType}). All four sit AHEAD of the explanation and
+ * the out-of-band-confirm step, so the redaction half is what keeps the party
+ * this warning is ABOUT from deleting them with a planted `BEGIN` marker at the
+ * sink that redacts each whole line.
  *
  * @param local   This party's observed host key, or `undefined` if none.
  * @param partner The partner's advertised observed host key, or `undefined`.
@@ -47,10 +51,10 @@ export function reconcileHostKeyFingerprints(
   if (local === undefined || partner === undefined) return undefined;
   if (local.fingerprint === partner.fingerprint) return undefined;
 
-  const localFp = sanitizeForDisplay(local.fingerprint);
-  const partnerFp = sanitizeForDisplay(partner.fingerprint);
-  const localType = sanitizeForDisplay(local.keyType);
-  const partnerType = sanitizeForDisplay(partner.keyType);
+  const localFp = redactAndSanitizeForDisplay(local.fingerprint);
+  const partnerFp = redactAndSanitizeForDisplay(partner.fingerprint);
+  const localType = redactAndSanitizeForDisplay(local.keyType);
+  const partnerType = redactAndSanitizeForDisplay(partner.keyType);
 
   const sameType = local.keyType === partner.keyType;
   const observed = sameType
