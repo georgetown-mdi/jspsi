@@ -10,7 +10,7 @@
 // one, and the bump that answers it cannot land on the workflow and leave the
 // composite behind.
 //
-// Two rules, over .github/workflows and .github/actions:
+// Three rules, over .github/workflows and .github/actions:
 //
 //   A. An action named in both trees carries the same ref everywhere it appears.
 //      A bump applied to some occurrences and not others -- the shape a
@@ -20,6 +20,12 @@
 //      composite-only action has no occurrence on the configured path for a
 //      release or advisory to surface on, so the check fails closed on it rather
 //      than passing a gap.
+//   C. Every remote `uses:` reference names a ref. One that names none fixes no
+//      version, so nothing here determines which code the step runs and no
+//      release or advisory has an occurrence to surface on: neither guarded tree
+//      may hold one, and rule A's mirror cannot be satisfied by one. Whether
+//      GitHub itself rejects the shape is unverified and the rule does not rest
+//      on it -- if GitHub does, this simply never fires.
 //
 // What this check cannot see:
 //   - It compares refs as text. `@v7` agrees with `@v7` whatever the tag resolves
@@ -30,8 +36,7 @@
 //     mirror invariant this repo relies on, and confirms no tool's coverage.
 //   - It reads `uses:` references only. An action reached another way -- a `run:`
 //     line that fetches a release, an image named in `container:` or `services:`
-//     -- is invisible to it, as is a reference carrying no `@ref`, which is not a
-//     pin and is skipped rather than reported.
+//     -- is invisible to it.
 //   - Rule A binds only actions appearing in both trees. Two workflows may pin an
 //     action no composite uses at differing refs without failing anything here.
 
@@ -71,27 +76,37 @@ export function usesValues(source) {
 }
 
 /**
- * Split a `uses:` reference into `{name, ref}`, or null when it is not a pinned
- * registry action: a `./` local reference, a `docker://` image, or a reference
- * carrying no `@ref` at all.
+ * Split a `uses:` reference into `{name, ref}`, or null when it names no remote
+ * action at all: a `./` local reference or a `docker://` image. A remote
+ * reference carrying no usable ref -- no `@`, a trailing `@`, or a leading `@` --
+ * gets a null `ref` and its `name` is the reference as written, so rule C can
+ * report it against the two legitimate skips.
  */
-export function parseActionPin(uses) {
+export function parseActionReference(uses) {
   const reference = uses.trim();
   if (reference.startsWith("./") || reference.startsWith("docker://")) {
     return null;
   }
   const at = reference.lastIndexOf("@");
-  if (at <= 0 || at === reference.length - 1) return null;
+  if (at <= 0 || at === reference.length - 1) {
+    return { name: reference, ref: null };
+  }
   return { name: reference.slice(0, at), ref: reference.slice(at + 1) };
 }
 
-/** The action pins one YAML source carries, as `{file, name, ref}` triples. */
-export function filePins(file, source) {
+/**
+ * The remote action references one YAML source carries, as `{file, name, ref}`
+ * triples. A null `ref` is a reference naming no version; local and docker
+ * references do not appear at all.
+ */
+export function fileReferences(file, source) {
   return usesValues(source).flatMap((uses) => {
-    const pin = parseActionPin(uses);
-    return pin === null ? [] : [{ file, ...pin }];
+    const reference = parseActionReference(uses);
+    return reference === null ? [] : [{ file, ...reference }];
   });
 }
+
+const isPinned = ({ ref }) => ref !== null;
 
 const byName = (pins) => {
   const groups = new Map();
@@ -118,14 +133,20 @@ function describeRefs(pins) {
 }
 
 /**
- * Every way the two trees' pins can be out of step, as message strings. Empty
- * means each composite pin mirrors a workflow pin exactly.
+ * Every way the two trees' references can be out of step, as message strings.
+ * Empty means every reference names a ref and each composite pin mirrors a
+ * workflow pin exactly.
  */
-export function pinViolations(workflowPins, actionPins) {
-  const violations = [];
-  const workflowsByName = byName(workflowPins);
+export function pinViolations(workflowReferences, actionReferences) {
+  const violations = [...workflowReferences, ...actionReferences]
+    .filter((reference) => !isPinned(reference))
+    .map(
+      ({ file, name }) =>
+        `${name} in ${file} names no ref -- an unpinned remote reference fixes no version, so nothing here determines which code the step runs and no release or advisory has an occurrence to surface on. Write it as owner/action@ref.`,
+    );
+  const workflowsByName = byName(workflowReferences.filter(isPinned));
 
-  for (const [name, composite] of byName(actionPins)) {
+  for (const [name, composite] of byName(actionReferences.filter(isPinned))) {
     const workflow = workflowsByName.get(name);
     if (!workflow) {
       violations.push(
@@ -161,11 +182,11 @@ function yamlFiles(root, dir, matches) {
   return files;
 }
 
-function readPins(root, dir, matches) {
+function readReferences(root, dir, matches) {
   return yamlFiles(root, dir, matches).flatMap((file) => {
     const source = readFileSync(resolve(root, file), "utf8");
     try {
-      return filePins(file, source);
+      return fileReferences(file, source);
     } catch (cause) {
       throw new Error(`${file}: could not be parsed as YAML`, { cause });
     }
@@ -173,16 +194,19 @@ function readPins(root, dir, matches) {
 }
 
 /**
- * The pins both guarded trees carry under `root`, with repo-relative file paths.
- * Workflows are every `.yml`/`.yaml`; composites are every `action.yml`/
- * `action.yaml`, the only two names GitHub loads an action definition from.
+ * The remote action references both guarded trees carry under `root`, with
+ * repo-relative file paths. Workflows are every `.yml`/`.yaml`; composites are
+ * every `action.yml`/`action.yaml`, the only two names GitHub loads an action
+ * definition from.
  */
-export function treePins(root) {
+export function treeReferences(root) {
   return {
-    workflowPins: readPins(root, WORKFLOW_DIR, (name) =>
+    workflowReferences: readReferences(root, WORKFLOW_DIR, (name) =>
       WORKFLOW_FILE.test(name),
     ),
-    actionPins: readPins(root, ACTION_DIR, (name) => ACTION_FILE.test(name)),
+    actionReferences: readReferences(root, ACTION_DIR, (name) =>
+      ACTION_FILE.test(name),
+    ),
   };
 }
 
@@ -190,20 +214,20 @@ export function treePins(root) {
 // functions without the process.exit.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const { workflowPins, actionPins } = treePins(root);
-  if (workflowPins.length === 0) {
+  const { workflowReferences, actionReferences } = treeReferences(root);
+  if (workflowReferences.length === 0) {
     console.error(
-      `${WORKFLOW_DIR}: no action pins matched in any workflow -- the extraction rotted; fix scripts/check-action-pin-drift.mjs`,
+      `${WORKFLOW_DIR}: no action references matched in any workflow -- the extraction rotted; fix scripts/check-action-pin-drift.mjs`,
     );
     process.exit(1);
   }
-  const violations = pinViolations(workflowPins, actionPins);
+  const violations = pinViolations(workflowReferences, actionReferences);
   if (violations.length > 0) {
     for (const violation of violations) console.error(violation);
     process.exit(1);
   }
   const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
   console.log(
-    `Action pin drift check passed: ${plural(actionPins.length, "pin")} under ${ACTION_DIR} checked against ${plural(workflowPins.length, "pin")} under ${WORKFLOW_DIR}.`,
+    `Action pin drift check passed: ${plural(actionReferences.length, "pin")} under ${ACTION_DIR} checked against ${plural(workflowReferences.length, "pin")} under ${WORKFLOW_DIR}.`,
   );
 }
