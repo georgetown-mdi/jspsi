@@ -1842,6 +1842,61 @@ test("runOnlineBootstrap persists the acceptor's own outbound consent into the f
   }
 });
 
+test("runOnlineBootstrap refreshes the outbound consent surgically on a reused config", async () => {
+  // The reuse path writes no fresh config, but the operator has just consented to
+  // THIS acceptance's outbound set; leaving a prior record stale would make the
+  // next recurring run stop for a set the operator never declined. The write is
+  // surgical: the operator's own keys and comments survive it.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    "# operator note\npreexisting: true\noutbound_payload_consent:\n  status: pending\n",
+  );
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+      outboundPayloadConsent: { status: "confirmed", columns: ["diagnosis"] },
+    });
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).toContain("# operator note");
+    const written = YAML.parse(raw);
+    expect(written.preexisting).toBe(true);
+    expect(written.outbound_payload_consent).toEqual({
+      status: "confirmed",
+      columns: ["diagnosis"],
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap keeps a failed reuse-path consent refresh non-fatal", async () => {
+  // The kept config stands whatever happens to the surgical refresh: here the
+  // config path is a directory, so the refresh's read throws, and the completed
+  // exchange must not be undone -- nothing rethrows and no configWriteError is
+  // reported (that channel's recovery text is for the fresh-config write; the
+  // catch's warn covers this one). getLogger("bootstrap-test") is silenced above,
+  // so the warn does not print. A stale record only makes the next run ask again.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.mkdirSync(configPath);
+  try {
+    const { configWriteError } = await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+      outboundPayloadConsent: { status: "confirmed", columns: ["diagnosis"] },
+    });
+    expect(configWriteError).toBeUndefined();
+    expect(fs.statSync(configPath).isDirectory()).toBe(true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runOnlineBootstrap omits the outbound consent when the caller passes none", async () => {
   // The online INVITER, which authored its own set at mint and pins it as
   // disclosedPayloadColumns instead: no consent record, so its runs stay lazy.

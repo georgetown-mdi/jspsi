@@ -709,8 +709,8 @@ export async function handler(argv: Arguments): Promise<void> {
           expectedReceivedPayloadColumns: ready.token.disclosedPayloadColumns,
           // Record this party's consent to its own outbound set in the same fresh
           // write, so a later `psilink exchange` from this configuration is held to
-          // the columns just consented to here. No-op on the reuse path, which
-          // writes no fresh config and records it surgically below instead.
+          // the columns just consented to here. The reuse path writes no fresh
+          // config; the hook refreshes the kept config's record surgically instead.
           outboundPayloadConsent,
         });
         logOnlineBootstrapOutcome(log, {
