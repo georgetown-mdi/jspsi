@@ -1842,6 +1842,51 @@ test("runOnlineBootstrap persists the acceptor's own outbound consent into the f
   }
 });
 
+test("runOnlineBootstrap persists a pending outbound consent into the fresh config", async () => {
+  // The unresolvable shape through the online first write: the acceptance could
+  // not resolve the set, so `pending` rides the write and the first resolving run
+  // shows and asks before connecting.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      outboundPayloadConsent: { status: "pending" },
+    });
+    const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    expect(written.outbound_payload_consent).toEqual({ status: "pending" });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap refreshes a reused config's record to pending", async () => {
+  // The unresolvable shape through the reuse refresh: a prior acceptance's
+  // confirmed columns must not stand as if confirmed by THIS acceptance, which
+  // displayed no set -- pending overwrites them and the next run asks.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    "preexisting: true\noutbound_payload_consent:\n  status: confirmed\n" +
+      "  columns:\n    - stale_col\n",
+  );
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+      outboundPayloadConsent: { status: "pending" },
+    });
+    const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    expect(written.preexisting).toBe(true);
+    expect(written.outbound_payload_consent).toEqual({ status: "pending" });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runOnlineBootstrap refreshes the outbound consent surgically on a reused config", async () => {
   // The reuse path writes no fresh config, but the operator has just consented to
   // THIS acceptance's outbound set; leaving a prior record stale would make the

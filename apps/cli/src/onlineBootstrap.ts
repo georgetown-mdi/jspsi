@@ -822,9 +822,11 @@ export async function runOnlineBootstrap(params: {
           // for a set the operator never declined -- the same rationale as the
           // offline reuse branch's surgical write, at this hook's same
           // post-handshake timing as the fresh write below. Gated on a defined
-          // record: where nothing is transmitted at all the consent is
-          // undefined, a stale record is inert (the run gate no-ops without
-          // transmission), and the operator's config stays byte-identical.
+          // record: the caller derives the reuse-path value from the KEPT
+          // config's own output terms (the accept handler's reuse derivation),
+          // so undefined here means that config itself does not transmit -- a
+          // leftover record is then inert against those same terms -- and the
+          // operator's config stays byte-identical.
           // A failure is non-fatal like the observed-payload write below: the
           // exchange has completed, the kept config stands, and the stale
           // record only makes the next run show the columns and ask again.

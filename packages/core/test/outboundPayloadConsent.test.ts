@@ -288,6 +288,52 @@ test("prepareForExchange: refuses a set widened since it was confirmed", () => {
   ).toThrow(/diagnosis/);
 });
 
+test("prepareForExchange: refuses a set narrowed since it was confirmed, as a UsageError", () => {
+  // Narrowing is a mismatch exactly as widening is: the exchange record and the
+  // partner's consent surface state the confirmed set. The instanceof assertion
+  // pins the exit classification (64, a local configuration error) at the same
+  // boundary the other refusals use.
+  let thrown: unknown;
+  try {
+    prepareForExchange(
+      {
+        linkageTerms: acceptorTerms,
+        outboundPayloadConsent: {
+          status: "confirmed",
+          columns: ["diagnosis", "notes"],
+        },
+      },
+      "Acceptor",
+      acceptorRows,
+      acceptorColumns,
+    );
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  expect(String(thrown)).toMatch(/no longer send.*notes|notes.*no longer/);
+});
+
+test("prepareForExchange: the pending and widened refusals are UsageErrors too", () => {
+  for (const consent of [
+    { status: "pending" } as const,
+    { status: "confirmed" as const, columns: [] },
+  ]) {
+    let thrown: unknown;
+    try {
+      prepareForExchange(
+        { linkageTerms: acceptorTerms, outboundPayloadConsent: consent },
+        "Acceptor",
+        acceptorRows,
+        acceptorColumns,
+      );
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UsageError);
+  }
+});
+
 test("prepareForExchange: prepares normally once the resolved set is the confirmed one", () => {
   const prepared = prepareForExchange(
     {

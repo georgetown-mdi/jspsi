@@ -1577,6 +1577,48 @@ test("handler: offline-from-config persists the disclosed subset into the reused
   }
 });
 
+test("handler: offline-from-config removes an acceptor-era outbound consent record", async () => {
+  // A mint re-establishes the config as the inviting side, whose outbound set is
+  // the disclosed-columns commitment itself: an acceptor-era record left behind
+  // would go stale against re-edited metadata and refuse a later unattended run
+  // with remedy text about re-accepting. Same no-field-lags-this-mint rule as the
+  // commitment refresh proven above.
+  const metadata = inferMetadata(["first_name", "last_name", "dob", "ssn"]);
+  const { dir, configPath, keyPath } = withConfig(
+    defaultTerms(),
+    undefined,
+    metadata,
+  );
+  fs.appendFileSync(
+    configPath,
+    "outbound_payload_consent:\n  status: confirmed\n  columns:\n" +
+      "    - acceptor_era_col\n",
+  );
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: [],
+      "config-file": configPath,
+      "key-file": keyPath,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalledWith(64);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).not.toContain("outbound_payload_consent");
+    expect(raw).not.toContain("acceptor_era_col");
+  } finally {
+    logSpy.mockRestore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("handler: offline infer-from-input writes the disclosed subset into the fresh config", async () => {
   // The fresh-config counterpart: `psilink invite input.csv` infers metadata,
   // mints, and writes a new config via saveConfig; disclosed_payload_columns must

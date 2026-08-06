@@ -21,6 +21,7 @@ import {
   persistDisclosedPayloadColumns,
   persistExpectedPayloadColumns,
   persistHostKeyFingerprint,
+  persistOutboundPayloadConsent,
   saveConfig,
 } from "../../src/config";
 import type {
@@ -2150,4 +2151,59 @@ test("assertRetainSweepGuard: --force-retain-sweep alone is a UsageError; other 
   expect(() => assertRetainSweepGuard(true, true)).not.toThrow();
   expect(() => assertRetainSweepGuard(true, false)).not.toThrow();
   expect(() => assertRetainSweepGuard(false, false)).not.toThrow();
+});
+
+// --- persistOutboundPayloadConsent: removal and empty-set shapes -------------
+
+test("persistOutboundPayloadConsent removes the record on undefined, and no-ops when absent", () => {
+  // The removal branch is what the accept-reuse and mint paths lean on: a record
+  // that should not stand is deleted, never left stale -- and removing from a
+  // config that carries none must not rewrite the operator's file.
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "connection:",
+      "  channel: sftp",
+      "  server:",
+      "    host: h",
+      "outbound_payload_consent:",
+      "  status: confirmed",
+      "  columns:",
+      "    - old_col",
+      "",
+    ].join("\n"),
+  );
+  persistOutboundPayloadConsent(configPath, undefined);
+  const raw = fs.readFileSync(configPath, "utf8");
+  expect(raw).not.toContain("outbound_payload_consent");
+  expect(raw).not.toContain("old_col");
+  const parsed = YAML.parse(raw) as { connection: { channel: string } };
+  expect(parsed.connection.channel).toBe("sftp");
+  persistOutboundPayloadConsent(configPath, undefined);
+  expect(fs.readFileSync(configPath, "utf8")).toBe(raw);
+});
+
+test("persistOutboundPayloadConsent writes a confirmed-empty set verbatim", () => {
+  // An empty confirmed set is a real confirmation that nothing is disclosed, not
+  // an absence: it must survive to disk as `columns: []` and parse back as an
+  // empty array, so a later run enforcing it refuses any disclosure at all.
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    ["connection:", "  channel: sftp", "  server:", "    host: h", ""].join(
+      "\n",
+    ),
+  );
+  persistOutboundPayloadConsent(configPath, {
+    status: "confirmed",
+    columns: [],
+  });
+  const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+    outbound_payload_consent?: { status: string; columns?: string[] };
+  };
+  expect(parsed.outbound_payload_consent).toEqual({
+    status: "confirmed",
+    columns: [],
+  });
 });

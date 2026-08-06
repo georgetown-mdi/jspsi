@@ -169,7 +169,22 @@ export async function confirmOutboundPayloadConsent(params: {
     );
 
   const confirmed = { status: "confirmed" as const, columns: verdict.columns };
-  persistOutboundPayloadConsent(configPath, confirmed);
+  try {
+    persistOutboundPayloadConsent(configPath, confirmed);
+  } catch (err) {
+    // A failed record write is a local configuration fault, not a transport
+    // failure: classify it as usage (exit 64) like the sibling config writes,
+    // name the path, and keep the cause on the chain. Nothing was sent -- the
+    // refusal precedes the connection -- and the confirmation is re-asked on
+    // the next run rather than assumed.
+    throw new UsageError(
+      `you confirmed the columns, but the confirmation could not be recorded ` +
+        `in ${configPath}, so the exchange did not run and nothing was sent. ` +
+        `Fix the file or its permissions and run again; you will be asked to ` +
+        `confirm again.`,
+      { cause: err },
+    );
+  }
   spec.outboundPayloadConsent = confirmed;
   log.info(
     `recorded your confirmation in ${configPath}; later runs of this exchange ` +

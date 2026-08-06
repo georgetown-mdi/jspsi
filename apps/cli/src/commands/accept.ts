@@ -200,6 +200,13 @@ type AcceptReady = {
    * is written. False when no config existed and a fresh one will be written.
    */
   reuseExistingConfig: boolean;
+  /**
+   * The kept config's own `output.shareWithPartner`, present only under reuse.
+   * Reconciliation compares no output field, so the invitation's mirror cannot
+   * stand in for it when deciding what outbound-consent record the kept config
+   * needs (see the derivation at the accept handler).
+   */
+  existingOutputShares?: boolean;
 } & (
   | {
       mode: "online";
@@ -331,12 +338,13 @@ export async function validateAccept(params: {
     // endpoint-influenced) before the input is read and before any network
     // activity, so a location disagreement aborts with a diff and no acceptance
     // is ever sent to the inviter.
-    const reuseExistingConfig = reconcileAcceptConfig({
-      configPath: options.configFile,
-      myTerms,
-      target: connection,
-      log,
-    });
+    const { reuse: reuseExistingConfig, existingOutputShares } =
+      reconcileAcceptConfig({
+        configPath: options.configFile,
+        myTerms,
+        target: connection,
+        log,
+      });
     // accept reads its y/N confirmation from stdin (promptConfirm), so it cannot
     // also take the CSV there -- unless `--consent-to-terms` skips that prompt,
     // which frees stdin for the CSV. Gate `-` on it: rejected when the prompt
@@ -378,6 +386,7 @@ export async function validateAccept(params: {
       dataSpec,
       prepared,
       reuseExistingConfig,
+      existingOutputShares,
     };
   }
 
@@ -391,11 +400,12 @@ export async function validateAccept(params: {
   warnOptionsOverridesIgnoredOffline(options, log);
 
   // Offline.
-  const reuseExistingConfig = reconcileAcceptConfig({
-    configPath: options.configFile,
-    myTerms,
-    log,
-  });
+  const { reuse: reuseExistingConfig, existingOutputShares } =
+    reconcileAcceptConfig({
+      configPath: options.configFile,
+      myTerms,
+      log,
+    });
   // `-` is gated on `--consent-to-terms` here exactly as on the online path
   // above: stdin serves the confirmation prompt unless the flag skips it, freeing
   // it for the CSV.
@@ -434,6 +444,7 @@ export async function validateAccept(params: {
     seeded,
     dataSpec,
     reuseExistingConfig,
+    existingOutputShares,
   };
 }
 
@@ -451,9 +462,9 @@ function reconcileAcceptConfig(params: {
   myTerms: LinkageTerms;
   target?: RunnableConnectionConfig;
   log: ReturnType<typeof getLogger>;
-}): boolean {
+}): { reuse: boolean; existingOutputShares?: boolean } {
   const { configPath, myTerms, target, log } = params;
-  if (detectFileConflicts([configPath]).length === 0) return false;
+  if (detectFileConflicts([configPath]).length === 0) return { reuse: false };
 
   // Reference to the source(s) compared against, woven into the messages so the
   // online ("invitation and URL") and offline ("invitation") cases read right.
@@ -542,7 +553,14 @@ function reconcileAcceptConfig(params: {
       : `the existing configuration at ${configPath} will be reused unchanged; ` +
           "the connection differences above apply to this exchange only.",
   );
-  return true;
+  // The kept config's own output terms ride back with the verdict: the later
+  // run is governed by them, and this diff deliberately compares no output
+  // field, so a caller deciding what to record about the acceptor's outbound
+  // set must not take the invitation's mirror as the kept config's reality.
+  return {
+    reuse: true,
+    existingOutputShares: existing.linkageTerms.output.shareWithPartner,
+  };
 }
 
 // --- Linkage preflight -------------------------------------------------------
@@ -642,6 +660,24 @@ export async function handler(argv: Arguments): Promise<void> {
         : ownOutboundSend === undefined
           ? { status: "pending" }
           : { status: "confirmed", columns: ownOutboundSend };
+      // What a REUSED config's record becomes. The later run is governed by the
+      // kept config's own terms, and reconciliation compares no output field, so
+      // an invitation whose mirror says "nothing transmitted" cannot decide that
+      // about a kept config that still shares: deleting the record there would
+      // leave the run's gate blind (it no-ops on an absent record) and transmit
+      // an unconfirmed set on partner-controlled terms. Where the mirror yields
+      // no record but the kept config shares, the safe record is `pending` --
+      // this acceptance displayed and confirmed no outbound set for a config
+      // that will transmit, so the next run shows and asks, or refuses
+      // unattended. Undefined only where the kept config itself does not share
+      // (or no config is kept), where a leftover record is inert against the
+      // kept config's own terms.
+      const reuseOutboundPayloadConsent: OutboundPayloadConsent | undefined =
+        outboundPayloadConsent !== undefined
+          ? outboundPayloadConsent
+          : ready.existingOutputShares === true
+            ? { status: "pending" }
+            : undefined;
       // Rendered through a sink that knows whether the prompt below will run: when
       // it will, the terms reach the terminal it asks on even when the operator
       // routed diagnostics to a --log-file or above info, so consent is never asked
@@ -710,8 +746,11 @@ export async function handler(argv: Arguments): Promise<void> {
           // Record this party's consent to its own outbound set in the same fresh
           // write, so a later `psilink exchange` from this configuration is held to
           // the columns just consented to here. The reuse path writes no fresh
-          // config; the hook refreshes the kept config's record surgically instead.
-          outboundPayloadConsent,
+          // config; the hook refreshes the kept config's record surgically instead,
+          // with the record derived for the KEPT config's own output terms (the
+          // reuse derivation above) -- identical to the invitation-derived record
+          // on the fresh path, where the written config's terms are the mirror's.
+          outboundPayloadConsent: reuseOutboundPayloadConsent,
         });
         logOnlineBootstrapOutcome(log, {
           configFile: options.configFile,
@@ -776,13 +815,12 @@ export async function handler(argv: Arguments): Promise<void> {
         // same reason: the operator has just re-consented on THIS acceptance, so the
         // record is rewritten to what they were shown here rather than left at a
         // prior acceptance's value. Where this acceptance could not resolve the set
-        // it records `pending`, which asks at the first run that can -- and where
-        // nothing is transmitted at all it removes the field, rather than leaving a
-        // stale record to be enforced against a set it never described. The kept
-        // config's own metadata is what the later run resolves from, so a config
-        // whose stored metadata discloses something other than what was shown here
-        // is exactly what that run stops to ask about.
-        persistOutboundPayloadConsent(configPath, outboundPayloadConsent);
+        // it records `pending`, which asks at the first run that can. The removal
+        // case follows the KEPT config's own output terms, not the invitation's
+        // mirror (the reuse derivation above): reconciliation compares no output
+        // field, so a partner-supplied invitation must not be able to delete the
+        // record from a config that still transmits.
+        persistOutboundPayloadConsent(configPath, reuseOutboundPayloadConsent);
         log.info(
           `reused the existing configuration at ${configPath}; it already matches ` +
             "the invitation, so the connection and linkage settings are unchanged.",

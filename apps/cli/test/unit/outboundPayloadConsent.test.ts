@@ -339,3 +339,23 @@ test("prepareDataset: the same run prepares once the set is the confirmed one", 
     "diagnosis",
   ]);
 });
+
+test("a failed record write after a yes is a usage error naming the config, not a transport failure", async () => {
+  // The operator answered yes at a terminal and nothing was sent; a read-only or
+  // replaced config is a local configuration fault, so it must classify as usage
+  // (exit 64) like the sibling config writes, with the fs cause on the chain --
+  // not fall through as a transport-class failure.
+  writeConfig({ status: "pending" });
+  promptConfirmMock.mockResolvedValue(true);
+  fs.rmSync(configFile);
+  fs.mkdirSync(configFile);
+  const spec: ExchangeDataSpec = {
+    linkageTerms: acceptorTerms,
+    outboundPayloadConsent: { status: "pending" },
+  };
+  const err = await confirm(spec, metadataDisclosing(["diagnosis"]), true);
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toMatch(/could not be recorded/);
+  expect((err as Error).message).toContain(configFile);
+  expect((err as { cause?: unknown }).cause).toBeDefined();
+});

@@ -2941,21 +2941,22 @@ test("handler: online accept forwards the token's disclosed set to runOnlineBoot
  */
 async function runOfflineAcceptReuse(params: {
   configFile: string;
-  input: string;
+  input?: string;
   disclosed: string[] | undefined;
+  token?: InvitationToken;
 }): Promise<string> {
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
   try {
     const encoded = await encodeInvitation({
-      ...sampleToken(FUTURE()),
+      ...(params.token ?? sampleToken(FUTURE())),
       disclosedPayloadColumns: params.disclosed,
     });
     await acceptHandler({
       _: [],
       $0: "psilink",
-      args: [encoded, params.input],
+      args: params.input !== undefined ? [encoded, params.input] : [encoded],
       "consent-to-terms": true,
       "config-file": params.configFile,
       "key-file": path.join(path.dirname(params.configFile), ".psilink.key"),
@@ -3235,6 +3236,107 @@ test("handler: offline accept-reuse refreshes the outbound consent, preserving o
     expect(parseExchangeSpec(YAML.parse(raw)).outboundPayloadConsent).toEqual({
       status: "confirmed",
       columns: ["diagnosis"],
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: a no-output invitation cannot strip the record from a kept config that shares", async () => {
+  // The partner-controlled shape the reuse derivation exists for: reconciliation
+  // compares no output field, so an invitation carrying expects_output: false
+  // reconciles as matching a kept config that still shares. The mirror then
+  // yields no record -- and deleting the existing one would leave the later run
+  // ungated (the gate no-ops on an absent record). The record falls to pending
+  // instead: nothing about the outbound set was displayed or confirmed for a
+  // config that will transmit.
+  const { dir, input, configFile } = fixtureWithPayloadColumn();
+  try {
+    writeExistingConfig(configFile);
+    fs.appendFileSync(
+      configFile,
+      "outbound_payload_consent:\n  status: confirmed\n  columns:\n" +
+        "    - stale_col\n",
+    );
+    const base = sampleToken(FUTURE());
+    const raw = await runOfflineAcceptReuse({
+      configFile,
+      input,
+      disclosed: undefined,
+      token: {
+        ...base,
+        linkageTerms: {
+          ...base.linkageTerms,
+          output: { expectsOutput: false, shareWithPartner: true },
+        },
+      },
+    });
+    expect(parseExchangeSpec(YAML.parse(raw)).outboundPayloadConsent).toEqual({
+      status: "pending",
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: the record is removed on reuse only where the kept config does not share", async () => {
+  // The inert case: the kept config's own terms admit no transmission, so a
+  // leftover record describes nothing the run can send and is removed as
+  // hygiene rather than left stale.
+  const { dir, input, configFile } = fixtureWithPayloadColumn();
+  try {
+    const terms = getDefaultLinkageTerms("Acceptor Org");
+    writeExistingConfig(configFile, {
+      terms: {
+        ...terms,
+        output: { ...terms.output, shareWithPartner: false },
+      },
+    });
+    fs.appendFileSync(
+      configFile,
+      "outbound_payload_consent:\n  status: confirmed\n  columns:\n" +
+        "    - stale_col\n",
+    );
+    const base = sampleToken(FUTURE());
+    const raw = await runOfflineAcceptReuse({
+      configFile,
+      input,
+      disclosed: undefined,
+      token: {
+        ...base,
+        linkageTerms: {
+          ...base.linkageTerms,
+          output: { expectsOutput: false, shareWithPartner: true },
+        },
+      },
+    });
+    expect(raw).not.toContain("outbound_payload_consent");
+    expect(
+      parseExchangeSpec(YAML.parse(raw)).outboundPayloadConsent,
+    ).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: offline accept-reuse without an input file overwrites a confirmed record with pending", async () => {
+  // The unresolvable shape through the reuse writer: this acceptance displayed no
+  // set, so a prior acceptance's confirmed columns must not stand as if they were
+  // confirmed here -- pending makes the first resolving run show and ask.
+  const { dir, configFile } = fixtureWithPayloadColumn();
+  try {
+    writeExistingConfig(configFile);
+    fs.appendFileSync(
+      configFile,
+      "outbound_payload_consent:\n  status: confirmed\n  columns:\n" +
+        "    - stale_col\n",
+    );
+    const raw = await runOfflineAcceptReuse({
+      configFile,
+      disclosed: undefined,
+    });
+    expect(parseExchangeSpec(YAML.parse(raw)).outboundPayloadConsent).toEqual({
+      status: "pending",
     });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
