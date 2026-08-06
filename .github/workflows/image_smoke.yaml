@@ -145,10 +145,13 @@ jobs:
       - name: Smoke the file-drop probe tooling
         run: docker run --rm --entrypoint sh ${{ matrix.tag }} -c 'command -v smbclient'
 
-      # The variant's entrypoint preamble reads the activated provider and the
-      # host kernel's FIPS mode and reports both on every run. An operator's
-      # only cheap window into what their deployment is actually running, so a
-      # preamble that silently stopped reporting would be a real regression.
+      # The variant's entrypoint preamble runs the engagement probe and reports
+      # the host kernel's FIPS mode on every run. An operator's only cheap
+      # window into what their deployment is actually running, so a preamble
+      # that silently stopped reporting would be a real regression. The
+      # "FIPS provider active" line is written only on a zero exit from the
+      # probe, so this grep is also the assertion that the probe ships in the
+      # image and runs there: a missing file or a broken import warns instead.
       - name: Smoke the FIPS entrypoint report
         if: matrix.fips == 'true'
         run: |
@@ -158,20 +161,23 @@ jobs:
           grep -q 'FIPS provider active' entrypoint.out
           grep -q 'host kernel' entrypoint.out
 
-      # Does the configuration the image SHIPS engage the provider? The probe
-      # below answers a stronger question but answers it about configurations it
-      # writes itself, so it cannot answer this one. `crypto.getFips()` is no
-      # substitute: it returns 1 with no module loaded at all. The script fails
-      # unless fips.so is mapped into the process, an AES-256-GCM round trip at
-      # the product's own call shape succeeds, and both an MD5 digest and a
+      # Does the configuration the image SHIPS engage the provider? The probe in
+      # the step below answers a stronger question but answers it about
+      # configurations it writes itself, so it cannot answer this one.
+      # `crypto.getFips()` is no substitute: it returns 1 with no module loaded
+      # at all. This runs the copy INSIDE the image -- the same file the
+      # entrypoint runs at every container start, rather than a mounted one that
+      # could differ from it -- and it fails unless fips.so is mapped into the
+      # process, the four psilink call shapes (AES-256-GCM, HKDF-SHA-256,
+      # HMAC-SHA-256, SHA-256) all succeed, and both an MD5 digest and a
       # below-minimum RSA keygen -- which no FIPS provider serves -- fail beside
-      # it.
+      # them. The step above reads the same verdict through the exit status; this
+      # one is what puts the per-leg JSON transcript in the run log.
       - name: Assert the shipped configuration engages the FIPS provider
         if: matrix.fips == 'true'
         run: |
           docker run --rm \
-            -v "$PWD/support/fips-probe:/probe:ro" \
-            --entrypoint node ${{ matrix.tag }} /probe/image-engagement.mjs
+            --entrypoint node ${{ matrix.tag }} /app/fips-probe/image-engagement.mjs
 
       # The four-leg attribution, including the causal controls the step above
       # deliberately does not run: the provider is broken (its config MAC

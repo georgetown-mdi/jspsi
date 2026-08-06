@@ -42,9 +42,10 @@ HKDF.
   `3.0.8-1.amzn2023.0.1`, installed with `dnf swap` against a pinned release
   snapshot.
 - **The operator provides a FIPS-mode host.** The image does not enable FIPS
-  mode, cannot, and does not refuse to run when the host lacks it. It reports
-  the module it loaded and the host's FIPS-mode state on every run, and warns
-  when that state is not enabled.
+  mode, cannot, and does not refuse to run when the host lacks it. On every run
+  it probes whether its own crypto is being served by the validated module and
+  reports the host's FIPS-mode state, and warns on either when the answer is not
+  what a claim needs.
 - **No psilink-level FIPS flag.** The FIPS-mode decision belongs to the host and
   its system-wide crypto policy.
 - **Built and smoked in CI ahead of any publication.** The claim gets written
@@ -268,17 +269,49 @@ applies `nodejs_conf` and silently ignores a configuration written under
 naming one of them configures one consumer while the other runs exactly as
 though no configuration existed.
 
+The per-run report is the same question asked of the running container, and it
+is asked of the right consumer. The image ships the engagement probe and its
+entrypoint runs it before dispatching: a Node process under the image's own
+configuration, making psilink's four call shapes and requiring `fips.so` mapped
+into that process beside an MD5 digest and a below-minimum RSA keygen that both
+fail. The preamble reads the probe's exit status and nothing else, and parses no
+text at all. That is deliberate rather than incidental. Reading `openssl list
+-providers` back with awk is the obvious way to write this line and it is wrong
+twice over: `openssl` on this base is the Amazon Linux CLI, a **different
+libcrypto** from the one inside the `node` binary that runs psilink, so it
+answers for a consumer psilink does not use; and a listing parsed for an
+assurance line has no comparison behind it, so every shape the parse reads
+wrongly becomes a false assurance rather than a failure. Which module is serving
+is not read back either: the entrypoint names the `FIPS_MODULE_VERSION` the
+runtime stage bakes in from the pinned ARG, which the build assertion above has
+already compared against the module the loader activates. So no file that ships
+in either image, or runs inside one, parses `openssl list` at all; the build
+assertion is the one place that does, where the system OpenSSL is the right
+consumer because what is being verified is the package just installed, and where
+the exact comparison against the pin makes a misread shape fail the build. The
+harness in `support/fips-probe/list-algorithms.sh` parses that command too, and
+ships nowhere.
+
 CI carries the rest, because a static parser cannot observe a process.
-`image_smoke.yaml` builds the variant and then asserts, through
-`support/fips-probe/`, that the provider is **engaged** rather than merely
-present -- `crypto.getFips()` returning 1 proves nothing, since it returns 1
-with no module loaded at all. Two legs: `image-engagement.mjs` runs under the
-configuration the image *ships* and requires `fips.so` mapped into the process,
-an AES-256-GCM round trip at the product's own call shape succeeding, and both
-an MD5 digest and a below-minimum RSA keygen failing beside it; `webcrypto-probe.mjs`
-adds the causal controls, breaking the provider and re-running the same call.
-A third leg runs a full two-party exchange between two containers of the image
-over a shared volume, which is the only end-to-end run either image gets.
+`image_smoke.yaml` builds the variant and then asserts that the provider is
+**engaged** rather than merely present -- `crypto.getFips()` returning 1 proves
+nothing, since it returns 1 with no module loaded at all. Three legs. The first
+runs the probe copy *inside* the built image, the same file the entrypoint runs,
+which is what puts its per-leg JSON transcript in the run log. The second is
+`webcrypto-probe.mjs` from `support/fips-probe/`, mounted rather than shipped,
+which adds the causal controls: breaking the provider and re-running the same
+call. The third runs a full two-party exchange between two containers of the
+image over a shared volume, which is the only end-to-end run either image gets.
+
+The probe's product legs are what a "dispatches into the validated module"
+claim may name, and no more: AES-256-GCM, HKDF-SHA-256, HMAC-SHA-256 and
+SHA-256, each at the parameter shape `packages/core/src` passes. Naming a
+primitive in such a claim means adding its leg first. That the four are calls
+the committed probe actually makes and completes is driven in
+`scripts/docker-entrypoint-fips.test.mjs`, so a leg silently dropped or
+misparameterised reddens there; that the claim in
+[COMPLIANCE.md](../COMPLIANCE.md#fips-140) names those four and no others is
+held by review.
 
 ## What it costs
 

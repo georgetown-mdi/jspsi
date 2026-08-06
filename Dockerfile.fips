@@ -116,8 +116,9 @@ ARG FIPS_MODULE_VERSION
 
 # samba-client provides smbclient for the Windows file-drop setup scripts'
 # SMB probe, as apk add samba-client does in the root Dockerfile; the openssl
-# CLI is what reads the loaded provider back, in the assertion below and in the
-# entrypoint's per-run report.
+# CLI is what reads the loaded provider back in the build assertion below, which
+# is the only reader of it -- the entrypoint's per-run report probes Node's own
+# crypto instead, that being the consumer psilink actually runs on.
 RUN dnf -y --releasever=${AL2023_RELEASEVER} install samba-client openssl && dnf clean all
 # `swap`, not `install` or `downgrade`. The stock amazonlinux:2023 already ships
 # openssl-fips-provider-latest at an uncertified 3.5.5, and its fips.so is the
@@ -135,6 +136,17 @@ RUN dnf -y --releasever=${AL2023_RELEASEVER} swap openssl-fips-provider-latest $
 # module version string, and which runs the module's own integrity self-test as
 # a side effect, since a fips.so whose bytes do not match its embedded MAC never
 # reaches `status: active`.
+#
+# This awk is the only parse of `openssl list` output on either image's path --
+# nothing that ships in an image or runs inside one reads that command back, the
+# remaining parse in the repository being support/fips-probe/list-algorithms.sh,
+# a harness that ships nowhere. It is safe here for two reasons the runtime is
+# not: at build time the system OpenSSL is the right consumer, because what is
+# being verified is the package just installed, and the parse is followed by an
+# exact comparison against the pin, so any shape it reads wrongly fails the
+# build rather than reporting an assurance. The exact comparison is what makes
+# the block-anchored scan checkable: a fips block with no status line of its own
+# yields the empty string, which is not the pinned value.
 RUN set -eux; \
   owner="$(rpm -qf --qf '%{NAME} %{VERSION}-%{RELEASE}' /usr/lib64/ossl-modules/fips.so)"; \
   echo "installed FIPS module comes from: ${owner}"; \
@@ -169,6 +181,12 @@ ARG VITE_DEPLOYMENT_PROFILE
 ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
 ENV JOB_CLI_BINARY=/app/apps/cli/dist/index.js
 
+# The pinned module version, carried into the image so the entrypoint can name
+# the module without reading one back. The assertion above has already compared
+# this value against what the installed module reports, so inside the image it
+# is a fact about the build rather than a claim about the run.
+ENV FIPS_MODULE_VERSION=${FIPS_MODULE_VERSION}
+
 EXPOSE 3000
 
 # Two scripts: the FIPS preamble reports the provider and the host's FIPS-mode
@@ -176,6 +194,13 @@ EXPOSE 3000
 # so both images serve the CLI and `serve` roles identically.
 COPY docker-entrypoint.sh docker-entrypoint-fips.sh /app/
 RUN chmod +x /app/docker-entrypoint.sh /app/docker-entrypoint-fips.sh
+
+# The engagement probe the preamble runs at every container start, and the
+# module holding its legs. Only these two files of support/fips-probe/ ship:
+# the rest of that directory builds OpenSSL from source and deliberately
+# corrupts a provider, which is a measurement harness rather than anything a
+# runtime image should carry.
+COPY support/fips-probe/engagement.mjs support/fips-probe/image-engagement.mjs /app/fips-probe/
 
 ENV OPENSSL_CONF=/etc/psilink/fips-only.cnf
 ENV OPENSSL_MODULES=/usr/lib64/ossl-modules

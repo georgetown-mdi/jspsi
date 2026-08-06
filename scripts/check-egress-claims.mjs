@@ -108,10 +108,13 @@
 // app and library trees and the web app's static assets it carries
 // apps/web/server, the Nitro entry point the deployed server boots (named by
 // apps/web/nitro.config.ts). SCANNED_FILES carries the shipped files that sit
-// at the repository root rather than in a tree, for both images: the two
-// entrypoints, docker-entrypoint.sh and docker-entrypoint-fips.sh, which run
-// inside the container the "no other network connection" claim is about (each
-// is its image's ENTRYPOINT), and the two Dockerfiles, Dockerfile and
+// outside any scanned tree, for both images: the two entrypoints,
+// docker-entrypoint.sh and docker-entrypoint-fips.sh, which run inside the
+// container the "no other network connection" claim is about (each is its
+// image's ENTRYPOINT); the two files of support/fips-probe/ the FIPS variant
+// COPYs in, which its entrypoint runs at every container start and which are
+// therefore as shipped as the entrypoint itself, the rest of that directory
+// being a harness that ships nowhere; and the two Dockerfiles, Dockerfile and
 // Dockerfile.fips, which reach a different class -- what the image build
 // fetches rather than what the running container connects to -- scanned anyway,
 // because a `RUN curl` or `ADD https://...` pulling a third party into the
@@ -153,6 +156,8 @@ export const SCANNED_FILES = [
   "docker-entrypoint.sh",
   "Dockerfile.fips",
   "docker-entrypoint-fips.sh",
+  "support/fips-probe/engagement.mjs",
+  "support/fips-probe/image-engagement.mjs",
 ];
 
 /**

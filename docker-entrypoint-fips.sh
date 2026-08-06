@@ -3,44 +3,41 @@
 # then hands off to the dispatch script the default image runs, unchanged, so
 # both images serve the CLI and `serve` roles identically.
 #
-# What it reports, and why each is read rather than baked in at build time:
+# What it reports, and how each is established:
 #
-#   the activated provider -- read back through `openssl list`, which is the
-#     Amazon Linux OpenSSL CLI and therefore a different libcrypto from the one
-#     bundled into the `node` binary that runs psilink. The line names what that
-#     consumer activated, and the shipped configuration sets both `openssl_conf`
-#     and `nodejs_conf` so the two see the same providers; an OPENSSL_CONF
-#     substituted at run time can separate them, and only the CI engagement
-#     probe observes Node's own process. The image build asserts the same
-#     version and status; this is what an operator can see without rebuilding.
+#   whether this container's crypto is served by the validated module -- decided
+#     by running the engagement probe the image ships and reading its exit
+#     status, and by nothing else. The probe is a Node process under the image's
+#     own configuration, so it exercises the same libcrypto the `node` that runs
+#     psilink does, at the parameter shapes psilink itself passes; it requires
+#     fips.so mapped into that process and an MD5 digest and a below-minimum RSA
+#     keygen failing beside the successful calls, so a success served by the
+#     default provider cannot read as engagement. The Amazon Linux `openssl` CLI
+#     answers for a different libcrypto and a different consumer, which is why
+#     nothing here consults it. WHICH module is serving is not read back at all:
+#     FIPS_MODULE_VERSION is baked into the image by a build that asserted the
+#     installed module reports exactly that string, so at run time it is a fact
+#     rather than a parse.
 #   the host kernel's FIPS mode -- /proc/sys/crypto/fips_enabled, which is the
 #     host kernel's file seen through the container's /proc. The image cannot
 #     set it: fips-mode-setup does not work inside a container, which AWS and
 #     Red Hat both document, so this is the operator's to provide.
 #
-# It warns and does not refuse when the host is not in FIPS mode. Refusing would
-# strand every developer machine -- Docker Desktop's kernel does not carry the
-# sysctl at all -- and the operator is the one who decides what their deployment
-# has to satisfy. What the arrangement does and does not support a claim of, at
-# each of the three host tiers, is in docs/notes/fips-variant-image.md.
+# It warns and does not refuse, on either report. Refusing would strand every
+# developer machine -- Docker Desktop's kernel does not carry the sysctl at all
+# -- and the operator is the one who decides what their deployment has to
+# satisfy. What the arrangement does and does not support a claim of, at each of
+# the three host tiers, is in docs/notes/fips-variant-image.md.
 set -e
 
-# The scan is anchored to the fips block: a provider header (the only one-field
-# line that is not "Providers:") sets `seen` for fips and clears it for every
-# other provider, so a fips block carrying no status line cannot borrow the
-# version or the status of whichever provider is listed next.
-provider=$(openssl list -providers 2>/dev/null |
-  awk 'NF == 1 && index($1, ":") == 0 { seen = ($1 == "fips"); next }
-       seen && $1 == "version:" { version = $2 }
-       seen && $1 == "status:" { print version, $2; exit }') || provider=""
-
-provider_version=${provider%% *}
-provider_status=${provider#* }
-
-if [ -n "$provider_version" ] && [ "$provider_status" = "active" ]; then
-  echo "[psilink] FIPS provider active: Amazon Linux 2023 OpenSSL FIPS provider, module $provider_version (as reported by the system OpenSSL)" >&2
+# The probe's own stdout carries the JSON transcript and the per-leg reasons,
+# which are worth showing on the failure path and noise on the success one, so
+# it is captured whole and replayed rather than read.
+if engagement_report=$(node /app/fips-probe/image-engagement.mjs 2>&1); then
+  echo "[psilink] FIPS provider active: this container's crypto is served by the Amazon Linux 2023 OpenSSL FIPS provider, module ${FIPS_MODULE_VERSION} (probed in this container at startup)" >&2
 else
-  echo "[psilink] WARNING: 'openssl list -providers' reported no FIPS provider with status active. This image's cryptography is not running in the module it was built around." >&2
+  echo "[psilink] WARNING: the startup probe did not find this container's crypto being served by the FIPS provider this image was built around (module ${FIPS_MODULE_VERSION}). This image's cryptography is not running in the module it was built around. The probe reported:" >&2
+  printf '%s\n' "$engagement_report" >&2
 fi
 
 if [ -r /proc/sys/crypto/fips_enabled ]; then

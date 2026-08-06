@@ -464,6 +464,52 @@ describe("Dockerfile.fips certificate pins", () => {
     expect(image.allRuntimeDests).toContain(image.runtimeEnv.OPENSSL_CONF);
     expect(image.runtimeEnv.OPENSSL_MODULES).toBe("/usr/lib64/ossl-modules");
   });
+
+  it("carries the pinned module version into the image as an ENV", () => {
+    // The entrypoint names the module from this value rather than reading one
+    // back, which is sound only because the assertion above already compared it
+    // against what the installed module reports. Both halves are needed: drop
+    // the runtime stage's ARG redeclaration and the ENV expands to the empty
+    // string, leaving the per-run assurance line naming no module at all.
+    expect(image.runtimeEnv.FIPS_MODULE_VERSION).toBe("${FIPS_MODULE_VERSION}");
+    expect(
+      image.runtime.some(
+        ({ inst, rest }) => inst === "ARG" && rest === "FIPS_MODULE_VERSION",
+      ),
+    ).toBe(true);
+  });
+});
+
+// The variant's per-run provider report is the exit status of a probe the image
+// runs at every container start, so the probe and everything it imports have to
+// be in the image. A path that is not there warns on every run, which reads
+// exactly like a provider that failed to load.
+describe("the engagement probe the FIPS variant runs at startup", () => {
+  const image = IMAGES.find(({ file }) => file === "Dockerfile.fips").image;
+  const preamble = readRepoFile(posix.basename(dispatchChain(image).chain[0]));
+  const probePath = /\bnode\s+(\/\S+\.mjs)\b/.exec(preamble)?.[1];
+
+  it("runs a probe the runtime stage copies in", () => {
+    expect(probePath).toBeDefined();
+    expect(image.allRuntimeDests).toContain(probePath);
+  });
+
+  it("copies in every module that probe imports", () => {
+    // Read from the committed source of the copied file rather than from the
+    // Dockerfile's source list, so an import added to the probe without a
+    // matching COPY reddens here instead of at the operator's first run.
+    const copy = image.runtimeCopies.find(({ dests }) =>
+      dests.includes(probePath),
+    );
+    const source = readRepoFile(copy.sources[copy.dests.indexOf(probePath)]);
+    const imports = [...source.matchAll(/\bfrom\s+"(\.[^"]+)"/g)].map(
+      ([, specifier]) => posix.resolve(posix.dirname(probePath), specifier),
+    );
+    expect(imports.length).toBeGreaterThan(0);
+    for (const imported of imports) {
+      expect(image.allRuntimeDests).toContain(imported);
+    }
+  });
 });
 
 describe("the fips-only OpenSSL configuration the variant ships", () => {

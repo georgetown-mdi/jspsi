@@ -222,7 +222,12 @@ changes those values. The three do not move together, and that is what keeps a
 partial override from passing. The `dnf swap` and the `rpm -qf` assertion both
 read `FIPS_PROVIDER_PACKAGE` and `FIPS_PROVIDER_VERSION`, so overriding those
 moves the install and its own check in step; `FIPS_MODULE_VERSION` appears in no
-`dnf` line and is read only by the read-back assertion. A build driven by hand
+`dnf` line and is read by the read-back assertion and by the `ENV` of the same
+name the runtime stage exports from it. That `ENV` is the value the entrypoint's
+per-run report names, and it is trustworthy at run time for exactly one reason:
+the assertion that compares it against the module the loader activates has
+already run in the same stage, so no green build can carry an `ENV` naming a
+module other than the one installed. A build driven by hand
 with `--build-arg` over the install pins alone therefore installs a different
 NVR, satisfies the `rpm -qf` half, and fails on the module version the loader
 reports -- it goes red, not green. A green build carrying a different module
@@ -359,6 +364,8 @@ The file is worth binding at all because the release and smoke builds export eve
 **The npm floor.** The install-side policy arrives in npm 11.16.0: that release is the first to define the `strict-allow-scripts` config, ship the preflight, and read `allowScripts` in arborist. Measured against this repo's own tree, 11.16.0 installs clean with the committed map and raises `ESTRICTALLOWSCRIPTS` when a verdict is removed, exactly as 11.17 does. npm 11.15.0 and earlier have none of it, so both are inert there: the map goes unread with no diagnostic at all, and the flag draws only `npm warn Unknown project config "strict-allow-scripts"` (measured on 11.15.0 against this branch's file) -- a warning about the key, never about an install script that ran unreviewed.
 
 The builder's floor is nonetheless 11.17 in intent, for two reasons that are not "anything lower is inert": 11.17 is the npm every matching rule in this section was measured against, and it is the first to run the same preflight from `npm exec`. Nothing in this repo enforces that floor, in the image or outside it. `engines.node` constrains node, not the npm shipped beside it, so an install driven by npm 11.15.0 or earlier runs with the policy silently off wherever that npm comes from -- including a builder whose base digest is re-pinned onto an older node. Which npm the pinned digest bundles is therefore a property of the base image: the one pinned here bundles 11.17.0, measured in a real build.
+
+That last sentence is about the default `Dockerfile` only. The FIPS variant's builder installs no distribution node package: its npm arrives inside the `nodejs.org` tarball named by `ARG NODE_VERSION`, whose bytes are checked against a manifest fetched beside them rather than against any value committed here, and whose bundled npm the build prints (`npm --version`) without asserting. So the npm that variant installs under is a property of the tarball that ARG names, and moving the ARG moves it with nothing to notice. The floor is unenforced in both builders; what differs is only which artifact decides it.
 
 **The key forms npm matches.** For a registry package npm honors a bare name (equivalently `name@*`), one exact version, and exact versions joined by `||`. A semver range or a dist-tag is dropped from the policy with one warning. A lone version must be spelled canonically, because npm compares the key's text against the version it parsed out of the tarball URL: `v1.0.0`, `=1.0.0`, a leading zero, or build metadata is kept in the policy and matches nothing, with no diagnostic at all. Inside a `||` disjunction the comparison runs through semver instead, which accepts a leading `v` and build metadata and normalizes them away, while still rejecting `=1.0.0` and a leading zero. Either way an entry npm does not match states a verdict that is not in force.
 
