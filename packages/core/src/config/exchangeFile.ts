@@ -5,6 +5,7 @@ import type { ExchangeSpec } from "./exchangeSpec.js";
 import type { ConnectionConfig, FileSyncOptions } from "./connection.js";
 import type { LinkageTerms } from "./linkageTerms.js";
 import type { Metadata } from "./metadata.js";
+import type { OutboundPayloadConsent } from "./outboundPayloadConsent.js";
 import type { Standardization } from "./standardization.js";
 import { snakeizeKeys } from "../utils/camelizeKeys.js";
 import { PLACEHOLDER_SSH_USERNAME } from "./endpointProducer.js";
@@ -155,6 +156,14 @@ export interface ExchangeSpecAssembly {
   disclosedPayloadColumns?: string[];
   /** See {@link ExchangeFileInput.expectedPayloadColumns}. */
   expectedPayloadColumns?: string[];
+  /**
+   * This party's consent to its OWN outbound payload set -- the record a later
+   * run is held to before it connects (`assertOutboundPayloadConsented`). Absent
+   * for every party that is not an acceptor, whose own set is authored at mint;
+   * derived by the consenting surface through `deriveOutboundPayloadConsent`, so
+   * an assembled record always names the set the operator was shown.
+   */
+  outboundPayloadConsent?: OutboundPayloadConsent;
 }
 
 /**
@@ -191,6 +200,9 @@ export function assembleExchangeSpec(
       : {}),
     ...(input.expectedPayloadColumns !== undefined
       ? { expectedPayloadColumns: input.expectedPayloadColumns }
+      : {}),
+    ...(input.outboundPayloadConsent !== undefined
+      ? { outboundPayloadConsent: input.outboundPayloadConsent }
       : {}),
   };
   return ExchangeSpecSchema.parse(assembled);

@@ -417,6 +417,39 @@ export function assertDisclosureMatchesCommitment(
 }
 
 /**
+ * Derive the {@link OutboundPayloadConsent} record a consenting surface writes --
+ * the WRITER's counterpart to {@link assessOutboundPayloadConsent}, which reads
+ * the record back before every later run.
+ *
+ * `metadata` is the metadata the surface resolved and showed the operator, or
+ * `undefined` where it could resolve none (no input file was named, or its columns
+ * could not satisfy the invitation's linkage keys). The column set is resolved
+ * here through {@link disclosedColumnNames} -- the predicate {@link preparePayload}
+ * transmits on and {@link assessOutboundPayloadConsent} re-resolves at the run --
+ * so a recorded confirmation structurally cannot name a set other than the one
+ * that leaves the machine.
+ *
+ * The three outcomes are the record's three states:
+ * - ABSENT (`undefined`) where `output.shareWithPartner` is false: nothing crosses
+ *   whatever the metadata discloses, so there is no disclosure to consent to. The
+ *   same output gate {@link assessOutboundPayloadConsent} applies when reading.
+ * - `pending` where the set was not resolvable, so the first run that can resolve
+ *   it shows and confirms it, and an unattended one refuses.
+ * - `confirmed` with the resolved set otherwise.
+ *
+ * Every surface that takes this consent derives its record here -- the CLI's
+ * acceptance and the browser's -- so no front end records one on a rule of its own.
+ */
+export function deriveOutboundPayloadConsent(
+  output: Output,
+  metadata: Metadata | undefined,
+): OutboundPayloadConsent | undefined {
+  if (!output.shareWithPartner) return undefined;
+  if (metadata === undefined) return { status: "pending" };
+  return { status: "confirmed", columns: disclosedColumnNames(metadata) };
+}
+
+/**
  * What this party's recorded {@link OutboundPayloadConsent} says about the column
  * set the run it is about to make would actually transmit. Produced by
  * {@link assessOutboundPayloadConsent}; a front end reads it to show and confirm

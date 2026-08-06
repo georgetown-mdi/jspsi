@@ -46,4 +46,32 @@ describe("prepareManagedRerunExchange", () => {
     const prepared = prepareManagedRerunExchange(exchangeFile(), rows, columns);
     expect(prepared.expectedPayloadColumns).toBeUndefined();
   });
+
+  test("refuses before connecting when the run's set is not the one consented to", () => {
+    // A stored acceptor document whose consent names a set this run's columns no
+    // longer resolve: the re-run must refuse rather than transmit it. The document
+    // carries no metadata, so the set resolves from THIS run's header.
+    const stale = composeManagedExchangeFile({
+      connection: { channel: "webrtc", host: "signaling.example.org" },
+      linkageTerms: getDefaultLinkageTerms("Clinic A"),
+      outboundPayloadConsent: {
+        status: "confirmed",
+        columns: ["consented_column"],
+      },
+    });
+    expect(() => prepareManagedRerunExchange(stale, rows, columns)).toThrow(
+      /not the ones you confirmed/,
+    );
+  });
+
+  test("a consent record covering the run's set prepares normally", () => {
+    const covered = composeManagedExchangeFile({
+      connection: { channel: "webrtc", host: "signaling.example.org" },
+      linkageTerms: getDefaultLinkageTerms("Clinic A"),
+      outboundPayloadConsent: { status: "confirmed", columns: [] },
+    });
+    expect(() =>
+      prepareManagedRerunExchange(covered, rows, columns),
+    ).not.toThrow();
+  });
 });

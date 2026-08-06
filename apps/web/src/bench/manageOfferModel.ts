@@ -22,7 +22,10 @@
  * "compose then throw away" path here -- a caller that declines never composes.
  */
 
-import { MAX_TOKEN_MAX_AGE_DAYS } from "@psilink/core";
+import {
+  MAX_TOKEN_MAX_AGE_DAYS,
+  deriveOutboundPayloadConsent,
+} from "@psilink/core";
 
 import {
   MAX_LABEL_LENGTH,
@@ -80,6 +83,14 @@ export { MAX_TOKEN_MAX_AGE_DAYS };
  * payload-column commitments. The connection is supplied separately as a webrtc
  * locator, so this shape is transport-agnostic and identical for both sides. */
 export interface ManagedExchangeDocumentParts {
+  /**
+   * This party's side of the partnership. Required, not optional: it decides
+   * whether the composed document carries an outbound-payload consent record, and
+   * an ABSENT record is a silent pass at every later run -- so a composing surface
+   * must state its side rather than omit it into that default (see
+   * {@link composeManagedDocument}).
+   */
+  side: ManagedExchangeSide;
   /** This party's linkage terms -- the inviter's minted terms, or the acceptor's
    * derived perspective (identity replaced, output/payload mirrored). */
   linkageTerms: ExchangeSpec["linkageTerms"];
@@ -122,6 +133,18 @@ export interface ManagedExchangeDocumentParts {
  * document carries no `authentication` block and no credential by construction
  * (see {@link composeManagedExchangeFile}).
  *
+ * The one field this composer DERIVES rather than carries is the acceptor's
+ * `outboundPayloadConsent`. Nobody authors an acceptance's own outbound set --
+ * the invitation authors the inviter's, the mirror leaves the acceptor's absent,
+ * and it resolves from the acceptor's own CSV header -- so the record is what
+ * makes it chosen instead of inferred, and core's `deriveOutboundPayloadConsent`
+ * derives it from the very `metadata` this document persists: the set the columns
+ * step showed the operator, resolved by the predicate the run transmits on. That
+ * derivation, rather than a caller-supplied set, is what keeps the persisted
+ * record and the persisted metadata from disagreeing. An inviter records none:
+ * its own set was authored at mint and pinned as `disclosedPayloadColumns` (see
+ * docs/spec/FILE_SYNC.md, "The acceptor's own outbound consent").
+ *
  * @throws {ZodError} if the assembled document fails schema validation (a
  *   malformed locator, an out-of-range port).
  */
@@ -129,6 +152,10 @@ export function composeManagedDocument(
   parts: ManagedExchangeDocumentParts,
   connection: WebRTCExchangeLocator,
 ): ExchangeSpec {
+  const outboundPayloadConsent =
+    parts.side === "acceptor"
+      ? deriveOutboundPayloadConsent(parts.linkageTerms.output, parts.metadata)
+      : undefined;
   return composeManagedExchangeFile({
     connection,
     linkageTerms: parts.linkageTerms,
@@ -142,6 +169,7 @@ export function composeManagedDocument(
     ...(parts.expectedPayloadColumns !== undefined
       ? { expectedPayloadColumns: parts.expectedPayloadColumns }
       : {}),
+    ...(outboundPayloadConsent !== undefined ? { outboundPayloadConsent } : {}),
   });
 }
 

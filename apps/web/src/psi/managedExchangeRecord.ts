@@ -32,7 +32,11 @@ import { z } from "zod";
 
 import { deriveEditedExpiry } from "./managedTokenAgeEdit";
 
-import type { ExchangeSpec, WebRTCExchangeLocator } from "@psilink/core";
+import type {
+  ExchangeSpec,
+  OutboundPayloadConsent,
+  WebRTCExchangeLocator,
+} from "@psilink/core";
 import type { ZodType } from "zod";
 
 /**
@@ -336,6 +340,10 @@ export interface ManagedExchangeFileComposition {
   disclosedPayloadColumns?: Array<string>;
   /** This party's receive-side lock-in. */
   expectedPayloadColumns?: Array<string>;
+  /** This party's consent to its own outbound payload set. Absent for a party
+   * that records none -- every side but the acceptor (see
+   * {@link ../bench/manageOfferModel.ts}). */
+  outboundPayloadConsent?: OutboundPayloadConsent;
 }
 
 /**

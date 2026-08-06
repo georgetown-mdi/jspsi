@@ -436,6 +436,7 @@ export function InviterBench() {
       );
       const exchangeFile = composeManagedDocument(
         {
+          side: "inviter",
           linkageTerms: invitation.linkageTerms,
           ...(invitation.metadata !== undefined
             ? { metadata: invitation.metadata }

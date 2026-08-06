@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import {
   assessOutboundPayloadConsent,
   assertOutboundPayloadConsented,
+  deriveOutboundPayloadConsent,
 } from "../src/payloadExchange";
 import { prepareForExchange, resolveExchangeInputs } from "../src/exchange";
 import { parseExchangeSpec } from "../src/config/exchangeSpec";
@@ -51,6 +52,67 @@ function metadataDisclosing(columns: string[]): Metadata {
     })),
   ];
 }
+
+// --- deriveOutboundPayloadConsent --------------------------------------------
+
+test("deriveOutboundPayloadConsent: a resolved set is confirmed, in this party's own namespace", () => {
+  expect(
+    deriveOutboundPayloadConsent(
+      SHARES,
+      metadataDisclosing(["enrollment_date", "program_code"]),
+    ),
+  ).toEqual({
+    status: "confirmed",
+    columns: ["enrollment_date", "program_code"],
+  });
+});
+
+test("deriveOutboundPayloadConsent: a set disclosing nothing is a real confirmation, not an absent record", () => {
+  // The empty confirmation and the absent record are distinct states: the first
+  // holds a later run to disclosing nothing, the second checks nothing at all.
+  expect(deriveOutboundPayloadConsent(SHARES, metadataDisclosing([]))).toEqual({
+    status: "confirmed",
+    columns: [],
+  });
+});
+
+test("deriveOutboundPayloadConsent: an unresolvable set is pending, never absent", () => {
+  // A surface that could not resolve the set (no input file named, or columns that
+  // cannot satisfy the linkage keys) must not leave the field absent -- that is the
+  // silent pass. Pending makes the first run that CAN resolve it ask.
+  expect(deriveOutboundPayloadConsent(SHARES, undefined)).toEqual({
+    status: "pending",
+  });
+});
+
+test("deriveOutboundPayloadConsent: no record where nothing is transmitted to the partner", () => {
+  // The output gate the reader applies, applied identically at write: with the
+  // partner entitled to no result nothing crosses whatever the metadata discloses.
+  expect(
+    deriveOutboundPayloadConsent(
+      SHARES_NOTHING,
+      metadataDisclosing(["enrollment_date"]),
+    ),
+  ).toBeUndefined();
+  expect(
+    deriveOutboundPayloadConsent(SHARES_NOTHING, undefined),
+  ).toBeUndefined();
+});
+
+test("deriveOutboundPayloadConsent: what it writes, the run-time read finds current", () => {
+  // The writer and the reader must resolve the set the same way, or an acceptance
+  // would refuse its own first run. Pinned across both directions rather than
+  // asserted of either alone.
+  const metadata = metadataDisclosing(["enrollment_date", "program_code"]);
+  const record = deriveOutboundPayloadConsent(SHARES, metadata);
+  expect(assessOutboundPayloadConsent(record, metadata, SHARES)).toEqual({
+    status: "current",
+    columns: ["enrollment_date", "program_code"],
+  });
+  expect(() =>
+    assertOutboundPayloadConsented(record, metadata, SHARES),
+  ).not.toThrow();
+});
 
 // --- assessOutboundPayloadConsent --------------------------------------------
 

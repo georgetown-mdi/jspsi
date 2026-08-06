@@ -971,7 +971,11 @@ export function AcceptorBench() {
   // expectedPayloadColumns (empty = strict receive-nothing; an absent set stays
   // absent = lazy), exactly as the CLI accept persists it, so a managed re-run
   // fails closed if the partner transmits a set diverging from what was
-  // consented to here. The secret is the invitation's; the one-shot run discards
+  // consented to here. This party's OWN outbound set -- the one the columns step
+  // showed -- is recorded as the document's outboundPayloadConsent, derived by the
+  // composer from the same metadata persisted beside it, so a later CLI run or
+  // managed re-run sends exactly that set or stops to ask rather than passing
+  // silently. The secret is the invitation's; the one-shot run discards
   // its own derived rotation, so the record stays coherent at this value until a
   // managed re-run rotates it. Declining is simply not pressing Manage.
   async function manageExchange(choices: ManageOfferChoices) {
@@ -982,6 +986,7 @@ export function AcceptorBench() {
     try {
       const exchangeFile = composeManagedDocument(
         {
+          side: "acceptor",
           linkageTerms: deriveAcceptedLinkageTerms(
             invitationToken.linkageTerms,
             committedName,

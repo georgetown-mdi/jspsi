@@ -16,6 +16,12 @@
  * `prepareAcceptorExchange` applies from the invitation's disclosed set. An absent
  * persisted set (a lazy token) stays undefined and the party reconciles lazily.
  *
+ * The send side has its own persisted gate: the acceptor's `outboundPayloadConsent`
+ * rides the document into `prepareForExchange`, which refuses before connecting if
+ * the set this re-run resolves is not the one the operator confirmed at accept
+ * (`assertOutboundPayloadConsented`). Absent on every other party, where it is a
+ * no-op.
+ *
  * Pure and exported so the terms binding and the lock-in are the tested boundary,
  * pinned without a connection.
  */
@@ -49,6 +55,9 @@ export function prepareManagedRerunExchange(
         : {}),
       ...(exchangeFile.disclosedPayloadColumns !== undefined
         ? { disclosedPayloadColumns: exchangeFile.disclosedPayloadColumns }
+        : {}),
+      ...(exchangeFile.outboundPayloadConsent !== undefined
+        ? { outboundPayloadConsent: exchangeFile.outboundPayloadConsent }
         : {}),
     },
     exchangeFile.linkageTerms.identity,

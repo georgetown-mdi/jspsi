@@ -5,8 +5,11 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   inferMetadata,
+  parseExchangeSpec,
+  snakeizeKeys,
 } from "@psilink/core";
 import { describe, expect, test } from "vitest";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import {
   LABEL_GUIDANCE,
@@ -68,6 +71,7 @@ function depositInputs(
     side: "inviter",
     exchangeFile: composeManagedDocument(
       {
+        side: "inviter",
         linkageTerms: inviterTerms,
         metadata: inviterMetadata,
         disclosedPayloadColumns: tokenDisclosedColumns,
@@ -98,7 +102,10 @@ describe("webrtcLocatorFromEndpoint", () => {
     // The composer's strict parse must accept it, so an absent optional cannot be
     // an explicit `undefined` key.
     expect(() =>
-      composeManagedDocument({ linkageTerms: inviterTerms }, locator),
+      composeManagedDocument(
+        { side: "inviter", linkageTerms: inviterTerms },
+        locator,
+      ),
     ).not.toThrow();
   });
 });
@@ -106,7 +113,11 @@ describe("webrtcLocatorFromEndpoint", () => {
 describe("composeManagedDocument", () => {
   test("composes a credential-free webrtc document with no authentication block", () => {
     const doc = composeManagedDocument(
-      { linkageTerms: inviterTerms, metadata: inviterMetadata },
+      {
+        side: "inviter",
+        linkageTerms: inviterTerms,
+        metadata: inviterMetadata,
+      },
       webrtcLocatorFromEndpoint(inviterEndpoint),
     );
     expect(doc.connection).toEqual(
@@ -121,6 +132,7 @@ describe("composeManagedDocument", () => {
   test("carries caller-supplied payload commitments verbatim, never re-derived", () => {
     const doc = composeManagedDocument(
       {
+        side: "inviter",
         linkageTerms: inviterTerms,
         metadata: inviterMetadata,
         // Deliberately NOT what this metadata would derive, so the assertion
@@ -140,6 +152,7 @@ describe("composeManagedDocument", () => {
   test("preserves an EMPTY commitment (strict), distinct from an absent one (lazy)", () => {
     const strict = composeManagedDocument(
       {
+        side: "inviter",
         linkageTerms: inviterTerms,
         disclosedPayloadColumns: [],
         expectedPayloadColumns: [],
@@ -150,11 +163,136 @@ describe("composeManagedDocument", () => {
     expect(strict.expectedPayloadColumns).toEqual([]);
 
     const lazy = composeManagedDocument(
-      { linkageTerms: inviterTerms, metadata: inviterMetadata },
+      {
+        side: "inviter",
+        linkageTerms: inviterTerms,
+        metadata: inviterMetadata,
+      },
       webrtcLocatorFromEndpoint(inviterEndpoint),
     );
     expect(lazy).not.toHaveProperty("disclosedPayloadColumns");
     expect(lazy).not.toHaveProperty("expectedPayloadColumns");
+  });
+});
+
+// The acceptor's own perspective of the inviter's terms: identity replaced,
+// output and payload mirrored -- what the accept flow composes its document from.
+const acceptedTerms = deriveAcceptedLinkageTerms(inviterTerms, "Clinic A");
+// The acceptor's own file: ssn/first_name/last_name/dob infer linkage columns and
+// visit_id infers a disclosed payload column, so the set it would send is
+// non-empty and derived, not authored.
+const acceptorMetadataFixture = inferMetadata([
+  "ssn",
+  "first_name",
+  "last_name",
+  "dob",
+  "visit_id",
+]);
+
+describe("the acceptor's outbound-payload consent record", () => {
+  test("records the resolved set as confirmed -- exactly what the columns step showed", () => {
+    const doc = composeManagedDocument(
+      {
+        side: "acceptor",
+        linkageTerms: acceptedTerms,
+        metadata: acceptorMetadataFixture,
+      },
+      webrtcLocatorFromEndpoint(invitationEndpoint),
+    );
+    // The shown set is disclosedColumnNames over the same metadata the columns
+    // step held, which is the metadata this document persists -- so the record and
+    // the document's own metadata cannot state different disclosures.
+    expect(doc.outboundPayloadConsent).toEqual({
+      status: "confirmed",
+      columns: disclosedColumnNames(acceptorMetadataFixture),
+    });
+    // Pinned literally too, so the assertion above cannot pass on a derivation
+    // that drifted in step with the record.
+    expect(doc.outboundPayloadConsent).toEqual({
+      status: "confirmed",
+      columns: ["visit_id"],
+    });
+  });
+
+  test("records confirmed with an EMPTY set when the file discloses nothing, distinct from no record", () => {
+    const keysOnly = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    const doc = composeManagedDocument(
+      {
+        side: "acceptor",
+        linkageTerms: acceptedTerms,
+        metadata: keysOnly,
+      },
+      webrtcLocatorFromEndpoint(invitationEndpoint),
+    );
+    expect(doc.outboundPayloadConsent).toEqual({
+      status: "confirmed",
+      columns: [],
+    });
+  });
+
+  test("records pending when the acceptance resolved no set to show", () => {
+    const doc = composeManagedDocument(
+      { side: "acceptor", linkageTerms: acceptedTerms },
+      webrtcLocatorFromEndpoint(invitationEndpoint),
+    );
+    // Pending, never absent: an absent record passes silently at every later run,
+    // while pending makes the first run that CAN resolve the set show and confirm
+    // it (and an unattended one refuse).
+    expect(doc.outboundPayloadConsent).toEqual({ status: "pending" });
+  });
+
+  test("records nothing when the exchange transmits nothing to the partner", () => {
+    // An invitation whose inviting party wants no result: the mirror leaves this
+    // acceptor sharing nothing, so the payload step transmits nothing whatever the
+    // input holds and there is no disclosure to consent to.
+    const sendsNothing = deriveAcceptedLinkageTerms(
+      {
+        ...inviterTerms,
+        output: { expectsOutput: false, shareWithPartner: true },
+      },
+      "Clinic A",
+    );
+    expect(sendsNothing.output.shareWithPartner).toBe(false);
+    const doc = composeManagedDocument(
+      {
+        side: "acceptor",
+        linkageTerms: sendsNothing,
+        metadata: acceptorMetadataFixture,
+      },
+      webrtcLocatorFromEndpoint(invitationEndpoint),
+    );
+    expect(doc).not.toHaveProperty("outboundPayloadConsent");
+  });
+
+  test("the inviter records none: its own set was authored at mint", () => {
+    const doc = composeManagedDocument(
+      {
+        side: "inviter",
+        linkageTerms: inviterTerms,
+        metadata: inviterMetadata,
+      },
+      webrtcLocatorFromEndpoint(inviterEndpoint),
+    );
+    expect(doc).not.toHaveProperty("outboundPayloadConsent");
+  });
+
+  test("survives a round trip through the CLI config schema, record intact", () => {
+    const doc = composeManagedDocument(
+      {
+        side: "acceptor",
+        linkageTerms: acceptedTerms,
+        metadata: acceptorMetadataFixture,
+        expectedPayloadColumns: tokenDisclosedColumns,
+      },
+      webrtcLocatorFromEndpoint(invitationEndpoint),
+    );
+    // The document as the CLI would receive it: snake_case keys, serialized and
+    // read back through the schema a `psilink.yaml` is parsed with.
+    const serialized = stringifyYaml(snakeizeKeys(doc));
+    expect(serialized).toContain("outbound_payload_consent");
+    const reloaded = parseExchangeSpec(parseYaml(serialized));
+    expect(reloaded.outboundPayloadConsent).toEqual(doc.outboundPayloadConsent);
+    expect(reloaded.metadata).toEqual(doc.metadata);
   });
 });
 
@@ -213,7 +351,7 @@ describe("buildManagedDeposit (inviter)", () => {
 });
 
 describe("buildManagedDeposit (acceptor)", () => {
-  const acceptorColumns = ["ssn", "first_name", "last_name", "dob"];
+  const acceptorColumns = ["ssn", "first_name", "last_name", "dob", "visit_id"];
   const acceptorMetadata = inferMetadata(acceptorColumns);
   // The acceptor's own perspective: identity replaced, output/payload mirrored.
   const acceptorTerms = deriveAcceptedLinkageTerms(inviterTerms, "Clinic A");
@@ -224,6 +362,7 @@ describe("buildManagedDeposit (acceptor)", () => {
         side: "acceptor",
         exchangeFile: composeManagedDocument(
           {
+            side: "acceptor",
             linkageTerms: acceptorTerms,
             metadata: acceptorMetadata,
             ...(tokenSet !== undefined
@@ -258,6 +397,15 @@ describe("buildManagedDeposit (acceptor)", () => {
     // The acceptor persists no send-side commitment field: its send commitment
     // rides the mirrored payload.send (docs/spec/FILE_SYNC.md).
     expect(deposit.exchangeFile).not.toHaveProperty("disclosedPayloadColumns");
+  });
+
+  test("the deposited document records this party's own outbound set as confirmed", () => {
+    const deposit = acceptorDeposit(tokenDisclosedColumns);
+    expect(deposit.exchangeFile.outboundPayloadConsent).toEqual({
+      status: "confirmed",
+      columns: disclosedColumnNames(acceptorMetadata),
+    });
+    expect(disclosedColumnNames(acceptorMetadata)).toEqual(["visit_id"]);
   });
 
   test("an EMPTY token set persists as a strict receive-nothing lock-in", () => {
