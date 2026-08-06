@@ -16,6 +16,9 @@ ARG VITE_DEPLOYMENT_PROFILE=console
 
 # Amazon Linux 2023 packages nodejs20, nodejs22 and nodejs24 only, and the root
 # package.json requires >=26, so the runtime comes from the official tarball.
+# The per-architecture sha256 the tarball is checked against is committed below
+# and covers this release's bytes only, so a Node bump moves this version and
+# both of those hashes together.
 ARG NODE_VERSION=v26.7.0
 
 # The Amazon Linux release snapshot every dnf transaction below resolves
@@ -34,36 +37,44 @@ ARG FIPS_PROVIDER_PACKAGE=openssl-fips-provider-certified
 ARG FIPS_PROVIDER_VERSION=3.0.8-1.amzn2023.0.1
 ARG FIPS_MODULE_VERSION=3.0.8-d694bfa693b76001
 
-FROM amazonlinux:2023 AS nodebase
+# The multi-arch index digest, not a platform-specific manifest digest, so both
+# architectures resolve. The rootfs at this digest reports
+# PRETTY_NAME="Amazon Linux 2023.12.20260727" on each of them -- the release
+# AL2023_RELEASEVER names -- so the base and the package snapshot are one
+# release rather than two compatible ones, which is the coupling this pin is
+# for. Where it was resolved and how to re-resolve it on a bump are in
+# docs/spec/DEPENDENCY_PINS.md.
+FROM amazonlinux:2023@sha256:694092ae18877ed4e3cb9b643759ba95df1f12af12528fefa18f60f79d4c1568 AS nodebase
 ARG NODE_VERSION
 ARG AL2023_RELEASEVER
 # libatomic is the one shared library the stock Amazon Linux 2023 image lacks for
 # the official Node binary: without it node exits 127 on a missing
 # libatomic.so.1. tar, gzip and xz unpack the tarball below.
 RUN dnf -y --releasever=${AL2023_RELEASEVER} install tar gzip xz findutils libatomic && dnf clean all
-# The tarball's checksum is verified against the release's own SHASUMS256.txt,
-# which is fetched over the same channel as the tarball -- an integrity check,
-# not a provenance one. What that does and does not buy, and the two ways to
-# close it, are in docs/notes/fips-variant-image.md.
+# The tarball is checked against a sha256 committed here rather than against the
+# release's own SHASUMS256.txt, which would arrive over the same channel as the
+# bytes it vouches for. Each hash is a literal in this RUN and deliberately not
+# an ARG: an ARG moves with --build-arg alongside the artifact it is meant to
+# hold, which checks nothing. Where the two values came from, and what the
+# provenance act behind them does and does not establish, are in
+# docs/notes/fips-variant-image.md.
 #
-# --ignore-missing is what lets the manifest be checked whole: it lists every
-# artifact of the release and only the one tarball fetched here is on disk. That
-# this fails closed rather than skipping its way to success is driven against the
-# real sha256sum in scripts/docker-entrypoint-fips.test.mjs.
+# That this check fails closed -- on bytes that do not match, and on the arch
+# selection pairing a tarball with the other architecture's hash -- is driven
+# against the real sha256sum in scripts/docker-entrypoint-fips.test.mjs.
 RUN set -eux; \
   arch="$(uname -m)"; \
   case "$arch" in \
-  x86_64) node_arch=x64 ;; \
-  aarch64) node_arch=arm64 ;; \
+  x86_64) node_arch=x64; node_sha256=982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee ;; \
+  aarch64) node_arch=arm64; node_sha256=afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d ;; \
   *) echo "unsupported architecture $arch" >&2; exit 1 ;; \
   esac; \
   cd /tmp; \
   curl -fsSLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
-  curl -fsSLO "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt"; \
-  sha256sum -c --ignore-missing SHASUMS256.txt; \
+  echo "${node_sha256}  node-${NODE_VERSION}-linux-${node_arch}.tar.xz" | sha256sum -c -; \
   mkdir -p /opt/node; \
   tar -xJf "node-${NODE_VERSION}-linux-${node_arch}.tar.xz" -C /opt/node --strip-components=1; \
-  rm -f "node-${NODE_VERSION}-linux-${node_arch}.tar.xz" SHASUMS256.txt
+  rm -f "node-${NODE_VERSION}-linux-${node_arch}.tar.xz"
 ENV PATH=/opt/node/bin:$PATH
 RUN node --version && npm --version
 

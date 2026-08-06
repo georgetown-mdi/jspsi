@@ -207,16 +207,18 @@ the npm freeze applies to it unchanged -- same lockfile, same `npm ci`, same
 `--omit=dev` runtime tree, same freeze test. What follows is what it pins
 beyond that, and the second OS-package inventory that comes with it.
 
-**Four pins, three of them enforced at build time.**
+**Six pins, four of them compared against the artifact inside the build.**
 
 | Pin | Value | How it is held |
 | --- | --- | --- |
 | Release snapshot | `--releasever=2023.12.20260727` on every `dnf` transaction | Shape-checked as a dated snapshot in `scripts/dockerfile-freeze.test.mjs` |
 | Provider package and version | `openssl-fips-provider-certified` at `3.0.8-1.amzn2023.0.1` | `rpm -qf` on the installed `fips.so`, asserted in the build |
 | Module version string | `3.0.8-d694bfa693b76001` | `openssl list -providers` read back, asserted in the build |
-| Base image | `amazonlinux:2023`, by tag | Not pinned; see below |
+| Base image | `amazonlinux:2023@sha256:694092ae18877ed4e3cb9b643759ba95df1f12af12528fefa18f60f79d4c1568`, the multi-arch index digest | Named in the `FROM` instead of the tag; the literal held in `scripts/dockerfile-freeze.test.mjs` |
+| Node runtime tarball, `x64` | `982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee` | `sha256sum -c` against the literal committed in the fetching `RUN`; the literal held in `scripts/dockerfile-freeze.test.mjs` |
+| Node runtime tarball, `arm64` | `afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d` | as above |
 
-All three asserted pins are build `ARG`s, so what the assertions catch is a
+All three certificate pins are build `ARG`s, so what the assertions catch is a
 package layer that drifts under the committed values rather than an operator who
 changes those values. The three do not move together, and that is what keeps a
 partial override from passing. The `dnf swap` and the `rpm -qf` assertion both
@@ -236,6 +238,19 @@ module was intended. What holds the committed defaults themselves is
 `scripts/dockerfile-freeze.test.mjs`, which pins all three as literals, and no
 CI path passes a build-arg -- `image_smoke.yaml` passes none, and the release
 workflow does not build this image.
+
+**The two tarball hashes are deliberately not `ARG`s.** Each is a literal in the
+`RUN` that fetches the tarball, selected by the same `case` arm that selects the
+architecture's tarball name. An `ARG` is overridable at
+`docker build --build-arg`, which is the limit the paragraph above records for
+the certificate pins: tolerable there, because a second assertion reads the
+installed module back and a partial override goes red, and not tolerable here,
+because nothing else in the build looks at the tarball. `NODE_VERSION` stays an
+`ARG`, so overriding it alone fetches bytes the committed hash does not cover
+and fails at the checksum -- a Node bump means moving the version and both
+hashes together. That the check fails closed, on bytes that do not match and on
+an arch arm that paired a tarball with the other architecture's hash, is driven
+against the real `sha256sum` in `scripts/docker-entrypoint-fips.test.mjs`.
 
 The release-snapshot pin is for reproducibility rather than for the certificate:
 AWS retains superseded NVRs, and a dated snapshot is immutable while
@@ -262,12 +277,22 @@ The `-certified` name this image uses is a different package with one published
 NVR, so a `dnf update` has nothing to move it to; the assertion is what catches
 a future one that is not certified.
 
-**The base image is not digest-pinned, unlike the default image's.** The
+**The base image digest and the snapshot pin name one release, not two.** The
 snapshot pin covers the package layer and not the base rootfs, and the two are
 coupled: a base far newer than the pinned snapshot can put that snapshot's
-packages in conflict with what the base already carries. Adding the digest needs
-a `docker buildx imagetools inspect amazonlinux:2023` from a network-capable
-session, and is open.
+packages in conflict with what the base already carries. The digest in the table
+above closes that. It is the multi-arch index digest, which is what a
+multi-platform build can resolve -- a platform-specific manifest digest names one
+architecture and fails on the other -- and it was resolved on 2026-08-06 with
+`docker buildx imagetools inspect amazonlinux:2023`, both of whose per-arch
+manifests carry `org.opencontainers.image.created: 2026-08-04`. The rootfs at
+that digest reports `PRETTY_NAME="Amazon Linux 2023.12.20260727"` on `amd64` and
+`arm64` alike, which is the release `AL2023_RELEASEVER` names, so the base and
+the packages are the same snapshot rather than two compatible ones. Bumping the
+base means re-resolving the digest and re-reading that release out of each
+architecture's rootfs -- `docker create` plus `docker cp` of `/etc/os-release`
+reads the foreign architecture without emulating or executing it -- and moving
+`AL2023_RELEASEVER` to match.
 
 **What the build fetches, beyond the npm tree.** Two mirrors rather than the
 default image's one:
@@ -275,13 +300,14 @@ default image's one:
 - `dnf` from the pinned Amazon Linux snapshot, for `tar`, `gzip`, `xz`,
   `findutils`, `libatomic`, `samba-client`, `openssl`, and the provider swap.
   RPM signatures are verified against the key the base image carries.
-- `nodejs.org`, for the official Node 26 tarball and its `SHASUMS256.txt`. Amazon
-  Linux 2023 packages nodejs20, nodejs22 and nodejs24 only and the root
-  `package.json` requires `>=26`, and `libatomic` is the one shared library the
-  stock image lacks for that binary (without it `node` exits 127). The checksum
-  file is fetched over the same channel as the tarball, so this is an integrity
-  check and not a provenance one; the two ways to close that are in
-  [fips-variant-image.md](../notes/fips-variant-image.md).
+- `nodejs.org`, for the official Node 26 tarball, whose bytes are checked against
+  the per-architecture hash committed in the fetching `RUN` rather than against a
+  checksum file fetched beside them. Amazon Linux 2023 packages nodejs20,
+  nodejs22 and nodejs24 only and the root `package.json` requires `>=26`, and
+  `libatomic` is the one shared library the stock image lacks for that binary
+  (without it `node` exits 127). What that pin does and does not establish about
+  the tarball's provenance, and the one-time verification behind the two values,
+  are in [fips-variant-image.md](../notes/fips-variant-image.md).
 
 `smbclient` comes from `samba-client` here rather than from Alpine's package of
 the same name, at 4.17.12, so `image_smoke.yaml`'s `command -v smbclient`
@@ -365,7 +391,7 @@ The file is worth binding at all because the release and smoke builds export eve
 
 The builder's floor is nonetheless 11.17 in intent, for two reasons that are not "anything lower is inert": 11.17 is the npm every matching rule in this section was measured against, and it is the first to run the same preflight from `npm exec`. Nothing in this repo enforces that floor, in the image or outside it. `engines.node` constrains node, not the npm shipped beside it, so an install driven by npm 11.15.0 or earlier runs with the policy silently off wherever that npm comes from -- including a builder whose base digest is re-pinned onto an older node. Which npm the pinned digest bundles is therefore a property of the base image: the one pinned here bundles 11.17.0, measured in a real build.
 
-That last sentence is about the default `Dockerfile` only. The FIPS variant's builder installs no distribution node package: its npm arrives inside the `nodejs.org` tarball named by `ARG NODE_VERSION`, whose bytes are checked against a manifest fetched beside them rather than against any value committed here, and whose bundled npm the build prints (`npm --version`) without asserting. So the npm that variant installs under is a property of the tarball that ARG names, and moving the ARG moves it with nothing to notice. The floor is unenforced in both builders; what differs is only which artifact decides it.
+That last sentence is about the default `Dockerfile` only. The FIPS variant's builder installs no distribution node package: its npm arrives inside the `nodejs.org` tarball named by `ARG NODE_VERSION`, whose bundled npm the build prints (`npm --version`) without asserting. So the npm that variant installs under is a property of that tarball, and nothing checks which version of npm is inside it. Moving `ARG NODE_VERSION` alone does not silently move it, though: the bytes are checked against the sha256 committed for that release, so the override fails the build rather than installing under an unnoticed npm. The floor is unenforced in both builders; what differs is only which artifact decides it.
 
 **The key forms npm matches.** For a registry package npm honors a bare name (equivalently `name@*`), one exact version, and exact versions joined by `||`. A semver range or a dist-tag is dropped from the policy with one warning. A lone version must be spelled canonically, because npm compares the key's text against the version it parsed out of the tarball URL: `v1.0.0`, `=1.0.0`, a leading zero, or build metadata is kept in the policy and matches nothing, with no diagnostic at all. Inside a `||` disjunction the comparison runs through semver instead, which accepts a leading `v` and build metadata and normalizes them away, while still rejecting `=1.0.0` and a leading zero. Either way an entry npm does not match states a verdict that is not in force.
 

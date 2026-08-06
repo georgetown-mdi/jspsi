@@ -480,6 +480,78 @@ describe("Dockerfile.fips certificate pins", () => {
   });
 });
 
+// The two pins that decide what the variant's userland and its Node runtime are
+// made of. The build's own checksum step compares the tarball against whatever
+// hash the RUN carries, so it cannot notice a committed hash that has drifted
+// from the value docs/spec/DEPENDENCY_PINS.md records as resolved and reviewed;
+// the base digest has no build-time reader at all. These literals are what holds
+// both.
+describe("Dockerfile.fips base image and Node runtime pins", () => {
+  const image = IMAGES.find(({ file }) => file === "Dockerfile.fips").image;
+
+  // The multi-arch index digest, which is the one a multi-platform build can
+  // resolve: a platform-specific manifest digest names one architecture and
+  // fails on the other.
+  const EXPECTED_BASE =
+    "amazonlinux:2023@sha256:694092ae18877ed4e3cb9b643759ba95df1f12af12528fefa18f60f79d4c1568";
+
+  // The sha256 of each architecture's official nodejs.org tarball, keyed by the
+  // node_arch the `case` selects beside it.
+  const EXPECTED_TARBALL_SHA256 = {
+    x64: "982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee",
+    arm64: "afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d",
+  };
+
+  const nodeFetch = image.instructions.find(
+    ({ inst, rest }) => inst === "RUN" && rest.includes("nodejs.org"),
+  );
+
+  it("builds every stage from that base digest or from another stage of its own", () => {
+    // A tag resolves to whatever the registry serves that day, and the base
+    // rootfs is coupled to the release snapshot the dnf lines pin: the two are
+    // the same Amazon Linux release, not merely compatible ones.
+    const declaredStages = new Set();
+    const externalBases = [];
+    for (const { inst, rest } of image.instructions) {
+      if (inst !== "FROM") continue;
+      const tokens = normalize(rest).split(" ");
+      if (!declaredStages.has(tokens[0])) externalBases.push(tokens[0]);
+      const as = tokens.findIndex((token) => token.toUpperCase() === "AS");
+      if (as !== -1) declaredStages.add(tokens[as + 1]);
+    }
+    expect(externalBases).toEqual([EXPECTED_BASE]);
+  });
+
+  it("checks the fetched Node tarball against the committed hash for its architecture", () => {
+    expect(nodeFetch).toBeDefined();
+    for (const [nodeArch, sha256] of Object.entries(EXPECTED_TARBALL_SHA256)) {
+      expect(normalize(nodeFetch.rest)).toContain(
+        `node_arch=${nodeArch}; node_sha256=${sha256}`,
+      );
+    }
+    // Piped into the checker, rather than merely present in the instruction.
+    expect(nodeFetch.rest).toMatch(
+      /echo "\$\{node_sha256\} +node-\$\{NODE_VERSION\}-linux-\$\{node_arch\}\.tar\.xz" \| sha256sum -c -/,
+    );
+    // A checksum file fetched beside the tarball would be served by whatever
+    // served the tarball, and would make the literals above decorative.
+    expect(nodeFetch.rest).not.toContain("SHASUMS256.txt");
+  });
+
+  it("carries those hashes as literals rather than as overridable ARGs", () => {
+    // `docker build --build-arg` moves an ARG, so a hash carried as one moves
+    // with the artifact it is supposed to hold. NODE_VERSION stays an ARG,
+    // which is why a Node bump edits these two literals in the same commit.
+    const argDefaults = image.instructions
+      .filter(({ inst }) => inst === "ARG")
+      .map(({ rest }) => rest);
+    for (const sha256 of Object.values(EXPECTED_TARBALL_SHA256)) {
+      expect(argDefaults.some((arg) => arg.includes(sha256))).toBe(false);
+      expect(nodeFetch.rest).toContain(sha256);
+    }
+  });
+});
+
 // The variant's per-run provider report is the exit status of a probe the image
 // runs at every container start, so the probe and everything it imports have to
 // be in the image. A path that is not there warns on every run, which reads

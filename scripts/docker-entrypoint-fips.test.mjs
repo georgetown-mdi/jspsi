@@ -257,31 +257,29 @@ describe("the engagement probe the image ships", () => {
   });
 });
 
-// The tarball fetched in Dockerfile.fips's nodebase stage is checked against the
-// release's own SHASUMS256.txt with `sha256sum -c --ignore-missing`. That the
-// check fails closed is the property the image's whole Node runtime rests on,
-// and CLAUDE.md's rule is to encode such a claim as a check rather than as a
-// Dockerfile comment, which cannot fail. These drive the real tool rather than
-// modelling it.
+// The tarball fetched in Dockerfile.fips's nodebase stage is checked against a
+// per-architecture sha256 committed in that same RUN, by piping one checksum
+// line into `sha256sum -c -`. That the check fails closed is the property the
+// image's whole Node runtime rests on, and CLAUDE.md's rule is to encode such a
+// claim as a check rather than as a Dockerfile comment, which cannot fail. These
+// run the real tool through a real shell pipeline rather than modelling either.
 //
 // Every digest below is 64 hex characters, valid or not, because coreutils
-// rejects a whole manifest carrying no properly formatted line: a short
-// placeholder digest makes every case exit non-zero for that reason instead of
-// the one it names.
+// rejects a line it cannot read as a checksum with a different message and the
+// same exit status (`no properly formatted checksum lines found`): a short
+// placeholder digest makes a case exit non-zero for that reason instead of the
+// one it names.
 //
 // Limit: this runs whatever coreutils the dev container carries, not Amazon
 // Linux 2023's coreutils-single, which is what the build will actually use.
 describe("the Node tarball checksum check", () => {
-  function checkManifest({ manifest, files }) {
+  function checkAgainstCommittedHash({ hash, tarball, bytes }) {
     workdir = mkdtempSync(join(tmpdir(), "fips-shasums-"));
-    for (const [name, body] of Object.entries(files)) {
-      writeFileSync(join(workdir, name), body);
-    }
-    writeFileSync(join(workdir, "SHASUMS256.txt"), manifest);
+    writeFileSync(join(workdir, tarball), bytes);
 
     return spawnSync(
-      "sha256sum",
-      ["-c", "--ignore-missing", "SHASUMS256.txt"],
+      "/bin/sh",
+      ["-c", `echo "${hash}  ${tarball}" | sha256sum -c -`],
       {
         cwd: workdir,
         encoding: "utf8",
@@ -290,17 +288,20 @@ describe("the Node tarball checksum check", () => {
   }
 
   const TARBALL = "node-v26.7.0-linux-x64.tar.xz";
-  // sha256 of the exact bytes written as the good tarball below.
-  const GOOD =
+  const TARBALL_BYTES = "hello\n";
+  // sha256 of TARBALL_BYTES, standing in for the x64 hash the Dockerfile
+  // commits beside node_arch=x64.
+  const ITS_HASH =
     "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03";
-  // A well-formed digest of no file here, for the manifest lines that stand in
-  // for another architecture's tarball.
-  const OTHER_ARCH = "0".repeat(64);
+  // A well-formed digest of no file here, standing in for the hash the
+  // Dockerfile commits for the other architecture.
+  const OTHER_ARCH_HASH = "0".repeat(64);
 
-  it("verifies the tarball when its bytes match the manifest", () => {
-    const result = checkManifest({
-      manifest: `${GOOD}  ${TARBALL}\n${OTHER_ARCH}  node-v26.7.0-linux-arm64.tar.xz\n`,
-      files: { [TARBALL]: "hello\n" },
+  it("verifies the tarball when its bytes match the committed hash", () => {
+    const result = checkAgainstCommittedHash({
+      hash: ITS_HASH,
+      tarball: TARBALL,
+      bytes: TARBALL_BYTES,
     });
 
     expect(result.status).toBe(0);
@@ -308,39 +309,30 @@ describe("the Node tarball checksum check", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("fails when the tarball's bytes do not match the manifest", () => {
-    const result = checkManifest({
-      manifest: `${GOOD}  ${TARBALL}\n`,
-      files: { [TARBALL]: "tampered\n" },
+  it("fails when the tarball's bytes do not match the committed hash", () => {
+    const result = checkAgainstCommittedHash({
+      hash: ITS_HASH,
+      tarball: TARBALL,
+      bytes: "tampered\n",
     });
 
     expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain(`${TARBALL}: FAILED`);
   });
 
-  // --ignore-missing skips manifest lines whose file is absent, so the name the
-  // build fetched being absent from the manifest must not read as success. The
-  // reason is asserted rather than the exit status alone: coreutils rejects a
-  // malformed manifest with a different message and the same non-zero exit, so
-  // the status by itself cannot tell a skipped-to-empty run from a rejected
-  // manifest.
-  it("fails, for want of a verified file, when the tarball's name is absent from the manifest", () => {
-    const result = checkManifest({
-      manifest: `${OTHER_ARCH}  node-v26.7.0-linux-s390x.tar.xz\n`,
-      files: { [TARBALL]: "hello\n" },
+  // The hash is selected by the same `case` arm that selects the tarball name,
+  // so an arm pairing the two wrongly would check an intact tarball against the
+  // other architecture's hash. That direction has to fail too, or the pairing
+  // is doing no work.
+  it("fails when an intact tarball is checked against the other architecture's hash", () => {
+    const result = checkAgainstCommittedHash({
+      hash: OTHER_ARCH_HASH,
+      tarball: TARBALL,
+      bytes: TARBALL_BYTES,
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("no file was verified");
+    expect(result.stdout).toContain(`${TARBALL}: FAILED`);
     expect(result.stderr).not.toContain("no properly formatted checksum lines");
-  });
-
-  it("fails when the manifest is not a checksum file at all", () => {
-    const result = checkManifest({
-      manifest: "<html><body>404 Not Found</body></html>\n",
-      files: { [TARBALL]: "hello\n" },
-    });
-
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("no properly formatted checksum lines");
   });
 });

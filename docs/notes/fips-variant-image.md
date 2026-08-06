@@ -329,16 +329,48 @@ it is open. The per-package inventory and the caveats on those figures are in
 The Node runtime is the other cost, and it is a supply-chain one rather than a
 size one. Amazon Linux 2023 packages nodejs20, nodejs22 and nodejs24 only, so
 the runtime comes from the official tarball at `nodejs.org` plus one extra
-package (`libatomic`, without which the binary exits 127). The build verifies
-the tarball against the release's own `SHASUMS256.txt`, **fetched over the same
-channel as the tarball: that is an integrity check, not a provenance one.** Two
-things would close it and neither was done here: verifying the detached
-`SHASUMS256.txt.sig` against pinned Node release key fingerprints, which needs a
-key list this project would have to carry and keep current, or committing the
-per-architecture tarball sha256 into the Dockerfile, which is the same trust
-model as the default image's base-image digest pin and is the cheaper of the
-two. The provider itself does not share this gap: `dnf` verifies the vendor's
-RPM signatures against the key the base image carries.
+package (`libatomic`, without which the binary exits 127). Checking that tarball
+against the release's own `SHASUMS256.txt` would be **an integrity check and not
+a provenance one**, the manifest arriving over the same channel as the bytes it
+vouches for, so a host serving a bad tarball serves a matching checksum. Two
+things close that: verifying the detached `SHASUMS256.txt.sig` in the build,
+which needs a keyring and a key-rotation story inside the image, or committing
+the per-architecture tarball sha256 into the Dockerfile, which is the same trust
+model as the base-image digest pin and needs neither. The second is what the
+build does, and the values are in
+[DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md); what vouches for the tarball is
+then this repository rather than the host that served it. The provider does not
+share this gap either way: `dnf` verifies the vendor's RPM signatures against the
+key the base image carries.
+
+**The provenance act behind those two hashes.** A committed hash carries whatever
+trust was placed in the bytes at pin time, so the signature was checked once,
+by hand, when the values were resolved on 2026-08-06. No build runs any of this.
+The v26.7.0 `SHASUMS256.txt.sig` is an EdDSA signature made 2026-08-05 by
+
+    5BE8A3F6C8A5C01D106C0AD820B1A390B168D356   Antoine du Hamel
+    ed25519 [SC], created 2025-06-28
+
+and that key was obtained from two channels distinct from nodejs.org --
+`keys.openpgp.org` by fingerprint, and the `nodejs/release-keys` repository on
+GitHub -- with the signature verified separately under each in its own throwaway
+`GNUPGHOME`. Both gave `Good signature`, and the two copies agree on the primary
+fingerprint and on the cv25519 encryption subkey
+`0A178CD0FE03CB4F8780980A039F94E89826F891`. That the key is a releaser's rather
+than merely a key is corroborated by the same fingerprint appearing under
+"Primary GPG keys for Node.js Releasers" in `nodejs/node`'s README, and by the
+key file entering `nodejs/release-keys` on 2025-07-18, roughly twelve months
+before the release it signed.
+
+The limit is worth stating exactly, because it is easy to overstate. This is
+independent of the *host* that served the tarball: neither github.com nor
+keys.openpgp.org is nodejs.org, and a compromise of nodejs.org alone cannot forge
+the signature. It is not independent of the *project*: `nodejs/release-keys` and
+the `nodejs/node` README are Node-controlled, and keys.openpgp.org attests
+control of an email address, never releaser status. The Node project is the right
+trust anchor for a Node runtime, so this is the correct shape of answer rather
+than a weak one -- but it is a provenance record, not a runtime claim, and
+nothing re-checks it on a rebuild.
 
 ## What is not settled
 
@@ -356,12 +388,6 @@ RPM signatures against the key the base image carries.
   certified packages are published for `x86_64` at the same NVRs, and nothing
   was executed there; the CI job added with this image builds and runs on
   `amd64`, so it is the first execution of this stack on that architecture.
-- **The base image digest.** The default `Dockerfile` pins `node:26-alpine` to
-  its multi-arch index digest; `Dockerfile.fips` names `amazonlinux:2023` by tag
-  and pins only the package layer, through the release snapshot. The two pins
-  are coupled -- a base rootfs far newer than the pinned snapshot can put the
-  snapshot's packages in conflict with what the base already carries -- so the
-  digest pin is worth adding, and it needs a network-capable session to resolve.
 - **A single scanner.** The certificate comparison used Trivy 0.73.0 plus AWS's
   own advisory metadata, which agreed on 56 of 56. That is one scanner and the
   vendor rather than two scanners.

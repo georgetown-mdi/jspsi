@@ -200,7 +200,7 @@ export const ALLOWLIST = [
     url: "https://nodejs.org/dist",
     match: "prefix",
     reason:
-      "the FIPS variant image's build fetches the official Node runtime tarball and its checksum file from here, because Amazon Linux 2023 packages no Node 26; what the build fetches, not a connection the running container makes, and the same class as the Alpine mirror the default image's one apk install reaches",
+      "the FIPS variant image's build fetches the official Node runtime tarball from here, because Amazon Linux 2023 packages no Node 26; what the build fetches, not a connection the running container makes, and the same class as the Alpine mirror the default image's one apk install reaches",
   },
   {
     url: "https://github.com/georgetown-mdi/jspsi",
