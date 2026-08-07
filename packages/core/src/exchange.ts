@@ -46,7 +46,7 @@ import {
   deriveReceiptBinder,
   exchangeSignedReceipt,
 } from "./signedReceipt.js";
-import { UsageError } from "./errors.js";
+import { OperatorConfigError, UsageError } from "./errors.js";
 import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
 import type { StandardizedDataset } from "./standardization.js";
@@ -64,6 +64,7 @@ import type { ExchangeSpec } from "./config/exchangeSpec.js";
 import type { PartnerPayload } from "./payloadExchange.js";
 import type { BuiltExchangeRecord } from "./exchangeRecord.js";
 import type { SigningIdentity } from "./signingIdentity.js";
+import type { SigningMode } from "./config/signing.js";
 import type { DualSignedRecord, ReceiptContent } from "./signedReceipt.js";
 
 /**
@@ -211,6 +212,55 @@ export function assertDeduplicateImplemented(deduplicate: boolean): void {
 }
 
 /**
+ * Refuse a `signing.mode` the exchange cannot honor, before it runs.
+ *
+ * `SigningModeSchema` accepts `session-derived` (a MAC under the shared session
+ * key) but no code path produces one: the signing step runs only for a
+ * `certificate`-mode block, so a `session-derived` config would complete an
+ * exchange and leave the operator with the ordinary unsigned record: the receipt
+ * the configuration asked for is never produced, and nothing says so. Refuse it
+ * in {@link prepareForExchange} instead, before any connection, so the answer
+ * arrives while the operator is still configuring rather than as a missing file
+ * after a completed exchange.
+ *
+ * The guard ALLOWLISTS the two modes the exchange honors -- `certificate` (signs
+ * and swaps a dual-signed receipt) and `none` (asks for no receipt, as does an
+ * absent block) -- rather than denylisting `session-derived`, so a mode later
+ * added to `SigningModeSchema` (the enum is documented as the extensibility seam
+ * for an authority-backed trust model) is refused by default until it too is
+ * implemented and allowed here. This follows the repo's allowlist-over-blocklist
+ * rule (CONTRIBUTING.md, Code Conventions).
+ *
+ * An {@link OperatorConfigError}, unlike its {@link assertAlgorithmImplemented}
+ * and {@link assertDeduplicateImplemented} siblings: those read a linkage-terms
+ * value the accept side adopts verbatim from the partner's invitation, so the
+ * fault is not provably local, while the `signing` block is only ever this
+ * party's own config -- it lives on the local {@link ExchangeSpec} and no
+ * invitation or accept path carries one (see `config/signing.ts`). That is
+ * `OperatorConfigError`'s membership rule, so the fault surfaces as the
+ * actionable config category on both front ends rather than as a generic
+ * exchange failure; the message names only the fixed enum literals, and the CLI
+ * still classifies it as a usage error (exit 64) through the base class.
+ *
+ * When a session-derived receipt path lands, REPLACE this refusal with it rather
+ * than merely widening the allowlist: the mode needs a signing step of its own,
+ * not just permission to reach the certificate one.
+ */
+export function assertSigningModeImplemented(
+  mode: SigningMode | undefined,
+): void {
+  if (mode === undefined || mode === "none" || mode === "certificate") return;
+  throw new OperatorConfigError(
+    'this receipt signing mode is not yet implemented: only "certificate" ' +
+      'signing produces a receipt. A "session-derived" MAC, or any other ' +
+      "non-certificate mode, would leave this exchange with the ordinary " +
+      "unsigned record while the configuration asks for a signed receipt, so " +
+      "it is refused before the exchange runs. Set signing.mode to " +
+      '"certificate" to sign receipts, or to "none" to run unsigned.',
+  );
+}
+
+/**
  * Resolve the matching cardinality {@link runExchange} passes to the linkage
  * strategies, from the two parties' agreed `deduplicate` settings.
  *
@@ -309,6 +359,12 @@ export function prepareForExchange(
   // holds for a PreparedExchange built without going through this function. See
   // assertDeduplicateImplemented.
   assertDeduplicateImplemented(linkageTerms.deduplicate);
+
+  // Fail closed on a signing mode with no run path before connecting: only
+  // certificate mode signs a receipt, so a session-derived block would otherwise
+  // run to completion and leave the operator the unsigned record they did not
+  // ask for. See assertSigningModeImplemented.
+  assertSigningModeImplemented(exchangeDataSpec.signing?.mode);
 
   // Reject a payload data dictionary that does not match what metadata transmits.
   // `payload.send` is exchanged, consented to, written into the exchange record,

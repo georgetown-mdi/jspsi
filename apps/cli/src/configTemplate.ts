@@ -224,8 +224,9 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 #   # Stamp a maximum age (in days) onto the rotated token; omit for no limit.
 #   token_max_age_days: 365
 
-# signing: receipt signing and partner-certificate trust. mode is none,
-# session-derived (tamper-evident), or certificate (third-party verifiable).
+# signing: receipt signing and partner-certificate trust. mode is none or
+# certificate (third-party verifiable); the session-derived mode is not yet
+# implemented and an exchange configured with it is refused.
 # signing:
 #   mode: none
 #   # identity_file: ~/.psilink/signing-identity.json   # created by 'psilink fingerprint'
