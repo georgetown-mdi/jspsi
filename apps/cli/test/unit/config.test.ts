@@ -1136,9 +1136,6 @@ test("saveConfig round-trips webrtc provider_options verbatim", () => {
 test("saveConfig preserves WebRTC connection.role and prunes the authentication block", () => {
   const configPath = path.join(dir, "psilink.yaml");
   const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-  // role now lives on the WebRTC connection config, not under authentication.
-  // saveConfig touches only the top-level authentication block, so role is
-  // preserved while the authentication block (key material only) is pruned.
   const spec = {
     connection: {
       channel: "webrtc",
@@ -1635,9 +1632,9 @@ test("diffLinkageTerms: a pathologically deep transform.params is a clean bounde
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
   // nfcDeep's own depth guard, exercised directly. A real invitation's deep params
-  // is now rejected earlier, at the decode chokepoint (the camelize fold bounds it
-  // -- see the decode-side test in core's invitation.test.ts), so the reconcile no
-  // longer sees one in practice. This builds the 3000-deep value straight into the
+  // is rejected earlier, at the decode chokepoint (the camelize fold bounds it --
+  // see the decode-side test in core's invitation.test.ts), so the reconcile does
+  // not see one in practice. This builds the 3000-deep value straight into the
   // reconcile input (bypassing decode) to pin nfcDeep's backstop: it is an
   // independent recursion that must reject a deep value itself rather than trust its
   // caller to have pre-bounded it. Build it iteratively so the test does not recurse.
@@ -1898,9 +1895,9 @@ test("loadConfigLinkageSource rejects invalid linkage_terms", () => {
 // A local config whose linkage_terms trips a camelizeKeys structural bound (here
 // the depth bound, the cheapest to reach) must still surface the file-named
 // "config file X has invalid linkage_terms: ..." wrap, not the raw bound-error
-// text -- safeParseLinkageTerms is now genuinely non-throwing for the bound, so
-// the if(!result.success) branch produces the helpful message rather than the
-// throw skipping straight past it. Still a UsageError (CLI exit 64), as before.
+// text -- safeParseLinkageTerms is genuinely non-throwing for the bound, so the
+// if(!result.success) branch produces the helpful message rather than the throw
+// skipping straight past it. Still a UsageError (CLI exit 64).
 test("loadConfigLinkageSource file-names a linkage_terms camelize-bound trip", () => {
   const configPath = path.join(dir, "psilink.yaml");
   // Nest one level past the depth bound so camelizeKeys rejects before Zod.
@@ -2116,7 +2113,7 @@ test("loadConfigLinkageSource rejects a non-mapping top-level value", () => {
   );
 });
 
-// --- CLI-only entry-sweep flags (195255994) ----------------------------------
+// --- CLI-only entry-sweep flags ----------------------------------------------
 
 test("connection.options.sweep_exchange_files is not a persistable config field (CLI-only)", () => {
   // The entry sweep is invocation-scoped: FileSyncOptionsSchema has no such

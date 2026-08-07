@@ -128,9 +128,9 @@ test("lock synchronization with race condition", async () => {
 
 test("basic synchronization", async () => {
   await sftpAdapter.put(
-    // The planted peer hello must advertise the bilateral mode flags
-    // (193901017); an empty {} body now fails the HelloEnvelope schema. Both
-    // parties run default lock mode, so both flags are false.
+    // The planted peer hello must advertise the bilateral mode flags; an empty
+    // {} body fails the HelloEnvelope schema. Both parties run default lock
+    // mode, so both flags are false.
     Buffer.from(
       JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
     ),

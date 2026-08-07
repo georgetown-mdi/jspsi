@@ -73,16 +73,8 @@ function preparedFor(identity: string, rows: Array<Record<string, string>>) {
   return prepareForExchange(spec, identity, rows, ["first_name"]);
 }
 
-// A connection-config factory producing a fully typed ProtocolConnectionConfig.
-// Authentication is no longer part of the connection; it is passed to runProtocol
-// on its own parameter at the call site. Written per channel so the discriminated
-// union narrows correctly.
 type ConfigFactory = () => ProtocolConnectionConfig;
 
-// writeOutput now resolves on the stream's 'finish' and runProtocol awaits it, so
-// the file is fully flushed before runProtocol resolves; this poll is retained as
-// cheap insurance against filesystem visibility lag, waiting until it is present
-// and byte-stable.
 async function readWhenReady(file: string): Promise<string> {
   const deadline = Date.now() + 5_000;
   let last = "";

@@ -152,9 +152,6 @@ export class LocalFSClient implements FileTransportClient {
     if (typeof dirPath !== "string")
       throw new Error("LocalFSClient.connect: options.path is required");
 
-    // Defensive default for a direct LocalFSClient caller; the filedrop connect
-    // site in core's fileSyncConnection now always supplies this explicitly, so
-    // it shares the one source of truth rather than a drifting literal.
     const connectTimeoutMs =
       (options["connectTimeoutMs"] as number | undefined) ??
       DEFAULT_SERVER_CONNECT_TIMEOUT_MS;

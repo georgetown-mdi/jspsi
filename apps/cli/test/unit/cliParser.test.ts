@@ -41,9 +41,6 @@ async function parse(
 }
 
 test("a misspelled option on the zero-setup command exits 64, naming the option", async () => {
-  // The reported failure: `--server-user` (for `--server-username`) was silently
-  // dropped and the run proceeded with the default, so a mistyped credential went
-  // unnoticed. It must now fail fast, before any connection.
   const { exit, stderr } = await parse([
     "--server-user",
     "u",

@@ -46,11 +46,11 @@ function expectTeardownStaysOffConsole(): void {
   expect(logSpy).not.toHaveBeenCalled();
 }
 
-// Regression guard for the native-hardening console flake (board item 202617870):
-// a bare `new Ssh2SftpClient()` leaves ssh2-sftp-client's default callbacks
-// writing `Global error listener: read ECONNRESET` (and the end/close lines) to
-// the console on teardown, which the integration sentinel catches only
-// best-effort. createRawSftpClient must route those off the console at the source.
+// Regression guard for the native-hardening console flake: a bare
+// `new Ssh2SftpClient()` leaves ssh2-sftp-client's default callbacks writing
+// `Global error listener: read ECONNRESET` (and the end/close lines) to the
+// console on teardown, which the integration sentinel catches only best-effort.
+// createRawSftpClient must route those off the console at the source.
 test("createRawSftpClient routes teardown diagnostics off the console", () => {
   expectTeardownStaysOffConsole();
 });

@@ -7,13 +7,13 @@ import { WorkerPsiEngine, type PsiEngine } from "@psilink/core";
 
 import { createWorkerThreadHandle } from "../../src/psiWorkerHost";
 
-// Exercises the CLI PSI crypto offload (board item 208035324) against the REAL
-// shipping worker: a `worker_threads` worker running the built
-// dist/psiWorker.worker.js, which loads the native-preferred backend, generates
-// its own key, and answers the RPC. The rest of the suite drives the crypto
-// through the in-process fallback (tests run from src, where no compiled worker
-// sits beside psiWorkerHost.ts), so the worker path itself is only manually
-// smoke-tested; this closes that gap end to end -- correctness AND clean teardown.
+// Exercises the CLI PSI crypto offload against the REAL shipping worker: a
+// `worker_threads` worker running the built dist/psiWorker.worker.js, which
+// loads the native-preferred backend, generates its own key, and answers the
+// RPC. The rest of the suite drives the crypto through the in-process fallback
+// (tests run from src, where no compiled worker sits beside psiWorkerHost.ts),
+// so the worker path itself is only manually smoke-tested; this closes that gap
+// end to end -- correctness AND clean teardown.
 //
 // The built bundle is emitted by `npm run build -w apps/cli`. CI's primary CLI
 // job builds it before this suite runs; a local run must build first. When it is

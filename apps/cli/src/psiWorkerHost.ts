@@ -14,7 +14,7 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 // The host side of the CLI's PSI worker: it spawns the
 // worker_threads worker that runs the masking off the event-loop-owning thread and
-// exposes it as a PsiEngine, so a long round no longer starves the SFTP heartbeat or
+// exposes it as a PsiEngine, so a long round does not starve the SFTP heartbeat or
 // the liveness timers. Wired through RunExchangeOptions.psiEngineFactory in
 // protocol.ts.
 

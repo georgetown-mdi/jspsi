@@ -41,11 +41,11 @@ log.setLevel(log.levels.DEBUG);
 // serverConn/clientConn pair -- the only long-lived exchange in this file --
 // rendezvouses in its OWN dedicated mkdtemp directory (pairPath, created in
 // beforeAll), never SFTP_PATH. That per-exchange isolation is the root-cause
-// de-flake of board items 200576628 and 201583776: those flakes came from an
-// exchange poll straddling a test boundary (a mid-flight list() reading a later
-// test's files as foreign and tripping the directory-exclusivity guard "must be
-// dedicated to a single exchange") or a lock left behind by stop()-without-
-// close() outliving the test on a SHARED path. With every exchange confined to
+// de-flake for two prior flake sources: an exchange poll straddling a test
+// boundary (a mid-flight list() reading a later test's files as foreign and
+// tripping the directory-exclusivity guard "must be dedicated to a single
+// exchange") or a lock left behind by stop()-without-close() outliving the test
+// on a SHARED path. With every exchange confined to
 // its own directory, neither residue can reach another test. So, for any future
 // test: one that stands up its own exchange MUST use freshRendezvous() (below)
 // or its own dedicated directory, never SFTP_PATH; re-introducing shared-
@@ -108,9 +108,8 @@ async function waitFor(
 // foreign, and a lock a prior rendezvous left behind (swept only by close())
 // outlives the test. On a SHARED path either residue trips a later test's
 // directory-exclusivity guard -- a window the restricted-crypto native-sshd
-// profile widens via its slower handshake (board items 200576628 and
-// 201583776). A dedicated mkdtemp directory per exchange removes the sharing in
-// both directions.
+// profile widens via its slower handshake. A dedicated mkdtemp directory per
+// exchange removes the sharing in both directions.
 // Returns the remote path to connect to and records the host directory for
 // teardown in afterAll, so the per-test directories do not pile up under the
 // served root over the run.
@@ -207,9 +206,9 @@ test("lock synchronization with race condition", async () => {
 
 test("basic synchronization", async () => {
   await serverSFTP.put(
-    // The planted peer hello must advertise the bilateral mode flags
-    // (193901017); an empty {} body now fails the HelloEnvelope schema. Both
-    // parties run default lock mode, so both flags are false.
+    // The planted peer hello must advertise the bilateral mode flags; an empty
+    // {} body fails the HelloEnvelope schema. Both parties run default lock
+    // mode, so both flags are false.
     Buffer.from(
       JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
     ),
@@ -235,12 +234,10 @@ test("message deliverable", async () => {
   // Stagger the rendezvous so the server arrives a tick ahead of the client (an
   // explicit arrival order, distinct from the simultaneous Promise.all race the
   // first test exercises), but await BOTH parties' synchronize() before any
-  // send(). The client's synchronize() was previously launched in an un-awaited
-  // setImmediate and never awaited, so under a slow handshake -- the timing-
-  // sensitive restricted-crypto native-sshd profile -- send() below could run
-  // before the client committed its peerId and throw "not synchronized" (board
-  // item 202047461, the third recurrence of this flake). Awaiting both removes
-  // that ordering race at the root: it no longer depends on the handshake
+  // send(). Without that, under a slow handshake -- the timing-sensitive
+  // restricted-crypto native-sshd profile -- send() below can run before the
+  // client commits its peerId and throw "not synchronized". Awaiting both
+  // removes that ordering race at the root: it does not depend on the handshake
   // landing within a tick, and the send()/poll() peerId guards stay intact.
   const serverSyncPromise = serverConn.synchronize();
   const clientSyncPromise = new Promise<void>((resolve, reject) => {
@@ -404,9 +401,8 @@ test("lock starter aborts on a stuck mid-arrival joiner over real SFTP", async (
   // namespace: the planted `-joining.json` sentinel and the starter's polling
   // would otherwise outlive this test as residue/a late poll and trip another
   // exchange's directory-exclusivity guard on the shared path -- the same
-  // cross-test residue race #161 (board item 200576628) fixed for the other
-  // self-connecting tests, which left this pair sharing SFTP_PATH (board item
-  // 201583776).
+  // cross-test residue race fixed for the other self-connecting tests, which
+  // left this pair sharing SFTP_PATH.
   const remote = await freshRendezvous();
 
   const abortSFTP = new SSH2SFTPClientAdapter();
@@ -846,9 +842,9 @@ inProcessOnly(
   "the host-key probe and verify(false) rejections strand no Client listener",
   async () => {
     // CONTRACT ASSERTION for the "no leaked event listeners" half of the teardown
-    // re-verification (board item 202393052): the first-use host-key probe and both
-    // verify(false) host-key rejections (the pinned-mismatch enforce path and the
-    // no-pin fail-closed default) tear the raw transport down OUTSIDE
+    // re-verification: the first-use host-key probe and both verify(false)
+    // host-key rejections (the pinned-mismatch enforce path and the no-pin
+    // fail-closed default) tear the raw transport down OUTSIDE
     // ssh2-sftp-client's own end() (the probe ends explicitly after a host-denied
     // connect; an open() rejection never reaches a session), so each must leave the
     // underlying ssh2 Client with no stranded 'error'/'end'/'close' handler. (The

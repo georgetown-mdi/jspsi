@@ -40,8 +40,6 @@ export const SENTINEL_GATED_LEVELS: readonly ConsoleLevel[] = [
  *     few integration tests that must drive a bare client -- so neither path
  *     leaks the teardown ECONNRESET the sentinel could otherwise only catch
  *     best-effort.
- *   - The former unpinned-host-key WARN is gone: the no-pin host-key path now
- *     fails closed rather than warn-and-proceed.
  *
  * So seeding those as live matchers would only create dead entries. If one
  * regresses and starts leaking, the fix is to re-suppress/route it at the

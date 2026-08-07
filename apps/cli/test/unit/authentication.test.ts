@@ -112,7 +112,7 @@ test("both parties derive the same rotated token over a real connection", async 
 
 test("applyEncryption surfaces own-OR-peer through authenticateConnection across flag combinations", async () => {
   // The OR semantics are pinned at the runKex layer; this asserts they survive
-  // through authenticateConnection, whose AuthResult now carries applyEncryption.
+  // through authenticateConnection, whose AuthResult carries applyEncryption.
   // All four combinations are exercised so the auth layer pins both the
   // unencrypted (false, false) -> false decision and the own-OR-peer rule on its
   // own, rather than leaning on the (true, true) success path above. Run over an
