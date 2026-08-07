@@ -3,10 +3,10 @@ import type { ReattachedRunState } from "./BenchRunSurface";
 
 /**
  * The recovery state a re-attached bench run heads with, shared by both run
- * sections and mirroring the strand-recovery panel's derivation: a delivered
- * terminal (a run failure, or received outputs) wins, else the busy probe's
- * initial status seeds it so a re-attached terminal run never flashes "still
- * running" before the replay lands. A `stopped` run promises no downloads.
+ * sections and the strand-recovery panel: a delivered terminal (a run failure, or
+ * received outputs) wins, else the busy probe's initial status seeds it so a
+ * re-attached terminal run never flashes "still running" before the replay lands.
+ * A `stopped` run promises no downloads.
  */
 export function reattachedRunState(args: {
   failed: boolean;

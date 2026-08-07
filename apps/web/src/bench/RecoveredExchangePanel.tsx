@@ -32,6 +32,7 @@ import {
 } from "./BenchRunSurface";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
+import { reattachedRunState } from "./reattachedRunState";
 import styles from "./bench.module.css";
 
 import type { ConsoleJobSeat } from "@psi/consoleJobAttachment";
@@ -247,18 +248,13 @@ export function RecoveredExchangePanel() {
   // re-attached terminal run never flashes the wrong copy. `stopped` (failed or
   // cancelled -- including this panel's own Stop) must NOT promise downloads:
   // there is no result, so the copy points at the failure alert and Discard.
-  const stopped =
-    failure !== undefined ||
-    (outputs === undefined &&
-      (initialStatus === "failed" || initialStatus === "cancelled"));
-  const finished =
-    !stopped && (outputs !== undefined || initialStatus === "succeeded");
-  const running = !stopped && !finished;
-  const runState: ReattachedRunState = running
-    ? "running"
-    : finished
-      ? "finished"
-      : "stopped";
+  const runState = reattachedRunState({
+    failed: failure !== undefined,
+    hasOutputs: outputs !== undefined,
+    status: initialStatus,
+  });
+  const stopped = runState === "stopped";
+  const running = runState === "running";
 
   return (
     <section className={styles.callout} aria-label="Recovered exchange">
