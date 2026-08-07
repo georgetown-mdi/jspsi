@@ -366,7 +366,13 @@ export interface SftpSessionControls {
    * disarm -- a within-batch or mid-rendezvous drop the re-dial recovers from,
    * distinct from the standing {@link maxOps} cap. The drop is armed as that op
    * is counted and may pre-empt its own reply (a mid-request cut), so it is not
-   * guaranteed to complete. "The active session" is the single-active-session
+   * guaranteed to complete. Which it is turns on the opcode: the teardown is
+   * deferred to the check phase, so a request the backend answers from a
+   * filesystem callback is cut mid-flight, while one it answers synchronously (a
+   * READDIR served from the handle's cached names, a directory CLOSE) is
+   * answered first and the cut lands with that client's wire empty -- a party
+   * with nothing outstanding to tear may never observe the drop as a lost
+   * session at all. "The active session" is the single-active-session
    * appliance model: the counter is server-wide, not per-connection, so if a
    * connection-per-poll re-dial overlaps the prior connection (a new session
    * comes up before the old one closes), the count spans both and the drop may

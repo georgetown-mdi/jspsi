@@ -805,14 +805,53 @@ inProcessOnly(
           srv.sessionControls.resetHandshakeCount();
           receiver.start();
           for (let sent = 0; sent < POLL_LOOP_DROPS; sent += 1) {
+            // Arm with the polling party's wire QUIET, so the drop is spent by
+            // the first request of its next operation. Every operation a cycle
+            // issues takes more than one request, so a drop landing on the first
+            // one cannot be completed around: the operation is torn, enters
+            // session recovery, and the loss is charged to the partner -- which
+            // is the counter this wait reads.
+            //
+            // Armed against a request already in flight, the drop can instead be
+            // spent by that operation's LAST request. The backend answers a
+            // READDIR and a directory CLOSE synchronously, ahead of the teardown
+            // the drop defers to the check phase, so the operation succeeds and
+            // the session is cut with nothing left on the wire. The
+            // connection-per-poll idle release then closes over that already-cut
+            // transport, and while the partner's FIN is still in flight it can
+            // only read the close as its own: the loss is charged as a deliberate
+            // release, no counter moves, and this wait runs out.
+            //
+            // Quiet needs both ends: neither count alone is it. The
+            // adapter's outstanding count misses the handle close a settled
+            // listing fires after it, which is issued outside the operation's
+            // span and answered synchronously -- exactly the request that can
+            // absorb a drop. So the server's own arrival count has to be
+            // unchanged across a full interval as well: a request already
+            // written when the count was first read has arrived by the time it
+            // is read again.
+            let requestsSeen = -1;
+            await waitFor(
+              () => {
+                const { received } = srv.sessionControls.requests.read();
+                const quiet =
+                  received === requestsSeen &&
+                  outstandingOperations(receiverAdapter) === 0;
+                requestsSeen = received;
+                return quiet;
+              },
+              {
+                what: `the polling party's wire to go quiet before drop ${sent + 1}`,
+              },
+            );
+            // The drop counter is server-wide, so the held session's own request
+            // would spend this arming instead. The sender issues one only from
+            // the send() below, which this loop has already awaited -- checked
+            // rather than assumed, since a drop spent there lands on the wrong
+            // party and surfaces only as this wait timing out.
+            expect(outstandingOperations(senderAdapter)).toBe(0);
             const before = receiverAdapter.midExchangeReconnectCount;
-            // The next SFTP operation this cycle issues is torn off the wire. The
-            // sender is idle between its sends, so the server-wide counter can
-            // only be spent by the polling party.
             srv.sessionControls.dropActiveAfterOps(1);
-            // A drop landing in a cycle's tail is absorbed by the next
-            // cycle-start dial and charged as the partner's loss all the same,
-            // so either route moves the counter this wait reads.
             await waitFor(
               () => receiverAdapter.midExchangeReconnectCount > before,
               {
