@@ -268,10 +268,11 @@ describe("prepareForExchange: an unimplemented signing mode is refused", () => {
   test("mode: session-derived is refused before connecting", () => {
     // Only certificate mode signs a receipt, so a session-derived config would
     // otherwise run to completion and leave the operator the unsigned record.
-    // Refused with the actionable UsageError (CLI exit 64) whose message names
-    // the fixed enum literal, so an operator sees which value to change.
+    // An OperatorConfigError, not a plain UsageError: the signing block is only
+    // ever this party's own config, so both front ends surface the message as an
+    // actionable config fault (and the CLI still exits 64 through the base).
     expect(() => prepareWithSigning({ mode: "session-derived" })).toThrow(
-      UsageError,
+      OperatorConfigError,
     );
     expect(() => prepareWithSigning({ mode: "session-derived" })).toThrow(
       /session-derived/,
@@ -300,7 +301,7 @@ describe("prepareForExchange: an unimplemented signing mode is refused", () => {
 describe("assertSigningModeImplemented", () => {
   test("refuses session-derived", () => {
     expect(() => assertSigningModeImplemented("session-derived")).toThrow(
-      UsageError,
+      OperatorConfigError,
     );
   });
 
@@ -315,6 +316,6 @@ describe("assertSigningModeImplemented", () => {
     // SigningModeSchema is refused until it is implemented and allowed here.
     expect(() =>
       assertSigningModeImplemented("authority-backed" as SigningMode),
-    ).toThrow(UsageError);
+    ).toThrow(OperatorConfigError);
   });
 });

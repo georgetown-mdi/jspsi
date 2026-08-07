@@ -7,6 +7,7 @@ import {
   OperatorConfigError,
   StandardizationTermsError,
   UsageError,
+  assertSigningModeImplemented,
 } from "@psilink/core";
 
 import {
@@ -177,6 +178,17 @@ test("classifies a PREPARE-phase OperatorConfigError as config", () => {
     classifyTerminalError(new StandardizationTermsError("x"), "prepare"),
   ).toBe("config");
   expect(buildErrorEvent(err, "prepare").category).toBe("config");
+
+  // Core's prepare-time signing-mode refusal is raised from this party's own
+  // config, so the error it actually throws reaches this category rather than
+  // the generic, retryable-looking `exchange` one.
+  let signingRefusal: unknown;
+  try {
+    assertSigningModeImplemented("session-derived");
+  } catch (thrown) {
+    signingRefusal = thrown;
+  }
+  expect(classifyTerminalError(signingRefusal, "prepare")).toBe("config");
 });
 
 test("classifies a security-kind ConnectionError as security in any phase", () => {

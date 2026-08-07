@@ -46,7 +46,7 @@ import {
   deriveReceiptBinder,
   exchangeSignedReceipt,
 } from "./signedReceipt.js";
-import { UsageError } from "./errors.js";
+import { OperatorConfigError, UsageError } from "./errors.js";
 import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
 import type { StandardizedDataset } from "./standardization.js";
@@ -231,10 +231,16 @@ export function assertDeduplicateImplemented(deduplicate: boolean): void {
  * implemented and allowed here. This follows the repo's allowlist-over-blocklist
  * rule (CONTRIBUTING.md, Code Conventions).
  *
- * Plain {@link UsageError}, like {@link assertAlgorithmImplemented} and
- * {@link assertDeduplicateImplemented}: the CLI classifies it as a usage error
- * (exit 64), and the message names only the fixed enum literals, never a value
- * read back out of the config.
+ * An {@link OperatorConfigError}, unlike its {@link assertAlgorithmImplemented}
+ * and {@link assertDeduplicateImplemented} siblings: those read a linkage-terms
+ * value the accept side adopts verbatim from the partner's invitation, so the
+ * fault is not provably local, while the `signing` block is only ever this
+ * party's own config -- it lives on the local {@link ExchangeSpec} and no
+ * invitation or accept path carries one (see `config/signing.ts`). That is
+ * `OperatorConfigError`'s membership rule, so the fault surfaces as the
+ * actionable config category on both front ends rather than as a generic
+ * exchange failure; the message names only the fixed enum literals, and the CLI
+ * still classifies it as a usage error (exit 64) through the base class.
  *
  * When a session-derived receipt path lands, REPLACE this refusal with it rather
  * than merely widening the allowlist: the mode needs a signing step of its own,
@@ -244,7 +250,7 @@ export function assertSigningModeImplemented(
   mode: SigningMode | undefined,
 ): void {
   if (mode === undefined || mode === "none" || mode === "certificate") return;
-  throw new UsageError(
+  throw new OperatorConfigError(
     'this receipt signing mode is not yet implemented: only "certificate" ' +
       'signing produces a receipt. A "session-derived" MAC, or any other ' +
       "non-certificate mode, would leave this exchange with the ordinary " +
