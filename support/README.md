@@ -1,19 +1,25 @@
 # Support: getting psilink running in your environment
 
-This area holds field guides for problems that sit *around* psilink rather than
-in it -- your operating system, your Docker installation, your agency's network
-and its policies. psilink is barely involved in most of them; the same
-obstacles face anyone running a container against a corporate file server.
+This area holds what sits *around* psilink rather than in it -- your operating
+system, your Docker installation, your agency's network and its policies, and
+the harnesses that measure the ground psilink stands on. Most of it is field
+guides: psilink is barely involved, and the same obstacles face anyone running
+a container against a corporate file server.
 
 These pages are separate from [`docs/`](../docs/README.md) on purpose.
-Documentation there describes the software and is kept honest by the test
-suite. What is here describes the outside world -- Windows releases, Docker
-Desktop behavior, DFS, VPN and authentication policy -- which no test of ours
-can verify. These pages are written from field experience, may be provisional,
-and each says how far it has actually been confirmed.
+Documentation there describes the software. A field guide here describes the
+outside world -- Windows releases, Docker Desktop behavior, DFS, VPN and
+authentication policy -- which no test of ours can verify, so it is written
+from field experience, may be provisional, and says how far it has actually
+been confirmed.
+
+One subdirectory is not a field guide and is not verified that way:
+[`fips-probe/`](fips-probe/README.md) is a measurement harness, and CI runs it.
+Its entry is below.
 
 If you are choosing, evaluating, or operating psilink deliberately, start at
-[`docs/`](../docs/README.md) instead. Come here when something will not start.
+[`docs/`](../docs/README.md) instead. Come here when something will not start,
+or when you need the provider measurements behind a FIPS claim.
 
 ## Find your problem
 
@@ -27,6 +33,7 @@ If you are choosing, evaluating, or operating psilink deliberately, start at
 | Nothing to send IT when a network problem turns out to be theirs | [what to ask IT for](windows-network-filedrop/troubleshooting.md#what-to-ask-your-it-department-for) |
 | A Windows PC with no PowerShell, or with policy blocking it | [which version to run](windows-network-filedrop/README.md#which-version-to-run) |
 | Deciding which account to give a Docker CIFS volume, and what happens to its password | [passwords](windows-network-filedrop/passwords.md) |
+| Which OpenSSL FIPS provider algorithms a psilink container base actually serves | [fips-probe](fips-probe/README.md) |
 
 ## Each guide
 
@@ -47,6 +54,17 @@ describe rather than with this repository.
   too, because the Windows one needs the setup script beside it; the macOS and
   Linux one is here to keep the pair together rather than because the folder's
   subject matter applies to it.
+
+## Measurement harnesses
+
+[`fips-probe/`](fips-probe/README.md) answers what an OpenSSL FIPS provider
+running beside the Node in a psilink container base actually serves, by driving
+the provider rather than reading its documentation. It is not a field guide and
+is not verified like one: `fips_provider_probe.yaml` and `image_smoke.yaml` run
+it in CI, and two of its files ship inside the FIPS variant image, which runs
+them at every container start. Its own README is the reference; the readings it
+produced are recorded in
+[fips-provider-surface.md](../docs/notes/fips-provider-surface.md).
 
 ## Maintainer notes
 

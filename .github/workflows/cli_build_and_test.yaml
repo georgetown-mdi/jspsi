@@ -4,7 +4,7 @@ name: CLI Build and Test
 # eb_build_and_test.yaml -- which builds and tests only the web app for its
 # Elastic Beanstalk deploy. This is the merge-time gate that catches a
 # dependency bump breaking the ssh2 SFTPWrapper coupling the SFTP adapter
-# relies on (see docs/SECURITY_DESIGN.md, "Upgrading the SFTP stack"); the same
+# relies on (see docs/spec/DEPENDENCY_PINS.md, "Upgrading the SFTP Stack"); the same
 # integration suite also runs in release.yaml as the ship gate before publish.
 #
 # Scoped by path to CLI-affecting changes. If this job is made a required
