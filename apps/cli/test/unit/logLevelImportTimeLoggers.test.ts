@@ -31,10 +31,13 @@ let identityPath: string;
 
 snapshotDiagnosticSinkAndLevel();
 
-beforeEach(() => {
+beforeEach(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loglevel-"));
   identityPath = path.join(dir, "signing-identity.json");
-  saveSigningIdentity(identityPath, generateSigningIdentity("Party A, Agency"));
+  saveSigningIdentity(
+    identityPath,
+    await generateSigningIdentity("Party A, Agency"),
+  );
   // The writer creates it owner-only; loosen it so the command's load emits the
   // over-permissive warning through the import-time logger.
   fs.chmodSync(identityPath, 0o644);
