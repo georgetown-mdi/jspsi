@@ -138,7 +138,9 @@ Design intent for the unimplemented deduplicating cardinality: in a many-to-one 
 
 The linkage fields define the standardized form of each PII element that participates in linkage. Each field has a name, a semantic type, and optional constraints. The name is a unique identifier used by linkage key elements and data standardizing transformations.
 
-Constraints are not enforced by the application -- they are standards that both parties independently commit to meeting when preparing their data. The application will warn if a constraint is violated, but it will not transform the data to satisfy it. In the future, it may be an option to upgrade these warnings to errors.
+Constraints are not enforced by the application -- they are standards that both parties independently commit to meeting when preparing their data. The application warns when a value violates a constraint it can test at the value level (`exclude`, `allowed_characters`, and `valid_only`), but it never transforms the data to satisfy it. In the future, it may be an option to upgrade these warnings to errors.
+
+`affixes_allowed` is the exception: it is a documentary standard with no clean value-level test -- nothing in a cleaned name distinguishes a suffix that was removed from one that was never present -- so it is never checked and never warns. It is a statement of what each party commits to having done to its data, verified between the parties rather than by the application.
 
 Social Security Numbers must be formatted as `XXXXXXXXX` (nine-character numeric string, no dashes). Dates of birth must be formatted as `YYYYMMDD`. Converting raw input to these formats is the responsibility of each party's data standardization.
 
@@ -193,7 +195,7 @@ linkage_terms:
 | `identifier` | Column that indexes a party's own records; never matchable |
 | `other` | A column whose PII type is none of the above |
 
-The first eight values are the complete type set for a `linkage_fields[].type`. The last two, `identifier` and `other`, are additionally valid for a `metadata.columns[].type` -- inference assigns them to an `_id`-suffixed column and to an otherwise unrecognized column, respectively -- but are not linkage-field types: a `linkage_fields[].type` set to either is rejected.
+The first eight values are the complete type set for a `linkage_fields[].type`. The last two, `identifier` and `other`, are additionally valid for a `metadata[].type` -- inference assigns them to an `_id`-suffixed column and to an otherwise unrecognized column, respectively -- but are not linkage-field types: a `linkage_fields[].type` set to either is rejected.
 
 Additional types will be added as their use case arises.
 
@@ -264,13 +266,12 @@ linkage_terms:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `field` | string | yes | Name of a linkage field from
-`linkage_terms.linkage_fields` |
+| `field` | string | yes | Name of a linkage field from `linkage_terms.linkage_fields` |
 | `name` | string | no | Optional alias for this element; used when the same field appears more than once in a key, or as the target of a `swap` |
 | `transform` | array | no | Sequence of transformation steps applied to the canonical field value before concatenation into the key |
-| `generate_fuzzy_comparisons` | string | no | Method for generating additional values for fuzzy matching: `transpositions` generates all two-digit transpositions; `edit_distances` generates all single-character deletions up to `max_length`, matching values within one edit distance; `adjacent_years` generates dates +/- 1 year from the input. Applied after any transformation |
+| `generate_fuzzy_comparisons` | string | no | Method for generating additional values for fuzzy matching: `transpositions` generates all two-digit transpositions; `edit_distances` generates all single-character deletions, matching values within one edit distance; `adjacent_years` generates dates +/- 1 year from the input. Applied after any transformation |
 
-> **Not yet implemented:** `generate_fuzzy_comparisons` is accepted by the schema, but the expansion (transpositions, edit distances, adjacent years) is not generated at key-building time yet, so authoring it has no effect on matching today. Working fuzzy keys are targeted for the 1.0 release; see [ROADMAP.md](ROADMAP.md).
+> **Not yet implemented:** `generate_fuzzy_comparisons` is accepted by the schema, but the expansion (transpositions, edit distances, adjacent years) is not generated at key-building time yet, so authoring it has no effect on matching today. It is not silently inert to the partner, though: an invitation carrying it shows the setting on the accepting party's consent display marked as proposed and not yet applied, so the partner weighs the term you authored rather than the narrower matching the run performs. Unlike `psi-c` and `deduplicate`, a fuzzy term is not refused -- the run proceeds and simply matches without the expansion. Working fuzzy keys are targeted for the 1.0 release; see [ROADMAP.md](ROADMAP.md).
 
 #### Transform steps
 
@@ -324,7 +325,11 @@ linkage_terms:
 
 A party that declares it receives no output (`output.expects_output: false`) may not list `payload.receive` columns: it cannot receive payload for matched records it never gets, so the combination is refused. A non-receiving party is sent no payload and refuses any it is sent regardless, so a non-receiving helper never receives the partner's disclosed columns. It may still `send` payload (to a partner that does receive output).
 
-Five fields govern payload. `payload.send` and `payload.receive` are the exchanged data dictionary -- what this party will disclose, and what it expects to receive -- and are cross-checked as a mirror: one party's `send` against the other's `receive`. `expected_payload_columns`, `disclosed_payload_columns`, and `outbound_payload_consent` are per-party local records that are not exchanged (each is deliberately kept out of the mirror), holding the actual runtime disclosure to what was promised, or consented to, at setup:
+Five fields govern payload, and they sit at two different levels of the file. `payload.send` and `payload.receive` are members of this `linkage_terms.payload` block: they are the exchanged data dictionary -- what this party will disclose, and what it expects to receive -- and are cross-checked as a mirror, one party's `send` against the other's `receive`.
+
+**`expected_payload_columns`, `disclosed_payload_columns`, and `outbound_payload_consent` are top-level keys of `psilink.yaml`, siblings of `linkage_terms`, not members of `payload` or of `linkage_terms`.** The level is load-bearing rather than cosmetic: `linkage_terms` and `payload` both strip keys they do not recognize, so one of these three nested inside either is dropped silently at parse -- no error, no warning, and the disclosure lock-in it was meant to establish simply does not exist. Check the indentation when you author one by hand.
+
+The three are per-party local records that are never exchanged, cross-checked against the partner, or folded into the agreed-terms hash (each is deliberately kept out of the mirror). What they do is hold the actual runtime disclosure to what was promised, or consented to, at setup:
 
 - **`payload.send`** -- the columns this party discloses, exchanged with the partner as a data dictionary. It must agree exactly with what this party's [input metadata](#input-metadata) actually transmits (`is_payload: true` and `role` not `ignored`, the single source of truth for disclosure); a `send` that over- or under-declares that set is refused before the exchange runs, so the dictionary shown for consent and written into the [exchange record](spec/EXCHANGE_RECORD.md) matches the bytes that flow. Empty is strict and absent is lazy, as for the three fields below: omitting `send` is exempt (the guided and default paths author none while metadata still transmits), while an explicit `send: []` declares that this party discloses nothing. It is held to that whenever the partner is entitled to the matched result. Accepting an invitation that declares `receive: []` gives you exactly that `send: []`, because the two are mirrored -- so a partner that asks for nothing, paired with an input file whose extra columns default to transmitted, is refused locally, before any credential, terms, or data are sent, naming the columns. Mark them `is_payload: false` (or `role: ignored`), or ask for a corrected invitation. A partner entitled to no result is sent no payload at all, so there the same pair runs and transmits nothing rather than being refused; a `send` that names columns is still held to the disclosed set in either direction, since that dictionary is exchanged, consented to, and recorded whatever moves.
 - **`payload.receive`** -- what this party expects to be disclosed. Omitting it is lazy ("take whatever I am given") and that direction is not cross-checked; declaring it -- including an explicit empty `receive: []`, which asserts the partner discloses nothing -- is strict, and any divergence from the partner's `send` aborts the exchange before data moves. This empty-is-strict, absent-is-lazy convention lets an invitation be authored without the inviter knowing the partner's columns: the inviter declares only its `send`, the accepting party adopts that as its own `receive`, and the inviter takes whatever the partner's metadata turns out to disclose. Laziness relaxes only this declaration check, never what is disclosed -- each sender's own metadata always governs what it sends.
@@ -332,14 +337,29 @@ Five fields govern payload. `payload.send` and `payload.receive` are the exchang
 - **`disclosed_payload_columns`** (local, send-side) -- the disclosed set this party promised, the send-side mirror of `expected_payload_columns`. It is checked at prepare time, before any credential, terms, or data are sent: if the current metadata can no longer produce exactly that set the run fails fast, naming the offending column(s), rather than under- or over-delivering and having the partner abort mid-exchange. Every invite path (re)records it, so re-inviting after editing your data keeps the promise in step and it cannot go stale.
 - **`outbound_payload_consent`** (local, send-side) -- what an *accepting* party confirmed about its own outbound columns. An invitation authors what its sender discloses and, usually, nothing about what it will receive, so nothing in it authors the accepting party's own outbound set: that set comes from your input file, where a column psilink does not recognize is transmitted by default. Accepting records what it showed you (`status: confirmed` with the columns, or `status: pending` where it had no input file to resolve them from), and a run that resolves a different set -- wider or narrower -- shows it and asks again before connecting, or refuses (exit 64) where there is no terminal to ask on. Omit it for an exchange whose outbound columns you authored yourself, such as one you invited a partner to; a run then sends whatever your metadata discloses, as `disclosed_payload_columns` holds it to what you promised.
 
-  ```yaml
-  outbound_payload_consent:
-    status: confirmed
-    columns:
-      - enrollment_date
-  ```
+All three sit beside `linkage_terms`, not inside it:
 
-The runtime lock-in mechanism, the wire field an invitation carries, the accepting party's own consent record, and how the observe-then-persist paths reach the same lock-in are specified in [FILE_SYNC.md](spec/FILE_SYNC.md#disclosed-columns-subset-on-the-token).
+```yaml
+linkage_terms:
+  payload:
+    send:
+      - name: "enrollment_date"
+    receive:
+      - name: "case_id"
+
+expected_payload_columns:
+  - case_id
+disclosed_payload_columns:
+  - enrollment_date
+outbound_payload_consent:
+  status: confirmed
+  columns:
+    - enrollment_date
+```
+
+In practice you rarely author them: every path that establishes an exchange writes the ones it owns. Accepting an invitation records what the invitation disclosed and what the acceptance showed you; inviting records the subset the token published, and re-inviting refreshes it; a `--save` run crystallizes what the first exchange actually carried. Each is refreshed by the operation that could invalidate it, so the file cannot promise one disclosure while the exchange performs another. What you author by hand is the pair inside `payload`; what you review before an unattended run is these three.
+
+The runtime lock-in mechanism, the wire field an invitation carries, the accepting party's own consent record, and how the observe-then-persist paths reach the same lock-in are specified in [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md#payload-disclosure-consent).
 
 ---
 
@@ -410,7 +430,7 @@ psilink --retain-files --outbound-path /mnt/share/to-partner \
   file:///mnt/share/from-partner records.csv results.csv
 ```
 
-**Mirror relationship across an invitation.** When an invitation carries a split-directory endpoint, the acceptor's seeded connection block starts as the inviter's *mirror image*: the acceptor's `inbound_path` is taken from the inviter's `outbound_path` and its `outbound_path` from the inviter's `inbound_path`, because one party's outbound is the other's inbound. The invitation conveys this role swap, so neither operator hand-edits which folder is inbound. The seeded block also carries the retain-mode options a split exchange requires, so it is runnable once the credential placeholders are filled in. (Emitting a split-directory endpoint from `psilink invite` is the inviter-side complement and is still pending -- see [CLI.md](CLI.md) "Current CLI limitations"; the acceptor mirror-swap applies to any invitation that does carry such an endpoint.)
+**Mirror relationship across an invitation.** When an invitation carries a split-directory endpoint, the acceptor's seeded connection block starts as the inviter's *mirror image*: the acceptor's `inbound_path` is taken from the inviter's `outbound_path` and its `outbound_path` from the inviter's `inbound_path`, because one party's outbound is the other's inbound. The invitation conveys this role swap, so neither operator hand-edits which folder is inbound. The seeded block also carries the retain-mode options a split exchange requires, so it is runnable once the credential placeholders are filled in. `psilink invite` emits the inviter's own pair verbatim onto the endpoint, so the swap is applied at exactly one place, on the accepting side.
 
 This keeps a Docker mount layout fixed. The two container mounts can stay constant -- for example `/data/in` and `/data/out` -- and the invitation, not a per-side config edit, decides which the party reads and which it writes. The folder *names* may still need a manual edit in an asymmetric topology, where the two parties' paths -- or even channels -- differ (one party syncing a local `file:///` directory up to a server the other reaches over `sftp://`): the swap fixes the *roles*, and the concrete paths, host, and channel are reconciled by the operator through the normal accept reconcile flow. An SFTP login-home (unset) path has no concrete value to mirror, so such an endpoint conveys the roles with no suggested path rather than failing.
 
@@ -481,7 +501,7 @@ connection:
 
 #### On-demand server provisioning
 
-When the primary server is allocated on demand rather than always running, a `provision` sub-object can be added to `server`. The application calls the provisioning endpoint before attempting to connect. There are two modes:
+When the primary server is allocated on demand rather than always running, a `provision` sub-object can be added to `server`. It describes the endpoint that brings the server up before either party connects. There are two modes:
 
 **Lifecycle provisioning**: the server has a fixed, known address but is started on demand to avoid consuming resources between exchanges. The static `host` and other `server` fields are present alongside `provision` in both parties' configs; `provision` is the call that wakes the server. Both parties may call the same endpoint independently before connecting.
 
@@ -493,6 +513,8 @@ When the primary server is allocated on demand rather than always running, a `pr
 | `port` | integer | no | Port; defaults to 443 |
 | `path` | string | no | API path |
 | `auth` | object | no | Authentication credentials (see [HTTP service authentication](#http-service-authentication-auth)) |
+
+> **Not yet implemented:** `server.provision` is accepted by the schema, and its `auth` credentials resolve their `@`-file references, but no connect path calls the endpoint. A config carrying it connects straight to the static `server` fields, so the server must already be running. Provision it out-of-band until the call is wired in.
 
 ```yaml
 # Lifecycle provisioning: wake a serverless PeerJS instance before connecting
@@ -514,9 +536,9 @@ connection:
 *Required:* no  
 *Applies to:* `webrtc`
 
-Identifies this party as the inviter or acceptor. Used to derive deterministic PeerJS peer IDs from the shared secret so both parties reach each other without an out-of-band address exchange. This is a peer-addressing concern specific to the WebRTC transport -- which is why it lives on the connection config rather than in the channel-agnostic top-level [`authentication`](#authentication) block -- and is orthogonal to the PSI protocol roles, which are determined by [`linkage_terms.output`](#linkage_termsoutput). For `sftp` and `filedrop` this field is not part of the schema and is silently dropped.
+Records this party as the inviter or acceptor. This is a peer-addressing concern specific to the WebRTC transport -- which is why it lives on the connection config rather than in the channel-agnostic top-level [`authentication`](#authentication) block -- and is orthogonal to the PSI protocol roles, which are determined by [`linkage_terms.output`](#linkage_termsoutput). For `sftp` and `filedrop` this field is not part of the schema and is silently dropped.
 
-The partner shared secret itself is configured separately, in the top-level [`authentication`](#authentication) block.
+The field records the role; the transport does not read it. Both parties' deterministic PeerJS peer IDs are derived from the shared secret and a per-flow `inviter`/`acceptor` label supplied by the rendezvous code, so they reach each other without an out-of-band address exchange whether or not this field is set, and editing it changes no address.
 
 ```yaml
 connection:
@@ -532,7 +554,9 @@ connection:
 *Required:* no  
 *Applies to:* `webrtc`
 
-STUN servers used for ICE candidate gathering. Each entry is a string in `stun:` or `stuns:` URI format. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `stun` is invalid.
+STUN servers for ICE candidate gathering. Each entry is a string in `stun:` or `stuns:` URI format. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `stun` is invalid.
+
+> **Not yet honored:** the three ICE fields -- `stun`, `turn`, and `ice_provision` -- are validated by the schema, and their exclusivity and `@`-file rules are enforced, but no candidate gathering reads them. The shipped WebRTC client builds its peer connection with a fixed set of STUN servers and no TURN entry, so authoring these fields changes no candidate the browser gathers. Author them for the record if you wish; do not rely on them to reach a partner behind a restrictive NAT.
 
 ```yaml
 connection:
@@ -547,7 +571,7 @@ connection:
 *Required:* no  
 *Applies to:* `webrtc`
 
-TURN servers used when a direct peer-to-peer connection cannot be established. Credential type `hmac-sha1` indicates time-limited credentials generated via a shared secret rather than a static password. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `turn` is invalid.
+TURN servers for the case where a direct peer-to-peer connection cannot be established. Credential type `hmac-sha1` indicates time-limited credentials generated via a shared secret rather than a static password. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `turn` is invalid. The exclusivity rule is enforced; the servers themselves are not yet honored (see [`connection.stun`](#connectionstun)).
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -570,15 +594,16 @@ connection:
 *Required:* no  
 *Applies to:* `webrtc`
 
-A provisioning endpoint that returns a complete set of ICE servers -- STUN and TURN combined -- for the current exchange. Called at the start of each CLI run; both parties call the same endpoint independently and may receive different time-limited credentials pointing to the same infrastructure. This matches the API shape of commercial ICE credential services such as Twilio Network Traversal Service. Mutually exclusive with static `stun` and `turn`.
+A provisioning endpoint that returns a complete set of ICE servers -- STUN and TURN combined -- for the current exchange. Both parties name the same endpoint and call it independently, so each may receive different time-limited credentials pointing to the same infrastructure. This matches the API shape of commercial ICE credential services such as Twilio Network Traversal Service. Mutually exclusive with static `stun` and `turn`.
+
+The endpoint is not yet called by either application (see [`connection.stun`](#connectionstun)); the CLI additionally refuses a `webrtc` config outright, so this field is reachable only from a WebRTC exchange the web application conducts.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `host` | string | yes | Hostname of the ICE credential API |
 | `port` | integer | no | Port; defaults to 443 |
 | `path` | string | no | API path |
-| `auth` | object | no | Authentication credentials
-(see [HTTP service authentication](#http-service-authentication-auth)) |
+| `auth` | object | no | Authentication credentials (see [HTTP service authentication](#http-service-authentication-auth)) |
 
 ```yaml
 connection:
@@ -637,7 +662,7 @@ Channel-agnostic and channel-specific tuning parameters. A configuration warning
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `peer_timeout_ms` | integer | 3600000 | Milliseconds to wait for the partner at any single step before giving up, applied both to the initial rendezvous and to each message exchanged during the protocol; if the partner goes silent past this window the exchange fails with a transport error. The effective limit is the minimum of this and the remaining shared-secret lifetime. Must be a positive integer. Connection teardown after a completed exchange is bounded separately and short, not by this value: how long the exchange WAITS for teardown runs on a fixed budget of its own, which this value caps only if you set it lower. That cap does not shorten teardown itself -- on a channel that holds a session, closing the connection carries bounds of its own that are not derived from this setting -- so with a very small value the exchange stops waiting while the connection is still closing, and the command can take a little longer to exit and print its teardown line after its final output. On the SFTP channel, see [SFTP connection teardown](#sftp-connection-teardown) for what a partner server that never closes the connection costs. |
+| `peer_timeout_ms` | integer | 3600000 | Milliseconds to wait for the partner at any single step before giving up, applied both to the initial rendezvous and to each message exchanged during the protocol; if the partner goes silent past this window the exchange fails with a transport error. The effective limit is the minimum of this and the remaining shared-secret lifetime. Must be a positive integer. It does not govern teardown, which runs on a short fixed budget of its own that this value caps only if you set it lower -- and capping the wait does not shorten the close, so a very small value can leave the command printing its teardown line a little after its final output. See [SFTP connection teardown](#sftp-connection-teardown). |
 | `server_connect_timeout_ms` | integer | 30000 | Milliseconds to wait during each connection attempt to the primary exchange server. Must be a positive integer (zero is not a meaningful "no timeout"). |
 | `max_reconnect_attempts` | integer | 3 | Maximum number of times to retry dialing the connection within a single connection attempt after a fast transient failure (for example, while a share or its permissions are still settling), each attempt bounded by `server_connect_timeout_ms`. A timed-out attempt is terminal and is not retried. The same value also caps the cumulative number of mid-exchange reconnections in the default held-session mode: on the SFTP channel a clean session drop mid-exchange (typically a server-enforced session or idle limit) is transparently re-dialed -- reusing the pinned host key and stored credentials -- and the interrupted operation re-issued, so the exchange survives it, but only up to this many drops over the whole exchange, after which the next drop ends the exchange with a terminal non-zero error naming this budget and the two remedies (raise this setting for a flaky link; set [`connection_per_poll`](#sftp-only-options) for a server that caps session lifetime). That mid-exchange budget is a separate counter of the same size as the dialing-retry loop (the two do not share one tally), is strictly cumulative (it does not reset on progress), does not apply to `connection_per_poll` mode, and is not charged for the teardown abort-marker write. Zero is a valid value and means what it says on both counters: connect once without a dialing retry, and treat the first mid-exchange drop as terminal. Other unrecoverable conditions (a fatal protocol error, a rejected host key, or the peer-timeout budget) also end the exchange terminally. Bounded above by a sanity ceiling (one retry per second for seven days). |
 
@@ -651,8 +676,8 @@ These options apply to both `sftp` and `filedrop` channels.
 | `timestamp_in_filename` | boolean | false | When `true`, each outgoing message filename also encodes a UTC timestamp and a per-session sequence number (see [Message filenames](#message-filenames)). Useful for filename-based logging in sync-mediated environments where the sync tool stamps files with the transfer time rather than the original creation time. |
 | `lockless_rendezvous` | boolean | false | When `true`, the rendezvous handshake uses an ack-handshake barrier (`<id>-hello.json` plus a zero-length acknowledgment marker `<myId>-<peerId>-hello-ack.json` named after the peer hello it acknowledges) instead of the default atomic lock-file race (`<id>-hello.json` + `<peer1>-<peer2>-lock.json`). Required on sync-mediated transports that lack atomic exclusive-create or deletion visibility during rendezvous (e.g. a cloud sync service reconciling two local mirrors where both sides "win" a local create). Both parties must set this identically. The setting is advertised in the hello payload, and a mismatch fails fast at rendezvous with a clear error naming each side's setting, rather than stalling until the peer timeout. The detection mechanism, including its best-effort symmetric guarantee, is specified in [FILE_SYNC.md](spec/FILE_SYNC.md#bilateral-configuration-detect-and-fail-never-negotiate). The operational sync glob in lockless mode is `<myId>-*` (upload) / `<partnerId>-*` (download), which covers hello, ack, and message files while excluding in-flight `temp-*.tmp` writes. |
 | `peer_id` | string | - | A stable, human-readable identifier for this party. Appears in every filename this party writes (hello, message, ack) and in server-side logs and transcripts. When unset, a UUID is generated at construction time. **Recommended for unattended and scheduled runs**, where it turns the leftover a killed run leaves into an immediate start-up refusal naming the file rather than a failed run (see [Directory exclusivity](#directory-exclusivity)); note that a stable id also makes this party's runs linkable to each other in the partner's logs. Requires `timestamp_in_filename: true`; a reused stable id without a timestamp segment can collide with a leftover file from a crashed prior session. The two parties must use distinct ids, and neither may be the other's id extended by `-` (e.g. `"site"` and `"site-2"` are rejected at rendezvous; see [FILE_SYNC.md preconditions](spec/FILE_SYNC.md#preconditions-for-a-correct-exchange)). Spaces and `-` are permitted within a `peer_id`. The value `"temp"` is reserved. Filesystem-unsafe characters (`/` and NUL on all platforms; `<`, `>`, `:`, `"`, `\`, `|`, `?`, `*` on Windows NTFS) are not validated but may cause errors at the transport layer. |
-| `retain_files` | boolean | false | When `true`, the receiver writes a zero-length acknowledgment marker after consuming each message rather than deleting it; the sender gates its next write on observing that marker rather than on the message file disappearing. Once rendezvous completes, no exchange file is deleted as a protocol step and the shared directory becomes a permanent transcript; a rendezvous that fails before it completes is the exception and clears its own files (see [Directory exclusivity](#directory-exclusivity)). Requires `timestamp_in_filename: true` -- without it, every message from the same party would share a filename and a retained transcript would overwrite itself. Also requires `lockless_rendezvous: true` -- lock rendezvous is delete-based and cannot produce the whole-directory no-delete transcript retain mode guarantees. The CLI `--retain-files` flag implies both `--lockless-rendezvous` and `--timestamp-in-filename` when those are not already set. Both parties must set this flag identically; like `lockless_rendezvous`, the setting is advertised in the hello and a mismatch fails fast with a clear error naming each side's setting rather than stalling until the peer timeout (see [FILE_SYNC.md](spec/FILE_SYNC.md#bilateral-configuration-detect-and-fail-never-negotiate)). (When both flags differ at once -- only possible as `retain=true`/`lockless=true` versus both `false`, since `retain_files` implies `lockless_rendezvous` -- the error names the `retain_files` mismatch, which a single rerun realigns.) **A fresh directory is required for each exchange and is enforced**: with no sweep flag, the exchange is refused before it runs unless the directory is empty except for at most one peer hello (foreign, non-protocol files are tolerated), because a stale message or ack marker from a prior session would corrupt or stall the run. To deliberately reuse a retain directory, `--sweep-exchange-files --force-retain-sweep` wipes the prior transcript first -- a CLI-only recovery (see [Directory exclusivity](#directory-exclusivity)). See [Acknowledgment markers](#acknowledgment-markers). |
-| `unexpected_files` | enum | mode-coupled (see description) | How to handle a file that appears in the shared directory *during* the message loop and is neither recognized as part of this exchange nor an in-flight temporary write of its own -- a sign the directory is being shared with another process or session, or that a sync tool produced a conflict copy or partial download (see [Directory exclusivity](#directory-exclusivity)). One of `error` (fail with a usage error (exit 64) naming the file and the directory path), `warn` (log once per distinct file name and continue), or `ignore` (skip silently -- the prior behavior). **Local, not bilateral**: detecting a foreign file is an observation of one's own directory view, needs no peer agreement, and carries none of the mismatch-stall risk of `lockless_rendezvous`/`retain_files`; the two parties may use different values. When unset the effective default is mode-coupled: `error` on plain delete-mode transports (ordinary `sftp`/`filedrop`) and `warn` when `retain_files` or `lockless_rendezvous` is set -- those flags signal a sync-mediated transport that legitimately produces transient conflict copies and partial downloads mid-session, where a hard fail would abort exactly the exchanges retain mode targets. An explicit value always overrides the mode-coupled default. This setting governs foreign-file detection only; a malformed *protocol* file (a peer-prefixed, message-shaped name a correctly configured peer cannot produce) is always reported regardless of this setting. |
+| `retain_files` | boolean | false | When `true`, the receiver writes an [acknowledgment marker](#acknowledgment-markers) after consuming each message rather than deleting it, and the sender gates its next write on that marker rather than on the message file disappearing. Once rendezvous completes, no exchange file is deleted as a protocol step and the shared directory becomes a permanent transcript; a rendezvous that fails before it completes is the exception and clears its own files (see [Directory exclusivity](#directory-exclusivity)). Requires `timestamp_in_filename: true` -- without it, every message from the same party would share a filename and a retained transcript would overwrite itself. Also requires `lockless_rendezvous: true` -- lock rendezvous is delete-based and cannot produce the whole-directory no-delete transcript retain mode guarantees. The CLI `--retain-files` flag implies both `--lockless-rendezvous` and `--timestamp-in-filename` when those are not already set. Both parties must set this flag identically, advertised and fast-failed exactly as `lockless_rendezvous` above. (When both flags differ at once -- only possible as `retain=true`/`lockless=true` versus both `false`, since `retain_files` implies `lockless_rendezvous` -- the error names the `retain_files` mismatch, which a single rerun realigns.) **Each exchange needs a fresh directory**, enforced before the run: a stale message or ack marker from a prior session would corrupt or stall it. Reusing a retain directory is a deliberate CLI-only recovery; see [Directory exclusivity](#directory-exclusivity) for the guard, the flags that clear it, and what they discard. |
+| `unexpected_files` | enum | mode-coupled (see description) | How to handle a file that appears in the shared directory *during* the message loop and is neither recognized as part of this exchange nor an in-flight temporary write of its own -- a sign the directory is being shared with another process or session, or that a sync tool produced a conflict copy or partial download (see [Directory exclusivity](#directory-exclusivity)). One of `error` (fail with a usage error (exit 64) naming the file and the directory path), `warn` (log once per distinct file name and continue), or `ignore` (skip silently). **Local, not bilateral**: detecting a foreign file is an observation of one's own directory view, needs no peer agreement, and carries none of the mismatch-stall risk of `lockless_rendezvous`/`retain_files`; the two parties may use different values. When unset the effective default is mode-coupled: `error` on plain delete-mode transports (ordinary `sftp`/`filedrop`) and `warn` when `retain_files` or `lockless_rendezvous` is set -- those flags signal a sync-mediated transport that legitimately produces transient conflict copies and partial downloads mid-session, where a hard fail would abort exactly the exchanges retain mode targets. An explicit value always overrides the mode-coupled default. This setting governs foreign-file detection only; a malformed *protocol* file (a peer-prefixed, message-shaped name a correctly configured peer cannot produce) is always reported regardless of this setting. |
 
 #### SFTP-only options
 
@@ -660,74 +685,27 @@ These options apply to the `sftp` channel only. Setting one on `filedrop` (which
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `connection_per_poll` | boolean | false | When `true`, a fresh SFTP session is opened at the start of each poll cycle and released before the loop goes idle again, instead of holding one session for the whole exchange. Because each cycle's session then needs only survive that cycle's seconds, the poll loop ordinarily does not reach a server's maximum-session-duration or idle cap. Detailed below: when to set it, what still holds a session open, what the mode leaves unchanged, and what a run reports. |
+| `connection_per_poll` | boolean | false | When `true`, a fresh SFTP session is opened at the start of each poll cycle and released before the loop goes idle again, instead of holding one session for the whole exchange. Because each cycle's session then needs only survive that cycle's seconds, the poll loop ordinarily does not reach a server's maximum-session-duration or idle cap. When to set it is below; the session model it runs under is in [FILE_SYNC.md](spec/FILE_SYNC.md#session-lifetime-across-an-idle-boundary), and what a run counts and warns about in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#sftp-mid-exchange-session-recovery). |
 
-##### When per-poll sessions help
+**When to set `connection_per_poll`.** Set it when the partner's SFTP server enforces a session-lifetime limit you cannot change and a single exchange spans many idle poll gaps -- a slow peer that reconciles the directory only occasionally, so an exchange lasts hours. Pair it with a minutes-scale `poll_interval_ms`: the mode pays a full SSH handshake every cycle, negligible at a long interval and wasteful at a short one, so a sub-minute interval draws a CLI warning, as does the `--connection-per-poll` flag with no long `--polling-frequency`.
 
-Use it when the partner's SFTP server enforces a session-lifetime limit you cannot change and a single exchange spans many idle poll gaps -- a slow peer that reconciles the directory only occasionally, so an exchange lasts hours.
-
-**Pair it with a long `poll_interval_ms`** (minutes-scale).
-The mode pays a full SSH handshake every cycle, negligible at a long interval but wasteful at a short one, so combining it with a sub-minute interval draws a CLI warning; the `--connection-per-poll` flag with no long `--polling-frequency` is flagged the same way.
-
-##### What still holds a session open
-
-Two things still hold a session across an idle stretch:
-
-- **The rendezvous that runs first** -- this side waiting for the partner to join the exchange -- holds one across its wait, so a server cap can cut a long wait there.
-- **A boundary reached while an operation of this side's is still in flight** keeps its session rather than cutting that operation off the wire, so the session spans that gap and every later boundary the operation is still running at. A transfer the partner's server never finishes answering carries no deadline of its own, and a session held for one stays up for the rest of the exchange.
-
-A cap that cuts either is transparently re-dialed, so the exchange completes in every case.
-Holding a boundary is ordinary -- a reply written while the loop is cycling produces one -- so no occurrence draws a warning, and the run's total is stated once in the end-of-run summary.
-
-What a boundary is held for, and what ends a hold, are in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#sftp-mid-exchange-session-recovery); the session lifetime the poll loop runs under, and how teardown obtains a session, are in [FILE_SYNC.md](spec/FILE_SYNC.md#session-lifetime-across-an-idle-boundary).
-
-##### What per-poll sessions do not change
-
-**Local, not bilateral**: how one party dials is invisible to the peer and to the shared directory, so it is not advertised in the hello and cannot cause a rendezvous mismatch -- one party may cycle its session while the other holds one, and each sets this independently.
-
-A drop within a cycle and one that cuts the rendezvous are both transparently re-dialed underneath the mode (see `max_reconnect_attempts`, whose cumulative cap this mode is exempt from).
-
-##### What a per-poll run reports
-
-The mode's own per-cycle dialing is not reported as a reconnection: the reconnect count and its warning are reserved for unexpected session losses, so a run that suffers none reports zero at any poll interval.
-A session the partner's server takes IS such a loss and is reported whether an operation was interrupted by it or an idle boundary simply found the session already gone -- so against a server that caps session lifetime, a run reports one per cycle that cap cuts, and a rendezvous the same cap cuts is reported alongside them.
-This side cannot tell the two causes apart, so the re-dial warning names both: a drop inside a poll cycle, which points at the link or the partner's server, or a rendezvous wait the partner's cap cut, which needs nothing from you.
-
-A *different* warning -- that the partner's server did not close the connection, so this side closed it -- names no drop at all, and against some servers a healthy exchange draws it routinely: a server that accepts the disconnect and then leaves the connection half-open never completes the release, so the mode closes it from this side and dials a fresh session next cycle.
-It is paced (the first, then every tenth) and totalled once in the end-of-run summary.
-
-**The end-of-run summary gives every paced warning its run total**, so a paced warning is never the only record of one. It states:
-
-- How many idle boundaries ended a session at all -- the denominator that says whether the forced total above is most of the run's boundaries or a handful of them.
-- The subset of those this side had to close itself.
-- The boundaries held for an operation still in flight.
-- The poll cycles that carried no session because a session transition on the connection did not complete within the cycle signal's wait.
-
-These count boundaries rather than dropped sessions, so none of them is a reconnect count by another name: a boundary that closed over a session the partner had already taken is counted in both, and every other one in these alone.
+It is a local choice, not a bilateral one: how this party dials is invisible to the peer, so the two parties may set it differently and a difference cannot fail the rendezvous. Two idle stretches still hold a session even under the mode -- the rendezvous wait, and a boundary reached while one of this side's operations is still unsettled -- and a server cap that cuts either is transparently re-dialed, so the exchange completes either way. Leave it unset for an ordinary exchange against a server with no session cap.
 
 #### SFTP connection teardown
 
-Closing an SFTP connection is a two-party act: this side disconnects, and the partner's server closes the connection.
-Some servers accept the disconnect and then go quiet -- they consume it and never close the connection, leaving it half-open.
-Waiting on such a server would leave a run that had already fully succeeded -- files delivered, results written -- sitting at teardown holding a connection that can no longer carry anything.
+Closing an SFTP connection is a two-party act: this side disconnects, and the partner's server closes the connection. Some servers accept the disconnect and then go quiet, leaving it half-open. psilink bounds that wait in **both session modes**, the default held session and [`connection_per_poll`](#sftp-only-options): past a short fixed teardown bound it closes the connection from this side and the command finishes normally.
 
-psilink bounds that wait.
-When the partner's server has not closed the connection within a short teardown bound -- seconds, fixed and not configurable -- psilink closes it from this side and the command finishes normally.
-The same happens when the close fails outright rather than going quiet.
-This applies in **both session modes**, the default held session and [`connection_per_poll`](#sftp-only-options), because a connection's final close is common to both.
+What you may see, at the end of a run and at most once:
 
-What you see when it happens:
+- An informational line naming what left the connection open and stating that this side closed it. It is not an error and it is no verdict on the run -- this close is the last step of teardown, so it changes neither the results nor the exit code, and a run that failed for another reason draws the same line.
+- A warning in its place when this side could not close it either. The connection is then left to the operating system, it may stay half-open, and the command may not exit on its own. The warning names what could not be done and where to check what changed; like the line, it is no verdict on the run.
+- Nothing at all against a server that closes normally.
 
-- One informational line at the default log level, naming what left the connection open -- a partner's server that did not close it, or a close that failed -- and stating that this side closed it. It is not an error, and it is no verdict on the run: this close is the last step of teardown, so it changes neither the results nor the exit code. A run that failed for some other reason draws the same line, and it neither caused that failure nor reports it.
-- A warning in place of that line when this side could not close it either -- either the means of closing it was not available, or the connection did not close when it was used. The connection is then left to the operating system, it may stay half-open, and the command may not exit on its own. The warning names what could not be done and where to check what changed. Like the informational line, it is no verdict on the run: the results and the exit code are whatever the exchange produced.
-- Nothing at all against a server that closes normally. That close is awaited and returns promptly, with no added wait.
-
-This is distinct from the per-cycle release warning `connection_per_poll` can draw from the same class of server: that one names an idle boundary in the *middle* of an exchange, is paced, and is totalled in the end-of-run summary.
-The teardown line names the *end* of the exchange and appears at most once.
+Do not read either as the mid-exchange release warning `connection_per_poll` can draw from the same class of server: that one names an idle boundary in the *middle* of an exchange and is paced and totalled. The bound, the forced close behind it, and the run accounting are specified in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#sftp-mid-exchange-session-recovery).
 
 #### Message filenames
 
-On the `sftp` and `filedrop` channels each party writes its outgoing messages as files in the shared directory; the partner polls for them. Every message filename ends in `.json`, and the last `-`-delimited segment before the extension is a decimal byte count: the exact size of the serialized message. The receiver compares that declared count against the file's on-disk size and reads the file only once the two match, so a partially synced file is never read as a complete message. Because the byte count is always the final segment, parsing is right-anchored and a party id containing hyphens does not affect extraction.
+On the `sftp` and `filedrop` channels each party writes its outgoing messages as files in the shared directory; the partner polls for them. A message is the digit-terminal case of the [filename grammar](#filename-grammar) below, which defines the byte-count segment and the size gate the receiver applies to it. Two concrete shapes exist, selected by `timestamp_in_filename`.
 
 With `timestamp_in_filename` unset (the default), the format is:
 
@@ -743,15 +721,18 @@ With `timestamp_in_filename: true`, the filename additionally carries a timestam
 
 `<YYYYMMDDTHHMMSS>` is the UTC write time in compact ISO 8601 form (no colons or hyphens, so it is Windows-safe and sorts lexicographically by time). `<NNN>` is a per-session counter that starts at `000`, is zero-padded to three digits, and increments with each message sent; it widens to four or more digits only after the 1000th message of a session.
 
-In-flight writes use a temporary `.tmp` file that is renamed to the final `.json` name only once the write completes, so a sync tool watching `*.json` never observes a partial file under its final name. Handshake files (`<id>-hello.json`, `<peer1>-<peer2>-lock.json`, the lockless acknowledgment marker `<myId>-<peerId>-hello-ack.json`) are separate from message files and are documented in [FILE_SYNC.md](spec/FILE_SYNC.md).
+In-flight writes use a temporary `.tmp` file that is renamed to the final `.json` name only once the write completes, so a sync tool watching `*.json` never observes a partial file under its final name. Handshake files (`<id>-hello.json`, `<peer1>-<peer2>-lock.json`, and the rendezvous [acknowledgment marker](#acknowledgment-markers)) are separate from message files; how they sequence a rendezvous is in [FILE_SYNC.md](spec/FILE_SYNC.md).
 
 #### Acknowledgment markers
 
-When `retain_files: true`, the receiver writes a zero-length acknowledgment marker after consuming each message rather than deleting it, so its terminal segment is the `ack` type word (not a digit string) and it is never mistaken for a message even though the consumed message's `<NNN>` and `<byteCount>` appear mid-name:
+An acknowledgment marker is a zero-length file the receiver writes to signal that it has taken a message or a hello, in place of deleting it. Two kinds exist and they share one shape: under `retain_files: true` the receiver writes one after consuming each message, and under `lockless_rendezvous: true` each party writes one for the peer hello it has seen. Its terminal segment is the `ack` type word rather than a digit string, so it is never mistaken for a message even though a consumed message's `<NNN>` and `<byteCount>` appear mid-name:
 
 ```
-<receiverId>-<senderId>-<YYYYMMDDTHHMMSS>-<NNN>-<byteCount>-ack.json
+<receiverId>-<senderId>-<YYYYMMDDTHHMMSS>-<NNN>-<byteCount>-ack.json   # a consumed message
+<myId>-<peerId>-hello-ack.json                                         # a peer hello
 ```
+
+Each is named after the file it acknowledges, prefixed with the id of the party that wrote it, so the two parties' markers never collide and either party can construct the name it is waiting for rather than parsing what is on disk.
 
 Because no exchange file is ever deleted, the directory accumulates each message and its ack on every transport -- including those, such as SFTP, that do support deletion -- so it is a durable transcript, not only a workaround for transports that cannot propagate deletions. The hellos and acks of a completed rendezvous persist in it too; a rendezvous that fails instead clears the failing party's own hello and ack (see [Directory exclusivity](#directory-exclusivity)). The transcript accumulates with no in-protocol cleanup; retention, rotation, and archival are out-of-band operator responsibilities.
 
@@ -765,7 +746,9 @@ A third process writing protocol-grammar files -- `<id>-hello.json`, `<peer1>-<p
 
 **Foreign (non-protocol) files are tolerated.** A file whose name does not match the protocol grammar -- an unrelated file, or a sync tool's conflict copy or partial download -- does not abort the exchange. Foreign files present at session start are snapshotted and ignored for the session; one that first appears mid-session is handled by [`unexpected_files`](#connectionoptions) (`error`/`warn`/`ignore`). The protocol never deletes a foreign file. The exclusivity requirement is therefore on the protocol-grammar namespace, not on the directory as a whole. Note that a foreign file whose name coincidentally matches the message grammar (`<peerId>-<digits>.json`) is *not* foreign -- it is treated as a protocol message and rejected -- so this tolerance covers genuinely non-grammar names only.
 
-**Recovering a contaminated or reused directory (CLI-only).** When a prior run crashed, or a bilateral-mode mismatch left protocol files behind, the entry guard refuses the next run (exit 64). The refusal names the directory, how many offending files it found, and as many of their names as fit the operator-facing display budget -- a long path is shortened before the names are, and a name too long to show whole is counted rather than shown in part; the directory itself is the full list. Remove those files after confirming no other session is using the path, or re-run with `--sweep-exchange-files`.
+**Every exchange starts from a fresh directory, and the guard enforces it.** Before a run begins, the directory must be empty of protocol files except for at most one peer hello -- the file a partner who arrived first legitimately leaves. Foreign, non-protocol files are tolerated and do not count. The rule applies in both message-loop modes, but it is what protects retain mode in particular, where a stale message or ack marker from a prior session would be mis-consumed against the receiver's counter or would prematurely release the sender's gate, corrupting or stalling the exchange with no error.
+
+**Recovering a contaminated or reused directory (CLI-only).** When a prior run crashed, or a bilateral-mode mismatch left protocol files behind, that guard refuses the next run (exit 64). The refusal names the directory, how many offending files it found, and as many of their names as fit the operator-facing display budget -- a long path is shortened before the names are, and a name too long to show whole is counted rather than shown in part; the directory itself is the full list. Remove those files after confirming no other session is using the path, or re-run with `--sweep-exchange-files`.
 
 What the leftover kinds tell you:
 
@@ -778,23 +761,23 @@ What the leftover kinds tell you:
 
 - **To skip the failed round**, one party sweeps and stays in the exchange while the other starts afterwards with no sweep flag. Nothing printed marks the moment that second start is safe -- the `sweeping ...` line goes out before the deletions do, and a directory with nothing to delete draws no line at all -- so the two operators have to agree the order between themselves and check the directory's contents (the named leftovers gone, a single hello present) rather than a log line.
 
-**One kind of leftover needs no flag.** A run that fails after the partner handshake leaves an abort marker (`<id>-abort.json`) so the waiting partner learns of the failure instead of sitting out its inactivity timeout, and that marker outlives the run that wrote it. In the default (non-retain) mode the next run in the same directory clears it at start-up, whichever party's failure left it, so a plain retry is never blocked by one. Clearing it at start-up is also what the marker's own reader depends on not happening too early: if the partner is still running the failed exchange, let it poll once before you retry, because a retry that clears the marker first leaves the partner to sit out its inactivity timeout rather than fail fast. In retain mode nothing is cleared automatically -- the directory is a durable transcript -- and a leftover marker is refused along with it until you pass both flags above.
+**One kind of leftover needs no flag.** A run that fails after the partner handshake leaves an abort marker (`<id>-abort.json`) so the waiting partner learns of the failure instead of sitting out its inactivity timeout. In the default (non-retain) mode the next run in the same directory clears it at start-up, whichever party's failure left it, so a plain retry is never blocked by one; in retain mode nothing is cleared automatically and a leftover marker is refused along with the transcript until you pass both flags above. One thing to time: if the partner may still be running the failed exchange, let it poll once before you retry. A retry clears the marker, and a partner that had not yet read it then sits out its full inactivity timeout instead of failing fast. Who writes the marker, who may remove it, and why its reader is neither are in [FILE_SYNC.md](spec/FILE_SYNC.md#file-taxonomy).
 
-**A failed rendezvous leaves no leftover at all.** A party whose rendezvous fails before it completes -- it waited out the peer timeout, or the directory turned out to be contaminated -- removes the hello it wrote, and the acknowledgment it wrote for a partner hello it had seen, in retain mode as well as the default: a handshake that reached no exchange is not part of the transcript, so retry into the same directory rather than clearing it by hand. Two cases still leave files behind, both covered above: a bilateral-mode mismatch deliberately leaves both hellos in place so each party reads the other's setting, and a run killed outright never reaches its own cleanup. Why removing these files is right in retain mode is in [FILE_SYNC.md](spec/FILE_SYNC.md#phase-1----terminal-rendezvous-failure).
+**A failed rendezvous leaves no leftover at all.** A party whose rendezvous fails before it completes -- it waited out the peer timeout, or the directory turned out to be contaminated -- removes the hello it wrote and the acknowledgment it wrote for a partner hello it had seen, in retain mode as well as the default. So retry into the same directory rather than clearing it by hand. Two cases still leave files behind, both covered above: a bilateral-mode mismatch deliberately leaves both hellos in place so each party reads the other's setting, and a run killed outright never reaches its own cleanup. Why removing these files is right in retain mode is in [FILE_SYNC.md](spec/FILE_SYNC.md#phase-1----terminal-rendezvous-failure).
 
-**A hello left by a killed run is the leftover to know about.** A run killed outright (SIGKILL, an out-of-memory kill, power loss) leaves its own `<id>-hello.json` behind, and because the party id is a fresh value per run unless you set [`peer_id`](#connectionoptions), the next run reads that file as a *partner's* hello rather than its own. Nothing can tell the two apart from the directory alone, so that run cannot succeed; how it fails depends on the rendezvous mode:
+**A hello left by a killed run is the leftover to know about.** A run killed outright (SIGKILL, an out-of-memory kill, power loss) leaves its own `<id>-hello.json` behind, and because the party id is a fresh value per run unless you set [`peer_id`](#connectionoptions), the next run reads that file as a *partner's* hello rather than its own. Nothing can tell the two apart from the directory alone, so that run cannot succeed. What you do about it:
 
-- **Default (lock) rendezvous.** The run joins the leftover, gets no answer, and fails in the key exchange. Its error names the leftover as the likely cause rather than blaming your partner. It also consumed the file on the way through, so the directory is clear and a straight re-run is the recovery.
-- **`lockless_rendezvous` (and therefore `retain_files`).** The run fails well inside the peer timeout, naming the file and asking you to re-run, removing it only if it survives that re-run and no other session is using the directory. The re-run is the check that matters: a partner whose transport is simply slow completes it, while genuine residue fails it identically every time. The run never deletes the file -- a hello it cannot prove is its own is not its to remove -- so once the re-run confirms it, delete the named file, or use `--sweep-exchange-files`, whose assertion is the same one you are making by hand.
+- **Default (lock) rendezvous.** The run fails in the key exchange, with an error naming the leftover as the likely cause rather than blaming your partner. It consumed the file on the way through, so the directory is already clear and a straight re-run is the recovery.
+- **`lockless_rendezvous` (and therefore `retain_files`).** The run fails well inside the peer timeout, naming the file and asking you to re-run. Do that first: a partner whose transport is simply slow completes the re-run, while genuine residue fails it identically every time. Only once the re-run confirms it should you delete the named file, or pass `--sweep-exchange-files`, whose assertion is the one you are making by hand. The run itself never deletes it -- a hello it cannot prove is its own is not its to remove.
 
-**Set `peer_id` for unattended and scheduled runs.** With a stable id the leftover carries *your own* id, so the next run recognizes it immediately and refuses at start-up (exit 64) naming the file, before any waiting -- in every mode, and on the filename alone, so it holds even for a hello whose body the kill left incomplete. `peer_id` requires `timestamp_in_filename: true`, and the two parties must use distinct ids; note that a stable id also appears in your partner's logs, making your runs linkable to each other. Do not reach for `--sweep-exchange-files` on a schedule instead: it asserts no concurrent session is using the directory, which an unattended run is in no position to assert on every invocation.
+Setting [`peer_id`](#connectionoptions) avoids all of this, which is why it is recommended for unattended and scheduled runs: the leftover then carries your own id and is refused at start-up on the filename alone. Do not reach for `--sweep-exchange-files` on a schedule instead -- it asserts no concurrent session is using the directory, which an unattended run is in no position to assert on every invocation. How the entrant distinguishes the two cases, and the bounded window it waits, are in [FILE_SYNC.md](spec/FILE_SYNC.md#phase-1----entry-present-peer-hello).
 
 #### Filename grammar
 
 Every protocol file on `sftp` and `filedrop` channels is named `<id>-...-<token>.json`, where `<token>` is the final `-`-delimited segment before `.json`:
 
 - If `<token>` is all digits, the file is a **message** and `<token>` is its declared byte count. Parsing is right-anchored so a party id containing hyphens does not affect extraction.
-- Otherwise `<token>` is a **type word** naming the file kind: `hello` (rendezvous hello), `ack` (a zero-length acknowledgment marker: the lockless rendezvous ack of a peer hello, and the retain-mode ack of a consumed message), `joining` (the lock-path joiner-arrival sentinel `<id>-joining.json`, briefly present while the joiner deletes the peer hello and renames the sentinel to its own hello), `lock` (the rendezvous tiebreaker `<peer1>-<peer2>-lock.json`, created in lock mode -- the default `lockless_rendezvous: false` -- when both hellos coexist and one party wins the atomic exclusive-create race; both sides encode the two ids in hello-filename order so they reconstruct the same name), or `abort` (the marker `<id>-abort.json` a failing party leaves for its partner, described under [Directory exclusivity](#directory-exclusivity) above). A typed file is never read as a message; the receiver's message scan ignores any file whose terminal segment is non-numeric, so a message ack's mid-name `<NNN>`/`<byteCount>` digits do not route it as a message.
+- Otherwise `<token>` is a **type word** naming the file kind: `hello` (rendezvous hello), `ack` (see [Acknowledgment markers](#acknowledgment-markers)), `joining` (the lock-path joiner-arrival sentinel `<id>-joining.json`, briefly present while the joiner deletes the peer hello and renames the sentinel to its own hello), `lock` (the rendezvous tiebreaker `<peer1>-<peer2>-lock.json`, created in lock mode -- the default `lockless_rendezvous: false` -- when both hellos coexist and one party wins the atomic exclusive-create race; both sides encode the two ids in hello-filename order so they reconstruct the same name), or `abort` (the marker `<id>-abort.json` a failing party leaves for its partner, described under [Directory exclusivity](#directory-exclusivity) above). A typed file is never read as a message; the receiver's message scan ignores any file whose terminal segment is non-numeric, so a message ack's mid-name `<NNN>`/`<byteCount>` digits do not route it as a message.
 
 The receiver only reads files whose on-disk size matches the declared byte count, so a partially synced message file is never consumed prematurely.
 
@@ -847,7 +830,7 @@ Optional top-level block, a sibling of [`signing`](#signing). It holds the partn
 
 Taken together, the `authentication` block is never required in a configuration file -- its only fields today are key-file-injected. It is required for the in-memory objects used for recurring exchanges, and it is optional for zero-setup exchanges.
 
-The shared secret is automatically rotated after each successful authentication handshake: both parties independently derive the replacement from the key-exchange session key using HKDF, so no extra round-trip is required. The CLI persists the new secret automatically; library consumers of `authenticateConnection` are responsible for persisting `rotatedSecret` from the returned `AuthResult` to their own storage. If the exchange fails before a successful handshake, the existing secret remains valid. If the handshake succeeds but the data exchange subsequently fails, both parties already hold the rotated secret and can retry without re-inviting. If the handshake succeeds but the new secret cannot be persisted (e.g., a disk-write error), both parties may be out of sync: the partner may already hold the rotated secret, making the old secret invalid. In that case both parties must re-invite. Invitation tokens carry a default expiration of 1 hour; rotation-generated shared secrets carry none by default, unless [`token_max_age_days`](#authenticationtoken_max_age_days) is set, in which case each rotation stamps an expiration that many days out.
+The shared secret is automatically rotated after each successful authentication handshake: both parties independently derive the replacement from the key-exchange session key using HKDF, so no extra round-trip is required. The CLI persists the new secret automatically; library consumers of `authenticateConnection` are responsible for persisting `rotatedSecret` from the returned `AuthResult` to their own storage. If the exchange fails before a successful handshake, the existing secret remains valid. If the handshake succeeds but the data exchange subsequently fails, both parties already hold the rotated secret and can retry without re-inviting. If the handshake succeeds but the new secret cannot be persisted (e.g., a disk-write error), both parties may be out of sync: the partner may already hold the rotated secret, making the old secret invalid. In that case both parties must re-invite. Invitation tokens carry a default expiration of 1 hour; what a rotation-generated secret carries is governed by [`token_max_age_days`](#authenticationtoken_max_age_days).
 
 | Field | Type | In `psilink.yaml` | Description |
 |-------|------|-------------------|-------------|
@@ -866,7 +849,7 @@ Why `authentication` and `signing` are two separate blocks (rather than one trus
 *Type:* integer (positive, at most 36500 -- about 100 years)  
 *Required:* no
 
-An operator-policy field, not key-file-injected. Rotation tokens written after each successful exchange carry no expiration by default, on the assumption that active partnerships exchange frequently. A dormant partnership (a monthly cadence, a holiday gap) could otherwise hold a valid token indefinitely. When `token_max_age_days` is set, a successful exchange stamps `expires` = (the moment of rotation) + `token_max_age_days` days into the rotated `.psilink.key`, bounding a token's age independently of exchange frequency. When it is omitted, rotated tokens carry no expiry (the unchanged default).
+An operator-policy field, not key-file-injected. Rotation tokens written after each successful exchange carry no expiration by default, on the assumption that active partnerships exchange frequently. A dormant partnership (a monthly cadence, a holiday gap) could otherwise hold a valid token indefinitely. When `token_max_age_days` is set, a successful exchange stamps `expires` = (the moment of rotation) + `token_max_age_days` days into the rotated `.psilink.key`, bounding a token's age independently of exchange frequency.
 
 The stamp is enforced at the next `psilink exchange`, which reads the token's `expires` at load time:
 
@@ -912,7 +895,7 @@ signing:
   mode: certificate
   identity_file: ~/.psilink/signing-identity.json
   partner_fingerprint: iWD-ZB69Oz6gOpaX_OoC7sD8ohIZj2lETC9qbl-IbPg
-  receipt_output: ./receipts
+  receipt_output: ./receipts/agency-a-receipt.json
 ```
 
 ### `signing.receipt_output`
@@ -950,25 +933,34 @@ Optional field-level descriptions of the input dataset. If omitted, semantic typ
 
 When metadata is inferred (no explicit `metadata` block), an empty (zero-length) column name in the input is rejected at intake with a clear error, the same way an explicit `metadata` `name` is rejected at config parse (see the `name` field below). A trailing comma, a blank cell, or a leading delimiter in a CSV header row produces such an unnamed column; because an empty name cannot be used for linkage, identification, or payload, the file is refused up front rather than silently dropping the column's audit record during the exchange. Name the column or remove the empty header field. The web app surfaces the same rejection at its file-intake surfaces (the quick and Advanced invite paths and the acceptor's file step).
 
+`metadata` is a list of column entries directly, not an object wrapping one:
+
 ```yaml
 metadata:
-  columns:
-    - name: "LAST_NAME"
-      type: last_name
-      role: linkage
-      description: "Legal last name as recorded at enrollment"
-    - name: "DOB"
-      type: date_of_birth
-      role: linkage
-    - name: "CLIENT_ID"
-      role: identifier
-      description: "Internal client identifier"
-    - name: "PROGRAM_START_DATE"
-      role: payload
-      description: "Date client enrolled in the program"
-    - name: "COUNTY"
-      role: ignored
-      description: "Present in the input but excluded from this exchange"
+  - name: "LAST_NAME"
+    type: last_name
+    role: linkage
+    is_payload: false
+    description: "Legal last name as recorded at enrollment"
+  - name: "DOB"
+    type: date_of_birth
+    role: linkage
+    is_payload: false
+  - name: "CLIENT_ID"
+    type: identifier
+    role: identifier
+    is_payload: false
+    description: "Internal client identifier"
+  - name: "PROGRAM_START_DATE"
+    type: other
+    role: payload
+    is_payload: true
+    description: "Date client enrolled in the program"
+  - name: "COUNTY"
+    type: other
+    role: ignored
+    is_payload: false
+    description: "Present in the input but excluded from this exchange"
 ```
 
 ### Column fields
@@ -976,12 +968,27 @@ metadata:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Column name in the input CSV; must be non-empty, at most 256 characters, and unique within the metadata block (matched case-sensitively). A violation is rejected at config parse |
-| `type` | string | no | Semantic type (see [Semantic Types](#semantic-types) above); inferred from name if omitted |
-| `role` | enum | no | `linkage`, `identifier`, `payload`, or `ignored`; inferred if omitted (inference never assigns `ignored` -- it is opt-in only) |
-| `is_payload` | boolean | no | Whether this column is transmitted as payload data after the intersection is identified; defaults to `true` when `role` is `payload`, `false` otherwise |
+| `type` | string | yes | Semantic type (see [Semantic Types](#semantic-types) above) |
+| `role` | enum | yes | `linkage`, `identifier`, `payload`, or `ignored` |
+| `is_payload` | boolean | yes | Whether this column is transmitted as payload data after the intersection is identified |
 | `description` | string | no | Human-readable description; shared with partner for payload columns |
 
-`role` and `is_payload` are partially independent. A column used for linkage or as an identifier can also carry `is_payload: true`, meaning it participates in the PSI protocol *and* is transmitted as payload for matched members. For example, a phone-number column can have `role: linkage` and `is_payload: true` so that it both links records and is delivered to the partner for matched rows. Any column that is not used for linkage or identification must have `is_payload: true`; the application will treat such a column as `role: payload` if no role is specified.
+**Authoring a `metadata` block is all-or-nothing per column.** `type`, `role`, and `is_payload` are each required on every column the block lists; there is no per-field fallback, and a column missing any of them is rejected at config parse. Inference is the alternative to authoring, not a filler for a partial block: it runs only when the whole `metadata` block is absent, over the input file's header row.
+
+What inference assigns, when it runs:
+
+| Column | `type` | `role` | `is_payload` |
+|--------|--------|--------|--------------|
+| A recognized linkage name (`ssn`, `dob`, `first_name`, `phone`, `email`, `zip`, and their aliases) | the matching semantic type | `linkage` | `false` |
+| `id` or `identifier` | `identifier` | `identifier` | `true` |
+| A name ending in `_id` | `identifier` | `identifier` when it is the header's only `identifier`-typed column, otherwise `payload` | `true` |
+| Anything else | `other` | `payload` | `true` |
+
+Both identifier rows produce `type: identifier`, and that type is what decides the `role`: a header carrying exactly one `identifier`-typed column roles it `identifier` whatever its name, so a lone `case_id` indexes the records. A header carrying several gives `role: identifier` to a column named `id` or `identifier` when one is present, and to no column at all otherwise -- two `_id` columns and nothing else leaves both roled `payload`, so none of this party's columns indexes its own records in the result.
+
+The two identifier rows are the ones to check before an exchange: an inferred identifier column is transmitted, so a party that does not intend to disclose its own record keys authors a `metadata` block and sets `is_payload: false` on them. Inference never assigns `ignored` -- that role is opt-in only.
+
+`role` and `is_payload` are partially independent. A column used for linkage or as an identifier can also carry `is_payload: true`, meaning it participates in the PSI protocol *and* is transmitted as payload for matched members. For example, a phone-number column can have `role: linkage` and `is_payload: true` so that it both links records and is delivered to the partner for matched rows. A column that is neither used for linkage nor an identifier is there to be sent, so give it `role: payload` and `is_payload: true` -- which is also what inference assigns to an unrecognized column.
 
 `role: ignored` is the explicit opposite of that default: a column present in the input but used for nothing. An ignored column is never used for linkage, never treated as an identifier, and never transmitted as payload -- the role wins over `is_payload`, so an ignored column is not sent even if it carries `is_payload: true`. Use it to keep a column in the input file (so the file need not be edited) while declaring that this exchange must not touch it. Inference never assigns `ignored`; it must be set explicitly.
 
@@ -1038,8 +1045,7 @@ When an exchange configuration authors its own `standardization`, that standardi
 |-------|------|----------|-------------|
 | `output` | string | yes | Name of a linkage field from `linkage_terms.linkage_fields` |
 | `input` | string | yes | Column name in the raw input CSV |
-| `steps` | array | no | Steps applied in order; if omitted the raw value is
-used unchanged |
+| `steps` | array | no | Steps applied in order; if omitted the raw value is used unchanged |
 
 ### Step fields
 
@@ -1080,7 +1086,7 @@ When exactly one fan-out entry matches, the original row is accepted and all its
 
 Parameter names below are written in snake_case in YAML (e.g. `input_format`, `include_original`), following the same convention as the rest of the spec; they are normalized for the function library internally. Unlike `connection.provider_options`, a `params` block is not opaque and its keys are not passed verbatim.
 
-**Regex patterns run under a linear-time engine.** The four regex functions (`replace_regex`, `extract_regex`, `filter_regex`, and `split_on`) take a `pattern` (a `delimiter` for `split_on`) that is compiled and run per row over the full dataset. Because a partner authors these patterns and they execute on your data, they run under a linear-time regular-expression engine (RE2 semantics) rather than the JavaScript engine, so no pattern can hang the application through catastrophic backtracking -- this is guaranteed by construction, not screened for. The cost is a restricted **dialect**: a pattern may use the common syntax (character classes, anchors, quantifiers, groups, alternation, and Unicode classes) but not the features that require backtracking -- backreferences and lookarounds -- and a few escapes and class semantics differ from JavaScript. A pattern outside the dialect is rejected at terms validation, before any row is processed. One operator-facing consequence of the switch: a pattern that backtracked catastrophically on the old engine (e.g. `(a+)+`) now simply runs in linear time rather than being rejected; `parse_date` runs on the same engine, so an `input_format` with many adjacent variable-width tokens is likewise bounded by construction. The permitted syntax, the JavaScript divergences, and the exact operation semantics are specified normatively in [PROTOCOL.md](spec/PROTOCOL.md#transform-regular-expression-dialect).
+**Regex patterns run under a linear-time engine.** The four regex functions (`replace_regex`, `extract_regex`, `filter_regex`, and `split_on`) take a `pattern` (a `delimiter` for `split_on`) that is compiled and run per row over the full dataset. Because a partner authors these patterns and they execute on your data, they run under a linear-time regular-expression engine (RE2 semantics) rather than the JavaScript engine, so no pattern can hang the application through catastrophic backtracking -- this is guaranteed by construction, not screened for. The cost is a restricted **dialect**: a pattern may use the common syntax (character classes, anchors, quantifiers, groups, alternation, and Unicode classes) but not the features that require backtracking -- backreferences and lookarounds -- and a few escapes and class semantics differ from JavaScript. A pattern outside the dialect is rejected at terms validation, before any row is processed. A pattern with nested quantifiers (e.g. `(a+)+`) is accepted and runs in linear time like any other, because no pattern the dialect admits can hang the application; `parse_date` runs on the same engine, so an `input_format` with many adjacent variable-width tokens is likewise bounded by construction. The permitted syntax, the JavaScript divergences, and the exact operation semantics are specified normatively in [PROTOCOL.md](spec/PROTOCOL.md#transform-regular-expression-dialect).
 
 #### String transformation
 
@@ -1098,8 +1104,8 @@ Parameter names below are written in snake_case in YAML (e.g. `input_format`, `i
 | `remove_affixes` | Remove name titles (Mr., Dr., ...) (and suffixes (Jr., III, ...) | - |
 | `substring` | Extract a substring | `start` (integer, 1-indexed, required; negative counts from end), `length` (positive integer, required) |
 | `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`), each at most 256 characters; tokens: `YYYY`, `YY`, `MM`, `DD` |
-| `pad_left` | Left-pad the value with a fill character up to a target length; pass-through if already at or above the length | `length` (positive integer, required, at most 256), `char` (single character, default `"0"`) |
-| `phonetic` | Apply a phonetic encoding | `algorithm`: `soundex` (default); result is a 4-character string |
+| `pad_left` | Left-pad the value with a fill character up to a target length; pass-through if already at or above the length | `length` (positive integer, required; capped at 256 in a linkage key element's `transform`, uncapped in a `standardization` step), `char` (single character, default `"0"`) |
+| `phonetic` | Apply a phonetic encoding | `algorithm`: `soundex` (default); result is a 4-character string, or `null` for a value carrying no letters |
 | `replace_regex` | Replace all regex matches | `pattern` (required), `replacement` (default `""`) |
 | `extract_regex` | Keep the first capture group, or the whole match if the pattern has none; produce `null` if there is no match or the result is empty | `pattern` (required) |
 
@@ -1136,7 +1142,7 @@ Steps following `split_on` are applied element-wise across all parts. Null-produ
 
 ## Full example
 
-An end-to-end annotated specification covering every component is planned; see [ROADMAP.md](ROADMAP.md). The web application, under Expert authoring in the Matching keys tab, now exports the linkage terms as a JSON or YAML document (and imports one back, round-tripped through the same validation) -- the GUI-produced reference for the linkage-terms component. The per-section snippets above remain the working reference for the rest.
+An end-to-end annotated specification covering every component is planned; see [ROADMAP.md](ROADMAP.md). For the linkage-terms component, the web application's Expert authoring surface in the Matching keys tab exports the terms as a JSON or YAML document (and imports one back, round-tripped through the same validation), which serves as a GUI-produced reference. The per-section snippets above are the working reference for the rest.
 
 ## See also
 
