@@ -74,6 +74,8 @@ function tierStatus(tier: ManagedFailureTier, at: string): string {
       return "Stored secret lapsed; re-invite to run again";
     case "input":
       return `Last run could not use your input file (${at})`;
+    case "consent":
+      return `Last run stopped before sending (${at}); settle what it sends`;
     case "storage":
       return `Last run could not be saved (${at}); re-invite to reconnect`;
     case "imported":

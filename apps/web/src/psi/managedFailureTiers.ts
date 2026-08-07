@@ -13,7 +13,8 @@
  * at the next visit. The evidence is:
  *
  * - `lastRun.failureKind` -- the structured enum the runner and the critical section
- *   stamp (`auth` \| `transport` \| `storage` \| `input` \| `cancelled`);
+ *   stamp (`auth` \| `transport` \| `storage` \| `input` \| `consent` \|
+ *   `cancelled`);
  * - a lapsed `expires` (its own state, detected before any connection; handled by the
  *   pre-connection check, mirrored here for a next-visit read);
  * - an import/restore since the last successful run -- the local `imported` sibling
@@ -48,6 +49,10 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
  *   whose bound lapsed while dormant.
  * - `"input"` -- a benign pre-run input problem the last run recorded (a missing file
  *   or a rejected column shape; recovery: fix the input and retry).
+ * - `"consent"` -- a benign pre-run refusal by one of the send-side disclosure gates:
+ *   what this run would send is not the set the exchange recorded agreeing to send
+ *   (recovery: re-confirm the disclosure; never a retry, since the same input refuses
+ *   identically at the next window).
  * - `"missed"` -- an agreed window passed without a completed handshake (recovery:
  *   automatic retry at the next window; no action). Never a live-launch tier.
  * - `"storage"` -- a recorded persist failure on the last run (recovery: re-invite;
@@ -65,6 +70,7 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
 export type ManagedFailureTier =
   | "expired"
   | "input"
+  | "consent"
   | "missed"
   | "storage"
   | "imported"
@@ -118,6 +124,10 @@ export function deriveManagedFailureTier(
 
   // A recorded benign pre-run input problem: its own tier, never desync/attack.
   if (lastRun.failureKind === "input") return "input";
+  // A recorded pre-run disclosure refusal: likewise its own benign tier, and kept
+  // out of the retryable transport bucket -- its remedy is re-confirming what this
+  // exchange sends, which no amount of reconnecting supplies.
+  if (lastRun.failureKind === "consent") return "consent";
   // A recorded persist failure on the last run: a one-sided persist may have
   // desynced the parties, so the recovery is re-invite -- Tier 1, no attack checklist.
   if (lastRun.failureKind === "storage") return "storage";

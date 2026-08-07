@@ -11,7 +11,7 @@ import {
 import { prepareForExchange } from "../src/exchange";
 import { deriveAcceptedLinkageTerms } from "../src/config/linkageTerms";
 import { disclosedColumnNames } from "../src/config/metadata";
-import { UsageError } from "../src/errors";
+import { OutboundDisclosureRefusalError, UsageError } from "../src/errors";
 
 import type { Metadata } from "../src/config/metadata";
 import type { LinkageTerms, Output, Payload } from "../src/config/linkageTerms";
@@ -724,6 +724,15 @@ test("assertDisclosureMatchesCommitment: a column now disclosed but not committe
   expect(() =>
     assertDisclosureMatchesCommitment(["patient_id"], metaWithId),
   ).toThrow(/diagnosis/);
+});
+
+test("assertDisclosureMatchesCommitment: a drift carries the disclosure-refusal type", () => {
+  // The distinct type is what lets a caller keeping per-failure bookkeeping tell a
+  // local pre-connection refusal from a transport fault, without giving up the
+  // `instanceof UsageError` classification the CLI's exit 64 rests on.
+  expect(() =>
+    assertDisclosureMatchesCommitment(["patient_id"], metaWithId),
+  ).toThrow(OutboundDisclosureRefusalError);
 });
 
 test("assertDisclosureMatchesCommitment: an empty commitment is strict 'disclose nothing'", () => {

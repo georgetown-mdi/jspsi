@@ -13,11 +13,11 @@
  *   from the error.
  * - The RECORDED tiers, derived from the record's own structured bookkeeping (see
  *   {@link deriveManagedFailureTier}): a recorded persist failure, a restore/import
- *   since the last success, a transport drop, or -- only when nothing else explains a
- *   failed-closed handshake -- the unexplained tier that carries the full out-of-band
- *   confirmation. The tier is derived from the record's evidence, never the live error,
- *   so a failure from an unattended run surfaces through the same tiers at the next
- *   visit.
+ *   since the last success, a pre-connection disclosure refusal, a transport drop, or
+ *   -- only when nothing else explains a failed-closed handshake -- the unexplained
+ *   tier that carries the full out-of-band confirmation. The tier is derived from the
+ *   record's evidence, never the live error, so a failure from an unattended run
+ *   surfaces through the same tiers at the next visit.
  *
  * The recovery affordance the classification names then has copy of its own: the
  * re-invite callout reads differently for each side, so {@link
@@ -51,9 +51,13 @@ import type { ManagedLocalState } from "@psi/managedLocalState";
  * - `"retry"` -- retryable in place (fix the input, or retry a transport drop).
  * - `"wait"` -- not this run's to act on (a run in progress elsewhere).
  * - `"confirm"` -- the Tier-2 out-of-band confirmation and the two-outcome gate.
+ * - `"reconfirm"` -- what this exchange sends must be settled again before it can
+ *   run: the run's own input decides the set, so neither retrying the connection nor
+ *   re-minting the secret changes the outcome. Deliberately not `"retry"`, so a
+ *   surface never offers the run again as though the same input could pass.
  * - `"none"` -- nothing to recover (informational; e.g. a missed window). */
 export type ManagedRunRecovery =
-  "reinvite" | "retry" | "wait" | "confirm" | "none";
+  "reinvite" | "retry" | "wait" | "confirm" | "reconfirm" | "none";
 
 /** A classified launch state, ready to render: the state's kind (the pre-connection
  * benign states plus the derived tiers), its plain copy, and the recovery affordance
@@ -64,6 +68,7 @@ export interface ManagedRunFailure {
   kind:
     | "expired"
     | "input"
+    | "consent"
     | "already-running"
     | "storage"
     | "imported"
@@ -114,6 +119,26 @@ const INPUT_FAILURE: ManagedRunFailure = {
     "have the columns this exchange needs. Check that the file is in place " +
     "and matches the agreed terms, then try again.",
   recovery: "retry",
+};
+
+/** The benign disclosure-refusal state: a send-side gate refused before connecting
+ * because what this run would send is not the set the exchange recorded agreeing to
+ * send. Fixed and non-oracular, like the input state's: the refusal names the drifted
+ * columns, and those are this party's own, but the copy states the condition rather
+ * than echoing a list the operator reads faster from their own file. It names
+ * re-confirming the disclosure and says the run is not worth repeating as-is, because
+ * the same input refuses identically. */
+const CONSENT_FAILURE: ManagedRunFailure = {
+  kind: "consent",
+  title: "What this run would send is not what this exchange agreed to send",
+  message:
+    "The columns your input file would send to your partner for matched " +
+    "records are not the ones this exchange agreed to send, so it stopped " +
+    "before connecting and nothing left this device. Running it again with the " +
+    "same file stops the same way - this is not a connection problem. Run it " +
+    "with the input file whose columns match what was agreed, or set the " +
+    "exchange up again with your partner to settle what it sends now.",
+  recovery: "reconfirm",
 };
 
 /** The Tier-1 recorded persist-failure state: the last run rotated the secret but
@@ -199,6 +224,8 @@ function tierFailure(
         : TRANSPORT_FAILURE;
     case "input":
       return INPUT_FAILURE;
+    case "consent":
+      return CONSENT_FAILURE;
     case "storage":
       return STORAGE_FAILURE;
     case "imported":
@@ -259,8 +286,9 @@ export function managedRunFailureFromRecord(
 /** Whether a classified failure is retryable in place (the input and transport states
  * -- fix the file or retry the connection). The expired, storage, imported, and
  * unexplained states are not retried in place: their recovery is re-invite (directly,
- * or through the confirmation gate), and an in-progress run elsewhere is not this run's
- * to retry until it finishes. */
+ * or through the confirmation gate); a consent refusal is not retried either, because
+ * the same input settles the same disclosure however many times it runs; and an
+ * in-progress run elsewhere is not this run's to retry until it finishes. */
 export function managedRunRetryable(failure: ManagedRunFailure): boolean {
   return failure.recovery === "retry";
 }
