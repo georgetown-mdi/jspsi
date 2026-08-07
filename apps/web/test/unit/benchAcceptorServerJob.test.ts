@@ -189,6 +189,13 @@ describe("acceptorServerJobConfig", () => {
       token.disclosedPayloadColumns,
     );
   });
+
+  test("states the acceptor side, which is what records the outbound consent", () => {
+    // The composer derives an outbound_payload_consent record for this side
+    // alone. A config that stated any other side would compose none, leaving a
+    // later unattended run of it held to no set.
+    expect(configFor().side).toBe("acceptor");
+  });
 });
 
 // The received-payload lock-in the console acceptor must set EXPLICITLY, mirroring

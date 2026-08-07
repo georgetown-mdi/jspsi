@@ -421,6 +421,9 @@ export function useInviterExchange({
       const transport = serverJobTransport();
       return createServerJobExchangeDriver({
         transport,
+        // The inviter authored its own outbound set at mint, so this side records
+        // no outbound consent: the invitation IS the statement of what it sends.
+        side: "inviter",
         linkageTerms: minted.linkageTerms,
         sharedSecret: minted.sharedSecret,
         inputSource,

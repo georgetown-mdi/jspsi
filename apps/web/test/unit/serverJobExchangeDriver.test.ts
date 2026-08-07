@@ -40,6 +40,7 @@ const CONFIG_INPUT_CSV = "ssn\n111223333\n";
 function driverConfig(): ServerJobExchangeDriverConfig {
   return {
     transport: { channel: "filedrop" },
+    side: "inviter",
     linkageTerms: validLinkageTerms(),
     sharedSecret: VALID_SHARED_SECRET,
     inputSource: { kind: "inline", csv: CONFIG_INPUT_CSV },
@@ -516,6 +517,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     expect(JSON.stringify(createdIntents[0])).toBe(
       JSON.stringify({
         channel: "filedrop",
+        side: config.side,
         linkageTerms: config.linkageTerms,
         sharedSecret: config.sharedSecret,
         inputCsv: CONFIG_INPUT_CSV,
@@ -564,6 +566,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       "inputCsv",
       "linkageTerms",
       "sharedSecret",
+      "side",
     ]);
   });
 

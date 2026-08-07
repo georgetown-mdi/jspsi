@@ -4,6 +4,7 @@ import { parse as parseYaml } from "yaml";
 
 import {
   MAX_NAME_LENGTH,
+  assessOutboundPayloadConsent,
   disclosedColumnNames,
   safeParseExchangeSpec,
   safeParseMetadata,
@@ -43,7 +44,12 @@ import {
   validZeroSetupSftpIntent,
 } from "../utils/jobFixtures";
 
-import type { Metadata, Standardization } from "@psilink/core";
+import type {
+  LinkageTerms,
+  Metadata,
+  OutboundPayloadConsent,
+  Standardization,
+} from "@psilink/core";
 
 // The intent schema is the ONLY channel from the client into a CLI invocation.
 // These pin its injection-closure: unknown/injection-shaped values are rejected,
@@ -395,6 +401,159 @@ describe("composeConfigDocument carries the received-payload lock-in", () => {
   });
 });
 
+// The send-side counterpart of the lock-in above. An acceptance's own outbound
+// set is authored by nobody -- the invitation authors the inviter's, the mirror
+// leaves the acceptor's absent -- so without a recorded consent the CLI's
+// pre-connect gate reads "no record" and no later unattended run is ever held to
+// a set. These pin the record's three states through the composition, and that
+// the composed config is one the gate then accepts without asking again.
+
+/** The linkage terms of a party that receives the result but transmits nothing:
+ * the shape core's deriver records no consent for, since nothing crosses. */
+function notTransmittingTerms(): LinkageTerms {
+  const terms = validLinkageTerms();
+  return {
+    ...terms,
+    output: { ...terms.output, shareWithPartner: false },
+  };
+}
+
+/** The `outbound_payload_consent` block of a composed filedrop config, read back
+ * through core's own exchange-spec parser so what is asserted is what the CLI
+ * would load. */
+function composedConsent(
+  overrides: Parameters<typeof validIntent>[0],
+): OutboundPayloadConsent | undefined {
+  const yaml = composeConfigDocument(
+    validIntent(overrides),
+    "/srv/jobs/abc/exchange",
+  );
+  const parsed = safeParseExchangeSpec(parseYaml(yaml));
+  expect(parsed.success).toBe(true);
+  return parsed.success ? parsed.data.outboundPayloadConsent : undefined;
+}
+
+describe("composeConfigDocument records the acceptance's outbound consent", () => {
+  test("an acceptance whose metadata resolved records the confirmed set", () => {
+    expect(
+      composedConsent({ side: "acceptor", metadata: editedMetadata }),
+    ).toEqual({
+      status: "confirmed",
+      columns: disclosedColumnNames(editedMetadata),
+    });
+  });
+
+  test("the confirmed set is the disclosure predicate's, not the column list", () => {
+    // `secret` is roled ignored, so it is in the metadata but not in the set that
+    // leaves the machine: recording the raw column names would consent to more
+    // than is transmitted.
+    const consent = composedConsent({
+      side: "acceptor",
+      metadata: editedMetadata,
+    });
+    expect(consent).toMatchObject({ status: "confirmed" });
+    if (consent?.status !== "confirmed") return;
+    expect(consent.columns).not.toContain("secret");
+  });
+
+  test("an acceptance with no resolvable metadata records pending", () => {
+    expect(composedConsent({ side: "acceptor" })).toEqual({
+      status: "pending",
+    });
+  });
+
+  test("an acceptance that transmits nothing records no consent at all", () => {
+    expect(
+      composedConsent({
+        side: "acceptor",
+        linkageTerms: notTransmittingTerms(),
+        metadata: editedMetadata,
+      }),
+    ).toBeUndefined();
+  });
+
+  test("an inviter records none -- its own set was authored at mint", () => {
+    expect(
+      composedConsent({ side: "inviter", metadata: editedMetadata }),
+    ).toBeUndefined();
+  });
+
+  test("an intent stating no side records none", () => {
+    expect(composedConsent({ metadata: editedMetadata })).toBeUndefined();
+  });
+
+  test("the sftp arm records the identical block", () => {
+    const fields = { side: "acceptor" as const, metadata: editedMetadata };
+    const sftpDoc = parseYaml(
+      composeSftpConfigDocument(validSftpIntent(fields), testSftpServerEntry()),
+    ) as Record<string, unknown>;
+    const filedropDoc = parseYaml(
+      composeConfigDocument(validIntent(fields), "/srv/jobs/x/exchange"),
+    ) as Record<string, unknown>;
+    expect(sftpDoc.outbound_payload_consent).toEqual(
+      filedropDoc.outbound_payload_consent,
+    );
+    expect(sftpDoc.outbound_payload_consent).toBeDefined();
+  });
+});
+
+describe("a composed acceptance config satisfies the later run's consent gate", () => {
+  /** The verdict a later `psilink exchange` reaches on a composed config: the
+   * record the config carries, assessed against the set that run would actually
+   * transmit -- the exact reading `confirmOutboundPayloadConsent` performs before
+   * anything connects. `runMetadata` is what the run resolves for itself (the
+   * config's own metadata, or an inferred one where the config carries none). */
+  function gateVerdictFor(
+    overrides: Parameters<typeof validIntent>[0],
+    runMetadata: Metadata,
+  ) {
+    const yaml = composeConfigDocument(
+      validIntent(overrides),
+      "/srv/jobs/abc/exchange",
+    );
+    const parsed = safeParseExchangeSpec(parseYaml(yaml));
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) throw new Error("the composed config did not parse");
+    return assessOutboundPayloadConsent(
+      parsed.data.outboundPayloadConsent,
+      runMetadata,
+      parsed.data.linkageTerms.output,
+    );
+  }
+
+  test("an unattended run of the composed config needs no re-confirmation", () => {
+    expect(
+      gateVerdictFor(
+        { side: "acceptor", metadata: editedMetadata },
+        editedMetadata,
+      ),
+    ).toEqual({
+      status: "current",
+      columns: disclosedColumnNames(editedMetadata),
+    });
+  });
+
+  test("a pending record makes the gate ASK rather than silently pass", () => {
+    // The acceptance resolved no set, so the config carries `pending`. The first
+    // run that CAN resolve one -- here from its own input file -- shows and
+    // confirms it; an unattended one refuses instead of transmitting it.
+    expect(gateVerdictFor({ side: "acceptor" }, editedMetadata)).toMatchObject({
+      status: "confirmation-required",
+      reason: "unconfirmed",
+      columns: disclosedColumnNames(editedMetadata),
+    });
+  });
+
+  test("with no record the gate is inert -- nothing holds the run to a set", () => {
+    expect(
+      gateVerdictFor({ metadata: editedMetadata }, editedMetadata),
+    ).toEqual({
+      status: "not-required",
+      reason: "no-record",
+    });
+  });
+});
+
 describe("jobExchangeIntentSchema rejects injection-shaped intents", () => {
   test("accepts a well-formed filedrop intent", () => {
     expect(jobExchangeIntentSchema.safeParse(validIntent()).success).toBe(true);
@@ -410,6 +569,18 @@ describe("jobExchangeIntentSchema rejects injection-shaped intents", () => {
   test("rejects an unknown channel", () => {
     const intent = { ...validIntent(), channel: "webrtc" };
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("admits only the two sides, and admits an intent stating none", () => {
+    for (const side of ["inviter", "acceptor"])
+      expect(
+        jobExchangeIntentSchema.safeParse({ ...validIntent(), side }).success,
+      ).toBe(true);
+    expect(
+      jobExchangeIntentSchema.safeParse({ ...validIntent(), side: "auditor" })
+        .success,
+    ).toBe(false);
+    expect(jobExchangeIntentSchema.safeParse(validIntent()).success).toBe(true);
   });
 
   test("rejects an unknown top-level key (no smuggled path/host)", () => {
@@ -717,12 +888,13 @@ describe("jobZeroSetupIntentSchema is injection-closed and strict", () => {
     }
   });
 
-  test("rejects linkageTerms, metadata, standardization, expectedPayloadColumns", () => {
+  test("rejects linkageTerms, metadata, standardization, expectedPayloadColumns, side", () => {
     for (const smuggled of [
       { linkageTerms: validLinkageTerms() },
       { metadata: editedMetadata },
       { standardization: editedStandardization },
       { expectedPayloadColumns: ["program_code"] },
+      { side: "acceptor" },
     ]) {
       const intent = { ...validZeroSetupIntent(), ...smuggled };
       expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);

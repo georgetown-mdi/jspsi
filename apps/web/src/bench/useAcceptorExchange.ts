@@ -109,6 +109,12 @@ function transportForEndpointChannel(
  * path threads through {@link prepareAcceptorExchange}. Without them a column the
  * operator marked ignored would be inferred as disclosed payload and silently sent.
  *
+ * The send-side counterpart is the stated `side`, which is what makes the composed
+ * config carry this party's `outbound_payload_consent`: an acceptance's own
+ * outbound set is authored by nobody, so the record derived from these very
+ * `edits.metadata` is what a later unattended run of the config is held to. The
+ * derivation itself is the composer's, from the fields it writes.
+ *
  * Pure and exported so the derivation is the tested boundary, pinned without
  * running the hook.
  *
@@ -129,6 +135,7 @@ export function acceptorServerJobConfig({
 }): ServerJobExchangeDriverConfig {
   return {
     transport,
+    side: "acceptor",
     linkageTerms: deriveAcceptedLinkageTerms(token.linkageTerms, acceptorName),
     sharedSecret: token.sharedSecret,
     inputSource,

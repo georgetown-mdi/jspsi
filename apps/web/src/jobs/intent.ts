@@ -11,6 +11,7 @@ import {
   MetadataSchema,
   SHARED_SECRET_REGEX,
   StandardizationSchema,
+  deriveOutboundPayloadConsent,
   mintExchangeFile,
   snakeizeKeys,
 } from "@psilink/core";
@@ -27,6 +28,7 @@ import type {
   FileSyncOptions,
   LinkageTerms,
   Metadata,
+  OutboundPayloadConsent,
   Standardization,
 } from "@psilink/core";
 import type { JobSftpServerEntry } from "./sftpServer";
@@ -95,6 +97,13 @@ export interface JobInputFileReference {
 }
 
 /**
+ * Which side of the partnership the submitting party is running. A closed
+ * two-value enum -- never a path, host, or credential -- carrying no connection
+ * or column material of its own; it selects a composition rule, not a value.
+ */
+export type JobExchangeSide = "inviter" | "acceptor";
+
+/**
  * The fields shared by every {@link JobExchangeIntent} arm. Field-level
  * contracts (see {@link jobExchangeIntentSchema} for the closure argument):
  *
@@ -137,6 +146,8 @@ export interface JobInputFileReference {
  * - `expectedPayloadColumns` is the acceptor's received-payload lock-in: a list of
  *   partner-namespace column names, no path/host/credential. See the field doc for
  *   the empty-vs-absent semantics.
+ * - `side` is a closed two-value enum selecting which composition rules apply to
+ *   this party; it contributes no value to the composed config.
  */
 interface JobExchangeIntentBase {
   /**
@@ -165,6 +176,20 @@ interface JobExchangeIntentBase {
    * INCLUDING an empty array, so the strict form is preserved.
    */
   expectedPayloadColumns?: Array<string>;
+  /**
+   * Which side of the partnership this party runs. The composers read it for one
+   * decision: only an acceptance derives an `outbound_payload_consent` record
+   * into the composed config, because only an acceptance has an outbound set
+   * nobody authored (the invitation authors the inviter's and pins it; the
+   * mirror leaves the acceptor's absent, so it resolves from this party's own
+   * columns). See {@link composeConfigDocument}.
+   *
+   * Optional on the wire, and an absent value composes no record -- the state
+   * every non-acceptor is in regardless. Stating it is not left to a submitter's
+   * discipline where it matters: the server-job driver's config makes `side`
+   * required, so the console cannot build an acceptance that omits it.
+   */
+  side?: JobExchangeSide;
   options?: JobExchangeOptions;
   eventStream?: boolean;
 }
@@ -395,6 +420,7 @@ const jobExchangeIntentCommonFields = {
     .array(z.string().max(MAX_NAME_LENGTH))
     .max(MAX_EXPECTED_PAYLOAD_COLUMNS)
     .optional(),
+  side: z.enum(["inviter", "acceptor"]).optional(),
   eventStream: z.boolean().optional(),
 };
 
@@ -588,6 +614,32 @@ export const JOB_FILE_NAMES = {
 } as const;
 
 /**
+ * This party's consent to its OWN outbound payload set, for the composed config's
+ * `outbound_payload_consent`. An acceptance is the only side that records one, and
+ * it records core's {@link deriveOutboundPayloadConsent} of the very
+ * `linkageTerms.output` and `metadata` the same call composes into the config --
+ * the acceptor's own-perspective output (mirrored, so `shareWithPartner` is what
+ * THIS party transmits under) and the columns the confirm step showed the operator.
+ * Deriving from the composed fields rather than from a set the client names is what
+ * keeps the recorded consent and the config it rides in from disagreeing.
+ *
+ * The three states are core's, not this composer's: absent where nothing is
+ * transmitted, `pending` where no metadata was resolvable, `confirmed` with the
+ * resolved set otherwise. A `pending` or `confirmed` record is what makes a later
+ * unattended run's consent gate live on this config -- without one the gate reads
+ * "no record" and no run is ever held to a set.
+ */
+function outboundPayloadConsentFor(
+  intent: JobExchangeIntent,
+): OutboundPayloadConsent | undefined {
+  if (intent.side !== "acceptor") return undefined;
+  return deriveOutboundPayloadConsent(
+    intent.linkageTerms.output,
+    intent.metadata,
+  );
+}
+
+/**
  * Compose the CLI config document (snake_case YAML the CLI loads verbatim) from a
  * validated filedrop {@link JobExchangeIntent}, setting the connection directory to
  * the operator-configured rendezvous mount (`JOB_RENDEZVOUS_DIR`) both parties can
@@ -612,6 +664,11 @@ export const JOB_FILE_NAMES = {
  * enforced explicitly (the CLI prefers it over the `payload.receive` fallback);
  * an empty array is forwarded verbatim -- it means "receive nothing" and must lock
  * in strictly -- and only an omitted field reconciles lazily.
+ *
+ * The send-side counterpart is `outbound_payload_consent`, derived here for an
+ * acceptance alone (see {@link outboundPayloadConsentFor}), so the config this
+ * composer hands an operator to graduate to cron is one a later unattended run is
+ * held to rather than one whose consent gate finds no record.
  */
 export function composeConfigDocument(
   intent: JobFiledropExchangeIntent,
@@ -619,6 +676,7 @@ export function composeConfigDocument(
 ): string {
   const options = intentOptionsToFileSyncOptions(intent.options);
   const { metadata, standardization, expectedPayloadColumns } = intent;
+  const outboundPayloadConsent = outboundPayloadConsentFor(intent);
   const fileInput: ExchangeFileInput = {
     connection: {
       channel: "filedrop",
@@ -629,6 +687,7 @@ export function composeConfigDocument(
     ...(metadata !== undefined ? { metadata } : {}),
     ...(standardization !== undefined ? { standardization } : {}),
     ...(expectedPayloadColumns !== undefined ? { expectedPayloadColumns } : {}),
+    ...(outboundPayloadConsent !== undefined ? { outboundPayloadConsent } : {}),
   };
   return mintExchangeFile(fileInput);
 }
@@ -645,8 +704,10 @@ export function composeConfigDocument(
  * at exchange time, so no secret byte transits this process. The client's
  * `linkageTerms`, `metadata`, `standardization`, and `expectedPayloadColumns`
  * reach the file exactly as they do on the filedrop path -- as schema-validated
- * YAML values -- and the tuning `options` are the same numeric/boolean/enum
- * subset (with the sftp poll floor already enforced by the intent schema).
+ * YAML values -- the acceptance's `outbound_payload_consent` is derived exactly as
+ * it is there (see {@link outboundPayloadConsentFor}), and the tuning `options`
+ * are the same numeric/boolean/enum subset (with the sftp poll floor already
+ * enforced by the intent schema).
  *
  * This path deliberately does NOT use `mintExchangeFile`: its
  * {@link ExchangeFileInput} typing makes credentials unrepresentable, an
@@ -665,6 +726,7 @@ export function composeSftpConfigDocument(
 ): string {
   const options = intentOptionsToFileSyncOptions(intent.options);
   const { metadata, standardization, expectedPayloadColumns } = intent;
+  const outboundPayloadConsent = outboundPayloadConsentFor(intent);
   const assembled: ExchangeSpec = {
     connection: {
       channel: "sftp",
@@ -675,6 +737,7 @@ export function composeSftpConfigDocument(
     ...(metadata !== undefined ? { metadata } : {}),
     ...(standardization !== undefined ? { standardization } : {}),
     ...(expectedPayloadColumns !== undefined ? { expectedPayloadColumns } : {}),
+    ...(outboundPayloadConsent !== undefined ? { outboundPayloadConsent } : {}),
   };
   const validated = ExchangeSpecSchema.parse(assembled);
   return stringifyYaml(snakeizeKeys(validated));
