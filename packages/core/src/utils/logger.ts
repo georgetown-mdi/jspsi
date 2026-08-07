@@ -84,7 +84,10 @@ export const getDiagnosticSink = (): DiagnosticSink | undefined =>
  * where the operator has persisted a root level, loglevel skips a persisted root,
  * so the root keeps that level and the loggers {@link getLoggerForVerbosity}
  * builds afterwards floor against it rather than against `level`. The registry
- * sweep still reaches every logger that already exists.
+ * sweep still reaches every logger that already exists. A persisted per-logger
+ * key has the same effect one level down: a logger built after the sweep whose
+ * name carries a persisted level comes up at that level rather than the swept
+ * default.
  *
  * Call this at bootstrap, before any per-logger level is chosen: it overwrites
  * the level of every logger that exists, including one
