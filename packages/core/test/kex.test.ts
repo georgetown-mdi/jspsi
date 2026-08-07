@@ -376,10 +376,13 @@ describe("crypto.subtle.importKey peer-share validation", () => {
 
   test("ACCEPTS the compressed and hybrid encodings of a valid point, which is why the encoding is pinned above importKey", async () => {
     // The load-bearing measurement behind the canonical-encoding check in
-    // kex.ts: importKey is not the layer that pins the encoding. It admits
-    // several SEC1 encodings of one point and re-exports each as the same
-    // uncompressed point, so a share re-encoded in transit would decode to the
-    // same key while carrying different bytes into the transcript.
+    // kex.ts: importKey is not the layer that pins the encoding. On this
+    // platform it admits several SEC1 encodings of one point and re-exports
+    // each as the same uncompressed point, so a share re-encoded in transit
+    // would decode to the same key while carrying different bytes into the
+    // transcript. The browser suite makes the same measurement in Chromium and
+    // gets a different answer for the hybrid form, which is the second reason
+    // the pin cannot be delegated.
     const { publicKey } = await generateEphemeral();
     const compressed = compressPoint(publicKey);
     const hybrid = hybridPoint(publicKey);

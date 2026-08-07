@@ -36,17 +36,24 @@ const PSK_LEN = 32;
 
 // Wire encoding of an ephemeral public key: the SEC1 uncompressed point
 // `0x04 || X || Y`, 65 bytes over P-256. This encoding is PINNED, not merely
-// preferred. A curve point has several valid SEC1 encodings, and
-// crypto.subtle.importKey accepts more than one of them: driven against the
-// platform, it admits the 33-byte compressed forms (0x02/0x03 || X) and the
-// 65-byte hybrid form (0x06/0x07 || X || Y) alongside the uncompressed form,
-// re-exporting every one of them as the same uncompressed point. Since the wire
-// bytes -- not the decoded point -- are what MixHash and MixKey fold into the
-// transcript, admitting a second encoding of one point would let an attacker
-// re-encode a share and desynchronize the two transcripts. Both checks below
-// are therefore applied to the raw share BEFORE import, and importPeerShare is
-// the only path from wire bytes to a CryptoKey. kex.test.ts drives importKey
-// with each alternative encoding to keep the premise honest.
+// preferred, and pinning it is this module's job rather than importKey's. A
+// curve point has several valid SEC1 encodings, and crypto.subtle.importKey
+// accepts more than the uncompressed one -- driven against both platforms, Node
+// admits the 33-byte compressed forms (0x02/0x03 || X) AND the 65-byte hybrid
+// form (0x07 || X || Y), while Chromium admits the compressed forms and refuses
+// hybrid. Each re-exports what it admits as the same uncompressed point.
+//
+// Two consequences, either one sufficient. The wire bytes -- not the decoded
+// point -- are what MixHash and MixKey fold into the transcript, so admitting a
+// second encoding of one point would let an attacker re-encode a share in
+// transit and desynchronize the two sides' transcripts. And the platforms
+// disagree about which alternatives decode at all, so delegating the question
+// would make a share's acceptance depend on which peer received it.
+//
+// Both checks are therefore applied to the raw share BEFORE import, and
+// importPeerShare is the only path from wire bytes to a CryptoKey. kex.test.ts
+// and the browser suite each drive importKey with the alternative encodings on
+// their own platform, so the premise above is measured rather than assumed.
 const PUBLIC_KEY_LEN = 65;
 const UNCOMPRESSED_POINT_PREFIX = 0x04;
 
