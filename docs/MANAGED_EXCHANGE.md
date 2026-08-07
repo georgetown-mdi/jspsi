@@ -849,13 +849,14 @@ eviction they were implicitly told could not happen.
 
 When the browser copy is gone -- evicted, or cleared with site data -- the
 recovery affordance is the empty state itself, which offers the import of the
-backup file the operator exported. Restoring after eviction and migrating to a new device are the
-**same import operation** (consistent with migration-not-sync): an import
-re-establishes the one owner, wherever it runs. One honest limit: a wholesale
-eviction erases the evidence that anything existed, so the app cannot always
-distinguish a first visit from a post-eviction one -- which is exactly why the
-managed-exchange list's empty state carries the import affordance standing,
-rather than surfacing it only behind a detected loss.
+backup file the operator exported. Restoring after eviction and migrating to
+a new device are the **same import operation** (consistent with
+migration-not-sync): an import re-establishes the one owner, wherever it
+runs. One honest limit: a wholesale eviction erases the evidence that
+anything existed, so the app cannot always distinguish a first visit from a
+post-eviction one -- which is exactly why the managed-exchange list's empty
+state carries the import affordance standing, rather than surfacing it only
+behind a detected loss.
 
 ## Deleting a managed exchange
 

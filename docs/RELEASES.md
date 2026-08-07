@@ -100,7 +100,7 @@ The unscoped `npm audit` additionally reports development-tree findings, which a
 
 ### 5. Run the full test suite
 
-Run what CI gates, rather than a copy of it that drifts: `.github/workflows/static_checks.yaml` is the source of truth for the static checks (typecheck, format, lint, the link and claim checks, and the script suite), and `.github/workflows/eb_build_and_test.yaml` for the browser integration suite. Everything they run must pass on the release branch before it merges.
+Run what CI gates, rather than a copy of it that drifts: `.github/workflows/static_checks.yaml` is the source of truth for the static checks (typecheck, format, lint, the link and claim checks, and the script suite), `.github/workflows/eb_build_and_test.yaml` for the browser integration suite, and `.github/workflows/cli_build_and_test.yaml` -- the CLI's pull-request gate -- for the CLI's unit and SFTP integration suites, whose integration half also runs in `release.yaml` as the ship gate before publish. Everything they run must pass on the release branch before it merges.
 
 ### 6. Open and merge the release PR
 
