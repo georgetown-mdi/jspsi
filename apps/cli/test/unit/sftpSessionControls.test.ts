@@ -282,6 +282,66 @@ describe("SFTP session controls: stalled handshake", () => {
     expect(() => controls.onConnectionAccepted(undefined)).not.toThrow();
   });
 
+  test("the stalled count follows the connections the control is holding", () => {
+    const controls = createSftpSessionControls();
+    expect(controls.stalledConnectionCount()).toBe(0);
+    controls.onConnectionAccepted(stubSocket().socket);
+    expect(controls.stalledConnectionCount()).toBe(0);
+
+    controls.stallHandshakeOnConnect = true;
+    controls.onConnectionAccepted(stubSocket().socket);
+    controls.onConnectionAccepted(stubSocket().socket);
+    expect(controls.stalledConnectionCount()).toBe(2);
+
+    controls.stopStallingHandshakes();
+    expect(controls.stalledConnectionCount()).toBe(0);
+  });
+
+  test("a vanished session is not counted as a stalled connection", () => {
+    const controls = createSftpSessionControls();
+    const { conn } = stubConnection();
+    controls.onConnectionReady(conn, stubSocket().socket);
+    controls.vanishActiveSession();
+    expect(controls.stalledConnectionCount()).toBe(0);
+  });
+
+  test("closing the stalled connections destroys them and leaves the stall armed", () => {
+    const controls = createSftpSessionControls();
+    const { socket, destroy } = stubSocket();
+    controls.stallHandshakeOnConnect = true;
+    controls.onConnectionAccepted(socket);
+    controls.closeStalledConnections();
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(controls.stallHandshakeOnConnect).toBe(true);
+    const later = stubSocket();
+    controls.onConnectionAccepted(later.socket);
+    later.socket.write("x");
+    expect(later.write).not.toHaveBeenCalled();
+  });
+
+  test("closing the stalled connections reaches one whose closers are silenced", () => {
+    const controls = createSftpSessionControls();
+    const { socket, destroy } = stubSocket();
+    controls.withholdCloseOnDisconnect = true;
+    controls.stallHandshakeOnConnect = true;
+    controls.onConnectionAccepted(socket);
+    controls.closeStalledConnections();
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test("closing the stalled connections leaves a vanished session silent", () => {
+    const controls = createSftpSessionControls();
+    const { conn } = stubConnection();
+    const { socket, destroy } = stubSocket();
+    controls.onConnectionReady(conn, socket);
+    controls.vanishActiveSession();
+    controls.closeStalledConnections();
+
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   test("stopping one control leaves the other's hold on a socket in place", () => {
     // A socket accepted under both controls is silenced on both halves; stopping
     // one hands back only the half it took.

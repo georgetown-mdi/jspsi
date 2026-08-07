@@ -579,9 +579,9 @@ What the verdict, and the check that carries it, do not cover:
 The teardown that gives up its wait closes the transport with a handshake live
 beneath it, which is exactly the shape reviewers have read out of the library's
 source and got wrong. So it was DRIVEN, against the same real stack: a server that
-accepts the TCP connection and then never writes a byte -- not even its SSH
-identification string -- so the client's dial hangs, established but never ready
-(`stallHandshakeOnConnect` in `apps/cli/test/sftpServer/sessionControls.ts`).
+accepts the TCP connection and then stops writing, so the client's dial hangs,
+established but never ready (`stallHandshakeOnConnect` in
+`apps/cli/test/sftpServer/sessionControls.ts`).
 
 What the run shows about the library -- that `end()` closes nothing
 mid-handshake, that the destroy settles the parked attempt rather than
@@ -606,8 +606,9 @@ whether ssh2 arms its connect deadline per attempt changes when the sibling give
 up, never when the waiter does.
 
 Its limits, on the same terms as the section above. The control suppresses server
-writes at accept time, so what was driven is a server that never answers the
-identification string; one that answers it and then stalls mid-key-exchange is a
+writes as the connection is accepted, which ssh2 does only after answering the
+identification string, so what was driven is a server that answers that line and
+then goes quiet; one that stalls once the key exchange is under way is a
 different, unmeasured shape. And it is in-process only -- a native sshd cannot be
 told to stall its handshake.
 

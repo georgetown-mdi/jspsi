@@ -476,6 +476,26 @@ export function createSftpSessionControls(): SftpSessionControlHub {
       releaseVanished();
     },
 
+    stalledConnectionCount(): number {
+      return [...mutedSockets.keys()].filter(
+        (socket) => !vanishedSockets.has(socket),
+      ).length;
+    },
+
+    closeStalledConnections(): void {
+      for (const socket of [...mutedSockets.keys()]) {
+        // A vanished socket is muted in this same pool, and closing it would
+        // undo the half of the vanish that makes it a black hole.
+        if (vanishedSockets.has(socket)) continue;
+        // Through the real closer where one has been taken away, so a
+        // connection accepted under the withheld-close control is closable here
+        // even though its own server-side close is silenced.
+        const real = silencedSockets.get(socket);
+        if (real) real.destroy();
+        else socket.destroy();
+      }
+    },
+
     vanishActiveSession(): void {
       if (!activeConnection) {
         throw new Error(

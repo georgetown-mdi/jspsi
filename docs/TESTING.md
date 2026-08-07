@@ -74,7 +74,11 @@ paths. The in-process backend adds two surfaces a real `sshd` cannot offer:
   FIN and sends nothing back, leaving it in half-close, and a handshake stall
   that accepts the TCP connection and writes nothing past the identification
   string ssh2 has already sent by then, so the key exchange never comes and a
-  dial hangs established but never ready. A live session can also be made to
+  dial hangs established but never ready. The stalled connections are counted,
+  which is how a case knows the stall has reached a dial rather than acting on a
+  handshake that then completes, and they can be closed from the server's side,
+  which is the only way to end a parked dial with a peer close rather than with a
+  teardown the client drove. A live session can also be made to
   VANISH: from that moment the server neither answers nor closes it, so the
   client sees no `end`, no `close` and no further byte, and can learn of it only
   from its own liveness deadline. Unlike the withheld close it fires against a
