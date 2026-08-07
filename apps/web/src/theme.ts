@@ -118,8 +118,8 @@ export const mantineTheme: MantineThemeOverride = createTheme({
   // non-text 3:1) against its own surfaces; enforced by
   // test/unit/themeContrast.test.ts.
   //
-  // Light raised 6 -> 9. The default cyan-6 (#15aabf) fails wherever the primary is
-  // used: white-on-cyan-6 filled buttons (and the copy ActionIcon glyph and the
+  // Light is 9. The default cyan-6 (#15aabf) fails wherever the primary is used:
+  // white-on-cyan-6 filled buttons (and the copy ActionIcon glyph and the
   // consent Checkbox checkmark) = 2.79:1; the cyan-6 anchor/link and the cyan-6
   // focus-visible outline / input focus border on the white page = 2.79:1. cyan-8
   // is also short (white text 4.35:1); cyan-9 (#0b7285) is the first shade clearing
@@ -127,9 +127,9 @@ export const mantineTheme: MantineThemeOverride = createTheme({
   // 5.59:1. The filled hover step resolves to cyan-8 (4.35:1) -- transient, and AA
   // is judged on the resting state.
   //
-  // Dark moved 8 -> 6. No single cyan shade satisfies both dark bars with WHITE
-  // filled text: cyan-8 (the old default) left the filled button text at
-  // white-on-cyan-8 = 4.35:1 (under 4.5), and darkening to cyan-9 fixes the button
+  // Dark is 6. No single cyan shade satisfies both dark bars with WHITE filled
+  // text: cyan-8 leaves the filled button text at white-on-cyan-8 = 4.35:1
+  // (under 4.5), and darkening to cyan-9 fixes the button
   // but drops the focus ring / input border on the dark body to 2.78:1 / 2.43:1
   // (under 3). cyan-6 is bright enough that the focus ring on the dark-7 body reaches
   // 5.57:1 and the input focus border on the dark-6 input 4.87:1, and the

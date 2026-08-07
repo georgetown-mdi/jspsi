@@ -24,8 +24,8 @@ import { errorFromWorkerEvent } from "./workerEventError";
  * this thread or in the worker -- the streaming only chunks the hand-off of an
  * already-complete parse, it does not change how the parse itself is run. This is the
  * Vite-native replacement for PapaParse's `worker: true` self-hosted worker, which
- * #307 removed because it corrupts the parse once Vite bundles and minifies the app
- * (see the `worker: false` rationale in core's `file.ts`): a worker Vite bundles from
+ * corrupts the parse once Vite bundles and minifies the app (see the
+ * `worker: false` rationale in core's `file.ts`): a worker Vite bundles from
  * `new Worker(new URL(...))` survives a production `vite build`; one PapaParse
  * constructs from the running script's URL does not.
  */

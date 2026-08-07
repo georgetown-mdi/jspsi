@@ -1,17 +1,14 @@
 /**
  * Maximum size, in bytes, of a file the bench intake dropzones accept -- 100 MB.
  *
- * This is a browser-memory bound, not a parser bound. Core's `loadCSVFile` now
- * accumulates across PapaParse chunks (it no longer truncates a file that spans
- * more than one `LocalChunkSize` chunk), so the cap is free of the former
- * single-chunk constraint and is set instead against what a browser tab can read,
- * parse, and hold for the exchange. The dominant cost is the parsed row array,
- * retained for the whole exchange, so 100 MB (roughly one to two million
- * identifier rows) resolves to a few hundred MB resident -- a profile sized for
- * the modern-workstation execution target, well above the prior 10 MB, and
- * tunable upward as that profile is measured. The rationale, and why this intake
- * budget is distinct from the comparison-step memory, lives in
- * `docs/spec/PROTOCOL.md`.
+ * This is a browser-memory bound, not a parser bound: core's `loadCSVFile`
+ * accumulates across PapaParse chunks, so the cap is set against what a browser
+ * tab can read, parse, and hold for the exchange. The dominant cost is the parsed
+ * row array, retained for the whole exchange, so 100 MB (roughly one to two
+ * million identifier rows) resolves to a few hundred MB resident -- a profile
+ * sized for the modern-workstation execution target, and tunable upward as that
+ * profile is measured. The rationale, and why this intake budget is distinct from
+ * the comparison-step memory, lives in `docs/spec/PROTOCOL.md`.
  *
  * No-silent-truncation is the invariant that actually matters here, and it is
  * pinned directly by a multi-chunk correctness test

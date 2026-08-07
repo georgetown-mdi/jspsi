@@ -60,8 +60,7 @@ export const MANAGED_EXCHANGE_LOCAL_STORE_NAME = "localState";
 
 /** The database schema version this build opens. Bump only for an IndexedDB
  * structural migration (a new object store or index), never for a change to the
- * record's own `schemaVersion`, which the record schema governs. Bumped to 2 to add
- * the local-sibling-state store.
+ * record's own `schemaVersion`, which the record schema governs.
  * @internal */
 export const IDB_VERSION = 2;
 

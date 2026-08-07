@@ -715,8 +715,7 @@ export class JobManager {
 
   /**
    * The active record when the slot holds one matching this id and it has not been
-   * deleted, else undefined. A deleted (but not-yet-freed) slot surfaces 404 here,
-   * as today's eager delete did.
+   * deleted, else undefined. A deleted (but not-yet-freed) slot surfaces 404 here.
    */
   getJob(id: string): JobRecord | undefined {
     const slot = this.slot;

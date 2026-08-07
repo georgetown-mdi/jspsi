@@ -642,12 +642,11 @@ function standardizationForImportedTerms(
     // schema-valid document is accepted on import), so a crafted document declaring
     // an extra same-typed field must not be able to auto-bind it to a column the
     // operator roled `identifier` (row-identifier) or `payload` (sent-to-partner)
-    // and so hash that column's value into a PSI key without consent. This now
-    // matches core's own rule on every path: `resolveFieldColumns` binds only
-    // a `role: linkage` column, and the workbench's `addFieldForType` /
-    // `columnsForType` likewise offer only linkage columns -- so the import path is
-    // no longer stricter than the rest, it applies the same `role: linkage`
-    // requirement here. An extra field with no free `linkage` column stays
+    // and so hash that column's value into a PSI key without consent. The same
+    // rule holds on every path: core's `resolveFieldColumns` binds only a
+    // `role: linkage` column, and the workbench's `addFieldForType` /
+    // `columnsForType` likewise offer only linkage columns. An extra field with no
+    // free `linkage` column stays
     // undeclared (fail-closed); the operator establishes the binding by roling the
     // column `linkage` and binding it in the workbench. The default base's
     // first-column-per-type binding comes from the same core rule, so it too binds
