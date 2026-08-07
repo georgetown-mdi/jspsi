@@ -359,7 +359,7 @@ outbound_payload_consent:
 
 In practice you rarely author them: every path that establishes an exchange writes the ones it owns. Accepting an invitation records what the invitation disclosed and what the acceptance showed you; inviting records the subset the token published, and re-inviting refreshes it; a `--save` run crystallizes what the first exchange actually carried. Each is refreshed by the operation that could invalidate it, so the file cannot promise one disclosure while the exchange performs another. What you author by hand is the pair inside `payload`; what you review before an unattended run is these three.
 
-The runtime lock-in mechanism, the wire field an invitation carries, the accepting party's own consent record, and how the observe-then-persist paths reach the same lock-in are specified in [FILE_SYNC.md](spec/FILE_SYNC.md#disclosed-columns-subset-on-the-token).
+The runtime lock-in mechanism, the wire field an invitation carries, the accepting party's own consent record, and how the observe-then-persist paths reach the same lock-in are specified in [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md#payload-disclosure-consent).
 
 ---
 
