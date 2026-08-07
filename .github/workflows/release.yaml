@@ -39,6 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # actions/attest-build-provenance below: the OIDC token Sigstore signs the
+      # provenance against, and the write to this repository's attestation store.
+      id-token: write
+      attestations: write
     outputs:
       # The manifest-list digest, carried to the launcher job so the reference it
       # stamps and the reference cosign signs below are the same value.
@@ -114,6 +118,20 @@ jobs:
           cosign sign --yes --key env://COSIGN_PRIVATE_KEY \
             vdorie/psi-link@${{ steps.build.outputs.digest }}
 
+      # Answers a different question from the signature above -- how the image
+      # was built, not who published it -- so it adds to the Cosign signature
+      # rather than replacing it. Its subject is the same manifest-list digest
+      # cosign signs and the launchers job stamps, so one manifest carries both
+      # claims. The attestation is left in this repository's store rather than
+      # pushed to Docker Hub as an OCI referrer (push-to-registry defaults to
+      # false), so verifying it does not depend on what the registry can hold;
+      # docs/RELEASES.md carries the matching verification command.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: docker.io/vdorie/psi-link
+          subject-digest: ${{ steps.build.outputs.digest }}
+
   # The host-side launchers are handed to an operator as plaintext and pin the
   # image by digest rather than by tag, so a release copy runs exactly the
   # manifest signed above. Filling that digest in is this job's whole purpose;
@@ -122,8 +140,8 @@ jobs:
     name: Publish the stamped launchers
     needs: publish
     runs-on: ubuntu-latest
-    # The only job in this workflow that writes anything back to the repository,
-    # and it writes release assets alone.
+    # The only job in this workflow holding contents: write, and what it writes
+    # under it is release assets alone.
     permissions:
       contents: write
     steps:
