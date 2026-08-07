@@ -53,7 +53,7 @@ We ask reporters to hold public disclosure until we have published the advisory 
 
 The following are in scope for this policy:
 
-- Cryptographic protocol implementation: X25519 key exchange, key derivation, secret rotation, key confirmation
+- Cryptographic protocol implementation: P-256 ECDH key exchange, key derivation, secret rotation, key confirmation
 - Key file handling and credential exposure through configuration parsing
 - PSI protocol correctness: a result that leaks more than the agreed intersection
 - Authentication bypass or impersonation between exchange partners
@@ -73,5 +73,5 @@ PSI-Link's security properties depend on several upstream cryptographic componen
 | Dependency          | Role                                        | Upstream                                                            |
 | ------------------- | ------------------------------------------- | ------------------------------------------------------------------- |
 | `@openmined/psi.js` | PSI primitive (vendored WASM)               | [OpenMined/PSI](https://github.com/OpenMined/PSI)                   |
-| `@noble/curves`     | Elliptic-curve operations (X25519, Ed25519) | [paulmillr/noble-curves](https://github.com/paulmillr/noble-curves) |
-| Web Crypto API      | SHA-256, HMAC-SHA-256, HKDF                 | Platform-provided; report to browser/runtime vendor                 |
+| `@noble/curves`     | Receipt signing (Ed25519)                   | [paulmillr/noble-curves](https://github.com/paulmillr/noble-curves) |
+| Web Crypto API      | P-256 ECDH keygen and key agreement, SHA-256, HMAC-SHA-256, HKDF | Platform-provided; report to browser/runtime vendor    |

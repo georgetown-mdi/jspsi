@@ -163,7 +163,7 @@ Opening a PR populates [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST
 
 A change requires explicit security review and maintainer approval before merging if it touches any of the following. This list is the trigger; [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md) is the model behind it, consulted only to decide a case the list does not settle.
 
-- Cryptographic code or its inputs: the PSI protocol, the X25519 key exchange / handshake / key schedule, token generation / rotation / derivation, or canonical encoding.
+- Cryptographic code or its inputs: the PSI protocol, the P-256 ECDH key exchange / handshake / key schedule, token generation / rotation / derivation, or canonical encoding.
 - The application-layer AEAD: encryption, the nonce / sequence scheme, or the integrity / replay / reordering / gap checks.
 - The channel-hardening controls: the frame-size, directory-listing, liveness / timeout, connect-probe, and whole-exchange bounds, the web WebRTC data-channel inbound bound, plus the SFTP crash-safety and authenticated abort-marker controls.
 - Credential and secret handling: how the key file, signing identity, or result CSV is written or permissioned; how secrets are stored, transmitted, logged, or referenced (the configuration `@path` resolution).

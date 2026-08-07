@@ -23,11 +23,12 @@ module, and an OpenSSL provider cannot cover a different cryptographic library
 in principle.** That is not a gap this image closes, or a later image could
 close; it is a permanent property of the design, and it belongs in the first
 paragraph of any claim made about this artifact rather than in a footnote to it.
-Key establishment and receipt signing sit outside the module too, in
-`@noble/curves`, which is why the claim waits on the two migrations recorded in
-the sibling notes. What the image puts inside a validated module today is the
-AEAD and the key-schedule primitives: AES-256-GCM, SHA-256, HMAC-SHA-256 and
-HKDF.
+Receipt signing sits outside the module too, in `@noble/curves`, which is why
+the claim waits on the receipt-signing migration recorded in the sibling note.
+Key establishment runs P-256 ECDH through `crypto.subtle`, the same dispatch
+path as the AEAD, but the probe carries no ECDH leg, so what the image puts
+inside a validated module today is the AEAD and the key-schedule primitives:
+AES-256-GCM, SHA-256, HMAC-SHA-256 and HKDF.
 
 ## The decision
 
@@ -49,8 +50,8 @@ HKDF.
 - **No psilink-level FIPS flag.** The FIPS-mode decision belongs to the host and
   its system-wide crypto policy.
 - **Built and smoked in CI ahead of any publication.** The claim gets written
-  once, after the decided P-256 ECDH and ECDSA migrations land, and the release
-  workflow's published artifacts stay as they are until it is.
+  once, after the decided ECDSA migration lands, and the release workflow's
+  published artifacts stay as they are until it is.
 
 ## What was rejected, and why
 
@@ -236,9 +237,10 @@ here was measured in the image rather than reasoned about.
   Amazon Linux module carries neither; `openssl list` reports both ABSENT while
   the provider is `status: active` and the default-configuration control lists
   both, so the absence is the provider's rather than the listing's. psilink's
-  own X25519 key agreement and Ed25519 receipt signing run in `@noble/curves`
-  and are functionally unaffected -- and are equally outside the module, which
-  is the point the two sibling notes decide.
+  own Ed25519 receipt signing runs in `@noble/curves` and is functionally
+  unaffected -- and is equally outside the module, which is the point the
+  sibling note decides. Key establishment uses neither primitive: its P-256
+  ECDH runs through `crypto.subtle`.
 - **Package operations inside the running image.** `dnf` dies under the shipped
   fips-only configuration on `unsupported hash type blake2s(in FIPS mode)`,
   because its Python hashes with blake2s. Unset `OPENSSL_CONF` for any in-image

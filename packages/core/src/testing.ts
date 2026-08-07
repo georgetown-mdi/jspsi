@@ -28,6 +28,12 @@ export {
 } from "./displayEscapingFixtures.js";
 export type { HostileSource } from "./displayEscapingFixtures.js";
 
+// The key-schedule core, so the browser cross-implementation suite can run the
+// checked-in known-answer vectors through the browser build the way the Node
+// suite runs them through the Node build. It stays out of the main entry point:
+// callers conduct a handshake with runKex, never by composing the schedule.
+export { computeKexKeys } from "./kex.js";
+
 /** @internal */
 export function sortAssociationTable(
   value: AssociationTable,

@@ -26,7 +26,7 @@ const NON_TRUST_KINDS: ReadonlySet<ConnectionErrorKind> = new Set([
 ]);
 
 /**
- * Run the X25519 (NNpsk0) authenticated key exchange over the web exchange's
+ * Run the P-256 (NNpsk0) authenticated key exchange over the web exchange's
  * `MessageConnection`, immediately after the data channel opens and before the
  * PSI exchange begins. It reuses core's {@link authenticateConnection} unchanged
  * -- the same handshake, role labels, and token encoding the CLI uses -- so a

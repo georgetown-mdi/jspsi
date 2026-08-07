@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { x25519 } from "@noble/curves/ed25519.js";
 
 import {
   enc,
@@ -18,43 +17,83 @@ import {
 import { markPeerWaitTimeout } from "./errors.js";
 
 // Authenticated key exchange that replaces SPAKE2 as the source of the exchange
-// session key. It is an ephemeral X25519 Diffie-Hellman pinned to the Noise
+// session key. It is an ephemeral P-256 Diffie-Hellman pinned to the Noise
 // NNpsk0 pattern (no static keys, the pre-shared secret mixed at position 0,
 // ephemeral-ephemeral DH) plus an explicit, role-asymmetric mutual key
-// confirmation. The X25519 primitive and the ephemeral keygen come from the
-// audited @noble/curves library (already a dependency); only the minimal NNpsk0
-// glue -- the key-schedule mixing and the two confirmation tags -- is written
-// here. The full Noise framework is deliberately NOT implemented. The
-// construction is modeled on NNpsk0 and pinned by the checked-in known-answer
-// vector (test/vectors/kex-vectors.json) rather than wire-compatible with
-// generic Noise. See docs/SECURITY_DESIGN.md ("Key-agreement design") and
-// docs/spec/PROTOCOL.md ("X25519 authenticated key exchange").
+// confirmation. Every cryptographic operation -- ephemeral key generation, the
+// ECDH, the chaining HKDF, the application HKDF, SHA-256, and HMAC -- is a
+// crypto.subtle call, so a validated module configured beneath the platform
+// performs all of them; only the minimal NNpsk0 glue (the key-schedule mixing
+// and the two confirmation tags) is written here. The full Noise framework is
+// deliberately NOT implemented. The construction is modeled on NNpsk0 and
+// pinned by the checked-in known-answer vector (test/vectors/kex-vectors.json)
+// rather than wire-compatible with generic Noise. See docs/SECURITY_DESIGN.md
+// ("Key-agreement design"), docs/spec/PROTOCOL.md ("P-256 authenticated key
+// exchange"), and docs/notes/key-establishment-fips-boundary.md.
 
-// X25519 public keys and the pre-shared secret are fixed 32-byte values
-// (RFC 7748; the psk is psk0, which Noise mandates be 32 bytes).
-const X25519_KEY_LEN = 32;
+// The pre-shared secret is psk0, which Noise mandates be 32 bytes.
 const PSK_LEN = 32;
 
+// Wire encoding of an ephemeral public key: the SEC1 uncompressed point
+// `0x04 || X || Y`, 65 bytes over P-256. This encoding is PINNED, not merely
+// preferred, and pinning it is this module's job rather than importKey's. A
+// curve point has several valid SEC1 encodings, and crypto.subtle.importKey
+// accepts more than the uncompressed one -- driven against both platforms, Node
+// admits the 33-byte compressed forms (0x02/0x03 || X) AND the 65-byte hybrid
+// form (0x07 || X || Y), while Chromium admits the compressed forms and refuses
+// hybrid. Each re-exports what it admits as the same uncompressed point.
+//
+// Two consequences, either one sufficient. The wire bytes -- not the decoded
+// point -- are what MixHash and MixKey fold into the transcript, so admitting a
+// second encoding of one point would let an attacker re-encode a share in
+// transit and desynchronize the two sides' transcripts. And the platforms
+// disagree about which alternatives decode at all, so delegating the question
+// would make a share's acceptance depend on which peer received it.
+//
+// Both checks are therefore applied to the raw share BEFORE import, and
+// importPeerShare is the only path from wire bytes to a CryptoKey. kex.test.ts
+// and the browser suite each drive importKey with the alternative encodings on
+// their own platform, so the premise above is measured rather than assumed.
+const PUBLIC_KEY_LEN = 65;
+const UNCOMPRESSED_POINT_PREFIX = 0x04;
+
+// SP 800-56A Rev 3 Z for P-256: the 32-byte X coordinate of the shared point,
+// which is what crypto.subtle.deriveBits returns for ECDH over this curve.
+const SHARED_SECRET_LEN = 32;
+
+const ECDH_P256 = { name: "ECDH", namedCurve: "P-256" } as const;
+
+// SHA-256 output length: the width of every chaining-key, handshake-hash, and
+// confirmation-tag value, and the block size the Noise chaining HKDF counts in.
+const HASH_LEN = 32;
+
 // Protocol-version tag. It is the Noise "protocol name" hashed into the initial
-// handshake hash, so it is part of the transcript covered by every derived key
-// and every confirmation tag. A future authenticated mode (e.g. a
-// certificate-chain variant) is an additive new version selected out-of-band:
-// bumping this string makes a mismatched peer derive a different transcript and
-// fail closed. The version is reserved for a genuine cryptographic-suite change
-// and is not bumped for an additive payload such as the request-encryption flag
-// below: a flag-aware and a flag-unaware peer already fail closed at parse. The
-// flag-aware side rejects a message that omits reqEnc by the schema's
-// required-field check; an old flag-unaware side rejects a message that carries
-// the (to it unknown) reqEnc key by its strict (.strict()) schema. Either way
-// the message is rejected before any transcript is computed. See
-// docs/SECURITY_DESIGN.md ("Key-agreement design").
-const PROTOCOL_NAME = "psilink-kex-v1:NNpsk0_25519_SHA256";
+// handshake hash, and ck0 = h0, so it is part of the transcript covered by every
+// derived key and every confirmation tag: a peer on a different tag derives a
+// different h and ck from the first step and fails the confirmation round, never
+// reaching a usable session key. v2 names the cryptographic suite this file
+// implements -- P-256 ECDH in place of X25519 -- and is deliberately
+// wire-incompatible with a v1 peer. A future authenticated mode (e.g. a
+// certificate-chain variant) is an additive new version selected out-of-band on
+// the same mechanism. The version is reserved for a genuine cryptographic-suite
+// change and is not bumped for an additive payload such as the
+// request-encryption flag below: a flag-aware and a flag-unaware peer already
+// fail closed at parse. The flag-aware side rejects a message that omits reqEnc
+// by the schema's required-field check; an old flag-unaware side rejects a
+// message that carries the (to it unknown) reqEnc key by its strict (.strict())
+// schema. Either way the message is rejected before any transcript is computed.
+// See docs/SECURITY_DESIGN.md ("Key-agreement design").
+const PROTOCOL_NAME = "psilink-kex-v2:NNpsk0_P256_SHA256";
 
 // Domain-separation labels, all namespaced under psilink-kex-v1: and disjoint
 // from every other label in the system (psilink-aead-v1:*,
-// psilink-shared-secret-rotation-v1, the psilink-signing-* labels). The two confirm
-// labels are role-asymmetric: each side sends the tag for its own role and
-// verifies the tag for the opposite role, so a reflected/echoed confirmation
+// psilink-shared-secret-rotation-v1, the psilink-signing-* labels). Their
+// namespace version is independent of the suite version tag above and does not
+// track it: the tag already separates one suite's transcript from another's
+// totally (it seeds both h and ck), so re-versioning these labels would change
+// derived bytes without separating anything the tag has not separated. The two
+// confirm labels are role-asymmetric: each side sends the tag for its own role
+// and verifies the tag for the opposite role, so a reflected/echoed confirmation
 // does not verify.
 const SESSION_LABEL = "psilink-kex-v1:session";
 const CONFIRM_KEY_LABEL = "psilink-kex-v1:confirm";
@@ -91,7 +130,7 @@ const EMPTY = new Uint8Array(0);
 // All schemas use `.strict()` so extra keys cause a parse failure rather than
 // being silently stripped. A message arriving with unexpected fields indicates
 // either a peer bug or a malicious actor fuzzing the parser, and either case
-// should fail fast. `e` is a base64url-encoded 32-byte X25519 public key;
+// should fail fast. `e` is a base64url-encoded 65-byte uncompressed P-256 point;
 // `confirm` is a base64url-encoded 32-byte HMAC-SHA-256 tag. `reqEnc` is this
 // party's "request additional application-encryption layer" flag: it rides the
 // party's own message (initiator's on msg1, responder's on msg2), is a required
@@ -165,12 +204,6 @@ function concatBytes(
   return out;
 }
 
-// noble returns a plain Uint8Array; normalize to the ArrayBuffer-backed type the
-// crypto helpers are typed against (and defensively copy off any pooled buffer).
-function toBytes(u: Uint8Array): Uint8Array<ArrayBuffer> {
-  return Uint8Array.from(u);
-}
-
 function decodeBase64Url(value: string): Uint8Array<ArrayBuffer> | undefined {
   try {
     return fromBase64Url(value);
@@ -201,12 +234,16 @@ interface SymmetricState {
 
 /**
  * HKDF as defined by the Noise Protocol Framework (rev 34, section 4.3): a
- * chaining HKDF keyed by the running chaining key. Equivalent to RFC 5869
+ * chaining HKDF keyed by the running chaining key, returning `numOutputs`
+ * 32-byte blocks. Noise's definition -- `temp_key = HMAC(ck, ikm)` then
+ * `output_i = HMAC(temp_key, output_{i-1} || byte(i))` -- is exactly RFC 5869
  * HKDF-Extract(salt = ck, ikm) followed by HKDF-Expand with an empty info
- * string, returning `numOutputs` 32-byte blocks. This differs from the
- * application-level {@link hkdfDerive} (zero salt, named info) on purpose: the
- * Noise key schedule chains the salt. Cross-checked against RFC 5869 test
- * case 3 in kex.test.ts.
+ * string, so it is issued as one `crypto.subtle` HKDF `deriveBits` call: the
+ * extract-then-expand is a single operation the platform -- and any validated
+ * module beneath it -- serves as a unit rather than a chain of HMAC calls
+ * assembled here. This differs from the application-level {@link hkdfDerive}
+ * (zero salt, named info) on purpose: the Noise key schedule chains the salt.
+ * Cross-checked against RFC 5869 test case 3 in kex.test.ts.
  *
  * @internal exported only for the RFC 5869 cross-check test.
  */
@@ -215,17 +252,29 @@ export async function noiseHkdf(
   ikm: Uint8Array<ArrayBuffer>,
   numOutputs: 2 | 3,
 ): Promise<Array<Uint8Array<ArrayBuffer>>> {
-  const tempKey = await hmacSha256(ck, ikm);
-  const o1 = await hmacSha256(tempKey, Uint8Array.of(1));
-  const o2 = await hmacSha256(tempKey, concatBytes(o1, Uint8Array.of(2)));
-  if (numOutputs === 2) return [o1, o2];
-  const o3 = await hmacSha256(tempKey, concatBytes(o2, Uint8Array.of(3)));
-  return [o1, o2, o3];
+  const key = await crypto.subtle.importKey(
+    "raw",
+    ikm,
+    { name: "HKDF" },
+    false,
+    ["deriveBits"],
+  );
+  const bits = new Uint8Array(
+    await crypto.subtle.deriveBits(
+      { name: "HKDF", hash: "SHA-256", salt: ck, info: EMPTY },
+      key,
+      numOutputs * HASH_LEN * 8,
+    ),
+  );
+  const blocks: Array<Uint8Array<ArrayBuffer>> = [];
+  for (let i = 0; i < numOutputs; i++)
+    blocks.push(bits.slice(i * HASH_LEN, (i + 1) * HASH_LEN));
+  return blocks;
 }
 
 async function initializeSymmetric(): Promise<SymmetricState> {
   // Noise InitializeSymmetric: for a protocol name longer than the hash length
-  // (PROTOCOL_NAME is 34 bytes > 32) h = HASH(name); ck = h. The name-padding
+  // (PROTOCOL_NAME is 33 bytes > 32) h = HASH(name); ck = h. The name-padding
   // branch for <=32-byte names is unused here.
   const h = await sha256(enc.encode(PROTOCOL_NAME));
   // Noise sets ck = h here. Keep them as distinct buffers (not one shared
@@ -256,8 +305,8 @@ async function mixKeyAndHash(
 ): Promise<void> {
   // ck, temp_h, temp_k = HKDF(ck, ikm, 3); MixHash(temp_h). The third output
   // (temp_k, the CipherState key) is unused here but still requested so this
-  // matches the Noise MixKeyAndHash definition verbatim; the extra HMAC is
-  // negligible next to the X25519 scalar multiplication.
+  // matches the Noise MixKeyAndHash definition verbatim; the extra block is
+  // negligible next to the elliptic-curve scalar multiplication.
   const [ck, tempH] = await noiseHkdf(s.ck, ikm, 3);
   s.ck = ck;
   await mixHash(s, tempH);
@@ -277,17 +326,19 @@ async function mixKeyAndHash(
  * request-encryption flag is MixHash'd as that message's handshake payload, right
  * after the party's `e` token (initiator's after e_initiator, responder's after
  * e_responder) -- MixHash only, since the flag need not be confidential. The
- * session key and a
- * distinct confirmation key are then
- * derived over BOTH the resulting chaining key `ck` (which carries the psk and
- * the X25519 DH output) AND the handshake hash `h` (which carries the
- * protocol-version tag, both ephemeral public keys in role order, and both
- * request-encryption flags). Deriving
- * from ck||h is the load-bearing invariant: the session key depends on the
- * X25519 output, so it is neither the pre-shared secret alone (which would have
- * no forward secrecy) nor the raw DH output alone (which would not be
+ * session key and a distinct confirmation key are then derived over BOTH the
+ * resulting chaining key `ck` (which carries the psk and the ECDH shared
+ * secret) AND the handshake hash `h` (which carries the protocol-version tag,
+ * both ephemeral public keys in role order, and both request-encryption flags).
+ * Deriving from ck||h is the load-bearing invariant: the session key depends on
+ * the ECDH output, so it is neither the pre-shared secret alone (which would
+ * have no forward secrecy) nor the raw DH output alone (which would not be
  * transcript-bound). SP 800-56A Rev. 3 section 5.8.1 (KDF over the shared secret
- * plus FixedInfo) and section 5.9 / 6.2.1.5 (key confirmation).
+ * plus FixedInfo) and section 5.9 (key confirmation).
+ *
+ * The ephemeral public keys enter the schedule as their 65-byte wire encodings;
+ * every length downstream is unchanged, since MixHash and MixKey both absorb
+ * arbitrary-length input and the shared secret stays 32 bytes.
  *
  * The two flags enter `h` only (MixHash, not MixKey), so `ck` -- and therefore
  * the confirmation key derived from `ck` -- is independent of them; `h`, the
@@ -362,34 +413,84 @@ export async function computeKexKeys(
   };
 }
 
-// Computes the X25519 shared secret, returning undefined on any failure so the
-// caller can apply its uniform abort-and-fail handling. noble's getSharedSecret
-// already rejects low-order / non-canonical peer shares by throwing (RFC 7748,
-// the contributory check), so that check is enforced by the audited library
-// rather than hand-rolled. The explicit all-zero guard is defense in depth: it
-// would catch a future primitive swap that returned a raw zero instead of
-// throwing. The compare is constant-time to avoid leaking via timing.
+// --- P-256 ECDH --------------------------------------------------------------
+
+// A fresh ephemeral P-256 key pair. `extractable: false` applies to the private
+// key only (WebCrypto always marks a generated public key extractable), so the
+// ephemeral secret never becomes JavaScript-visible bytes at all -- it stays a
+// platform key handle, inside a validated module where one is configured, and
+// the residual-memory question the raw-bytes form raised does not arise for it.
+// The public key is exported raw, which for P-256 is the 65-byte uncompressed
+// point that goes on the wire.
+async function generateEphemeral(): Promise<{
+  privateKey: CryptoKey;
+  publicKey: Uint8Array<ArrayBuffer>;
+}> {
+  const pair = await crypto.subtle.generateKey(ECDH_P256, false, [
+    "deriveBits",
+  ]);
+  const publicKey = new Uint8Array(
+    await crypto.subtle.exportKey("raw", pair.publicKey),
+  );
+  return { privateKey: pair.privateKey, publicKey };
+}
+
+// The single path from peer-supplied wire bytes to a usable public key,
+// returning undefined on every rejection so the caller applies its uniform
+// abort-and-fail handling. Two layers, in this order:
 //
-// `mySecret` is typed as a plain Uint8Array (not Uint8Array<ArrayBuffer>)
-// because it receives noble's x25519.keygen().secretKey directly, avoiding a
-// defensive copy of secret key material; it only feeds getSharedSecret. The
-// ephemeral secret is not zeroized after use: JS offers no reliable
-// zeroization (GC, copies), and the key is single-use per handshake, so the
-// residual-memory exposure is an accepted limitation.
-function deriveSharedSecret(
-  mySecret: Uint8Array,
-  peerPublic: Uint8Array<ArrayBuffer>,
-): Uint8Array<ArrayBuffer> | undefined {
-  let ss: Uint8Array;
+//  1. The pinned canonical encoding: exactly 65 bytes with the uncompressed
+//     0x04 prefix. This is ours to enforce, because importKey also decodes
+//     other encodings of the same point, and not the same set of them on every
+//     platform (see the PUBLIC_KEY_LEN comment), while the transcript folds in
+//     the wire bytes.
+//  2. Point validity: importKey itself. Driven against both platforms, it
+//     rejects a point not on the curve, the point at infinity in either of its
+//     encodings, and a coordinate at or above the field prime. P-256 has
+//     cofactor 1, so there is no small-order subgroup for a low-order share to
+//     land in and the identity is the whole of the degenerate case. kex.test.ts
+//     and the browser suite assert each of these rejections against the real
+//     crypto.subtle rather than an assumed one.
+async function importPeerShare(
+  share: Uint8Array<ArrayBuffer>,
+): Promise<CryptoKey | undefined> {
+  if (share.length !== PUBLIC_KEY_LEN || share[0] !== UNCOMPRESSED_POINT_PREFIX)
+    return undefined;
   try {
-    ss = x25519.getSharedSecret(mySecret, peerPublic);
+    return await crypto.subtle.importKey("raw", share, ECDH_P256, false, []);
   } catch {
     return undefined;
   }
-  const out = toBytes(ss);
-  // Compare against a freshly allocated zero buffer rather than a shared
-  // module-level sentinel, so no in-place mutation could ever weaken the check.
-  if (bytesEqual(out, new Uint8Array(X25519_KEY_LEN))) return undefined;
+}
+
+// Computes the ECDH shared secret (SP 800-56A Rev 3 Z, the shared point's X
+// coordinate), returning undefined on any failure.
+//
+// The all-zero result guard is a backstop, not the validation: on a cofactor-1
+// curve an all-zero Z means the shared point was the identity, which requires a
+// peer share importPeerShare has already rejected. It is retained because that
+// rejection is a measured platform behavior rather than one this project
+// controls -- a platform that admitted the identity point would otherwise hand
+// back a shared secret both parties' attacker knows, silently costing the
+// handshake its forward secrecy. The compare is constant-time, and is against a
+// freshly allocated zero buffer rather than a module-level sentinel so no
+// in-place mutation could weaken it.
+async function deriveSharedSecret(
+  myPrivate: CryptoKey,
+  peerPublic: CryptoKey,
+): Promise<Uint8Array<ArrayBuffer> | undefined> {
+  let bits: ArrayBuffer;
+  try {
+    bits = await crypto.subtle.deriveBits(
+      { name: "ECDH", public: peerPublic },
+      myPrivate,
+      SHARED_SECRET_LEN * 8,
+    );
+  } catch {
+    return undefined;
+  }
+  const out = new Uint8Array(bits);
+  if (bytesEqual(out, new Uint8Array(SHARED_SECRET_LEN))) return undefined;
   return out;
 }
 
@@ -425,12 +526,12 @@ async function receiveHandshake(conn: MessageConnection): Promise<unknown> {
 // --- Result ------------------------------------------------------------------
 
 /**
- * Result of a completed X25519 key exchange.
+ * Result of a completed P-256 key exchange.
  *
  * `sessionKey` is a 32-byte key suitable for passing to `deriveAeadKey`
  * (exported from `./auth.ts`) to derive channel encryption keys, and to the
  * token-rotation HKDF. Both parties hold the same value after a successful
- * handshake. It has forward secrecy (it mixes a fresh ephemeral X25519 DH) and
+ * handshake. It has forward secrecy (it mixes a fresh ephemeral P-256 ECDH) and
  * is mutually authenticated by the pre-shared secret.
  */
 export interface KexResult {
@@ -451,7 +552,7 @@ export interface KexResult {
 // --- Protocol ----------------------------------------------------------------
 
 /**
- * Executes a 3-message authenticated X25519 key exchange over an established
+ * Executes a 3-message authenticated P-256 key exchange over an established
  * connection.
  *
  * Message flow (initiator sends first throughout):
@@ -461,8 +562,10 @@ export interface KexResult {
  *   3. Initiator -> Responder : `{ kexMsg: "3", confirm: MAC_I }` or
  *      `{ kexMsg: "abort" }`
  *
- * `e_I` and `e_R` are base64url-encoded 32-byte ephemeral X25519 public keys,
- * generated via the library keygen. `MAC_R` and `MAC_I` are the role-asymmetric
+ * `e_I` and `e_R` are base64url-encoded 65-byte ephemeral P-256 public keys in
+ * the SEC1 uncompressed encoding (`0x04 || X || Y`), generated by
+ * `crypto.subtle.generateKey`; a share in any other encoding of the same point
+ * is rejected, not decoded. `MAC_R` and `MAC_I` are the role-asymmetric
  * confirmation tags (HMAC-SHA-256 under the confirmation key, binding the
  * handshake transcript). The responder confirms first (in msg2); the initiator
  * verifies it before sending its own confirmation in msg3, so a mismatched
@@ -479,9 +582,10 @@ export interface KexResult {
  * tags mismatch and the handshake aborts -- it cannot be downgraded to a
  * different encryption decision than the parties agreed.
  *
- * The construction is Noise NNpsk0 over X25519 plus an explicit key
- * confirmation, following NIST SP 800-56A; the DH is a @noble/curves call, not
- * hand-rolled curve math. See the module header and docs/spec/PROTOCOL.md.
+ * The construction is Noise NNpsk0 over P-256 plus an explicit key
+ * confirmation, following NIST SP 800-56A; the ephemeral keygen and the DH are
+ * `crypto.subtle` calls, not hand-rolled curve math. See the module header and
+ * docs/spec/PROTOCOL.md.
  *
  * `psk` is the raw 32-byte pre-shared secret. Callers holding a base64url token
  * decode it to bytes first (a wrong length is a caller error, thrown
@@ -523,9 +627,8 @@ export async function runKex(
     throw new Error(`runKex: psk must be ${PSK_LEN} bytes, got ${psk.length}`);
   }
 
-  const ephemeral = x25519.keygen();
-  const myPublic = toBytes(ephemeral.publicKey);
-  const mySecret = ephemeral.secretKey;
+  const { privateKey: mySecret, publicKey: myPublic } =
+    await generateEphemeral();
 
   if (handshakeRole === "initiator") {
     await conn.send({
@@ -543,11 +646,13 @@ export async function runKex(
       throw new ConnectionError(GENERIC_FAILURE, "security");
     }
     const peerPublic = decodeBase64Url(msg2.data.e);
-    if (peerPublic === undefined || peerPublic.length !== X25519_KEY_LEN) {
+    const peerKey =
+      peerPublic === undefined ? undefined : await importPeerShare(peerPublic);
+    if (peerPublic === undefined || peerKey === undefined) {
       await sendAbort(conn);
       throw new ConnectionError(GENERIC_FAILURE, "security");
     }
-    const dh = deriveSharedSecret(mySecret, peerPublic);
+    const dh = await deriveSharedSecret(mySecret, peerKey);
     if (dh === undefined) {
       await sendAbort(conn);
       throw new ConnectionError(GENERIC_FAILURE, "security");
@@ -567,7 +672,8 @@ export async function runKex(
 
     // No explicit length check on the decoded tag: bytesEqual is total and
     // returns false on any length mismatch (unlike the public key above, whose
-    // length must be 32 before it feeds the DH).
+    // encoding must be the pinned 65-byte uncompressed point before it feeds
+    // the DH).
     const receivedConfirm = decodeBase64Url(msg2.data.confirm);
     if (
       receivedConfirm === undefined ||
@@ -595,11 +701,13 @@ export async function runKex(
       throw new ConnectionError(GENERIC_FAILURE, "security");
     }
     const peerPublic = decodeBase64Url(msg1.data.e);
-    if (peerPublic === undefined || peerPublic.length !== X25519_KEY_LEN) {
+    const peerKey =
+      peerPublic === undefined ? undefined : await importPeerShare(peerPublic);
+    if (peerPublic === undefined || peerKey === undefined) {
       await sendAbort(conn);
       throw new ConnectionError(GENERIC_FAILURE, "security");
     }
-    const dh = deriveSharedSecret(mySecret, peerPublic);
+    const dh = await deriveSharedSecret(mySecret, peerKey);
     if (dh === undefined) {
       await sendAbort(conn);
       throw new ConnectionError(GENERIC_FAILURE, "security");

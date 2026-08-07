@@ -39,7 +39,7 @@ The documentation is organized in three tiers: this **overview** tier (`docs/`) 
 
 ### Technical specifications ([`docs/spec/`](spec/README.md))
 
-- [PROTOCOL.md](spec/PROTOCOL.md) - PSI and PSI-C algorithms, linkage mechanics, datasets, post-linkage steps, and X25519 key-exchange wire-level specification
+- [PROTOCOL.md](spec/PROTOCOL.md) - PSI and PSI-C algorithms, linkage mechanics, datasets, post-linkage steps, and P-256 key-exchange wire-level specification
 - [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md) - application-layer AEAD construction, the transport memory/liveness bounds, SFTP fatal-packet crash safety, and the authenticated abort marker
 - [FILE_SYNC.md](spec/FILE_SYNC.md) - file-sync transport state model: the directory-as-state-machine, filename taxonomy, enforcement sites, invariants, and exchange preconditions for the `sftp` and `filedrop` channels
 - [COMMUNICATION.md](spec/COMMUNICATION.md) - transport-contract complement to the overview: the terminal `ConnectionErrorKind` classification rationale

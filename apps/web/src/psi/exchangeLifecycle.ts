@@ -359,7 +359,7 @@ export async function runExchangeLifecycle<
     // now its first handshake frame -- is buffered rather than dropped no matter
     // how long this side then takes to read it.
     mc = await openPeerMessageConnection(conn);
-    // Authenticate the peer before any PSI frame is sent: the X25519 key exchange
+    // Authenticate the peer before any PSI frame is sent: the P-256 key exchange
     // fails closed on a wrong secret or tampered/malformed frame, so an
     // unauthenticated peer never reaches runExchange. Its 32-byte session key is
     // discarded here (web is single-use and, under DTLS, declines the AEAD wrap --
