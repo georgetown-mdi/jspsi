@@ -6,7 +6,7 @@ import { parseBoundedJson } from "./utils/boundedJson.js";
 // The single chokepoint for parsing documents that may hold secrets: the
 // operator's psilink.yaml (inline SFTP credentials -- server.password /
 // privateKey / privateKeyPassphrase), the .psilink.key shared secret, the
-// signing identity's Ed25519 private key (all stored at 0600), and -- in the web
+// signing identity's P-256 private key (all stored at 0600), and -- in the web
 // app -- a YAML/JSON linkage-terms document an operator imports. The invariant
 // these helpers enforce in one place is: the content of such a document must
 // never reach an error message, log, or stderr -- only a caller-supplied

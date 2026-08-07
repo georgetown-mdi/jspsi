@@ -24,19 +24,25 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const identity = generateSigningIdentity("Party A", {
-  seed: new Uint8Array(32).map((_, i) => i),
+const identity = await generateSigningIdentity("Party A", {
+  privateKey: {
+    kty: "EC",
+    crv: "P-256",
+    x: "JHWxrL6MWMbpKlF5G-EULYpHJ5M6PnEdleg66V0RCvo",
+    y: "ZQuEikGWXN5_AKJYN-xh_HjLnqrQG4QpVkzPocFYbJg",
+    d: "AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dw",
+  },
 });
 
-test("returns null when signing is absent (the unsigned path)", () => {
-  expect(resolveSigningPersist(undefined)).toBeNull();
+test("returns null when signing is absent (the unsigned path)", async () => {
+  await expect(resolveSigningPersist(undefined)).resolves.toBeNull();
 });
 
-test("returns null for the non-certificate modes", () => {
+test("returns null for the non-certificate modes", async () => {
   const none: SigningConfig = { mode: "none" };
   const session: SigningConfig = { mode: "session-derived" };
-  expect(resolveSigningPersist(none)).toBeNull();
-  expect(resolveSigningPersist(session)).toBeNull();
+  await expect(resolveSigningPersist(none)).resolves.toBeNull();
+  await expect(resolveSigningPersist(session)).resolves.toBeNull();
 });
 
 test("loads the identity and pin for certificate mode", async () => {
@@ -49,7 +55,7 @@ test("loads the identity and pin for certificate mode", async () => {
     partnerFingerprint: fingerprint,
     receiptOutput: path.join(dir, "receipt.json"),
   };
-  const resolved = resolveSigningPersist(config);
+  const resolved = await resolveSigningPersist(config);
   expect(resolved).not.toBeNull();
   expect(resolved!.identity).toEqual(identity);
   expect(resolved!.partnerFingerprint).toBe(fingerprint);
@@ -58,25 +64,25 @@ test("loads the identity and pin for certificate mode", async () => {
   });
 });
 
-test("certificate mode with no identity file is a usage error", () => {
+test("certificate mode with no identity file is a usage error", async () => {
   const config: SigningConfig = {
     mode: "certificate",
     identityFile: path.join(dir, "does-not-exist.json"),
   };
-  expect(() => resolveSigningPersist(config)).toThrow(UsageError);
-  expect(() => resolveSigningPersist(config)).toThrow(
+  await expect(resolveSigningPersist(config)).rejects.toThrow(UsageError);
+  await expect(resolveSigningPersist(config)).rejects.toThrow(
     /no signing identity was found/,
   );
 });
 
-test("certificate mode with no pin resolves (verification fails closed at run time)", () => {
+test("certificate mode with no pin resolves (verification fails closed at run time)", async () => {
   const identityPath = path.join(dir, "signing-identity.json");
   saveSigningIdentity(identityPath, identity, { exclusive: true });
   const config: SigningConfig = {
     mode: "certificate",
     identityFile: identityPath,
   };
-  const resolved = resolveSigningPersist(config);
+  const resolved = await resolveSigningPersist(config);
   // The pin is absent here; the fail-closed rejection happens in the signing step
   // (verifyPresentedCertificate), not at config resolution.
   expect(resolved).not.toBeNull();

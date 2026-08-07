@@ -13,7 +13,7 @@ import {
   signReceiptContent,
   verifyReceiptSignature,
 } from "../src/signedReceipt";
-import { hkdfDerive } from "../src/utils/crypto";
+import { fromBase64Url, hkdfDerive, toBase64Url } from "../src/utils/crypto";
 import {
   computeCertificateFingerprint,
   generateSigningIdentity,
@@ -26,16 +26,34 @@ import type {
   SignedReceiptExchangeInputs,
 } from "../src/signedReceipt";
 import type { CommittedPayload } from "../src/exchangeRecord";
-import type { SigningIdentity } from "../src/signingIdentity";
+import type { P256PrivateJwk, SigningIdentity } from "../src/signingIdentity";
 
 // --- Fixtures ----------------------------------------------------------------
 
-// Deterministic identities so the tests are reproducible and can be re-derived
-// by an independent implementation seeded identically (the cross-impl class).
-const seedA = new Uint8Array(32).map((_, i) => i);
-const seedB = new Uint8Array(32).map((_, i) => (i + 100) & 0xff);
-const identityA = generateSigningIdentity("Party A", { seed: seedA });
-const identityB = generateSigningIdentity("Party B", { seed: seedB });
+// Fixed keys so the tests are reproducible and can be re-derived by an
+// independent implementation given the same key (the cross-impl class).
+// crypto.subtle.generateKey takes no seed, so a fixed key -- not a seed -- is
+// what makes a signing identity reproducible.
+const keyA: P256PrivateJwk = {
+  kty: "EC",
+  crv: "P-256",
+  x: "TGM247iz3ncbYTocehc0g0zWnBpPX_7LJAxjvA3bFXQ",
+  y: "9olsXRTKROADd5HCMAMzJZpxuQHlJYV10QfluKxItCQ",
+  d: "ERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzA",
+};
+const keyB: P256PrivateJwk = {
+  kty: "EC",
+  crv: "P-256",
+  x: "UUL0inyAyvR1RKQo_FfScqbGeK1ek__Lo2ZmqZY55R0",
+  y: "0b22-1mBRFZ6Jlfo_zYZ-6oM0qBAwZqyKvkQxwWnV7o",
+  d: "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+};
+const identityA = await generateSigningIdentity("Party A", {
+  privateKey: keyA,
+});
+const identityB = await generateSigningIdentity("Party B", {
+  privateKey: keyB,
+});
 // The agreed-terms identity each party asserts for its partner. In these fixtures
 // the certificate identity and the agreed-terms identity coincide (a well-behaved
 // partner); the tautology-fix test below drives them apart deliberately.
@@ -103,11 +121,59 @@ describe("signReceiptContent / verifyReceiptSignature", () => {
     ).toBe(true);
   });
 
-  test("Ed25519 signatures are deterministic (same content, same signature)", async () => {
+  test("ECDSA signatures are randomized: two signings differ and both verify", async () => {
+    // The receipt format therefore cannot pin a signature as a known answer;
+    // what reproduces across implementations is the signed bytes, so a fixed
+    // signature over them verifies everywhere (see the vector suite below).
     const c = content();
     const sig1 = await signReceiptContent(identityA, c, "initiator");
     const sig2 = await signReceiptContent(identityA, c, "initiator");
-    expect(sig1).toBe(sig2);
+    expect(sig1).not.toBe(sig2);
+    for (const sig of [sig1, sig2])
+      expect(
+        await verifyReceiptSignature(
+          identityA.certificate,
+          c,
+          sig,
+          "initiator",
+        ),
+      ).toBe(true);
+  });
+
+  test("a signature is the fixed-length raw r||s, and any other length is refused", async () => {
+    const c = content();
+    const sig = await signReceiptContent(identityA, c, "initiator");
+    expect(fromBase64Url(sig)).toHaveLength(64);
+    const truncated = toBase64Url(fromBase64Url(sig).subarray(0, 63));
+    expect(
+      await verifyReceiptSignature(
+        identityA.certificate,
+        c,
+        truncated,
+        "initiator",
+      ),
+    ).toBe(false);
+    // A DER SEQUENCE of the same two field elements is refused on its length,
+    // not decoded: crypto.subtle emits and accepts only the raw encoding.
+    const raw = fromBase64Url(sig);
+    const der = new Uint8Array([
+      0x30,
+      0x44,
+      0x02,
+      0x20,
+      ...raw.subarray(0, 32),
+      0x02,
+      0x20,
+      ...raw.subarray(32),
+    ]);
+    expect(
+      await verifyReceiptSignature(
+        identityA.certificate,
+        c,
+        toBase64Url(der),
+        "initiator",
+      ),
+    ).toBe(false);
   });
 
   test("a mutated content field fails verification (tamper detection)", async () => {
@@ -402,8 +468,10 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
       inputsFor(identityA, fingerprintB, partnerIdentityForA, shared),
       inputsFor(identityB, fingerprintA, partnerIdentityForB, shared),
     );
-    // Both parties write a byte-identical artifact (roles fixed by the handshake,
-    // not by local/partner), carrying both certificates and signatures.
+    // Both parties write the same artifact (roles fixed by the handshake, not by
+    // local/partner), carrying both certificates and signatures: each copies the
+    // signature the other sent rather than re-deriving it, so the two files agree
+    // byte for byte even though ECDSA signing is randomized.
     expect(recInit).toEqual(recResp);
     expect(recInit.version).toBe(SIGNED_RECEIPT_VERSION);
     expect(recInit.content).toEqual(shared);
@@ -544,10 +612,47 @@ describe("serialize / parse dual-signed record", () => {
   test("rejects an unrecognized version", () => {
     expect(() =>
       parseDualSignedRecord({
-        version: "psilink-signed-receipt/v2",
+        version: "psilink-signed-receipt/v9",
         content: content(),
         initiator: { certificate: identityA.certificate, signature: "AAAA" },
         responder: { certificate: identityB.certificate, signature: "AAAA" },
+      }),
+    ).toThrow();
+  });
+
+  test("rejects a record from the previous format rather than parsing it", () => {
+    // A record written under the previous signature scheme carries both the old
+    // record version and old certificates (an Ed25519 key in an RFC 8037 OKP
+    // JWK). Either discriminant refuses it; neither is reinterpreted.
+    const v1Certificate = {
+      version: "psilink-signing-cert/v1",
+      algorithm: "ed25519",
+      identity: "Party A",
+      publicKey: {
+        kty: "OKP",
+        crv: "Ed25519",
+        x: "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+      },
+      signature:
+        "8WKs03xb2bO9IsxziElnQeQ4v6--9DKTCRl5RyasydYD5THhQBBQwUD0nDHK7Lqm8NqgxczxhKX7JjJWlJiyAQ",
+    };
+    const v1Party = { certificate: v1Certificate, signature: "AAAA" };
+    expect(() =>
+      parseDualSignedRecord({
+        version: "psilink-signed-receipt/v1",
+        content: content(),
+        initiator: v1Party,
+        responder: v1Party,
+      }),
+    ).toThrow();
+    // Even relabelled with the current record version, the embedded v1
+    // certificates are refused.
+    expect(() =>
+      parseDualSignedRecord({
+        version: SIGNED_RECEIPT_VERSION,
+        content: content(),
+        initiator: v1Party,
+        responder: v1Party,
       }),
     ).toThrow();
   });
@@ -585,15 +690,25 @@ describe("serialize / parse dual-signed record", () => {
   });
 });
 
-// --- Cross-implementation determinism ----------------------------------------
+// --- Cross-implementation vectors --------------------------------------------
 
-// These vectors ARE the deterministic output of signReceiptContent /
-// deriveReceiptBinder (regenerated by generate-signed-receipt-vectors.mjs). The
-// cross-implementation guarantee is that any implementation, seeded and given the
-// same content and session key, reproduces the same binder and signature -- so a
-// signature one side produces the other side (a different implementation) can
-// verify. This test pins the bytes; the browser suite reproduces them against the
-// web build.
+// ECDSA signing is randomized, so the vectors are no longer
+// reproduce-the-signature known answers. They pin two things instead.
+//
+// The deterministic anchors -- the certificate fingerprint and the per-exchange
+// binder -- stay known answers: any implementation given the same key, identity,
+// session key, and role must reproduce both.
+//
+// The signature is verify-only, and the one checked in was produced by OPENSSL
+// over signed bytes the generator assembles from docs/spec/EXCHANGE_RECORD.md
+// rather than from signedReceipt.ts. Accepting it therefore proves this build
+// reconstructs the same signed bytes as an independent statement of the layout,
+// and interoperates with a signer outside this codebase. The browser suite runs
+// the same file against the web build in real Chromium, so both implementations
+// accept the same fixed signature -- which is what says their signed bytes
+// agree. A signature this build produces is checked against the same fixed key
+// and content below; sign and verify share the byte construction, so a build
+// whose bytes diverged would already have failed the fixed-signature check.
 describe("cross-implementation vectors", () => {
   const vectorsPath = new URL(
     "./vectors/signed-receipt-vectors.json",
@@ -602,8 +717,8 @@ describe("cross-implementation vectors", () => {
   const { vectors } = JSON.parse(readFileSync(vectorsPath, "utf8")) as {
     vectors: Array<{
       name: string;
-      seed: string;
       identity: string;
+      privateKey: P256PrivateJwk;
       sessionKey: string;
       role: "initiator" | "responder";
       content: ReceiptContent;
@@ -611,33 +726,48 @@ describe("cross-implementation vectors", () => {
     }>;
   };
 
-  const fromB64Url = (s: string): Uint8Array =>
-    new Uint8Array(Buffer.from(s, "base64url"));
-
   for (const vector of vectors) {
-    test(`${vector.name}: binder and signature reproduce`, async () => {
-      const identity = generateSigningIdentity(vector.identity, {
-        seed: fromB64Url(vector.seed),
+    const otherRole = vector.role === "initiator" ? "responder" : "initiator";
+
+    test(`${vector.name}: the fingerprint and binder reproduce`, async () => {
+      const identity = await generateSigningIdentity(vector.identity, {
+        privateKey: vector.privateKey,
       });
-      const fingerprint = await computeCertificateFingerprint(
-        identity.certificate,
+      expect(await computeCertificateFingerprint(identity.certificate)).toBe(
+        vector.expected.fingerprint,
       );
-      expect(fingerprint).toBe(vector.expected.fingerprint);
+      expect(
+        await deriveReceiptBinder(
+          fromBase64Url(vector.sessionKey),
+          vector.role,
+        ),
+      ).toBe(vector.expected.binder);
+    });
 
-      const binder = await deriveReceiptBinder(
-        fromB64Url(vector.sessionKey) as Uint8Array<ArrayBuffer>,
-        vector.role,
-      );
-      expect(binder).toBe(vector.expected.binder);
+    test(`${vector.name}: the checked-in foreign signature verifies`, async () => {
+      const identity = await generateSigningIdentity(vector.identity, {
+        privateKey: vector.privateKey,
+      });
+      expect(
+        await verifyReceiptSignature(
+          identity.certificate,
+          vector.content,
+          vector.expected.signature,
+          vector.role,
+        ),
+      ).toBe(true);
+    });
 
+    test(`${vector.name}: a signature this build produces also verifies, and differs`, async () => {
+      const identity = await generateSigningIdentity(vector.identity, {
+        privateKey: vector.privateKey,
+      });
       const signature = await signReceiptContent(
         identity,
         vector.content,
         vector.role,
       );
-      expect(signature).toBe(vector.expected.signature);
-      // And the produced signature verifies -- a cross-impl signer's output is
-      // accepted by this verifier (checked against bytes bound to the same role).
+      expect(signature).not.toBe(vector.expected.signature);
       expect(
         await verifyReceiptSignature(
           identity.certificate,
@@ -646,6 +776,38 @@ describe("cross-implementation vectors", () => {
           vector.role,
         ),
       ).toBe(true);
+    });
+
+    test(`${vector.name}: a flipped bit, the other role, and mutated content are rejected`, async () => {
+      const identity = await generateSigningIdentity(vector.identity, {
+        privateKey: vector.privateKey,
+      });
+      const flipped = fromBase64Url(vector.expected.signature);
+      flipped[0] = (flipped[0] as number) ^ 0x01;
+      expect(
+        await verifyReceiptSignature(
+          identity.certificate,
+          vector.content,
+          toBase64Url(flipped),
+          vector.role,
+        ),
+      ).toBe(false);
+      expect(
+        await verifyReceiptSignature(
+          identity.certificate,
+          vector.content,
+          vector.expected.signature,
+          otherRole,
+        ),
+      ).toBe(false);
+      expect(
+        await verifyReceiptSignature(
+          identity.certificate,
+          { ...vector.content, termsHash: "bXV0YXRlZA" },
+          vector.expected.signature,
+          vector.role,
+        ),
+      ).toBe(false);
     });
   }
 });

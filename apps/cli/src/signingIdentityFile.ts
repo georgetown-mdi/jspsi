@@ -35,18 +35,19 @@ export function defaultSigningIdentityPath(): string {
 }
 
 /**
- * Load and validate the signing identity at `identityPath`. Returns `undefined`
- * if the file does not exist (so a caller can lazily create it). Throws a
- * {@link UsageError} on a malformed, unreadable, or inconsistent file -- the
- * same exit-64 classification a malformed key file gets. Warns (advisory)
- * if the file is readable by other users.
+ * Load and validate the signing identity at `identityPath`. Resolves
+ * `undefined` if the file does not exist (so a caller can lazily create it).
+ * Rejects with a {@link UsageError} on a malformed, unreadable, or inconsistent
+ * file -- the same exit-64 classification a malformed key file gets. Warns
+ * (advisory) if the file is readable by other users. Validation reaches
+ * `crypto.subtle`, so the load is asynchronous; the file read itself is not.
  */
-export function loadSigningIdentity(
+export async function loadSigningIdentity(
   identityPath: string,
-): SigningIdentity | undefined {
+): Promise<SigningIdentity | undefined> {
   // Read, then parse through the sensitive-file chokepoint. A read failure
   // carries only a path and errno (no file content), safe to surface. The JSON
-  // parse can echo a span of the source, and this file holds the Ed25519 private
+  // parse can echo a span of the source, and this file holds the P-256 private
   // key, so it routes through parseSensitiveJson, which reports path-only (see
   // sensitiveFile.ts). parseSigningIdentity's schema error names paths and types,
   // never the key value, so it is kept.
@@ -63,7 +64,7 @@ export function loadSigningIdentity(
   const raw = parseSensitiveJson(source, `signing identity at ${identityPath}`);
   let identity: SigningIdentity;
   try {
-    identity = parseSigningIdentity(raw);
+    identity = await parseSigningIdentity(raw);
   } catch (err: unknown) {
     throw new UsageError(
       `signing identity at ${identityPath} is malformed or unsupported: ` +

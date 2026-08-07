@@ -157,7 +157,7 @@ test("fingerprint (created): stdout is the bare fingerprint value, diagnostics o
     // value and a newline, with no diagnostic prefix, no spaces (the value is
     // base64url), and none of the banner/identity/instruction prose the command
     // also emits.
-    const created = loadSigningIdentity(idPath);
+    const created = await loadSigningIdentity(idPath);
     if (created === undefined) throw new Error("identity was not created");
     const fingerprint = await computeCertificateFingerprint(
       created.certificate,
@@ -191,7 +191,7 @@ test("fingerprint (loaded): stdout is the bare fingerprint value, diagnostics on
     // Seed an existing identity so a plain (no --force) run loads it (Loaded)
     // rather than creating or regenerating; report() runs the same on this path,
     // so a stray console.log added only to the load path is caught here.
-    saveSigningIdentity(idPath, generateSigningIdentity("Party A"));
+    saveSigningIdentity(idPath, await generateSigningIdentity("Party A"));
 
     const { stdout, stderr } = await runCapturing(() =>
       fingerprintHandler({
@@ -205,7 +205,7 @@ test("fingerprint (loaded): stdout is the bare fingerprint value, diagnostics on
 
     // stdout is exactly the loaded identity's fingerprint (loading does not
     // change it), bare and alone.
-    const loaded = loadSigningIdentity(idPath);
+    const loaded = await loadSigningIdentity(idPath);
     if (loaded === undefined) throw new Error("identity was not loaded");
     const fingerprint = await computeCertificateFingerprint(loaded.certificate);
     expect(stdout).toBe(fingerprint + "\n");
@@ -235,7 +235,7 @@ test("fingerprint (regenerated): stdout is the new bare fingerprint value, the -
     process.chdir(dir); // hermetic: no ambient ./psilink.yaml is consulted
     const idPath = path.join(dir, "id.json");
     // Seed an existing identity so the --force run re-keys it (Regenerated).
-    saveSigningIdentity(idPath, generateSigningIdentity("Party A"));
+    saveSigningIdentity(idPath, await generateSigningIdentity("Party A"));
 
     const { stdout, stderr } = await runCapturing(() =>
       fingerprintHandler({
@@ -249,7 +249,7 @@ test("fingerprint (regenerated): stdout is the new bare fingerprint value, the -
 
     // stdout is exactly the NEW fingerprint (the re-keyed identity now on disk),
     // nothing else.
-    const regenerated = loadSigningIdentity(idPath);
+    const regenerated = await loadSigningIdentity(idPath);
     if (regenerated === undefined)
       throw new Error("identity was not regenerated");
     const fingerprint = await computeCertificateFingerprint(

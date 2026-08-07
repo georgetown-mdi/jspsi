@@ -30,9 +30,9 @@ afterEach(() => {
 
 // --- resolveSigningIdentity (lazy create / load / regenerate) ----------------
 
-test("creates the identity on first use and persists it", () => {
+test("creates the identity on first use and persists it", async () => {
   const idPath = path.join(dir, "id.json");
-  const { identity, action } = resolveSigningIdentity({
+  const { identity, action } = await resolveSigningIdentity({
     identityPath: idPath,
     identityArg: "Party A, Agency A",
     force: false,
@@ -45,13 +45,13 @@ test("creates the identity on first use and persists it", () => {
 
 test("loads the existing identity on a second run (same fingerprint)", async () => {
   const idPath = path.join(dir, "id.json");
-  const first = resolveSigningIdentity({
+  const first = await resolveSigningIdentity({
     identityPath: idPath,
     identityArg: "Party A",
     force: false,
     log: noopLog,
   });
-  const second = resolveSigningIdentity({
+  const second = await resolveSigningIdentity({
     identityPath: idPath,
     force: false,
     log: noopLog,
@@ -62,16 +62,16 @@ test("loads the existing identity on a second run (same fingerprint)", async () 
   );
 });
 
-test("ignores --identity when an identity already exists, and warns", () => {
+test("ignores --identity when an identity already exists, and warns", async () => {
   const idPath = path.join(dir, "id.json");
-  resolveSigningIdentity({
+  await resolveSigningIdentity({
     identityPath: idPath,
     identityArg: "Party A",
     force: false,
     log: noopLog,
   });
   const warn = vi.fn();
-  const { identity, action } = resolveSigningIdentity({
+  const { identity, action } = await resolveSigningIdentity({
     identityPath: idPath,
     identityArg: "Someone Else",
     force: false,
@@ -84,13 +84,13 @@ test("ignores --identity when an identity already exists, and warns", () => {
 
 test("--force regenerates a new key with a new fingerprint", async () => {
   const idPath = path.join(dir, "id.json");
-  const first = resolveSigningIdentity({
+  const first = await resolveSigningIdentity({
     identityPath: idPath,
     identityArg: "Party A",
     force: false,
     log: noopLog,
   });
-  const regenerated = resolveSigningIdentity({
+  const regenerated = await resolveSigningIdentity({
     identityPath: idPath,
     force: true,
     log: noopLog,
@@ -102,19 +102,19 @@ test("--force regenerates a new key with a new fingerprint", async () => {
     await computeCertificateFingerprint(regenerated.identity.certificate),
   ).not.toBe(await computeCertificateFingerprint(first.identity.certificate));
   // the new identity is the one now persisted
-  const onDisk = loadSigningIdentity(idPath);
+  const onDisk = await loadSigningIdentity(idPath);
   expect(onDisk).toEqual(regenerated.identity);
 });
 
-test("--force with --identity rebinds to a new identity string", () => {
+test("--force with --identity rebinds to a new identity string", async () => {
   const idPath = path.join(dir, "id.json");
-  resolveSigningIdentity({
+  await resolveSigningIdentity({
     identityPath: idPath,
     identityArg: "Party A",
     force: false,
     log: noopLog,
   });
-  const { identity, action } = resolveSigningIdentity({
+  const { identity, action } = await resolveSigningIdentity({
     identityPath: idPath,
     identityArg: "Party A, renamed",
     force: true,
@@ -124,36 +124,36 @@ test("--force with --identity rebinds to a new identity string", () => {
   expect(identity.certificate.identity).toBe("Party A, renamed");
 });
 
-test("errors when no identity is available to create one", () => {
+test("errors when no identity is available to create one", async () => {
   const idPath = path.join(dir, "id.json");
-  expect(() =>
+  await expect(
     resolveSigningIdentity({
       identityPath: idPath,
       force: false,
       log: noopLog,
     }),
-  ).toThrow(UsageError);
+  ).rejects.toThrow(UsageError);
   expect(fs.existsSync(idPath)).toBe(false);
 });
 
-test("a corrupt identity file is an error without --force", () => {
+test("a corrupt identity file is an error without --force", async () => {
   const idPath = path.join(dir, "id.json");
   fs.writeFileSync(idPath, "{ not valid json");
-  expect(() =>
+  await expect(
     resolveSigningIdentity({
       identityPath: idPath,
       identityArg: "Recovered",
       force: false,
       log: noopLog,
     }),
-  ).toThrow(UsageError);
+  ).rejects.toThrow(UsageError);
 });
 
-test("--force regenerates over a corrupt identity file", () => {
+test("--force regenerates over a corrupt identity file", async () => {
   const idPath = path.join(dir, "id.json");
   fs.writeFileSync(idPath, "{ not valid json");
   const warn = vi.fn();
-  const { identity, action } = resolveSigningIdentity({
+  const { identity, action } = await resolveSigningIdentity({
     identityPath: idPath,
     identityArg: "Recovered",
     force: true,
@@ -163,18 +163,21 @@ test("--force regenerates over a corrupt identity file", () => {
   expect(identity.certificate.identity).toBe("Recovered");
   expect(warn).toHaveBeenCalledOnce(); // warned that the old file was unreadable
   // the file is now a valid, loadable identity
-  expect(loadSigningIdentity(idPath)).toEqual(identity);
+  await expect(loadSigningIdentity(idPath)).resolves.toEqual(identity);
 });
 
-test("on a lost create race, adopts the winner's identity instead of failing", () => {
+test("on a lost create race, adopts the winner's identity instead of failing", async () => {
   const idPath = path.join(dir, "id.json");
   // A "winner" process has already written a valid identity to disk.
-  idFile.saveSigningIdentity(idPath, generateSigningIdentity("Winner Party"));
+  idFile.saveSigningIdentity(
+    idPath,
+    await generateSigningIdentity("Winner Party"),
+  );
   const realLoad = idFile.loadSigningIdentity;
   let calls = 0;
   const spy = vi
     .spyOn(idFile, "loadSigningIdentity")
-    .mockImplementation((p: string) => {
+    .mockImplementation(async (p: string) => {
       calls += 1;
       // First call is resolve's existence check: report absent so it attempts
       // an exclusive create and then loses the race to the file on disk. The
@@ -183,7 +186,7 @@ test("on a lost create race, adopts the winner's identity instead of failing", (
     });
   try {
     const warn = vi.fn();
-    const { identity, action } = resolveSigningIdentity({
+    const { identity, action } = await resolveSigningIdentity({
       identityPath: idPath,
       identityArg: "Loser Party",
       force: false,
@@ -199,7 +202,7 @@ test("on a lost create race, adopts the winner's identity instead of failing", (
   }
 });
 
-test("retries the exclusive create after the winner vanishes, then creates", () => {
+test("retries the exclusive create after the winner vanishes, then creates", async () => {
   const idPath = path.join(dir, "id.json");
   const realSave = idFile.saveSigningIdentity;
   let saveCalls = 0;
@@ -215,9 +218,9 @@ test("retries the exclusive create after the winner vanishes, then creates", () 
   // absent (the winner vanished), so the loop retries rather than adopting.
   const loadSpy = vi
     .spyOn(idFile, "loadSigningIdentity")
-    .mockReturnValue(undefined);
+    .mockResolvedValue(undefined);
   try {
-    const { identity, action } = resolveSigningIdentity({
+    const { identity, action } = await resolveSigningIdentity({
       identityPath: idPath,
       identityArg: "Party A",
       force: false,
@@ -232,7 +235,7 @@ test("retries the exclusive create after the winner vanishes, then creates", () 
   }
 });
 
-test("fails with a usage error (not a stale exists error) when a create race flaps", () => {
+test("fails with a usage error (not a stale exists error) when a create race flaps", async () => {
   const idPath = path.join(dir, "id.json");
   // Every exclusive create loses the race and every recovery read finds the file
   // gone -- a pathological create/delete flap. The bounded retry must give up
@@ -245,25 +248,25 @@ test("fails with a usage error (not a stale exists error) when a create race fla
     });
   const loadSpy = vi
     .spyOn(idFile, "loadSigningIdentity")
-    .mockReturnValue(undefined);
+    .mockResolvedValue(undefined);
   try {
-    expect(() =>
+    await expect(
       resolveSigningIdentity({
         identityPath: idPath,
         identityArg: "Party A",
         force: false,
         log: noopLog,
       }),
-    ).toThrow(UsageError);
+    ).rejects.toThrow(UsageError);
   } finally {
     saveSpy.mockRestore();
     loadSpy.mockRestore();
   }
 });
 
-test("falls back to the config identity when --identity is absent", () => {
+test("falls back to the config identity when --identity is absent", async () => {
   const idPath = path.join(dir, "id.json");
-  const { identity, action } = resolveSigningIdentity({
+  const { identity, action } = await resolveSigningIdentity({
     identityPath: idPath,
     configIdentity: "Configured Party",
     force: false,
@@ -278,7 +281,7 @@ test("falls back to the config identity when --identity is absent", () => {
 test("handler refuses to export the certificate over the identity file itself", async () => {
   const idPath = path.join(dir, "id.json");
   // Seed a real identity file (it holds the private key).
-  idFile.saveSigningIdentity(idPath, generateSigningIdentity("Party A"));
+  idFile.saveSigningIdentity(idPath, await generateSigningIdentity("Party A"));
   const before = fs.readFileSync(idPath, "utf8");
 
   const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
@@ -305,7 +308,7 @@ test("handler refuses to export the certificate over the identity file itself", 
   }
   // The identity file is byte-for-byte intact: the private key was not destroyed.
   expect(fs.readFileSync(idPath, "utf8")).toBe(before);
-  const reloaded = loadSigningIdentity(idPath);
+  const reloaded = await loadSigningIdentity(idPath);
   expect(reloaded).toBeDefined();
   expect(reloaded?.privateKey).toBeDefined();
 });

@@ -257,11 +257,17 @@ const TOKEN_A = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 // 32 0x01 bytes in base64url: a second valid token for the mismatched-secret case.
 const TOKEN_B = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
 
-// A fixed, deterministic signing identity for the runProtocol-level warn-gate
-// tests below. Its content is never verified in these tests (runExchange is
-// mocked), so any valid identity will do.
-const signingIdentityFixture = generateSigningIdentity("test-party", {
-  seed: new Uint8Array(32).fill(9),
+// A fixed signing identity for the runProtocol-level warn-gate tests below. Its
+// content is never verified in these tests (runExchange is mocked), so any valid
+// identity will do.
+const signingIdentityFixture = await generateSigningIdentity("test-party", {
+  privateKey: {
+    kty: "EC",
+    crv: "P-256",
+    x: "JHWxrL6MWMbpKlF5G-EULYpHJ5M6PnEdleg66V0RCvo",
+    y: "ZQuEikGWXN5_AKJYN-xh_HjLnqrQG4QpVkzPocFYbJg",
+    d: "AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dw",
+  },
 });
 
 // Values unused because runExchange and buildOutputTable are mocked.

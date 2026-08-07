@@ -1,88 +1,122 @@
 {
+  "description": "Cross-implementation vectors for the psilink-signing-cert/v2 certificate and psilink-signing-identity/v2 identity file: ECDSA over P-256 with SHA-256, the public key an RFC 7518 EC JWK, the signature the fixed-length raw r||s (IEEE P1363). Each vector fixes a private key and an identity. The public coordinates and the certificate fingerprint are known answers -- the fingerprint covers the body and never the signature, so it stays deterministic though ECDSA signing is not. The self-signature is NOT a known answer and is verify-only: it was produced by the openssl CLI (see externalAnchors), so a suite that parses these certificates accepts a signature made outside this codebase. Regenerate with generate-signing-cert-vectors.mjs.",
+  "construction": {
+    "certificateVersion": "psilink-signing-cert/v2",
+    "identityVersion": "psilink-signing-identity/v2",
+    "algorithm": "ecdsa-p256-sha256",
+    "signatureDomain": "psilink-signing-cert-signature/v1",
+    "fingerprintDomain": "psilink-signing-cert-fingerprint/v1",
+    "signedBytes": "canonicalBytes({ domain: signatureDomain, certificate: { version, algorithm, identity, publicKey: { kty, crv, x, y } } }) (RFC 8785)",
+    "fingerprint": "base64url(SHA-256(canonicalBytes({ domain: fingerprintDomain, certificate: <the same body> })))",
+    "signatureEncoding": "64 bytes, r || s, each field element left-padded to 32 bytes. Not DER: a field of any other length is rejected rather than decoded.",
+    "publicKeyEncoding": "x and y are each exactly 32 bytes in canonical unpadded base64url. A coordinate carrying a leading zero byte, or written with base64 padding, is rejected rather than normalized."
+  },
   "vectors": [
     {
-      "name": "ed25519-identity-a",
-      "description": "Deterministic Ed25519 signing identity (seed = bytes 0..31) bound to a multi-line free-text identity. Any implementation seeded identically must reproduce publicKeyX, signature, and fingerprint.",
-      "seed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "name": "p256-identity-a",
+      "description": "A signing identity on the fixed private scalar 0x01..0x20, bound to a multi-line free-text identity. Any implementation given this private key must derive the same public coordinates and the same fingerprint, and must accept the checked-in certificate.",
       "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
-      "expected": {
-        "publicKeyX": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
-        "signature": "8WKs03xb2bO9IsxziElnQeQ4v6--9DKTCRl5RyasydYD5THhQBBQwUD0nDHK7Lqm8NqgxczxhKX7JjJWlJiyAQ",
-        "fingerprint": "iWD-ZB69Oz6gOpaX_OoC7sD8ohIZj2lETC9qbl-IbPg"
+      "privateKey": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
+        "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q",
+        "d": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
       },
-      "identityFile": {
-        "version": "psilink-signing-identity/v1",
-        "privateKey": {
-          "kty": "OKP",
-          "crv": "Ed25519",
-          "x": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
-          "d": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
-        },
-        "certificate": {
-          "version": "psilink-signing-cert/v1",
-          "algorithm": "ed25519",
-          "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
-          "publicKey": {
-            "kty": "OKP",
-            "crv": "Ed25519",
-            "x": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg"
-          },
-          "signature": "8WKs03xb2bO9IsxziElnQeQ4v6--9DKTCRl5RyasydYD5THhQBBQwUD0nDHK7Lqm8NqgxczxhKX7JjJWlJiyAQ"
-        }
+      "expected": {
+        "publicKeyX": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
+        "publicKeyY": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q",
+        "fingerprint": "WiJHb37O9YMHrcF0R6g0UXgzAjW60jWYVSTgqA326yg"
       },
       "certificate": {
-        "version": "psilink-signing-cert/v1",
-        "algorithm": "ed25519",
+        "version": "psilink-signing-cert/v2",
+        "algorithm": "ecdsa-p256-sha256",
         "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
         "publicKey": {
-          "kty": "OKP",
-          "crv": "Ed25519",
-          "x": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg"
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
+          "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q"
         },
-        "signature": "8WKs03xb2bO9IsxziElnQeQ4v6--9DKTCRl5RyasydYD5THhQBBQwUD0nDHK7Lqm8NqgxczxhKX7JjJWlJiyAQ"
+        "signature": "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g"
+      },
+      "identityFile": {
+        "version": "psilink-signing-identity/v2",
+        "privateKey": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
+          "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q",
+          "d": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
+        },
+        "certificate": {
+          "version": "psilink-signing-cert/v2",
+          "algorithm": "ecdsa-p256-sha256",
+          "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
+          "publicKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
+            "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q"
+          },
+          "signature": "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g"
+        }
       }
     },
     {
-      "name": "ed25519-identity-b",
-      "description": "A second deterministic identity (seed = bytes 255..224) with a different identity string, used as the mismatched-identity and non-matching-fingerprint counterpart to identity-a.",
-      "seed": "__79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-bl5OPi4eA",
+      "name": "p256-identity-b",
+      "description": "A second identity on the fixed private scalar 0xff..0xe0 with a different identity string, used as the mismatched-identity and non-matching-fingerprint counterpart to identity-a.",
       "identity": "Bureau of B, Office of Linkage",
+      "privateKey": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
+        "y": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg",
+        "d": "__79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-bl5OPi4eA"
+      },
       "expected": {
-        "publicKeyX": "uvxxvq06xeS2PpyCFu5xo0quxlci7tvKcotOmzzM45Y",
-        "signature": "dtJyxCvW-SKwFMO0rzZ87JAOhBLqFE1DJneVOzWoKDsSlLTVsY8JAEbMaBd-Oem8mvfEUmoTchMgiOXDave6AQ",
-        "fingerprint": "tOURHnCEbF5GlKMSI-UpKSOS2jNvsZuJuo6HLWyQuz4"
+        "publicKeyX": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
+        "publicKeyY": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg",
+        "fingerprint": "fRw3Aonk4i4yd4t28rcUrznFcxhmo6qo3PkzzsUxj1s"
+      },
+      "certificate": {
+        "version": "psilink-signing-cert/v2",
+        "algorithm": "ecdsa-p256-sha256",
+        "identity": "Bureau of B, Office of Linkage",
+        "publicKey": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
+          "y": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg"
+        },
+        "signature": "8qShMY-wkwMJ5otOaB8ARTRs3Ikq9P7zvN0KkYkKtxwtsjImh7fR1ntjwgfXJ6QPNFQEBW9yqGJaPu97447J6w"
       },
       "identityFile": {
-        "version": "psilink-signing-identity/v1",
+        "version": "psilink-signing-identity/v2",
         "privateKey": {
-          "kty": "OKP",
-          "crv": "Ed25519",
-          "x": "uvxxvq06xeS2PpyCFu5xo0quxlci7tvKcotOmzzM45Y",
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
+          "y": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg",
           "d": "__79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-bl5OPi4eA"
         },
         "certificate": {
-          "version": "psilink-signing-cert/v1",
-          "algorithm": "ed25519",
+          "version": "psilink-signing-cert/v2",
+          "algorithm": "ecdsa-p256-sha256",
           "identity": "Bureau of B, Office of Linkage",
           "publicKey": {
-            "kty": "OKP",
-            "crv": "Ed25519",
-            "x": "uvxxvq06xeS2PpyCFu5xo0quxlci7tvKcotOmzzM45Y"
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
+            "y": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg"
           },
-          "signature": "dtJyxCvW-SKwFMO0rzZ87JAOhBLqFE1DJneVOzWoKDsSlLTVsY8JAEbMaBd-Oem8mvfEUmoTchMgiOXDave6AQ"
+          "signature": "8qShMY-wkwMJ5otOaB8ARTRs3Ikq9P7zvN0KkYkKtxwtsjImh7fR1ntjwgfXJ6QPNFQEBW9yqGJaPu97447J6w"
         }
-      },
-      "certificate": {
-        "version": "psilink-signing-cert/v1",
-        "algorithm": "ed25519",
-        "identity": "Bureau of B, Office of Linkage",
-        "publicKey": {
-          "kty": "OKP",
-          "crv": "Ed25519",
-          "x": "uvxxvq06xeS2PpyCFu5xo0quxlci7tvKcotOmzzM45Y"
-        },
-        "signature": "dtJyxCvW-SKwFMO0rzZ87JAOhBLqFE1DJneVOzWoKDsSlLTVsY8JAEbMaBd-Oem8mvfEUmoTchMgiOXDave6AQ"
       }
     }
-  ]
+  ],
+  "externalAnchors": {
+    "signatureProducer": "OpenSSL 3.0.20 7 Apr 2026 (Library: OpenSSL 3.0.20 7 Apr 2026)",
+    "note": "Every checked-in self-signature was produced by the openssl CLI named above (openssl dgst -sha256 -sign, DER read back through openssl asn1parse and re-encoded as the fixed-length raw r||s), over signed bytes this generator assembles from docs/spec/PROTOCOL.md. A suite that parses these certificates is therefore accepting a signature produced outside this codebase."
+  }
 }
