@@ -50,10 +50,10 @@ A new version is taken for any of: removing a field or a check id, changing what
 | Value | Meaning | Rolled up from |
 | ----- | ------- | -------------- |
 | `ok` | Nothing found here blocks an exchange. A `warn` check is reported under this value: it asks something of the operator without stopping them. | No check has status `fail`. |
-| `fix_and_retry` | The checks ran and at least one returned a verdict the operator can act on before running an exchange. | At least one `fail`, none of which stopped the battery. |
-| `fatal` | The checks could not be run, so nothing was established either way -- neither that the share works nor that it does not. | At least one `fail` that stopped the battery from running: the `smbclient` binary missing from the image, or the mount directory not listable. |
+| `fix_and_retry` | The checks ran and at least one returned a verdict the operator can act on before running an exchange. | At least one `fail`, none of them a failure that made the checks unrunnable. A `fail` that ends the run early, leaving the checks after it `skipped`, still rolls up here. |
+| `fatal` | The checks could not be run, so nothing was established either way -- neither that the share works nor that it does not. | At least one `fail` that made the checks unrunnable: the `smbclient` binary missing from the image, or the mount directory not listable. |
 
-The two failure classes are distinguished by `overall` alone; which check stopped the battery is not itself a field. `fatal` outranks `fix_and_retry` because the two ask different things of the caller: a `fatal` verdict has no `action` to follow, since the checks that would have produced one never ran.
+The two failure classes are distinguished by `overall` alone; which check was the unrunnable one is not itself a field. `fatal` outranks `fix_and_retry` because the two ask different things of the caller: a `fatal` verdict has no `action` to follow, since the checks that would have produced one never ran.
 
 ## Check status
 
@@ -76,7 +76,7 @@ The id set per mode is fixed and ordered. Every id below appears in every verdic
 | -- | -------------------------------- |
 | `name_resolution` | The server name resolves from inside the container. A literal IPv4 address needs no resolution and passes on that basis. |
 | `tcp_445` | A TCP connection to port 445 on the server completes. |
-| `smbclient_available` | The `smbclient` binary is present. Its absence is the failure that stops this battery. |
+| `smbclient_available` | The `smbclient` binary is present. Its absence is the failure that makes the rest of this battery unrunnable. |
 | `authentication` | The server accepted the credentials. A server that authenticates and then refuses to list its shares is `ok` with a `meaning`, not a failure: refusing the share list to ordinary accounts is common and decides nothing. |
 | `share_open` | The share opened. When a subdirectory was given, a share root that will not list is `ok` with a `meaning` -- rights to one's own folder and nothing above it is the ordinary shape of an agency grant. |
 | `subdirectory` | The folder the exchange will run in opened, and how many entries it holds. With no subdirectory configured this is the share root, counted the same way. A folder already holding more entries than the transport's directory-listing bound is a `warn` (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#directory-listing-bound)). |
@@ -90,7 +90,7 @@ The id set per mode is fixed and ordered. Every id below appears in every verdic
 
 | Id | What a passing check establishes |
 | -- | -------------------------------- |
-| `mount_readable` | The directory exists and can be listed. Its failure is the failure that stops this battery. |
+| `mount_readable` | The directory exists and can be listed. Its failure is the failure that makes the rest of this battery unrunnable. |
 | `marker` | The file `doctor probe` left behind is here and is this run's, so both batteries examined the same directory. A marker from a different run is a `warn`, and so is a matching marker the mount cannot delete; an absent one is a `fail`, since the mount and the probe are then pointing at different directories. `skipped` when no marker or token was supplied. |
 | `write_rename` | A file was written under a temporary name and renamed into place, the shape psilink writes every message with. |
 | `exclusive_create` | The share refuses to create a file that already exists -- the `O_EXCL` refusal psilink's rendezvous uses to decide which side goes first. A share that does not refuse it is a `warn`; a share where the create could not be tested at all is `skipped`, carrying an `action` naming the same remedy. |
