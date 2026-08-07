@@ -6,6 +6,8 @@ title: "PSI-Link CLI"
 
 This document covers the CLI commands, configuration files, invitation strings, and recovery procedures for PSI-Link. It does not cover the PSI protocol (see [PROTOCOL.md](spec/PROTOCOL.md)), the security and authentication model (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)), or deployment of supporting services (see [DEPLOYMENT.md](DEPLOYMENT.md)). Intended readers are IT staff and power users.
 
+Before a first SFTP exchange against a server you do not administer yourself, work through the [SFTP server checklist](DEPLOYMENT.md#sftp-server): the settings covered there -- upload-triggered automation, scanning, auto-cleanup, account permissions, anti-flood bans, and session limits -- are the usual cause of an SFTP exchange that stalls, and each one reaches you as that stall rather than as a message naming it.
+
 ## Configuration
 
 Exchange details are stored in two files: a configuration file and an authentication key file. The default file names and paths are `./psilink.yaml` and `./.psilink.key`, while command line arguments to override are `--config-file` and `--key-file` respectively. When these files are first created, the application prints a notice identifying both and gives a warning that the key file should be treated as private. For Docker deployments, agencies are expected to mount one directory per exchange partner, so the working directory itself provides isolation and no subdirectory is needed.

@@ -147,7 +147,65 @@ A shared-directory (`filedrop`) exchange runs over the rendezvous directory at `
 
 ## SFTP server
 
-PSI-Link does not include or require any particular SFTP server. In practice almost all deployments reuse an existing service: `sshd` on a standard Linux host, with a per-exchange directory whose Unix permissions restrict access to the two partner accounts, is sufficient. The two parties should agree out-of-band on the directory path and on which accounts have access; nothing more is required of the server beyond that.
+PSI-Link does not include or require any particular SFTP server. In practice almost all deployments reuse an existing service: `sshd` on a standard Linux host, with a per-exchange directory whose Unix permissions restrict access to the two partner accounts, is sufficient. The two parties should agree out-of-band on the directory path and on which accounts have access.
+
+No feature of the server is required beyond ordinary SFTP. What an exchange does need is that nothing else edits the directory it runs in: PSI-Link treats the shared directory as the whole of the exchange's state -- the set of filenames present in it *is* the protocol state (see [FILE_SYNC.md](spec/FILE_SYNC.md#core-principle-the-directory-is-the-state-machine)) -- so a server-side rule that moves, renames, rewrites, quarantines, or deletes a file there is rewriting that state behind both parties' backs. A failed exchange against a commercial or managed SFTP service is more often a server-side setting of this kind than a fault in the exchange, and it reaches the operator as an unexplained stall rather than as a message naming the cause. Work through the checklist below before the first exchange against a server you do not administer yourself, and give the partner's administrator the same list.
+
+### Rendezvous directory checklist
+
+Ordered by what they cost deployments, most damaging first.
+
+1. **No upload-triggered automation on the directory.** Any Event Rule, Monitor, Trigger, or scheduled Task that acts on a newly uploaded file -- moving it to an archive or processing folder, renaming it, or quarantining it -- breaks the exchange, and it is the most common configuration-dependent failure. PSI-Link publishes every file whose contents the partner reads by writing a `temp-<uuid>.tmp` first and renaming it to the final name, so a partner never reads a partial file under the name it is waiting for. An automation that grabs the temporary file races that rename; one that grabs the final file removes the message the partner is polling for. The result is either a failed publish that ends the run or a partner waiting on a file that is no longer there until its peer timeout expires. Rules that only notify -- an email, a log entry, a webhook -- are harmless; it is moving, renaming, and quarantining that must be off for this directory.
+
+2. **Exclude the directory from antivirus, DLP, and ICAP scanning.** The files an exchange writes are opaque protocol frames, and an invitation-based exchange encrypts them end to end -- the CLI requests the application-layer AEAD on every file-sync exchange and an invitation is what supplies the session key it needs, so the server and anything reading through it see only ciphertext (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security); a zero-setup exchange has no session key and runs under the SSH transport's encryption alone). A scanner therefore has nothing it can classify accurately -- at best it passes the file through, at worst it holds it until a scan completes or quarantines it as unrecognized binary content, which is a deletion as far as the protocol is concerned. Exclude the path rather than tuning the scanner's verdicts.
+
+3. **No aggressive or short-age auto-cleanup.** An exchange spans many poll cycles and can run for hours when the partner reconciles the directory slowly. PSI-Link removes files itself where the protocol calls for it; a cleanup rule that removes one first -- a hello during rendezvous, or a message the partner has not yet consumed -- costs the exchange with no error naming the cause. It is worse in retain mode, where nothing is deleted as a protocol step and the directory is kept deliberately as a permanent transcript (see the `retain_files` row in [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md#sftp-and-file-drop-options)): an age-based sweep there destroys audit material and not only a live exchange. Where a mandatory retention policy cannot exempt the directory, set its age threshold well above the longest exchange you expect to run.
+
+4. **Give the PSI-Link account rename and delete, not just write.** Two operations beyond `put` are load-bearing. **Rename** is how every file the partner reads is published -- the temp-then-final rename above is what keeps a partner from ever reading a partial file. **Delete** is a protocol step in the default (non-retain) mode: the receiver deletes each message it has consumed, and that deletion is the sender's go-ahead for the next one. It is also how a run clears its own files at close and how a starting run sweeps a temporary file orphaned by a crashed prior attempt.
+
+   Delete carries a second, narrower consequence that applies only under [`connection_per_poll`](#a-maximum-session-duration-needs-a-session-per-poll-cycle); the default held-session mode keeps no such record and is unaffected. On a rendezvous directory whose permissions stop this party from unlinking files the partner wrote -- a sticky-bit directory is the usual shape -- a `connection_per_poll` run also leaves some of its *own* temporary files behind. The peer-owned temporary files that the start-of-exchange sweep attempts and cannot delete fill the adapter's record of cleanup deletes it still owes, and while that record stands full a cleanup this party's send path deferred across an idle gap is refused a place in it. The fill clears itself within a few session re-establishments rather than standing for the run -- but a cleanup refused inside that window is issued once and never re-issued, so that one temporary file survives the run. What it costs is directory hygiene: no data is lost, nothing hangs, and no exchange fails. The mechanism, the constants, and what the bound rests on are the second stated limit in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#the-deferred-cleanup-delete-record).
+
+5. **Allow-list the parties' client addresses, and give each party its own account.** PSI-Link polls the directory on a cadence and re-dials after a dropped session, which an anti-flood or auto-ban rule can read as abuse. Some products (Cerberus FTP Server and Titan FTP among them) offer a permanent ban as the response, which turns one transient network drop into a lockout that outlives the exchange; check whether yours does and what its ban duration and thresholds are. Allow-list both parties' client addresses so the rule cannot fire against them. Give each party its own account as well: the two parties are connected concurrently, so a shared account collides with per-account maximum-login and maximum-connection limits, and distinct accounts are also what make the directory permissions above meaningful per party.
+
+### Server-enforced session limits
+
+Two server limits are easily confused with each other, and PSI-Link answers them differently. Establish which one your server enforces before configuring anything.
+
+#### An idle timeout is already handled
+
+Servers commonly close a session that has gone quiet for some window; Azure Blob Storage's SFTP endpoint uses a fixed two minutes that is not operator-adjustable. An exchange does go legitimately quiet: one party polls while the other computes its reply, which on modest hardware runs for minutes with no file traffic at all.
+
+PSI-Link covers this itself, with nothing to configure. The SFTP adapter issues a real no-op SFTP command on a fixed interval once a session has been idle for it, so a server keying idleness on the last SFTP **request** sees activity. The interval is a constant rather than a knob, sized below the tightest fixed idle window it must survive -- Azure's two minutes; the value and the reasoning are in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#sftp-session-heartbeat-and-tcp-keepalive). A TCP or SSH-transport keepalive is not a substitute for it, and PSI-Link does not rely on one here: transport traffic rides below the SFTP protocol and does not reset a timer keyed on SFTP requests.
+
+Two residues are the operator's rather than the adapter's:
+
+- a server whose idle window is shorter still than the heartbeat interval; and
+- a server that keys idleness on something other than SFTP request activity -- bytes transferred, say, or a wall clock the session's activity never resets, which is the next class rather than an idle timer at all.
+
+For either one, confirm the *effective* idle setting with the server's administrator rather than assuming the product's documented default, since it can be set per account or per group, then either raise it or treat the server as a session-lifetime case below.
+
+#### A maximum session duration needs a session per poll cycle
+
+Some servers cap a session's total lifetime: past a fixed age the session is closed however active it has been. No heartbeat defeats that -- activity is exactly what such a cap ignores.
+
+The remedy is `connection_per_poll` (`--connection-per-poll` on the command line), which opens a fresh SFTP session at the start of each poll cycle and releases it before the loop goes idle again, so no session need outlive one cycle. When to set it, what it costs, and the two idle stretches that still hold a session are in the `connection_per_poll` row and the guidance beneath it in [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md#sftp-only-options). Three points matter at deployment time:
+
+- **It is a local choice, not a bilateral one.** How this party dials leaves no trace the partner can see, so the partner's side is unaffected and need not match. Only the party facing the capped server sets it.
+- **Pair it with a long poll interval.** Every cycle pays a full SSH handshake, so the mode belongs with a minutes-scale `poll_interval_ms`; a sub-minute interval draws a warning from the CLI.
+- **It replaces the heartbeat rather than layering with it.** No heartbeat is armed in this mode -- a session that lives one cycle has nothing to keep alive -- so the two are alternatives, not layers. Do not read the mode as extra protection on top of the idle-timeout handling above.
+
+Setting neither leaves the default held-session mode, where a clean mid-exchange drop is re-dialed transparently and the interrupted operation re-issued, up to the `max_reconnect_attempts` budget over the whole exchange, after which the next drop ends it (see [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md#shared-options)). That budget is a floor under a flaky link, not an answer to a server that caps every session it serves.
+
+### Object-store and managed SFTP front-ends
+
+Object-store SFTP front-ends -- AWS Transfer Family over S3, Azure Blob Storage's SFTP endpoint, Google Cloud Storage bridges -- do work with PSI-Link. Run them in **retain mode**, the configuration they are intended for: set `retain_files` on both parties, and on the command line `--retain-files` supplies the two settings it requires, `lockless_rendezvous` and `timestamp_in_filename` (see the rows in [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md#sftp-and-file-drop-options)). Retain mode rendezvouses through an acknowledgment-marker barrier instead of the default exclusive-create lock race, and exclusive create is the one operation an object-store front-end may not honor the way the lock path needs, so configuring retain mode settles that question rather than leaving it to the backend. Retain mode is bilateral: both parties set it, and a mismatch fails fast at rendezvous rather than stalling. A front-end that implements rename as copy-then-delete is not a problem in either mode, because PSI-Link never renames onto a name that already exists and a reader waits for a message's declared byte count before reading it.
+
+Two of the checklist items above still apply, and retain mode makes the first of them more pressing rather than less:
+
+- **Keep the rendezvous prefix out of every lifecycle and auto-expiry rule** (S3 Lifecycle, Azure lifecycle management, and their equivalents). Retain mode leaves the exchange's files in place as a durable transcript, so they linger longer than in the default mode and an expiry rule is correspondingly more likely to reach them -- during an exchange as well as after it.
+- **No upload-triggered move or quarantine automation, and no antivirus/DLP scanning on the prefix.** These are orthogonal to the rendezvous mode and reach a retain-mode exchange exactly as they reach any other.
+
+### Local development and testing
 
 For local development and integration testing, the project's test suite stands up its own SFTP server (an in-process `ssh2.Server` by default, or a native OpenSSH `sshd` child process). That setup is intended for testing the CLI's transport behavior against a known-good server and is not a production reference.
 
