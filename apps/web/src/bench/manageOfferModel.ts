@@ -146,7 +146,7 @@ export interface ManagedExchangeDocumentParts {
  * derivation, rather than a caller-supplied set, is what keeps the persisted
  * record and the persisted metadata from disagreeing. An inviter records none:
  * its own set was authored at mint and pinned as `disclosedPayloadColumns` (see
- * docs/spec/FILE_SYNC.md, "The acceptor's own outbound consent").
+ * docs/spec/EXCHANGE_FILE.md, "The acceptor's outbound consent").
  *
  * {@link buildManagedDeposit} composes through this function rather than taking a
  * composed document, so a completion surface never holds one to pair with a side
