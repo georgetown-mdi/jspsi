@@ -1,5 +1,7 @@
 ---
 title: "PSI-Link Security Design"
+review_owner: "PSI-Link maintainers"
+last_reviewed: "2026-08-07"
 ---
 
 # PSI-Link security
