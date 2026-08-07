@@ -89,7 +89,6 @@ for (const { name, fn } of safeHelpers) {
   });
 }
 
-// A legitimate config is unaffected: it parses to success as before.
 const minimalLinkageTerms = {
   version: "1.0.0",
   identity: "Test Party",

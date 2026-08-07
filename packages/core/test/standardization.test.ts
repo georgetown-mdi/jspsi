@@ -268,9 +268,6 @@ describe("runPipeline — string functions", () => {
   });
 
   test("pad_left with a non-string char does not throw and falls back to the default", () => {
-    // A partner-crafted non-string `char` is schema-valid (transform params are
-    // z.unknown(), count-bounded only); normalizing it once threw. It must fall
-    // back to the "0" default, identically to an absent char.
     for (const badChar of [42, [], {}, true, null]) {
       const run = () =>
         runPipeline("AB", [
@@ -434,10 +431,6 @@ describe("runPipeline — parse_date", () => {
   });
 
   test("a non-string output format does not throw and falls back to the default", () => {
-    // A partner-crafted non-string `output_format` is schema-valid (transform
-    // params are z.unknown(), count-bounded only); a matched row once threw from
-    // `.replace` on the non-string. It must fall back to the absent default, so a
-    // valid MM/DD/YYYY date round-trips to YYYYMMDD.
     for (const bad of [42, [], {}, true, null]) {
       const badOutput = () =>
         runPipeline("06/15/2021", [
@@ -452,10 +445,6 @@ describe("runPipeline — parse_date", () => {
   });
 
   test("a non-string input format drops the record without throwing", () => {
-    // A partner-crafted non-string `input_format` is a dead key by design; an
-    // array once threw from `.startsWith` while building the pattern. Every
-    // non-string subtype (number, array, object, boolean) must now drop uniformly
-    // rather than crash, matching the satisfiability pre-flight's dead verdict.
     for (const bad of [42, ["MM"], {}, true]) {
       const badInput = () =>
         runPipeline("06/15/2021", [
@@ -689,11 +678,6 @@ describe("runPipeline — null-producing functions", () => {
   });
 
   test("null_if with a non-string value/values param does not throw and excludes nothing", () => {
-    // Partner-crafted params are schema-valid (transform params are z.unknown(),
-    // count-bounded only); normalizing a non-string entry once threw. A null,
-    // number, or object scalar, a non-string array element, and a non-array
-    // `values` must each read as no exclusion (a non-string can never equal a
-    // string cell), so the input passes through unchanged.
     const cases: Record<string, unknown>[] = [
       { value: null },
       { values: null },
@@ -778,9 +762,6 @@ describe("runPipeline — null-producing functions", () => {
   });
 
   test("replace_regex with a non-string replacement does not throw and falls back to empty", () => {
-    // A partner-crafted non-string `replacement` is schema-valid (transform
-    // params are z.unknown(), count-bounded only); normalizing it once threw. It
-    // must fall back to the empty replacement, identically to an absent param.
     for (const badReplacement of [42, [], {}, true, null]) {
       const run = () =>
         runPipeline("A1B2C3", [
@@ -826,11 +807,6 @@ describe("runPipeline — coalesce", () => {
   });
 
   test("coalesce with a non-string default does not throw and behaves as absent", () => {
-    // A partner-crafted non-string `default` is schema-valid (transform params
-    // are z.unknown(), count-bounded only), so it reaches compileStep and once
-    // threw a TypeError from `.normalize`. A null, number, array, or object
-    // default must leave a dropped value dropped, identically to an absent
-    // default -- never String()-coerced into a bogus substitution.
     const absent = runPipeline("", [
       { function: "null_if", params: { value: "" } },
       { function: "coalesce" },
@@ -1149,9 +1125,6 @@ describe("NFC-safe mid-pipeline comparisons (null_if / filter_regex / extract_re
   });
 
   test("split_on with no delimiter match returns the NFC-normalized value", () => {
-    // Pins the no-split path: as a derive-type step it returns the normalized
-    // form, not the original non-NFC bytes left by to_upper_case. Returning the
-    // original (the pre-change behavior) would yield UPPER_NONNFC instead.
     expect(
       runPipeline(GREEK_INPUT, [
         { function: "to_upper_case" },
@@ -1161,8 +1134,6 @@ describe("NFC-safe mid-pipeline comparisons (null_if / filter_regex / extract_re
   });
 
   test("regression: an already-NFC value flows through with unchanged bytes", () => {
-    // U+00E9 is already NFC, so the in-step normalize is a no-op and emitted
-    // bytes are byte-identical to pre-change behavior; pure ASCII is a subset.
     const NFC_JOSE = "Jos\u00e9";
     expect(
       runPipeline(NFC_JOSE, [{ function: "null_if", params: { value: "X" } }]),
@@ -1330,8 +1301,6 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
 
     const spy = vi.spyOn(linearRegex, "compileLinearRegex");
     for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i);
-    // One regex step in one element transform -> one compile, independent of the
-    // 50 rows. Pre-memoization this was 50 (one recompile per row).
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
@@ -1459,8 +1428,6 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
 
     const spy = vi.spyOn(linearRegex, "compileLinearRegex");
     for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i);
-    // Four distinct element transforms -> four compiles across all 50 rows,
-    // independent of row count. Pre-memoization this was 4 * 50.
     expect(spy).toHaveBeenCalledTimes(4);
   });
 
@@ -1755,7 +1722,6 @@ describe("buildKeyStrings", () => {
   ): StandardizedDataset {
     const standardizedFields = Object.entries(fields).map(([name, value]) => {
       if (Array.isArray(value)) {
-        // Encode the array as a "|"-delimited raw value and split it back.
         const raw = value.join("|");
         return new StandardizedField(
           name,
@@ -1866,11 +1832,6 @@ describe("buildKeyStrings", () => {
   });
 
   test("element transform coalesce with a non-string default does not crash the key build", () => {
-    // The partner-reachable path: a crafted invitation carries a linkage-key
-    // element transform whose coalesce declares a non-string `default`. This once
-    // threw a TypeError from compileStep while building the first row's key. With
-    // a present value the coalesce is a no-op; the key must build identically to
-    // an absent default, never throw.
     const keyWith = (params: Record<string, unknown> | undefined) => ({
       name: "SSN+LN",
       elements: [
@@ -1901,10 +1862,6 @@ describe("buildKeyStrings", () => {
   });
 
   test("element transform null_if / replace_regex / pad_left with non-string params do not crash the key build", () => {
-    // The partner-reachable path for the other three normalize-a-param factories:
-    // a crafted linkage-key element transform carries a non-string param that once
-    // threw from `.normalize` while building the first row's key. Each must fall
-    // back to its absent/default behavior and build the key rather than throw.
     const dataset = makeDataset({ ssn: "123456789", last_name: "SMITH" });
     const key = (
       transform: Array<{ function: string; params?: Record<string, unknown> }>,
@@ -1968,11 +1925,9 @@ describe("buildKeyStrings", () => {
       swap: ["first_name", "last_name"] as [string, string],
     };
     const dataset = makeDataset({ first_name: "JANE", last_name: "SMITH" });
-    // Sender: first_name then last_name = "JANESMITH"
     expect(buildKeyStrings(swapKey, dataset, 0, false)).toEqual(
       new Set(["JANESMITH"]),
     );
-    // Receiver: swapped = last_name then first_name = "SMITHJANE"
     expect(buildKeyStrings(swapKey, dataset, 0, true)).toEqual(
       new Set(["SMITHJANE"]),
     );
@@ -2148,9 +2103,7 @@ describe("assertStandardizationMatchesTerms", () => {
 // The one binding the dataset builder, the satisfiability checker, and the
 // default-standardization derivation all consume. These pin its observable
 // resolution result directly, so a future change to the rules cannot pass while
-// silently differing from what the builder does. The two named cases below were
-// both live divergence bugs in the hand-maintained second copy this primitive
-// replaced (see #201001899).
+// silently differing from what the builder does.
 describe("resolveFieldColumns", () => {
   // ssn + lastName fields, named by their semantic type for brevity.
   const terms: LinkageTerms = {
@@ -2425,8 +2378,6 @@ describe("unsatisfiedLinkageFields", () => {
   });
 
   test("names the fields whose type no input column provides", () => {
-    // Only first_name is present; last_name, date_of_birth, and ssn cannot be
-    // produced.
     const unsatisfied = unsatisfiedLinkageFields(["first_name"], fullTerms);
     const names = unsatisfied.map((f) => f.name).sort();
     expect(names).toContain("last_name");
@@ -2486,7 +2437,6 @@ describe("unsatisfiedLinkageFields", () => {
   });
 
   test("an explicit standardization whose input column is absent does not satisfy", () => {
-    // The mapping references tax_id, but the input has no tax_id column.
     const unsatisfied = unsatisfiedLinkageFields(
       ["first_name", "last_name", "dob"],
       fullTerms,
@@ -2855,9 +2805,6 @@ describe("assessLinkageSatisfiability dead keys", () => {
   });
 
   test("the builder also drops every record for a non-string input format (differential)", () => {
-    // The detector's "dead" verdict must match the builder for every non-string
-    // subtype, the same differential the string case pins. The array case is the
-    // one that once threw at the factory instead of dropping.
     for (const inputFormat of [5, ["MM"], { x: 1 }, true]) {
       const terms = dobTerms([
         { function: "parse_date", params: { inputFormat } },
@@ -2906,11 +2853,6 @@ describe("assessLinkageSatisfiability dead keys", () => {
   });
 
   test("a YY parse_date in a key ELEMENT transform resolves via the fixed constant (differential)", () => {
-    // The pivot lives in the parse_date factory, so it reaches an element-transform
-    // parse_date exactly as it reaches field standardization -- there is no
-    // chokepoint to bypass. Pin the resolved four-digit year (1990, via the fixed
-    // window) against an actual builder run over an element transform carrying YY,
-    // the path the prior "bind the reference at build time" design left unbound.
     const terms = dobTerms([
       {
         function: "parse_date",
@@ -2988,13 +2930,6 @@ describe("assessLinkageSatisfiability dead keys", () => {
   });
 
   test("a predicate-dead parse_date yields no key across a generated input-format corpus (differential)", () => {
-    // The detector is a hand-maintained mirror of core's parse_date runtime and has
-    // already drifted once (a non-string input format). The point tests above pin
-    // individual cases; this sweeps a generated space of input formats and pins the
-    // dangerous direction -- predicate says dead => the builder yields NOTHING for
-    // any value -- so a future tokenizer/guard change that the predicate fails to
-    // mirror turns red here rather than silently shipping a self-defeating key.
-    // Deterministic: every format is enumerated, no Math.random.
     const permute = (a: string[]): string[][] =>
       a.length <= 1
         ? [a]
@@ -3392,7 +3327,6 @@ describe("checkValueConstraints", () => {
     expect(checkValueConstraints(withConstraint, "20210228")).toEqual([]);
     // A value in another output format is not judged (the operator may target it).
     expect(checkValueConstraints(withConstraint, "2021-02-30")).toEqual([]);
-    // No constraint declared -> nothing flagged.
     expect(checkValueConstraints(withoutConstraint, "20210230")).toEqual([]);
   });
 
@@ -3457,7 +3391,6 @@ describe("checkValueConstraints", () => {
         "a@b.com",
       ),
     ).toEqual([]);
-    // A field with no constraints at all returns nothing.
     expect(
       checkValueConstraints(
         { name: "phone", type: "phone_number" },

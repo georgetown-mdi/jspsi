@@ -420,7 +420,7 @@ test("rejects invalid base64url characters in the body", async () => {
 // belt-and-suspenders there, not the sole guard.) For the web alert the swallows
 // are the only thing keeping partner bytes out of that .message; these tests pin
 // them so a future "improve the error by relaying the original" refactor fails
-// loudly here instead of silently reopening the vector. See board item 199895565.
+// loudly here instead of silently reopening the vector.
 
 // Representative partner-controllable bytes, one per class the display-boundary
 // hardening neutralizes. Written as explicit escapes -- never pasted glyphs --

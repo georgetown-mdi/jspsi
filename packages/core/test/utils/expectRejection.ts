@@ -20,8 +20,6 @@ export async function expectRejectionKind(
   return err as ConnectionError;
 }
 
-// As expectRejectionKind, but also asserts the error message matches
-// `messagePattern`.
 export async function expectRejection(
   p: Promise<unknown>,
   kind: ConnectionError["kind"],
@@ -32,7 +30,6 @@ export async function expectRejection(
   return err;
 }
 
-// Convenience wrapper for the common "security"-kind case.
 export async function expectSecurity(
   p: Promise<unknown>,
   messagePattern: RegExp,

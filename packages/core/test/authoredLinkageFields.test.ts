@@ -145,10 +145,6 @@ describe("authoredLinkageFields", () => {
   });
 
   test("a present matchable type with no default field and no binding declares a synthetic field", () => {
-    // zip_code is matchable but absent from DEFAULT_LINKAGE_FIELDS, so with no
-    // authored cleaning it would previously declare nothing and be unpickable in the
-    // key editor. It now declares one synthetic, constraint-free field named for the
-    // type, which resolveFieldColumns binds to the column by type.
     const metadata: Metadata = [col("zip", "zip_code")];
     expect(authoredLinkageFields(metadata)).toEqual([
       { name: "zip_code", type: "zip_code" },

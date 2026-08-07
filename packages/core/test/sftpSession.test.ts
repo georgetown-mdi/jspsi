@@ -35,8 +35,6 @@ const inertClient: FileTransportClient = {
   exists: async () => false,
 };
 
-// Build an SftpSession over a stub deps object, collecting the warnings its
-// option-building emits (warn is the only log level the moved code uses).
 function makeSession(): { session: SftpSession; warnings: string[] } {
   const warnings: string[] = [];
   const log = {

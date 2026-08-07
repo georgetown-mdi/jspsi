@@ -166,7 +166,6 @@ describe("commitments", () => {
       baseInputs,
       fixedRandomness,
     );
-    // Nothing re-supplied: every present commitment is unverifiable.
     const none = await verifyRecordCommitments(record, keys, {});
     expect(none.allValid).toBe(false);
     expect(none.verdicts).toEqual({
@@ -174,8 +173,6 @@ describe("commitments", () => {
       partnerPayloadReceived: false,
       associationTable: false,
     });
-    // Only the association table's data omitted: the two re-supplied commitments
-    // still verify, but the omitted one fails and drags allValid down.
     const partial = await verifyRecordCommitments(record, keys, {
       localPayloadSent,
       partnerPayloadReceived,
@@ -208,8 +205,6 @@ describe("commitments", () => {
       baseInputs,
       fixedRandomness,
     );
-    // Reuse the real salt but a different data set: the committer cannot open
-    // the same commitment to a second association table.
     expect(
       await verifyCommitmentOpening(
         "associationTable",
@@ -249,7 +244,6 @@ describe("commitments", () => {
     const sentValue = toBase64Url(
       await computeCommitment("localPayloadSent", sharedSalt, data),
     );
-    // Same salt, same data, different domain -> different commitment.
     expect(
       await verifyCommitmentOpening(
         "partnerPayloadReceived",
@@ -483,7 +477,6 @@ describe("association-table commitment", () => {
     });
     expect(record.commitments.associationTable).toBeUndefined();
     expect(keys.salts.associationTable).toBeUndefined();
-    // Payload commitments are still produced.
     expect(record.commitments.localPayloadSent).toBeDefined();
     expect(record.commitments.partnerPayloadReceived).toBeDefined();
   });
@@ -574,7 +567,6 @@ describe("governance metadata", () => {
       fixedRandomness,
     );
     expect(record.governance.algorithm).toBe("psi-c");
-    // Empty arrays, not omission: the no-payload case is recorded explicitly.
     expect(record.governance.payloadSent).toEqual([]);
     expect(record.governance.payloadReceived).toEqual([]);
   });
@@ -587,7 +579,6 @@ describe("governance metadata", () => {
     expect(record.governance.payloadSent).toEqual([
       { name: "dose", description: "Administered dose in milligrams." },
     ]);
-    // 'status' has no description -> the key is omitted, not set to undefined.
     expect(record.governance.payloadReceived).toEqual([{ name: "status" }]);
     expect("description" in record.governance.payloadReceived[0]).toBe(false);
   });
@@ -809,7 +800,6 @@ describe("binding nonce", () => {
     const first = await buildExchangeRecord(baseInputs);
     const second = await buildExchangeRecord(baseInputs);
     expect(first.record.bindingNonce).not.toBe(second.record.bindingNonce);
-    // Same agreed terms still hash identically across the two runs.
     expect(first.record.termsHash).toBe(second.record.termsHash);
   });
 
@@ -821,7 +811,6 @@ describe("binding nonce", () => {
       keys.salts.associationTable!,
     ];
     expect(salts).not.toContain(record.bindingNonce);
-    // And the per-commitment salts are independent of one another.
     expect(new Set(salts).size).toBe(salts.length);
   });
 });
@@ -845,9 +834,7 @@ describe("parse input bounds (untrusted read path)", () => {
       governanceInputs,
       fixedRandomness,
     );
-    // A valid record parses.
     expect(() => parseExchangeRecord(record)).not.toThrow();
-    // A free-text field one character past MAX_TEXT_LENGTH is rejected.
     expect(() =>
       parseExchangeRecord({
         ...record,
@@ -881,7 +868,6 @@ describe("parse input bounds (untrusted read path)", () => {
         governance: { ...record.governance, payloadSent: overCountPayload },
       }),
     ).toThrow();
-    // matchingBasis padded one past MAX_LINKAGE_ENTRIES is likewise rejected.
     const overCountBasis = Array.from(
       { length: MAX_LINKAGE_ENTRIES + 1 },
       (_, i) => ({ name: `f${i}`, type: "t" }),
@@ -1010,7 +996,6 @@ describe("exchange-record-vectors.json", () => {
       );
       expect(record).toEqual(vector.record);
       expect(keys).toEqual(vector.keys);
-      // Verification re-supplies the committed data (the vector's own inputs).
       const { allValid } = await verifyRecordCommitments(record, keys, {
         localPayloadSent: vector.inputs.localPayloadSent,
         partnerPayloadReceived: vector.inputs.partnerPayloadReceived,

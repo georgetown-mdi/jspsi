@@ -410,8 +410,6 @@ test("prepareForExchange: prepares normally once the resolved set is the confirm
 });
 
 test("prepareForExchange: a party with no consent record is untouched", () => {
-  // The compatibility property the absent field carries: every exchange that
-  // predates this record, and every non-acceptor, prepares exactly as before.
   expect(() =>
     prepareForExchange(
       { linkageTerms: acceptorTerms },

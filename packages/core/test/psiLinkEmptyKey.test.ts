@@ -4,14 +4,6 @@ import PSI from "@openmined/psi.js";
 
 import { runLink } from "./utils/runLink";
 
-// Coverage for the empty-string key value: "" is a present, matchable key
-// distinct from undefined (the "no key" sentinel). The conflation site was
-// removeDuplicatesAndUndefineds dropping every falsy value; it now drops only
-// undefined, so a singleton "" participates in matching while undefined records
-// stay excluded. The within-dataset uniqueness rule is unchanged, so a "" that
-// is duplicated within a dataset is still dropped from that round. See
-// docs/spec/PROTOCOL.md (Key input data).
-
 const psiLibrary = await PSI();
 
 test('a singleton "" key matches on each side; undefined/missing keys do not', async () => {

@@ -61,10 +61,6 @@ async function runExchange(tA: LinkageTerms, tB: LinkageTerms) {
   ]);
 }
 
-/** Resolve both parties' PSI roles from the pure local computation, given each
- *  party's output expectation and record count. resolveRole no longer touches a
- *  connection -- the counts are carried on the terms exchange -- so this is a
- *  synchronous double call, one per party's viewpoint. */
 function resolveBothRoles(
   outA: Output,
   outB: Output,
@@ -127,7 +123,6 @@ test("each party reads back the other's advertised observed host key", async () 
   ]);
   expect(a.partnerHostKey).toEqual(hostKeyB);
   expect(b.partnerHostKey).toEqual(hostKeyA);
-  // A well-formed advertisement is not flagged malformed.
   expect(a.partnerHostKeyMalformed).toBe(false);
   expect(b.partnerHostKeyMalformed).toBe(false);
 });
@@ -242,11 +237,8 @@ test("both parties advertise the protocol version on their terms messages", asyn
   // Same-version parties are unaffected: the exchange completes.
   expect(a.partnerTerms.identity).toBe("Party B");
   expect(b.partnerTerms.identity).toBe("Party A");
-  // The initiator's opening terms (message 1) and the responder's terms +
-  // decision (message 2) both carry the version.
   expect(initiatorSent[0]).toMatchObject({ protocolVersion: PROTOCOL_VERSION });
   expect(responderSent[0]).toMatchObject({ protocolVersion: PROTOCOL_VERSION });
-  // Message 3 is a bare decision -- no version rides it.
   expect("protocolVersion" in initiatorSent[1]).toBe(false);
 });
 
@@ -262,7 +254,6 @@ test("both parties advertise disclosesPayload on their terms messages, read back
   const { conn: recordingA, sent: initiatorSent } = recordingConnection(connA);
   const { conn: recordingB, sent: responderSent } = recordingConnection(connB);
   const [a, b] = await Promise.all([
-    // A discloses payload, B does not.
     exchangeTerms(
       recordingA,
       "initiator",
@@ -282,10 +273,8 @@ test("both parties advertise disclosesPayload on their terms messages, read back
       false,
     ),
   ]);
-  // Each party reads the OTHER's advertised flag.
   expect(a.partnerDisclosesPayload).toBe(false);
   expect(b.partnerDisclosesPayload).toBe(true);
-  // Message 1 (initiator) and message 2 (responder) both carry it; message 3 does not.
   expect(initiatorSent[0]).toMatchObject({ disclosesPayload: true });
   expect(responderSent[0]).toMatchObject({ disclosesPayload: false });
   expect("disclosesPayload" in initiatorSent[1]).toBe(false);
@@ -408,13 +397,6 @@ test("initiator fails fast (and sends an abort) on a malformed message-2 version
 });
 
 test("a malformed sibling field does not bury the version skew (responder path)", async () => {
-  // The structural guarantee: the version is read from a lenient probe BEFORE the
-  // strict envelope parse, so a malformed SIBLING field -- here a non-boolean
-  // `save`, which throws termsMessage.parse -- can no longer swallow the actionable
-  // version diagnosis behind a generic "failed to parse". This is the real-world
-  // shape of a future version reshaping any envelope field. Skew the version and
-  // garble `save` together; the named version message must still win, so the abort
-  // reason is the mismatch, not a parse error.
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB, 200);
   await connA.send({
@@ -586,7 +568,6 @@ test("initiator: a version skew on an abort frame wins over the peer's abort rea
   });
   const err = await initiator.catch((e: unknown) => e);
   expect((err as Error).message).toBe(PROTOCOL_VERSION_MISMATCH_MESSAGE);
-  // The peer's stated abort reason is NOT what surfaced: the version skew won.
   expect((err as Error).message).not.toContain("responder rejected");
 });
 
@@ -636,10 +617,6 @@ test("both parties compute the same role independently", () => {
 });
 
 test("record counts ride the terms messages, not a separate frame", async () => {
-  // The count now travels on the terms-exchange envelope (beside linkageTerms),
-  // so role resolution is a local computation and there is no dedicated
-  // {recordCount} frame. Capture every frame each party sends and assert the
-  // counts arrive on the terms messages and nowhere on their own.
   const [connA, connB] = makeConnections();
   const { conn: recordingA, sent: initiatorSent } = recordingConnection(connA);
   const { conn: recordingB, sent: responderSent } = recordingConnection(connB);
@@ -648,34 +625,25 @@ test("record counts ride the terms messages, not a separate frame", async () => 
     exchangeTerms(recordingB, "responder", termsB, 200),
   ]);
 
-  // Each party read the other's count off the terms exchange.
   expect(a.partnerRecordCount).toBe(200);
   expect(b.partnerRecordCount).toBe(100);
 
-  // The initiator's message 1 carries its count on the terms frame; its message
-  // 3 is a bare decision with no count.
   expect(initiatorSent[0]).toMatchObject({
     linkageTerms: termsA,
     recordCount: 100,
   });
-  // The responder's message 2 carries its count on its terms + decision frame.
   expect(responderSent[0]).toMatchObject({
     linkageTerms: termsB,
     decision: "proceed",
     recordCount: 200,
   });
 
-  // No party ever sends a standalone {recordCount} frame: a count only ever
-  // rides a frame that also carries the terms.
   for (const frame of [...initiatorSent, ...responderSent]) {
     if ("recordCount" in frame) expect("linkageTerms" in frame).toBe(true);
   }
 });
 
 test("both-output role resolves over the folded terms exchange (both selections)", async () => {
-  // The whole-path guard for criterion 2: run the real terms exchange (which now
-  // carries the counts), then resolve the role from the returned
-  // partnerRecordCount, for each smaller-dataset selection.
   const out: Output = { expectsOutput: true, shareWithPartner: true };
 
   // Selection 1: initiator has fewer records -> initiator is the receiver.
@@ -857,12 +825,6 @@ test("initiator: a pathological-count abortReasons fails cleanly, not with a Ran
 // --- Abort-send failure on the responder -------------------------------------
 
 test("exchangeTerms responder: rejects (does not hang) when abort send fails on incompatible terms", async () => {
-  // Regression guard: previously, the responder's incompatible-terms branch
-  // awaited `conn.send({...abort})` without a try/catch. If the send rejected
-  // (transport error coinciding with terms incompatibility), the abort failure
-  // masked the local "linkage terms are incompatible" rejection and left
-  // exchangeTerms pending. The fix wraps the abort send in a try/catch so the
-  // local rejection is always observed.
   const [connA, connB] = makeConnections();
   // Wrap connB so its send always rejects (simulating a transport-layer
   // failure on the responder side) while receive still delivers msg1 from the

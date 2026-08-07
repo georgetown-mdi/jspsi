@@ -43,7 +43,6 @@ const inviterTerms: LinkageTerms = {
   deduplicate: false,
   linkageFields: [{ name: "firstName", type: "first_name" }],
   linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
-  // The strict "I want nothing from you" declaration: present, empty.
   payload: { receive: [] },
 };
 
@@ -92,7 +91,6 @@ function acceptorPrepared() {
   return acceptorPreparedFor(inviterTerms);
 }
 
-/** Records every message a party puts on the wire, in order. */
 function recordSends(conn: MessageConnection): {
   conn: MessageConnection;
   sent: unknown[];

@@ -85,8 +85,6 @@ async function runBoth(
   ]);
 }
 
-/** A successful exchange always builds the record; narrow the now-optional
- * audit pair (or fail loudly) so the assertions below read cleanly. */
 function built(result: ExchangeResult): BuiltExchangeRecord {
   expect(result.audit).toBeDefined();
   return result.audit!;
@@ -406,8 +404,8 @@ test("single-output: the no-output helper is sent no payload (one-sided disclosu
   // helper's disclosed payload, as it should. But the no-output helper (responder)
   // is sent NONE of the receiver's disclosed payload, even though the receiver's
   // own metadata discloses `note`: the send-gate transmits payload only to a
-  // partner entitled to the result, closing the one-sided disclosure (203012150 /
-  // docs/notes/one-sided-disclosure.md). The committed records reflect it.
+  // partner entitled to the result, closing the one-sided disclosure
+  // (docs/notes/one-sided-disclosure.md). The committed records reflect it.
   const receiverOut: Output = { expectsOutput: true, shareWithPartner: false };
   const senderOut: Output = { expectsOutput: false, shareWithPartner: true };
   const [initiator, responder] = await runBoth(receiverOut, senderOut);
@@ -484,7 +482,7 @@ test("lock-in: a received payload matching the consented set completes", async (
 // --- Universal count exchange: deadlock-free ordering ------------------------
 
 test("the unconditional count exchange composes into a deadlock-free full exchange for every (handshake-role x strategy) combination", async () => {
-  // The record-count exchange now runs on every exchange, immediately before
+  // The record-count exchange runs on every exchange, immediately before
   // linkage. Verify it composes into a complete, lockstep full exchange for both
   // linkage strategies and in every output orientation: both-output, each
   // one-sided direction (which handshake role is the sole output party), and the

@@ -33,7 +33,6 @@ import {
   NestingDepthExceededError,
 } from "../src/utils/camelizeKeys";
 
-// Minimal valid set of terms used as a base for individual tests.
 const base = {
   version: "1.0.0",
   identity: "Test Party",
@@ -491,8 +490,8 @@ test("a swap target matching no element in its key is rejected", () => {
 // cannot backtrack catastrophically. The remaining validation control is dialect
 // conformance: a pattern the engine cannot compile (a backreference, lookaround,
 // or unsupported escape) is rejected before any execution. The check lives in
-// LinkageTermsSchema so every parse path inherits it. (Engine semantics, and the
-// former-ReDoS patterns running in linear time, are unit-tested in
+// LinkageTermsSchema so every parse path inherits it. (Engine semantics, and
+// catastrophic-backtracking patterns running in linear time, are unit-tested in
 // linearRegex.test.ts and standardization.test.ts.)
 
 test("a transform regex outside the linear-time dialect is rejected at validation", () => {
@@ -521,10 +520,6 @@ test("a transform regex outside the linear-time dialect is rejected at validatio
 });
 
 test("a nested-quantifier pattern that backtracks on new RegExp now validates", () => {
-  // `(a+)+$` is the textbook catastrophic-backtracking pattern on a backtracking
-  // engine; under the linear-time engine it is in-dialect and matches in linear
-  // time, so it is accepted rather than rejected -- the by-construction successor
-  // to the removed best-effort ReDoS screen.
   const result = safeParseLinkageTerms({
     ...base,
     linkageKeys: [
@@ -568,9 +563,6 @@ test("the bundled email-filter pattern in an element transform validates (in-dia
 });
 
 test("an element-transform regex the engine cannot compile is rejected at validation (fail closed)", () => {
-  // An uncompilable pattern is now rejected at terms validation rather than
-  // deferred to a runtime throw: the dialect gate compiles every pattern, and one
-  // that cannot compile fails closed before any data is processed.
   const result = safeParseLinkageTerms({
     ...base,
     linkageKeys: [
@@ -668,9 +660,9 @@ test("a malformed pad_left length still validates, so the runtime factory check 
 // `outputFormat`, recompiled per row by applyElementTransform over the full
 // dataset. An unbounded format makes every row compile / allocate work
 // proportional to its length -- bounded by the MAX_DATE_FORMAT_LENGTH refine at
-// LinkageTermsSchema validation. The other former risk -- the format's MM/DD
+// LinkageTermsSchema validation. The other risk -- the format's MM/DD
 // tokens expanding into adjacent `(\d{1,2})` groups that catastrophically
-// backtrack at a length well under that cap -- is now closed by running parse_date
+// backtrack at a length well under that cap -- is closed by running parse_date
 // on the linear-time engine (standardization.ts), so no separate screen is needed.
 // (parse_date's runtime behavior is unit-tested in standardization.test.ts.)
 
@@ -1090,12 +1082,12 @@ test.each(["editDistances", "adjacentYears"] as const)(
 );
 
 test("a rejected camelCase enum value is not echoed in the parse error", () => {
-  // These enums ride a partner-controlled invitation token (#162) and operator
-  // config that may carry secrets (#169), so the strict-rejection path must stay
-  // a static error located by issue path -- protocolSetup leaves the Zod
-  // parse-error message unsanitized, relying on the reachable issue codes
-  // (invalid discriminator, invalid enum) reporting the EXPECTED options and the
-  // schema path, not the received value. Pin that the offending camelCase value
+  // These enums ride a partner-controlled invitation token and operator config
+  // that may carry secrets, so the strict-rejection path must stay a static
+  // error located by issue path -- protocolSetup leaves the Zod parse-error
+  // message unsanitized, relying on the reachable issue codes (invalid
+  // discriminator, invalid enum) reporting the EXPECTED options and the schema
+  // path, not the received value. Pin that the offending camelCase value
   // does not surface raw in the message, for both the semantic-type discriminator
   // and the fuzzy-comparison enum.
   const fieldResult = safeParseLinkageTerms({
@@ -1734,10 +1726,10 @@ test("a declared receive still aborts when the partner's send does not satisfy i
 });
 
 test("an explicit empty receive: [] is strict and aborts a partner that sends columns (local side)", () => {
-  // Decision (item 203599248): an explicit `receive: []` is STRICT, not lazy. It
-  // asserts "the partner sends nothing" -- distinct from an ABSENT receive (lazy) --
-  // so it takes the present-field branch of the gate and a partner that discloses
-  // any column fails the check. This agrees with the received-payload runtime
+  // Decision: an explicit `receive: []` is STRICT, not lazy. It asserts "the
+  // partner sends nothing" -- distinct from an ABSENT receive (lazy) -- so it
+  // takes the present-field branch of the gate and a partner that discloses any
+  // column fails the check. This agrees with the received-payload runtime
   // lock-in (an empty committed set is strict) and the web consent display's
   // "(none)" lock-in; reading [] as lazy here would admit an exchange that lock-in
   // then aborts.
@@ -2215,7 +2207,7 @@ test("a pathological-count transform params record fails cleanly, not with a Ran
 test("an over-long transform params key within the count bound is still rejected per-key", () => {
   // The count gate must not mask the per-key length bound for an in-range record:
   // a single over-long key still trips the post-pipe `invalid_key` path, the one
-  // item 202554679's parse-error sanitization relies on.
+  // the parse-error sanitization relies on.
   const result = safeParseLinkageTerms(
     paramsTerms({ ["k".repeat(MAX_NAME_LENGTH + 1)]: 1 }),
   );
@@ -2226,7 +2218,7 @@ test("an over-long transform params key within the count bound is still rejected
 });
 
 test("an over-count transform params record is rejected without the per-key camelize rewrite or record validation", () => {
-  // Pins the guard's defining property (board item 202722105): the over-count
+  // Pins the guard's defining property: the over-count
   // rejection skips the two EXPENSIVE per-key passes -- the snake->camel camelize
   // rewrite and the permissive record stage's per-key validation -- that an
   // over-count record would otherwise incur. The key count itself is still O(n)
@@ -2505,8 +2497,8 @@ test("a pathological-count payload receive list is rejected by the node budget, 
 // count does not overflow the call stack -- but a partner array of millions of
 // invalid entries still makes Zod throw `Invalid string length` building its
 // error from one issue per entry, because a bare `.max()` is checked only AFTER
-// per-element validation. They now take the boundedArray count gate (fired
-// before per-element validation), with the existing .min(1) floor preserved. A
+// per-element validation. They take the boundedArray count gate (fired before
+// per-element validation), with a .min(1) floor. A
 // count past the camelize node budget (MAX_NODE_COUNT) is rejected by that budget
 // before Zod; the count gate handles a moderate over-count that stays under it.
 
@@ -2578,8 +2570,7 @@ test("a pathological-count linkageKeys is rejected by the node budget, not with 
   // and never the TypeError a raw non-object key would drive at the terms-level
   // refine (the over-budget array never reaches it). safeParseLinkageTerms
   // absorbs the bound into a { success: false } result rather than throwing (the
-  // "safe" contract); the not-throwing assertion stands in for the prior
-  // not-a-RangeError / not-a-TypeError checks. The boundedArray `abort` that
+  // "safe" contract). The boundedArray `abort` that
   // guards that refine for a sub-budget over-count is pinned by the next test.
   const keys = Array.from({ length: 4_000_000 }, () => 123);
   let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
@@ -2769,9 +2760,6 @@ test("deriveAcceptedLinkageTerms does not mutate the inviter's terms", () => {
 });
 
 test("a verbatim copy of one-sided inviter output would FAIL the mirror (why mirror, not copy)", () => {
-  // The regression guard for the bug this work closes: with one-sided output, a
-  // verbatim copy (the old behavior) makes both sides claim the same direction,
-  // which validateCompatibility rejects. Mirroring is what makes it pass.
   const inviterTerms: LinkageTerms = {
     ...inviterBase,
     output: { expectsOutput: true, shareWithPartner: false },
@@ -2844,10 +2832,10 @@ test("deriveAcceptedLinkageTerms mirrors payload send/receive (asymmetric invite
 });
 
 test("deriveAcceptedLinkageTerms mirrors an explicit empty inviter receive to an explicit empty acceptor send", () => {
-  // Decision (item 203599248): an explicit `receive: []` is strict. The acceptor
-  // mirror carries it through as an explicit empty `send: []` -- present, not absent
-  // -- so the inviter's strict "send me nothing" becomes the acceptor's strict "I
-  // send nothing." (An ABSENT inviter receive instead yields an absent acceptor
+  // Decision: an explicit `receive: []` is strict. The acceptor mirror carries
+  // it through as an explicit empty `send: []` -- present, not absent -- so the
+  // inviter's strict "send me nothing" becomes the acceptor's strict "I send
+  // nothing." (An ABSENT inviter receive instead yields an absent acceptor
   // send, the lazy case the asymmetric-shape test above covers.) The mirror stays
   // coherent: both directions pass validateCompatibility.
   const inviterTerms: LinkageTerms = {

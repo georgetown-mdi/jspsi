@@ -12,7 +12,7 @@ import { sortAssociationTable } from "../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
 // Resolved intersection-and-association known-answer anchor for the vendored
-// @openmined/psi.js engine (item 207302520). psi-intersection-vectors.json
+// @openmined/psi.js engine. psi-intersection-vectors.json
 // consolidates the toStrictEqual KATs otherwise inline in psiParticipant.test.ts,
 // psiLink.test.ts, psiLinkForLinkageKeys.test.ts, psiLinkEmptyRound.test.ts, and
 // psiLinkEmptyKey.test.ts into one portable fork-bump gate: this test replays each

@@ -11,17 +11,12 @@ import {
   IncompatibleEnvelopeVersionError,
 } from "../src/connection/fileSyncFraming";
 
-// Per-seam contract coverage for the message-framing codec. The pre-split code
-// only exercised this behind FileSyncConnection; these tests pin the wire layout
-// and the deserialize validation branches directly.
-
 const textPayload = (s: string): Uint8Array => new TextEncoder().encode(s);
 
 test("header is exactly MESSAGE_HEADER_BYTES with version || type || seq layout", () => {
   const header = serializeFileSyncMessageHeader(MESSAGE_TYPE_BINARY, 258);
   expect(header.length).toBe(MESSAGE_HEADER_BYTES);
   expect(MESSAGE_HEADER_BYTES).toBe(10);
-  // byte 0: envelope version marker.
   expect(header[0]).toBe(MESSAGE_ENVELOPE_VERSION);
   // byte 1: outer cleartext payload type.
   expect(header[1]).toBe(MESSAGE_TYPE_BINARY);

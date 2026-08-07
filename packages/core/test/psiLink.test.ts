@@ -585,11 +585,11 @@ test("singlePassReplyByteCap weights the sender heavier and stays below both tra
   );
   // The file-sync backstop, a core constant.
   expect(atCeiling).toBeLessThan(MAX_FRAME_SIZE_BYTES);
-  // The nearer constraint after board item 206377899 raised the cap: the WebRTC
-  // data channel's fixed browser-tab envelope. It is a web constant
-  // (MAX_WEBRTC_FRAME_BYTES in apps/web/src/psi/boundedReassembly.ts), not
-  // importable into core, so it is mirrored here as a literal -- a core-only cap or
-  // byte-weight change must not silently outgrow it. The coupling is bidirectional:
+  // The nearer constraint on the raised cap: the WebRTC data channel's fixed
+  // browser-tab envelope. It is a web constant (MAX_WEBRTC_FRAME_BYTES in
+  // apps/web/src/psi/boundedReassembly.ts), not importable into core, so it is
+  // mirrored here as a literal -- a core-only cap or byte-weight change must not
+  // silently outgrow it. The coupling is bidirectional:
   // lowering the web constant below this ceiling cap would pass here yet reject
   // legitimate WebRTC replies, so the two must move together.
   const MAX_WEBRTC_FRAME_BYTES = 256 * 1024 * 1024;
@@ -608,7 +608,6 @@ test("the single-pass receiver read gate is bounded to the derived reply cap", a
     { role: "joiner", verbose: -1 },
     UNBOUNDED_PSI_ELEMENTS,
   );
-  // One key, three local rows; partner (sender) has two rows.
   const keyCount = 1;
   const localRows = 3;
   const partnerRows = 2;

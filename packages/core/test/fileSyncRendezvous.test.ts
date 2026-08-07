@@ -48,11 +48,6 @@ import {
   ConnectionClosedError,
 } from "../src/errors";
 
-// Per-seam contract coverage for the pure rendezvous helpers. Before the split
-// these were only exercised behind FileSyncConnection.synchronize(); these tests
-// pin the comparison order, the name predicates, and the partial-sync gate's
-// terminal/transient branches directly.
-
 // A FileTransportClient stub whose only meaningful method is get(); every other
 // method rejects, so a test that reaches one is a bug in the gate under test.
 function stubClient(getImpl: FileTransportClient["get"]): FileTransportClient {
@@ -651,7 +646,6 @@ function makeParty(
 const helloName = (id: string) => `${id}${HELLO_SUFFIX}`;
 const helloStem = (id: string) => `${id}-hello`;
 
-// Places a peer's hello (with its advertised flags) in the shared directory.
 function placePeerHello(
   files: Map<string, Buffer>,
   peerId: string,
@@ -816,7 +810,6 @@ describe("FileSyncRendezvous identity reset per rejected path", () => {
 
   test("bilateral mismatch in the lockless barrier resets identity and skips its hello", async () => {
     const files = new Map<string, Buffer>();
-    // Peer advertises retain_files=true; this party does not.
     placePeerHello(files, "zzz", {
       locklessRendezvous: true,
       retainFiles: true,
@@ -880,7 +873,6 @@ describe("FileSyncRendezvous identity reset per rejected path", () => {
     expect(p.state.clearCount).toBe(0);
     expect(p.state.role).toBe("unknown role");
     expect(p.state.peerId).toBeUndefined();
-    // This party's own hello was removed before throwing.
     expect(files.has(`${DIR}/${helloName("aaa")}`)).toBe(false);
   });
 
@@ -1087,7 +1079,6 @@ describe("FileSyncRendezvous live-signal cancellation", () => {
 
     const closed = new ConnectionClosedError("connection closed");
     const runPromise = p.rdv.run(p.scope);
-    // Let the coordinator reach its first parked wait, then abort.
     await new Promise((r) => setTimeout(r, 20));
     p.controller.abort(closed);
 
@@ -1141,7 +1132,6 @@ describe("FileSyncRendezvous entry scan and sweep contract", () => {
     await expect(p.rdv.run(p.scope)).rejects.toBeInstanceOf(
       BilateralModeMismatchError,
     );
-    // Orphaned temp swept during the scan; foreign file snapshotted (not swept).
     expect(files.has(orphan)).toBe(false);
     expect(p.state.foreignFileSnapshot.has("leftover.txt")).toBe(true);
     expect(files.has(`${DIR}/leftover.txt`)).toBe(true);
@@ -1196,7 +1186,6 @@ describe("FileSyncRendezvous entry scan and sweep contract", () => {
       name: "UsageError",
       message: expect.stringContaining("retain-mode signal"),
     });
-    // Refused: the retain hello is NOT deleted.
     expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
   });
 
@@ -1228,8 +1217,6 @@ describe("FileSyncRendezvous entry scan and sweep contract", () => {
 
   test("a delete rejection during sweep surfaces as a transport error, not a UsageError", async () => {
     const files = new Map<string, Buffer>();
-    // An unexpected protocol file with no retain signal, and a transport whose
-    // delete() rejects.
     files.set(`${DIR}/x-y${LOCK_SUFFIX}`, Buffer.alloc(0));
     const p = makeParty(
       "aaa",
@@ -1733,7 +1720,6 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     const detail = detailLink(sanitizeErrorForDisplay(err));
     expect(detail).toContain(DISPLAY_TRUNCATION_MARKER);
     expect(detail.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
-    // The scope runs from the ` in ` that opens it to the marker that closes it.
     const scopeShown = detail.slice(
       detail.indexOf(" in ") + " in ".length,
       detail.indexOf(DISPLAY_TRUNCATION_MARKER),
@@ -2116,8 +2102,6 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
     await party.rdv.run(party.scope);
 
     expect(party.state.peerId).toBe("zzz");
-    // Every op ran on its own re-dialed session, and none of those sessions
-    // opened onto a half-published file.
     expect(boundaries).toHaveLength(ops());
     for (const boundary of boundaries)
       expectNoHalfPublishedFile(boundary.contents);
@@ -2175,24 +2159,19 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
     await party.rdv.run(party.scope);
 
     expect(party.state.peerId).toBe("zzz");
-    // The entry sweep cleared the crashed exchange's leftover...
     expect(removed).toContain(`${DIR}/x-y${LOCK_SUFFIX}`);
     expect(files.has(`${DIR}/x-y${LOCK_SUFFIX}`)).toBe(false);
-    // ...and never ran again over the files this party wrote after it.
     const ownAck = ackMarkerName("aaa", helloStem("zzz"));
     expect(removed).not.toContain(`${DIR}/${helloName("aaa")}`);
     expect(removed).not.toContain(`${DIR}/${ownAck}`);
     expect(files.has(`${DIR}/${helloName("aaa")}`)).toBe(true);
     expect(files.has(`${DIR}/${ownAck}`)).toBe(true);
-    // Nor over the peer's hello and ack, nor the foreign file.
     expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
     expect(files.has(`${DIR}/${ackMarkerName("zzz", helloStem("aaa"))}`)).toBe(
       true,
     );
     expect(removed).not.toContain(`${DIR}/leftover.txt`);
     expect(files.has(`${DIR}/leftover.txt`)).toBe(true);
-    // Every op ran on its own re-dialed session, and none of those sessions
-    // opened onto a half-published file.
     expect(boundaries).toHaveLength(ops());
     for (const boundary of boundaries)
       expectNoHalfPublishedFile(boundary.contents);
@@ -2230,12 +2209,6 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
 });
 
 // --- hello publish discipline ------------------------------------------------
-//
-// The hello was the last payload-bearing protocol file written directly to its
-// final name, so a hard kill mid-write left a torn `<id>-hello.json` on disk --
-// legal to pre-exist at entry, and unresolvable by the I5a read gate. These pin
-// the temp-then-rename publish that removes that shape, and the ordering premise
-// the entry sweep's unconditional delete of the OTHER temp shape rests on.
 
 // Records every transport op in call order, so a test can assert what was
 // written, in which order, and under which name.
@@ -2679,9 +2652,6 @@ describe("FileSyncRendezvous entry-present peer hello window", () => {
   });
 
   test("a configured peer_id keeps its immediate entry-guard refusal", async () => {
-    // The leftover carries this party's OWN id, so it is a self-hello: an
-    // unexpected protocol file the entry guard refuses before any window or
-    // wait, exactly as before.
     const files = new Map<string, Buffer>();
     files.set(
       `${DIR}/${helloName("site-a")}`,

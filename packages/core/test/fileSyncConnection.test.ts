@@ -137,9 +137,6 @@ function makeMockClient(opts?: MockClientOptions): {
   const client: FileTransportClient = {
     connect: async () => {},
     end: async () => {},
-    // Reflect the in-memory store so send()/poll(), which now detect files via
-    // list() pattern scans, see the same state exists()/get() do. Returns
-    // direct children of `dir`, with `size` taken from the buffer length.
     list: async (dir: string): Promise<FileInfo[]> => {
       const prefix = dir.endsWith("/") ? dir : `${dir}/`;
       return [...files.entries()]
@@ -274,11 +271,6 @@ async function driveUntilError(
   return { errors, pollerActiveBeforeDriverStop };
 }
 
-// Build a peer message file's on-disk bytes in the binary envelope the transport
-// now reads (version || type || seq || payload). `objectMessage` carries a JSON
-// control payload (the common case in these tests); `binaryMessage` carries a
-// raw binary frame. `seq` is the per-session counter the filename NNN and the
-// retain-mode body/filename cross-check key on.
 function objectMessage(payload: unknown, seq = 0): Buffer {
   return serializeFileSyncMessage(
     MESSAGE_TYPE_OBJECT,
@@ -290,11 +282,6 @@ function binaryMessage(payload: Uint8Array, seq = 0): Buffer {
   return serializeFileSyncMessage(MESSAGE_TYPE_BINARY, seq, payload);
 }
 
-// A valid hello body advertising the default lock/non-retain flags. Tests whose
-// rendezvous reader runs in the default (lock) mode hand-plant this as the peer
-// hello so it passes the HelloEnvelope read gate without a spurious bilateral
-// mismatch. The hello body must carry both bilateral flags; a bare `{}` no
-// longer satisfies the hello schema.
 const LOCK_HELLO_BODY = Buffer.from(
   JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
 );
@@ -387,7 +374,6 @@ test("close() sweeps responsible files and ends the client, idempotently", async
   expect(deleted).toContain(messagePath);
   expect(files.has(messagePath!)).toBe(false);
 
-  // A second close neither throws nor re-ends the client.
   ended = false;
   await expect(conn.close()).resolves.toBeUndefined();
   expect(ended).toBe(false);
@@ -420,7 +406,6 @@ test("emit('error', ...) with no listener is buffered and returned by takeBuffer
   const err = new Error("transport failure");
   conn.emit("error", err);
   expect(conn.takeBufferedError()).toBe(err);
-  // Second read clears the buffer.
   expect(conn.takeBufferedError()).toBeUndefined();
 });
 
@@ -1096,8 +1081,6 @@ test("open (sftp) with a list of pins fails closed when the key matches NONE and
 });
 
 test("open (sftp) with no pin fails closed (the no-pin default)", async () => {
-  // The no-pin default is now fail-closed (was warn-and-proceed): core refuses
-  // the connection and the error surfaces the presented fingerprint to pin.
   const conn = new FileSyncConnection(makeHostKeyMockClient(ed25519Blob()), {
     verbose: -1,
   });
@@ -1162,13 +1145,11 @@ test("probeHostKeyFingerprint sends no credential, so an unresolved @path never 
   // The host key is still read: dropping credentials leaves host-key negotiation
   // unchanged.
   expect(presented.keyType).toBe("ssh-ed25519");
-  // No credential -- the unresolved @path included -- reached ssh2.
   expect(captured).toBeDefined();
   expect(captured?.["privateKey"]).toBeUndefined();
   expect(captured?.["passphrase"]).toBeUndefined();
   expect(captured?.["password"]).toBeUndefined();
   expect(captured?.["tryKeyboard"]).toBeUndefined();
-  // The non-secret fields the probe DOES need are still present.
   expect(captured?.["host"]).toBe("sftp.example.org");
   expect(captured?.["username"]).toBe("roberts");
 });
@@ -1585,10 +1566,6 @@ test("open maps pollIntervalMs to pollingFrequency for filedrop config", async (
 });
 
 test("open defers default timeToLive computation until connect resolves", async () => {
-  // Regression guard: previously the default 1-hour TTL was computed in the
-  // constructor, so retry latency between construction and open() ate into
-  // the budget. The TTL must now be set during open() so the full default
-  // window is available for peer-waiting.
   const { client } = makeMockClient();
   const conn = new FileSyncConnection(client, { verbose: -1 });
   expect(conn.options.timeToLive).toBeUndefined();
@@ -1718,13 +1695,6 @@ test("send writes the in-flight file with a .tmp extension and renames to .json"
 });
 
 test("send streams the header and payload as two chunks, without a concat copy", async () => {
-  // The peak-shaving change: send() hands put() a [header, payload] chunk list
-  // rather than one pre-concatenated buffer, so prepending the 10-byte header no
-  // longer copies the whole payload -- a binary frame holds ~1x its size live, not
-  // ~2x. Pin (a) put() receives a two-element array, (b) the payload part is the
-  // SAME reference the caller passed (never copied), and (c) the bytes the
-  // transport writes are byte-identical to the single-buffer serialization, with
-  // the on-disk byte count the filename encodes matching.
   const { client } = makeMockClient();
   const conn = await makeConnectedConn(client);
   conn.peerId = "stub-peer";
@@ -1746,15 +1716,12 @@ test("send streams the header and payload as two chunks, without a concat copy",
   const frame = new Uint8Array([0x10, 0x20, 0x30, 0x40, 0x50]);
   await conn.send(frame);
 
-  // (a) A two-chunk list: the header then the payload.
   expect(Array.isArray(putSrc)).toBe(true);
   const parts = putSrc as Uint8Array[];
   expect(parts).toHaveLength(2);
   expect(parts[0].length).toBe(MESSAGE_HEADER_BYTES);
   // (b) The payload chunk IS the caller's array, not a copy -- the ~1x proof.
   expect(parts[1]).toBe(frame);
-  // (c) On-disk bytes equal the single-buffer serialization (header || payload)
-  // for the same seq, and the filename encodes that exact length.
   const expected = serializeFileSyncMessage(MESSAGE_TYPE_BINARY, 0, frame);
   expect(Buffer.concat(parts).equals(expected)).toBe(true);
   expect(renamedTo).toBe(`/test/${conn.id}-${expected.length}.json`);
@@ -1769,7 +1736,7 @@ test("a binary frame sent through the new framing is read back byte-exactly by a
   // on-disk-size mismatch that opened or jammed the partial-sync read gate would
   // corrupt (or never deliver) the read-back rather than pass silently. The
   // receiver's size gate must accept the frame for it to be delivered at all, so
-  // this also exercises the new byteLength = header + payload formula against the
+  // this also exercises the byteLength = header + payload formula against the
   // gate for a binary frame.
   const { client } = makeMockClient();
   const sender = await makeConnectedConn(client, { pollingFrequency: 10 });
@@ -1840,12 +1807,9 @@ test("send removes the .tmp file in-process when the rename fails", async () => 
     "synthetic rename failure",
   );
 
-  // The temp file was actually written (a .tmp, not a .json) ...
   expect(tempPath).toBeDefined();
   expect(tempPath!.endsWith(".tmp")).toBe(true);
-  // ... the catch swept exactly that file via safeDelete ...
   expect(safeDeleted).toContain(tempPath!);
-  // ... and no .tmp residue remains on disk.
   expect(files.has(tempPath!)).toBe(false);
   const tmpFiles = [...files.keys()].filter((p) => p.endsWith(".tmp"));
   expect(tmpFiles).toEqual([]);
@@ -1960,9 +1924,7 @@ test("poll does not emit error when get() throws ENOENT after list() surfaced th
   expect(logs[0].message).toContain("disappeared between list and get");
 
   expect(errors).toHaveLength(0);
-  // get() was called exactly once (on the ENOENT-throwing poll cycle).
   expect(getCount).toBe(1);
-  // The poller rescheduled and ran additional cycles after the ENOENT.
   expect(listCount).toBeGreaterThan(1);
 });
 
@@ -2156,7 +2118,6 @@ test("createExclusive throws EEXIST when destination already exists", async () =
   await expect(client.createExclusive("/existing")).rejects.toMatchObject({
     code: "EEXIST",
   });
-  // destination is unchanged
   expect(files.get("/existing")).toEqual(Buffer.from("y"));
 });
 
@@ -2166,7 +2127,6 @@ test("createExclusive creates an empty entry and does not affect other files", a
   await client.createExclusive("/new");
   expect(files.has("/new")).toBe(true);
   expect(files.get("/new")).toEqual(Buffer.alloc(0));
-  // unrelated file is untouched
   expect(files.get("/other")).toEqual(Buffer.from("data"));
 });
 
@@ -2218,7 +2178,6 @@ test("synchronize() cleans up hello and lock files when createExclusive() throws
 
   await conn.synchronize();
 
-  // All residue files must be gone.
   expect(files.has(lockPath)).toBe(false);
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
   expect(files.has(`${conn.path}/${myHelloName}`)).toBe(false);
@@ -2283,7 +2242,6 @@ test("synchronize() recognize-and-sweeps leftover abort markers (own and peer) a
 
   await conn.synchronize();
 
-  // Both leftover markers were swept; rendezvous still completed.
   expect(files.has(ownAbortPath)).toBe(false);
   expect(files.has(peerAbortPath)).toBe(false);
   expect(conn.peerId).toBe(peerId);
@@ -2383,7 +2341,6 @@ test("synchronize() does NOT sweep a leftover abort marker in retain mode; it su
   ];
 
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
-  // The transcript-adjacent marker survives the refusal.
   expect(files.has(ownAbortPath)).toBe(true);
 });
 
@@ -2593,7 +2550,7 @@ test("poll() stops the poller on a stalled consume-delete, not swallowed-and-re-
   // The delete-mode consume path deletes a validated message (the go-ahead signal
   // to the sender) before emitting it. A TRANSIENT delete failure is swallowed and
   // the file re-read next cycle -- but a terminal UsageError (the per-op stall
-  // deadline a withheld delete callback now trips) must NOT be swallowed: doing so
+  // deadline a withheld delete callback trips) must NOT be swallowed: doing so
   // would emit the message while its consume-delete never landed, leaving the file
   // on disk to be re-emitted as a duplicate every cycle (a ~120 s/cycle stall loop).
   // The poller must instead stop and surface the terminal error, like every other
@@ -2645,7 +2602,7 @@ test("poll() stops the poller on a stalled retain-mode ack-write, not advanced-a
   // then a rename) BEFORE poll() emits the payload and advances
   // recvSeq/lastAckedNNN. A TRANSIENT ack-write failure reschedules and the
   // never-deleted message is reprocessed next cycle -- but a terminal UsageError
-  // (the per-op stall deadline a withheld put callback now trips) must NOT be
+  // (the per-op stall deadline a withheld put callback trips) must NOT be
   // swallowed: re-attempting just re-hits the stall, and advancing past it would
   // emit a message whose ack never landed, leaving the sender blocked forever on
   // an ack it will never see. The poller must instead stop and surface the
@@ -2721,8 +2678,7 @@ test("poll() stops the poller on a stalled retain-mode ack-write, not advanced-a
 // The write-path analogue of the read-path liveness test above. The CLI adapter's
 // per-operation bounds fast-fail a stalled READ (list/get/createExclusive) in 60s,
 // but the always-executed write/stat/delete ops (put/rename/delete/exists) have no
-// per-op bound, so a server that withholds the callback on one of them used to
-// hang the exchange forever (the blocking S1 finding). FileSyncConnection now backstops
+// per-op bound. FileSyncConnection backstops
 // EVERY transport await with the peer-inactivity budget, so a withheld callback
 // fails the exchange with a terminal TransportOperationStalledError within the
 // budget instead of hanging. The mock here withholds the callback (a never-settling
@@ -2739,7 +2695,6 @@ test("send() fails within the peer budget when the server withholds the put call
     timeToLiveMs: 60_000,
   });
   conn.peerId = "stub-peer";
-  // The server accepts the request but never invokes the put callback.
   client.put = () => new Promise<void>(() => {});
   await expect(conn.send({ hello: "world" })).rejects.toBeInstanceOf(
     TransportOperationStalledError,
@@ -2796,11 +2751,6 @@ test("a private-key-shaped rename source does not take the destination with it",
 });
 
 test("synchronize() fails within the peer budget when the server withholds the delete callback", async () => {
-  // The lock-mode joiner fast-path publishes a joining sentinel, then deletes the
-  // discovered peer hello, then renames the sentinel to its own hello. A server
-  // that withholds the delete callback used to hang the rendezvous forever; the
-  // budget now fails it terminally. delete is never individually wrapped, so this
-  // failure is the consumer-layer backstop alone.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, {
@@ -2873,7 +2823,6 @@ test("poll() budget error escapes a hostile peer filename in the stalled-operati
   await conn.close();
   expect(err).toBeInstanceOf(TransportOperationStalledError);
   const rendered = sanitizeErrorForDisplay(err);
-  // The raw ESC from the peer filename never reaches the operator's terminal.
   expect(rendered).not.toContain("\x1b");
   expect(rendered).toContain("\\x1b");
 });
@@ -2892,8 +2841,6 @@ test("close() does not hang when the server withholds a cleanup safeDelete callb
   conn.peerId = "stub-peer";
   await conn.send({ hello: "world" }); // makes this side responsible for a file
   client.safeDelete = () => new Promise<void>(() => {});
-  // Resolves (does not reject, does not hang) once the cleanup delete hits the
-  // budget.
   await expect(conn.close()).resolves.toBeUndefined();
 });
 
@@ -2914,8 +2861,6 @@ test("close() does not hang or throw when the server withholds the end() callbac
     endCalls++;
     return new Promise<void>(() => {});
   };
-  // First close() resolves (does not reject) once the withheld end() hits the
-  // budget, and it called end() exactly once.
   await expect(conn.close()).resolves.toBeUndefined();
   expect(endCalls).toBe(1);
   // Second close() neither throws nor re-enters the end() branch: `connected` was
@@ -3066,7 +3011,6 @@ test("close() ends the client LAST, after the drain and cleanup()", async () => 
   expect(order[0]).toBe("beginTeardown");
   expect(order.at(-1)).toBe("end");
   expect(order.filter((step) => step === "end")).toHaveLength(1);
-  // The drain listed and cleanup() swept, both strictly before the client ended.
   expect(order.indexOf("list")).toBeGreaterThan(-1);
   expect(order.indexOf("safeDelete")).toBeGreaterThan(order.indexOf("list"));
 });
@@ -3293,14 +3237,7 @@ test("synchronize() outer catch clears responsibleFiles so cleanup() makes no re
 });
 
 test("synchronize() resolves cleanly when it observes a lock file already created by the peer", async () => {
-  // Regression guard: the lock-detection branch
-  // (waitForPeer's "lockFiles.length > 0" arm) used to compare bare UUIDs
-  // from the lock filename against -hello.json entries, which never matched,
-  // so any party that observed a peer-created lock file threw
-  // "lock file does not reference this connection" instead of completing
-  // the rendezvous.
-  //
-  // Scenario reproduced here: peer arrived first, both wrote -hello.json,
+  // Scenario: peer arrived first, both wrote -hello.json,
   // peer won the lock race and created `${peerId}-${myId}-lock.json`. This party
   // observes peer-hello.json + my-hello.json + lock file on its next list().
   const peerId = "00000000-0000-4000-8000-000000000001";
@@ -3343,7 +3280,6 @@ test("synchronize() resolves cleanly when it observes a lock file already create
   // the other rendezvous branches: responder=starter, initiator=joiner.
   expect(conn.role).toBe("joiner");
   expect(conn.peerId).toBe(peerId);
-  // All three files cleaned up by the lock-detection branch.
   expect(files.has(lockPath)).toBe(false);
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
   expect(files.has(`${conn.path}/${myHelloName}`)).toBe(false);
@@ -3490,14 +3426,6 @@ test("synchronize() lock-detection branch rejects a stale lock from a different 
 // --- synchronize(): createExclusive winner retains responsibleFiles --------
 
 test("synchronize() createExclusive winner: leaves own hello and lock name in responsibleFiles so cleanup() can sweep them if peer never arrives", async () => {
-  // Regression guard: previously, the outer try block in synchronize() cleared
-  // responsibleFiles on every successful waitForPeer() return -- including the
-  // createExclusive-winner path, which is the one path that legitimately needs
-  // to retain its files. The loser (whose createExclusive throws EEXIST) is
-  // normally responsible for cleaning the lock and both hellos, but if the
-  // loser never arrives (crash, partition), the winner's eventual cleanup()
-  // must sweep them. With the clear, the winner's responsibleFiles was empty
-  // and the files were stranded.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
@@ -3513,7 +3441,7 @@ test("synchronize() createExclusive winner: leaves own hello and lock name in re
   let listCallCount = 0;
   client.list = async () => {
     listCallCount++;
-    if (listCallCount === 1) return []; // initial check
+    if (listCallCount === 1) return [];
     return [
       { name: myHelloName, modifyTime: mtime, size: 0 },
       { name: peerHelloName, modifyTime: mtime, size: 0 },
@@ -3662,7 +3590,6 @@ async function makeJoiner(joinerRecoveryMs?: number): Promise<{
   return { conn, client, files, peerId, peerHelloName };
 }
 
-// Reads the private responsibleFiles set for assertions.
 function responsibleFilesOf(conn: FileSyncConnection): Set<string> {
   return (conn as unknown as { responsibleFiles: Set<string> })
     .responsibleFiles;
@@ -3682,7 +3609,6 @@ test("synchronize() joiner branch: a sentinel put failure leaves the peer hello 
     "synthetic sentinel put failure",
   );
 
-  // Peer hello untouched; nothing the joiner owns is left behind.
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
   expect(files.has(`${conn.path}/${conn.id}-joining.json`)).toBe(false);
   expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(false);
@@ -3708,10 +3634,8 @@ test("synchronize() joiner branch: a failure before the peer hello is deleted tr
     "synthetic peer-hello delete failure",
   );
 
-  // Sentinel was committed and the peer hello is intact (delete never ran).
   expect(files.has(`${conn.path}/${joiningName}`)).toBe(true);
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
-  // The joiner still owns the sentinel: it is tracked and cleanup() removes it.
   expect(responsibleFilesOf(conn).has(joiningName)).toBe(true);
   await conn.cleanup();
   expect(files.has(`${conn.path}/${joiningName}`)).toBe(false);
@@ -3734,7 +3658,6 @@ test("synchronize() joiner branch: a failure after the peer hello is deleted lea
     "synthetic sentinel rename failure",
   );
 
-  // Peer hello deleted, sentinel still on disk and NOT renamed to a hello.
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
   expect(files.has(`${conn.path}/${joiningName}`)).toBe(true);
   expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(false);
@@ -3785,7 +3708,6 @@ test("synchronize() lock starter: completes rendezvous when a mid-arrival joiner
   expect(conn.role).toBe("starter");
   expect(conn.handshakeRole).toBe("responder");
   expect(conn.peerId).toBe(idB);
-  // The starter branch consumed (deleted) the joiner's hello.
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
 });
 
@@ -4063,7 +3985,7 @@ test("synchronize() lock starter: TTL expiry with no joiner produces the bare [s
     timeToLiveMs: 80,
   });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-  client.list = async () => []; // empty forever: no peer, no sentinel
+  client.list = async () => [];
 
   const err = await conn.synchronize().catch((e: unknown) => e);
   expect(err).toBeInstanceOf(Error);
@@ -4188,7 +4110,6 @@ test("synchronize() lockless mode: a bare -hello.json injected mid-rendezvous is
   client.list = async () => {
     listCallCount++;
     if (listCallCount === 1) return []; // entry: clean, write own hello and enter the barrier
-    // Barrier: our hello, the real peer hello, and an injected bare `-hello.json`.
     const base = [
       { name: `${myId}-hello.json`, modifyTime: Date.now(), size: 0 },
       { name: peerHello, modifyTime: Date.now(), size: 0 },
@@ -4403,7 +4324,6 @@ test("send filename encodes timestamp and zero-padded counter when timestampInFi
   expect(firstName).toMatch(
     new RegExp(`^${conn.id}-\\d{8}T\\d{6}-000-\\d+\\.json$`),
   );
-  // The last segment is the exact serialized byte count.
   const firstBuf = files.get(`/test/${firstName}`)!;
   expect(Number(firstName.slice(0, -".json".length).split("-").at(-1))).toBe(
     firstBuf.length,
@@ -4482,11 +4402,6 @@ test("poll ignores message files belonging to a different peer", async () => {
 
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
-  // This test isolates message-routing: a different peer's message file
-  // (`peer-b-*`) must never be consumed as ours. Under the default policy that
-  // file is now also flagged as a foreign file (another session sharing the
-  // path); pin `ignore` so this test exercises the routing exclusion alone --
-  // the foreign-file detection is covered by its own tests below.
   conn.options.unexpectedFiles = "ignore";
 
   const received: unknown[] = [];
@@ -4563,7 +4478,6 @@ test("poll under the ignore policy skips a prefix-matching file whose final segm
   expect(errors).toHaveLength(0);
   expect(received).toHaveLength(1);
   expect((received[0] as Record<string, unknown>)["ok"]).toBe(true);
-  // The non-message file is left untouched, not deleted or read.
   expect(files.has(`/test/${peerId}-backup.json`)).toBe(true);
 });
 
@@ -4598,7 +4512,6 @@ test("close() drains the last sent file before cleanup, preventing premature del
 
   await sender.send({ terminal: true });
 
-  // Identify the written message file.
   const msgPath = [...files.keys()].find((p) =>
     new RegExp(`^/test/${sender.id}-\\d+\\.json$`).test(p),
   );
@@ -4611,7 +4524,6 @@ test("close() drains the last sent file before cleanup, preventing premature del
   // "receiver" consumes the file.
   await new Promise((r) => setTimeout(r, 20));
 
-  // Simulate receiver consuming the terminal frame.
   receiverConsumed = true;
   files.delete(msgPath!);
 
@@ -4662,7 +4574,6 @@ test("close() emits an info log at drain entry when the last sent file is still 
     expect(entryLog).toBeDefined();
     expect(entryLog!.message).toContain("500 ms");
     expect(entryLog!.message).toContain(capturedOutName);
-    // File was consumed before the deadline; no deadline-fired log.
     expect(logs.some((l) => l.message.includes("drain deadline reached"))).toBe(
       false,
     );
@@ -4793,13 +4704,6 @@ test("close() does not emit the deadline log when the final poll observes the fi
 });
 
 test("close() drain is bounded by the fixed terminal-frame budget, not the full peer timeout", async () => {
-  // The teardown drain must NOT inherit the (default one-hour) peer-inactivity
-  // budget: at close() the result is already persisted and cleanup() deletes the
-  // frame as a fallback, so the drain is bounded by TERMINAL_FRAME_DRAIN_TIMEOUT_MS
-  // (min'd with the configured peer budget). With a peer budget far larger than
-  // that constant, the bound named at drain entry is the constant -- proving the
-  // cap. Teeth: the prior code interpolated the full peerTimeoutMs here, so this
-  // would read the one-hour value and fail.
   const hugePeerTimeoutMs = 60 * 60 * 1000; // one hour, > the fixed drain budget
   expect(hugePeerTimeoutMs).toBeGreaterThan(TERMINAL_FRAME_DRAIN_TIMEOUT_MS);
   const prevLevel = logLibrary.getLevel();
@@ -4873,11 +4777,8 @@ test("synchronize() lock path writes hello as <id>-hello.json and self-hello det
 
   await conn.synchronize();
 
-  // The lock-race winner (this conn: lock created by createExclusive)
-  // committed peerId correctly from the -hello.json filename.
   expect(conn.peerId).toBe(peerId);
   expect(conn.handshakeRole).toBe("initiator");
-  // Our hello is named with the new convention and was written to the store.
   const helloInStore = [...files.keys()].find((p) =>
     p.endsWith(`/${myHelloName}`),
   );
@@ -4908,7 +4809,6 @@ test("synchronize() lockless mode completes rendezvous when createExclusive and 
 
   await Promise.all([connA.synchronize(), connB.synchronize()]);
 
-  // Both parties must be synchronized.
   expect(connA.peerId).toBe(idB);
   expect(connB.peerId).toBe(idA);
 });
@@ -4986,7 +4886,6 @@ test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier 
 
   // Neither party should have called delete (unsupported on lockless transport).
   expect(deleteCalled).toBe(false);
-  // Both are synchronized.
   expect(connA.peerId).toBe(idB);
   expect(connB.peerId).toBe(idA);
   // Lockless never deletes a hello: both remain in the directory.
@@ -4997,11 +4896,6 @@ test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier 
 // --- send(): hasOutstandingMessage excludes typed protocol files ---------------
 
 test("send() completes without spinning when a <id>-hello.json file is present in the store", async () => {
-  // Regression guard: the drain waits only for the exact lastSentFile, which is
-  // undefined on this first send, so a pre-existing own <id>-hello.json must not
-  // block send(). (Under the old grammar-glob drain this required a
-  // parseMessageByteCount carve-out; exact-name matching ignores it for free.)
-  // Verify send() completes immediately instead of spinning.
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client);
   conn.peerId = "stub-peer";
@@ -5018,12 +4912,6 @@ test("send() completes without spinning when a <id>-hello.json file is present i
 });
 
 test("send() completes without spinning on a foreign <thisId>-<digits>.json (site-4 residual)", async () => {
-  // A foreign/stray file carrying this party's own id and a numeric terminal
-  // (a sync-tool artifact, or a leftover the peer never sent) matches the
-  // message grammar. The old hasOutstandingMessage glob counted it as an
-  // unconsumed own-message and span send() to the peer timeout. The drain now
-  // waits for the EXACT lastSentFile -- undefined on the first send -- so send()
-  // completes and leaves the foreign file untouched.
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, {
     pollingFrequency: 10,
@@ -5036,7 +4924,6 @@ test("send() completes without spinning on a foreign <thisId>-<digits>.json (sit
 
   await expect(conn.send({ check: true })).resolves.toBeUndefined();
 
-  // send() does not own the foreign file and must leave it in place.
   expect(files.has(foreignPath)).toBe(true);
 });
 
@@ -5056,7 +4943,6 @@ test("send() is not blocked by a <id>-joining.json sentinel", async () => {
 
   await expect(conn.send({ check: true })).resolves.toBeUndefined();
 
-  // send() does not own the sentinel and must not have consumed it.
   expect(files.has(joiningPath)).toBe(true);
 });
 
@@ -5082,7 +4968,6 @@ test("a <a>-<b>-lock.json tiebreaker is not mistaken for a message by poll() or 
   const ourLockPath = `/test/${conn.id}-${peerId}-lock.json`;
   files.set(ourLockPath, Buffer.alloc(0));
   await expect(conn.send({ check: true })).resolves.toBeUndefined();
-  // send() does not own the lock file and must leave it in place.
   expect(files.has(ourLockPath)).toBe(true);
 
   // (2) poll() must ignore a peer-prefixed lock file, delivering only the real
@@ -5108,7 +4993,6 @@ test("a <a>-<b>-lock.json tiebreaker is not mistaken for a message by poll() or 
   expect(errors).toHaveLength(0);
   expect(received).toHaveLength(1);
   expect((received[0] as Record<string, unknown>)["ok"]).toBe(true);
-  // The lock file is a control file: poll() neither reads nor deletes it.
   expect(files.has(peerLockPath)).toBe(true);
 });
 
@@ -5429,7 +5313,6 @@ test("synchronize() lock mode: round-trip hello write and read with JSON envelop
 
   await conn.synchronize();
 
-  // Joiner wrote its own hello with a JSON envelope body.
   const myHelloPath = `${conn.path}/${conn.id}-hello.json`;
   expect(files.has(myHelloPath)).toBe(true);
   const body = JSON.parse(files.get(myHelloPath)!.toString());
@@ -5460,7 +5343,6 @@ test("synchronize() lockless mode: round-trip hello body and zero-length ack mar
 
   await Promise.all([connA.synchronize(), connB.synchronize()]);
 
-  // Both hellos carry the bilateral-flag envelope body.
   for (const id of [idA, idB]) {
     const helloBody = JSON.parse(
       files.get(`/test/${id}-hello.json`)!.toString(),
@@ -5515,7 +5397,6 @@ test("synchronize() joiner: mid-sync hello body retried, not reported malformed"
 
   await conn.synchronize();
 
-  // Gate retried at least twice before succeeding.
   expect(getCalls).toBeGreaterThanOrEqual(3);
   expect(conn.peerId).toBe(peerId);
 });
@@ -5540,11 +5421,6 @@ test("synchronize() joiner: fully-synced but malformed hello body is a UsageErro
 });
 
 test("synchronize() lockless: rendezvous completes on ack existence; ack body is never read", async () => {
-  // The ack is a zero-length marker matched by name existence: the barrier must
-  // complete without ever get()-ing an `-ack.json` file. There is no body and no
-  // read gate on the ack (only the hello body is read through the gate). This
-  // replaces the former mid-sync-ack-body-retry test, which guarded a read gate
-  // the unified zero-byte marker no longer has.
   const idA = "00000000-0000-4000-8000-000000000001";
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const ackGets: string[] = [];
@@ -5571,8 +5447,6 @@ test("synchronize() lockless: rendezvous completes on ack existence; ack body is
 
   expect(connA.peerId).toBe(idB);
   expect(connB.peerId).toBe(idA);
-  // No `-ack.json` file was ever read through get(): the barrier matched on
-  // existence alone.
   expect(ackGets).toEqual([]);
 });
 
@@ -5874,7 +5748,6 @@ test("(c) lockless vs lock mismatch fails fast on BOTH parties, concurrently", a
     // Distinct from the generic peer-timeout backstop.
     expect(reason.message).not.toMatch(/timed out|synchronization has timed/);
   }
-  // Both advertised hellos remain as the directory's terminal state.
   expect(files.has(`/test/${ID_LOW}-hello.json`)).toBe(true);
   expect(files.has(`/test/${ID_HIGH}-hello.json`)).toBe(true);
 });
@@ -5932,7 +5805,6 @@ test("(c) lock joiner reading a lockless peer hello fails fast and leaves both h
   expect((err as Error).message).toContain(
     "the peer has lockless_rendezvous=true",
   );
-  // Own advertisement written, peer hello not deleted: both remain.
   expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
 });
@@ -5986,7 +5858,6 @@ test("(c) lock joiner fast-path retries a transient advertise-hello write, then 
   // let a transport rejection mask or replace the actionable mismatch.
   expect(err).toBeInstanceOf(BilateralModeMismatchError);
   expect(err).toBeInstanceOf(UsageError);
-  // The write was retried across the budget and the final attempt landed.
   expect(helloPutAttempts).toBe(ADVERTISE_HELLO_RETRY_ATTEMPTS);
   // Durable advertised hello is left on disk for the peer to read, alongside the
   // (undeleted) peer hello -- both are the directory's terminal state.
@@ -6032,7 +5903,6 @@ test("(c) lock joiner fast-path degrades to log-and-throw once the advertise-hel
 
   expect(err).toBeInstanceOf(BilateralModeMismatchError);
   expect(err).toBeInstanceOf(UsageError);
-  // The full budget was exhausted before giving up.
   expect(helloPutAttempts).toBe(ADVERTISE_HELLO_RETRY_ATTEMPTS);
   // No durable advertisement left (every write failed); the peer hello is
   // untouched. The peer degrades to the legacy peer-timeout, exactly as the
@@ -6233,7 +6103,7 @@ test("(d) a fully-synced hello missing a flag is a terminal usage error", async 
   const peerHelloName = `${ID_LOW}-hello.json`;
   files.set(
     `${conn.path}/${peerHelloName}`,
-    Buffer.from(JSON.stringify({ locklessRendezvous: true })), // retainFiles absent
+    Buffer.from(JSON.stringify({ locklessRendezvous: true })),
   );
 
   let err: unknown;
@@ -6306,7 +6176,6 @@ test("(e) leftover hellos after a mismatch make a rerun rejected by the entry gu
 
 // --- retain mode (retainFiles: true) -----------------------------------------
 
-// Creates a retain-mode connection that is already open, connected, and paired.
 function makeRetainConn(
   client: FileTransportClient,
   id: string,
@@ -6474,11 +6343,9 @@ test("retain mode: sender blocks until the ack of its last message appears, then
   conn.id = id;
   conn.peerId = peerId;
 
-  // First send proceeds without waiting (seq=0).
   await conn.send({ first: true });
   const stem = lastSentStem(files, "/test", id);
 
-  // Second send blocks waiting for the ack of the first message.
   let secondDone = false;
   const secondSend = conn.send({ second: true }).then(() => {
     secondDone = true;
@@ -6604,10 +6471,8 @@ test("retain mode: cleanup() does not delete exchange files", async () => {
 
   await runPoller(conn, delivered);
 
-  // cleanup() must not delete any files in retain mode.
   await conn.cleanup();
   expect(safeDeleted).toHaveLength(0);
-  // The ack marker is still on disk (cleanup did not remove it).
   const ackOnDisk = [...files.keys()].find(
     (p) => p.includes(`${id}-`) && p.endsWith("-ack.json"),
   );
@@ -6615,13 +6480,6 @@ test("retain mode: cleanup() does not delete exchange files", async () => {
 });
 
 test("retain mode: a consumed message file is retained on a delete-capable transport", async () => {
-  // Regression: retain mode must never delete the message payload, even when the
-  // transport's delete() succeeds (e.g. real SFTP). The directory is the durable
-  // transcript and the ack is the consumption signal that replaces deletion.
-  // Previously the receiver issued a best-effort delete that silently removed the
-  // message on capable transports, so the "permanent transcript" guarantee held
-  // only on no-delete transports. makeMockClient's delete() actually removes the
-  // file, so this exercises the capable-transport path.
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
   const id = "receiver-me";
@@ -6658,11 +6516,8 @@ test("retain mode: a consumed message file is retained on a delete-capable trans
 
   await runPoller(conn, delivered);
 
-  // The message payload is still on disk after consumption...
   expect(files.has(msgPath)).toBe(true);
-  // ...because no deletion was ever attempted in retain mode.
   expect(deleted).toHaveLength(0);
-  // The ack -- the consumption signal that replaces deletion -- was written.
   const ackOnDisk = [...files.keys()].some(
     (p) => p.includes(`${id}-`) && p.endsWith("-ack.json"),
   );
@@ -6723,10 +6578,8 @@ test("retain mode: a message reprocessed after an emit failure is not acked twic
 
   await runPoller(conn, delivered);
 
-  // Processed twice (first emit threw, second delivered)...
   expect(emitCount).toBeGreaterThanOrEqual(2);
   expect(received).toHaveLength(1);
-  // ...but the ack was written exactly once (idempotent across the retry).
   expect(ackRenames).toHaveLength(1);
 });
 
@@ -6751,7 +6604,6 @@ test("retain mode: ack-wait timeout throws a UsageError on the timeToLive budget
   // First send uses the budget without blocking; no ack will arrive.
   await conn.send({ first: true });
 
-  // Second send must time out and throw UsageError.
   await expect(conn.send({ second: true })).rejects.toBeInstanceOf(UsageError);
 });
 
@@ -6837,7 +6689,6 @@ test("retain mode: send() does not advance seq when rename throws", async () => 
 
   const seqBefore = conn.seq;
 
-  // Stub rename to throw so the durable write never completes.
   client.rename = async () => {
     throw new Error("rename failed");
   };
@@ -6896,9 +6747,7 @@ test("close() resets seq, recvSeq, and lastAckedNNN to their initial values", as
   // Drive counters to non-initial values by sending a message and manipulating
   // internal state directly (the fields are internal but accessible in tests).
   await conn.send({ n: 1 });
-  // seq is now 1 after a successful send.
   expect(conn.seq).toBe(1);
-  // Manually set recvSeq and lastAckedNNN to non-zero/non-(-1) values.
   messageLoopInternals(conn).recvSeq = 3;
   messageLoopInternals(conn).lastAckedNNN = 2;
 
@@ -6946,16 +6795,13 @@ test("retain mode: poll() duplicate-NNN error is a UsageError and stops the poll
     settleMs: 50,
   });
 
-  // Error fired exactly once.
   expect(errors).toHaveLength(1);
-  // The error is classified as a UsageError (terminal protocol violation).
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("more than one message file");
 
   // pollerActive must be false: the poller stopped itself before emitting.
   expect(pollerActiveBeforeDriverStop).toBe(false);
 
-  // No second error arrived during the settle (poller did not reschedule).
   expect(errors).toHaveLength(1);
 });
 
@@ -6970,7 +6816,6 @@ test("delete mode: poll() more-than-one-message error is a UsageError and stops 
   const peerId = "peer-sender";
   conn.peerId = peerId;
 
-  // Two distinct, fully-synced delete-mode message files from the peer.
   files.set(`/test/${peerId}-10.json`, Buffer.from("a".repeat(10)));
   files.set(`/test/${peerId}-20.json`, Buffer.from("b".repeat(20)));
 
@@ -6984,7 +6829,6 @@ test("delete mode: poll() more-than-one-message error is a UsageError and stops 
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("more than one message file");
   expect(pollerActiveBeforeDriverStop).toBe(false);
-  // No second error: the poller did not reschedule.
   expect(errors).toHaveLength(1);
 });
 
@@ -7038,7 +6882,6 @@ test("non-retain send() before synchronize() (peerId unset) throws 'not synchron
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
-    // Explicitly NOT retain mode.
     retainFiles: false,
   });
   conn.connected = true;
@@ -7071,7 +6914,6 @@ test("I8: send() whose put throws -- seq unchanged, temp file cleaned up", async
     return origSafeDelete(p);
   };
 
-  // Stub put to throw, making the temp write itself fail.
   client.put = async () => {
     throw new Error("synthetic put failure");
   };
@@ -7087,7 +6929,6 @@ test("I8: send() whose put throws -- seq unchanged, temp file cleaned up", async
   const tempSweep = safeDeleted.find((p) => p.endsWith(".tmp"));
   expect(tempSweep).toBeDefined();
 
-  // No temp-*.tmp file must remain in the store.
   const tmpFiles = [...files.keys()].filter((p) => p.endsWith(".tmp"));
   expect(tmpFiles).toEqual([]);
 });
@@ -7125,15 +6966,11 @@ test("I8: send() whose rename throws -- seq unchanged, temp file cleaned up", as
 
   await expect(conn.send({ n: 1 })).rejects.toThrow("synthetic rename failure");
 
-  // seq must not have advanced.
   expect(conn.seq).toBe(seqBefore);
 
-  // The temp file was written (a .tmp path)...
   expect(tempPath).toBeDefined();
   expect(tempPath!.endsWith(".tmp")).toBe(true);
-  // ...and swept via safeDelete.
   expect(safeDeleted).toContain(tempPath!);
-  // No temp-*.tmp residue on disk.
   const tmpFiles = [...files.keys()].filter((p) => p.endsWith(".tmp"));
   expect(tmpFiles).toEqual([]);
 });
@@ -7182,7 +7019,6 @@ test("I8: poll() list throws -- error reaches the error event, recvSeq unchanged
   const { client } = makeMockClient();
   const peerId = "peer-sender";
 
-  // Stub list to throw on every call so poll() fails immediately.
   client.list = async () => {
     throw new Error("synthetic list failure from poll");
   };
@@ -7204,7 +7040,6 @@ test("I8: poll() list throws -- error reaches the error event, recvSeq unchanged
 
   const { errors } = await driveUntilError(conn, { stopInHandler: true });
 
-  // Error must have been emitted.
   expect(errors).toHaveLength(1);
   expect((errors[0] as Error).message).toContain("synthetic list failure");
 
@@ -7272,29 +7107,24 @@ test("I8: retain poll() ack-write failure -- recvSeq held, message reprocessed a
 
   await runPoller(conn, delivered);
 
-  // The ack write was attempted twice: it threw once, then succeeded.
   expect(ackRenameAttempts).toBe(2);
-  // The failure surfaced on the error channel.
   expect(errors.length).toBeGreaterThanOrEqual(1);
-  // The message was delivered exactly once...
   expect(received).toHaveLength(1);
   // ...recvSeq advanced exactly once, only after the successful ack + emit
   // (so it was held across the failed attempt)...
   expect(messageLoopInternals(conn).recvSeq).toBe(1);
-  // ...and exactly one ack persists on disk.
   expect(ackRenames).toHaveLength(1);
   const onDiskAcks = [...files.keys()].filter((p) => p.endsWith("-ack.json"));
   expect(onDiskAcks).toHaveLength(1);
 });
 
 // --- synchronize() entry precondition matrix ---------------------------------
-// One mode-agnostic rule replaces the former generic + retain-specific guards:
-// at synchronize() entry the directory must be empty except for at most one peer
-// hello. The matrix is the full (file-kind x mode) cross-product of that rule,
-// generated rather than hand-listed so a missing combination is structurally
-// impossible. The only legal pre-entry states are an empty directory and a
-// single peer hello (the case the old retain guard wrongly rejected); every
-// other file kind can appear only AFTER entry and is rejected, in both modes.
+// One mode-agnostic rule: at synchronize() entry the directory must be empty
+// except for at most one peer hello. The matrix is the full (file-kind x mode)
+// cross-product of that rule, generated rather than hand-listed so a missing
+// combination is structurally impossible. The only legal pre-entry states are an
+// empty directory and a single peer hello; every other file kind can appear only
+// AFTER entry and is rejected, in both modes.
 // If a kind below is not a direct consequence of the rule, the rule -- not the
 // matrix -- is wrong.
 
@@ -7359,8 +7189,6 @@ const entryPreconditionKinds: Array<{
     present: [`${ENTRY_PEER_ID}-joining.json`],
     outcome: "reject",
   },
-  // A stale non-timestamped message closes the pre-existing gap where the old
-  // generic (delete-mode) guard let leftover messages through.
   {
     kind: "non-timestamped message",
     present: [`${ENTRY_PEER_ID}-42.json`],
@@ -7542,7 +7370,6 @@ test("synchronize() leaves a temp-free directory unaffected by the sweep", async
   // than being rejected there with the strict-empty UsageError.
   expect(err).not.toBeInstanceOf(UsageError);
   expect(String(err)).toContain("timed out");
-  // The sweep matched nothing: no .tmp file was deleted.
   expect(safeDeleted.filter((p) => p.endsWith(".tmp"))).toHaveLength(0);
 });
 
@@ -7564,15 +7391,11 @@ test("synchronize() sweeps a temp file alongside a single peer hello and complet
 
   await conn.synchronize();
 
-  // Rendezvous completed via the joiner fast-path.
   expect(conn.peerId).toBe(peerId);
   expect(conn.handshakeRole).toBe("initiator");
   expect(conn.role).toBe("joiner");
-  // The orphaned temp was swept ...
   expect(files.has(tempPath)).toBe(false);
-  // ... the peer hello was consumed (the joiner deletes it) ...
   expect(files.has(peerHelloPath)).toBe(false);
-  // ... and the joiner's own hello is now present (renamed from the sentinel).
   expect(files.has(`${conn.path}/${myId}-hello.json`)).toBe(true);
 });
 
@@ -7646,7 +7469,6 @@ test("synchronize() does NOT sweep a foreign temp-*.tmp whose stem is not a UUID
 
   // Proceeded past the guard (a timeout Error), tolerating the foreign temp.
   expect(err).not.toBeInstanceOf(UsageError);
-  // The foreign temp survived: never swept, still on disk...
   expect(safeDeleted).not.toContain(foreignTempPath);
   expect(files.has(foreignTempPath)).toBe(true);
   // ...and recorded in the entry snapshot so the loop tolerates it.
@@ -7687,7 +7509,6 @@ test("synchronize() does NOT sweep a foreign temp whose stem is an UPPERCASE v4 
 
   // Proceeded past the guard, tolerating the uppercase-stem foreign temp.
   expect(err).not.toBeInstanceOf(UsageError);
-  // The foreign temp survived: never swept, still on disk...
   expect(safeDeleted).not.toContain(foreignTempPath);
   expect(files.has(foreignTempPath)).toBe(true);
   // ...and recorded in the entry snapshot so the loop tolerates it.
@@ -7739,11 +7560,9 @@ test("poll(): the loop recognizes a real temp-<uuid>.tmp but treats a non-UUID t
     }
   });
   expect(errors).toHaveLength(0);
-  // The protocol temp is recognized -- never warned.
   expect(logs.filter((l) => l.message.includes("temp-77777777"))).toHaveLength(
     0,
   );
-  // The foreign temp is warned exactly once.
   expect(
     logs.filter((l) => l.message.includes("temp-export.tmp")),
   ).toHaveLength(1);
@@ -7783,7 +7602,6 @@ test("poll() terminal: a fully-synced message with an unparseable body stops the
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("not valid JSON");
-  // The poller stopped itself; no payload delivered and no ack written.
   expect(pollerActiveBeforeDriverStop).toBe(false);
   expect(received).toHaveLength(0);
   expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(false);
@@ -7818,7 +7636,6 @@ test("poll() terminal: the unparseable-body error escapes control/ANSI bytes ech
   );
   const rendered = sanitizeErrorForDisplay(err);
   expect(rendered).toContain("not valid JSON");
-  // The peer's raw ESC, quoted back by the parser, never reaches the terminal.
   expect(rendered).not.toContain("\x1b");
   expect(rendered).toContain("\\x1b");
 });
@@ -7890,7 +7707,6 @@ test("poll() terminal: a foreign envelope version byte surfaces the same version
   expect(errors[0]).toBeInstanceOf(UsageError);
   const message = (errors[0] as Error).message;
   expect(message).toContain("incompatible psilink version");
-  // The offending byte and this build's expected version are both named.
   expect(message).toContain("envelope version byte 2");
 });
 
@@ -7924,10 +7740,8 @@ test("poll() retryable: a transient list() failure reschedules and the message i
 
   await runPoller(conn, delivered);
 
-  // The transient error surfaced but was not terminal...
   expect(errors.length).toBeGreaterThanOrEqual(1);
   expect(errors[0]).not.toBeInstanceOf(UsageError);
-  // ...and the poller rescheduled and delivered the message exactly once.
   expect(received).toHaveLength(1);
   expect(messageLoopInternals(conn).recvSeq).toBe(1);
 });
@@ -8109,10 +7923,6 @@ test("composed via fromEventConnection: an undetermined ack publish ends the exc
 });
 
 test("poll() terminal: delete mode also stops the poller on a fully-synced corrupt message", async () => {
-  // The terminal-parse rule is mode-agnostic. In delete mode poll() parses
-  // before deleting, so a corrupt fully-synced file stops the poller AND is left
-  // on disk for inspection -- it no longer silently drops-and-continues as it
-  // did before this change (the deliberate "both modes" behavior change).
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client);
   const peerId = "peer-sender";
@@ -8458,7 +8268,6 @@ test("poll(): an unrecognized file mid-loop is a terminal UsageError under the d
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = "peer-test";
 
-  // A net-new foreign file appears during the loop.
   files.set("/test/intruder.json", Buffer.from("x"));
 
   // Do NOT stop the poller in the handler: a terminal error must stop it on its
@@ -8602,11 +8411,8 @@ test("poll(): an unrecognized file mid-loop warns once per name under the warn p
     }
   });
 
-  // warn does not abort the exchange.
   expect(errors).toHaveLength(0);
-  // Several poll cycles ran...
   expect(listCount).toBeGreaterThanOrEqual(5);
-  // ...but the file was warned about exactly once, not every cycle.
   const warns = logs.filter((l) => l.message.includes("intruder.json"));
   expect(warns).toHaveLength(1);
 });
@@ -8640,12 +8446,10 @@ test("poll(): an unrecognized file mid-loop is silently skipped under the ignore
         ),
       ),
     ]);
-    // The poller is still running -- the foreign file did not stop it...
     expect(messageLoopInternals(conn).pollerActive).toBe(true);
   } finally {
     conn.stop();
   }
-  // ...and no error was emitted.
   expect(errors).toHaveLength(0);
 });
 
@@ -8900,18 +8704,12 @@ test("poll(): retain mode recognizes our own accumulated message files rather th
     }
   });
 
-  // No terminal error from the strict policy, and no per-cycle warn noise:
-  // every own file was classified as recognized across all cycles.
   expect(errors).toHaveLength(0);
   expect(listCount).toBeGreaterThanOrEqual(5);
   expect(logs).toHaveLength(0);
 });
 
 test("poll(): an ack-shaped foreign file whose target is not a real protocol file is flagged, not recognized", async () => {
-  // `me-peer-x-ack.json` has a known-party prefix and >=4 dash segments, so the
-  // old segment-count floor admitted it. Its embedded target `peer-x` is neither
-  // a hello nor a message name, so it is not a real ack and must fall to the
-  // unexpected-file policy (default error) rather than being recognized.
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 5 });
   conn.id = "me";
@@ -9072,11 +8870,9 @@ test("close() during a parked poll delete-retry emits no spurious error (site 6 
     // Let any erroneously-rescheduled poll cycle run (it must not).
     await new Promise((r) => setTimeout(r, 30));
 
-    // (b) nothing buffered either.
     expect(conn.takeBufferedError()).toBeUndefined();
   });
 
-  // (a) no error surfaced on the event channel.
   expect(errors).toHaveLength(0);
   // (c) the second delete was skipped, so its warn never fired.
   expect(logs.some((l) => l.message.includes("failed to delete"))).toBe(false);
@@ -9207,8 +9003,6 @@ test("close() during a parked rendezvous gate read completes teardown cleanly de
 
   const err = await outcome;
   expect(err).toBeInstanceOf(ConnectionClosedError);
-  // (c) no spurious error surfaced/buffered despite the teardown-side
-  // safeDeletes.
   expect(errors).toHaveLength(0);
   expect(conn.takeBufferedError()).toBeUndefined();
 });
@@ -9362,7 +9156,6 @@ test("synchronize() default: an unexpected protocol file is exit-64 and points a
   expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
   expect(rendered).toContain("old-peer-old-hello-ack.json");
   expect(rendered).toContain("--sweep-exchange-files");
-  // Rejected, not swept: the file is untouched.
   expect(files.has("/test/old-peer-old-hello-ack.json")).toBe(true);
 });
 
@@ -9407,7 +9200,6 @@ test("synchronize() default: a foreign file is tolerated, snapshotted, and not d
   await conn.synchronize();
 
   expect(conn.handshakeRole).toBe("initiator");
-  // The foreign file survived rendezvous untouched...
   expect(files.has("/test/notes.txt")).toBe(true);
   // ...and was recorded in the entry snapshot so the loop tolerates it.
   const snapshot = (conn as unknown as { foreignFileSnapshot: Set<string> })
@@ -9458,7 +9250,6 @@ test("poll(): a foreign file snapshotted at entry does not warn, but a new forei
   expect(
     logs.filter((l) => l.message.includes("preexisting.json")),
   ).toHaveLength(0);
-  // The newcomer is warned exactly once.
   expect(logs.filter((l) => l.message.includes("newcomer.json"))).toHaveLength(
     1,
   );
@@ -9521,7 +9312,6 @@ test("synchronize() --sweep-exchange-files: refuses (exit 64) on a peer hello ad
   expect(err).toBeInstanceOf(UsageError);
   expect((err as Error).message).toMatch(/retain/i);
   expect((err as Error).message).toContain("--force-retain-sweep");
-  // The retain peer's transcript hello is preserved -- nothing was deleted.
   expect(deleted).toHaveLength(0);
   expect(files.has(`/test/${peerHelloName}`)).toBe(true);
 });
@@ -9651,9 +9441,7 @@ test("synchronize() --sweep-exchange-files --force-retain-sweep: wipes the retai
     await conn.synchronize().catch(() => {});
     expect(files.has(`/test/${peerHelloName}`)).toBe(false);
   });
-  // The retain peer hello was swept...
   expect(deleted.some((p) => p.includes(`${peerId}-hello.json`))).toBe(true);
-  // ...and the destructive action was loudly warned.
   const warning = logs.find((l) =>
     /force-retain-sweep|destructive and irreversible/i.test(l.message),
   );
@@ -9715,9 +9503,7 @@ test("synchronize() --sweep-exchange-files: one delete failure still attempts ev
   expect(err).toBeInstanceOf(Error);
   expect(err).not.toBeInstanceOf(UsageError);
   expect((err as Error).message).toContain("a-b-lock.json");
-  // Every delete was attempted despite the one failure...
   expect(attempted).toHaveLength(3);
-  // ...and the deletable files were actually removed.
   expect(files.has("/test/peerA-hello.json")).toBe(false);
   expect(files.has("/test/peerB-hello.json")).toBe(false);
 });
@@ -9776,7 +9562,7 @@ test("synchronize() --sweep-exchange-files: the retain inspection stops at the f
   const origGet = client.get.bind(client);
   client.get = async (p: string) => {
     bodyReads.push(p);
-    if (p.endsWith(firstHello)) throw new Error("partial sync"); // never resolves
+    if (p.endsWith(firstHello)) throw new Error("partial sync");
     return origGet(p);
   };
 
@@ -9786,17 +9572,11 @@ test("synchronize() --sweep-exchange-files: the retain inspection stops at the f
   );
   expect(err).toBeInstanceOf(UsageError);
   expect((err as Error).message).toMatch(/retain-uncertain|did not resolve/i);
-  // The loop broke on the first unreadable hello: the second was never read.
   expect(bodyReads.some((p) => p.endsWith(firstHello))).toBe(true);
   expect(bodyReads.some((p) => p.endsWith(secondHello))).toBe(false);
 });
 
 test("synchronize() --sweep-exchange-files --force-retain-sweep: an earlier unreadable hello shadows a later malformed one and the forced sweep proceeds", async () => {
-  // The one behavior the break changes: under --force the operator has authorized
-  // the wipe, so breaking on the first unreadable hello means a later malformed
-  // hello is never read and cannot veto the forced sweep (the old read-every-
-  // hello behavior would have thrown a terminal UsageError on it and aborted).
-  // Both hellos are swept and the danger warning still fires.
   const peerA = "peerA-hello.json"; // unreadable: body never finishes syncing
   const peerB = "peerB-hello.json"; // fully synced but malformed (not a HelloEnvelope)
   const deleted: string[] = [];
@@ -9814,7 +9594,7 @@ test("synchronize() --sweep-exchange-files --force-retain-sweep: an earlier unre
 
     const origGet = client.get.bind(client);
     client.get = async (p: string) => {
-      if (p.endsWith(peerA)) throw new Error("partial sync"); // never resolves
+      if (p.endsWith(peerA)) throw new Error("partial sync");
       return origGet(p);
     };
     const origDelete = client.delete.bind(client);
@@ -10254,7 +10034,6 @@ describe("connection-per-poll idle-boundary signal", () => {
     const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
     conn.peerId = "stub-peer";
     conn.start();
-    // Let a few poll cycles run.
     await new Promise((r) => setTimeout(r, 40));
     conn.stop();
 

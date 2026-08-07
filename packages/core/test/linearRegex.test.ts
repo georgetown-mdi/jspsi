@@ -7,9 +7,6 @@ import {
 } from "../src/utils/linearRegex";
 
 // --- Engine operations -------------------------------------------------------
-// Each operation must be byte-identical to the JavaScript `RegExp` operation it
-// replaced for in-dialect patterns; the broad equivalence corpus lives in
-// transformRegexVectors.test.ts. These pin the wrapper's own contract.
 
 describe("compileLinearRegex operations", () => {
   test("replaceAll replaces every match, with $n group references", () => {
@@ -26,7 +23,6 @@ describe("compileLinearRegex operations", () => {
     );
     // No capture group: falls back to the whole match.
     expect(compileLinearRegex("\\d+").extractFirst("abc123")).toBe("123");
-    // No match.
     expect(compileLinearRegex("(\\d{4})$").extractFirst("12")).toBeNull();
     // Matches but the result is empty -> null (the `|| null` in the contract).
     expect(compileLinearRegex("(x*)").extractFirst("y")).toBeNull();
@@ -127,9 +123,6 @@ describe("coerceToPatternString", () => {
 });
 
 // --- Dialect semantics that differ from JavaScript RegExp --------------------
-// Pinned so a future re2js change is caught. These are deliberate, documented
-// divergences from JS (PROTOCOL.md): both parties run re2js, so they agree with
-// each other; only a migration from the old engine sees the difference.
 
 describe("RE2 vs JavaScript class semantics", () => {
   test("\\s is ASCII-only -- narrower than JavaScript's Unicode \\s", () => {

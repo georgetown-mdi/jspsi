@@ -246,9 +246,9 @@ test("an opaque map is verbatim all the way down (nested objects, arrays), both 
 // A caller (parseLinkageTerms, for transform.params) names keys whose object
 // value is left verbatim once its key count exceeds a given bound, so a
 // pathological-count partner record is not rewritten key by key before the
-// schema's own count bound rejects it (board item 202722105). The bound is keyed
-// by the canonical camelCase key name, like the opaque-value skip; a within-bound
-// value is recursed into and camelized as normal.
+// schema's own count bound rejects it. The bound is keyed by the canonical
+// camelCase key name, like the opaque-value skip; a within-bound value is
+// recursed into and camelized as normal.
 
 test("a width-bounded key's over-count value is left verbatim", () => {
   const value = { a_b: 1, c_d: 2, e_f: 3 };

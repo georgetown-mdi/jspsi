@@ -74,7 +74,6 @@ describe("parseSigningConfig", () => {
         }).success,
       ).toBe(false);
     }
-    // The canonical form is still accepted.
     expect(
       safeParseSigningConfig({
         mode: "certificate",

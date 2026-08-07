@@ -49,12 +49,6 @@ async function makeInjectable(
   return [recv, rawPeer];
 }
 
-// Build the binary envelope bytes (version || IV || ciphertext || tag) for
-// `plaintext` at `seq`, sealed with the send key for `senderRole`. Mirrors the
-// decorator's own envelope layout and per-direction keying so a crafted frame is
-// indistinguishable from a legitimate one except where the test deliberately
-// corrupts it. The inner transport now carries the raw envelope bytes, so this
-// is exactly what an injected frame passes to `peer.send`.
 async function sealRawBytes(
   senderRole: HandshakeRole,
   seq: number,
@@ -115,7 +109,6 @@ async function expectRejection(
   return err as ConnectionError;
 }
 
-// Convenience wrapper for the common "security"-kind case.
 async function expectSecurity(
   p: Promise<unknown>,
   messagePattern: RegExp,
@@ -181,9 +174,6 @@ test("binary and JSON payloads interleave over one connection", async () => {
 
 test("a large binary payload round-trips", async () => {
   const [encA, encB] = await makeEncryptedPair();
-  // A 100 KB frame; PSI protobuf frames are legitimately this large. Guards the
-  // binary envelope's encrypt/decrypt over a multi-block payload now that the
-  // frame is carried as raw bytes rather than chunk-stitched base64.
   const payload = new Uint8Array(100_000) as Uint8Array<ArrayBuffer>;
   for (let i = 0; i < payload.length; i++) payload[i] = i & 0xff;
   await encA.send(payload);
@@ -198,7 +188,7 @@ test("a replayed frame is rejected as a security failure", async () => {
   const [recv, peer] = await makeInjectable("responder");
   const envelope = await sealRawBytes("initiator", 0, jsonPlaintext({ n: 1 }));
   await peer.send(envelope);
-  await peer.send(envelope); // same seq again
+  await peer.send(envelope);
   expect(await recv.receive()).toEqual({ n: 1 });
   await expectSecurity(recv.receive(), /replay|out-of-order/i);
 });
@@ -207,7 +197,7 @@ test("an out-of-order frame (seq <= last accepted) is rejected as a security fai
   const [recv, peer] = await makeInjectable("responder");
   await peer.send(await sealRawBytes("initiator", 0, jsonPlaintext({})));
   await peer.send(await sealRawBytes("initiator", 1, jsonPlaintext({})));
-  await peer.send(await sealRawBytes("initiator", 1, jsonPlaintext({}))); // 1 <= 1
+  await peer.send(await sealRawBytes("initiator", 1, jsonPlaintext({})));
   await recv.receive();
   await recv.receive();
   await expectSecurity(recv.receive(), /replay|out-of-order/i);
@@ -294,9 +284,6 @@ test("an envelope with an unsupported version byte is rejected as a security fai
 
 test("a non-binary envelope (the old base64url-in-JSON object) is rejected as a security failure", async () => {
   const [recv, peer] = await makeInjectable("responder");
-  // Clean break with the pre-binary format: an inbound that is not a Uint8Array
-  // -- here the old `{ enc }` object shape -- is rejected as an invalid envelope
-  // rather than silently misparsed.
   await peer.send({ enc: "AAAAAAAAAAAAAAAA" });
   await expectSecurity(recv.receive(), /invalid envelope/i);
 });
@@ -419,7 +406,7 @@ test("a JSON body nested past the depth bound is rejected without crashing", asy
 test("an inbound seq above MAX_SAFE_INTEGER is rejected before decryption", async () => {
   const [recv, peer] = await makeInjectable("responder");
   const iv = new Uint8Array(12) as Uint8Array<ArrayBuffer>;
-  new DataView(iv.buffer).setBigUint64(IV_SEQ_OFFSET, 2n ** 53n, false); // one above MAX_SAFE_INTEGER
+  new DataView(iv.buffer).setBigUint64(IV_SEQ_OFFSET, 2n ** 53n, false);
   const garbage = new Uint8Array(32).fill(0xff);
   // version || IV || garbage (ciphertext+tag): passes the version and
   // minimum-length checks so the inbound-seq range guard is the rejecting one.
@@ -651,7 +638,7 @@ test("close() resolves even when the inner connection's close rejects", async ()
   let closeCalls = 0;
   const inner: MessageConnection = {
     send: () => Promise.resolve(),
-    receive: () => new Promise<unknown>(() => {}), // never resolves
+    receive: () => new Promise<unknown>(() => {}),
     close: () => {
       closeCalls++;
       return Promise.reject(new Error("inner close boom"));
@@ -696,11 +683,6 @@ test("deriveAeadKey known-answer vector pins the HKDF info string", async () => 
 });
 
 // --- deriveAeadKey / AEAD_CONTEXTS guards -------------------------------------
-// deriveAeadKey and the frozen AEAD_CONTEXTS tuple are exported from auth.ts and
-// lost their unit coverage when pake.test.ts was deleted in the X25519 cutover.
-// The KAT above pins the exact bytes (and the per-label difference); these
-// restore the runtime guards and the remaining derivation properties. (Ported
-// from the deleted pake.test.ts.)
 
 test("deriveAeadKey derives a stable 32-byte key for each allowed label", async () => {
   const sessionKey = new Uint8Array(32).fill(0x42);

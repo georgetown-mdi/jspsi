@@ -10,8 +10,8 @@ import { createMessagePipe } from "../src/connection/messageConnection";
 import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
 import type { Output } from "../src/config/linkageTerms";
 
-// Cross-party reconciliation of the SFTP host-key fingerprint (201058119). Each
-// party advertises the host key it observed in the authenticated post-handshake
+// Cross-party reconciliation of the SFTP host-key fingerprint. Each party
+// advertises the host key it observed in the authenticated post-handshake
 // terms exchange; a divergence is surfaced so a one-sided interception, or a
 // server rekey between the two parties' setups, becomes detectable to both.
 
@@ -59,7 +59,6 @@ test("a missing observed key on either side is not a divergence", () => {
 test("a same-type fingerprint difference warns and names both values", () => {
   const msg = reconcileHostKeyFingerprints(KEY_ED25519, KEY_ED25519_OTHER);
   expect(msg).toBeDefined();
-  // Names both observed fingerprints.
   expect(msg).toContain(KEY_ED25519.fingerprint);
   expect(msg).toContain(KEY_ED25519_OTHER.fingerprint);
   // Same type: narrowed to rekey-or-interception, with no benign-type clause.
@@ -227,11 +226,6 @@ function prepared(identity: string) {
   );
 }
 
-/**
- * Run a full exchange over an in-memory pipe, with each party advertising its
- * own observed host key. Returns the divergence message each side reported (or
- * undefined when none).
- */
 async function exchangeWithObservedKeys(
   observedInitiator: PresentedHostKey | undefined,
   observedResponder: PresentedHostKey | undefined,
