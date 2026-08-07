@@ -23,12 +23,13 @@ module, and an OpenSSL provider cannot cover a different cryptographic library
 in principle.** That is not a gap this image closes, or a later image could
 close; it is a permanent property of the design, and it belongs in the first
 paragraph of any claim made about this artifact rather than in a footnote to it.
-Receipt signing sits outside the module too, in `@noble/curves`, which is why
-the claim waits on the receipt-signing migration recorded in the sibling note.
-Key establishment runs P-256 ECDH through `crypto.subtle`, the same dispatch
-path as the AEAD, and the probe measures it, so what the image puts inside a
-validated module today is key establishment plus the AEAD and the key-schedule
-primitives: P-256 ECDH, AES-256-GCM, SHA-256, HMAC-SHA-256 and HKDF.
+Receipt signing runs ECDSA over P-256 through `crypto.subtle`, so it is on the
+same dispatch path as the AEAD, but no probe leg covers it and the image
+therefore supports no measured claim about it. Key establishment runs P-256 ECDH
+through that same path and the probe does measure it, so what the image is
+measured to put inside a validated module is key establishment plus the AEAD and
+the key-schedule primitives: P-256 ECDH, AES-256-GCM, SHA-256, HMAC-SHA-256 and
+HKDF.
 
 ## The decision
 
@@ -50,8 +51,8 @@ primitives: P-256 ECDH, AES-256-GCM, SHA-256, HMAC-SHA-256 and HKDF.
 - **No psilink-level FIPS flag.** The FIPS-mode decision belongs to the host and
   its system-wide crypto policy.
 - **Built and smoked in CI ahead of any publication.** The claim gets written
-  once, after the decided ECDSA migration lands, and the release workflow's
-  published artifacts stay as they are until it is.
+  once, and the release workflow's published artifacts stay as they are until it
+  is.
 
 ## What was rejected, and why
 
@@ -236,11 +237,9 @@ here was measured in the image rather than reasoned about.
 - **X25519 and Ed25519 through `node:crypto` or `crypto.subtle`.** The certified
   Amazon Linux module carries neither; `openssl list` reports both ABSENT while
   the provider is `status: active` and the default-configuration control lists
-  both, so the absence is the provider's rather than the listing's. psilink's
-  own Ed25519 receipt signing runs in `@noble/curves` and is functionally
-  unaffected -- and is equally outside the module, which is the point the
-  sibling note decides. Key establishment uses neither primitive: its P-256
-  ECDH runs through `crypto.subtle`.
+  both, so the absence is the provider's rather than the listing's. No psilink
+  path needs either primitive: key establishment agrees over P-256 ECDH and
+  receipt signing signs with ECDSA over P-256, both through `crypto.subtle`.
 - **Package operations inside the running image.** `dnf` dies under the shipped
   fips-only configuration on `unsupported hash type blake2s(in FIPS mode)`,
   because its Python hashes with blake2s. Unset `OPENSSL_CONF` for any in-image
@@ -428,7 +427,7 @@ reading -- Docker Hub is not reachable from the development container and no
   and what the OpenSSL Project's own certificates approve.
 - [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) and
   [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md) -- the two
-  algorithm migrations a claim about this image waits on.
+  algorithm migrations behind what a claim about this image may say.
 - [DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md) -- the variant's pins, its OS
   package inventory beside the Alpine image's, and the checks that hold both.
 - [COMPLIANCE.md](../COMPLIANCE.md#fips-140) -- the FIPS claims an agency
