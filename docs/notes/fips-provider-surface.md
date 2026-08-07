@@ -92,7 +92,7 @@ Engagement is necessary but not sufficient: a provider only covers operations th
 | AEAD AES-256-GCM, 12-byte IV (`connection/encryptedMessageConnection.ts`) | WebCrypto `crypto.subtle` | Yes -- measured engaged |
 | HKDF-SHA-256, HMAC-SHA-256, SHA-256 (`utils/crypto.ts`, `auth.ts`, `kex.ts`, `signedReceipt.ts`) | WebCrypto `crypto.subtle` | Yes -- measured available under a fips-only configuration |
 | `getRandomValues` (`utils/crypto.ts`) | WebCrypto | Yes |
-| P-256 ECDH key agreement (`kex.ts`) | WebCrypto `crypto.subtle` | Yes -- `ECDH` is listed under a fips-only configuration on every measured build; the P-256 `deriveBits` call is not itself a measured leg |
+| P-256 ECDH key agreement (`kex.ts`) | WebCrypto `crypto.subtle` | Yes -- `ECDH` is listed under a fips-only configuration on every measured build, and the P-256 `deriveBits` call is a gating leg of the variant image's engagement probe |
 | Ed25519 keygen/sign/verify (`signingIdentity.ts`, `signedReceipt.ts`) | `@noble/curves`, pure JS | **No** -- same |
 | PSI masking, P-256 (`psiEngine.ts`) | BoringSSL inside the vendored `@openmined/psi.js` (WASM, or the native addon) | **No, and not reachable in principle** -- an OpenSSL provider cannot cover a different crypto library |
 | SFTP transport crypto (`ssh2` via `connection/ssh2SftpAdapter.ts`) | `node:crypto`, not WebCrypto | Yes -- measured dispatched (see below) |

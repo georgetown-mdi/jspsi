@@ -26,9 +26,9 @@ paragraph of any claim made about this artifact rather than in a footnote to it.
 Receipt signing sits outside the module too, in `@noble/curves`, which is why
 the claim waits on the receipt-signing migration recorded in the sibling note.
 Key establishment runs P-256 ECDH through `crypto.subtle`, the same dispatch
-path as the AEAD, but the probe carries no ECDH leg, so what the image puts
-inside a validated module today is the AEAD and the key-schedule primitives:
-AES-256-GCM, SHA-256, HMAC-SHA-256 and HKDF.
+path as the AEAD, and the probe measures it, so what the image puts inside a
+validated module today is key establishment plus the AEAD and the key-schedule
+primitives: P-256 ECDH, AES-256-GCM, SHA-256, HMAC-SHA-256 and HKDF.
 
 ## The decision
 
@@ -282,7 +282,7 @@ though no configuration existed.
 The per-run report is the same question asked of the running container, and it
 is asked of the right consumer. The image ships the engagement probe and its
 entrypoint runs it before dispatching: a Node process under the image's own
-configuration, making psilink's four call shapes and requiring `fips.so` mapped
+configuration, making psilink's five call shapes and requiring `fips.so` mapped
 into that process beside an MD5 digest and a below-minimum RSA keygen that both
 fail. The preamble reads the probe's exit status and nothing else, and parses no
 text at all. That is deliberate rather than incidental. Reading `openssl list
@@ -314,14 +314,22 @@ call. The third runs a full two-party exchange between two containers of the
 image over a shared volume, which is the only end-to-end run either image gets.
 
 The probe's product legs are what a "dispatches into the validated module"
-claim may name, and no more: AES-256-GCM, HKDF-SHA-256, HMAC-SHA-256 and
-SHA-256, each at the parameter shape `packages/core/src` passes. Naming a
-primitive in such a claim means adding its leg first. That the four are calls
+claim may name, and no more: AES-256-GCM, HKDF-SHA-256, HMAC-SHA-256, SHA-256
+and P-256 ECDH, each at the parameter shape `packages/core/src` passes. Naming a
+primitive in such a claim means adding its leg first. That the five are calls
 the committed probe actually makes and completes is driven in
 `scripts/docker-entrypoint-fips.test.mjs`, so a leg silently dropped or
 misparameterised reddens there; that the claim in
-[COMPLIANCE.md](../COMPLIANCE.md#fips-140) names those four and no others is
+[COMPLIANCE.md](../COMPLIANCE.md#fips-140) names those five and no others is
 held by review.
+
+The ECDH leg is the whole handshake chain rather than the agreement alone: an
+ephemeral keygen, a raw export of the share that goes on the wire, a raw import
+of the peer's, and then `deriveBits`. `kex.ts` pins the 65-byte SEC1
+uncompressed encoding and folds the wire bytes into the transcript, so a
+provider that agreed a key while exporting or admitting a different encoding of
+the same point would break the handshake as completely as one that refused the
+curve.
 
 ## What it costs
 

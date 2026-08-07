@@ -25,9 +25,10 @@
 //     decides nothing: it reports the library context's default properties and
 //     returns 1 with no module loaded anywhere.
 //   the product legs -- an AES-256-GCM round trip, an HKDF-SHA-256 derivation,
-//     an HMAC-SHA-256 signature and a SHA-256 digest, each at the parameter
-//     shape psilink itself passes. On their own they prove nothing: every one
-//     of them succeeds through the default provider too, and looks identical.
+//     an HMAC-SHA-256 signature, a SHA-256 digest and a P-256 ECDH derivation,
+//     each at the parameter shape psilink itself passes. On their own they
+//     prove nothing: every one of them succeeds through the default provider
+//     too, and looks identical.
 //   md5, rsa1024 -- an MD5 digest and an RSA keygen below the FIPS minimum
 //     modulus both FAIL in that same process. No FIPS provider serves either,
 //     whatever its build, so either one succeeding means the default provider
@@ -43,9 +44,10 @@ import { readFileSync } from "node:fs";
 
 // The parameter shapes psilink's own calls put on the wire:
 // packages/core/src/connection/encryptedMessageConnection.ts imports a raw
-// 256-bit AES-GCM key and a 12-byte IV, and the four helpers in
+// 256-bit AES-GCM key and a 12-byte IV, the four helpers in
 // packages/core/src/utils/crypto.ts derive 32 bytes with HKDF-SHA-256 under a
-// zero salt, sign with HMAC-SHA-256, and digest with SHA-256.
+// zero salt, sign with HMAC-SHA-256, and digest with SHA-256, and
+// packages/core/src/kex.ts agrees a session key over P-256.
 const AES_KEY_BYTES = 32;
 const AES_IV_BYTES = 12;
 const AES_PLAINTEXT = "psilink fips image engagement";
@@ -54,6 +56,12 @@ const HKDF_SALT_BYTES = 32;
 const HKDF_OUTPUT_BITS = 256;
 const HKDF_INFO = "psilink fips image engagement v1";
 const HMAC_KEY_BYTES = 32;
+const ECDH_P256 = { name: "ECDH", namedCurve: "P-256" };
+// SEC1 uncompressed point `0x04 || X || Y` over P-256, the encoding kex.ts pins
+// for a share on the wire, and the 32-byte X coordinate deriveBits returns.
+const ECDH_PUBLIC_KEY_BYTES = 65;
+const ECDH_UNCOMPRESSED_POINT_PREFIX = 0x04;
+const ECDH_SHARED_SECRET_BYTES = 32;
 
 const encoder = new TextEncoder();
 
@@ -163,6 +171,48 @@ async function sha256Digest() {
   }
 }
 
+// Key establishment's own primitive. The whole chain runs here rather than
+// deriveBits alone, because psilink's handshake needs all of it: an ephemeral
+// pair whose private key stays a platform handle, its own share raw-exported as
+// the point that goes on the wire, the peer's share raw-imported back, and then
+// the agreement. A provider serving the agreement while exporting or admitting
+// some other encoding of the point would fail the handshake just as completely,
+// the transcript being over the wire bytes rather than the decoded point.
+async function ecdhP256DeriveBits() {
+  const ours = await crypto.subtle.generateKey(ECDH_P256, false, [
+    "deriveBits",
+  ]);
+  const theirs = await crypto.subtle.generateKey(ECDH_P256, false, [
+    "deriveBits",
+  ]);
+  const share = new Uint8Array(
+    await crypto.subtle.exportKey("raw", theirs.publicKey),
+  );
+  if (
+    share.length !== ECDH_PUBLIC_KEY_BYTES ||
+    share[0] !== ECDH_UNCOMPRESSED_POINT_PREFIX
+  ) {
+    throw new Error(
+      "a raw-exported P-256 public key was not the pinned uncompressed point",
+    );
+  }
+  const peer = await crypto.subtle.importKey(
+    "raw",
+    share,
+    ECDH_P256,
+    false,
+    [],
+  );
+  const shared = await crypto.subtle.deriveBits(
+    { name: "ECDH", public: peer },
+    ours.privateKey,
+    ECDH_SHARED_SECRET_BYTES * 8,
+  );
+  if (shared.byteLength !== ECDH_SHARED_SECRET_BYTES) {
+    throw new Error("P-256 ECDH returned an unexpected shared-secret length");
+  }
+}
+
 async function rsaKeygenBelowFipsMinimum() {
   await crypto.subtle.generateKey(
     {
@@ -202,6 +252,7 @@ export async function measureEngagement() {
     ["hkdf_derive_bits", "the HKDF-SHA-256 derivation", hkdfDeriveBits],
     ["hmac_sha256_sign", "the HMAC-SHA-256 signature", hmacSha256Sign],
     ["sha256_digest", "the SHA-256 digest", sha256Digest],
+    ["ecdh_p256_derive_bits", "the P-256 ECDH derivation", ecdhP256DeriveBits],
   ];
   const operations = {};
   for (const [key, , operation] of productLegs) {

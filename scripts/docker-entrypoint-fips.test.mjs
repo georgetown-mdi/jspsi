@@ -204,6 +204,7 @@ describe("the engagement probe the image ships", () => {
     ["hkdf_derive_bits", "the HKDF-SHA-256 derivation failed"],
     ["hmac_sha256_sign", "the HMAC-SHA-256 signature failed"],
     ["sha256_digest", "the SHA-256 digest failed"],
+    ["ecdh_p256_derive_bits", "the P-256 ECDH derivation failed"],
   ];
 
   it.each(PRODUCT_LEGS)("completes psilink's %s call shape", (leg) => {
