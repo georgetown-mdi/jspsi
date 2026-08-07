@@ -28,9 +28,9 @@ export const SFTP_CREDENTIAL_SCRATCH_DIR = "/run/psilink/sftp-credentials";
  * runs the built server as an ordinary user) points it at a writable,
  * non-partner-syncable location instead, since the fixed default sits under
  * root-owned `/run` and cannot be created at boot. It is server-side
- * configuration, never derived from a request,
- * and the boot containment assertion guards it exactly as it does the default -- a
- * value inside the data root or rendezvous mount refuses the boot.
+ * configuration, never derived from a request, and the boot containment assertion
+ * guards it exactly as it does the default -- a value inside the data root or
+ * rendezvous mount refuses the boot.
  */
 export const JOB_SFTP_CREDENTIAL_DIR_ENV = "JOB_SFTP_CREDENTIAL_DIR";
 
