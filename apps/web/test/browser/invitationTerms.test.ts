@@ -450,11 +450,10 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     expect(panel.textContent).toContain("risk_score");
     expect(panel.textContent).toContain("may match more than one");
     // ... the partner-authored allowed-character class is NOT among them: it is
-    // promoted whole into the always-visible core (its own constraints group), so
-    // the raw class no longer sits dimmed in the disclosure ...
+    // promoted whole into the always-visible core (its own constraints group) ...
     expect(panel.textContent).not.toContain("A-Z");
     // ... the legal agreement is NOT among them either: it is promoted whole into
-    // the always-visible core, so its reference no longer sits in the disclosure ...
+    // the always-visible core ...
     expect(panel.textContent).not.toContain("MOU-2025-0042");
     // ... and the per-key matching detail moved out, into the key's own
     // disclosure.
@@ -798,7 +797,7 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     // from the cooperative caveat above (it is about what an honest partner learns,
     // not about a dishonest one keeping the table), and lands in the "What the
     // exchange produces" tier where result sharing lives -- not merely somewhere in
-    // the panel -- preserving the labelled-group contract item 208072217 pinned.
+    // the panel.
     expect(container!.textContent).toContain(
       "learns which of its own records are in your data",
     );
@@ -963,8 +962,7 @@ describe("InvitationTerms: always-visible egress and legal-agreement facts, tier
     expect(el.textContent).toContain("Agreement valid through 2027-12-31");
 
     // The promoted block IS the whole of the agreement: it is not also duplicated
-    // inside the "Other details" disclosure (structure, not styling). The reference
-    // -- which formerly lived only in that disclosure -- is now absent from it.
+    // inside the "Other details" disclosure (structure, not styling).
     const panel = await readyPanel("Other details");
     expect(panel.textContent).not.toContain("attaches a legal agreement");
     expect(panel.textContent).not.toContain("MOU-2025-0042");
@@ -1017,12 +1015,9 @@ describe("InvitationTerms: a partner-authored allowed-character constraint is on
   });
 
   test("the constraint is not de-emphasized relative to the always-visible terms core", async () => {
-    // The regression the raise fixes: the class formerly rendered dimmed
-    // (size="xs" c="dimmed") inside the collapsed disclosure. It is now in the core
-    // at the same non-dimmed prominence as the terms around it. Assert the raw class
-    // node resolves to the SAME color as a core body-weight line elsewhere on the
-    // screen (the always-visible matching summary, a plain size="sm" Text), rather
-    // than the muted --mantine-color-dimmed the old disclosure used -- so it is not
+    // Assert the raw class node resolves to the SAME color as a core body-weight
+    // line elsewhere on the screen (the always-visible matching summary, a plain
+    // size="sm" Text), rather than the muted --mantine-color-dimmed -- so it is not
     // rendered less prominently than the always-visible terms core.
     render(terms);
     const constraints = group(GROUP);
@@ -1078,8 +1073,7 @@ describe("InvitationTerms: a partner-authored allowed-character constraint is on
       "partner-supplied, unverified",
     );
     expect(classNode!.textContent).not.toContain("unverified");
-    // The corrected framing from the prior rework is preserved: the class is not
-    // dressed up as a plain-language "limited to" guarantee.
+    // The class is not dressed up as a plain-language "limited to" guarantee.
     expect(constraints.element().textContent).not.toContain("limited to");
   });
 
@@ -1492,12 +1486,12 @@ describe("InvitationTerms: the inviter's own send is gated on the accepting part
 
 describe("InvitationTerms: the outbound-send caption does not presuppose a non-empty send", () => {
   // The caption above the acceptor's own outbound disclosure is a topic phrase
-  // ("What you will send to your partner"), not the declarative "Columns you will
-  // send ..." it replaced: that presupposed a non-empty send, so it contradicted its
-  // own empty-send body ("No columns are sent ...") and over-asserted a definite send
-  // on the pre-file review screen, where the set is not yet known. These pin that the
-  // caption reads truthfully over both branches -- and that the presupposing phrasing
-  // does not creep back at either call site.
+  // ("What you will send to your partner"), not a declarative "Columns you will
+  // send ...": a declarative caption presupposes a non-empty send, so it contradicts
+  // its own empty-send body ("No columns are sent ...") and over-asserts a definite
+  // send on the pre-file review screen, where the set is not yet known. These pin
+  // that the caption reads truthfully over both branches -- and that the
+  // presupposing phrasing does not creep back at either call site.
   function render(options: {
     perspective: "review" | "accepted";
     outboundColumns?: Array<string>;
@@ -1506,15 +1500,14 @@ describe("InvitationTerms: the outbound-send caption does not presuppose a non-e
   }
 
   const caption = "What you will send to your partner";
-  // The declarative phrasing this reword removed. Asserted absent so a revert that
-  // reintroduces the presupposition fails, rather than passing on the "send to your
-  // partner" tail both phrasings share.
+  // The declarative phrasing. Asserted absent so a revert that reintroduces the
+  // presupposition fails, rather than passing on the "send to your partner" tail
+  // both phrasings share.
   const presupposingCaption = "Columns you will send to your partner";
 
   test("reads as a topic phrase, not a definite send, above the empty-send confirmation", async () => {
     // A chosen file that sends nothing (outboundColumns []): the caption sits above
-    // the explicit "No columns are sent ..." body. The topic phrasing no longer
-    // contradicts that body the way the old declarative caption did.
+    // the explicit "No columns are sent ..." body.
     render({ perspective: "accepted", outboundColumns: [] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(container!.textContent).toContain(caption);
@@ -1598,10 +1591,9 @@ describe("InvitationTerms: the always-visible facts are tiered into labelled dir
 
   test("the produce tier groups the matching method and result sharing, and only those", async () => {
     // "What the exchange produces" carries the matching method and result sharing --
-    // what is revealed and to whom -- announced as one related set. It is slimmed to
-    // that pair: the matching mechanics (the field summary, the "Matching strategies"
-    // disclosure) moved to their own "How records are matched" tier, so this group is
-    // no longer overloaded with three unlike concerns.
+    // what is revealed and to whom -- announced as one related set, and only that
+    // pair: the matching mechanics (the field summary, the "Matching strategies"
+    // disclosure) live in their own "How records are matched" tier.
     render(terms);
     await expect.element(toggle("Other details")).toBeInTheDocument();
     const produce = group("What the exchange produces");
@@ -1615,10 +1607,9 @@ describe("InvitationTerms: the always-visible facts are tiered into labelled dir
   });
 
   test("the matching mechanics live in a 'How records are matched' tier", async () => {
-    // The field summary and the "Matching strategies" disclosure are split out of the
-    // produce tier into their own mechanics tier, kept below the disclosure/result
-    // outcome. The always-visible field summary and the disclosure toggle are both
-    // under that group.
+    // The field summary and the "Matching strategies" disclosure live in their own
+    // mechanics tier, kept below the disclosure/result outcome. The always-visible
+    // field summary and the disclosure toggle are both under that group.
     render(terms);
     await expect.element(toggle("Other details")).toBeInTheDocument();
     const mechanics = group("How records are matched");
@@ -1681,8 +1672,7 @@ describe("InvitationTerms: the always-visible facts are tiered into labelled dir
 
   test("the 'Other details' describedby always resolves, even with no payload or legal agreement", async () => {
     // The self-describing summary is always present (Other details always holds the
-    // personal-data and duplicate-match blocks), so the describedby never dangles --
-    // the invariant that replaced the former "no hint -> no describedby" case.
+    // personal-data and duplicate-match blocks), so the describedby never dangles.
     render({ ...terms, payload: undefined, legalAgreement: undefined });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     const describedById = toggle("Other details")
@@ -1722,8 +1712,7 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
   // Mirror of the send-side "(none)" treatment: an authored empty payload.receive
   // is the strict "the acceptor sends nothing" assertion, which the consent screen
   // must show rather than confuse with the lazy (undeclared) case -- the latter
-  // accepts whatever the acceptor discloses. Before this, the receive side rendered
-  // only a non-empty list, so a declared-empty receive was invisible.
+  // accepts whatever the acceptor discloses.
   function render(
     linkageTerms: LinkageTerms,
     perspective?: "review" | "accepted" | "proposing",

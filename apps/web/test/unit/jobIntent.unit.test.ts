@@ -347,10 +347,10 @@ describe("composeConfigDocument carries the operator's data-prep edits", () => {
   });
 
   test("the operator-ignored column is NOT disclosed in the composed metadata", () => {
-    // The bug this slice closes: without carried metadata the CLI infers `secret`
-    // as an unrecognized column and defaults it to disclosed payload. The forwarded
-    // metadata roles it `ignored`, so disclosedColumnNames -- the single source of
-    // truth for what leaves the machine -- excludes it.
+    // Without carried metadata the CLI infers `secret` as an unrecognized column
+    // and defaults it to disclosed payload. The forwarded metadata roles it
+    // `ignored`, so disclosedColumnNames -- the single source of truth for what
+    // leaves the machine -- excludes it.
     const intent = validIntent({ metadata: editedMetadata });
     const yaml = composeConfigDocument(intent, "/srv/jobs/abc/exchange");
     const doc = parseYaml(yaml) as { metadata?: unknown };
@@ -508,8 +508,8 @@ describe("the sftp intent arm", () => {
   });
 
   test("the sftp arm rejects a sent remote field as an unknown key", () => {
-    // The connection field is gone: the appliance provisions the one server, so
-    // a client that still sends a `remote` is rejected by the strict parse.
+    // The appliance provisions the one server, so a client that sends a `remote`
+    // is rejected by the strict parse.
     const intent = { ...validSftpIntent(), remote: TEST_SFTP_REMOTE_NAME };
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
@@ -558,7 +558,6 @@ describe("composeSftpConfigDocument", () => {
       TEST_HOST_KEY_FINGERPRINT,
     );
     expect(doc.connection.server.keyboard_interactive).toBe(true);
-    // The camelCase spellings never reach the file.
     expect(yaml).not.toContain("hostKeyFingerprint");
     expect(yaml).not.toContain("keyboardInteractive");
   });

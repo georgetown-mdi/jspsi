@@ -65,9 +65,8 @@ describe("selectExchangeDriver", () => {
   });
 
   test("unconfigured console sftp runs here (authoring pending), not save-file", () => {
-    // The silent configured:false -> save-file degrade is gone: the run mode is
-    // server-job (it runs here once the operator authors a connection), and the
-    // create gate blocks minting until there is one.
+    // The run mode is server-job (it runs here once the operator authors a
+    // connection), and the create gate blocks minting until there is one.
     expect(selectExchangeDriver("sftp", "console", false).kind).toBe(
       "server-job",
     );

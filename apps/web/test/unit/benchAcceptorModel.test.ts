@@ -222,8 +222,7 @@ describe("acceptor ledger rows", () => {
 
   test("from the columns step on, the send row names the disclosed metadata columns, sanitized", () => {
     // The acceptor's live metadata discloses a payload column the invitation never
-    // requested (the inviter authored no payload.receive). The send row must name
-    // it -- the state the security panel proved the old ledger hid.
+    // requested (the inviter authored no payload.receive). The send row must name it.
     const rows = acceptorLedgerRows(
       makeToken(),
       HOW_IT_RUNS,

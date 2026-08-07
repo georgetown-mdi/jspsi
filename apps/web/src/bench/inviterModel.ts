@@ -130,12 +130,11 @@ export function isCliTransport(
  * `JOB_RENDEZVOUS_DIR` is set, and is disabled otherwise. */
 export type TransportRunMode = ExchangeDriverSelection["kind"];
 
-/** One transport card's placement in the chooser: whether it is offered (rendered
- * at all), whether it renders disabled, how a pick would run, and -- for SFTP on a
- * console -- whether a connection still needs authoring before it can run here. */
+/** One transport card's placement in the chooser: whether it renders disabled,
+ * how a pick would run, and -- for SFTP on a console -- whether a connection
+ * still needs authoring before it can run here. */
 export interface TransportOption {
   transport: Transport;
-  offered: boolean;
   disabled: boolean;
   runMode: TransportRunMode;
   /** The console SFTP third state: offered to run here, but no connection is
@@ -200,7 +199,7 @@ export function availableTransports(
       consoleBuild &&
       !sftpConfigured &&
       !sftpSaveFilePreferred;
-    return { transport, offered: true, disabled, runMode, authoringRequired };
+    return { transport, disabled, runMode, authoringRequired };
   });
   const defaultTransport: Transport = consoleBuild
     ? sftpConfigured

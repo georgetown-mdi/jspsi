@@ -112,8 +112,6 @@ describe.skipIf(!hasBuild)(
       const { id } = (await response.json()) as { id: string };
       expect(typeof id).toBe("string");
 
-      // A zero-setup job composes no config document and no key file: the workdir
-      // holds only the inline input, never psilink.yaml or .psilink.key.
       expect(existsSync(join(dataRoot, id, "psilink.yaml"))).toBe(false);
       expect(existsSync(join(dataRoot, id, ".psilink.key"))).toBe(false);
       expect(existsSync(join(dataRoot, id, "input.csv"))).toBe(true);

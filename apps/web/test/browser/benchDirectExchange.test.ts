@@ -451,9 +451,6 @@ describe("direct exchange confirm and run", () => {
       ).toBe(true),
     );
 
-    // The operator is no longer stranded: re-walk to confirm and Run is enabled again
-    // (before the fix `started` stayed true, leaving Run permanently disabled), and a
-    // fresh create is issued rather than blocked on the still-occupied slot.
     const postsBefore = api.captured.filter(
       (r) => r.url === "/api/jobs" && r.method === "POST",
     ).length;

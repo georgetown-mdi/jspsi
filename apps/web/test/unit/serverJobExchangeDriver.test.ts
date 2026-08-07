@@ -46,7 +46,6 @@ function driverConfig(): ServerJobExchangeDriverConfig {
   };
 }
 
-/** The four lifecycle event mocks a run receives, plus a fresh signal. */
 function driverEvents(signal: AbortSignal) {
   return {
     signal,
@@ -169,7 +168,6 @@ describe("createServerJobExchangeDriver event mapping", () => {
       "exchange",
       "finish",
     ]);
-    // onStage never fires after the terminal onResult.
     expect(events.onStage.mock.invocationCallOrder.at(-1)).toBeLessThan(
       events.onResult.mock.invocationCallOrder[0],
     );
@@ -731,7 +729,6 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
 
     await driver.run(events);
 
-    // No cancel is POSTed off the signal.
     expect(cancelledIds).toEqual([]);
     // The abort is a silent user-leave: no error, and the post-abort stage is
     // never mapped.

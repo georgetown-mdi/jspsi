@@ -14,8 +14,8 @@ import { dateTimeLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type { CliTransport, SaveExchangeFields } from "./saveExchangeModel";
+import type { AlertContent } from "@components/csvIntake";
 import type { GeneratedInvitation } from "@psi/invitation";
-import type { IntakeAlert } from "./YourFileSection";
 
 /** The saved artifacts a CLI transport produces together: the minted invitation
  * (whose code the copy row shows and whose creation dates the file) and the
@@ -51,7 +51,7 @@ export function SaveExchangeSection({
   fields: SaveExchangeFields;
   saved: SavedExchange | undefined;
   saving: boolean;
-  alert: IntakeAlert | undefined;
+  alert: AlertContent | undefined;
   onFields: (fields: SaveExchangeFields) => void;
   onSave: () => void;
   onBack: () => void;

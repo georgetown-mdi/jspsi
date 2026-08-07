@@ -223,11 +223,10 @@ describe("generateInvitation", () => {
   });
 
   test("a partial-column invitation stays terms-compatible with the acceptor it produces", async () => {
-    // The bug this flow fixes: the acceptor adopts the invitation's terms, so if
-    // the embedded set diverged from what the inviter runs, the terms-compat
-    // handshake would reject. Now the inviter both embeds and runs THESE terms,
-    // and the acceptor adopts them (its own identity substituted), so the two
-    // sides carry an identical key set.
+    // The acceptor adopts the invitation's terms, so an embedded set diverging from
+    // what the inviter runs would make the terms-compat handshake reject. The
+    // inviter both embeds and runs THESE terms, and the acceptor adopts them (its
+    // own identity substituted), so the two sides carry an identical key set.
     const { linkageTerms } = await generateInvitation({
       inviterName: "Inviter",
       file: csvStream(PARTIAL_CSV),
@@ -238,9 +237,9 @@ describe("generateInvitation", () => {
       [],
     );
 
-    // Contrast: had the invitation embedded the UNFILTERED defaults (the pre-fix
-    // behavior) while the inviter ran the file-filtered set, the key sets would
-    // differ and the handshake would reject.
+    // Contrast: had the invitation embedded the UNFILTERED defaults while the
+    // inviter ran the file-filtered set, the key sets would differ and the
+    // handshake would reject.
     const unfilteredAcceptor = {
       ...getDefaultLinkageTerms("Inviter"),
       identity: "Acceptor",
@@ -269,7 +268,6 @@ describe("generateInvitation", () => {
     });
 
     const token = await decodeInvitation(encoded);
-    // (f) authored terms round-trip through generateInvitation and decode back equal.
     expect(token.linkageTerms).toStrictEqual(authored);
     // The returned object is the embedded one, for the inviter's own exchange.
     expect(linkageTerms).toStrictEqual(authored);
@@ -333,9 +331,9 @@ describe("generateInvitation", () => {
 
   test("fails closed when authored terms over-declare payload.send at the mint", async () => {
     // Defense-in-depth backstop: the Advanced editor authors no payload block
-    // today, so this cannot fire from the UI until payload authoring lands (item
-    // 202741998). Constructed by hand here to prove the mint boundary rejects an
-    // over-declaring payload.send rather than letting the token and the partner's
+    // today, so this cannot fire from the UI until payload authoring lands.
+    // Constructed by hand here to prove the mint boundary rejects an over-declaring
+    // payload.send rather than letting the token and the partner's
     // consent screen carry a column the metadata gates off. `ssn` is a linkage
     // column (isPayload:false), so it is not disclosed and may not be declared.
     const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);

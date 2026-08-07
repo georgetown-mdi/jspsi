@@ -16,8 +16,6 @@ vi.mock("@utils/clientConfig", async (importOriginal) => {
   return { ...actual, isConsoleBuild: () => clientConfig.consoleBuild };
 });
 
-/** Invoke a route's beforeLoad and return what it threw, or undefined if it
- * returned without redirecting. */
 function beforeLoadResult(route: {
   options: { beforeLoad?: (ctx: unknown) => unknown };
 }): { threw: true; value: unknown } | { threw: false; value: unknown } {

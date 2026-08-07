@@ -15,8 +15,8 @@ import { defaultSpawnCSVParseWorker } from "@psi/csvParseWorkerClient";
 // fake worker (test/unit/csvParseController.test.ts); these confirm the actual worker
 // module -- constructed via `new Worker(new URL(...))`, running core's loadCSVFile --
 // parses correctly and surfaces core's guards, in a real Worker. The production-BUNDLE
-// case (the regression #307 fixed) is a separate build-gated integration test, since
-// Vitest's browser mode serves the dev transform, not a `vite build`.
+// case is a separate build-gated integration test, since Vitest's browser mode
+// serves the dev transform, not a `vite build`.
 
 describe("CSV worker parse (real Vite-native worker)", () => {
   test("a parse driven through the worker returns the same data and fields as inline", async () => {

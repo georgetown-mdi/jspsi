@@ -228,9 +228,13 @@ describe("console inputs disabled state", () => {
     await expect
       .element(page.getByText("JOB_DATA_ROOT", { exact: false }))
       .toBeInTheDocument();
-    // The transient red fault must not be what shows for a deliberate 404.
+    // The transient red fault must not be what shows for a deliberate 404. The
+    // ServerFilePicker notice title is the anchor: it belongs to the error branch
+    // alone, where a fragment of the body would have to match a longer sentence.
     expect(
-      page.getByText("check that the job API is reachable").query(),
+      page
+        .getByText("Could not list the work directory", { exact: true })
+        .query(),
     ).toBeNull();
     // Nothing to recover, so no recovery panel.
     await vi.waitFor(() =>

@@ -267,13 +267,12 @@ export function MetadataGrid({
 
       {/* The disclosure readout is shown VISIBLY by the host's column chips
           (the "What you will send to your partner" list beside the agreed
-          terms), so the grid no longer repeats it as text -- that was a
-          duplicate on the same screen. What stays here is the announcement: a
-          screen-reader user toggling a disclosure Select above gets no spoken
-          feedback from the static chips, so this single debounced live region --
-          computed from the same disclosedColumnNames predicate the run transmits
-          on, under the direction that decides whether it transmits at all --
-          voices the set as it changes, right at the control. The testid is how a
+          terms). What stays here is the announcement: a screen-reader user
+          toggling a disclosure Select above gets no spoken feedback from the
+          static chips, so this single debounced live region -- computed from the
+          same disclosedColumnNames predicate the run transmits on, under the
+          direction that decides whether it transmits at all -- voices the set as
+          it changes, right at the control. The testid is how a
           test tells this region's copy from the identical sentence the host
           renders visibly. */}
       <VisuallyHidden

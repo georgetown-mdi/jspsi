@@ -294,8 +294,7 @@ Describe 'Select-DfsCandidate' {
 
     It 'matches server and share together, never the server alone' {
         # Substituting only the server, keeping the namespace's share, produces
-        # a device that cannot exist -- the defect that had the automatic
-        # resolution removed.
+        # a device that cannot exist.
         $connections = @(
             (New-SmbConnectionFixture -ServerName 'namespace' -ShareName 'dfs'),
             (New-SmbConnectionFixture -ServerName 'namespace' -ShareName 'exchange$'))

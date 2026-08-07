@@ -125,8 +125,6 @@ describe("copy is transport-specific", () => {
     expect(copy).toContain("SSH username");
     expect(copy).toContain("@file reference");
     expect(copy).toContain("exchange secret");
-    // Truthful about what the psilink key file carries -- no longer claims
-    // the CLI supplies SSH credentials from its own key file.
     expect(copy).not.toMatch(/supplies them at run time from its own key/);
   });
 

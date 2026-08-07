@@ -25,7 +25,6 @@ afterEach(() => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/** A mount holding a loose file, an .ssh dir with a key, and a plain subdir. */
 function mountWithKeys(): string {
   const mount = tempDir("mount");
   fs.writeFileSync(path.join(mount, "partner-password"), "s3cret\n");

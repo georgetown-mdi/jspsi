@@ -543,8 +543,7 @@ try {
         }
 
         # Whether Windows holds a connection to the namespace root, to the target,
-        # or to both is the premise the guide's removed auto-resolution rested on,
-        # and it has never been measured.
+        # or to both is an auto-resolution premise that has never been measured.
         $connections = (@(Get-SmbConnection -ErrorAction SilentlyContinue |
                     ForEach-Object { "$($_.ServerName)\$($_.ShareName)" }) | Sort-Object -Unique) -join '|'
 

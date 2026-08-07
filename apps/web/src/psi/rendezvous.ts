@@ -68,11 +68,10 @@ interface SignalingLocation {
 }
 
 /**
- * Build the PeerJS options for a signaling location. The ICE configuration
- * mirrors the former `client.ts`/`server.ts`: public STUN only, no TURN -- a
- * TURN relay forwards data, and while all traffic is relayed across the Internet
- * regardless, we do not route through a third-party relay by default (a
- * self-hosted TURN server is a future option).
+ * Build the PeerJS options for a signaling location. The ICE configuration is
+ * public STUN only, no TURN -- a TURN relay forwards data, and while all traffic
+ * is relayed across the Internet regardless, we do not route through a
+ * third-party relay by default (a self-hosted TURN server is a future option).
  *
  * `redactableIds` are the session's derived rendezvous ids; the installed
  * `logFunction` strips them from PeerJS output so the per-session diagnostic
@@ -105,9 +104,8 @@ function buildPeerOptions(
 
 /**
  * This app's own signaling location, for the inviter listening on its derived id.
- * Mirrors the former dialer: `localhost` is normalized to a loopback literal a
- * peer can dial, and an empty (default-port) location resolves to 443/80 by
- * scheme.
+ * `localhost` is normalized to a loopback literal a peer can dial, and an empty
+ * (default-port) location resolves to 443/80 by scheme.
  */
 function inviterLocationFromWindow(): SignalingLocation {
   let host = window.location.hostname;

@@ -482,7 +482,6 @@ describe("inviter bench", () => {
       )
       .toBeInTheDocument();
 
-    // The layout holds at 400px: no horizontal document overflow.
     await page.viewport(400, 800);
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(400);
   });
@@ -556,9 +555,6 @@ describe("inviter bench", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Review & create");
 
-    // The check-your-answers table restates the proposal, and all three
-    // transports (browser plus the two command-line transports) are now
-    // selectable -- no disabled cards, no roadmap tags.
     await expect
       .element(page.getByText("clients.csv - 2 rows"))
       .toBeInTheDocument();

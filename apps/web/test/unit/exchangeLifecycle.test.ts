@@ -176,7 +176,7 @@ describe("runExchangeLifecycle", () => {
   beforeEach(() => {
     // Default happy mocks; individual tests override as needed. The handshake
     // resolves (its 32-byte session key is unused by the lifecycle today), so the
-    // owner advances to runExchange exactly as before the handshake existed.
+    // owner advances to runExchange.
     mockedAuthenticate.mockResolvedValue({
       sessionKey: new Uint8Array(32),
       rotatedSecret: "rotated",
@@ -612,9 +612,9 @@ describe("runExchangeLifecycle", () => {
     controller.abort();
     await run;
 
-    expect(close).toHaveBeenCalledTimes(1); // teardown-exclusive effect, once
+    expect(close).toHaveBeenCalledTimes(1);
     expect(peer.disconnect).toHaveBeenCalled();
-    expect(s.onError).not.toHaveBeenCalled(); // abort is silent
+    expect(s.onError).not.toHaveBeenCalled();
     expect(s.onResult).not.toHaveBeenCalled();
   });
 
@@ -623,8 +623,8 @@ describe("runExchangeLifecycle", () => {
     mockedOpen.mockResolvedValue(mc);
     // The handshake parks on a receive that the teardown close() will reject,
     // mirroring how a deliberate teardown unwinds an in-flight key exchange. This
-    // exercises an abort landing in the newly-inserted handshake step (before
-    // runExchange), the one interleaving the other abort tests do not cover.
+    // exercises an abort landing in the handshake step (before runExchange), the
+    // one interleaving the other abort tests do not cover.
     mockedAuthenticate.mockImplementation(
       async (c) => (await c.receive()) as AuthResult,
     );
@@ -643,10 +643,10 @@ describe("runExchangeLifecycle", () => {
     controller.abort();
     await run;
 
-    expect(close).toHaveBeenCalledTimes(1); // teardown-exclusive effect, once
+    expect(close).toHaveBeenCalledTimes(1);
     expect(peer.disconnect).toHaveBeenCalled();
-    expect(mockedRunExchange).not.toHaveBeenCalled(); // never reached the exchange
-    expect(s.onError).not.toHaveBeenCalled(); // abort is silent
+    expect(mockedRunExchange).not.toHaveBeenCalled();
+    expect(s.onError).not.toHaveBeenCalled();
     expect(s.onResult).not.toHaveBeenCalled();
   });
 

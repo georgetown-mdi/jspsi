@@ -52,7 +52,6 @@ describe("disclosure choice <-> {role, isPayload}", () => {
       const out = applyDisclosure(col({ name: "x" }), choice);
       expect(out.role).toBe(role);
       expect(out.isPayload).toBe(isPayload);
-      // Only the payload choice is disclosed to the partner.
       expect(isDisclosedToPartner(out)).toBe(choice === "payload");
     },
   );
@@ -200,7 +199,6 @@ describe("single-identifier rule", () => {
     expect(demotedIdentifiers).toEqual(["a"]);
     expect(next.find((c) => c.name === "a")?.role).toBe("ignored");
     expect(next.find((c) => c.name === "b")?.role).toBe("identifier");
-    // The displaced identifier is not silently disclosed.
     expect(disclosedColumnNames(next)).toEqual([]);
     expect(hasMultipleIdentifiers(next)).toBe(false);
   });

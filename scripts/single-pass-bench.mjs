@@ -1,4 +1,4 @@
-// Single-pass PSI measurement harness for board item 206245686.
+// Single-pass PSI measurement harness.
 //
 // Measures the two costs that bind the single-pass dataset ceiling -- they are
 // NOT the wire size (see docs/spec/PROTOCOL.md, "Linkage strategies"):
@@ -14,8 +14,8 @@
 //      cascade replay, all resident at once. The receiver is the heavier side.
 //
 // Three memory quantities are reported, and they differ by more than an order of
-// magnitude (board item 206377899; see docs/spec/PROTOCOL.md, the single-pass
-// dataset ceiling): the lifetime peak RSS (transient allocation churn, the
+// magnitude (see docs/spec/PROTOCOL.md, the single-pass dataset ceiling): the
+// lifetime peak RSS (transient allocation churn, the
 // practical ceiling), the live V8 heap after a forced GC (retained JS), and the
 // WebAssembly linear heap. The WASM heap must be measured DIRECTLY -- it is the
 // emmalloc linear memory the OpenMined module exports, grow-only and never
@@ -44,8 +44,8 @@
 //     linear heap per side. maxRSS is the WHOLE-PROCESS LIFETIME high-water mark, so
 //     it captures transient allocation churn across all phases, not an isolated
 //     single phase's peak; most of the per-value slope is collectable JS garbage,
-//     not live retained memory (board item 206377899). With --gc the children fork
-//     under --expose-gc, the same runtime flag the shipped CLI sets, which turns on
+//     not live retained memory. With --gc the children fork under --expose-gc,
+//     the same runtime flag the shipped CLI sets, which turns on
 //     @psilink/core's relieveTransientMemory at the single-pass phase boundaries --
 //     so the recv RSS the table reports is the real shipped relief, not a
 //     bench-only collection. The table also adds the post-GC live heap, the
@@ -175,9 +175,9 @@ async function runRates(argv) {
     const sVals = Array.from({ length: D }, (_, i) => `s_${i}`);
     const cVals = Array.from({ length: D }, (_, i) => `c_${i}`);
 
-    // The masking building blocks are async as of board item 208035324 (so the CLI
-    // can run them off-thread through a worker-backed engine). This bench passes no
-    // engine, so the participants use the default in-process engine and the crypto
+    // The masking building blocks are async (so the CLI can run them off-thread
+    // through a worker-backed engine). This bench passes no engine, so the
+    // participants use the default in-process engine and the crypto
     // still runs on THIS thread; awaiting each call in turn times one operation at a
     // time, so the per-op microsecond figures stand.
     let t = performance.now();

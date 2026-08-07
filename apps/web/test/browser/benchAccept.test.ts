@@ -902,7 +902,6 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     );
     expect(sendRow).toBeDefined();
     expect(sendRow?.querySelector("dd")?.textContent).toContain("comment");
-    // The old bug read the empty invitation request as "No additional columns".
     expect(sendRow?.querySelector("dd")?.textContent).not.toContain(
       "No additional columns",
     );

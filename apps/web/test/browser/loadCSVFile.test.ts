@@ -45,10 +45,10 @@ describe("loadCSVFile multi-chunk parsing", () => {
 
     // Count how many times PapaParse actually fires the per-chunk callback, by
     // wrapping the chunk handler the wrapped config carries. This makes the
-    // multi-chunk premise executable (it replaces the old `WORKERS_SUPPORTED`
-    // assertion): if a future PapaParse delivered this file inline in a single
-    // chunk, the accumulation would no longer be exercised and the row assertions
-    // below could pass vacuously -- so assert more than one chunk was seen.
+    // multi-chunk premise executable: if a future PapaParse delivered this file
+    // inline in a single chunk, the accumulation would no longer be exercised and
+    // the row assertions below could pass vacuously -- so assert more than one
+    // chunk was seen.
     let chunkCalls = 0;
     const realParse = Papa.parse;
     vi.spyOn(Papa, "parse").mockImplementation(((

@@ -1,3 +1,5 @@
+import { isRecord, readJsonOrNull } from "./jobApiBody";
+
 import type {
   JobInputListing,
   JobInputProfile,
@@ -82,20 +84,6 @@ export interface JobRendezvousConfig {
   configured: boolean;
   locator?: string;
   folderName?: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-/** Decode a response body as JSON, or null when it is empty or not JSON (an error
- * response may carry no body). */
-async function readJsonOrNull(response: Response): Promise<unknown> {
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    return null;
-  }
 }
 
 function isStringArray(value: unknown): value is Array<string> {

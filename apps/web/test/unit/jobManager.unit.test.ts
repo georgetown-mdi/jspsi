@@ -717,7 +717,6 @@ describe("the in-app authored sftp connection", () => {
     const server = composedServer(configYaml);
     expect(configYaml).toContain("channel: sftp");
     expect(server.host).toBe("authored.partner.example");
-    // The @path reference lands verbatim; the secret bytes never reach the config.
     expect(server.password).toBe(`@${secretPath}`);
     expect(configYaml).not.toContain("s3cret");
   });
@@ -1339,7 +1338,6 @@ describe("the disk-only DELETE arm", () => {
     const manager = bareManager(root);
     expect(await manager.deleteJob(id)).toBe(true);
     expect(fs.existsSync(workdir)).toBe(false);
-    // A second delete finds nothing.
     expect(await manager.deleteJob(id)).toBe(false);
   });
 

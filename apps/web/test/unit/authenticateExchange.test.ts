@@ -217,9 +217,8 @@ describe("authenticateExchange", () => {
 
   // --- Threaded invitation expiry ------------------------------------------
   //
-  // authenticateExchange now forwards the invitation's `expires` into core's
-  // auth parameters, arming the pre- and post-handshake expiry guards that were
-  // dormant while the web path passed only `{ sharedSecret }`. The guards live
+  // authenticateExchange forwards the invitation's `expires` into core's auth
+  // parameters, arming the pre- and post-handshake expiry guards. The guards live
   // in core (covered there); these pin that the web wrapper threads the value
   // and re-tags an expiry failure as the trust-distinct `security` kind, not the
   // generic retryable bucket.
