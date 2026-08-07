@@ -48,9 +48,10 @@ The structural invariants are enforced by `scripts/dockerfile-freeze.test.mjs`
 the FIPS variant's `Dockerfile.fips` alike: every install is `npm ci`, the
 lockfile and the root `.npmrc` are copied into the builder before the first
 install, the shipped tree is the `--omit=dev` one, the runtime stage runs no npm
-at all, each file's OS-package installs are exactly the reviewed set, and the
-copied layout keeps the workspace links and the PSI worker entry where the CLI
-resolves them.
+at all, every stage builds from the reviewed base digest or from another stage of
+the same file, each file's OS-package installs are exactly the reviewed set, and
+the copied layout keeps the workspace links and the PSI worker entry where the
+CLI resolves them.
 
 Those invariants are read off `COPY` and `RUN`, so the test refuses every other
 instruction class outright, in either stage, rather than modeling it. `ADD` is
@@ -67,6 +68,15 @@ base is a deliberate digest update. Pin the multi-arch index digest,
 not a platform-specific one, or the multi-platform release build cannot resolve
 every architecture; obtain it with `docker buildx imagetools inspect
 node:26-alpine`.
+
+What makes that update deliberate is the freeze test, which holds the digest as a
+literal listed once per stage: a stage re-pinned onto another digest, dropped
+back to the floating tag, or collapsed onto the other stage reddens until the
+literal moves in the same diff. The builder's `FROM` is held as tightly as the
+runtime stage's, because the npm that resolves the tree the runtime stage ships
+is the one the builder's base carries -- a property of the digest rather than of
+anything in this repository, recorded in
+[DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
 
 **The one OS package the build fetches.** The runtime stage runs
 `apk add --no-cache samba-client`, which is a dependency resolved at image-build
