@@ -10,6 +10,7 @@ import {
   disclosedColumnNames,
   getLogger,
   parseExchangeSpec,
+  redactAndSanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -334,6 +335,7 @@ export async function validateAccept(params: {
       reconcileAcceptConfig({
         configPath: options.configFile,
         myTerms,
+        consentedPayloadColumns: token.disclosedPayloadColumns,
         target: connection,
         log,
       });
@@ -395,6 +397,7 @@ export async function validateAccept(params: {
     reconcileAcceptConfig({
       configPath: options.configFile,
       myTerms,
+      consentedPayloadColumns: token.disclosedPayloadColumns,
       log,
     });
   // `-` is gated on `--consent-to-terms` here exactly as on the online path
@@ -446,14 +449,26 @@ export async function validateAccept(params: {
  * {@link UsageError} -- before the prompt and before any network activity -- when
  * a config exists but disagrees, or cannot be parsed to compare, showing the
  * user exactly what to resolve.
+ *
+ * Both accept-reuse paths -- offline, and online ahead of any network activity --
+ * reach the received-payload warning below through this one call, so a single
+ * wording covers both and lands before the confirmation prompt, where the
+ * operator can still decline what it reports.
  */
 function reconcileAcceptConfig(params: {
   configPath: string;
   myTerms: LinkageTerms;
+  /**
+   * The disclosed subset this acceptance consents to, from the invitation token.
+   * Compared against the kept config's recorded lock-in only to warn about a
+   * removal; what is persisted is decided by the caller's own write (see
+   * {@link persistExpectedPayloadColumns}).
+   */
+  consentedPayloadColumns: string[] | undefined;
   target?: RunnableConnectionConfig;
   log: ReturnType<typeof getLogger>;
 }): { reuse: boolean; existingOutputShares?: boolean } {
-  const { configPath, myTerms, target, log } = params;
+  const { configPath, myTerms, consentedPayloadColumns, target, log } = params;
   if (detectFileConflicts([configPath]).length === 0) return { reuse: false };
 
   // Reference to the source(s) compared against, woven into the messages so the
@@ -534,6 +549,34 @@ function reconcileAcceptConfig(params: {
         `configuration at ${configPath}; they apply to this exchange only and ` +
         `the saved config is left unchanged:\n` +
         conn.warnings.map((w) => `  - ${w}`).join("\n"),
+    );
+
+  // A kept config recording a consented received set, re-accepted from an
+  // invitation that carries no disclosed subset, has that record REMOVED -- the
+  // contract leaves no set standing that this acceptance did not show -- and the
+  // next run then reconciles the received payload lazily. The removal stands; the
+  // warning is so giving up that check is a decision the operator sees at the
+  // prompt rather than a silent consequence of accepting. A recorded EMPTY set is
+  // named rather than listed: it is the strictest lock-in (receive nothing) and
+  // has no column names to show. Each recorded name is partner-sourced (the
+  // inviter's namespace), so it is redacted and escaped at this composition site
+  // and printed one per line -- a name carrying a list separator cannot then be
+  // misread as two.
+  const recordedLockIn = existing.expectedPayloadColumns;
+  if (recordedLockIn !== undefined && consentedPayloadColumns === undefined)
+    log.warn(
+      `this invitation declares no disclosed columns, so accepting it removes ` +
+        `the received-payload lock-in recorded in ${configPath}. That lock-in ` +
+        `holds the partner's payload to ` +
+        (recordedLockIn.length === 0
+          ? "no columns at all (a strict receive-nothing consent)."
+          : "exactly these columns:\n" +
+            recordedLockIn
+              .map((column) => `  - ${redactAndSanitizeForDisplay(column)}`)
+              .join("\n")) +
+        `\nWithout it the next 'psilink exchange' from this configuration ` +
+        `accepts whatever columns the partner transmits. To keep the check, ask ` +
+        `the inviting party for an invitation that declares the columns it sends.`,
     );
 
   log.info(
