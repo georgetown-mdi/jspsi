@@ -7,10 +7,10 @@ import {
 } from "../../src/connection/sftpHeartbeat";
 
 // The application-layer keepalive that defeats a server's SFTP-command idle
-// timeout (board item 208035324). These pin the behaviors the adapter relies on:
-// it beats only after a genuine idle interval, never while a real operation is in
-// flight (ssh2-sftp-client forbids concurrent ops on one client), never stacks
-// beats, and stops dead on teardown so nothing outlives the session.
+// timeout. These pin the behaviors the adapter relies on: it beats only after a
+// genuine idle interval, never while a real operation is in flight
+// (ssh2-sftp-client forbids concurrent ops on one client), never stacks beats,
+// and stops dead on teardown so nothing outlives the session.
 
 const log = () => ({ trace: vi.fn() });
 

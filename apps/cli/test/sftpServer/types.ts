@@ -46,8 +46,8 @@ export interface SftpServerHandle {
   /**
    * The server's OpenSSH SHA256 host-key fingerprint (`SHA256:...`), the value a
    * client pins as `connection.server.host_key_fingerprint`. Exposed so the
-   * suite can pin the server it connects to: with the no-pin default now
-   * fail-closed, every conformance connection must pin this.
+   * suite can pin the server it connects to, as every conformance connection
+   * must under the fail-closed no-pin default.
    */
   hostKeyFingerprint: string;
   /**

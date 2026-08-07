@@ -594,7 +594,7 @@ test("validateInvite: a split online invite emits the pair verbatim, acceptor mi
   // --outbound-path makes the connection split (URL path = inbound, override =
   // outbound). The endpoint carries the inviter's pair unswapped; the acceptor's
   // connectionFromEndpoint lands the inviter's outbound on the acceptor's inbound,
-  // making the two parties mirror images (item 202418344's consumer, end-to-end).
+  // making the two parties mirror images.
   const { input, options } = onlineFixture();
   const ready = await validateInvite({
     resolved: { mode: "online", url: new URL("sftp://host/inviter-in"), input },

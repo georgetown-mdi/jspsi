@@ -161,9 +161,6 @@ test("a malformed credential-bearing server URL does not echo the credential", (
 
 // --- createConnection --------------------------------------------------------
 
-// createConnection now adapts a ConnectionOverrideOptions bag to the shared
-// domain builder's ConnectionOverrides shape; a bare bag (no overrides set) maps
-// to a connection built from the URL alone, which is what these base cases want.
 const baseOptions: ConnectionOverrideOptions = {};
 
 test("createConnection filedrop: channel and path are set", () => {
@@ -305,12 +302,6 @@ test("createConnection sftp: a bare-host URL leaves the path unset", () => {
 });
 
 test("createConnection sftp: a host-less URL is a usage error", () => {
-  // Now that zero-setup builds its connection through the shared connectionFromURL
-  // domain builder, a credential-less/host-less sftp URL (e.g. sftp:///drop) is
-  // rejected here with a clean UsageError -- the same fast, exit-64 failure the
-  // invite/accept paths already gave -- rather than letting host: "" flow through
-  // to an obscure downstream connect failure. Pins the normalize-to-bootstrap
-  // fix so zero-setup can never regress to the looser (untested) behavior it had.
   expect(() => createConnection(new URL("sftp:///drop"), baseOptions)).toThrow(
     UsageError,
   );

@@ -5956,8 +5956,6 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       );
       expect(dropWarns).toEqual([]);
 
-      // The operator still hears about the partner that never closes, described as
-      // what now happens rather than as the stall that used to follow.
       expect(warn).toHaveBeenCalledTimes(1);
       const message = warn.mock.calls[0][0] as string;
       expect(message).toContain("did not close the connection");

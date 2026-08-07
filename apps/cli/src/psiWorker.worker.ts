@@ -13,7 +13,7 @@ import { loadCliPsiBackend } from "./psiBackend";
 
 // Expose gc() in this worker so relievePsiWorkerMemory (@psilink/core) can force a
 // collection of the per-op JS<->native marshalling churn -- the single-pass
-// receiver's dominant transient cost, which now lives on this worker's heap rather
+// receiver's dominant transient cost, which lives on this worker's heap rather
 // than the main thread's. --expose-gc cannot be passed through a worker's execArgv
 // (Node rejects it with ERR_WORKER_INVALID_EXEC_ARGV), and a parent exposes gc in
 // its workers only when it was itself launched with --expose-gc, so enable it at
@@ -29,7 +29,7 @@ if (typeof globalWithGc.gc !== "function") {
 }
 
 // worker_threads entry point that runs the PSI elliptic-curve masking off the CLI's
-// event-loop-owning thread, so a multi-minute round no longer starves the SFTP
+// event-loop-owning thread, so a multi-minute round does not starve the SFTP
 // heartbeat or the liveness timers. It is seeded once with
 // the participant's role and id through workerData, loads the same native-preferred
 // backend the main thread would, then answers each request from the host

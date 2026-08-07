@@ -131,14 +131,6 @@ function testOptions(label: string): CommonBootstrapOptions {
   };
 }
 
-// writeOutput now resolves on the stream's 'finish' and runProtocol awaits it, so
-// the output file is fully flushed by the time runProtocol resolves; this poll is
-// retained as cheap insurance against filesystem visibility lag. It waits until the
-// file holds exactly the expected line count (header + dataRows) AND is byte-stable
-// across two reads. On timeout, report the last content seen, so a genuine stall
-// (or an unexpected row count) is diagnosable rather than blamed on an empty file.
-// Stricter than the sibling authenticatedExchange test's stability-only poll
-// because here the exact output shape is known up front.
 async function readStableOutput(
   file: string,
   dataRows: number,

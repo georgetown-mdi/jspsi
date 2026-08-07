@@ -13,11 +13,11 @@ const PASSWORD = "kbd-secret";
 // it refuses the direct `password` method and advertises keyboard-interactive as
 // the sole continuation, then prompts for and verifies the password. This is the
 // hardened-server configuration a `password`-only client (and plain `ssh`) is
-// refused by, while a GUI SFTP client -- and now the CLI with
-// keyboard_interactive enabled -- authenticates. The session accepts the SFTP
-// subsystem so a client `connect` completes; no file handlers are needed (these
-// tests assert on the handshake outcome, and connect resolving is itself proof
-// of a completed authentication).
+// refused by, while a GUI SFTP client -- and the CLI with keyboard_interactive
+// enabled -- authenticates. The session accepts the SFTP subsystem so a client
+// `connect` completes; no file handlers are needed (these tests assert on the
+// handshake outcome, and connect resolving is itself proof of a completed
+// authentication).
 async function startKeyboardInteractiveServer(): Promise<{
   host: string;
   port: number;

@@ -340,13 +340,12 @@ afterEach(async () => {
 
 // --- Peer-silence guidance ---------------------------------------------------
 
-// The sender-side residue of board item 195173462: the receiver names its own
-// cause locally, but the remote sender only sees the inactivity timeout, so it
-// surfaces guidance about likely receiver-side causes. runProtocol threads this
-// text to fromEventConnection's inactivityHint, which the core layer appends to
-// the peer-silence error (the append mechanism is pinned in
-// packages/core/test/messageConnection.test.ts). This pins the wording itself:
-// the deliverable per the acceptance criteria.
+// The receiver names its own cause locally, but the remote sender only sees the
+// inactivity timeout, so it surfaces guidance about likely receiver-side causes.
+// runProtocol threads this text to fromEventConnection's inactivityHint, which
+// the core layer appends to the peer-silence error (the append mechanism is
+// pinned in packages/core/test/messageConnection.test.ts). This pins the wording
+// itself.
 test("PEER_SILENCE_GUIDANCE names likely receiver-side causes without overclaiming", () => {
   // Names the two probable receiver-side faults.
   expect(PEER_SILENCE_GUIDANCE).toContain("exited");
@@ -1684,10 +1683,10 @@ test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceed
   // A terminal transport/directory UsageError thrown during the data exchange
   // reaches the catch with tokenRotated=true, where the generic "retry without
   // re-inviting" advisory would otherwise fire and contradict the error's own
-  // terminal refusal. FrameSizeExceededError now carries a class-level
-  // psilinkRecoveryHintEmitted tag (board item 199419757), so the hint-walker
-  // must suppress the generic advisory -- this pins that the new class tag is
-  // honored end to end, not just the Object.assign tags the other tests cover.
+  // terminal refusal. FrameSizeExceededError carries a class-level
+  // psilinkRecoveryHintEmitted tag, so the hint-walker must suppress the generic
+  // advisory -- this pins that the class tag is honored end to end, not just the
+  // Object.assign tags the other tests cover.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -2698,7 +2697,7 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
     }
 
     // 2. The cleartext probe never crossed the wire in any frame (PSI or
-    //    key-exchange) -- checked over the raw bytes, since frames are now binary.
+    //    key-exchange) -- checked over the raw bytes, since frames are binary.
     for (const buf of wireBuffers) {
       expect(buf.includes(CANARY)).toBe(false);
     }
@@ -3490,8 +3489,8 @@ test("a mismatched shared secret under --event-stream emits category security an
     await connB.close().catch(() => {});
   }
 
-  // The real handshake failure: the generic non-oracular message, now carried
-  // by a security-kind ConnectionError.
+  // The real handshake failure: the generic non-oracular message, carried by a
+  // security-kind ConnectionError.
   expect(resA.status).toBe("rejected");
   const reasonA = (resA as PromiseRejectedResult).reason as unknown;
   expect(reasonA).toBeInstanceOf(ConnectionError);

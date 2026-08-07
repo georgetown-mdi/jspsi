@@ -1408,7 +1408,7 @@ test.each(["sftp", "filedrop"] as const)(
 test("endpointFromConnection -> connectionFromEndpoint round-trips a split pair mirror-swapped", () => {
   // End-to-end producer -> consumer: the inviter emits its pair verbatim, and the
   // acceptor's single swap site lands the inviter's outbound on the acceptor's
-  // inbound (item 202418344's dormant consumer, now exercised by the producer).
+  // inbound.
   const connection = connectionFromURL(new URL("file:///inviter-in"), {
     options: { retainFiles: true },
     server: { outboundPath: "/inviter-out" },
@@ -1733,7 +1733,7 @@ test("runOnlineBootstrap leaves an empty observation lazy even when the inviter 
 test("runOnlineBootstrap does not crystallize the observed set without the inviter opt-in", async () => {
   // The online acceptor learns its received set up front from the token and does
   // not pass persistObservedReceivedPayload, so its saved config records no
-  // observed lock-in (203798031's in-memory-for-its-single-run design stands).
+  // observed lock-in.
   mockSuccessfulExchange(["dob", "zip"]);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
   const configPath = path.join(dir, "psilink.yaml");
