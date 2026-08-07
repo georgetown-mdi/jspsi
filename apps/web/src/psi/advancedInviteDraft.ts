@@ -646,11 +646,10 @@ function standardizationForImportedTerms(
     // rule holds on every path: core's `resolveFieldColumns` binds only a
     // `role: linkage` column, and the workbench's `addFieldForType` /
     // `columnsForType` likewise offer only linkage columns. An extra field with no
-    // free `linkage` column stays
-    // undeclared (fail-closed); the operator establishes the binding by roling the
-    // column `linkage` and binding it in the workbench. The default base's
-    // first-column-per-type binding comes from the same core rule, so it too binds
-    // only `role: linkage` columns.
+    // free `linkage` column stays undeclared (fail-closed); the operator
+    // establishes the binding by roling the column `linkage` and binding it in the
+    // workbench. The default base's first-column-per-type binding comes from the
+    // same core rule, so it too binds only `role: linkage` columns.
     const freeColumn = metadata.find(
       (column) =>
         column.type === field.type &&

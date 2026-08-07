@@ -272,11 +272,10 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
     // filled-primary Button / ActionIcon / Checkbox text must actually be pointed at
     // (Mantine resolves a filled surface's own text colour color-scheme-blind, so it
     // would otherwise be white in both schemes). Pin that wiring: each component's
-    // vars override must emit the contrast variable for the filled primary
-    // (default variant, no colour) and must
-    // NOT touch a default/subtle/light or explicitly-coloured instance, which keep
-    // their own text colour. The rendered colours themselves are checked in
-    // test/browser/themeContrast.test.ts.
+    // vars override must emit the contrast variable for the filled primary (default
+    // variant, no colour) and must NOT touch a default/subtle/light or
+    // explicitly-coloured instance, which keep their own text colour. The rendered
+    // colours themselves are checked in test/browser/themeContrast.test.ts.
     const contrastVar = "var(--mantine-primary-color-contrast)";
     const wiring: Array<[string, string]> = [
       ["Button", "--button-color"],

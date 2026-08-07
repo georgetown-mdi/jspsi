@@ -127,15 +127,14 @@ export const mantineTheme: MantineThemeOverride = createTheme({
   // 5.59:1. The filled hover step resolves to cyan-8 (4.35:1) -- transient, and AA
   // is judged on the resting state.
   //
-  // Dark is 6. No single cyan shade satisfies both dark bars with WHITE filled
-  // text: cyan-8 leaves the filled button text at white-on-cyan-8 = 4.35:1
-  // (under 4.5), and darkening to cyan-9 fixes the button
-  // but drops the focus ring / input border on the dark body to 2.78:1 / 2.43:1
-  // (under 3). cyan-6 is bright enough that the focus ring on the dark-7 body reaches
-  // 5.57:1 and the input focus border on the dark-6 input 4.87:1, and the
-  // filled-primary text -- routed through --mantine-primary-color-contrast (black on
-  // cyan-6) by the component overrides below -- reaches 7.53:1. All three clear with
-  // margin.
+  // Dark is 6. No single cyan shade satisfies both dark bars with WHITE filled text:
+  // cyan-8 leaves the filled button text at white-on-cyan-8 = 4.35:1 (under 4.5),
+  // and darkening to cyan-9 fixes the button but drops the focus ring / input border
+  // on the dark body to 2.78:1 / 2.43:1 (under 3). cyan-6 is bright enough that the
+  // focus ring on the dark-7 body reaches 5.57:1 and the input focus border on the
+  // dark-6 input 4.87:1, and the filled-primary text -- routed through
+  // --mantine-primary-color-contrast (black on cyan-6) by the component overrides
+  // below -- reaches 7.53:1. All three clear with margin.
   primaryShade: { light: 9, dark: 6 },
   components: {
     // Filled-primary text/icon -> per-scheme contrast color (see
