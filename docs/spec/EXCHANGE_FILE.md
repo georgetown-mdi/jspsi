@@ -17,11 +17,13 @@ from an invitation** material under that document's
 [Authentication](../EXCHANGE_REFERENCE.md#authentication) section; this document
 covers how the artifact is constructed and what it does and does not promise. It
 does not cover the field-level meaning of any config field (see
-[EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md)), the invitation token wire
-format and its endpoint sub-schemas (see [FILE_SYNC.md](FILE_SYNC.md)), or the
+[EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md)), the invitation token's
+connection-endpoint sub-schemas (see [FILE_SYNC.md](FILE_SYNC.md)), or the
 owner-only write discipline the key file it provisions is written under (see
-[CREDENTIAL_STORAGE.md](CREDENTIAL_STORAGE.md)). Intended readers are security
-auditors and implementors.
+[CREDENTIAL_STORAGE.md](CREDENTIAL_STORAGE.md)). The token's own wire format --
+its encoding, its checksum, and its top-level field layout -- is specified in no
+document of this tier; `packages/core/src/config/invitation.ts` is the only
+statement of it. Intended readers are security auditors and implementors.
 
 ## The artifact is the CLI config schema
 
@@ -52,12 +54,15 @@ The schema is the shared contract; the mint layer adds three guarantees a
 hand-authored config is not obligated to meet:
 
 - **No `authentication` block.** The mint layer never assembles the top-level
-  `authentication` block at all. The schema makes that block optional, and its
-  only fields today (`shared_secret`, `expires`) are key-file-injected at
-  runtime, so a minted file that omits the block carries no secret and no
-  place to put one. This mirrors `saveConfig`, which strips `shared_secret` and
-  `expires` from any `authentication` block a caller leaves populated; the mint
-  layer reaches the same end by never building the block.
+  `authentication` block at all. The schema makes that block optional and gives
+  it three fields: `shared_secret` and `expires`, both key-file-injected at
+  runtime, and the operator-policy `token_max_age_days`, which an operator sets
+  in `psilink.yaml` and no mint path has a value for. So a minted file that omits
+  the block carries no secret and no place to put one, and leaves the max-age
+  policy to whoever runs it. This mirrors `saveConfig`, which strips
+  `shared_secret` and `expires` from any `authentication` block a caller leaves
+  populated -- and leaves `token_max_age_days` standing; the mint layer reaches
+  the same end by never building the block.
 - **No credential field is representable.** The mint layer's input connection is
   a credential-free locator type (`ExchangeFileConnection`: `SftpExchangeLocator`
   or `FiledropExchangeLocator`). By construction these types have no `username`,
@@ -97,13 +102,16 @@ compatibility axis.
 The observable outcome depends on how the field diverges, and the two cases
 differ sharply:
 
-- **An unknown field is silently stripped.** The spec-tier sub-schemas
+- **An unknown field is silently stripped.** The spec-tier blocks
   (`linkage_terms`, `metadata`, `standardization`, `connection`, and the
-  top-level spec object itself) are bare `z.object` schemas, which strip
-  unrecognized keys on parse. A newer web app that adds an optional field an
-  older CLI's schema does not know drops that field on load; the exchange runs
-  on the fields the older CLI does understand. This is a silent narrowing, not a
-  loud rejection.
+  top-level spec object itself) all strip unrecognized keys on parse. That
+  property, not any one schema kind, is what this case rests on: the blocks are
+  built from different Zod constructs -- an object for the top-level spec and
+  `linkage_terms`, an array for `metadata` and `standardization`, a
+  discriminated union for `connection` -- and strip is the behavior they share.
+  A newer web app that adds an optional field an older CLI's schema does not know
+  drops that field on load; the exchange runs on the fields the older CLI does
+  understand. This is a silent narrowing, not a loud rejection.
 - **An unknown enum value is rejected loudly.** A field whose value changed to
   one an older schema does not accept -- a new `algorithm`, a new
   `linkage_strategy`, a new semantic `type`, a new `channel` -- is a
@@ -139,23 +147,38 @@ re-mint (or re-invite) rather than hand-migrate a file across a breaking change.
 An invitation may bind a connection endpoint (the credential-free
 `ConnectionEndpoint` locator, `packages/core/src/config/invitation.ts`) so the
 accepting party can reach the rendezvous without separate out-of-band setup. An
-endpoint names exactly one channel, and the accepting party's tool must speak
-that channel. There is no cross-transport promise and no renegotiation: a browser
-speaks only `webrtc`, and the CLI speaks `sftp`/`filedrop`.
+endpoint names exactly one channel, and the accepting party's tool must be able
+to drive that channel. There is no cross-transport promise and no renegotiation:
+what a build can drive is fixed at build time, and an endpoint it cannot drive is
+refused rather than adapted.
 
-Enforcement lives at the acceptor's accept path, per tool:
+The drivable set is not a property of "browser versus CLI" but of the tool and,
+for the web application, its deployment profile:
 
-- **CLI.** `psilink accept` seeds the endpoint into the acceptor's connection
-  through the single consumer `connectionFromEndpoint` (`apps/cli`), which also
-  applies the mirror swap for a split-directory endpoint. The endpoint is a
-  file-sync locator (`sftp`/`filedrop`); the CLI has no WebRTC transport yet.
-- **Browser.** `prepareAcceptedInvitation`
-  (`apps/web/src/psi/acceptInvitation.ts`) requires the token's
-  `connectionEndpoint` to be present and `channel === "webrtc"`; a token without
-  one, or carrying a different channel, throws before any rendezvous is
-  attempted ("This invitation does not carry a WebRTC connection endpoint, so it
-  cannot be accepted in the browser."). Because every failure path throws, a
-  caller that only dials on success cannot reach across transports.
+- **CLI.** `sftp` and `filedrop`. `psilink accept` seeds the endpoint into the
+  acceptor's connection through the single consumer `connectionFromEndpoint`
+  (`apps/cli`), which also applies the mirror swap for a split-directory
+  endpoint. The CLI has no WebRTC transport.
+- **Browser, public profile.** `webrtc` only. A file-sync endpoint names a
+  directory or an SFTP host the browser cannot reach.
+- **Browser, console profile.** `webrtc`, `filedrop`, and `sftp`. The console
+  build runs a file-sync exchange through its job API rather than in the page, so
+  a file-sync endpoint is drivable there and is accepted.
+
+Enforcement lives at the acceptor's accept path. In the browser,
+`prepareAcceptedInvitation` (`apps/web/src/psi/acceptInvitation.ts`) admits an
+endpoint only through `endpointDrivableHere(endpoint, profile)`, a switch over
+the channel union that is exhaustive with no `default` -- so a newly added
+channel fails to compile until it is deliberately classified, the allowlist
+discipline rather than a blocklist that would admit an unvetted channel. A token
+carrying no endpoint, or one this build cannot drive, throws before any
+rendezvous is attempted:
+
+> This invitation does not carry a connection endpoint this build can accept, so
+> it cannot be run here.
+
+Because every failure path throws, a caller that only dials on success cannot
+reach across transports.
 
 The endpoint itself carries only a public locator (signaling URL, SFTP
 host/port/path, or a file-drop directory / split pair) and never a credential;
@@ -176,7 +199,7 @@ file, and each party provisions its own `.psilink.key` from the code:
   the encoded invitation code, over a trusted out-of-band channel.
 - **The three provisioning paths.** `psilink invite` writes the inviter's key
   file (secret plus expiry); `psilink accept` writes the acceptor's copy
-  (secret, with the invitation expiry stripped); and the new
+  (secret, with the invitation expiry stripped); and
   `psilink exchange --invitation CODE` provisions the key file for the party that
   composed the exchange in the web app and downloaded a secret-free config,
   writing the inviter-side copy (secret **and** expiry, matching `psilink
@@ -185,7 +208,7 @@ file, and each party provisions its own `.psilink.key` from the code:
 ### `exchange --invitation` fail-closed ordering
 
 `provisionKeyFileFromInvitation` (`apps/cli/src/keyFile.ts`) is the ordering
-authority for the new path, and it is fail-closed at each step:
+authority for that path, and it is fail-closed at each step:
 
 1. **Refuse if a key file already exists.** A key file present at the key path is
    a `UsageError` (exit 64), never an overwrite. After the first exchange the
