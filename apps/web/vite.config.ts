@@ -29,7 +29,6 @@ const srcAliases = {
   "@components": path.resolve(__dirname, "src/components"),
   "@jobs": path.resolve(__dirname, "src/jobs"),
   "@utils": path.resolve(__dirname, "src/utils"),
-  "@util": path.resolve(__dirname, "src/util"),
   "@peerjs-server": path.resolve(__dirname, "src/contrib/peerjs-server"),
   "@psi": path.resolve(__dirname, "src/psi"),
   "@theme": path.resolve(__dirname, "src/theme"),
