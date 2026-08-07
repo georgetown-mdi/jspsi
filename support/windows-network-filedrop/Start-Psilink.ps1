@@ -687,6 +687,43 @@ function Wait-ForConsole {
     return $false
 }
 
+function Get-RendezvousFolderName {
+    <#  The name of the folder shared with the partner, as the operator knows
+        it, for the console to mint into the invitation.
+
+        The console cannot work this out for itself here. It sees only the
+        container's side of the mount, and this script picks that side: every
+        folder an operator chooses is bound at the same /rendezvous, and a
+        single-folder run rendezvouses out of /data. So the last segment of what
+        the container sees names this script's layout, not the operator's
+        folder, and the name has to be passed in beside the mount.
+
+        A network share is not mounted by path at all -- the volume stands for a
+        server and share -- so the name comes from the resolved share: the last
+        segment of the subfolder within it, or the share itself when the folder
+        IS the share root.
+
+        Returns an empty string when there is no folder name to give: a drive
+        root has none, and neither has a path this script could not read a last
+        segment out of. That empty string is passed to the console as it stands,
+        which is what leaves the console with no name for the folder at all;
+        naming the drive letter instead would be a name no partner could match. #>
+    param(
+        [string] $Path = '',
+        [string] $Share = '',
+        [string] $SubPath = ''
+    )
+
+    $source = if ($Share) { if ($SubPath) { $SubPath } else { $Share } } else { $Path }
+    $segments = @($source -split '[\\/]+' | Where-Object { $_ })
+    if ($segments.Count -eq 0) { return '' }
+    $name = $segments[-1].Trim()
+    # A bare drive designator (C:) is what a drive root reduces to, and it names
+    # a drive rather than a folder.
+    if ($name -match '^[A-Za-z]:$') { return '' }
+    return $name
+}
+
 function Get-ConsoleEngineArgs {
     <#  The engine's argument vector for the console.
 
@@ -694,13 +731,23 @@ function Get-ConsoleEngineArgs {
         job API has no authentication, and the 127.0.0.1: prefix is what keeps
         it on this machine. --rm is the other half of the posture -- the
         container keeps nothing, and everything the exchange produces is in the
-        operator's own folders. #>
+        operator's own folders.
+
+        The rendezvous folder's name is passed whether or not a rendezvous mount
+        is, and whether or not this script could work one out. A single-folder
+        console rendezvouses out of the data mount, and the operator's folder
+        still has a name the partner's copy of the invitation should carry; an
+        empty value is what tells the console this script could not name the
+        folder. Omitting the variable would instead have the console name the
+        folder after the mount point THIS script picked -- "rendezvous" or
+        "data", a name no partner could match. #>
     param(
         [Parameter(Mandatory = $true)][string] $ContainerName,
         [Parameter(Mandatory = $true)][int] $ConsolePort,
         [Parameter(Mandatory = $true)][string] $DataMount,
         [string] $InputMount = '',
-        [string] $RendezvousMount = ''
+        [string] $RendezvousMount = '',
+        [string] $RendezvousName = ''
     )
 
     $engineArgs = @(
@@ -713,6 +760,7 @@ function Get-ConsoleEngineArgs {
     if ($RendezvousMount) {
         $engineArgs += @('--env', 'JOB_RENDEZVOUS_DIR=/rendezvous', '--volume', "${RendezvousMount}:/rendezvous")
     }
+    $engineArgs += @('--env', "JOB_RENDEZVOUS_NAME=$RendezvousName")
     return $engineArgs + @((Get-PsilinkImage), 'serve')
 }
 
@@ -907,6 +955,9 @@ Show-Ok "Rendezvous folder: $rendezvousPath"
 # ==========================================================================
 $rendezvousMount = $rendezvousPath
 $usingVolume = $false
+# The folder's own name, worked out here and passed to the console, because the
+# container is shown this script's mount points rather than the operator's folder.
+$rendezvousFolderName = Get-RendezvousFolderName -Path $rendezvousPath
 
 if ($rendezvousResolved.Kind -eq 'Network') {
     Show-Head 'Part 2: the network folder'
@@ -941,6 +992,11 @@ if ($rendezvousResolved.Kind -eq 'Network') {
         Show-Ok "Share:        $share"
         Show-Ok "Subdirectory: $(if ($subPath) { $subPath } else { '(share root)' })"
     }
+
+    # From the share as resolved, and after any correction above: the drive letter
+    # or namespace path the operator typed is theirs alone, and a volume is mounted
+    # by server and share rather than by that path.
+    $rendezvousFolderName = Get-RendezvousFolderName -Share $share -SubPath $subPath
 
     Show-Head 'Credentials for the file server'
     # Read-ShareCredential, and New-ShareVolume below, come from the setup script
@@ -1042,7 +1098,8 @@ $rendezvousMountArgument = ''
 if ($usingVolume -or $RendezvousDir) { $rendezvousMountArgument = $rendezvousMount }
 
 $consoleArgs = Get-ConsoleEngineArgs -ContainerName $containerName -ConsolePort $Port `
-    -DataMount $DataRoot -InputMount $InputDir -RendezvousMount $rendezvousMountArgument
+    -DataMount $DataRoot -InputMount $InputDir -RendezvousMount $rendezvousMountArgument `
+    -RendezvousName $rendezvousFolderName
 
 $started = Invoke-EngineQuiet -EngineArgs $consoleArgs
 if ($started.ExitCode -ne 0) {

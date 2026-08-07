@@ -653,6 +653,22 @@ psilink_rendezvous_directory() {
   fi
 }
 
+# The name of the folder shared with the partner, as the operator knows it, for
+# the console to mint into the invitation. The console cannot work it out for
+# itself: it sees only the container's side of the mount, and this script picks
+# that side -- every folder is bound at the same /rendezvous, and a single-folder
+# run rendezvouses out of /data -- so the name has to be passed in beside it.
+# Prints nothing for a path with no last segment, the filesystem root: that
+# empty value is passed on as it stands, which is what leaves the console with
+# no name for the folder at all.
+psilink_rendezvous_folder_name() {
+  local directory name
+  directory="$(psilink_rendezvous_directory)"
+  name="${directory%"${directory##*[!/]}"}"
+  name="${name##*/}"
+  printf '%s' "$name"
+}
+
 # ===========================================================================
 # The console
 # ===========================================================================
@@ -716,6 +732,7 @@ psilink_stop_console() {
 # machine. --rm is the other half of the posture -- the container keeps nothing,
 # and everything the exchange produces is in the operator's own folders.
 psilink_build_console_arguments() {
+  local rendezvous_name
   PSILINK_CONSOLE_ARGUMENTS=(
     run --rm --name "$PSILINK_CONTAINER_NAME"
     --publish "127.0.0.1:$PSILINK_PORT:3000"
@@ -730,6 +747,15 @@ psilink_build_console_arguments() {
       --volume "$PSILINK_RENDEZVOUS_DIR:/rendezvous"
     )
   fi
+  # Passed whether or not a rendezvous mount is, and whether or not a name could
+  # be derived. A single-folder console rendezvouses out of the data mount, and
+  # that folder still has a name the partner's copy of the invitation should
+  # carry; an empty value is what tells the console this script could not name
+  # the folder. Omitting the variable would instead have the console name the
+  # folder after the mount point THIS script picked -- "rendezvous" or "data",
+  # a name no partner could match.
+  rendezvous_name="$(psilink_rendezvous_folder_name)"
+  PSILINK_CONSOLE_ARGUMENTS+=(--env "JOB_RENDEZVOUS_NAME=$rendezvous_name")
   PSILINK_CONSOLE_ARGUMENTS+=("$(psilink_image)" serve)
 }
 
