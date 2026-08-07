@@ -106,7 +106,6 @@ import type { BenchCoverageInput } from "@components/useNonEmptyRates";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
-import type { IntakeAlert } from "./YourFileSection";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { ProfiledJobInput } from "@psi/workInputClient";
@@ -216,7 +215,7 @@ export function AcceptorBench() {
   const [file, setFile] = useState<File>();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [rejectionMessage, setRejectionMessage] = useState<string>();
-  const [parseAlert, setParseAlert] = useState<IntakeAlert>();
+  const [parseAlert, setParseAlert] = useState<AlertContent>();
   const [parsing, setParsing] = useState(false);
   // The acceptor's own parsed CSV, stored on a passing parse (not discarded) so the
   // columns step and its verdict derive from it; and the layered column-step editor

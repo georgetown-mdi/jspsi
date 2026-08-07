@@ -123,10 +123,10 @@ import type {
   ProfiledJobInput,
 } from "@psi/workInputClient";
 import type { AcceptKitEndpoint } from "./acceptKit";
+import type { AlertContent } from "@components/csvIntake";
 import type { BenchCoverageInput } from "@components/useNonEmptyRates";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { DisclosureChoice } from "@psi/metadataEditing";
-import type { IntakeAlert } from "./YourFileSection";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { SavedExchange } from "./SaveExchangeSection";
@@ -218,7 +218,7 @@ export function InviterBench() {
   // click-selected file, a browser without the API, and the in-memory sample.
   const [sourceHandle, setSourceHandle] = useState<FileSystemFileHandle>();
   const [editor, setEditor] = useState<InviterEditor>();
-  const [intakeAlert, setIntakeAlert] = useState<IntakeAlert>();
+  const [intakeAlert, setIntakeAlert] = useState<AlertContent>();
   const [reading, setReading] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [invitation, setInvitation] = useState<GeneratedInvitation>();
@@ -231,14 +231,14 @@ export function InviterBench() {
   const [acceptKitEndpoint, setAcceptKitEndpoint] =
     useState<AcceptKitEndpoint>();
   const [minting, setMinting] = useState(false);
-  const [createAlert, setCreateAlert] = useState<IntakeAlert>();
+  const [createAlert, setCreateAlert] = useState<AlertContent>();
   const [expertMode, setExpertMode] = useState(false);
   const [editorAnnouncement, setEditorAnnouncement] = useState("");
   const [saveFields, setSaveFields] =
     useState<SaveExchangeFields>(EMPTY_SAVE_FIELDS);
   const [savedExchange, setSavedExchange] = useState<SavedExchange>();
   const [saving, setSaving] = useState(false);
-  const [saveAlert, setSaveAlert] = useState<IntakeAlert>();
+  const [saveAlert, setSaveAlert] = useState<AlertContent>();
   // The console's effective SFTP connection, fetched once on a console build and
   // updated when the operator authors or clears one. Undefined before it resolves;
   // its `connection` is null when none is authored, else the credential-free
@@ -577,7 +577,7 @@ export function InviterBench() {
   // recommended-terms callout, and the Continue gate all vouch for
   // `acquired`/`editor`, so leaving them set would present the previous file
   // as the one the operator just dropped.
-  function discardRead(alert: IntakeAlert) {
+  function discardRead(alert: AlertContent) {
     setAcquired(undefined);
     setConsoleSource(undefined);
     setSourceFile(undefined);

@@ -19,14 +19,8 @@ import type {
   WorkInputReference,
 } from "@psi/workInputClient";
 import type { AcquiredCsv } from "./inviterModel";
+import type { AlertContent } from "@components/csvIntake";
 import type { FileRejection } from "@mantine/dropzone";
-
-/** A titled alert for a failed or unusable read, focused when it appears so
- * the failure is announced without clearing the operator's input. */
-export interface IntakeAlert {
-  title: string;
-  message: string;
-}
 
 /**
  * Step 1 of the inviter spine: the inviter's name and file. Presentational --
@@ -61,7 +55,7 @@ export function YourFileSection({
   acquired: AcquiredCsv | undefined;
   /** Whether the read file can back at least one matching key. */
   linkable: boolean;
-  alert: IntakeAlert | undefined;
+  alert: AlertContent | undefined;
   /** The file committed to the bench on the console (its profiled reference), so the
    * picker marks its row; unused off the console. */
   committed?: WorkInputReference;
