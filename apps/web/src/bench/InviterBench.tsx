@@ -587,7 +587,7 @@ export function InviterBench() {
     setIntakeAlert(alert);
   }
 
-  async function readFile(file: File, seed?: { isSample: true; name: string }) {
+  async function readFile(file: File, seed?: { name: string }) {
     const id = ++parseId.current;
     parseAbort.current?.abort();
     const controller = new AbortController();
@@ -717,10 +717,7 @@ export function InviterBench() {
   // a sample inviter name so step 1 lands complete. The mint path stays
   // demo-free -- from here the visitor drives every real step by hand.
   function loadSample() {
-    void readFile(sampleInviterFile(), {
-      isSample: true,
-      name: SAMPLE_INVITER_NAME,
-    });
+    void readFile(sampleInviterFile(), { name: SAMPLE_INVITER_NAME });
   }
 
   // Clear the sample back to a fresh exchange: drop the read, the derived terms,
