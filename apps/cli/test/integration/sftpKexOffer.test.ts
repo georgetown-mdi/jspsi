@@ -14,7 +14,12 @@ import {
 } from "vitest";
 import { withCapturedLogs } from "@psilink/core/testing";
 
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import {
+  selectedBackend,
+  selectedNativeProfile,
+  startInProcessSftpServer,
+} from "../sftpServer";
+import { serverAuth } from "../sftpServer/testContext";
 import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
 
 // What the SFTP client actually OFFERS, read off the wire from the client's own
@@ -73,6 +78,17 @@ const SSH_DISCONNECT_PROTOCOL_ERROR = 2;
 // Only the in-process backend can be told to cut a session mid-operation (see
 // test/sftpServer/types.ts), which is what the recovery re-dial needs.
 const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
+
+// The native harness's restricted-crypto profile accepts only curve25519 key
+// exchanges (test/sftpServer/nativeSshdServer.ts), so under the forced verdict
+// above there is nothing both ends can perform. That is not a failure of the
+// constraint but the permanent incompatibility it exists to name, which the last
+// describe drives on purpose against a server of its own. A dial that has to
+// COMPLETE therefore needs a server offering something this process can perform.
+const serverOffersAPerformableKex = test.skipIf(
+  selectedBackend() === "native" &&
+    selectedNativeProfile() === "restricted-crypto",
+);
 
 // A transfer long enough that the cut below lands inside the READ run rather than
 // at its edges, and the re-dial's budget for the read that follows it.
@@ -457,57 +473,68 @@ describe("what ssh2 makes of a kex value psilink must not forward", () => {
 });
 
 describe("the constrained offer against a real SFTP server", () => {
-  test("negotiates and connects with no operator configuration", async () => {
-    // The whole point of the constraint: on a host missing X25519 the default
-    // case must just work. The suite's server offers X25519 FIRST -- so an
-    // unconstrained client would win the negotiation with it and die -- and the
-    // approved remainder behind it, which is what this dial lands on.
-    const server = inject("sftpServer");
-    const adapter = new SSH2SFTPClientAdapter();
-    try {
-      await adapter.connect({
-        host: server.host,
-        port: server.port,
-        username: server.usera.username,
-        password: server.usera.password,
-        readyTimeout: 5_000,
-        maxReconnectAttempts: 0,
-      });
-      expect(await adapter.list(server.remoteRoot)).toBeInstanceOf(Array);
-    } finally {
-      await adapter.end().catch(() => {});
-    }
-  });
+  serverOffersAPerformableKex(
+    "negotiates and connects with no operator configuration",
+    async () => {
+      // The whole point of the constraint: on a host missing X25519 the default
+      // case must just work. The suite's server offers X25519 FIRST -- so an
+      // unconstrained client would win the negotiation with it and die -- and the
+      // approved remainder behind it, which is what this dial lands on.
+      const server = inject("sftpServer");
+      const adapter = new SSH2SFTPClientAdapter();
+      // The method the backend actually authenticates by: the password the
+      // in-process server offers, or the private key native sshd requires, since
+      // it sets PasswordAuthentication no. The pin serverAuth carries belongs to
+      // a connection's `server` block rather than to ssh2's own options, so it
+      // stays out of the dial.
+      const { hostKeyFingerprint, ...auth } = serverAuth(server.usera);
+      try {
+        await adapter.connect({
+          host: server.host,
+          port: server.port,
+          ...auth,
+          readyTimeout: 5_000,
+          maxReconnectAttempts: 0,
+        });
+        expect(await adapter.list(server.remoteRoot)).toBeInstanceOf(Array);
+      } finally {
+        await adapter.end().catch(() => {});
+      }
+    },
+  );
 
-  test("the host-key probe dials constrained and still reads the key", async () => {
-    // The probe is one of the dial paths the constraint sits at connectLocked to
-    // cover, and it reaches the wire through core rather than through a direct
-    // adapter.connect(). Reading the server's real fingerprint through the relay
-    // is what says the constrained offer negotiated as far as host-key
-    // presentation, not merely that the offer was constrained.
-    const server = inject("sftpServer");
-    const relay = createKexinitRecordingProxy(server);
-    try {
-      const result = await probeHostKeyLines({
-        sftpUrl: `sftp://127.0.0.1:${await relay.port}`,
-        connectTimeoutSeconds: 10,
-        json: true,
-        verbosity: -1,
-      });
-      const parsed = JSON.parse(result.stdout ?? "{}") as {
-        fingerprint: string;
-      };
-      expect(parsed.fingerprint).toBe(server.hostKeyFingerprint);
-      expect(relay.offers).toHaveLength(1);
-      expect(relay.offers[0]!.filter((name) => /25519/i.test(name))).toEqual(
-        [],
-      );
-      for (const marker of APPENDED_MARKERS)
-        expect(relay.offers[0]).toContain(marker);
-    } finally {
-      await relay.close();
-    }
-  });
+  serverOffersAPerformableKex(
+    "the host-key probe dials constrained and still reads the key",
+    async () => {
+      // The probe is one of the dial paths the constraint sits at connectLocked to
+      // cover, and it reaches the wire through core rather than through a direct
+      // adapter.connect(). Reading the server's real fingerprint through the relay
+      // is what says the constrained offer negotiated as far as host-key
+      // presentation, not merely that the offer was constrained.
+      const server = inject("sftpServer");
+      const relay = createKexinitRecordingProxy(server);
+      try {
+        const result = await probeHostKeyLines({
+          sftpUrl: `sftp://127.0.0.1:${await relay.port}`,
+          connectTimeoutSeconds: 10,
+          json: true,
+          verbosity: -1,
+        });
+        const parsed = JSON.parse(result.stdout ?? "{}") as {
+          fingerprint: string;
+        };
+        expect(parsed.fingerprint).toBe(server.hostKeyFingerprint);
+        expect(relay.offers).toHaveLength(1);
+        expect(relay.offers[0]!.filter((name) => /25519/i.test(name))).toEqual(
+          [],
+        );
+        for (const marker of APPENDED_MARKERS)
+          expect(relay.offers[0]).toContain(marker);
+      } finally {
+        await relay.close();
+      }
+    },
+  );
 
   inProcessOnly(
     "the recovery re-dial offers exactly what the first dial offered",
