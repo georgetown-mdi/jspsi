@@ -246,10 +246,6 @@ load-bearing:
 - **SFTP-scoped, warn-not-block on the wrong channel**, folded into the existing
   helper that warns when an SFTP-only file-sync flag is set on another channel.
 
-The concrete flag name is deferred to the maintainer's separate CLI-naming
-exercise; this note does not coin one. When it is settled it becomes a single
-source of truth across the schema field, the CLI flag, and the operator docs.
-
 ## Invariants under a cycling connection
 
 Under per-cycle connects the in-memory protocol state (role, peer id, sequence
@@ -524,11 +520,9 @@ withheld), not reading the library:
   and the re-dial retires that torn transport before dialing its replacement.
   Against a normally-closing partner it also fires, on a destroyed socket, in
   219 ms -- the control that proved the driving works, and the arm the library
-  reaches by clearing the session itself. SUPERSEDED: this bullet recorded the
-  path as never firing against a withheld-close partner at all, because
-  ssh2-sftp-client's session property never clears. That measured the gate as it
-  then stood, refusing recovery on any set session; the library's property
-  behaves as it did, and the gate no longer does.
+  reaches by clearing the session itself. ssh2-sftp-client's session property
+  does not clear on a withheld close; the gate admits the ENDED transport rather
+  than the cleared session, which is what makes this path reachable at all.
 
 Two barriers hold it there, and the forced close is load-bearing in both -- the
 first barrier's recovery arm reaches its dial only after one, and the second is
@@ -552,13 +546,11 @@ about the state they leave:
    destroyed socket. "Ended but still writable" is not a deferring state.
 
 The library mechanism itself still exists, which is the part to carry forward
-rather than discard. A raw `ssh2.Client` second `connect()` on a LIVE socket
-(`writable: true`) with `readyTimeout: 5000` was unsettled at 45016 ms -- no
-`ready`, no `error`, the `readyTimeout` never fired -- and the same at the
-ssh2-sftp-client layer (44998 ms) with the session force-cleared. The
-precondition is therefore `writable === true` (a transport not yet ended)
-TOGETHER WITH a cleared session, narrower than "an open connection". What that
-means for a pin bump is in [DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md).
+rather than discard: a second `connect()` on a live socket does not settle, and
+its precondition is narrower than "an open connection". The measured figures and
+the exact precondition are a normative pin row in
+[DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client),
+which defers to this note for the two barriers above and the caveats below.
 
 What the verdict, and the check that carries it, do not cover:
 
@@ -591,33 +583,14 @@ accepts the TCP connection and then never writes a byte -- not even its SSH
 identification string -- so the client's dial hangs, established but never ready
 (`stallHandshakeOnConnect` in `apps/cli/test/sftpServer/sessionControls.ts`).
 
-What the run shows, at the moment the forced close lands:
+What the run shows about the library -- that `end()` closes nothing
+mid-handshake, that the destroy settles the parked attempt rather than
+abandoning it, and what that rejection looks like -- is a normative pin row in
+[DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client),
+with the measured figures and the re-verify instruction on a bump. That row
+defers to this note for the driven measurement and its limits, which are the
+residue below.
 
-- **The socket is fully live and the session is not yet set.** Mid-handshake it
-  reads `destroyed: false, writable: true, readable: true, writableEnded: false`,
-  with ssh2-sftp-client's session property still falsy.
-- **The destroy settles the pending attempt, promptly.** `destroy()` returns with
-  `destroyed` already `true` in the same tick, and the parked `connect()` rejects
-  about 3 ms later -- a plain `Error`, `code: "ERR_GENERIC_CLIENT"`, message
-  `getConnection: Unexpected close event`. That rejection is indistinguishable from
-  a genuine peer close, so anything that must tell "I destroyed this" from "the
-  partner dropped us" needs its own flag rather than error matching.
-- **With no retry budget left the process exits at once.** The `TCPSocketWrap`
-  handle is gone one tick after the destroy and a child process that does nothing
-  further exits, code 0, about 50 ms later.
-- **With budget left the retry loop re-dials on a FRESH socket** about a second
-  after the destroy, and the child stays alive for the rest of the dial budget. So
-  the destroy alone does not end the run: the loop has to read the teardown latch
-  between attempts, which is why it does.
-- **ssh2-sftp-client's `end()` is a no-op closer here.** Driven mid-handshake it
-  RESOLVED in 1 ms and left the socket untouched (`destroyed: false, writable:
-  true`) with the dial still pending -- it short-circuits on the session the
-  handshake has not restored. This is why the abandoning teardown reaches the
-  destroy and never `end()`: the destroy is the only thing that closes anything.
-  Driving it AHEAD of the destroy is worse than useless -- the parked dial was
-  still unsettled 3 s later, where the destroy on its own settles it about a
-  millisecond after it runs -- so this teardown must not create an `end()` to wait
-  on, rather than merely having none to wait on.
 - **The destroy is silent.** At default verbosity it draws no WARN and no ERROR of
   its own -- in particular not the "ssh2 client error outside an operation" line.
   What it does produce is the settled sibling's rejection, and whether that reaches
@@ -630,53 +603,13 @@ What the run shows, at the moment the forced close lands:
 
 The bound itself rests on none of this: it is a fixed ceiling on the wait, so
 whether ssh2 arms its connect deadline per attempt changes when the sibling gives
-up, never when the waiter does. What the measurements above are load-bearing for is
-the teardown branch -- that the destroy settles the dial rather than abandoning it,
-and that the retry loop must be stopped as well.
+up, never when the waiter does.
 
 Its limits, on the same terms as the section above. The control suppresses server
 writes at accept time, so what was driven is a server that never answers the
 identification string; one that answers it and then stalls mid-key-exchange is a
 different, unmeasured shape. And it is in-process only -- a native sshd cannot be
 told to stall its handshake.
-
-## How the work was sliced
-
-The slices this direction was broken into:
-
-- **Reconnect posture first.** Observability (a first-drop warning, a
-  rate-escalated cadence after it, a warning on the last re-dial the budget
-  permits, and the live count on the normal log) plus a
-  cumulative `max_reconnect_attempts` budget that fails the exchange terminally when
-  spent, so the field's name matches what it bounds: the cumulative number of
-  mid-exchange reconnections in the default mode, on top of each connect's own
-  dialing retries. This is independent of the mode, answers the
-  silent-unbounded-default concern directly, and lets the operator observe the
-  actual thrash before the budget is spent. The operator reference describes that
-  bounded behavior rather than an unbounded or absent one.
-- **Implement the lifecycle.** The adapter ephemeral-session mode reusing the
-  recovery machinery, the core idle-boundary signal, the non-terminal release that
-  never latches the `closing` flag (so recovery stays enabled across cycles), and the
-  ensure-connected-before-drain teardown change.
-  The teardown change is code and lives here, not in verification.
-- **Verify the invariants**, in two slices: rendezvous-across-disconnect (entry-once
-  placement, durable handshake files, mid-publish safety) and retain bookkeeping
-  (sequence and foreign-snapshot alignment across cycles).
-- **CLI and config surface.** The local, non-bilateral, explicit opt-in described
-  above, SFTP-scoped with the warn-not-block helper and the short-interval warning,
-  outside the bilateral-mismatch machinery. The flag name is the maintainer's
-  naming exercise.
-- **Documentation.** The operational description and the named slow-peer use case in
-  the operator reference, the lifecycle and boundary detail in the spec tier, and
-  the correction of the stale reconnect line (if not already done in the first
-  slice).
-- **Test harness.** The integration server needs a capability it lacks: force a
-  session drop after N ops or N seconds, and enforce a maximum-session/idle cap that
-  drops after a bound. This exercises the within-cycle recovery, the per-poll
-  boundary, and the drain-across-reconnect teardown, and reproduces the operator's
-  actual failure to prove per-poll survives where the held session thrashes. A
-  handshake-count assertion guards against the mode being enabled at the short
-  default interval. This is a test-infrastructure item on its own board.
 
 ## How this was decided
 

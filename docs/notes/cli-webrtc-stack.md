@@ -37,7 +37,7 @@ In short: @roamhq/wrtc buys the safest interop and complete TURN at the cost of 
 
 ## Packaging is not the gate
 
-The CLI ships as a Docker image (currently `node:26-alpine`, i.e. musl, built `linux/amd64,linux/arm64`); end users run the container, including on Windows and macOS via Docker. The maintainer's standing position is that a per-client *build* accommodation - a native build for an extra architecture, a different container base - is acceptable as long as it changes only the build, not the code. So distribution facts that would otherwise rule a library in or out (for example @roamhq/wrtc's glibc-only prebuilts, with no musl and no win-arm64) are not the deciding axis. The pick is made on interop, correctness, and code-brittleness grounds; packaging adapts to the chosen library rather than constraining it.
+The CLI ships as a Docker image (`node:26-alpine`, i.e. musl, built `linux/amd64,linux/arm64`), alongside a FIPS variant on a glibc base (`amazonlinux:2023`); end users run the container, including on Windows and macOS via Docker. The maintainer's standing position is that a per-client *build* accommodation - a native build for an extra architecture, a different container base - is acceptable as long as it changes only the build, not the code, and the glibc variant is already that precedent in the tree. So distribution facts that would otherwise rule a library in or out (for example @roamhq/wrtc's glibc-only prebuilts, with no musl and no win-arm64) are not the deciding axis. The pick is made on interop, correctness, and code-brittleness grounds; packaging adapts to the chosen library rather than constraining it.
 
 ## Current leaning: werift, with caveats
 

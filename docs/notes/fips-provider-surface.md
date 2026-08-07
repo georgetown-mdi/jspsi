@@ -151,7 +151,10 @@ Table membership is read from the caption that *follows* each table body, which 
 
 Neither EdDSA exception is reachable for a redistributed image, and the reason is obtainability rather than approval. 5116's certified package sits behind an authenticated portal, and its module version string is a date shared by three distinct public binaries with no digest published in the policy, so no public material binds a specific binary to that certificate. 5373's public build reports `3.2.2-d3feeb3848008cbe` against a certified `3.2.2-f9f9d133a30b6eb5` -- a near miss, and therefore a negative result. Both were tested on x86_64, and neither names an arm64 environment, which the published image needs.
 
-## What is settled, and what is not
+## What is settled
+
+What remains open is recorded in [fips-variant-image.md](fips-variant-image.md),
+"What is not settled".
 
 Settled by measurement, in the image, on the base that ships:
 
@@ -172,28 +175,14 @@ Decided since, by the owner, and recorded here because it changes how the rows a
 - **FIPS 140-3 is the target standard**, on the grounds that 140-2 is being retired. That forecloses X25519 inside the module: under 4985 it is Non-Approved and Not Allowed, so its "allowed" status under 140-2 is not something to build on.
 - **The Alpine base is expected to give way**, dropping musl, since no certificate reaches it.
 
-Settled since, and recorded in [fips-variant-image.md](fips-variant-image.md):
-
-- **Which certificate and base pair.** Certificate 5021 on `amazonlinux:2023`,
-  installed by `dnf swap` and asserted against the built image. What makes a
-  pairing reachable at all is Management Manual 7.9.2's Level 1 porting route,
-  which needs no vendor action -- the vendor-affirmation tables alone say the
-  opposite, and that is the trap.
-- **Which standard revision certificate 5021 carries.** FIPS 140-3, at overall
-  Security Level 1, read off its own security policy -- which validates module
-  version `3.0.8-d694bfa693b76001`, the one the image pins, and names 140-2
-  nowhere. That is the project's target standard, so wording naming the revision
-  may name 140-3. The reading rests on the policy document alone; the CMVP
-  certificate page was not reachable to corroborate it
-  ([fips-variant-image.md](fips-variant-image.md)).
+Which certificate pairs with which base, and which standard revision that
+certificate carries, are settled in
+[fips-variant-image.md](fips-variant-image.md), the normative home for the
+shipped variant.
 
 ## What this means for the items downstream
 
-- Shipping a validated provider in the image: delivered as a separate `-fips` variant on `amazonlinux:2023` rather than as a change to the default image, which stays on Alpine. The base change this note anticipated is what it took, and the harder part it named -- that matching a distribution does not by itself put the image inside a tested environment -- is answered by the Level 1 porting route rather than by the match. The variant's own record, including what may and may not be claimed of it, is in [fips-variant-image.md](fips-variant-image.md).
-- Documenting a FIPS deployment profile for SFTP: the provider build determines the surviving SSH algorithm set. That is now measured, not assumed.
-- Rewriting the FIPS and SC-13 claims in [COMPLIANCE.md](../COMPLIANCE.md): the current text says the modules in use are not FIPS 140-validated, which remains accurate. The rewrite's real work is the approved / allowed / not-allowed distinction above -- the SC-13 row draws it for the Ed25519 of receipt signing and leaves X25519's entry undistinguished, conflating algorithm-standard approval with module-certificate approval. Both things are true at once and the document has to say so.
-- Moving Ed25519 receipt signing off pure JS: the provider carries Ed25519, but no OpenSSL Project certificate places it inside approved mode, and under the targeted 140-3 certificate it is Not Allowed outright. The two certificates that do approve EdDSA are unreachable, as above. Routing signing through the provider is therefore off the table -- it would take the module out of approved mode for that operation. The remaining fork is ECDSA, which is approved, or keeping the pure-JS implementation and disclosing it, which costs nothing in module terms because an algorithm run outside the module does not change the module's mode. That fork is settled -- the choice of ECDSA over P-256 through `crypto.subtle`, and what a scoped FIPS claim may and may not say about receipt signing, is recorded in [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md).
-- Deciding the key-establishment FIPS boundary: with 140-3 as the target, X25519 must not be routed through the module at all. That does not force the migration, though, and the distinction is the item's whole answer: X25519 stays outside the module today because it runs in `@noble/curves`, and an algorithm the module never performs does not affect the module's mode. So the disclosure path remains available and cheap; the migration to P-256 ECDH is what buys key establishment *inside* the boundary, and it is now the only thing that does. That fork is settled -- the choice, and what a scoped FIPS claim may and may not say about key establishment, is recorded in [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md).
+- Documenting a FIPS deployment profile for SFTP: the provider build determines the surviving SSH algorithm set. That is measured, not assumed, and the profile is still to be written.
 
 ## Reproducing this
 
