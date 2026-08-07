@@ -6,6 +6,7 @@ import type { Argv, Arguments } from "yargs";
 import {
   describeDecodeError,
   deriveAcceptedLinkageTerms,
+  deriveOutboundPayloadConsent,
   disclosedColumnNames,
   getLogger,
   parseExchangeSpec,
@@ -639,28 +640,23 @@ export async function handler(argv: Arguments): Promise<void> {
       // infers one from the same CSV). The offline path has no prepared exchange to
       // read: it writes a configuration and stops, so an absent spec metadata is
       // genuinely not-yet-known and the display forward-references it.
-      const ownOutboundSend =
+      const ownMetadata =
         ready.mode === "online"
-          ? disclosedColumnNames(ready.prepared.metadata)
-          : ready.dataSpec.metadata !== undefined
-            ? disclosedColumnNames(ready.dataSpec.metadata)
-            : undefined;
+          ? ready.prepared.metadata
+          : ready.dataSpec.metadata;
+      const ownOutboundSend =
+        ownMetadata !== undefined
+          ? disclosedColumnNames(ownMetadata)
+          : undefined;
       // This party's consent to its OWN outbound set, recorded into the
       // configuration this acceptance writes so a later run cannot transmit a set no
-      // party chose. What is recorded is exactly what the prompt below shows (or
-      // what --consent-to-terms records advance consent to), so the two cannot
-      // differ. `pending` where the set is not resolvable here: the first run that
-      // can resolve it shows and confirms it before connecting, and an unattended
-      // run refuses instead. Nothing at all where the invitation gives the inviting
-      // party no result -- the payload step then transmits nothing whatever the
-      // input holds, so there is no disclosure to consent to, matching the display's
-      // no-payload line and the run-time check's own output gate.
-      const outboundPayloadConsent: OutboundPayloadConsent | undefined = !ready
-        .dataSpec.linkageTerms.output.shareWithPartner
-        ? undefined
-        : ownOutboundSend === undefined
-          ? { status: "pending" }
-          : { status: "confirmed", columns: ownOutboundSend };
+      // party chose. Derived from the same metadata the display's set resolves from,
+      // so what is recorded is exactly what the prompt below shows (or what
+      // --consent-to-terms records advance consent to).
+      const outboundPayloadConsent = deriveOutboundPayloadConsent(
+        ready.dataSpec.linkageTerms.output,
+        ownMetadata,
+      );
       // What a REUSED config's record becomes. The later run is governed by the
       // kept config's own terms, and reconciliation compares no output field, so
       // an invitation whose mirror says "nothing transmitted" cannot decide that
