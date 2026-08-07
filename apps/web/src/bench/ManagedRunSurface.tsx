@@ -41,6 +41,7 @@ import {
 } from "./BenchRunSurface";
 import {
   classifyManagedRunFailure,
+  managedReinviteRecoveryCopy,
   managedRunReinvites,
   managedRunRetryable,
 } from "./managedRunLaunchModel";
@@ -743,10 +744,12 @@ function FailureRecovery({
 }
 
 /** The re-invite recovery for a re-invite tier (lapsed, storage, imported). The
- * inviter side re-mints from the stored document; the acceptor side cannot mint an
- * inviter-namespace invitation from its mirrored perspective, so its recovery is to
- * ask the partner to send a fresh invitation and accept it -- the surface names which,
- * from the record's own `side`. */
+ * inviter side re-mints from the stored document, so it gets the mint action; the
+ * acceptor side cannot mint an inviter-namespace invitation from its mirrored
+ * perspective, so its recovery is to ask the partner to send a fresh invitation,
+ * accept it, and delete the record that accept supersedes. Both readings are the pure
+ * model's, composed from the record's own `side` ({@link managedReinviteRecoveryCopy});
+ * this renders them. */
 function ReinviteRecovery({
   record,
   reinviting,
@@ -758,35 +761,28 @@ function ReinviteRecovery({
   reinviteFailed: boolean;
   onReinvite: () => void;
 }) {
-  if (!canReinviteFromRecord(record))
-    return (
-      <div className={styles.callout}>
-        <p className={styles.calloutLead}>Ask your partner to re-invite.</p>
-        <p className={styles.small}>
-          Ask your partner to send you a fresh invitation for this exchange over
-          your usual trusted channel, then open its link to accept it. That
-          re-establishes the connection with a new secret; your terms are
-          unchanged.
-        </p>
-      </div>
-    );
+  const copy = managedReinviteRecoveryCopy(record);
   return (
     <div className={styles.callout}>
-      <p className={styles.calloutLead}>Re-invite your partner.</p>
-      <p className={styles.small}>
-        This keeps your agreed terms and only replaces the secret. The fresh
-        invitation carries a new one-time secret, so send it over your usual
-        trusted channel, exactly as you did the first time.
-      </p>
-      {reinviteFailed && (
-        <Alert color="red" title="That could not be completed" mb="sm">
-          The fresh invitation could not be created. Nothing changed here; try
-          again.
-        </Alert>
+      <p className={styles.calloutLead}>{copy.lead}</p>
+      {copy.body.map((paragraph) => (
+        <p key={paragraph} className={styles.small}>
+          {paragraph}
+        </p>
+      ))}
+      {canReinviteFromRecord(record) && (
+        <>
+          {reinviteFailed && (
+            <Alert color="red" title="That could not be completed" mb="sm">
+              The fresh invitation could not be created. Nothing changed here;
+              try again.
+            </Alert>
+          )}
+          <Button mt="sm" onClick={onReinvite} loading={reinviting}>
+            Create a fresh invitation
+          </Button>
+        </>
       )}
-      <Button mt="sm" onClick={onReinvite} loading={reinviting}>
-        Create a fresh invitation
-      </Button>
     </div>
   );
 }

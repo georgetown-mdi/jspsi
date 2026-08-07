@@ -3,6 +3,7 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   classifyManagedRunFailure,
+  managedReinviteRecoveryCopy,
   managedRunFailureFromRecord,
   managedRunReinvites,
   managedRunRetryable,
@@ -262,5 +263,54 @@ describe("managedRunRetryable and managedRunReinvites", () => {
         ),
       ),
     ).toBe(false);
+  });
+});
+
+describe("managedReinviteRecoveryCopy", () => {
+  const prose = (side: ManagedExchangeRecord["side"]) =>
+    managedReinviteRecoveryCopy(record({ side })).body.join(" ");
+
+  test("the acceptor is told the accept saves a second exchange and to delete this one", () => {
+    const copy = managedReinviteRecoveryCopy(record({ side: "acceptor" }));
+    expect(copy.lead).toMatch(/ask your partner/i);
+    // The second record, the delete instruction, and the affordance that performs it
+    // -- the operator acts from this copy without a separate lookup.
+    expect(copy.body.join(" ")).toMatch(/second/i);
+    expect(copy.body.join(" ")).toMatch(/delete this superseded exchange/i);
+    expect(copy.body.join(" ")).toMatch(/Delete button/);
+    expect(copy.body.join(" ")).toMatch(/recurring exchanges/i);
+  });
+
+  test("the inviter's recovery gains no delete instruction", () => {
+    // Re-minting rotates the record in place, so the inviter has nothing to clean up
+    // and must not be told to delete the exchange it just recovered.
+    const copy = managedReinviteRecoveryCopy(record({ side: "inviter" }));
+    expect(copy.lead).toMatch(/re-invite your partner/i);
+    expect(copy.body.join(" ")).not.toMatch(/delete/i);
+    expect(copy.body.join(" ")).not.toMatch(/second/i);
+  });
+
+  test("the guidance is keyed off the record's own side, not its run history", () => {
+    // Same record in every other respect: only `side` decides which recovery reads.
+    expect(prose("acceptor")).not.toBe(prose("inviter"));
+    expect(
+      managedReinviteRecoveryCopy(
+        record({ side: "acceptor", lastRun: failed("auth") }),
+      ),
+    ).toEqual(managedReinviteRecoveryCopy(record({ side: "acceptor" })));
+    expect(
+      managedReinviteRecoveryCopy(
+        record({ side: "inviter", lastRun: failed("storage") }),
+      ),
+    ).toEqual(managedReinviteRecoveryCopy(record({ side: "inviter" })));
+  });
+
+  test("neither side's copy claims a duplicate is handled automatically", () => {
+    // Nothing detects, merges, or retires a superseded record: the copy must not
+    // imply otherwise, and must not read as a block on saving the second one.
+    for (const side of ["acceptor", "inviter"] as const)
+      expect(prose(side)).not.toMatch(
+        /automatic|merge[sd]? (them|the two)|for you\b|cannot save/i,
+      );
   });
 });
