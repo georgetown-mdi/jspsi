@@ -135,13 +135,19 @@ The rest are limits rather than refusals:
 
 ## GitHub Action pins and the composite mirror
 
-Every action a workflow uses is tag-pinned (`actions/checkout@v7`,
+Every action a workflow uses is pinned by ref (`actions/checkout@v7`,
 `docker/build-push-action@v7`, `sigstore/cosign-installer@v4.1.2`). The
 `github-actions` block in `.github/dependabot.yml` is configured against
-`.github/workflows`, and its `ignore` entries hold the floating-major orgs
-(`actions/`, `docker/`, `aws-actions/`, `github/`) to major bumps only, so a
-within-major re-pin does not open a pull request while `cosign-installer`, which
-publishes no floating major, surfaces its patch bumps.
+`.github/workflows`, and its `ignore` entries hold four orgs (`actions/*`,
+`docker/*`, `aws-actions/*`, `github/*`) to major bumps only, so a within-major
+re-pin does not open a pull request. `cosign-installer` is deliberately absent
+from that list, so its patch bumps surface.
+
+Two invariants keep that configuration honest, each held by a check rather than
+by this document: the composite mirror below, and
+[the ignore list against the pin shapes it covers](#the-ignore-list-and-the-pin-shapes-it-covers).
+
+### The composite mirror
 
 The shared CI prologue composite (`.github/actions/setup/action.yml`) pins an
 action of its own, on a path this repo does not rely on being scanned. The
@@ -177,6 +183,52 @@ outside the check, as is anything about which paths Dependabot in fact scans --
 it enforces this repo's mirror invariant and confirms no tool's coverage. It
 reads `uses:` references only, so an action reached another way is invisible to
 it, and its ref-agreement rule binds only actions appearing in both trees.
+
+### The ignore list and the pin shapes it covers
+
+An `ignore` entry suppressing within-major updates is only sound over pins that
+float within their major. An exact pin (`actions/checkout@v7.0.1`), a commit sha,
+or a branch name under a covered org would sit under an ignore that suppresses
+every update it could ever receive: frozen silently, with no pull request to
+carry a fix that lands within the major.
+
+`scripts/check-dependabot-ignore-shape.mjs`
+(`npm run check:dependabot-ignore-shape`, a CI static check in
+`static_checks.yaml`) holds that rather than prose. It reads the `ignore` entries
+out of the `github-actions` block -- the org list is not restated in code, so
+editing the config changes what is enforced -- and fails on any pin under
+`.github/workflows` or `.github/actions` whose name an entry covers and whose ref
+is not a bare `v<major>`. An entry counts as suppressing within-major updates
+when its `update-types` names `version-update:semver-minor` or
+`version-update:semver-patch`, or names no update type at all; one that suppresses
+neither imposes no shape requirement, and an entry naming an org with no pins in
+either tree is not a failure. The reference extraction is the pin-drift check's,
+so a reference naming no ref is that check's rule C rather than a second report
+here.
+
+The rule is a coherence property of this repository's configuration, not a
+prediction of Dependabot's behavior. Whether a `version-update:semver-minor` /
+`semver-patch` ignore does in fact suppress a `v7.0.1 -> v7.0.2` bump has not been
+driven against the real tool, and the check does not rest on it: a pin the
+config's own stated rationale assumes to be floating is worth holding to that
+shape either way. Two directions are deliberately outside it -- a bare-major pin
+from an org no entry names (the ignore list's completeness, which fails noisily
+rather than silently), and what a ref resolves to, since the ref is read as text.
+
+**Open premise: `dependency-name: "github/*"` and subpath actions.** Whether that
+pattern covers `github/codeql-action/init` is unsettled in two parts: whether the
+glob crosses `/` at all, and whether the dependency name Dependabot reports for a
+subpath action is the repository (`github/codeql-action`) or the full path. The
+check takes the inclusive reading -- `*` matches across `/` -- which is the
+fail-closed direction, since it requires more pins to be bare majors and so stays
+correct if the narrower reading turns out to be Dependabot's. Under the narrower
+reading the ignore silently fails to apply and those pins draw within-major pull
+requests: drift in the noisy direction rather than the silent one. Settling it
+takes a run against the real service from outside this repository's firewalled
+development container -- a subpath action exact-pinned under a `github/*` ignore,
+and an observation of whether a bump opens. Observing this repository's own
+Dependabot pull requests does not settle it: its `github/codeql-action` pins are
+bare majors, so under either reading there may be nothing to open.
 
 ## npm resolution residuals
 

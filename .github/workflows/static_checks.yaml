@@ -95,6 +95,14 @@ jobs:
       # workflow alone. A composite pin no workflow mirrors fails closed.
       - name: Action pin drift
         run: npm run check:action-pin-drift
+      # The github-actions Dependabot block ignores within-major updates for
+      # several orgs, which is only sound over pins that float within their
+      # major. This reads that ignore list out of the config and fails on any
+      # pin it covers whose ref is not a bare floating major tag -- an exact,
+      # sha, or branch pin frozen under an ignore that suppresses every update
+      # it could receive.
+      - name: Dependabot ignore shape
+        run: npm run check:dependabot-ignore-shape
       # The root brace-expansion override answers an advisory no bump on the
       # dependency path can reach, and its exit condition is an upstream release
       # rather than anything in this repo. This fails once the committed lockfile

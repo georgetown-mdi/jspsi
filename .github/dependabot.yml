@@ -104,16 +104,24 @@ updates:
       # ecosystems; the semver-*-days keys are supported for npm only.
       default-days: 7
     ignore:
-      # Every action from these orgs is pinned to a floating major tag (e.g.
-      # actions/checkout@v7), which already tracks the latest release within that
-      # major at runtime. A minor/patch bump PR would only re-pin us to a
-      # specific, frozen version (dropping later fixes) and add churn -- so we
-      # ignore within-major bumps and let the major tags float. Major bumps
-      # (e.g. checkout v6 -> v7) are NOT ignored and still surface for review.
+      # An action pinned to a floating major tag (e.g. actions/checkout@v7)
+      # already tracks the latest release within that major at runtime. A
+      # minor/patch bump PR would only re-pin us to a specific, frozen version
+      # (dropping later fixes) and add churn -- so within-major bumps are
+      # ignored for these orgs and the major tags float. Major bumps (e.g.
+      # checkout v6 -> v7) are NOT ignored and still surface for review.
       #
-      # sigstore/cosign-installer is intentionally NOT listed: it publishes no
-      # floating major tag, so it stays exact-pinned (@v4.1.2) and its patch
-      # bumps are legitimate, reviewable updates to the release-signing tool.
+      # That rationale rests on every pin these entries cover in fact being a
+      # floating major -- a property of the workflow trees, held by
+      # scripts/check-dependabot-ignore-shape.mjs rather than by this comment.
+      # An exact, sha, or branch pin from a listed org fails the build instead
+      # of freezing under an ignore that suppresses its every update.
+      #
+      # An org whose actions are not floating-major pinned must stay off this
+      # list for its bumps to surface -- sigstore is absent because
+      # cosign-installer publishes no floating major tag, so it stays
+      # exact-pinned (@v4.1.2) and its patch bumps are legitimate, reviewable
+      # updates to the release-signing tool.
       #
       # A new floating-major action from another org should be added here.
       - dependency-name: "actions/*"
