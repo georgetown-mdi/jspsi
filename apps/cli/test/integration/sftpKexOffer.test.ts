@@ -482,11 +482,8 @@ describe("the constrained offer against a real SFTP server", () => {
       // approved remainder behind it, which is what this dial lands on.
       const server = inject("sftpServer");
       const adapter = new SSH2SFTPClientAdapter();
-      // The method the backend actually authenticates by: the password the
-      // in-process server offers, or the private key native sshd requires, since
-      // it sets PasswordAuthentication no. The pin serverAuth carries belongs to
-      // a connection's `server` block rather than to ssh2's own options, so it
-      // stays out of the dial.
+      // The pin serverAuth carries belongs to a connection's `server` block
+      // rather than to ssh2's own options, so it stays out of the dial.
       const { hostKeyFingerprint, ...auth } = serverAuth(server.usera);
       try {
         await adapter.connect({
