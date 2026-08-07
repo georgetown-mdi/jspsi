@@ -49,6 +49,22 @@ freeze, pin, and install on top of that tree is in
 
 **Rebuilding or bumping.** The addon is built from the fork's own Docker build image, not from this repo. On any rebuild -- a fork change, an upstream merge, or a version bump -- regenerate the sidecar (`sha256sum <tarball> > <tarball>.sha256`), and if the version string did not change, remove `node_modules/@openmined/psi.js` and reinstall so npm re-fetches the new bytes past its version cache. A rebuild that touches the native crypto is crypto-code review scope (see [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy)).
 
+## Inlined dependencies and their remediation path
+
+A dependency inlined into a built artifact is not resolved at runtime, so a
+transitive bump does not reach it: remediating an advisory against one requires
+bumping the dependency and rebuilding and re-releasing `@psilink/core`. Which
+dependencies that covers is therefore an upgrade-path fact, not a build detail.
+
+`@openmined/psi.js` and [`canonicalize`](https://www.npmjs.com/package/canonicalize)
+are inlined into every build. `canonicalize` is inlined because from 3.0.0 it
+ships ESM-only and a bare `require` of it fails in the CJS bundle; it is the
+RFC 8785 serializer behind [CANONICAL_ENCODING.md](CANONICAL_ENCODING.md).
+
+`re2js` and `yaml` are inlined only into the standalone UMD browser build. The
+ESM and CJS builds keep them external, so a transitive bump does remediate them
+for the CJS-based CLI.
+
 ## The install-script policy (`allowScripts`)
 
 The root `package.json` carries an `allowScripts` map. It is npm's own install-script policy field (npm 11.16 and later, maintained with `npm approve-scripts`), not a local convention: npm reads it from the `package.json` at the install prefix -- so the root map governs every workspace -- and consults it per installed package before running that package's `preinstall`, `install`, or `postinstall` (and `prepare`, for a non-registry source). A registry package is identified by the name and version parsed out of the lockfile's `resolved` tarball URL, not by the tarball's own manifest, which its publisher controls, and not by its install directory, which for an aliased dependency (`"h3-v2": "npm:h3@2"`) carries a name the registry never published.

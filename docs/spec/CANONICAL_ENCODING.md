@@ -280,15 +280,10 @@ character string and `canonicalBytes(value)` returns its UTF-8 bytes. Numeric
 schema fields use `safeIntegerSchema`. None of this is required to reproduce the
 bytes; the normative definition is RFC 8785 over the value domain above.
 
-The `canonicalize` package is bundled (inlined) into `@psilink/core`'s built
-artifacts rather than resolved at runtime, because from 3.0.0 it ships ESM-only
-and a bare `require` of it fails in the CJS bundle. One operational consequence:
-a future `canonicalize` security advisory cannot be remediated by a transitive
-dependency bump alone -- it requires bumping the dependency and rebuilding and
-re-releasing `@psilink/core`. This matches `@openmined/psi.js`, which is
-likewise inlined into every build. (`re2js` and `yaml` are inlined only into the
-standalone UMD browser build; the ESM and CJS builds keep them external, so a
-transitive bump does remediate them for the CJS-based CLI.)
+The `canonicalize` package is inlined into `@psilink/core`'s built artifacts
+rather than resolved at runtime; why, and what that costs when an advisory
+lands against it, are in
+[DEPENDENCY_PINS.md](DEPENDENCY_PINS.md#inlined-dependencies-and-their-remediation-path).
 
 ## See also
 
