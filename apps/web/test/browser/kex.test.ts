@@ -25,6 +25,9 @@ import vectorsRaw from "../../../../packages/core/test/vectors/kex-vectors.json?
 
 const ECDH_P256 = { name: "ECDH", namedCurve: "P-256" } as const;
 
+// The one generic message every authentication failure surfaces.
+const GENERIC_FAILURE = "key exchange authentication failed";
+
 interface KexCase {
   name: string;
   initiatorRequestsEncryption: boolean;
@@ -135,6 +138,23 @@ async function generateEphemeralPoint(): Promise<Uint8Array<ArrayBuffer>> {
   return new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
 }
 
+/** The SEC1 compressed encoding (0x02/0x03 || X) of an uncompressed point. */
+function compressPoint(
+  point: Uint8Array<ArrayBuffer>,
+): Uint8Array<ArrayBuffer> {
+  const compressed = new Uint8Array(33);
+  compressed[0] = point[64] & 1 ? 0x03 : 0x02;
+  compressed.set(point.slice(1, 33), 1);
+  return compressed;
+}
+
+/** The SEC1 hybrid encoding (0x06/0x07 || X || Y) of an uncompressed point. */
+function hybridPoint(point: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+  const hybrid = Uint8Array.from(point);
+  hybrid[0] = point[64] & 1 ? 0x07 : 0x06;
+  return hybrid;
+}
+
 describe("key exchange in the browser", () => {
   test("the browser's ECDH reproduces the vector's shared secret from the recorded private keys", async () => {
     const eInitPub = fromHex(vectors.derived.initiatorEphemeralPublicHex);
@@ -208,22 +228,24 @@ describe("key exchange in the browser", () => {
     expect(await importAccepts(Uint8Array.of(0x00))).toBe(false);
     expect(await importAccepts(new Uint8Array(32))).toBe(false);
 
+    // Both coordinates are pinned: a platform that reduced or ignored the
+    // second one would still pass the X case.
+    const fieldPrime = fromHex(
+      "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
+    );
     const outOfRangeX = new Uint8Array(65);
     outOfRangeX[0] = 0x04;
-    outOfRangeX.set(
-      fromHex(
-        "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
-      ),
-      1,
-    );
+    outOfRangeX.set(fieldPrime, 1);
     outOfRangeX.set(point.slice(33, 65), 33);
     expect(await importAccepts(outOfRangeX)).toBe(false);
 
-    const yIsOdd = point[64] & 1;
-    const compressed = new Uint8Array(33);
-    compressed[0] = yIsOdd ? 0x03 : 0x02;
-    compressed.set(point.slice(1, 33), 1);
-    expect(await importAccepts(compressed)).toBe(true);
+    const outOfRangeY = new Uint8Array(65);
+    outOfRangeY[0] = 0x04;
+    outOfRangeY.set(point.slice(1, 33), 1);
+    outOfRangeY.set(fieldPrime, 33);
+    expect(await importAccepts(outOfRangeY)).toBe(false);
+
+    expect(await importAccepts(compressPoint(point))).toBe(true);
 
     // Measured, not assumed: Chromium refuses both hybrid prefixes, where Node
     // decodes the parity-correct one.
@@ -248,7 +270,21 @@ describe("key exchange in the browser", () => {
     expect(responder.applyEncryption).toBe(true);
   });
 
-  test("a peer share in a non-canonical encoding is rejected by the browser build", async () => {
+  // The wire counterpart of the measurement above, in both roles. Chromium's
+  // importKey admits the compressed encoding and refuses the hybrid one, and
+  // Node's admits both, so on the wire these two shares would have three
+  // different fates were the verdict left to the platform. Both are rejected in
+  // both roles here and in the Node suite, which is what makes a share's
+  // acceptance independent of which peer received it.
+  //
+  // The responder half is what pins the rejection to the share rather than to
+  // the confirmation round: an accepted share would put msg2 on the wire and
+  // leave the responder waiting for msg3, so neither the abort nor the generic
+  // failure would arrive.
+
+  async function initiatorRejectsMsg2Share(
+    share: Uint8Array<ArrayBuffer>,
+  ): Promise<void> {
     const [connA, connB] = createMessagePipe();
     const initiator = runKex(
       connA,
@@ -258,18 +294,41 @@ describe("key exchange in the browser", () => {
     );
     initiator.catch(() => {});
     expect(((await connB.receive()) as { kexMsg: string }).kexMsg).toBe("1");
-    const point = await generateEphemeralPoint();
-    const compressed = new Uint8Array(33);
-    compressed[0] = point[64] & 1 ? 0x03 : 0x02;
-    compressed.set(point.slice(1, 33), 1);
     await connB.send({
       kexMsg: "2",
-      e: toBase64Url(compressed),
+      e: toBase64Url(share),
       confirm: toBase64Url(new Uint8Array(32)),
       reqEnc: false,
     });
-    await expect(initiator).rejects.toThrow(
-      "key exchange authentication failed",
+    await expect(initiator).rejects.toThrow(GENERIC_FAILURE);
+    expect(await connB.receive()).toEqual({ kexMsg: "abort" });
+  }
+
+  async function responderRejectsMsg1Share(
+    share: Uint8Array<ArrayBuffer>,
+  ): Promise<void> {
+    const [connA, connB] = createMessagePipe();
+    const responder = runKex(
+      connB,
+      "responder",
+      fromHex(vectors.inputs.pskHex),
+      false,
     );
+    responder.catch(() => {});
+    await connA.send({ kexMsg: "1", e: toBase64Url(share), reqEnc: false });
+    await expect(responder).rejects.toThrow(GENERIC_FAILURE);
+    expect(await connA.receive()).toEqual({ kexMsg: "abort" });
+  }
+
+  test("the browser build rejects a compressed peer share in either role", async () => {
+    const point = await generateEphemeralPoint();
+    await initiatorRejectsMsg2Share(compressPoint(point));
+    await responderRejectsMsg1Share(compressPoint(point));
+  });
+
+  test("the browser build rejects a hybrid peer share in either role", async () => {
+    const point = await generateEphemeralPoint();
+    await initiatorRejectsMsg2Share(hybridPoint(point));
+    await responderRejectsMsg1Share(hybridPoint(point));
   });
 });

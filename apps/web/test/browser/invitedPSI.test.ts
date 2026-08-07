@@ -88,7 +88,7 @@ beforeAll(async () => {
   const clientMc = await openPeerMessageConnection(acceptorConn);
 
   // Mirror the production lifecycle: authenticate the peer over the real data
-  // channel (the X25519 handshake the inviter/acceptor derive from the same
+  // channel (the P-256 handshake the inviter/acceptor derive from the same
   // shared secret) before any PSI frame. This is the end-to-end check that the
   // key-exchange messages round-trip over PeerJS and that both ends agree.
   const runServerPSI = async () => {

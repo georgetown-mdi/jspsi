@@ -128,6 +128,13 @@ function hybridPoint(point: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+/** The bare 64-byte X || Y, with the SEC1 encoding prefix octet stripped. */
+function prefixlessPoint(
+  point: Uint8Array<ArrayBuffer>,
+): Uint8Array<ArrayBuffer> {
+  return point.slice(1);
+}
+
 /** A 65-byte uncompressed encoding whose (X, Y) is not a point on P-256. */
 function offCurvePoint(
   point: Uint8Array<ArrayBuffer>,
@@ -362,16 +369,25 @@ describe("crypto.subtle.importKey peer-share validation", () => {
     expect(await importAccepts(new Uint8Array(32))).toBe(false);
   });
 
-  test("rejects a coordinate at or above the field prime", async () => {
+  test("rejects either coordinate at or above the field prime", async () => {
     const { publicKey } = await generateEphemeral();
-    const fieldPrimeHex =
-      "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff";
+    const fieldPrime = fromHex(
+      "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
+    );
     const outOfRangeX = concatBytes(
       Uint8Array.of(0x04),
-      fromHex(fieldPrimeHex),
+      fieldPrime,
       publicKey.slice(33, 65),
     );
     expect(await importAccepts(outOfRangeX)).toBe(false);
+    // The Y half of the same range check: a platform that reduced or ignored
+    // the second coordinate would still pass the X case above.
+    const outOfRangeY = concatBytes(
+      Uint8Array.of(0x04),
+      publicKey.slice(1, 33),
+      fieldPrime,
+    );
+    expect(await importAccepts(outOfRangeY)).toBe(false);
   });
 
   test("ACCEPTS the compressed and hybrid encodings of a valid point, which is why the encoding is pinned above importKey", async () => {
@@ -713,6 +729,14 @@ describe("a peer share that is not a canonically-encoded valid point is rejected
     await initiatorRejectsMsg2Share(new Uint8Array(32).fill(0x01));
   });
 
+  test("the 64-byte X || Y of a valid point with no encoding prefix", async () => {
+    // The bare coordinate pair a peer whose ECDH interface hands out raw X || Y
+    // would send: every byte belongs to a genuine point, and only the pinned
+    // 65-byte length separates it from an accepted share.
+    const { publicKey } = await generateEphemeral();
+    await initiatorRejectsMsg2Share(prefixlessPoint(publicKey));
+  });
+
   test("the responder rejects the same shares on msg1", async () => {
     const { publicKey } = await generateEphemeral();
     for (const share of [
@@ -720,6 +744,7 @@ describe("a peer share that is not a canonically-encoded valid point is rejected
       identityPoint(),
       compressPoint(publicKey),
       hybridPoint(publicKey),
+      prefixlessPoint(publicKey),
       new Uint8Array(32).fill(0x01),
     ]) {
       const [connA, connB] = createMessagePipe();
