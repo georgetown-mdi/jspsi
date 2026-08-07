@@ -1,5 +1,6 @@
 import { HOST_KEY_FINGERPRINT_REGEX } from "@psilink/core";
 
+import { isRecord, readJsonOrNull } from "./jobApiBody";
 import { sftpConnectionProjectionOf } from "./serverJobExchangeDriver";
 
 import type { AuthoredSftpServerRequest } from "@jobs/sftpServer";
@@ -67,19 +68,6 @@ export type PutSftpConnectionResult =
   | { kind: "invalid"; message: string }
   | { kind: "tooLarge" }
   | { kind: "error" };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-/** Decode a response body as JSON, or null when it is empty or not JSON. */
-async function readJsonOrNull(response: Response): Promise<unknown> {
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    return null;
-  }
-}
 
 /** Read the field-path-only validation message off a `400` body, or a fixed
  * fallback when the body carries none. The server generates the message from
