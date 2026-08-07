@@ -62,9 +62,18 @@ ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
 # canonical release version this image is tagged with (docs/RELEASES.md) --
 # rather than taken as a build argument, which could disagree with it. Scoped to
 # this RUN because it is a build input for the client bundle, not runtime
-# configuration like the profile above; a tree carrying no release version
-# yields a value the kit falls back from (apps/web/src/bench/acceptKit.ts).
-RUN VITE_PSILINK_VERSION="$(node -p "require('/build/apps/cli/package.json').version")" \
+# configuration like the profile above.
+#
+# The read is gated rather than carried as an assignment prefix on the build
+# command: a prefix gives the RUN the BUILD's exit status, so a reader that
+# fails, or a manifest carrying no version, bakes an empty value and ships an
+# image whose kit quietly names the floating tag instead
+# (apps/web/src/bench/acceptKit.ts). `set -e` fails the layer on the reader,
+# `test -n` on the empty value, and the build runs only past both.
+RUN set -eu; \
+  VITE_PSILINK_VERSION="$(node -p "require('/build/apps/cli/package.json').version ?? ''")"; \
+  test -n "$VITE_PSILINK_VERSION"; \
+  export VITE_PSILINK_VERSION; \
   npm run build -w apps/web
 
 # Rebuild node_modules production-only (npm ci empties it first): the identical

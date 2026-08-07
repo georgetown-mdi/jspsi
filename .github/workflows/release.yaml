@@ -52,6 +52,23 @@ jobs:
       - name: Verify vendored native tarball integrity
         run: sha256sum -c lib/openmined-psi.js-*.tgz.sha256
 
+      # The check is dependency-free, so a plain pinned Node suffices -- no npm
+      # ci or @psilink/core build (the ./.github/actions/setup prologue) needed.
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+
+      # Ahead of every build and push step below, because what it holds is a
+      # property of the image those steps publish: the tag they publish it under
+      # comes from the pushed git tag, while the accept kit inside it names the
+      # version apps/cli/package.json carries at build time. A release whose two
+      # disagree hands the partner a `docker run` line for a different build.
+      - name: Check the release version against the pushed tag
+        env:
+          PSILINK_TAG: ${{ github.ref_name }}
+        run: npm run check:release-version
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
