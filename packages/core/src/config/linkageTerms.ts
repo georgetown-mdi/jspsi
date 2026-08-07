@@ -681,8 +681,8 @@ export interface LinkageKeyElement {
   /**
    * Expands a single value into multiple candidates before hashing.
    * - `transpositions`: all two-digit transpositions.
-   * - `edit_distances`: all single-character deletions up to the constraint
-   *   `maxLength`.
+   * - `edit_distances`: all single-character deletions, matching values
+   *   within one edit distance.
    * - `adjacent_years`: +/- 1 year from the date.
    */
   generateFuzzyComparisons?: GenerateFuzzyComparisons;
