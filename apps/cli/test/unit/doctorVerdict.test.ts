@@ -357,6 +357,24 @@ describe("a key marker straddling the MEANING/ACTION wrap", () => {
     expect(flowed).toContain("[redacted private key]");
     expect(text).not.toContain("BEGIN");
     expect(text).not.toContain("SECRETBODY");
+    expect(text).toContain("ACTION:  ");
     expect(text).toContain("the credentials were refused.");
+  });
+
+  test("a marker with non-ASCII internal whitespace is redacted, not re-formed by the re-flow", () => {
+    // The re-flow collapses every whitespace class to ASCII spaces, so a
+    // marker written with U+00A0 separators -- which the raw-text redaction
+    // pattern does not match -- becomes a live marker exactly when redaction
+    // runs on the pre-normalization text. Redaction over the normalized text
+    // is what this pins.
+    const { text, flowed } = renderedWith(
+      PADDING + KEY_MARKER.replaceAll(" ", "\u00a0") + " SECRETBODYSECRETBODY",
+      "check the password file and run this again.",
+    );
+    expect(flowed).toContain("[redacted private key]");
+    expect(text).not.toContain("BEGIN");
+    expect(text).not.toContain("SECRETBODY");
+    expect(text).toContain("MEANING: ");
+    expect(text).toContain("check the password file and run this again.");
   });
 });
