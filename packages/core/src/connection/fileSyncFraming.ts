@@ -27,13 +27,10 @@
 //   bytes 10..  payload: UTF-8 JSON (MESSAGE_TYPE_OBJECT) or raw frame bytes
 //               (MESSAGE_TYPE_BINARY)
 //
-// Carrying the payload as raw bytes -- rather than the former
-// `{ ts, seq, type, payload }` JSON with a Uint8Array payload base64url-encoded
-// into the `payload` string -- removes the ~4/3 base64 expansion and ends the
-// read path's reliance on `Buffer.prototype.toString()` (which throws above
-// Node's maximum string length), so a frame larger than that limit can be read.
-// The send-time `ts` is no longer carried in the body (it was write-only there;
-// a timestamped filename still records it).
+// Carrying the payload as raw bytes costs no base64 expansion and keeps the
+// read path off `Buffer.prototype.toString()` (which throws above Node's
+// maximum string length), so a frame larger than that limit can be read. The
+// send-time `ts` is not carried in the body; a timestamped filename records it.
 /** @internal */
 export const MESSAGE_ENVELOPE_VERSION = 1;
 /** @internal */
@@ -43,9 +40,6 @@ export const MESSAGE_TYPE_BINARY = 1;
 /** @internal */
 export const MESSAGE_HEADER_BYTES = 10;
 
-// Human-readable label for a message payload type, used only in log lines (it
-// preserves the pre-binary "Object"/"Uint8Array" wording so log-scraping stays
-// stable across this format change).
 export const messageTypeLabel = (type: number): string =>
   type === MESSAGE_TYPE_BINARY ? "Uint8Array" : "Object";
 

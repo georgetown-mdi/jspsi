@@ -28,7 +28,6 @@ import {
   version as uuidVersion,
 } from "uuid";
 
-// Suffix shared by all hello files.
 export const HELLO_SUFFIX = "-hello.json";
 
 // Suffix of the lock-mode tiebreaker file (`<peer1>-<peer2>-lock.json`). Named

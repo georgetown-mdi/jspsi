@@ -81,7 +81,7 @@ export const IV_SEQ_OFFSET = 4;
  * a plain transport drop so a forged, replayed, or omitted frame is never
  * mistaken for an ordinary disconnect.
  *
- * This layer detects replay, reordering, tampering (a failed GCM tag), and now
+ * This layer detects replay, reordering, tampering (a failed GCM tag), and
  * mid-stream omission: a strict gap check rejects any inbound sequence number
  * that skips ahead of the expected next value, so a dropped or withheld frame
  * between two delivered frames is caught here as a `"security"` failure. What it
@@ -342,7 +342,6 @@ export class EncryptedMessageConnection implements MessageConnection {
 
   async receive(timeoutMs?: number): Promise<unknown> {
     if (this.failed !== undefined) throw this.failed;
-    // Pull one envelope from the inner FIFO; timeoutMs passes straight through.
     let data: unknown;
     try {
       data = await this.inner.receive(timeoutMs);
@@ -368,7 +367,6 @@ export class EncryptedMessageConnection implements MessageConnection {
   // `"security"` ConnectionError and throws it; a transport drop surfaced by
   // inner.receive propagates unchanged.
   private async handleInbound(data: unknown): Promise<unknown> {
-    // The envelope is a Uint8Array; reject anything else as a format mismatch.
     if (!(data instanceof Uint8Array)) {
       throw this.fail(
         new ConnectionError(

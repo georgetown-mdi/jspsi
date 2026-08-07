@@ -358,8 +358,7 @@ export interface InvitationToken {
    * one an existing decoder could not read correctly. Adding an optional field
    * at THIS top level is backward compatible (an older decoder validates with a
    * non-strict `z.object` and simply ignores the field), so it does not bump the
-   * version; `connectionEndpoint` and `disclosedPayloadColumns` were both added
-   * this way and the version stayed "1".
+   * version.
    *
    * The per-channel endpoint sub-schemas are `z.strictObject`, so an older
    * decoder REJECTS (it does not ignore) any field added to one of them: an

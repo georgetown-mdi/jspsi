@@ -16,8 +16,7 @@ import { RE2JS } from "re2js";
 // browser-tab freeze on the web path, a hung process on the CLI. re2js is an
 // RE2-semantics engine (a Thompson NFA / lazy DFA): its matching is linear in the
 // input length and it has no backtracking, so the blow-up is impossible BY
-// CONSTRUCTION rather than screened for heuristically. This supersedes the
-// best-effort `redos-detector` static screen that previously guarded these paths.
+// CONSTRUCTION rather than screened for heuristically.
 //
 // re2js is pure JavaScript, so the SAME engine build runs identically in the CLI
 // (Node) and the web (browser). Both parties and both build targets therefore
@@ -131,10 +130,9 @@ export interface CompiledLinearRegex {
  * operations. Throws (an `RE2JS` exception) if the pattern is outside the dialect;
  * callers that execute already-validated terms never hit that throw (the dialect
  * gate rejected such a pattern at parse time). The operator-local `runPipeline`
- * path surfaces it as a thrown error like the previous `new RegExp` path did,
- * though the trigger is wider: `new RegExp` threw only on JavaScript-invalid
- * syntax, whereas this also throws on a JavaScript-valid pattern the dialect drops
- * (a backreference or lookaround). The pattern there is operator-authored, so the
+ * path surfaces it as a thrown error, including on a JavaScript-valid pattern
+ * the dialect drops (a backreference or lookaround). The pattern there is
+ * operator-authored, so the
  * error echoing it leaks nothing partner-controlled.
  */
 export function compileLinearRegex(pattern: string): CompiledLinearRegex {

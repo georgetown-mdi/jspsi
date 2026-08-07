@@ -236,7 +236,6 @@ export interface ExchangeRecordCommitments {
  * {@link CommittedPayload}), so a change to the config type cannot silently move
  * this version-frozen on-disk format. */
 export interface RecordPayloadColumn {
-  /** Column name. */
   name: string;
   /** Optional data-dictionary description. Unlike the name, a description is NOT
    * cross-party validated at exchange time, so the two parties' records may
@@ -405,9 +404,8 @@ export interface CommitmentSalts {
 
 /**
  * The private verification keys for an {@link ExchangeRecord}: the per-commitment
- * salts and NOTHING ELSE. A salt is a secret HMAC key, not committed data, so --
- * unlike an earlier self-contained design that also snapshotted the data -- these
- * keys are NOT a second at-rest copy of the matched data: they carry no payload
+ * salts and NOTHING ELSE. A salt is a secret HMAC key, not committed data, so
+ * these keys are NOT a second at-rest copy of the matched data: they carry no payload
  * values and no matched-record pairing. The matched data lives only in the result
  * the operator chose to write, never in this file.
  *
@@ -427,10 +425,8 @@ export interface VerificationKeys {
 
 // --- Schemas -----------------------------------------------------------------
 
-// Untrusted-input bounds. parseExchangeRecord's first production caller is the
-// verification reader, which ingests a record file supplied by another party --
-// the first untrusted caller of this parser (records were previously only written
-// to disk / offered as downloads, never parsed back from an untrusted source). So
+// Untrusted-input bounds. parseExchangeRecord's production caller is the
+// verification reader, which ingests a record file supplied by another party, so
 // every partner-controlled string and array below carries a generous length /
 // element-count cap -- the same caps the linkage-terms producers imply
 // (MAX_NAME_LENGTH, MAX_TEXT_LENGTH, MAX_LINKAGE_ENTRIES, MAX_PAYLOAD_ENTRIES) so a
@@ -791,8 +787,6 @@ export async function buildExchangeRecord(
   inputs: ExchangeRecordInputs,
   randomness?: ExchangeRecordRandomness,
 ): Promise<BuiltExchangeRecord> {
-  // localPayloadSent and partnerPayloadReceived are always committed; the
-  // association table is committed only when this party holds it.
   const datasets: Array<{ name: CommitmentName; data: CanonicalValue }> = [
     { name: "localPayloadSent", data: inputs.localPayloadSent },
     { name: "partnerPayloadReceived", data: inputs.partnerPayloadReceived },

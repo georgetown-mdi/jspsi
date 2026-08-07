@@ -24,26 +24,12 @@ import {
 } from "../errors";
 import { cancellableDelay } from "./fileSyncConstants";
 import { ackMarkerName } from "./fileSyncNames";
-// Re-export the two grammar recognizers that were part of this module's public
-// surface before the grammar was split out to fileSyncNames.ts (which is not
-// barrelled by main.ts). This keeps them importable from `fileSyncConnection`
-// and in the package barrel exactly as before; neither is used internally here.
 export { isAbortMarkerName, isExpectedAbortName } from "./fileSyncNames";
 import { FileSyncMessageLoop } from "./fileSyncMessageLoop";
 import type { PresentedHostKey } from "./sftpConnect";
 import { AbortMarkerSubsystem } from "./abortMarker";
 import { SftpSession } from "./sftpSession";
-// Re-export PresentedHostKey, which was part of this module's public surface
-// before the SFTP connect/host-key concern was split out to sftpConnect.ts
-// (which main.ts does not barrel). This keeps it importable from
-// `fileSyncConnection` and in the package barrel exactly as before; it is also
-// used internally below (imported above as a type).
 export type { PresentedHostKey } from "./sftpConnect";
-// Re-export the message-framing codec symbols that were part of this module's
-// public surface before the codec was split out to fileSyncFraming.ts (which
-// main.ts does not barrel). This keeps them importable from `fileSyncConnection`
-// and in the package barrel exactly as before. The message loop that consumes
-// them internally lives in fileSyncMessageLoop.ts.
 export {
   MESSAGE_ENVELOPE_VERSION,
   MESSAGE_TYPE_OBJECT,
@@ -1182,8 +1168,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    * REFUSE the connection -- the ssh-keyscan analogue used to establish a
    * first-use pin. Delegates to the sftpSession subsystem, which drives the raw
    * transport and returns the presented fingerprint/key-type without ever
-   * authenticating; see {@link SftpSession.probeHostKeyFingerprint}. The
-   * signature and behavior are unchanged from when this lived inline: the CLI's
+   * authenticating; see {@link SftpSession.probeHostKeyFingerprint}. The CLI's
    * first-use trust flow (apps/cli/src/hostKeyTrust.ts) calls it directly.
    */
   async probeHostKeyFingerprint(

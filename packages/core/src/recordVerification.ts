@@ -296,7 +296,6 @@ export function reconstructCommittedData(
   const warnings: string[] = [];
   const data: Partial<Record<CommitmentName, CanonicalValue>> = {};
 
-  // Map an identifier value to its (first) input row index, noting duplicates.
   let idToRow: Map<string, number> | undefined;
   if (ourIdColumn !== undefined) {
     idToRow = new Map();

@@ -11,8 +11,7 @@
  *
  * Extends `Error`, NOT `UsageError`: a deadline on a connect probe is an
  * availability failure (the CLI's EX_UNAVAILABLE / exit 69), not a usage error
- * (exit 64) -- the same classification this rejection carried as a plain
- * `Error` before it was given a type.
+ * (exit 64).
  */
 export class TimeoutError extends Error {
   constructor(message: string) {

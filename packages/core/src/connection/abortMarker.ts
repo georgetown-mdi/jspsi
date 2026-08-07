@@ -120,12 +120,11 @@ interface AbortMarkerDeps {
 
 /**
  * The authenticated cross-party abort marker as a self-contained, stateful
- * subsystem {@link FileSyncConnection} composes. Owns the abort state the
- * connection used to hold inline (the two role-derived tokens, the captured
- * write inputs, and the write-vs-seal decision one-shot), and exposes the same
- * operations the connection delegated members forward to. External behavior is
- * byte-identical to the inline form; see docs/spec/CHANNEL_SECURITY.md
- * ("Authenticated abort marker").
+ * subsystem {@link FileSyncConnection} composes. Owns the abort state (the two
+ * role-derived tokens, the captured write inputs, and the write-vs-seal
+ * decision one-shot), and exposes the operations the connection's delegating
+ * members forward to. See docs/spec/CHANNEL_SECURITY.md ("Authenticated abort
+ * marker").
  *
  * @internal
  */

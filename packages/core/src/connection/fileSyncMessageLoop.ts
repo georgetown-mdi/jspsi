@@ -629,12 +629,6 @@ export class FileSyncMessageLoop {
     }
   }
 
-  // Applies the resolved `unexpectedFiles` policy to files found mid-loop that
-  // are neither recognized for the exchange nor in-flight temp writes
-  // (enforcement site 3). `error` throws a terminal UsageError (CLI exit 64, a
-  // usage/config condition like a wrong or shared directory) naming the files
-  // and the path; `warn` logs each distinct name at most once across the
-  // session; `ignore` does nothing (the pre-existing silent-skip behavior).
   private handleUnexpectedFiles(names: string[], path: string): void {
     const { deps } = this;
     const policy = resolveUnexpectedFilesPolicy(deps.options());
@@ -724,22 +718,19 @@ export class FileSyncMessageLoop {
             `${redactAndSanitizeForDisplay(peerId)}`,
         );
       // Detect via a pattern scan rather than an exact-name exists(): the
-      // message filename now encodes a per-message byte count (and optionally
-      // a timestamp and counter), so the receiver cannot predict the exact
+      // message filename encodes a per-message byte count (and optionally a
+      // timestamp and counter), so the receiver cannot predict the exact
       // name. `<peerId>-*.json` with a numeric terminal segment (the grammar
       // discriminant) matches only the peer's message files; its
       // `-hello.json`/`-ack.json`/`-lock.json` control files have non-numeric
       // terminals and are recognized for the loop instead.
       //
-      // Enforcement site 3 (see docs/spec/FILE_SYNC.md). The scan now classifies
+      // Enforcement site 3 (see docs/spec/FILE_SYNC.md). The scan classifies
       // EVERY file in the listing, not only peer-prefixed ones: a file that is
       // neither a peer message nor recognized for the loop (both hellos, both
       // acks, the lock, both parties' messages and message-acks, our own
       // writes, and in-flight `temp-*.tmp`) is an unexpected file and handled
-      // per `unexpectedFiles` -- a revision of the old "non-numeric terminals
-      // are ignored, not errors" rule for the post-entry window. The previous
-      // behavior (unconditional silent skip) is preserved by
-      // `unexpected_files: ignore`.
+      // per `unexpectedFiles`; `unexpected_files: ignore` skips it silently.
       //
       // In retain mode, messages are never deleted so the directory accumulates
       // one entry per send. synchronize() asserts a clean directory, so recvSeq

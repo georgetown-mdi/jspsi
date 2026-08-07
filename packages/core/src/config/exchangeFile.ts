@@ -64,7 +64,6 @@ export interface FiledropExchangeLocator {
   inboundPath?: string;
   /** Outbound (self-written) directory; the companion to {@link inboundPath}. */
   outboundPath?: string;
-  /** Optional tuning/toggle options. */
   options?: FileSyncOptions;
 }
 
