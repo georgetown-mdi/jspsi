@@ -691,6 +691,19 @@ re-exchanges the setup secret, rather than re-authoring the exchange from
 scratch. This makes re-invite cheap enough to be the honest first-line recovery,
 which is what lets the first release ship without the grace window.
 
+The two sides recover differently, and only one has cleanup to do. The inviter
+re-mints from its stored document, which rotates that record in place. The
+acceptor cannot mint an invitation in the inviter's namespace, so it recovers by
+accepting a fresh one -- and saving that accepted invitation adds a **new**
+recurring exchange rather than updating the superseded one: nothing links an
+accept to a stored partnership, and no duplicate is detected, merged, or retired.
+The acceptor is left holding two records for one partnership, the superseded one
+still offering a run that fails closed -- surfacing as the unexplained tier this
+recovery exists to clear. So the acceptor's recovery names the step: delete the
+superseded exchange once the fresh one is saved. It stays the operator's own act
+on their own record store -- nothing is deleted for them, and nothing blocks the
+second exchange from being saved.
+
 Cheap recovery has a cost that must be named. Every re-invite puts a fresh live
 setup secret on the out-of-band channel, so over a partnership's life the
 invitation-confidentiality requirement (see [Invitation contents and

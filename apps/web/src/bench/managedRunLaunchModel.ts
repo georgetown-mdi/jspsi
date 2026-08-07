@@ -19,6 +19,10 @@
  *   so a failure from an unattended run surfaces through the same tiers at the next
  *   visit.
  *
+ * The recovery affordance the classification names then has copy of its own: the
+ * re-invite callout reads differently for each side, so {@link
+ * managedReinviteRecoveryCopy} composes it from the record's own `side`.
+ *
  * Copy discipline: every benign tier gets plain, specific, non-alarming copy naming
  * one recovery action; only the unexplained tier follows the doc's attack framing
  * (out-of-band confirmation, then the two-outcome gate). No tier's copy echoes a
@@ -30,6 +34,7 @@ import {
   ManagedExchangeExpiredError,
   benignRerunOutcome,
 } from "@psi/managedRun";
+import { canReinviteFromRecord } from "@psi/managedReinvite";
 import { deriveManagedFailureTier } from "@psi/managedFailureTiers";
 
 import { dateTimeLabel } from "./inviterModel";
@@ -266,4 +271,67 @@ export function managedRunRetryable(failure: ManagedRunFailure): boolean {
  * state here. */
 export function managedRunReinvites(failure: ManagedRunFailure): boolean {
   return failure.recovery === "reinvite";
+}
+
+/** The re-invite recovery callout's copy: a lead line and the paragraphs below it,
+ * in order. */
+export interface ManagedReinviteRecoveryCopy {
+  /** The callout's lead line. */
+  lead: string;
+  /** The paragraphs below the lead, in order. */
+  body: Array<string>;
+}
+
+/** The inviter's recovery: it re-mints from its own stored document, so the copy is
+ * about the fresh invitation it is about to send. Re-minting rotates the record in
+ * place, leaving one record for the partnership, so there is no cleanup step. */
+const INVITER_REINVITE_RECOVERY: ManagedReinviteRecoveryCopy = {
+  lead: "Re-invite your partner.",
+  body: [
+    "This keeps your agreed terms and only replaces the secret. The fresh " +
+      "invitation carries a new one-time secret, so send it over your usual " +
+      "trusted channel, exactly as you did the first time.",
+  ],
+};
+
+/** The acceptor's recovery: it cannot mint an inviter-namespace invitation from its
+ * mirrored document, so it asks the partner for a fresh one -- and that accept saves
+ * a second recurring exchange beside this one, which the operator deletes. */
+const ACCEPTOR_REINVITE_RECOVERY: ManagedReinviteRecoveryCopy = {
+  lead: "Ask your partner to re-invite.",
+  body: [
+    "Ask your partner to send you a fresh invitation for this exchange over " +
+      "your usual trusted channel, then open its link to accept it. That " +
+      "re-establishes the connection with a new secret; your terms are " +
+      "unchanged.",
+    "Saving the accepted invitation as a recurring exchange adds a second one " +
+      "rather than updating this one, and nothing here reconciles the two. " +
+      "Once you have saved it, delete this superseded exchange with the " +
+      "Delete button below, or the one beside it in your recurring exchanges " +
+      "list. Left in place, it still offers a run that fails, because its " +
+      "secret is the one the fresh invitation replaces.",
+  ],
+};
+
+/**
+ * The re-invite recovery copy for a record, chosen from the record's OWN `side`
+ * through {@link canReinviteFromRecord} -- never an ambient flag, so a surface
+ * holding a record cannot show the other side's recovery.
+ *
+ * The acceptor's copy carries a cleanup step the inviter's does not need. An accept
+ * deposits a NEW managed record: the accept route carries no record id, and nothing
+ * compares a fresh invitation against a stored partnership, so the superseded record
+ * survives beside it and the operator holds two for one partnership. That is worth
+ * the operator's attention because the superseded record still offers a run, which
+ * fails closed and surfaces as the unexplained tier -- the very symptom this recovery
+ * exists to clear. The copy names the delete affordance and stops there: this is the
+ * operator's own record store, so nothing is deleted for them and nothing is blocked
+ * (see docs/MANAGED_EXCHANGE.md, "Recovery: fast re-invite").
+ */
+export function managedReinviteRecoveryCopy(
+  record: ManagedExchangeRecord,
+): ManagedReinviteRecoveryCopy {
+  return canReinviteFromRecord(record)
+    ? INVITER_REINVITE_RECOVERY
+    : ACCEPTOR_REINVITE_RECOVERY;
 }
