@@ -636,10 +636,11 @@ describe("structureOverBudget: the per-value cost model", () => {
     ).toBe(true);
   });
 
-  test("the production budget admits the largest legitimate mapped-element frame", () => {
-    // The ~4.19M-record (2^22) ceiling -- the 256 MiB wire cap's ~4M-element set --
-    // at the conservative per-record weight stays under the fixed budget, so no
-    // exchange the wire cap admits is rejected on a downstream frame.
+  test("the mapped cost of 2^22 records stays under the structure budget", () => {
+    // The wire-byte cap and the structure budget are independent, with no
+    // headroom relation between them -- this pins the mapped cost of a
+    // 4.19M-record (2^22) frame against the structure budget alone, at the
+    // conservative per-record weight.
     expect(expectedMappedCost(4_194_304)).toBeLessThan(
       MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
     );
