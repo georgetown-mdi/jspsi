@@ -254,11 +254,17 @@ review surface than the bump being landed.
 ### The brace-expansion advisory is fixed by a root override
 
 The root `package.json` carries `"overrides": { "brace-expansion": "^5.0.8" }`,
-which holds `npm audit --package-lock-only` at `found 0 vulnerabilities` against
-the committed lockfile. It answers GHSA-mh99-v99m-4gvg (`brace-expansion`:
+which holds every `brace-expansion` advisory clear against the committed
+lockfile. It answers GHSA-mh99-v99m-4gvg (`brace-expansion`:
 denial of service via unbounded expansion length driving an out-of-memory
 process crash), which affects every version at or below 5.0.7 and names 5.0.8 as
-its first patch, with no patched 2.x, 3.x or 4.x line. Without the override the
+its first patch, with no patched 2.x, 3.x or 4.x line. It also answers
+GHSA-rgw5-rvv9-x895, which defeats that first patch's mitigation through
+unbounded intermediate arrays: it affects 4.0.0 up to but excluding 5.0.9 and
+names 5.0.9 as its first patch, so the range the override already declares
+carries the tree onto that patch with no spec change. The nested 2.1.2 copies
+below are outside its range, so it is the overridden line alone that this second
+advisory ever reached. Without the override the
 audit reports 9 high-severity findings -- one advisory rolled up through the
 nine packages that depend on it, which npm answers `No fix available` -- against
 two copies at 2.1.2 nested under `archiver-utils` and `readdir-glob`.
@@ -273,7 +279,7 @@ widen the range on one of those lines, or archiver and nitropack to move off
 them.
 
 **What the override changes in the tree.** The hoisted root
-`brace-expansion@5.0.8` serves both minimatch declarations: the lockfile carries
+`brace-expansion@5.0.9` serves both minimatch declarations: the lockfile carries
 no nested `brace-expansion` entry and no nested `balanced-match` entry under
 `archiver-utils` or `readdir-glob`, and no other package version moves. An
 otherwise identical resolve without the override reports the same 9 high, which
@@ -326,7 +332,7 @@ release-scoped `npm sbom --omit=dev -w packages/core -w apps/cli -w apps/web`
 (step 9 in [RELEASES.md](../RELEASES.md)) names only that same peer.
 
 **What that invalid edge is underneath: an API-incompatible major.** The npm
-reporting artifact is not the whole cost. `brace-expansion@5.0.8` exports a
+reporting artifact is not the whole cost. `brace-expansion@5.0.9` exports a
 named `expand` and no callable default:
 `Object.keys(require("brace-expansion"))` is
 `["EXPANSION_MAX", "EXPANSION_MAX_LENGTH", "expand"]`, and `.default` is
