@@ -1,0 +1,38 @@
+# The FIPS variant image's OpenSSL configuration (Dockerfile.fips installs it at
+# /etc/psilink/fips-only.cnf and points OPENSSL_CONF at it).
+#
+# It activates the FIPS and base providers and deliberately does NOT activate
+# the default provider, with fips=yes as the default property: an algorithm the
+# certified module does not carry then fails rather than falling back to an
+# uncertified implementation of it.
+#
+# Both top-level keys name the same init section because the two consumers read
+# different ones. Node's bundled OpenSSL applies nodejs_conf and silently
+# ignores a configuration written under openssl_conf; the Amazon Linux 2023
+# openssl CLI is the opposite. A file naming one of them configures one of the
+# two, and the other runs as though no configuration existed at all -- which
+# looks identical to a provider that cannot be engaged.
+#
+# There is no .include of a fipsmodule.cnf. Amazon Linux 2023 ships none and its
+# `openssl fipsinstall` is disabled, because the vendor's module carries its own
+# integrity MAC and self-tests on load.
+config_diagnostics = 1
+openssl_conf = psilink_init
+nodejs_conf = psilink_init
+
+[psilink_init]
+providers = psilink_providers
+alg_section = psilink_algorithms
+
+[psilink_algorithms]
+default_properties = fips=yes
+
+[psilink_providers]
+fips = psilink_fips
+base = psilink_base
+
+[psilink_fips]
+activate = 1
+
+[psilink_base]
+activate = 1

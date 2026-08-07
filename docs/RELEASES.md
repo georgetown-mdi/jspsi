@@ -32,6 +32,8 @@ The single `vdorie/psi-link` image carries both roles: it runs headless as the C
 
 The hosted web deployment (`apps/web`) is a separate deployment to its hosting environment as part of CI/CD; it is not this image and is not distributed as a versioned artifact.
 
+A FIPS variant image (`Dockerfile.fips`) is built and smoke-tested on every pull request that can affect it and is published nowhere, so no `-fips` tag exists to pull. What it is, what may be claimed of it, and what has to land before it is published are in [fips-variant-image.md](notes/fips-variant-image.md).
+
 The three launcher files are the host-side front door an operator runs to open the console: `start-psilink.sh` for macOS and Linux, `Start-Psilink.ps1` for Windows, and `Setup-PsilinkFileDrop.ps1`, which the Windows one dot-sources for its path resolution, credential prompts and network-share volume, and which must sit beside it. They travel as one unit; see [Stamped launchers](#stamped-launchers) for what a release does to them.
 
 `@psilink/core` is not currently published to the npm registry. If that changes, add an npm row to the table above.
