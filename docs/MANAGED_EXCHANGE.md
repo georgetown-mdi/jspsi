@@ -7,17 +7,9 @@ title: "Managed (Recurring) Web Exchanges"
 This document describes the **managed exchange** lifecycle for the hosted web
 application: how a two-party PPRL exchange, once set up, runs again on an agreed
 schedule from the browser -- unattended where the platform allows -- without
-re-authoring the terms or re-establishing a shared secret. It covers the
-automation goal and its platform envelope, the agreed schedule and the run
-windows two runners meet in (with the retry policy for a missed one), the
-durability and crash-consistency contract for the rotating secret, the
-single-device ownership invariant and its rationale, how a party tells a
-rotation desync from an attack (and a missed run window from either) and
-recovers, how the design survives silent browser storage eviction, the
-moment-anchored backup surfaces and the between-visit OS notification that keep
-an operator honestly informed without training click-through, and the
-one-action deletion of an exchange's stored information. It opens with who the
-feature serves; the failure machinery follows.
+re-authoring the terms or re-establishing a shared secret. Intended readers are
+program officers, security reviewers, IT staff operating the hosted app, and
+contributors.
 
 It is the operational and conceptual counterpart to two companion documents: the
 **managed exchange record** field-by-field shape in
@@ -25,15 +17,16 @@ It is the operational and conceptual counterpart to two companion documents: the
 at-rest threat model** and egress-hardening limits in
 [SECURITY_DESIGN.md](SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges).
 It does not re-specify the record's byte-level shape, the KDF labels, or the CSP
-directive syntax; those live in the spec tier. Intended readers are program
-officers, security reviewers, IT staff operating the hosted app, and
-contributors.
+directive syntax; those live in the spec tier.
 
-> **Status.** The managed exchange lifecycle is not yet implemented. It reverses
-> a deliberate invariant -- a web exchange is single-use today, the browser
-> discarding the rotated secret (see
-> [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-web-exchanges-single-use-vs-managed)) --
-> so the epic's implementation is gated on security review.
+> **Status.** The record, its rotating secret at rest, the recurring-exchange
+> surfaces, and the attended one-action re-run are built. Schedule entry, the
+> scheduled window runner, and the between-visit OS notification are not, so
+> every run is operator-initiated today and the automation described below is
+> the design target rather than shipped behavior. Persisting a rotating secret
+> at rest reverses the one-shot exchange's discard (see
+> [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-web-exchanges-single-use-vs-managed)),
+> so the remaining work stays gated on security review.
 
 ## Who this is for
 
@@ -124,8 +117,7 @@ Degradations are named, not design floors:
 parties' runners must be awake in an overlapping window, so the run schedule is
 partnership-level agreement, coordinated out-of-band exactly as the terms are.
 A partner whose runner does not arrive in the agreed window is a **benign
-retry-at-next-window outcome**, recorded in the run bookkeeping -- never a
-desync and never an attack (see [A missed window is neither desync nor
+retry-at-next-window outcome** (see [A missed window is neither desync nor
 attack](#a-missed-window-is-neither-desync-nor-attack)). The record persists
 the agreed schedule and the retry bookkeeping
 ([MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)).
@@ -150,7 +142,9 @@ The schedule is **partnership-level agreement, coordinated out-of-band**,
 exactly as the linkage terms and the setup secret are (see
 [SECURITY_DESIGN.md](SECURITY_DESIGN.md#invitation-contents-and-confidentiality)).
 The two operators decide a cadence and a window together over their trusted
-channel, and each enters it locally when saving the exchange as recurring. It is
+channel, and each enters it locally. Saving an exchange as recurring does not
+yet offer schedule entry -- the record carries the field, but no surface sets
+it. It is
 **not** minted into the exchange-file document and **not** carried on the
 invitation wire: the document is the shared terms-and-locator config, fixed for
 the partnership -- changing the terms means setting up a new exchange, not
@@ -193,10 +187,9 @@ exchange a clock reading, so a wide window is what guarantees overlap despite
 small clock differences; the honest bound is in
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#clock-skew-and-the-window-width)),
 and it absorbs the ordinary slack of two independently-kept machines -- a laptop
-that woke late, an app launched a few minutes after login. A missed window is
-never desync and never an attack: nothing authenticated and nothing failed
-closed, because there was no peer to fail against (see [A missed window is
-neither desync nor attack](#a-missed-window-is-neither-desync-nor-attack)).
+that woke late, an app launched a few minutes after login. A missed window
+carries no security meaning (see [A missed window is neither desync nor
+attack](#a-missed-window-is-neither-desync-nor-attack)).
 
 ### Retry and repeated misses
 
@@ -234,15 +227,16 @@ problem, and it is resolved **out-of-band, where the schedule was agreed** --
 not by the app guessing. The record counts consecutive misses since the last
 success (see
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-schedule-object)),
-and at **two consecutive misses** the next visit's surface and the between-visit
-notification escalate to the coordination prompt, which names **both** checks:
+and once that count reaches the escalation threshold the next visit's surface
+and the between-visit notification escalate to the coordination prompt, which
+names **both** checks:
 check with your partner, and check this machine's own clock -- a wrong local
 time source produces exactly this pattern, and a no-IT operator pointed only at
 the partner would never look at their own machine.
 
 The threshold is a window count, not a wall-clock age, so it is deliberately
-**cadence-relative**: two misses on a monthly partnership means roughly two
-months before the escalated state. That is accepted because each miss already
+**cadence-relative**: on a monthly partnership the escalated state is months
+away. That is accepted because each miss already
 fires its own moment-anchored notification at its window (see [The between-visit
 notification](#the-between-visit-notification)), so the operator is not in the
 dark in the interim -- the threshold gates only the escalated
@@ -263,10 +257,12 @@ persona this feature serves the two failure modes are not symmetric:
   visit -- which may be weeks away. A silently paused schedule is a silently
   dead partnership.
 - **Continuing to attempt costs almost nothing.** Each attempt against a partner
-  who has gone away is one runner waking, deriving a rendezvous id, and waiting
-  out a window against a peer that never arrives: no wire traffic to a server,
-  no secret exposure (the secret does not rotate on a miss), and no data read
-  (the input guard and connection come only after a peer is found).
+  who has gone away is one runner waking, reading and column-checking its input
+  file, deriving a rendezvous id, and waiting out a window against a peer that
+  never arrives: no wire traffic to a server, no secret exposure (the secret
+  does not rotate on a miss), and one local file read. The input guard runs
+  ahead of the rendezvous, not after it (see [The second
+  run](#the-second-run-end-to-end)), so a no-show window costs that read.
 
 The honest cost of not pausing is that the miss surface must itself be
 trustworthy: if it read as noise the operator learned to ignore, endless quiet
@@ -277,10 +273,10 @@ pattern is real -- rather than a standing warning the operator clicks through
 (the same discipline the backup surfaces follow; see [Moment-anchored backup
 surfaces](#moment-anchored-backup-surfaces)).
 
-The operator retains an explicit, manual control either way: a recurring
-exchange can be paused or its schedule edited from its detail surface at any
-time, and deleting the exchange stops all attempts (see [Deleting a managed
-exchange](#deleting-a-managed-exchange)). What the design declines to do is make
+The operator retains an explicit, manual control either way: deleting the
+exchange stops all attempts (see [Deleting a managed
+exchange](#deleting-a-managed-exchange)). A pause control and in-place schedule
+editing arrive with the scheduling surface. What the design declines to do is make
 that pause decision *for* the operator on a heuristic, because the failure mode
 of a wrong automatic pause (a silently dead partnership) is worse for this
 persona than the failure mode of not pausing (cheap, visible, ignorable
@@ -335,9 +331,9 @@ already defines:
 
 Everything else stays quiet, and nothing repeats: each notification fires once
 at its state's transition, and a condition already surfaced is carried by the
-in-app state rather than re-announced at every subsequent wake -- the same
-moment-anchored discipline as the in-app surfaces, so the notification never
-becomes the standing nag the whole surface design avoids.
+in-app state rather than re-announced at every subsequent wake (the in-app
+surfaces follow the same discipline; see [Moment-anchored backup
+surfaces](#moment-anchored-backup-surfaces)).
 
 Because the notification is a concept over states the record already carries, a
 platform without OS notifications loses only the *sooner* prompt: every one of
@@ -373,8 +369,7 @@ re-selection where no handle is held); the completion surface offers the
 results and one more action, "download updated backup" -- the export, refreshed
 because the secret just rotated, offered as the natural final step rather than
 a later nagging prompt. On that path, with a fresh backup taken, **no standing
-warnings are shown** -- green and quiet. Every warning surface in this document
-is reserved for the moment its condition is true and actionable.
+warnings are shown** -- green and quiet.
 
 ### The input file each run
 
@@ -458,28 +453,24 @@ is what the desync recovery below exists for.
 The browser cannot match the CLI's on-disk durability, and the contract says so
 plainly rather than implying parity:
 
-- An IndexedDB transaction's `complete` event does **not** mean the bytes reached
-  stable media. Under the default (relaxed) durability it fires once the write is
-  visible in-process -- before OS writeback -- so it survives a tab or renderer
-  crash but not necessarily an OS crash or power loss. The rotated-secret write
-  therefore requests strict durability (see
-  [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#persist-before-success-ordering)),
-  which narrows but does not close that gap and is honored variably across
-  engines; nothing in the browser matches the CLI's forced flush and directory
-  flush (see [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md)).
+- **A committed browser write is not a flushed one.** The rotated-secret write
+  asks the store for the strongest durability the engine offers and still cannot
+  promise the bytes reached stable media: it survives a tab or renderer crash,
+  but not necessarily an OS crash or power loss, and nothing in the browser
+  matches the CLI's forced flush and directory flush (see
+  [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md)). The transaction
+  durability semantics this rests on are in
+  [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#persist-before-success-ordering).
 - The store can be **evicted wholesale** by the browser, silently, with no crash
   and no operator action (see [Surviving storage
   eviction](#surviving-storage-eviction)). The CLI's on-disk key file is not
   removed out from under it.
 
 The ordering above therefore guarantees renderer-crash consistency; the OS-crash
-and power-loss residual -- like eviction -- is covered not by a stronger at-rest
-guarantee but by the same recovery the CLI uses for a lost or desynced token:
-**fast re-invite** (see [Desync detection and
-recovery](#desync-detection-and-recovery)). The managed design is honest that
-at-rest durability in a browser is best-effort and that re-invite is the
-backstop, rather than presenting the browser store as equivalent to a file on
-disk.
+and power-loss residual -- like eviction -- is covered by [fast
+re-invite](#recovery-fast-re-invite) rather than by a stronger at-rest
+guarantee. Browser at-rest durability is best-effort, and the design says so
+rather than presenting the browser store as equivalent to a file on disk.
 
 ## Single-device ownership
 
@@ -513,38 +504,52 @@ property rests on migration-not-sync (below), not on the lock.
 
 ### Export/import is migration, not sync
 
-Moving a managed exchange to another device is **migration**: the act of
-exporting **invalidates the source copy**, so the secret is handed over, not
-duplicated. There is deliberately no sync: syncing a linear secret across two live
-copies is the exact fork the invariant forbids. An export produces a credential
-file (see [Export/import as the durability
-backbone](#the-durability-backbone-exportimport)); importing it on
-the target device installs the exchange there, and the source, having invalidated
-its copy on export, will not run again without a fresh import or a re-invite.
-Framing the operation as "take over on this device" rather than "copy to this
-device" is what keeps a single owner even across a device change.
+Moving a managed exchange to another device is **migration**: the source copy is
+spent when the handover completes, so the secret is handed over, not duplicated.
+There is deliberately no sync: syncing a linear secret across two live copies is
+the exact fork the invariant forbids. Importing the artifact on the target
+device installs the exchange there, and a spent source will not run again
+without a fresh import or a re-invite. Framing the operation as "take over on
+this device" rather than "copy to this device" is what keeps a single owner even
+across a device change.
 
 The two export intents are distinct in the UI even though the artifact is one
 format. A **backup export** leaves the source live (see [the durability
 backbone](#the-durability-backbone-exportimport)). A **migration export** is
-"take over on another device": the source record visibly transitions to a
-spent, handed-off state -- no Run affordance, no scheduled runs, labeled with
-the handoff date -- so the cooperation-not-cryptography invalidation below is
-legible at the one moment it is violable. A spent record can be deleted, or
-revived only by importing the artifact back.
+"take over on another device": it downloads the artifact and then asks the
+operator to attest that they saved it. The source is spent on that attestation
+rather than at the moment of export, so a cancelled or failed save leaves the
+source live and recoverable by exporting again; declining the attestation keeps
+the exchange on this device. On confirmation the source record visibly
+transitions to a spent, handed-off state -- no Run affordance, no scheduled
+runs, labeled with the handoff date -- so the cooperation-not-cryptography
+invalidation below is legible at the one moment it is violable. A spent record
+can be deleted, or revived only by importing the artifact back.
+
+The artifact is a **plaintext credential file in the operator's custody**.
+Passphrase encryption is deliberately not done: the record must be usable with
+nobody present to supply a passphrase at the moment of use. It is the browser
+analog of handing over `psilink.yaml` plus `.psilink.key`, and it adopts the key
+file's exact trust model: `.psilink.key` is a plaintext credential protected by
+custody and storage permissions, not a passphrase (see [Key file
+security](SECURITY_DESIGN.md#key-file-security)), and the export asks for the
+same handling -- owner-only storage, never an unencrypted transmission channel,
+an encrypted location or secrets manager if the operator wants encryption at
+rest. The artifact does not rotate -- it snapshots the secret current at export
+-- so a stale artifact stays usable until the partnership rotates past it or any
+`expires` it carries (stamped when a max-age policy is set) lapses. Its shape
+and the no-anti-rollback caveat are in
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#export-artifact).
 
 The invalidation is an **operator-cooperation property, not a cryptographic
-one**, and the design says so plainly: nothing in the protocol prevents a copied
-artifact, a browser-profile backup, or a VM snapshot from resurrecting a copy
-the UI "invalidated" -- the record keeps no rotation epoch, and the partner has
-no way to distinguish a restored copy from the owner. A captured or duplicated
-export is therefore treated as a captured credential, live until the partnership
-rotates past it, under the standard [compromise
+one**: nothing in the protocol prevents a copied artifact, a browser-profile
+backup, or a VM snapshot from resurrecting a copy the UI spent. A captured or
+duplicated export is therefore treated as a captured credential, live until the
+partnership rotates past it, under the standard [compromise
 response](SECURITY_DESIGN.md#compromise-response) (notify the partner
-out-of-band, re-invite). A monotonic rotation epoch carried in the record and
-checked in the handshake would let a party detect a stale or forked peer; it is a
-future core hardening, deferred alongside the grace window
-(see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect)).
+out-of-band, re-invite). Why the protocol cannot detect that resurrection, and
+the deferred hardening that would, are in
+[SECURITY_DESIGN.md](SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect).
 
 ## Desync detection and recovery
 
@@ -616,8 +621,9 @@ explanation -- a recorded persist failure on the last run (the structured
 `failureKind` bookkeeping), a detected restore-from-backup or import since the
 last successful run, or a lapsed age bound (which never even reaches here; see
 [Expiry is its own state](#expiry-is-its-own-state-never-routed-through-attack-framing))
--- the failure surfaces as that specific benign state with its specific recovery
-(re-invite, or import-then-run), **without** the attack checklist. The record's
+-- the failure surfaces as that specific benign state with its specific
+recovery, which for each of them is re-invite, **without** the attack
+checklist. The record's
 run bookkeeping is structured enums precisely so this tier can be derived
 rather than guessed.
 
@@ -659,9 +665,12 @@ distinct expired-token error, which names re-invitation rather than the generic
 out-of-sync guidance -- and is never delivered through the desync/attack
 framing above.
 
-The age bound is an **optional, operator-set creation-time policy, and it
-defaults to off** -- exactly the CLI's no-bound default (see [Token age and
-rotation policy](SECURITY_DESIGN.md#token-age-and-rotation-policy)). When the
+The age bound is **opt-in and off by default** -- exactly the CLI's no-bound
+default (see [Token age and rotation
+policy](SECURITY_DESIGN.md#token-age-and-rotation-policy)). It is set at setup
+and remains editable in place afterward, from the exchange's detail surface,
+where it can also be cleared; an edit re-derives the bound conservatively and
+never moves the stored secret's lapse later than it already stood. When the
 operator sets one, the exchange surfaces its cadence implication -- "this
 exchange must run or be renewed within N days" -- for the operator to weigh
 against the partnership's known cadence. The reason to opt in is a dormant
@@ -792,31 +801,14 @@ Because in-browser persistence can vanish silently, the **durability backbone is
 an export the operator holds outside the browser**, not the IndexedDB copy. The
 managed exchange can be exported to a file the operator keeps in their own
 secure storage and re-imported to reconstitute the exchange after an eviction.
-This is the same artifact and the same migration-not-sync semantics as a device
-move (see [Export/import is migration,
+It is the same artifact, with the same custody model and the same
+migration-not-sync semantics, as a device move (see [Export/import is migration,
 not sync](#exportimport-is-migration-not-sync)): an import re-establishes the one
-owner.
+owner. A backup export differs only in leaving the source live.
 
-The artifact is a **plaintext credential file in the operator's custody**.
-Passphrase encryption is deliberately not done: the record must be usable with
-nobody present to supply a passphrase at the moment of use. The artifact
-is the browser analog of handing over `psilink.yaml` plus `.psilink.key`, and it
-adopts the key file's exact trust model: `.psilink.key` is a plaintext credential
-protected by custody and storage permissions, not a passphrase (see [Key file
-security](SECURITY_DESIGN.md#key-file-security)), and the export asks for the
-same handling -- owner-only storage, never an unencrypted transmission channel,
-an encrypted location or secrets manager if the operator wants encryption at
-rest, exactly per the key file's backup guidance. A captured or copied export
-is a captured credential until the partnership rotates past it (see the
-[compromise response](SECURITY_DESIGN.md#compromise-response)). The artifact
-does not rotate -- it snapshots the secret current at export -- so a stale
-artifact stays usable until the partnership rotates past it or any `expires` it
-carries (stamped when a max-age policy is set) lapses. Re-export is prompted by
-the attended run's completion surface and by the backup state below; an
-unattended run rotates with nobody present, so its rotation flips the backup
-state to actionable at the next visit. The artifact's shape and the
-no-anti-rollback caveat are specified in
-[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#export-artifact).
+Re-export is prompted by the attended run's completion surface and by the backup
+state below; an unattended run rotates with nobody present, so its rotation flips
+the backup state to actionable at the next visit.
 
 ### Moment-anchored backup surfaces
 
@@ -856,9 +848,8 @@ eviction they were implicitly told could not happen.
 ### Eviction recovery is the import flow
 
 When the browser copy is gone -- evicted, or cleared with site data -- the
-recovery affordance is the empty state itself: "This exchange's browser copy
-was cleared. Restore from your backup file [Import], or re-invite your
-partner." Restoring after eviction and migrating to a new device are the
+recovery affordance is the empty state itself, which offers the import of the
+backup file the operator exported. Restoring after eviction and migrating to a new device are the
 **same import operation** (consistent with migration-not-sync): an import
 re-establishes the one owner, wherever it runs. One honest limit: a wholesale
 eviction erases the evidence that anything existed, so the app cannot always
@@ -877,9 +868,9 @@ re-invite -- and it is not secret expiry: an age bound (when set) caps how long
 the stored secret stays usable, while deletion removes this party's stored
 information entirely, whatever the secret's state. One custody note: deletion
 covers the browser's storage only; an exported backup file is under the
-operator's own custody, is disposed of by the operator, and remains a
-credential until the partnership rotates past it (see [the durability
-backbone](#the-durability-backbone-exportimport)).
+operator's own custody and is disposed of by the operator (see [Export/import is
+migration, not sync](#exportimport-is-migration-not-sync) for what it remains
+until then).
 
 ## See also
 
@@ -889,4 +880,3 @@ backbone](#the-durability-backbone-exportimport)).
 - [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md) - the self-attested per-run record of what this party disclosed, produced by every successful run
 - [COMPLIANCE.md](COMPLIANCE.md#hipaa-considerations) - how those per-run records serve an accounting of disclosures
 - [DEPLOYMENT.md](DEPLOYMENT.md) - the hosted web app deployment posture and the reverse-proxy responsibilities
-</content>
