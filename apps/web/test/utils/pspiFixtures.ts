@@ -4,9 +4,9 @@
 
 /** Probe the PeerJS coordination server at `hostString` with a short timeout, so
  * an unreachable server lets the caller skip its suite rather than failing. Call
- * this inside a hook, never at module scope: the networked exchange used to run
- * during import, where a "Failed to fetch" took down the entire browser project
- * (0 tests collected), hiding the server-less vector suites that share it. */
+ * this inside a hook, never at module scope: a "Failed to fetch" during import
+ * takes down the entire browser project (0 tests collected), hiding the
+ * server-less vector suites that share it. */
 export async function canReachServer(hostString: string): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 1_000);

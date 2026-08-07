@@ -252,11 +252,11 @@ describe("loadCSVFileOffMainThread: worker dispatch", () => {
 
   test("surfaces a worker parse rejection as an Error the consumer can display", async () => {
     // The worker runs core's loadCSVFile verbatim, so its guards -- including the
-    // non-string-header guard #307 added -- reject inside the worker exactly as
-    // inline. A real File cannot produce a non-string header (only the removed
-    // bundled-worker corruption could), so the guard's own firing is pinned in core's
-    // browser suite; here the guard's exact rejection is carried back over the worker
-    // boundary and must surface as an ordinary Error, not crash a downstream consumer.
+    // non-string-header guard -- reject inside the worker exactly as inline. A real
+    // File cannot produce a non-string header, so the guard's own firing is pinned in
+    // core's browser suite; here the guard's exact rejection is carried back over the
+    // worker boundary and must surface as an ordinary Error, not crash a downstream
+    // consumer.
     const fake = new FakeCSVParseWorker([
       {
         ok: false,

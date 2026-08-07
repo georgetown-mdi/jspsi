@@ -92,11 +92,11 @@ const PrimaryActionIcon = ActionIcon as unknown as ComponentType<{
 //    arithmetic.
 //  - Resolver-owned tokens (theme.ts cssVariablesResolver): dimmed, placeholder,
 //    error, and the yellow/red/green light-variant status text (the last also as the
-//    green import-success page text). The harness now mounts under
+//    green import-success page text). The harness mounts under
 //    the app's real cssVariablesResolver (see mount below), so these are exercised at
-//    the render level for the first time -- previously only the arithmetic unit test
-//    saw them. Each case pins the EXACT resolved token colour (proof the resolver
-//    reached the surface) as well as the AA floor (proof it is legible). Pinning the
+//    the render level. Each case pins the EXACT resolved token colour (proof the
+//    resolver reached the surface) as well as the AA floor (proof it is legible).
+//    Pinning the
 //    colour, not just the floor, is necessary: one default the resolver replaces
 //    (red's light-variant, red-9-on-red-1 = 4.51:1) already clears the floor, so a
 //    floor-only check would not notice that token regressing back to its default.

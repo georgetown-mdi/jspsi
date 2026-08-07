@@ -114,11 +114,10 @@ const darkButtonText = primaryContrast(darkPrimary);
 describe("theme colour contrast (WCAG 2.1 AA)", () => {
   const cases: Array<{ name: string; fg: string; bg: string; floor: number }> =
     [
-      // Primary (raised to cyan-9): one shade covers every surface it touches.
+      // Primary (cyan-9): one shade covers every surface it touches.
       // The text colour is read through primaryContrast (the per-scheme contrast
       // variable the filled-primary text is routed to) so this tracks what actually
-      // renders; the light guard test below locks it to white (byte-identical to the
-      // pre-autoContrast static default).
+      // renders; the light guard test below locks it to white.
       {
         name: "filled button text: contrast text on primary",
         fg: primaryContrast(primary),
@@ -154,9 +153,9 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
       // filled-primary text -- routed to --mantine-primary-color-contrast (black on
       // cyan-6) -- clears the text floor. Modeled like the light primary cases above:
       // button text on the fill, focus ring on the dark-7 body, input focus border on
-      // the dark-6 input. cyan-8 (the old default) left the button text at 4.35:1
-      // (under 4.5); darkening to cyan-9 instead would drop the focus ring / input
-      // border to 2.78:1 / 2.43:1 (under 3), which is why the shade went lighter, not
+      // the dark-6 input. cyan-8 leaves the button text at 4.35:1 (under 4.5);
+      // darkening to cyan-9 instead would drop the focus ring / input
+      // border to 2.78:1 / 2.43:1 (under 3), which is why the shade is lighter, not
       // darker (and why the text fix is the contrast-var route, not a shade move).
       {
         name: "filled button text (dark): contrast var on dark primary",
@@ -246,11 +245,10 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
     // if every other surface happened to compensate.
     expect(lightShade).toBeGreaterThanOrEqual(9);
     expect(contrast(white, primary)).toBeGreaterThanOrEqual(4.5);
-    // Enabling autoContrast (for the dark fix) must leave the light scheme
-    // byte-identical: the light primary cyan-9 sits below the luminanceThreshold, so
-    // --mantine-primary-color-contrast stays white -- the same colour the static
-    // default produced. A future shade light enough to flip it to black would fail
-    // here.
+    // autoContrast must leave the light scheme's contrast colour white: the light
+    // primary cyan-9 sits below the luminanceThreshold, so the variable
+    // --mantine-primary-color-contrast stays white. A future shade light enough to
+    // flip it to black would fail here.
     expect(primaryContrast(primary)).toBe(white);
   });
 
@@ -273,9 +271,9 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
     // The dark contrast cases above model --mantine-primary-color-contrast, which the
     // filled-primary Button / ActionIcon / Checkbox text must actually be pointed at
     // (Mantine resolves a filled surface's own text colour color-scheme-blind, so it
-    // would otherwise be white in both schemes -- the failure this whole change
-    // corrects). Pin that wiring: each component's vars override must emit the
-    // contrast variable for the filled primary (default variant, no colour) and must
+    // would otherwise be white in both schemes). Pin that wiring: each component's
+    // vars override must emit the contrast variable for the filled primary
+    // (default variant, no colour) and must
     // NOT touch a default/subtle/light or explicitly-coloured instance, which keep
     // their own text colour. The rendered colours themselves are checked in
     // test/browser/themeContrast.test.ts.

@@ -467,7 +467,6 @@ describe("consoleCoverageProvider", () => {
     vi.unstubAllGlobals();
   });
 
-  /** Resolve to "settled" if `promise` settles before `ms`, else "pending". */
   function race(promise: Promise<unknown>, ms: number): Promise<string> {
     return Promise.race([
       promise.then(() => "settled"),

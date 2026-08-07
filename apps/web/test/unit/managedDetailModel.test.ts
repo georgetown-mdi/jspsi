@@ -73,8 +73,6 @@ describe("linkageTermsRows renders configuration for both sides", () => {
     expect(rows.find((row) => row.label === "Your identity")?.value).toBe(
       "County Health Dept",
     );
-    // Every row carries either a value, a values list, or a muted empty state --
-    // never a bare undefined.
     for (const row of rows)
       expect(
         row.value !== undefined ||

@@ -193,10 +193,9 @@ describe("expert authoring round-trips", () => {
 describe("addElement keeps element identifiers unique within a key", () => {
   test("a second element of the same field gets a distinct alias, not a colliding identifier", () => {
     const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
-    // The repro that tore down the editor: a fresh key carries one element of the
-    // first declared field, and the picker defaults the next element to that same
-    // field -- so both took the bare "first_name" identifier. addElement now aliases
-    // the second so the two are told apart.
+    // A fresh key carries one element of the first declared field, and the picker
+    // defaults the next element to that same field -- both would take the bare
+    // "first_name" identifier, so addElement aliases the second to tell them apart.
     let d: AdvancedInviteDraft = { ...draft, keys: [] };
     d = addKey(d, "first_name");
     d = addElement(d, 0, "first_name");
@@ -250,7 +249,7 @@ describe("addElement keeps element identifiers unique within a key", () => {
     const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
     let d: AdvancedInviteDraft = { ...draft, keys: [] };
     d = addKey(d, "first_name");
-    // Force the collision addElement now avoids: a second bare first_name element.
+    // Force the collision addElement avoids: a second bare first_name element.
     d = updateKeyAt(d, 0, (key) => ({
       ...key,
       elements: [...key.elements, { field: "first_name" }],

@@ -299,7 +299,7 @@ describe("liveness-timeout config invariant", () => {
   // The unconfirmed window's safety argument is that it is at least 4x the PeerJS
   // first-heartbeat cadence, so a real peer always sends a frame and graduates to
   // the generous window before it can fire (4x leaves margin for a slow socket
-  // open and one missed heartbeat). The cadence is now psilink-owned -- set
+  // open and one missed heartbeat). The cadence is psilink-owned -- set
   // explicitly at Peer construction (PEER_PING_INTERVAL_MS) rather than left to
   // the caret-ranged `peerjs` default -- so pin the margin against both values
   // here: a future edit to either the reap window or the cadence that narrows it

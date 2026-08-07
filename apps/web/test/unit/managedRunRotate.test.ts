@@ -187,7 +187,6 @@ describe("runRotationCriticalSection: persist-before-gate ordering", () => {
     await expect(runRotationCriticalSection(section)).rejects.toThrow(
       "handshake failed closed",
     );
-    // The persist never ran.
     expect(order).toEqual(["handshake"]);
   });
 });

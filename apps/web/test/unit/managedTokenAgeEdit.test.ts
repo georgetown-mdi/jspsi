@@ -28,7 +28,6 @@ describe("deriveEditedExpiry", () => {
       NOW,
     );
     expect(result).toBe(new Date(ANCHOR + 30 * MS_PER_DAY).toISOString());
-    // Strictly earlier than the current bound.
     expect(Date.parse(result as string)).toBeLessThan(Date.parse(EXPIRES_90));
   });
 

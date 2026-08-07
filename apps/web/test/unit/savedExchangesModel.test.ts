@@ -129,7 +129,7 @@ describe("savedExchangeRow", () => {
 });
 
 describe("savedExchangeRow backup state", () => {
-  // Currency is now structural: a rotation clears the marker atomically and an export
+  // Currency is structural: a rotation clears the marker atomically and an export
   // binds its bytes to the marker, so the row derives state from marker presence
   // alone, independent of the record's lastRun.
   test("no marker at all is backup-needed", () => {
@@ -149,7 +149,7 @@ describe("savedExchangeRow backup state", () => {
   test("a present marker reads backed-up regardless of the last run's instant", () => {
     // A marker chronologically before the last successful run still reads backed-up:
     // the rotation would have cleared a stale marker, so a marker present at all is
-    // by construction current -- the model no longer re-derives staleness here.
+    // by construction current.
     const local: ManagedLocalState = {
       backup: { backedUpAt: "2026-07-09T09:00:00.000Z" },
     };

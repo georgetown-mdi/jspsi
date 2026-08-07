@@ -57,7 +57,6 @@ class FakePsiCryptoWorker implements PsiCryptoWorker {
   emitMessageError(event: unknown): void {
     this.onmessageerror?.(event);
   }
-  // Answer the most recent posted request as a success, echoing its id.
   replyOkToLast(result: unknown): void {
     const last = this.posted.at(-1);
     if (last === undefined) throw new Error("no request to reply to");

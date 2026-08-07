@@ -179,7 +179,6 @@ describe("buildReinviteRotation: the record's own expires provenance", () => {
   test("a max-age policy restamps the record's expires now + N days", () => {
     const rotation = buildReinviteRotation(FRESH_SECRET, 30, NOW);
     expect(rotation.sharedSecret).toBe(FRESH_SECRET);
-    // 30 days after NOW.
     expect(rotation.expires).toBe(
       new Date(NOW + 30 * 86_400_000).toISOString(),
     );

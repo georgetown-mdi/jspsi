@@ -1891,10 +1891,10 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
 
   test("a benign empty constraints object on a no-default-constraint field round-trips verbatim, not over-refused", () => {
     // date_of_birth has no default constraint, so a from-defaults rebuild emits no
-    // constraints key -- diverging from an imported empty {} and (before the faithful
-    // round-trip) tripping item 203437315's refuse-on-import guard even though {} is
-    // behaviorally identical to absent. Preserving the {} keeps the canonical forms
-    // equal: neither a silent divergence nor an over-refusal.
+    // constraints key -- diverging from an imported empty {} and tripping the
+    // refuse-on-import guard even though {} is behaviorally identical to absent.
+    // Preserving the {} keeps the canonical forms equal: neither a silent divergence
+    // nor an over-refusal.
     const imported = withFieldConstraints(defaultExport(), "date_of_birth", {});
     expect(
       imported.linkageFields.find((f) => f.name === "date_of_birth"),
@@ -2041,11 +2041,8 @@ describe("draftFromTerms degrades gracefully on an unsupplyable key", () => {
 
   test("a partially-satisfiable import disables only the unsupplyable key and generates the rest", () => {
     // Three same-typed fields into a two-column file: two bind, the third has no free
-    // column. Before this change satisfiableKeyCount was 2 yet canGenerate was false
-    // with the misleading "Enable at least one linkage key." -- the third key dangled
-    // the built terms and the referential-integrity failure masked the satisfiable
-    // subset. Now the import disables the third key so the two satisfiable keys
-    // generate, while the unsupplyable key stays visible (disabled) to re-enable later.
+    // column. The import disables the third key so the two satisfiable keys generate,
+    // while the unsupplyable key stays visible (disabled) to re-enable later.
     const exported = threeNameDocument();
     const seed = seedFor(twoNameColumns, twoNameMetadata);
     const imported = draftFromTerms(exported, seed, 3600, []);
@@ -2144,8 +2141,7 @@ describe("draftFromTerms degrades gracefully on an unsupplyable key", () => {
   });
 
   test("a fully satisfiable import is unchanged: every key stays enabled and generates", () => {
-    // Both same-typed fields bind against the two columns, so no key is disabled --
-    // the import behaves exactly as before this change.
+    // Both same-typed fields bind against the two columns, so no key is disabled.
     const document = buildAdvancedTerms({
       identity: "Inviter",
       lifetimeSeconds: 3600,

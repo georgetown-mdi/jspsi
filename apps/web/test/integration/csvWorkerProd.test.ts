@@ -18,13 +18,13 @@ import {
 import type { Browser } from "playwright";
 import type { ChildProcess } from "node:child_process";
 
-// The regression #307 fixed, guarded against return: PapaParse's `worker: true`
-// self-hosted worker corrupted the CSV parse once Vite bundled and minified the app
+// The regression this guards against: PapaParse's `worker: true` self-hosted
+// worker corrupted the CSV parse once Vite bundled and minified the app
 // (dev and Vitest's real-Chromium tests both passed with the broken worker, so a
 // dev-only test cannot catch it). This drives the REAL inviter bench flow -- the
 // operator's name, a large CSV, and the spine through to Create -- against the app
 // served from a production `vite build` (.output), so the parse runs through the
-// Vite-native worker in the exact bundled/minified form #307's inline switch was
+// Vite-native worker in the exact bundled/minified form the inline switch was
 // forced by. A worker is created (page.on("worker")) and the invitation is produced
 // with correct linkage terms, which only happens if the parse yielded a clean header
 // -- the broken worker mis-applied the header and crashed invitation generation. The
