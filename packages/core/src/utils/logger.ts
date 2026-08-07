@@ -59,6 +59,37 @@ export const setDiagnosticSink = (sink: DiagnosticSink | undefined): void => {
 export const getDiagnosticSink = (): DiagnosticSink | undefined =>
   diagnosticSink;
 
+/**
+ * Apply `level` as the diagnostic log level for EVERY logger -- the ones that
+ * already exist as well as the ones built later. This is the level counterpart of
+ * {@link setDiagnosticSink}: an application's logging bootstrap (the CLI's
+ * `configureLogging`) resolves the operator's requested level and installs it
+ * here, so a `silent` run is silent and a `debug` run is detailed no matter when
+ * a logger was constructed.
+ *
+ * The sweep over loglevel's registry is what makes it reach backwards.
+ * `setDefaultLevel` alone governs only the root logger and the loggers built
+ * after it, so a module-scope logger materialized when its module was imported
+ * -- before any flag was parsed -- would keep loglevel's `warn` default for the
+ * whole run. Setting each existing logger's level explicitly closes that, and
+ * `setDefaultLevel` still carries the level to loggers created later. Each sweep
+ * assignment passes `persist: false`, so a browser consumer's level is not
+ * written to web storage behind its back.
+ *
+ * Call this at bootstrap, before any per-logger level is chosen: it overwrites
+ * the level of every logger that exists, including one
+ * {@link getLoggerForVerbosity} has already floored to a `-v` verbosity. Setting
+ * a level also rebuilds that logger's methods from its own factory (loglevel
+ * installs `noop` for the disabled ones), so a reference captured to a logger's
+ * method beforehand -- a test spy, a destructured `log.warn` -- is stale
+ * afterwards; call the method off the logger instead.
+ */
+export const setLogLevel = (level: logLibrary.LogLevelNumbers): void => {
+  logLibrary.setDefaultLevel(level);
+  for (const existing of Object.values(logLibrary.getLoggers()))
+    existing.setLevel(level, false);
+};
+
 export const getLoggerForVerbosity = (
   name: string | symbol,
   verbosity: number,

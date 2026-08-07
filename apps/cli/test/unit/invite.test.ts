@@ -27,6 +27,7 @@ import {
 import { saveConfig } from "../../src/config";
 import { MAX_TIMEOUT_SECONDS } from "../../src/util/cli";
 import { connectionFromEndpoint } from "../../src/onlineBootstrap";
+import { captureStdio } from "../loggingTestSupport";
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 
 const silentLog = getLogger("invite-test");
@@ -1491,16 +1492,15 @@ test("handler: a mistyped --flag exits 64 naming it, before any side effect", as
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
   const configFile = path.join(dir, "psilink.yaml");
   const keyFile = path.join(dir, ".psilink.key");
-  const errors: string[] = [];
-  const logErr = vi
-    .spyOn(getLogger("invite"), "error")
-    .mockImplementation((...a: unknown[]) => {
-      errors.push(a.map(String).join(" "));
-    });
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
+  // The run is read at the level an operator would see the rejection at: the
+  // handler applies --log-level to every logger, so `silent` drops this message
+  // like any other, and a logger method spied before the run is replaced by the
+  // one the level installs.
+  const { stderrWrites, restore } = captureStdio();
   try {
     await inviteHandler({
       _: [],
@@ -1508,16 +1508,16 @@ test("handler: a mistyped --flag exits 64 naming it, before any side effect", as
       args: ["--server-usernam", "u", input],
       "config-file": configFile,
       "key-file": keyFile,
-      "log-level": "silent",
+      "log-level": "error",
       record: false,
     } as unknown as Arguments);
     expect(exit).toHaveBeenCalledWith(64);
-    expect(errors.join("\n")).toContain("--server-usernam");
+    expect(stderrWrites.join("")).toContain("--server-usernam");
     expect(logSpy).not.toHaveBeenCalled();
     expect(fs.existsSync(configFile)).toBe(false);
     expect(fs.existsSync(keyFile)).toBe(false);
   } finally {
-    logErr.mockRestore();
+    restore();
     logSpy.mockRestore();
     exit.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
