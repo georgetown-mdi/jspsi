@@ -7110,8 +7110,6 @@ test("I8: retain poll() ack-write failure -- recvSeq held, message reprocessed a
   expect(ackRenameAttempts).toBe(2);
   expect(errors.length).toBeGreaterThanOrEqual(1);
   expect(received).toHaveLength(1);
-  // ...recvSeq advanced exactly once, only after the successful ack + emit
-  // (so it was held across the failed attempt)...
   expect(messageLoopInternals(conn).recvSeq).toBe(1);
   expect(ackRenames).toHaveLength(1);
   const onDiskAcks = [...files.keys()].filter((p) => p.endsWith("-ack.json"));
@@ -7471,7 +7469,6 @@ test("synchronize() does NOT sweep a foreign temp-*.tmp whose stem is not a UUID
   expect(err).not.toBeInstanceOf(UsageError);
   expect(safeDeleted).not.toContain(foreignTempPath);
   expect(files.has(foreignTempPath)).toBe(true);
-  // ...and recorded in the entry snapshot so the loop tolerates it.
   const snapshot = (conn as unknown as { foreignFileSnapshot: Set<string> })
     .foreignFileSnapshot;
   expect(snapshot.has("temp-export.tmp")).toBe(true);
@@ -7511,7 +7508,8 @@ test("synchronize() does NOT sweep a foreign temp whose stem is an UPPERCASE v4 
   expect(err).not.toBeInstanceOf(UsageError);
   expect(safeDeleted).not.toContain(foreignTempPath);
   expect(files.has(foreignTempPath)).toBe(true);
-  // ...and recorded in the entry snapshot so the loop tolerates it.
+  // Recording it in the entry snapshot is what makes the poll loop tolerate it
+  // for the rest of the session.
   const snapshot = (conn as unknown as { foreignFileSnapshot: Set<string> })
     .foreignFileSnapshot;
   expect(snapshot.has("temp-953D0248-D2F0-46F2-94DC-5082EED218F9.tmp")).toBe(
@@ -9201,7 +9199,6 @@ test("synchronize() default: a foreign file is tolerated, snapshotted, and not d
 
   expect(conn.handshakeRole).toBe("initiator");
   expect(files.has("/test/notes.txt")).toBe(true);
-  // ...and was recorded in the entry snapshot so the loop tolerates it.
   const snapshot = (conn as unknown as { foreignFileSnapshot: Set<string> })
     .foreignFileSnapshot;
   expect(snapshot.has("notes.txt")).toBe(true);

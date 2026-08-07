@@ -127,13 +127,13 @@ export interface CompiledLinearRegex {
 
 /**
  * Compile `pattern` under the linear-time engine and return the per-row
- * operations. Throws (an `RE2JS` exception) if the pattern is outside the dialect;
- * callers that execute already-validated terms never hit that throw (the dialect
- * gate rejected such a pattern at parse time). The operator-local `runPipeline`
- * path surfaces it as a thrown error, including on a JavaScript-valid pattern
- * the dialect drops (a backreference or lookaround). The pattern there is
- * operator-authored, so the
- * error echoing it leaks nothing partner-controlled.
+ * operations. Throws (an `RE2JS` exception) if the pattern is outside the
+ * dialect; callers that execute already-validated terms never hit that throw
+ * (the dialect gate rejected such a pattern at parse time). The operator-local
+ * `runPipeline` path surfaces it as a thrown error, including on a
+ * JavaScript-valid pattern the dialect drops (a backreference or lookaround).
+ * The pattern there is operator-authored, so the error echoing it leaks nothing
+ * partner-controlled.
  */
 export function compileLinearRegex(pattern: string): CompiledLinearRegex {
   const re = compileCached(pattern);

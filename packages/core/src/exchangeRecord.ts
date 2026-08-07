@@ -405,9 +405,9 @@ export interface CommitmentSalts {
 /**
  * The private verification keys for an {@link ExchangeRecord}: the per-commitment
  * salts and NOTHING ELSE. A salt is a secret HMAC key, not committed data, so
- * these keys are NOT a second at-rest copy of the matched data: they carry no payload
- * values and no matched-record pairing. The matched data lives only in the result
- * the operator chose to write, never in this file.
+ * these keys are NOT a second at-rest copy of the matched data: they carry no
+ * payload values and no matched-record pairing. The matched data lives only in
+ * the result the operator chose to write, never in this file.
  *
  * They are still private, not shareable: a salt together with the record's
  * commitment can brute-force a low-entropy committed value (notably the
