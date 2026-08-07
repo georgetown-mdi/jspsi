@@ -111,25 +111,46 @@ describe.skipIf(!hasBuild)(
           // hydration ran, so the real fix is to re-apply both inputs until the button
           // reflects them: an enabled button IS the hydration signal. Each action is
           // short-bounded so one stuck call cannot overrun the loop's own deadline
-          // (its 30s default would).
+          // (its 30s default would), and an action that spends that bound is
+          // retried rather than thrown: an action here costs 46-260ms whether the
+          // container is idle or oversubscribed, so the bound expiring means the
+          // box stalled, which is the very thing the loop is here to ride out.
+          // Only the deadline below is a verdict, and it carries the last action
+          // failure so a real rejection is still named.
           const ACTION_TIMEOUT_MS = 5_000;
           const nameField = page.getByLabel("Your name");
           const fileInput = page.locator('input[type="file"]').first();
           const continueToColumns = page.getByRole("button", {
             name: "Continue to matching & sharing",
           });
+          let lastActionFailure = "none";
+          const attempt = async <T>(
+            action: () => Promise<T>,
+          ): Promise<T | undefined> => {
+            try {
+              return await action();
+            } catch (err) {
+              lastActionFailure =
+                err instanceof Error ? err.message : String(err);
+              return undefined;
+            }
+          };
           const enableDeadline = Date.now() + HYDRATION_TIMEOUT_MS;
           for (;;) {
-            await nameField.fill("Prod Worker Test", {
-              timeout: ACTION_TIMEOUT_MS,
-            });
-            await fileInput.setInputFiles(csvPath, {
-              timeout: ACTION_TIMEOUT_MS,
-            });
-            if (
-              await continueToColumns.isEnabled({ timeout: ACTION_TIMEOUT_MS })
-            )
-              break;
+            await attempt(() =>
+              nameField.fill("Prod Worker Test", {
+                timeout: ACTION_TIMEOUT_MS,
+              }),
+            );
+            await attempt(() =>
+              fileInput.setInputFiles(csvPath, {
+                timeout: ACTION_TIMEOUT_MS,
+              }),
+            );
+            const enabled = await attempt(() =>
+              continueToColumns.isEnabled({ timeout: ACTION_TIMEOUT_MS }),
+            );
+            if (enabled === true) break;
             if (Date.now() >= enableDeadline) {
               // Distinguish a hydration stall from a real rejection (the accept filter,
               // the 100 MB cap, or a broken name/file binding) so the failure is
@@ -142,7 +163,8 @@ describe.skipIf(!hasBuild)(
                 await continueToColumns.getAttribute("disabled");
               throw new Error(
                 `Continue to matching & sharing stayed disabled after ${HYDRATION_TIMEOUT_MS}ms ` +
-                  `(file shown in dropzone: ${fileShown}, disabled attr: ${disabledAttr}); ` +
+                  `(file shown in dropzone: ${fileShown}, disabled attr: ${disabledAttr}, ` +
+                  `last action failure: ${lastActionFailure}); ` +
                   "the invite interactions may not have hydrated, or the file was rejected",
               );
             }
@@ -189,10 +211,11 @@ describe.skipIf(!hasBuild)(
         }
       },
       // Cover the four bounded phases serially -- goto (<= GENERATE_TIMEOUT_MS), the
-      // enable loop (<= HYDRATION_TIMEOUT_MS), the Review & create heading wait
-      // (<= GENERATE_TIMEOUT_MS), and the share-block wait (<= GENERATE_TIMEOUT_MS)
-      // -- plus margin, so a slow phase surfaces its own error rather than a bare
-      // per-test timeout.
+      // enable loop (<= HYDRATION_TIMEOUT_MS plus the one iteration in flight when
+      // the deadline passes, at most three actions of 5s), the Review & create
+      // heading wait (<= GENERATE_TIMEOUT_MS), and the share-block wait
+      // (<= GENERATE_TIMEOUT_MS) -- plus margin, so a slow phase surfaces its own
+      // error rather than a bare per-test timeout.
       GENERATE_TIMEOUT_MS * 3 + HYDRATION_TIMEOUT_MS + 20_000,
     );
   },

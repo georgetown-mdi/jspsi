@@ -151,11 +151,21 @@ describe("native <-> WASM parity above the threading threshold", () => {
     }
   }
 
-  test("threaded native EC loops reproduce the WASM output", (ctx) => {
-    if (!native) {
-      ctx.skip();
-      return;
-    }
-    expect(runFlow(native)).toStrictEqual(runFlow(wasm));
-  });
+  // Two 1101-element flows, one per backend, are the most arithmetic any test in
+  // this package does off the stress tier: 2.2s alone on an idle container, and
+  // 4.1s measured inside the full unit suite on four cores -- 82% of vitest's 5s
+  // default, which is why CI has seen it lose. Sized at roughly seven times that
+  // worst measurement, the bound stays a backstop for an EC loop that never
+  // returns rather than an assertion about how fast the addon shards its work.
+  test(
+    "threaded native EC loops reproduce the WASM output",
+    { timeout: 30_000 },
+    (ctx) => {
+      if (!native) {
+        ctx.skip();
+        return;
+      }
+      expect(runFlow(native)).toStrictEqual(runFlow(wasm));
+    },
+  );
 });
