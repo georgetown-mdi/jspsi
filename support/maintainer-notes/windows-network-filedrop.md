@@ -54,6 +54,43 @@ moved the whole battery into the image.
 
 ## State
 
+**The CIFS volume pins `uid=1000,gid=1000`, and that is unverified against a
+real share, 6 August 2026.** The published image runs as an unprivileged
+account rather than as root, so the mount's own ownership decides whether an
+exchange can write to the share at all. A server without CIFS Unix extensions
+-- every native Windows SMB server -- sends no ownership for the client to map,
+and `cifs.ko` then presents the whole tree as uid 0 mode 0755/0644 and enforces
+that locally, which is `EACCES` on the first write from uid 1000. Both setup
+scripts therefore name `uid=1000,gid=1000` in the mount options, as do the
+by-hand copies of the command in `by-hand.md` and `troubleshooting.md`.
+`noperm` would also clear the refusal, by switching the client's permission
+check off wholesale; mapping the ownership is the narrower of the two and is
+what these carry.
+
+This is read off the documented mount-option semantics, not measured. CI does
+mount CIFS -- `cli_build_and_test.yaml`'s `smb-doctor` job mounts a local-driver
+`type=cifs` Docker volume and, separately, a kernel `mount -t cifs`, both against
+the Samba rig it stands up -- but neither leg measures this mapping. Both name
+`uid=$(id -u)`, the runner's own account rather than 1000; the volume leg runs
+its check in a stock `node` image rather than the published unprivileged one; and
+a Samba server can be made to serve the Unix extensions a native Windows server
+never does, which is the case these options exist for. The Windows side does not
+reach the mount either: the resolution workflow drives the script's resolution
+functions on a Windows runner and stops before part 4. And the runs recorded
+below reached "the volume mounts and psilink can write to it" while the image
+still ran as root, where the DAC override made the mapping irrelevant. That is
+why a working share passed before and why it is not evidence now.
+
+What settles it is a Windows-host pass of the kind recorded below: run either
+script through part 4 against a real share and read that same verdict. Both
+scripts' probes are the measurement -- `psilink doctor mount` for the PowerShell
+one, `cmd_psilink-volcheck.sh` for the Command Prompt one -- and both run inside
+the published image, so their write is uid 1000's write and a wrong mapping
+fails them rather than passing silently. Worth doing against a native Windows
+server rather than the Samba rig: Samba can be configured to serve Unix
+extensions, and a rig that does would mask exactly the case these options exist
+for.
+
 **The PowerShell script's own container-side diagnostics are gone, 5 August
 2026.** Both here-strings -- the smbclient probe and the volume check -- were
 deleted, and the script runs the image's `psilink doctor probe` and

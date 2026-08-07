@@ -50,6 +50,14 @@ script's own guidance text.
 
 ## State
 
+**The `uid=1000,gid=1000` mount options this script now creates the volume with
+are unverified against a real share**, exactly as the PowerShell script's are;
+the reasoning, what would settle it, and why the earlier passing runs are not
+evidence are recorded once, under "The CIFS volume pins `uid=1000,gid=1000`" in
+[`windows-network-filedrop.md`](windows-network-filedrop.md). The measurement on
+this side is `cmd_psilink-volcheck.sh`'s `WRITE_OK`, which runs inside the
+published image and so writes as the unprivileged account the mapping is for.
+
 The most recent full pass covers both scripts together and is written up once,
 under "Verification pass on staging, 30 July 2026" in
 [`windows-network-filedrop.md`](windows-network-filedrop.md). It confirms this

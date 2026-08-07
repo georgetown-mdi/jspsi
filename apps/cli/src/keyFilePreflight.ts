@@ -219,9 +219,11 @@ export function preflightKeyFilePath(
     throw new Error(
       `keyFilePath parent directory ${parent} is not writable: ` +
         (err instanceof Error ? err.message : String(err)) +
-        ". Restore write permission before running the exchange, " +
-        "otherwise saveKeyFile would fail after a successful key " +
-        "exchange and both parties would need to re-invite.",
+        ". Restore write access -- the directory's owner as well as its " +
+        "permissions, since in a container psilink runs as its own account " +
+        "and a mounted directory keeps the owner it has outside -- before " +
+        "running the exchange, otherwise saveKeyFile would fail after a " +
+        "successful key exchange and both parties would need to re-invite.",
     );
   } finally {
     if (probeFd !== undefined) {

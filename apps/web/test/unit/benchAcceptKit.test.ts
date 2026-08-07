@@ -106,6 +106,84 @@ describe("accept kit, per-channel shape", () => {
   });
 });
 
+describe("accept kit, the account the container runs as", () => {
+  const USER_FLAG = '--user "$(id -u):$(id -g)"';
+  const CHOWN = "chown 1000:1000 .";
+
+  test("gates on the engine before it instructs, on both channels", () => {
+    for (const endpoint of [FILEDROP, SFTP]) {
+      const text = sheet(endpoint);
+      // The reader with nothing to do learns that first, and the exemption is
+      // scoped by engine rather than by OS: Docker Desktop runs on Linux too,
+      // and presents a mount to whoever the container runs as wherever it runs.
+      expect(text).toContain("Docker Desktop, on Windows, macOS, or Linux");
+      expect(text).toContain("Docker Engine on Linux");
+      const gate = text.indexOf("WHICH DOCKER DO YOU HAVE?");
+      expect(gate).toBeGreaterThan(-1);
+      expect(gate).toBeLessThan(text.indexOf(USER_FLAG));
+      expect(gate).toBeLessThan(text.indexOf(CHOWN));
+      // The section qualifies every command on the sheet, so it precedes the
+      // first one: the image runs as uid 1000, and a bind-mounted folder owned
+      // by anyone else fails the partner's accept on its first write.
+      expect(text).toContain("numbered 1000");
+      expect(text.indexOf(CHOWN)).toBeLessThan(text.indexOf("docker run"));
+    }
+  });
+
+  test("leads with the flag and keeps chown as the privileged fallback", () => {
+    for (const endpoint of [FILEDROP, SFTP]) {
+      const text = sheet(endpoint);
+      // The flag needs no privilege, covers every folder the commands mount,
+      // and leaves what psilink writes owned by the partner, so it leads; the
+      // single-folder chown follows it as the fallback.
+      expect(text.indexOf(USER_FLAG)).toBeLessThan(text.indexOf(CHOWN));
+      // Giving a folder away to another uid is privileged: the unprivileged
+      // form succeeds only for a partner already numbered 1000, who did not
+      // need it, and the sheet names the symptom the others will see.
+      expect(text).toContain(`sudo ${CHOWN}`);
+      expect(text).toContain("Operation not permitted");
+      // 1000 is a uid, and on a shared machine it may be another person's:
+      // the fallback hands them the folder and everything psilink writes in
+      // it, so the sheet says whose folder it becomes before the reader runs
+      // the command.
+      const consequence = text.split(`sudo ${CHOWN}`)[1];
+      expect(consequence).toContain("a number, not a name");
+      expect(consequence).toContain("share with other people");
+    }
+  });
+
+  test("the flag's scope names the second folder each channel mounts", () => {
+    // Every command carries two mounts, and the chown fallback reaches only
+    // the first: the flag is what covers the shared folder (/sync) and the
+    // credential folder (/run/secrets) as well as the CSV folder (/work).
+    const scope = (endpoint: AcceptKitEndpoint): string =>
+      sheet(endpoint).split(USER_FLAG)[1].split("sudo chown")[0];
+    expect(scope(FILEDROP)).toContain("CSV file");
+    expect(scope(FILEDROP)).toContain("shared");
+    expect(scope(SFTP)).toContain("CSV file");
+    expect(scope(SFTP)).toContain("password file");
+    // The chown fallback says so itself rather than leaving the reader to
+    // discover the second mount when it fails.
+    for (const endpoint of [FILEDROP, SFTP])
+      expect(sheet(endpoint)).toContain("only the folder");
+  });
+
+  test("sends the chown reader to their own folder, not the shared one", () => {
+    // A folder-relative command given before the sheet has named a folder is
+    // how a filedrop partner ends up chowning the shared folder -- the one
+    // folder the sheet keeps their psilink files out of.
+    const fallback = (endpoint: AcceptKitEndpoint): string =>
+      sheet(endpoint)
+        .split("If you cannot change the commands")[1]
+        .split("sudo chown")[0];
+    expect(fallback(FILEDROP)).toContain("holds your CSV");
+    expect(fallback(FILEDROP)).toContain("never the shared one");
+    expect(fallback(SFTP)).toContain("holds your CSV");
+    // An SFTP partner has no shared folder, so the warning is not on that sheet.
+    expect(fallback(SFTP)).not.toContain("shared");
+  });
+});
+
 describe("accept kit, filedrop routing", () => {
   test("offers the network-drive/DFS launcher branch", () => {
     const text = sheet(FILEDROP);

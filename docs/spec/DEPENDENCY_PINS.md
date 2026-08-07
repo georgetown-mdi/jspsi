@@ -83,6 +83,13 @@ at all, each file's OS-package installs are exactly the reviewed set, and the
 copied layout keeps the workspace links and the PSI worker entry where the CLI
 resolves them.
 
+Those invariants are read off `COPY` and `RUN`, so the test refuses every other
+instruction class outright, in either stage, rather than modeling it. `ADD` is
+the one that names itself: it fetches a remote source and takes the same
+`--chown`/`--chmod` flags `COPY` does, so it can both pull in a build input the
+lockfile does not pin and land files with an ownership no assertion here reads. A
+build that needs another class extends the test's reviewed list in the same diff.
+
 The `node:26-alpine` base image is digest-pinned in both stages to its
 multi-arch index digest, so the Node runtime and Alpine userland beneath the
 frozen `node_modules` no longer drift between rebuilds. The tradeoff is that a
@@ -174,13 +181,19 @@ the install reports exactly `-rwxr-sr-x 1 root shadow /usr/sbin/unix_chkpwd` and
 no setuid file at all -- on the built `arm64` image, and at `x86_64` on the
 pinned base plus that one instruction. It sits beside the PAM helpers `faillock`,
 `mkhomedir_helper`, `pam_namespace_helper`, `pam_timestamp_check` and
-`pwhistory_helper`, none of them setgid. Exploitability rests on two properties
-of this image rather than on the package: it declares no `USER`, so a process in
-it is already uid 0 and a setgid-`shadow` helper grants nothing that opening the
-file would not, and `/etc/shadow` carries no usable hash (`root` is `*`, every
-other account `!`), so `unix_chkpwd` has nothing to verify against. Both would
-need revisiting if the image dropped to a non-root `USER`: at that point the
-helper is a real privilege boundary rather than a redundant one.
+`pwhistory_helper`, none of them setgid. The runtime stage declares `USER node`,
+so the process the setgid bit would elevate is unprivileged and the bit has to be
+read as a boundary rather than as the formality it is for uid 0. What bounds
+exploitability is a single measured property of the image rather than of the
+package -- `/etc/shadow` carries no usable hash (`root` is `*`, every other
+account `!`), so `unix_chkpwd` has nothing to verify against. Whether that
+account already carries group `shadow`, which would make the bit grant it nothing
+in the first place, is not measured here and nothing rests on it;
+`docker run --rm --entrypoint id <image> -Gn node` settles it against a built
+image. Nothing stands behind the one property that does carry the conclusion, so
+re-measure it if a change gives any account in the image a password hash, or if
+the image gains a second setgid or any setuid file; the `find` above settles
+both.
 
 **The helper image the setup scripts run the probe in is a mutable tag.** It is
 `vdorie/psi-link:latest` in both scripts, and floating it is deliberate: the

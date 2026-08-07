@@ -127,7 +127,7 @@ A file reference is the preferred path and never puts a secret through the web s
 
 **Graduating to a scheduled run.** The console is a prototyping tool: once an exchange works, the recurring production version graduates to the plain CLI plus cron or the Windows Task Scheduler. The console shows a recurring-run hand-off -- the portable `psilink.yaml` (or the zero-setup command), a cron and a Task Scheduler example, and the caveats -- filling in the portable settings that carried over from the run while showing the machine-specific paths as placeholders the operator sets on the scheduling machine. It is composed the moment the exchange starts and is available from then on, collapsed while the run is in flight and expanded once it completes, so the operator can set the schedule up in parallel rather than only afterwards. It never displays the shared secret or a container-internal path; for an invitation run it points at the on-disk `.psilink.key` to copy. The endpoint contract is in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md#the-recurring-run-hand-off) and the command-line reference in [CLI.md](CLI.md#recurring-exchange).
 
-**Sending the partner an accept kit.** An SFTP or shared-directory exchange puts the partner on the command line, so the console offers a second artifact at invitation-mint time: a printable, plaintext instruction sheet to send alongside the invitation. It assumes the partner has Docker Desktop or can get it and nothing else, and takes them to the point of accepting -- naming the channel, the rendezvous the invitation carries, the `docker run ... accept` and `exchange` commands, and, on a shared directory, routing a partner whose folder is a Windows network drive or DFS path to the release launchers instead (Docker cannot see a drive letter). It does not restate the linkage terms: accepting displays those and asks the partner to confirm them, which is where that disclosure belongs. The sheet carries no secret and no invitation token -- the partner pastes their own copy of the invitation over a placeholder -- so it can travel any way that suits them, including on paper. A WebRTC exchange gets no kit: that partner accepts in their browser by opening the link. Its full contents and invariants are in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md#the-partner-accept-kit).
+**Sending the partner an accept kit.** An SFTP or shared-directory exchange puts the partner on the command line, so the console offers a second artifact at invitation-mint time: a printable, plaintext instruction sheet to send alongside the invitation. It assumes the partner has Docker -- Desktop or Engine -- or can get it, and nothing else, and takes them to the point of accepting -- naming the channel, the rendezvous the invitation carries, the `docker run ... accept` and `exchange` commands, and, on a shared directory, routing a partner whose folder is a Windows network drive or DFS path to the release launchers instead (Docker cannot see a drive letter). It does not restate the linkage terms: accepting displays those and asks the partner to confirm them, which is where that disclosure belongs. The sheet carries no secret and no invitation token -- the partner pastes their own copy of the invitation over a placeholder -- so it can travel any way that suits them, including on paper. A WebRTC exchange gets no kit: that partner accepts in their browser by opening the link. Its full contents and invariants are in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md#the-partner-accept-kit).
 
 **Restarting cancels and forgets the exchange.** Job state lives in server memory only, so restarting the server cancels an exchange still running -- rerun it, since the exchange protocol cannot resume mid-run -- and forgets it entirely: the restarted server no longer reports its status or serves its files. The exchange's directory stays on disk under `JOB_DATA_ROOT` until you delete it through the API or remove it by hand; nothing is auto-deleted. Within one server lifetime, though, the console re-attaches: reloading or reopening the console from the same browser finds an exchange still running and picks it back up, and discarding it in the console is what removes its files. Leaving the page does not stop the exchange -- only discarding it does.
 
@@ -135,7 +135,7 @@ The endpoint contract, the request schema, the working-directory layout and file
 
 ### Mounted work-input directory
 
-The console lists this party's input CSVs out of `JOB_INPUT_DIR`, falling back to `JOB_DATA_ROOT` when that variable is unset -- so a single-folder console, one mount with only `JOB_DATA_ROOT` set, lists inputs out of the data root. It profiles the file the operator selects -- its columns, a bounded per-column sample of values, and per-field coverage -- and the CLI then reads that same file in place when it runs the exchange. The listing is non-recursive: it shows only the files directly in the directory, so mount the directory that holds the CSVs, not a parent, and dot-prefixed files and subdirectories (the per-job working directories) are not shown. No copy is made and nothing is written back to the input directory. Set `JOB_INPUT_DIR` to give the inputs their own mount, which you can mount read-only; because the container runs as root, a read-only mount is what keeps a root process from writing to the operator's source data.
+The console lists this party's input CSVs out of `JOB_INPUT_DIR`, falling back to `JOB_DATA_ROOT` when that variable is unset -- so a single-folder console, one mount with only `JOB_DATA_ROOT` set, lists inputs out of the data root. It profiles the file the operator selects -- its columns, a bounded per-column sample of values, and per-field coverage -- and the CLI then reads that same file in place when it runs the exchange. The listing is non-recursive: it shows only the files directly in the directory, so mount the directory that holds the CSVs, not a parent, and dot-prefixed files and subdirectories (the per-job working directories) are not shown. No copy is made and nothing is written back to the input directory. Set `JOB_INPUT_DIR` to give the inputs their own mount, which you can mount read-only. The container's own account (see [The user the image runs as](#the-user-the-image-runs-as)) cannot write a source directory it does not own, so ownership is the first thing standing between the appliance and the operator's data; a read-only mount states that intent at the mount as well, rather than leaving it to rest on host ownership alone. The inputs must still be readable by that account.
 
 A shared-directory (`filedrop`) exchange runs over the rendezvous directory at `JOB_RENDEZVOUS_DIR`, which the remote partner writes into over the synced folder; it too falls back to `JOB_DATA_ROOT` when unset, so the single-folder console rendezvouses out of the data root. Setting `JOB_RENDEZVOUS_DIR` to a dedicated mount -- separate from, and not nested with, the working directory that holds your key, input, and results -- is recommended, because the rendezvous directory is partner-writable: a dedicated mount keeps the partner's write access to the rendezvous mailbox and away from your own secrets. The console warns at job start when the rendezvous path overlaps the work-input directory or the data root (as it does in the single-folder layout), but the operator's own directory layout is theirs to choose, so the exchange still runs; a dedicated rendezvous directory is the reliable safeguard, not a requirement.
 
@@ -148,6 +148,47 @@ For local development and integration testing, the project's test suite stands u
 ## Docker deployment
 
 The single published image `vdorie/psi-link` runs in either of two roles depending on its first argument; there is no separate console image.
+
+### The user the image runs as
+
+Both roles run unprivileged, as the image's `node` account: **uid 1000, gid 1000**. Nothing in an exchange holds the privilege to write outside what you mounted, and the program files inside the container belong to `root`, so the running process cannot rewrite its own code.
+
+What this asks of you is bind-mount ownership. A bind mount keeps its host directory's ownership inside the container, so every directory the container writes -- `/work` for the CLI, and the data, input, and rendezvous mounts for the console appliance -- has to be writable by uid 1000, and every file it reads has to be readable by it. Which case below applies is decided by the container engine, not by the operating system: Docker Desktop is available for Linux too.
+
+- **Docker Desktop**, on macOS, Windows, or Linux, presents a bind mount to whichever user the container runs as, so there is nothing to do: the commands in this document and in the quickstart work as written.
+- **Docker Engine on Linux** passes the host directory's real ownership through. A directory created by an account that is itself uid 1000 -- the usual case on a single-user workstation -- is already owned by the account the container runs as. Otherwise hand the working directory to that uid once, before the first run:
+
+  ```sh
+  sudo chown 1000:1000 /host/work
+  ```
+
+  The `sudo` is load-bearing: giving a file away to another uid is privileged, and without it the command answers `Operation not permitted`.
+
+  **If you have run this image before**, the directory needs more than that. Earlier images ran as root, so any `psilink.yaml`, `.psilink.key`, or results file already in the directory belongs to root at mode `0600`: unreadable to uid 1000 whatever the directory around them says, and untouched by a chown of the directory alone. Hand the contents over with it:
+
+  ```sh
+  sudo chown -R 1000:1000 /host/work
+  ```
+
+  Watch the read side too: a working directory or input file that no other account can read (mode `0700`, `0600`) is unreadable inside the container even when it is yours on the host.
+
+- **A CIFS network-share volume** -- the Docker volume the Windows file-drop setup creates over `//server/share` -- has no host ownership to pass through: a Windows SMB server serves no Unix owner for the mount to read, so the client presents the whole tree as owned by whatever the volume's `uid=` and `gid=` mount options name, and root when they name nothing. The volume must therefore pin `uid=1000,gid=1000`, which is what `Setup-PsilinkFileDrop.ps1` and its Command Prompt counterpart create it with; a volume made by hand without them mounts and then refuses every write. Ownership is mapped rather than enforcement switched off, so the share's own access control still decides what the mount credential may do.
+
+**Running as your own account instead.** Where changing the directory's ownership is not an option, run the container as yourself:
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work vdorie/psi-link exchange input.csv
+```
+
+Two things come with that choice. The container then runs as an account the image knows nothing about, so the per-user signing identity -- what `psilink fingerprint` creates, under the home directory rather than the working directory -- has nowhere it can be written; add `--env HOME=/work` to put it in the mounted directory, where it also outlives `--rm`. Not when `/work` is the partner-synced folder, though: in a single-folder file-drop exchange that directory is one the partner writes into, and certificate-mode signing would be putting this party's long-lived Ed25519 private key there. Mount the synced folder separately from the working directory in that case, or point `HOME` at a mount only you can reach. And the console appliance writes container-internal state belonging to uid 1000, so `serve` wants the `chown` route rather than this one.
+
+**What a mis-owned mount looks like.** The failure names `EACCES` and the path it could not write. Those paths are relative -- the key file and config default to `./.psilink.key` and `./psilink.yaml`, resolved against the container's working directory -- and where the failure lands depends on the command:
+
+- `psilink exchange` stops up front, at the key-file preflight, with `keyFilePath parent directory . is not writable: EACCES: permission denied, open '.psilink-write-probe-<pid>-<hex>'. Restore write access ...`. It stops there deliberately, before any key exchange, so nothing is half-done.
+- `psilink accept` has no such preflight: the terms are displayed and confirmed, and the write that follows fails with `EACCES: permission denied, open './psilink.yaml.tmp.<pid>'` and exit 69. Nothing is spent -- the invitation is still good -- but the ownership has to be fixed and `accept` run again.
+- An existing `psilink.yaml` that the container cannot read fails earlier still, at config load: `config file ./psilink.yaml could not be read: EACCES: permission denied, open './psilink.yaml'`. That is the upgrade case above -- the file is root's, from a previous run -- and the recursive `chown` is what clears it.
+
+In all three the remedy is ownership, not mode: a `chmod` on a directory or file the container's account does not own changes nothing it can reach.
 
 ### Running the CLI
 
@@ -195,10 +236,12 @@ docker run --rm \
 
 Automated deployment tooling -- CI runners, container entrypoints, Kubernetes init containers, and orchestration scripts -- must not leave `.psilink.key` readable by other processes or users. Violating this rule defeats the application-layer authentication that protects recurring exchanges.
 
+Owner-only and the container's identity are one question here, not two: a `0600` file grants nothing to anyone but its owner, so the account the container runs as (see [The user the image runs as](#the-user-the-image-runs-as)) has to be that owner. A key file owned by some other uid is not merely unwritable from inside the container -- it is unreadable, and the exchange fails before it starts.
+
 **Inject via a secrets manager, not the image.** Never copy `.psilink.key` into a container image layer; image layers are readable by anyone with pull access to the registry. Instead, mount the file at runtime:
 
-- **Docker**: mount the key file as a named secret or a host-path bind mount with `--mount type=bind,src=/host/path/.psilink.key,dst=/work/.psilink.key`. Do not mount it read-only; the CLI must be able to write the rotated token after each successful exchange. Set the file's permissions to `0600` on the host before the container starts.
-- **Kubernetes**: use a `Secret` volume with `defaultMode: 0600`. Do not use a `ConfigMap` for the key file.
+- **Docker**: mount the key file as a named secret or a host-path bind mount with `--mount type=bind,src=/host/path/.psilink.key,dst=/work/.psilink.key`. Do not mount it read-only; the CLI must be able to write the rotated token after each successful exchange. Set the file to mode `0600` and owner uid 1000 on the host before the container starts.
+- **Kubernetes**: use a `Secret` volume with `defaultMode: 0600`. Do not use a `ConfigMap` for the key file. Set the pod's `securityContext` so the projected file belongs to the identity the container runs as; a `0600` file the container's uid does not own is unreadable to it.
 - **CI runners**: write the token to a temporary file with `install -m 0600 /dev/stdin .psilink.key <<< "$TOKEN"` (bash) or `printf '%s' "$TOKEN" | install -m 0600 /dev/stdin .psilink.key` (POSIX sh) rather than `echo "$TOKEN" > .psilink.key`, which may leave a world-readable file depending on the runner's umask.
 
 **Separate read-only config from read-write secrets.** If the working directory (containing `psilink.yaml` and input data) is mounted read-only - for example to prevent the container from modifying source data - mount a separate read-write volume for the key file and use `--key-file` to redirect the CLI:

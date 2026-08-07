@@ -136,6 +136,37 @@ EXPOSE 3000
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
+# Everything the container must WRITE, created and handed to the unprivileged
+# account the USER below drops to. /app is deliberately not among them: it stays
+# root-owned and world-readable, so the running process reads and executes its
+# own code without being able to rewrite it.
+#
+#   /work is the default working directory, so a run with no bind mount still
+#   has somewhere to write. A bind mount replaces it and carries the HOST
+#   directory's ownership instead -- what an operator has to do about that is in
+#   docs/DEPLOYMENT.md.
+#
+#   /run/psilink is the console's pasted-credential scratch directory
+#   (apps/web/src/jobs/sftpScratch.ts). Its parent /run is root-owned, so an
+#   unprivileged server cannot create it at boot -- and that boot fails closed
+#   rather than starting without it.
+RUN mkdir -p /work /run/psilink/sftp-credentials \
+  && chown -R node:node /work /run/psilink \
+  && chmod -R 700 /run/psilink
+
+# Stated rather than left to the runtime's passwd lookup: the CLI derives its
+# default signing-identity directory from the home directory while its module
+# loads, ahead of any command, so an operator who overrides the account with
+# `docker run --user` gets a resolvable home rather than a startup failure.
+ENV HOME=/home/node
+
+# Drop to the base image's `node` account (uid 1000, gid 1000) for both roles.
+# Nothing the entrypoint dispatches to needs privilege: the CLI writes only into
+# the operator's mounted working directory, and the console server binds an
+# unprivileged port. Placed after every COPY and RUN above so those still build
+# as root, and before the WORKDIR below so the ENTRYPOINT inherits it.
+USER node
+
 WORKDIR /work
 
 # --expose-gc lets @psilink/core release the single-pass linkage's transient

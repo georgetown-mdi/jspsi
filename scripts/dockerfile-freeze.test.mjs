@@ -38,19 +38,55 @@ const normalize = (rest) => rest.trim().replace(/[ \t]+/g, " ");
 // as docs/spec/DEPENDENCY_PINS.md records.
 const OS_PACKAGE_MANAGER = /\b(apk|apt|apt-get|dnf|microdnf|yum|pip|pip3)\b/;
 
+// The instruction classes this file reads. Every other class is refused rather
+// than modeled, because ownership and content both ride only the instructions
+// parsed below: ADD names itself here, since it takes the same --chown and
+// --chmod flags COPY does and can fetch a remote source, so a single
+// `ADD --chown=node:node ... /app/x` in either stage would hand the runtime
+// account a path under /app -- and pull in something the lockfile does not
+// pin -- while every assertion in this file, all of which read COPY and RUN,
+// still passed. Neither Dockerfile uses anything outside this list; a build that
+// needs another class extends it, where the review reads the instruction rather
+// than a verdict about it.
+const REVIEWED_INSTRUCTIONS = [
+  "ARG",
+  "COPY",
+  "ENTRYPOINT",
+  "ENV",
+  "EXPOSE",
+  "FROM",
+  "RUN",
+  "USER",
+  "WORKDIR",
+];
+
+// The ownership verbs the parse in analyze() reads: their path operands are
+// extracted and tested against the writable trees.
+const PARSED_OWNERSHIP_VERB = /^(?:chown|chgrp|chmod)\s/;
+
 function analyze(file) {
   const dockerfile = readRepoFile(file);
 
-  // Fold "\"-continued lines into one logical instruction, then drop blanks and
-  // comments. The fold removes the backslash and the newline and inserts
-  // nothing, which is what Docker's own parser does: a continuation with no
-  // space before the backslash joins two tokens into one, and reading it as two
-  // would let a command below match as something the build does not run.
+  // Drop comment lines, then fold "\"-continued lines into one logical
+  // instruction. That order is the load-bearing half: fold first and a comment
+  // line's own trailing backslash joins the instruction below it into the
+  // comment, which drops that instruction -- an ownership change among them --
+  // from every assertion in this file while the build still runs it.
+  //
+  // The fold removes the backslash and the newline and inserts nothing, which is
+  // what Docker's own parser does: a continuation with no space before the
+  // backslash joins two tokens into one, and reading it as two would let a
+  // command below match as something the build does not run. What the fold
+  // cannot settle from here is a "#" reaching an instruction, and the refusal
+  // asserted per image below is why it does not have to.
   const instructions = dockerfile
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("#"))
+    .join("\n")
     .replace(/\\\r?\n/g, "")
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line !== "" && !line.startsWith("#"))
+    .filter((line) => line !== "")
     .map((line) => {
       const [, inst, rest] = line.match(/^(\S+)\s*(.*)$/);
       return { inst: inst.toUpperCase(), rest };
@@ -64,12 +100,16 @@ function analyze(file) {
   const runtime = instructions.slice(lastFromIndex);
 
   // Resolve the runtime stage's COPY destinations against the WORKDIR in effect
-  // at each instruction, so assertions hold absolute in-image paths.
+  // at each instruction, so assertions hold absolute in-image paths. Each RUN is
+  // kept with that same WORKDIR, since a path operand it writes relative
+  // resolves against it too.
   const runtimeCopies = [];
+  const runtimeRunsWithCwd = [];
   {
     let cwd = "/";
     for (const { inst, rest } of runtime) {
       if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
+      if (inst === "RUN") runtimeRunsWithCwd.push({ run: rest, cwd });
       if (inst !== "COPY") continue;
       const tokens = rest.split(/\s+/);
       const flags = tokens.filter((t) => t.startsWith("--"));
@@ -89,6 +129,23 @@ function analyze(file) {
   const runsIn = (stage) =>
     stage.filter(({ inst }) => inst === "RUN").map(({ rest }) => rest);
 
+  // Each RUN read as the several commands it runs, split on the operators that
+  // separate one from the next. The runtime stage's carry the WORKDIR their
+  // instruction runs under. This reads the instruction text, so what it does NOT
+  // reach is: ownership a RUN assigns through a shell variable holding the verb
+  // or the path (`$SETUP /app`, `chown -R node:node "$DIR"`), ownership assigned
+  // inside a script the RUN invokes rather than on the instruction line, a verb
+  // outside the enumerated set below, and anything the base image already did.
+  const splitCommands = (run) =>
+    normalize(run)
+      .split(/&&|\|\||[;|]/)
+      .map((command) => command.trim())
+      .filter((command) => command !== "");
+
+  const runtimeShellCommands = runtimeRunsWithCwd.flatMap(({ run, cwd }) =>
+    splitCommands(run).map((command) => ({ command, cwd })),
+  );
+
   return {
     file,
     dockerfile,
@@ -96,6 +153,32 @@ function analyze(file) {
     builder,
     runtime,
     runtimeCopies,
+    runtimeShellCommands,
+    // The builder stage's commands, read the same way. Its files cross into the
+    // runtime stage through `COPY --from=builder`, so ownership assigned there
+    // is on the same footing as ownership assigned here.
+    builderShellCommands: runsIn(builder).flatMap(splitCommands),
+    // A chown/chgrp/chmod's path operands: its argv less the command name, its
+    // flags, and its first operand, which is the owner, group, or mode --
+    // unless a --reference flag supplied that instead, in which case every
+    // operand is a path. Each is resolved against the instruction's WORKDIR, so
+    // a relative operand and a `..` traversal (`/work/../app`) are tested as the
+    // path the build would write rather than as the text the author typed.
+    ownershipCommands: runtimeShellCommands
+      .filter(({ command }) => PARSED_OWNERSHIP_VERB.test(command))
+      .map(({ command, cwd }) => {
+        const argv = command.split(" ").slice(1);
+        const operands = argv.filter((token) => !token.startsWith("-"));
+        const pathOperands = argv.some((token) =>
+          token.startsWith("--reference"),
+        )
+          ? operands
+          : operands.slice(1);
+        return {
+          command,
+          paths: pathOperands.map((path) => posix.resolve(cwd, path)),
+        };
+      }),
     allRuntimeDests: runtimeCopies.flatMap(({ dests }) => dests),
     builderRuns: runsIn(builder),
     runtimeRuns: runsIn(runtime),
@@ -181,6 +264,32 @@ function dispatchChain(image) {
 
 for (const { file, osInstalls, image } of IMAGES) {
   describe(`${file} dependency freeze`, () => {
+    it("uses ADD nowhere, nor any other instruction class this file does not parse", () => {
+      expect(
+        image.instructions
+          .filter(({ inst }) => inst === "ADD")
+          .map(({ inst, rest }) => `${inst} ${rest}`),
+      ).toEqual([]);
+      expect(
+        [...new Set(image.instructions.map(({ inst }) => inst))].filter(
+          (inst) => !REVIEWED_INSTRUCTIONS.includes(inst),
+        ),
+      ).toEqual([]);
+    });
+
+    it("carries no # inside an instruction, so this parse and Docker's cannot disagree", () => {
+      // Comment lines are gone before the fold in analyze(), so a "#" reaching
+      // an instruction is either text Docker takes literally mid-line or a form
+      // whose reading depends on where each parser thinks the instruction ended.
+      // Neither Dockerfile has one, and refusing it is what keeps the fold from
+      // having to agree with Docker about a case no build here exercises.
+      expect(
+        image.instructions
+          .filter(({ inst, rest }) => inst.includes("#") || rest.includes("#"))
+          .map(({ inst, rest }) => `${inst} ${rest}`),
+      ).toEqual([]);
+    });
+
     it("installs only with npm ci, never npm install", () => {
       expect(image.dockerfile).not.toMatch(/\bnpm\s+install\b/);
       expect(image.builderRuns.some((run) => /\bnpm ci\b/.test(run))).toBe(
@@ -301,6 +410,177 @@ for (const { file, osInstalls, image } of IMAGES) {
     });
   });
 }
+
+// The account both roles run as, and the one instruction that makes the image
+// habitable for it, frozen by literal the way the OS installs above are. Which
+// directories are handed over is the whole substance of running unprivileged:
+// /work is where the CLI writes its result and rotated key file, and the console
+// cannot boot at all without a scratch directory under root-owned /run. Prose in
+// docs/DEPLOYMENT.md tells operators the uid a bind mount must be writable by, so
+// a silent change of it, or of what the account may write, is a change to
+// documented deployment behavior rather than an implementation detail.
+//
+// Scoped to the default image: the FIPS variant carries no USER and makes no
+// unprivileged claim, and its dnf transactions put the word `install` in front
+// of the refusal below, which reads that verb as an ownership assignment. A
+// variant that drops privilege later extends this block rather than widening it.
+const RUNTIME_USER = "node";
+const EXPECTED_WRITABLE_SETUP =
+  "RUN mkdir -p /work /run/psilink/sftp-credentials " +
+  "&& chown -R node:node /work /run/psilink " +
+  "&& chmod -R 700 /run/psilink";
+
+// The other half of that claim: /app is NOT among them, so the process reads and
+// executes its own code without being able to rewrite it. The Dockerfile says so
+// in a comment, which cannot hold it -- a `--chown` on a COPY, or one path added
+// to the chown above, hands the code to the account the entrypoint runs as and
+// reads as ordinary housekeeping in a diff.
+const WRITABLE_TREES = ["/work", "/run/psilink"];
+const withinWritableTree = (path) =>
+  WRITABLE_TREES.some((tree) => path === tree || path.startsWith(`${tree}/`));
+
+// The one mode change outside those trees, frozen by literal: the entrypoint
+// script has to be executable, and the bit says nothing about who owns it.
+const EXPECTED_MODE_CHANGE_OUTSIDE = "chmod +x /app/docker-entrypoint.sh";
+
+// The verbs that hand a path to an account by a route that parse does not read
+// -- install's -o/-g/-m, setfacl's ACL entry -- plus any of the parsed ones
+// reached other than as a command's leading word (`sh -c 'chown ...'`, `xargs
+// chown`, `find ... -exec chgrp`). The stage runs none of these, so they are
+// refused outright rather than modeled: a build that needs one has to extend
+// this test, where the review reads the argv rather than a verdict about it.
+const ANY_OWNERSHIP_VERB = /\b(?:chown|chgrp|chmod|install|setfacl)\b/;
+// The dash-leading tokens that parse reads on one of those verbs: -R (or
+// --recursive), and --reference=FILE, which is what moves the first operand from
+// an owner or a mode to a path. Any other is refused rather than classified,
+// because a mode is spelled like a flag: `chmod -R -w /app` takes the write bit
+// off /app, and a parse that reads every dash-leading token as an option drops
+// the mode, takes /app for the mode instead, and hands the guard below an empty
+// path set. The stage passes -R alone.
+const READ_OWNERSHIP_FLAGS = /^(?:-R|--recursive|--reference=\S+)$/;
+
+describe("the unprivileged account the default image runs as", () => {
+  const image = IMAGES.find(({ file }) => file === "Dockerfile").image;
+
+  it("drops to a single non-root runtime user for both roles", () => {
+    const users = image.runtime
+      .filter(({ inst }) => inst === "USER")
+      .map(({ rest }) => normalize(rest));
+    expect(users).toEqual([RUNTIME_USER]);
+  });
+
+  it("declares that user after the last build step, so the ENTRYPOINT inherits it", () => {
+    // A USER ahead of a COPY or RUN would either fail the build or leave the
+    // dropped account owning /app; one after the last of them, with no second
+    // USER to undo it, is what makes the entrypoint's node process unprivileged.
+    const userIndex = image.runtime.findIndex(({ inst }) => inst === "USER");
+    const lastBuildStep = image.runtime.reduce(
+      (last, { inst }, index) =>
+        inst === "RUN" || inst === "COPY" ? index : last,
+      -1,
+    );
+    expect(userIndex).toBeGreaterThan(lastBuildStep);
+  });
+
+  it("hands that user every directory the container writes", () => {
+    expect(image.runtimeRuns.map((run) => `RUN ${normalize(run)}`)).toContain(
+      EXPECTED_WRITABLE_SETUP,
+    );
+  });
+
+  it("assigns ownership only through the forms the two tests below parse", () => {
+    // The guard on those tests reads a leading chown/chgrp/chmod and its
+    // operands. Every other way an instruction can name one of those verbs --
+    // wrapped in `sh -c`, driven by xargs or find, or written as install or
+    // setfacl -- is refused here, so an ownership change cannot reach /app by
+    // taking a form the parse skips over.
+    expect(
+      image.runtimeShellCommands
+        .filter(
+          ({ command }) =>
+            ANY_OWNERSHIP_VERB.test(command) &&
+            !PARSED_OWNERSHIP_VERB.test(command),
+        )
+        .map(({ command }) => command),
+    ).toEqual([]);
+    // The same refusal one altitude down, over the argv of the ones it does
+    // read: a dash-leading token outside the two the parse understands decides
+    // which operand is the mode and which are paths, so it is refused rather
+    // than guessed at.
+    expect(
+      image.ownershipCommands.flatMap(({ command }) =>
+        command
+          .split(" ")
+          .slice(1)
+          .filter(
+            (token) =>
+              token.startsWith("-") && !READ_OWNERSHIP_FLAGS.test(token),
+          )
+          .map((token) => `${token} in: ${command}`),
+      ),
+    ).toEqual([]);
+  });
+
+  it("assigns no ownership in the builder stage, whose files the runtime copies in", () => {
+    // `COPY --from=builder` carries the builder's files into /app, and what
+    // ownership they arrive with is Docker's rule rather than this file's to
+    // model. The route is closed instead: the builder assigns no ownership at
+    // all, so nothing crosses the stage boundary already handed to an account.
+    expect(
+      image.builderShellCommands.filter((command) =>
+        ANY_OWNERSHIP_VERB.test(command),
+      ),
+    ).toEqual([]);
+    expect(
+      image.builder
+        .filter(({ inst }) => inst === "COPY")
+        .flatMap(({ rest }) => rest.split(/\s+/))
+        .filter((token) => /^--(?:chown|chmod)/.test(token)),
+    ).toEqual([]);
+  });
+
+  it("gives that user no path outside those directories, so /app stays root-owned", () => {
+    // Every chown and chgrp in the stage, and every COPY that assigns ownership
+    // as it lands. A path outside the two writable trees is code, or a mount
+    // point, that the entrypoint's own process could then rewrite -- a group
+    // handed over no less than an owner, since the account carries its group.
+    const handedOverPaths = image.ownershipCommands
+      .filter(({ command }) => /^(?:chown|chgrp) /.test(command))
+      .flatMap(({ paths }) => paths);
+    expect(handedOverPaths.length).toBeGreaterThan(0);
+    expect(handedOverPaths.filter((path) => !withinWritableTree(path))).toEqual(
+      [],
+    );
+    expect(
+      image.runtimeCopies
+        .filter(({ flags }) => flags.some((f) => f.startsWith("--chown")))
+        .flatMap(({ dests }) => dests)
+        .filter((dest) => !withinWritableTree(dest)),
+    ).toEqual([]);
+  });
+
+  it("changes no mode outside those directories but the entrypoint's executable bit", () => {
+    // A mode is the other way the account reaches what it must not write: a
+    // group- or world-writable /app needs no chown to be rewritable. Outside the
+    // writable trees the whole set of mode changes is held to the reviewed
+    // literal rather than to a reading of what each mode grants.
+    expect(
+      image.ownershipCommands
+        .filter(
+          ({ command, paths }) =>
+            command.startsWith("chmod ") &&
+            paths.some((path) => !withinWritableTree(path)),
+        )
+        .map(({ command }) => command),
+    ).toEqual([EXPECTED_MODE_CHANGE_OUTSIDE]);
+    expect(
+      image.runtimeCopies
+        .filter(({ flags }) => flags.some((f) => f.startsWith("--chmod")))
+        .flatMap(({ dests }) => dests)
+        .filter((dest) => !withinWritableTree(dest)),
+    ).toEqual([]);
+  });
+});
 
 // The committed root .npmrc, byte for byte. Equality with this literal is what
 // holds the file to configuration and nothing else, in place of a reader that

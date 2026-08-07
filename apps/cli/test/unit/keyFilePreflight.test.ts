@@ -195,7 +195,10 @@ test.skipIf(process.platform === "win32")(
     }
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).toContain("not writable");
-    expect((caught as Error).message).toContain("Restore write permission");
+    expect((caught as Error).message).toContain("Restore write access");
+    // Ownership is named beside permissions: the container account does not
+    // own a mounted directory, and chmod alone does not fix that case.
+    expect((caught as Error).message).toContain("owner");
     // The raw lstat errno must not be surfaced.
     expect((caught as Error).message).not.toContain("lstat");
   },

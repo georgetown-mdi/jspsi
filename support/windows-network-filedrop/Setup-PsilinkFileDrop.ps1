@@ -304,7 +304,13 @@ function New-ShareVolume {
     $device = "//$Server/$Share"
     if ($SubPath) { $device = "$device/$SubPath" }
 
-    $opts = "username=$Username,password=$Password"
+    # uid/gid are what make the mount writable from the psilink image, which runs
+    # as an unprivileged account (uid 1000). A Windows SMB server serves no Unix
+    # ownership for the client to read, so without them the whole tree presents
+    # as owned by root and every write is refused inside the container. They map
+    # ownership rather than switching enforcement off, which is what the blunter
+    # "noperm" would do.
+    $opts = "username=$Username,password=$Password,uid=1000,gid=1000"
     if ($Domain)       { $opts = "$opts,domain=$Domain" }
     if ($MountVersion) { $opts = "$opts,vers=$MountVersion" }
 
