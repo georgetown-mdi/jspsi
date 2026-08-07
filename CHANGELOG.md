@@ -30,7 +30,7 @@ This changelog is a reader's summary of what PSI-Link does and how that changes 
 
 ### Security
 
-- Recurring CLI exchanges are encrypted end-to-end on the wire with an application-layer AEAD, authenticated with an X25519 key exchange, and SFTP connections verify the server host key fail-closed. See `docs/SECURITY_DESIGN.md` and `docs/spec/CHANNEL_SECURITY.md`.
+- Recurring CLI exchanges are encrypted end-to-end on the wire with an application-layer AEAD, authenticated with a P-256 key exchange, and SFTP connections verify the server host key fail-closed. See `docs/SECURITY_DESIGN.md` and `docs/spec/CHANNEL_SECURITY.md`.
 
 ## [0.1.0] - 2026-05-08
 

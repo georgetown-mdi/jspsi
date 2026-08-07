@@ -9,14 +9,14 @@ import type { Authentication } from "./config/connection.js";
 // --- Public API --------------------------------------------------------------
 
 /**
- * Result returned by {@link authenticateConnection} after a successful X25519
+ * Result returned by {@link authenticateConnection} after a successful P-256
  * key exchange.
  */
 export interface AuthResult {
   /**
-   * 32-byte session key from the X25519 key exchange.  Both parties hold the
+   * 32-byte session key from the P-256 key exchange.  Both parties hold the
    * same value after a successful handshake; it has forward secrecy (the
-   * exchange mixes a fresh ephemeral X25519 DH) and is mutually authenticated
+   * exchange mixes a fresh ephemeral P-256 ECDH) and is mutually authenticated
    * by the shared secret.  Callers that need application-layer encryption
    * (the `sftp` and `filedrop` channels) pass this to {@link deriveAeadKey} to
    * derive the AES-256-GCM keys; those keys are per direction, not per channel,
@@ -237,7 +237,7 @@ export function assertSharedSecretReadyForHandshake(
 }
 
 /**
- * Run an X25519 (NNpsk0) authenticated key exchange over an already-open
+ * Run a P-256 (NNpsk0) authenticated key exchange over an already-open
  * connection.
  *
  * Call this immediately after the connection is established and before

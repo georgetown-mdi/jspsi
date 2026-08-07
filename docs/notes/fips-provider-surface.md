@@ -92,7 +92,7 @@ Engagement is necessary but not sufficient: a provider only covers operations th
 | AEAD AES-256-GCM, 12-byte IV (`connection/encryptedMessageConnection.ts`) | WebCrypto `crypto.subtle` | Yes -- measured engaged |
 | HKDF-SHA-256, HMAC-SHA-256, SHA-256 (`utils/crypto.ts`, `auth.ts`, `kex.ts`, `signedReceipt.ts`) | WebCrypto `crypto.subtle` | Yes -- measured available under a fips-only configuration |
 | `getRandomValues` (`utils/crypto.ts`) | WebCrypto | Yes |
-| X25519 key agreement (`kex.ts`) | `@noble/curves`, pure JS | **No** -- pure JS is inside no module boundary, whatever the provider carries |
+| P-256 ECDH key agreement (`kex.ts`) | WebCrypto `crypto.subtle` | Yes -- `ECDH` is listed under a fips-only configuration on every measured build; the P-256 `deriveBits` call is not itself a measured leg |
 | Ed25519 keygen/sign/verify (`signingIdentity.ts`, `signedReceipt.ts`) | `@noble/curves`, pure JS | **No** -- same |
 | PSI masking, P-256 (`psiEngine.ts`) | BoringSSL inside the vendored `@openmined/psi.js` (WASM, or the native addon) | **No, and not reachable in principle** -- an OpenSSL provider cannot cover a different crypto library |
 | SFTP transport crypto (`ssh2` via `connection/ssh2SftpAdapter.ts`) | `node:crypto`, not WebCrypto | Yes -- measured dispatched (see below) |
@@ -101,7 +101,7 @@ The last row needed its own measurement, because "WebCrypto engages" says nothin
 
 That has a deployment consequence worth carrying to the SFTP profile item: in a fips-only container with a 3.5.x provider, `ssh2` loses X25519 keypair generation, and with it the `curve25519-sha256` SSH key exchange, plus MD5 for key fingerprints. Under a 3.0.x provider X25519 survives. Which SSH algorithms remain available is therefore a function of the provider build, and it is not something the WebCrypto answer would have surfaced.
 
-The ceiling this table implies is the important part. Today the AEAD and the key-schedule primitives could sit inside a provider boundary; key establishment, receipt signing, and the PSI masking itself could not. The PSI masking is the one that cannot be fixed by moving code to WebCrypto, because it is BoringSSL inside a vendored module, not OpenSSL.
+The ceiling this table implies is the important part. Today the AEAD, the key-schedule primitives, and key establishment could sit inside a provider boundary; receipt signing and the PSI masking itself could not. The PSI masking is the one that cannot be fixed by moving code to WebCrypto, because it is BoringSSL inside a vendored module, not OpenSSL.
 
 ## What the certificates say
 

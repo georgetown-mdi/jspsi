@@ -306,7 +306,7 @@ export const SHARED_SECRET_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
  *
  * This is the single definition of secret generation, shared by the CLI
  * invitation flow and the web inviter rather than re-implemented in each. The
- * value it produces is the 256-bit short-lived setup secret the X25519 key
+ * value it produces is the 256-bit short-lived setup secret the P-256 key
  * exchange consumes and, in the web rendezvous flow, the seed for the derived
  * peer id; it is rotated to a persistent secret on the first successful
  * handshake.
@@ -327,7 +327,7 @@ const sharedSecretSchema = z
   .optional();
 
 /**
- * Shared secret for mutual authentication via the X25519 key exchange. The
+ * Shared secret for mutual authentication via the P-256 key exchange. The
  * secret and its expiration are stored in `.psilink.key` and injected at
  * runtime; they never appear in `psilink.yaml`. This is the type of the
  * channel-agnostic top-level `authentication` block of an {@link ExchangeSpec}

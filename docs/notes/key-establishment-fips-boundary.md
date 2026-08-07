@@ -150,10 +150,10 @@ abandons a pattern with published analysis for a bespoke equivalent with none.
 ## What a scoped FIPS claim may and may not say about key establishment
 
 **May say**, where a validated module is actually present in the environment:
-every cryptographic operation in key establishment
-is performed by the module, using algorithms on certificate 4985's approved
-list -- the shared-secret computation as `KAS-ECC-SSC` per SP 800-56A Rev 3 over
-P-256, and the extract-then-expand as `KDA HKDF SP800-56Cr2`.
+every cryptographic operation in key establishment is performed by the module,
+using algorithms on certificate 4985's approved list -- the shared-secret
+computation as `KAS-ECC-SSC` per SP 800-56A Rev 3 over P-256, and the
+extract-then-expand as `KDA HKDF SP800-56Cr2`.
 
 **May not say:**
 
