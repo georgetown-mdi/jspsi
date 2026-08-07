@@ -234,8 +234,9 @@ describe("connect retry", () => {
     // predicate discriminates rather than disabling retry wholesale. A
     // regression here (a renamed fatal message, a typo) would silently retry a
     // host-key failure maxReconnectAttempts times before failing with the same
-    // outcome; CONTRIBUTING.md's "Upgrading the SFTP stack" checklist names
-    // confirming this fragment as a per-bump obligation, which this pins.
+    // outcome; the "Upgrading the SFTP Stack" checklist in
+    // docs/spec/DEPENDENCY_PINS.md names confirming this fragment as a per-bump
+    // obligation, which this pins.
     vi.useFakeTimers();
     const adapter = new SSH2SFTPClientAdapter();
     let calls = 0;
@@ -248,8 +249,8 @@ describe("connect retry", () => {
         // failed)", from node_modules/ssh2/lib/protocol/kex.js. ssh2 sets no
         // machine-readable `code` on it, so the predicate keys on the message
         // fragment. Keep this string in sync with that same kex.js source named
-        // in CONTRIBUTING.md ("Upgrading the SFTP stack"); if a future bump
-        // renames it, that checklist and this string move together.
+        // in docs/spec/DEPENDENCY_PINS.md ("Upgrading the SFTP Stack"); if a
+        // future bump renames it, that checklist and this string move together.
         throw new Error("Host denied (verification failed)");
       }),
     };

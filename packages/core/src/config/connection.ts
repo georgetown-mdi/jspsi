@@ -360,8 +360,8 @@ export interface Authentication {
    * an invitation's bounded lifetime (default 1 hour) and a
    * {@link tokenMaxAgeDays} stamp on a rotated token, which core deliberately
    * does not distinguish: expiry means the same thing, and recovers the same
-   * way (re-invite), for both. See docs/SECURITY_DESIGN.md ("Two sources, one
-   * `expires`").
+   * way (re-invite), for both. See docs/SECURITY_DESIGN.md ("Token age and
+   * rotation policy").
    */
   expires?: string;
   /**
