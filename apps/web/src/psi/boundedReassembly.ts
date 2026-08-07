@@ -16,18 +16,19 @@ import type { DataConnection } from "peerjs";
  * receiving tab toward memory exhaustion, allocating proportional to what the
  * peer chooses to send.
  *
- * Value: 268,435,456 bytes (256 MiB). Unlike the file-sync cap -- a *decode*
- * ceiling anchored to Node's `MAX_STRING_LENGTH` -- this is a browser-tab
- * *memory envelope*, in the spirit of the directory-listing cap: above the
- * realistic largest legitimate PSI set frame (one party's set as raw EC points,
- * ~64 bytes/element binary, so a few-million-element set is tens to low-hundreds
- * of MiB; the 100 MiB CSV upload cap, `MAX_CSV_FILE_BYTES`, bounds it), below an
- * allocation that would crash the tab. 256 MiB is ~4 million elements. This
- * counts the *wire* (reassembled) bytes; the deserialized structure those bytes
- * unpack to is bounded separately by {@link MAX_WEBRTC_FRAME_STRUCTURE_BYTES},
- * because BinaryPack `unpack` can allocate far more than the wire size. Fixed, not
- * operator-configurable: a configurable cap risks being raised to reintroduce
- * the denial of service.
+ * Value: 268,435,456 bytes (256 MiB). Like the file-sync frame-size cap it is a
+ * chosen memory bound rather than a derived platform ceiling, but sized against a
+ * different envelope: a browser-tab *memory envelope*, in the spirit of the
+ * directory-listing cap -- above the realistic largest legitimate PSI set frame
+ * (one party's set as raw EC points, 35 bytes/element binary, so a
+ * few-million-element set is tens to low-hundreds of MiB; the 100 MiB CSV upload
+ * cap, `MAX_CSV_FILE_BYTES`, bounds it), below an allocation that would crash
+ * the tab. This counts the *wire* (reassembled) bytes; the deserialized
+ * structure those bytes unpack to is bounded separately by
+ * {@link MAX_WEBRTC_FRAME_STRUCTURE_BYTES} -- an independent bound this cap does
+ * not imply -- because BinaryPack `unpack` can allocate far more than the wire
+ * size. Fixed, not operator-configurable: a configurable cap risks being raised
+ * to reintroduce the denial of service.
  *
  * This is also the WebRTC half of the single-pass frame cap's per-transport
  * clamp. Single-pass derives a per-exchange reply cap from the exchanged record
@@ -147,20 +148,23 @@ export const WEBRTC_VALUE_WEIGHTS = {
  * *retained* cost. That is the mapped-element frame -- `Array<{theirIndex,
  * iteration}>`, one entry per matched record -- which `unpack`s, per record, to
  * one object (64) + two key strings ("theirIndex" 16+20, "iteration" 16+18) + two
- * integer values (8 each) ~= 150 bytes under the weights above. At the
- * ~4-million-element (2^22) set ceiling the wire-byte cap implies, that is ~4.19M
- * records ~= 629 MiB; 2^30 leaves ~1.6x headroom (matching the prior count
- * budget's ~21M-value-vs-2^25 ratio) so no exchange the wire cap admits is
- * rejected on a downstream frame -- a property the unit tests pin against the real
- * frame shape. Residual: the per-frame worst case is now this budget rather than
- * the ~2 GiB an all-empty-objects frame reached under the flat count. A frame of
- * the heaviest kind (~16.7M empty objects) reaches ~1 GiB and is rejected there,
- * and reaching even that requires ~16 MiB of proportional wire (the per-container
- * byte check ties cost to wire), freed once the schema layer rejects the frame. A
- * tighter budget is available only by making the weights less conservative (e.g.
- * crediting key-string internalization); that aggressiveness is a security-review
- * judgment (see docs/spec/CHANNEL_SECURITY.md). Fixed, not configurable: a
- * configurable bound risks being raised to reintroduce the denial of service.
+ * integer values (8 each) ~= 150 bytes under the weights above, a per-record cost
+ * the unit tests pin against the real frame shape; 2^30 therefore admits a
+ * mapped-element frame of about 7.1 million matched records. This path enforces
+ * that budget and {@link MAX_WEBRTC_FRAME_BYTES}, and no element-count ceiling:
+ * the two are independent bounds, with no headroom relation between them at the
+ * 35 bytes an encrypted element occupies on the wire (see docs/spec/PROTOCOL.md).
+ * A set frame filling the 256 MiB wire cap carries about 7.67 million elements,
+ * whose mapped-element frame would reach about 1.07 GiB and be rejected here.
+ * Residual: the per-frame worst case for the kinds this budget charges in full is
+ * the budget itself. A frame of the heaviest such kind (~16.7M empty objects)
+ * reaches ~1 GiB and is rejected there, and reaching even that requires ~16 MiB
+ * of proportional wire (the per-container byte check ties cost to wire), freed
+ * once the schema layer rejects the frame. A tighter budget is available only by
+ * making the weights less conservative (e.g. crediting key-string
+ * internalization); that aggressiveness is a security-review judgment (see
+ * docs/spec/CHANNEL_SECURITY.md). Fixed, not configurable: a configurable bound
+ * risks being raised to reintroduce the denial of service.
  */
 export const MAX_WEBRTC_FRAME_STRUCTURE_BYTES = 1_073_741_824;
 
