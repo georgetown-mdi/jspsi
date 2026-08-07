@@ -208,11 +208,22 @@ const WRAP_COLUMNS = 76;
 // Wrap `text` under a fixed-width label so the continuation lines align beneath
 // the first word rather than under the label, the shape the setup script's
 // MEANING/ACTION blocks have and operators are asked to read back.
+//
+// Redaction runs HERE, over the whole text, for the reason clampDetail redacts
+// ahead of its split: every marker this rule matches carries spaces, and the
+// re-flow breaks on whitespace, so a marker straddling a wrap would reach the
+// rendering's per-line pass as two lines that neither match, and the material
+// behind it would render verbatim. The fail-closed reach is one labelled block
+// -- MEANING and ACTION are wrapped separately -- and the label is composed
+// outside the redacted text, so a dangling BEGIN takes the rest of its own
+// block and reaches neither the label nor the sibling block.
 function wrapLabelled(label: string, text: string): string[] {
   const indent = " ".repeat(label.length);
   const lines: string[] = [];
   let current = label;
-  for (const word of text.split(/\s+/).filter((w) => w.length > 0)) {
+  for (const word of redactPrivateKeyMaterial(text)
+    .split(/\s+/)
+    .filter((w) => w.length > 0)) {
     if (
       current.length > label.length &&
       current.length + 1 + word.length > WRAP_COLUMNS

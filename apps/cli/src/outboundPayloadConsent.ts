@@ -1,7 +1,7 @@
 import {
   assessOutboundPayloadConsent,
   outboundPayloadConsentRefusal,
-  sanitizeForDisplay,
+  redactAndSanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -59,12 +59,19 @@ const OUTBOUND_CONSENT_QUESTION =
 
 /**
  * Render the set this run would transmit, and what changed about it, through
- * `emit`. Every column name is escaped at this sink: unlike the names composed
- * into {@link outboundPayloadConsentRefusal}'s message (an error, escaped once
- * where it is rendered), these reach the terminal as plain lines with no error to
- * carry them. They are this party's own CSV header, not partner-controlled, but a
- * header is untrusted enough to be worth neutralizing before it addresses a
- * terminal the next line asks a question on.
+ * `emit`. Every column name is redacted and escaped at this sink: unlike the
+ * names composed into {@link outboundPayloadConsentRefusal}'s message (an error,
+ * escaped once where it is rendered), these reach the terminal as plain lines
+ * with no error to carry them. They are this party's own CSV header, not
+ * partner-controlled, but a header is untrusted enough to be worth neutralizing
+ * before it addresses a terminal the next line asks a question on.
+ *
+ * Redacting at this composition rather than leaving it to the sinks is what
+ * makes the two sinks agree: {@link consentSurfaceSink} sends each line to
+ * `log.info`, where core's prefixer strips key material per argument, and -- when
+ * a prompt follows -- to `writePromptLine`, which runs no pass at all. A name
+ * shaped like armor would otherwise read as the replacement in the log and
+ * verbatim at the question it is answered against.
  */
 function displayOutboundColumns(
   emit: ConsentSurfaceSink,
@@ -77,7 +84,7 @@ function displayOutboundColumns(
   else {
     emit(`  ${OUTBOUND_CONSENT_COLUMNS_LABEL}:`);
     for (const column of verdict.columns)
-      emit(`    - ${sanitizeForDisplay(column)}`);
+      emit(`    - ${redactAndSanitizeForDisplay(column)}`);
   }
   // The two differences are listed separately rather than folded into the set
   // above: an operator re-confirming needs to see what moved, and a column that
@@ -85,12 +92,12 @@ function displayOutboundColumns(
   if (verdict.added.length > 0) {
     emit(`  ${OUTBOUND_CONSENT_ADDED_LABEL}:`);
     for (const column of verdict.added)
-      emit(`    - ${sanitizeForDisplay(column)}`);
+      emit(`    - ${redactAndSanitizeForDisplay(column)}`);
   }
   if (verdict.removed.length > 0) {
     emit(`  ${OUTBOUND_CONSENT_REMOVED_LABEL}:`);
     for (const column of verdict.removed)
-      emit(`    - ${sanitizeForDisplay(column)}`);
+      emit(`    - ${redactAndSanitizeForDisplay(column)}`);
   }
 }
 

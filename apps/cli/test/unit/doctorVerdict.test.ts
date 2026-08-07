@@ -285,3 +285,78 @@ describe("tool output behind a failure is bounded", () => {
     expect(lines).toContain("check the password file and run this again.");
   });
 });
+
+describe("a key marker straddling the MEANING/ACTION wrap", () => {
+  // The wrap re-flows on whitespace at 76 columns and every marker the
+  // redaction matches carries spaces, so a marker split across two rendered
+  // lines matches neither of them: the pass ahead of the re-flow is what these
+  // pin, at the lines the rendering hands its sink.
+  const KEY_MARKER = "-----BEGIN RSA PRIVATE KEY-----";
+  // Word for word the same lengths as KEY_MARKER and matched by no redaction
+  // pattern, so rendering it at the same offset shows where the wrap falls --
+  // making the straddle below a measured property rather than an assumption.
+  const WRAP_GAUGE = "-----AAAAA BBB CCCCCCC DDD-----";
+  // Leaves the line at 58 columns under the 9-column MEANING label, where the
+  // first two words of either run fit and the third does not.
+  const PADDING = "word ".repeat(10);
+
+  function renderedWith(
+    meaning: string,
+    action: string,
+  ): { lines: string[]; text: string; flowed: string } {
+    const lines = verdictLines(
+      report([
+        {
+          id: "share_open",
+          status: "fail",
+          summary: "the share would not open.",
+          meaning,
+          action,
+        },
+      ]),
+    );
+    // The replacement is prose to the wrap like any other phrase, so it can
+    // itself be broken across two rendered lines; `flowed` reads the block back
+    // as the operator reads it, and `text` is what the sink is handed.
+    return {
+      lines,
+      text: lines.join("\n"),
+      flowed: lines.join(" ").replace(/\s+/g, " "),
+    };
+  }
+
+  test("the wrap falls inside a run of the marker's shape", () => {
+    const { lines } = renderedWith(PADDING + WRAP_GAUGE, "a");
+    expect(
+      lines.filter(
+        (line) => line.includes("-----AAAAA") || line.includes("DDD-----"),
+      ),
+    ).toHaveLength(2);
+  });
+
+  test("a marker in a MEANING is replaced, taking the rest of that block", () => {
+    const { text, flowed } = renderedWith(
+      PADDING + KEY_MARKER + " SECRETBODYSECRETBODY",
+      "check the password file and run this again.",
+    );
+    expect(flowed).toContain("[redacted private key]");
+    expect(text).not.toContain("BEGIN");
+    expect(text).not.toContain("SECRETBODY");
+    // The label is composed outside the redacted text and ACTION is a block of
+    // its own, so the fail-closed replacement reaches neither.
+    expect(text).toContain("MEANING: ");
+    expect(text).toContain("check the password file and run this again.");
+    expect(text).toContain("FAIL: the share would not open.");
+  });
+
+  test("a marker in an ACTION does not cost the MEANING composed before it", () => {
+    const { text, flowed } = renderedWith(
+      "the credentials were refused.",
+      PADDING + KEY_MARKER + " SECRETBODYSECRETBODY",
+    );
+    expect(flowed).toContain("[redacted private key]");
+    expect(text).not.toContain("BEGIN");
+    expect(text).not.toContain("SECRETBODY");
+    expect(text).toContain("the credentials were refused.");
+  });
+});

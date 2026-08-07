@@ -5,7 +5,13 @@ import { tmpdir } from "node:os";
 import YAML from "yaml";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { getLogger, parseExchangeSpec, UsageError } from "@psilink/core";
+import {
+  getDiagnosticSink,
+  getLogger,
+  parseExchangeSpec,
+  setDiagnosticSink,
+  UsageError,
+} from "@psilink/core";
 import type { ExchangeDataSpec, LinkageTerms, Metadata } from "@psilink/core";
 
 import { confirmOutboundPayloadConsent } from "../../src/outboundPayloadConsent";
@@ -243,6 +249,59 @@ test("pending, non-interactive: refused with the set and how to confirm it", asy
   expect((err as Error).message).toContain("interactive terminal");
   expect(promptConfirmMock).not.toHaveBeenCalled();
   expect(fs.readFileSync(configFile, "utf8")).toBe(before);
+});
+
+test("a column shaped like armor reads the same in the log and at the prompt", async () => {
+  // The surface's two sinks run different passes -- core's prefixer strips key
+  // material per log argument, and writePromptLine runs none -- so a name left
+  // to the sinks would read as the replacement in the log and verbatim at the
+  // question it is answered against. Both sinks are captured on ONE run and
+  // compared line for line. A decline is what makes that comparison exact: the
+  // run ends at the refusal, so the log holds the surface and nothing after it.
+  writeConfig({ status: "pending" });
+  promptConfirmMock.mockResolvedValue(false);
+  const armored = "-----BEGIN RSA PRIVATE KEY-----MIIEowIBAAKCAQEA";
+  const spec: ExchangeDataSpec = {
+    linkageTerms: acceptorTerms,
+    outboundPayloadConsent: { status: "pending" },
+  };
+  const logged: string[] = [];
+  const previousSink = getDiagnosticSink();
+  const previousLevel = log.getLevel();
+  setDiagnosticSink((_method, _prefix, args) => {
+    logged.push(args.map((arg) => String(arg)).join(" "));
+  });
+  log.setLevel("info");
+  const stdio = captureStdio();
+  let thrown: unknown;
+  try {
+    thrown = await withStdin(ttyStream(), () =>
+      confirmOutboundPayloadConsent({
+        spec,
+        metadata: metadataDisclosing([armored]),
+        output: acceptorTerms.output,
+        configPath: configFile,
+        // A --log-file is what routes the log off the terminal the prompt asks
+        // on, so each sink receives the surface in its own right.
+        logFile: path.join(dir, "run.log"),
+        log,
+      }).then(
+        () => undefined,
+        (e: unknown) => e,
+      ),
+    );
+  } finally {
+    stdio.restore();
+    setDiagnosticSink(previousSink);
+    log.setLevel(previousLevel);
+  }
+
+  expect(thrown).toBeInstanceOf(UsageError);
+  const promptLines = stdio.stderrWrites.join("").split("\n").slice(0, -1);
+  expect(promptLines).toEqual(logged);
+  expect(promptLines).toContain("    - [redacted private key]");
+  expect(promptLines.join("\n")).not.toContain("MIIEow");
+  expect(promptLines.join("\n")).not.toContain("BEGIN RSA");
 });
 
 // --- Changed: the input file moved between accept and run --------------------
