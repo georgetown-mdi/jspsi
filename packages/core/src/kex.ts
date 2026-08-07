@@ -440,16 +440,17 @@ async function generateEphemeral(): Promise<{
 // abort-and-fail handling. Two layers, in this order:
 //
 //  1. The pinned canonical encoding: exactly 65 bytes with the uncompressed
-//     0x04 prefix. This is ours to enforce, because importKey accepts the
-//     compressed and hybrid encodings of the same point too (see the
-//     PUBLIC_KEY_LEN comment) and the transcript folds in the wire bytes.
-//  2. Point validity: importKey itself. Driven against the platform, it rejects
-//     a point not on the curve, the point at infinity in either of its
+//     0x04 prefix. This is ours to enforce, because importKey also decodes
+//     other encodings of the same point, and not the same set of them on every
+//     platform (see the PUBLIC_KEY_LEN comment), while the transcript folds in
+//     the wire bytes.
+//  2. Point validity: importKey itself. Driven against both platforms, it
+//     rejects a point not on the curve, the point at infinity in either of its
 //     encodings, and a coordinate at or above the field prime. P-256 has
 //     cofactor 1, so there is no small-order subgroup for a low-order share to
 //     land in and the identity is the whole of the degenerate case. kex.test.ts
-//     asserts each of these rejections against the real crypto.subtle rather
-//     than an assumed one.
+//     and the browser suite assert each of these rejections against the real
+//     crypto.subtle rather than an assumed one.
 async function importPeerShare(
   share: Uint8Array<ArrayBuffer>,
 ): Promise<CryptoKey | undefined> {
