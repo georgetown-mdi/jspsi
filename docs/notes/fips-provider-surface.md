@@ -93,7 +93,7 @@ Engagement is necessary but not sufficient: a provider only covers operations th
 | HKDF-SHA-256, HMAC-SHA-256, SHA-256 (`utils/crypto.ts`, `auth.ts`, `kex.ts`, `signedReceipt.ts`) | WebCrypto `crypto.subtle` | Yes -- measured available under a fips-only configuration |
 | `getRandomValues` (`utils/crypto.ts`) | WebCrypto | Yes |
 | P-256 ECDH key agreement (`kex.ts`) | WebCrypto `crypto.subtle` | Yes -- `ECDH` is listed under a fips-only configuration on every measured build, and the P-256 `deriveBits` call is a gating leg of the variant image's engagement probe |
-| Ed25519 keygen/sign/verify (`signingIdentity.ts`, `signedReceipt.ts`) | `@noble/curves`, pure JS | **No** -- same |
+| ECDSA P-256 with SHA-256 keygen/sign/verify (`signingKeys.ts`, `signingIdentity.ts`, `signedReceipt.ts`) | WebCrypto `crypto.subtle` | Yes -- `ECDSA` is listed under a fips-only configuration on every measured build; no leg of the variant image's engagement probe covers it, so nothing here is a measured dispatch |
 | PSI masking, P-256 (`psiEngine.ts`) | BoringSSL inside the vendored `@openmined/psi.js` (WASM, or the native addon) | **No, and not reachable in principle** -- an OpenSSL provider cannot cover a different crypto library |
 | SFTP transport crypto (`ssh2` via `connection/ssh2SftpAdapter.ts`) | `node:crypto`, not WebCrypto | Yes -- measured dispatched (see below) |
 
@@ -101,7 +101,7 @@ The last row needed its own measurement, because "WebCrypto engages" says nothin
 
 That has a deployment consequence worth carrying to the SFTP profile item: in a fips-only container with a 3.5.x provider, `ssh2` loses X25519 keypair generation, and with it the `curve25519-sha256` SSH key exchange, plus MD5 for key fingerprints. Under a 3.0.x provider X25519 survives. Which SSH algorithms remain available is therefore a function of the provider build, and it is not something the WebCrypto answer would have surfaced.
 
-The ceiling this table implies is the important part. Today the AEAD, the key-schedule primitives, and key establishment could sit inside a provider boundary; receipt signing and the PSI masking itself could not. The PSI masking is the one that cannot be fixed by moving code to WebCrypto, because it is BoringSSL inside a vendored module, not OpenSSL.
+The ceiling this table implies is the important part. Every operation psilink performs itself -- the AEAD, the key-schedule primitives, key establishment, and receipt signing -- can sit inside a provider boundary, because each is a `crypto.subtle` call. The PSI masking cannot, and it is the one that no move to WebCrypto fixes: it is BoringSSL inside a vendored module, not OpenSSL.
 
 ## What the certificates say
 
@@ -127,6 +127,29 @@ Three statements therefore have to be kept apart, and collapsing them is how thi
 The direction of travel tightens. A newer certified provider withdraws X25519's reprieve rather than extending it, so "wait for a newer certificate" is not a strategy that helps here.
 
 The runtime measurements agree with the tables, which is a useful cross-check that the intended module was loaded: under a fips-only configuration on 3.0.8 and 3.0.9, an X25519 `deriveBits` succeeds while the below-minimum RSA keygen and the MD5 digest fail beside it -- exactly the behaviour of an algorithm the module serves without approving.
+
+### A Table 13 row that does not say what it appears to say
+
+Certificate 4985's Table 13 (Non-Approved Services) carries a **Key Derivation** row, "Derive keys (key derivation key passed in by the calling process)", over `X942KDF-CONCAT`, `X963KDF`, `HKDF` and `OneStep KDF`. Read on its own it says that HKDF with a caller-supplied key is a non-approved service -- which would put PSI-Link's whole key schedule, and the collapsed `deriveBits` call that
+[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) lands on `KDA HKDF SP800-56Cr2`, outside the approved set. It does not say that, and the reading is worth landing here because it will otherwise be met cold by whoever reads the certificate next.
+
+**Table 13 is the service view of Table 8, and each row carries Table 8's qualification with it.** The correspondence was checked entry for entry: every algorithm named across Table 13's eight rows appears in Table 8 (Non-Approved, Not Allowed Algorithms), and Table 8 names none that Table 13 omits. So the Key Derivation row's four algorithms each arrive with the condition Table 8 states for them, and none of those conditions is "when the caller supplies the key":
+
+| Table 8 entry | The stated condition |
+|---|---|
+| `HKDF` | "Provides < 112 bits of security, Usage of HKDF with key length less than 112 bits" |
+| `OneStep KDF` | "Usage of OneStep KDF with PRF SHAKE128, SHAKE256" |
+| `X942KDF-CONCAT` | usage with PRF SHA-1, the truncated SHA-2 variants, the SHA-3 family, SHAKE, or KECCAK-KMAC |
+| `X963KDF` | the same PRF list |
+
+PSI-Link derives with HKDF-SHA-256 from 256-bit key-derivation keys to 256-bit outputs, so neither end of the derivation approaches the 112-bit threshold that row states and the row does not reach it.
+
+Two corroborations, from the same policy. `KDA HKDF SP800-56Cr2` is in **Table 5 (Approved Algorithms)**, and **Table 12 (Approved Services)** carries a "Key derivation (Perform approved security functions)" service whose indicator list includes `[HKDF: HKDF, MAC: HMAC, (SHA1, SHA2-224, SHA2-256, ...)]`. An algorithm cannot be both blanket non-approved and an approved service; the Table 8 qualification is what makes the two tables consistent.
+
+**Why the misreading is easy, stated so it is not made twice.** Table 13's rows are not uniformly self-contained. Its **Keyed Hash** row spells its condition out inline -- "Generate HMAC using key length less than 112 bits" -- and its **Random** row names the specific non-approved DRBG PRFs, while the Key Derivation row states only the caller-supplies-the-key condition and leaves the algorithm-level qualification to Table 8. A reader who takes each Table 13 row as complete in itself gets the HMAC answer right and the HKDF answer wrong.
+
+What this settles is the algorithm's approval status, and no more. Whether the module accepts a caller-supplied byte string as the shared-secret input to a given derivation service is a separate question, recorded as open in
+[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) and settled by driving the module rather than by reading further policy text.
 
 ### No certificate covers the base that ships
 
@@ -182,7 +205,7 @@ shipped variant.
 
 ## What this means for the items downstream
 
-- Documenting a FIPS deployment profile for SFTP: the provider build determines the surviving SSH algorithm set. That is measured, not assumed, and the profile is still to be written.
+- The FIPS deployment profile for SFTP rests on the surviving SSH algorithm set being a function of the provider build, which is measured here rather than assumed. The profile itself is [FIPS_SFTP_PROFILE.md](../FIPS_SFTP_PROFILE.md).
 
 ## Reproducing this
 
