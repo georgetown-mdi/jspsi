@@ -25,8 +25,8 @@
     "record linkage"
   ],
   "dependencies": {
-    "@mantine/core": "^9.5.0",
-    "@mantine/dropzone": "^9.5.0",
+    "@mantine/core": "^9.5.1",
+    "@mantine/dropzone": "^9.5.1",
     "@mantine/hooks": "^9.5.0",
     "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.3.tgz",
     "@psilink/core": "file:../../packages/core",
