@@ -29,7 +29,7 @@ Work required before the 1.0 release.
 
 - PSI cardinality (PSI-C) for research-grade exchanges that reveal only the count of shared members (partially implemented today)
 - PSI-Sum
-- Splitting standardized fields via fan-out (the `split_on` standardization function), e.g. last names split on `-` (partially implemented today)
+- Splitting standardized fields via fan-out (the `split_on` standardization function), e.g. last names split on `-`. The transform, its authoring surfaces, and the cross-product over the values it produces are implemented; what remains is matching on those values. A row whose value actually splits is dropped from that linkage key's round rather than contributing one PSI entry per value, so fan-out today narrows a match rather than widening it
 - Synchronous protocol execution for the CLI (the web WebRTC path is already synchronous; this eliminates file-based polling latency where the channel allows)
 - Provisioning of supporting services (peer coordination, STUN/TURN, SFTP, WebSocket-to-TCP proxy)
 - Reference configurations and deployment guides for each supporting service; the section pointers in [DEPLOYMENT.md](DEPLOYMENT.md) will be replaced with concrete guidance
@@ -42,7 +42,7 @@ Captured in [DESIGN.md#possible-extensions](DESIGN.md#possible-extensions). Thes
 - Threshold and weighted scoring via secure multi-party computation
 - Brute-force protection through input-size controls
 - WebSocket relay as a WebRTC fallback
-- Electron desktop or progressive-web-app distribution of the web application
+- Electron desktop or progressive-web-app distribution of the web application. Only the manifest stub exists today: `site.webmanifest` declares standalone display and the icon set, with empty `name`/`short_name` and no service worker
 
 ## See also
 
