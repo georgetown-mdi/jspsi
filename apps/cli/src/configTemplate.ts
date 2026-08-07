@@ -230,7 +230,7 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 #   mode: none
 #   # identity_file: ~/.psilink/signing-identity.json   # created by 'psilink fingerprint'
 #   # partner_fingerprint: <43-char base64url>          # pin the partner's certificate
-#   # receipt_output: ./receipts                        # where signed receipts are written
+#   # receipt_output: ./receipts/exchange-receipt.json  # where the receipt file is written
 
 # retention_disposition: a local note (recorded in your own exchange record
 # only, never shared) describing where you file the result and under what
