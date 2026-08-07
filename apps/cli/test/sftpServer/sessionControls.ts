@@ -21,7 +21,7 @@ export interface DroppableConnection {
  * side. Narrowing to this lets the hub be driven by a stub in its own unit test,
  * with no live socket.
  */
-export interface ClosableSocket {
+interface ClosableSocket {
   end(...args: unknown[]): unknown;
   destroy(...args: unknown[]): unknown;
 }
