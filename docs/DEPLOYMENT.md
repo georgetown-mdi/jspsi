@@ -205,6 +205,10 @@ Two of the checklist items above still apply, and retain mode makes the first of
 - **Keep the rendezvous prefix out of every lifecycle and auto-expiry rule** (S3 Lifecycle, Azure lifecycle management, and their equivalents). Retain mode leaves the exchange's files in place as a durable transcript, so they linger longer than in the default mode and an expiry rule is correspondingly more likely to reach them -- during an exchange as well as after it.
 - **No upload-triggered move or quarantine automation, and no antivirus/DLP scanning on the prefix.** These are orthogonal to the rendezvous mode and reach a retain-mode exchange exactly as they reach any other.
 
+### Negotiating only FIPS-approved algorithms
+
+A deployment required to use FIPS-approved cryptography constrains what the SSH layer will negotiate from the connection's own configuration, with no server-side cooperation needed. The settings to apply, what each excludes, what happens when the partner's server offers nothing approved, and the host-key gap no client-side setting can close are in [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md).
+
 ### Local development and testing
 
 For local development and integration testing, the project's test suite stands up its own SFTP server (an in-process `ssh2.Server` by default, or a native OpenSSH `sshd` child process). That setup is intended for testing the CLI's transport behavior against a known-good server and is not a production reference.
@@ -355,3 +359,4 @@ narrow ACLs correctly is in [TESTING.md](TESTING.md#verifying-windows-owner-only
 
 - [COMMUNICATION.md](COMMUNICATION.md) - the communication channels and services described here
 - [CLI.md](CLI.md) - CLI configuration for connecting to the services described here
+- [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md) - constraining an SFTP exchange's SSH negotiation to FIPS-approved algorithms
