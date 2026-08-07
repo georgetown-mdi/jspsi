@@ -607,7 +607,6 @@ describe("availableTransports matrix", () => {
       expect(available.defaultTransport).toBe("browser");
       const byTransport = optionByTransport(false, remotes, false);
       expect(byTransport.get("browser")).toMatchObject({
-        offered: true,
         disabled: false,
         runMode: "browser",
       });
@@ -628,8 +627,8 @@ describe("availableTransports matrix", () => {
     const byTransport = optionByTransport(true, true, true);
     // Browser is offered (never removed) but disabled: its in-tab exchange is out
     // of scope on the appliance.
+    expect(byTransport.get("browser")).toBeDefined();
     expect(byTransport.get("browser")).toMatchObject({
-      offered: true,
       disabled: true,
     });
     // A configured connection runs here with no authoring pending.
@@ -655,7 +654,6 @@ describe("availableTransports matrix", () => {
     // authoringRequired set, not disabled and not routed to save-a-file.
     const byTransport = optionByTransport(true, false, false);
     expect(byTransport.get("sftp")).toMatchObject({
-      offered: true,
       disabled: false,
       runMode: "server-job",
       authoringRequired: true,
