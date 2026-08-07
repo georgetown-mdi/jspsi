@@ -14,7 +14,7 @@ PSI-Link uses [semantic versioning](https://semver.org/) (MAJOR.MINOR.PATCH):
 - **MINOR**: backwards-compatible new features or new configuration fields. Exchange specification files written for an earlier MINOR version of the same MAJOR must continue to work.
 - **MAJOR**: breaking changes to the exchange protocol, configuration schema, or CLI interface. A MAJOR bump means existing key files or exchange specs may need to be updated.
 
-`apps/cli/package.json` is the canonical release version: Docker image tags and GitHub Release tags reflect the CLI version. That single image now also carries the web console appliance (`apps/web`, baked in and run via `serve`), which is versioned to the CLI version along with the rest of the image -- the deliberate departure from `apps/web` otherwise carrying no release version. `packages/core` (and any future sub-packages) version independently -- a patch to the core library does not require a CLI release unless the CLI itself is also affected. The hosted `apps/web` deployment is continuously deployed and carries no release version. The root `package.json` version is a monorepo workspace marker and is not independently meaningful.
+`apps/cli/package.json` is the canonical release version: Docker image tags and GitHub Release tags reflect the CLI version. The web console appliance baked into that image (`apps/web`, run via `serve`) is versioned to the CLI version along with the rest of the image; the hosted `apps/web` deployment carries no release version of its own. `packages/core` (and any future sub-packages) version independently -- a patch to the core library does not require a CLI release unless the CLI itself is also affected. The hosted `apps/web` deployment is continuously deployed and carries no release version. The root `package.json` version is a monorepo workspace marker and is not independently meaningful.
 
 Compatibility between the CLI and its core dependency is recorded by the lockfile and embedded in the Docker image; no separate compatibility matrix is maintained.
 
@@ -28,7 +28,7 @@ Each release produces:
 | GitHub Release | GitHub Releases                | Tag `vX.Y.Z`                                                             |
 | Launchers      | GitHub Release assets          | `start-psilink.sh`, `Start-Psilink.ps1`, `Setup-PsilinkFileDrop.ps1`     |
 
-The single `vdorie/psi-link` image carries both roles: it runs headless as the CLI by default (`docker run ... vdorie/psi-link exchange ...`) and, when its first argument is `serve`, as the single-party web console appliance (`docker run ... vdorie/psi-link serve`). See [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment) for running each role.
+The single `vdorie/psi-link` image carries both the CLI and the web console appliance; which role it runs is decided by its first argument (see [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment)).
 
 The hosted web deployment (`apps/web`) is a separate deployment to its hosting environment as part of CI/CD; it is not this image and is not distributed as a versioned artifact.
 
@@ -62,7 +62,7 @@ grep PSILINK_IMAGE_DIGEST start-psilink.sh
 cosign verify --key cosign.pub docker.io/vdorie/psi-link@sha256:...
 ```
 
-A digest that verifies is the image the maintainer signed. `cosign.pub` is the public signing key at the repository root; see [Verifying a Release](#verifying-a-release) for the tag and image checks it sits alongside.
+A digest that verifies is the image the maintainer signed. `cosign.pub` is the public signing key at the repository root. Verify by digest when the reference comes from a launcher, as here; verify by tag when it comes from the release notes (see [Verifying a Release](#verifying-a-release)).
 
 ## Release Checklist
 
@@ -96,19 +96,11 @@ npm audit --omit=dev -w packages/core -w apps/cli -w apps/web
 
 Resolve any high-severity findings before proceeding. For any dependency added since the last release, verify license compatibility (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
 
-That scope is the tree step 9 bills in the SBOM -- what the shipped image runs (see [Software Bill of Materials (SBOM)](#software-bill-of-materials-sbom)). The unscoped `npm audit` additionally reports development-tree findings, which are triaged separately rather than at release time; how the last one was resolved, and what holds it resolved, is recorded in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-brace-expansion-advisory-is-fixed-by-a-root-override).
+The unscoped `npm audit` additionally reports development-tree findings, which are triaged separately rather than at release time; how the last one was resolved, and what holds it resolved, is recorded in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-brace-expansion-advisory-is-fixed-by-a-root-override).
 
 ### 5. Run the full test suite
 
-```sh
-npm run build
-npm test -w packages/core
-npm test -w apps/cli
-npm run test:unit -w apps/web
-npm run test:integration -w apps/cli     # self-manages its SFTP test server
-```
-
-All tests must pass. Lint must be clean (`npm run lint`).
+Run what CI gates, rather than a copy of it that drifts: `.github/workflows/static_checks.yaml` is the source of truth for the static checks (typecheck, format, lint, the link and claim checks, and the script suite), and `.github/workflows/eb_build_and_test.yaml` for the browser integration suite. Everything they run must pass on the release branch before it merges.
 
 ### 6. Open and merge the release PR
 
@@ -139,9 +131,9 @@ From the workspace root:
 npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev -w packages/core -w apps/cli -w apps/web > psilink-X.Y.Z.cdx.json
 ```
 
-The image now bundles `apps/web`'s runtime dependencies into the Nitro `.output`, so the SBOM includes `apps/web`. That `.output` is a tree-shaken subset, so the `apps/web` entry is a superset of what actually ships -- acceptable for a security SBOM, which errs toward listing more. `--omit=dev` stays: `apps/web`'s build tools are `devDependencies` and are not shipped.
+`--omit=dev` stays: `apps/web`'s build tools are `devDependencies` and are not shipped. See [SBOM](#software-bill-of-materials-sbom) for the scoping rationale.
 
-**This command currently fails** with `ESBOMPROBLEMS` on an unsatisfiable `crossws` peer range. It is an upstream prerelease conflict that clears without action here, and the local workarounds cost more than the BOM is worth; the diagnosis, the rejected fixes, and what to re-check after a `@tanstack/*` or `nitropack` bump are in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-crossws-peer-conflict-blocks-the-release-sbom).
+**This command currently fails** with `ESBOMPROBLEMS` on an unsatisfiable `crossws` peer range. It is an upstream prerelease conflict that clears without action here, and the local workarounds cost more than the BOM is worth; the diagnosis, the rejected fixes, and what to re-check after a `@tanstack/*` or `nitropack` bump are in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-crossws-peer-conflict-blocks-the-release-sbom). Re-run the command and delete these three paragraphs once the `crossws` peer range resolves.
 
 If a release cannot wait for that to clear, drop `-w apps/web`:
 
@@ -187,7 +179,7 @@ docker inspect --format '{{index .RepoDigests 0}}' vdorie/psi-link:X.Y.Z
 
 Compare the digest against the value in the release notes.
 
-Each release image is also signed with Cosign using a key-based signature. To verify:
+Each release image is also signed with Cosign using a key-based signature. This verifies by tag, which is the right form when the reference comes from the release notes; a reference read out of a stamped launcher is verified by digest instead (see [Stamped launchers](#stamped-launchers)). To verify:
 
 ```sh
 cosign verify --key cosign.pub vdorie/psi-link:X.Y.Z
