@@ -82,7 +82,7 @@ afterEach(() => {
 
 test("renderConfigTemplate: every exchange-spec section is represented", async () => {
   const template = renderConfigTemplate(
-    await buildTemplateData(undefined, "Org", log),
+    await buildTemplateData(undefined, "Org"),
   );
 
   // The drift guard: every top-level ExchangeSpec section must appear in the
@@ -107,7 +107,7 @@ test("renderConfigTemplate: every exchange-spec section is represented", async (
 });
 
 test("renderConfigTemplate: defaults are pre-filled and the active body parses", async () => {
-  const data = await buildTemplateData(undefined, "Org", log);
+  const data = await buildTemplateData(undefined, "Org");
   const template = renderConfigTemplate(data);
 
   // Comments are stripped on parse, so the active body must round-trip through
@@ -129,7 +129,7 @@ test("renderConfigTemplate: an input file populates metadata and standardization
   const dir = scratchDir();
   const file = path.join(dir, "in.csv");
   fs.writeFileSync(file, SAMPLE_CSV);
-  const data = await buildTemplateData(file, "Org", log);
+  const data = await buildTemplateData(file, "Org");
   const template = renderConfigTemplate(data);
 
   const parsed = parseExchangeSpec(YAML.parse(template));
@@ -149,9 +149,7 @@ test("renderConfigTemplate: every FIELD_DOCS entry lands a comment in the docume
   const dir = scratchDir();
   const file = path.join(dir, "in.csv");
   fs.writeFileSync(file, SAMPLE_CSV);
-  const template = renderConfigTemplate(
-    await buildTemplateData(file, "Org", log),
-  );
+  const template = renderConfigTemplate(await buildTemplateData(file, "Org"));
   for (const { path: docPath, lines } of FIELD_DOCS) {
     expect(template, `comment for ${docPath.join(".")} missing`).toContain(
       lines[0],
@@ -190,7 +188,7 @@ test("every commented OPTIONAL section is valid when uncommented", async () => {
   // schema change (e.g. a new required field, or a strictObject rejecting a
   // typo) cannot drift the examples to invalid without a failing test.
   const base = YAML.parse(
-    renderConfigTemplate(await buildTemplateData(undefined, "Org", log)),
+    renderConfigTemplate(await buildTemplateData(undefined, "Org")),
   ) as Record<string, unknown>;
   for (const key of [
     "authentication",
@@ -214,7 +212,7 @@ test("every commented OPTIONAL section is valid when uncommented", async () => {
 // --- buildTemplateData: inference --------------------------------------------
 
 test("buildTemplateData: no input yields the default linkage terms only", async () => {
-  const data = await buildTemplateData(undefined, "Org", log);
+  const data = await buildTemplateData(undefined, "Org");
   expect(data.metadata).toBeUndefined();
   expect(data.standardization).toBeUndefined();
   expect(data.linkageTerms.identity).toBe("Org");
@@ -225,7 +223,7 @@ test("buildTemplateData: a file input infers metadata, fields, and standardizati
   const dir = scratchDir();
   const file = path.join(dir, "in.csv");
   fs.writeFileSync(file, SAMPLE_CSV);
-  const data = await buildTemplateData(file, "Org", log);
+  const data = await buildTemplateData(file, "Org");
   expect(data.metadata?.map((m) => m.name)).toContain("ssn");
   expect(data.standardization?.map((s) => s.output)).toContain("ssn");
 });
@@ -244,17 +242,17 @@ test("buildTemplateData: the bounded read infers the same terms (incl. DOB forma
       "Alice,Smith,03/14/1990,123456789\n" +
       "Bob,Jones,11/02/1985,234567891\n",
   );
-  const data = await buildTemplateData(file, "Org", log);
+  const data = await buildTemplateData(file, "Org");
   const full = buildDataSpec({
     identity: "Org",
     rows: await loadInputRows(file),
   });
 
-  expect(data.metadata).toEqual(full.dataSpec.metadata);
+  expect(data.metadata).toEqual(full.metadata);
   expect(data.linkageTerms.linkageFields).toEqual(
-    full.dataSpec.linkageTerms.linkageFields,
+    full.linkageTerms.linkageFields,
   );
-  expect(data.standardization).toEqual(full.dataSpec.standardization);
+  expect(data.standardization).toEqual(full.standardization);
   const parseDate = (data.standardization ?? [])
     .flatMap((s) => s.steps ?? [])
     .find((s) => s.function === "parse_date");
@@ -265,23 +263,23 @@ test("buildTemplateData: the bounded read infers the same terms (incl. DOB forma
 
 test("buildTemplateData: `-` reads the CSV from stdin", async () => {
   const data = await withStdin(streamOf(SAMPLE_CSV), () =>
-    buildTemplateData("-", "Org", log),
+    buildTemplateData("-", "Org"),
   );
   expect(data.metadata?.map((m) => m.name)).toContain("ssn");
 });
 
 test("buildTemplateData: `-` at an interactive terminal with nothing piped is a usage error", async () => {
   await withStdin(ttyStream(), async () => {
-    await expect(buildTemplateData("-", "Org", log)).rejects.toBeInstanceOf(
+    await expect(buildTemplateData("-", "Org")).rejects.toBeInstanceOf(
       UsageError,
     );
-    await expect(buildTemplateData("-", "Org", log)).rejects.toThrow(/stdin/);
+    await expect(buildTemplateData("-", "Org")).rejects.toThrow(/stdin/);
   });
 });
 
 test("buildTemplateData: an unreadable input file is a usage error (exit 64)", async () => {
   await expect(
-    buildTemplateData("/nonexistent/psilink-init-input.csv", "Org", log),
+    buildTemplateData("/nonexistent/psilink-init-input.csv", "Org"),
   ).rejects.toBeInstanceOf(UsageError);
 });
 

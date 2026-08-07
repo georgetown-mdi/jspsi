@@ -458,11 +458,11 @@ export function singlePassDisclosureNotice(): string {
  * Resolve the exchange-data portion of a config.
  *
  * - With input rows: infer metadata, then either infer linkage terms (invite,
- *   `terms` undefined) or use the supplied terms (accept). Standardization is
- *   inferred best-effort; if the input columns cannot satisfy the terms'
- *   linkage keys, a warning is collected and standardization (and metadata) are
- *   omitted so the user can adjust their data -- the linkage terms are still
- *   written.
+ *   `terms` undefined) or use the supplied terms (accept), and derive the default
+ *   standardization over both; the spec carries all three. A linkage field the
+ *   input columns cannot bind simply gets no transformation, and naming those
+ *   fields to the operator belongs to the satisfiability pre-flight
+ *   (`checkLinkageSatisfiability`), which runs before this.
  * - Without input rows (accept with no input file): `terms` is required and the
  *   spec is just those terms.
  *
@@ -487,16 +487,15 @@ export function buildDataSpec(args: {
   rows?: { rawRows: Array<CSVRow>; columns: string[] };
   dateInputFormat?: string;
   linkageStrategy?: LinkageStrategy;
-}): { dataSpec: ResolvedDataSpec; warnings: string[] } {
+}): ResolvedDataSpec {
   const { terms, identity, rows, linkageStrategy } = args;
-  const warnings: string[] = [];
 
   if (rows === undefined) {
     if (terms === undefined)
       // Unreachable through the CLI (offline invite always has input, accept
       // always has terms); guards a future caller against an empty spec.
       throw new Error("buildDataSpec requires either terms or input rows");
-    return { dataSpec: { linkageTerms: terms }, warnings };
+    return { linkageTerms: terms };
   }
 
   const metadata = inferMetadata(rows.columns);
@@ -514,23 +513,10 @@ export function buildDataSpec(args: {
       ? inferDateFormat(columnValues(rows.rawRows, dobCol.name))
       : undefined);
 
-  try {
-    const standardization = getDefaultStandardization(metadata, linkageTerms, {
-      dateInputFormat,
-    });
-    return { dataSpec: { linkageTerms, metadata, standardization }, warnings };
-  } catch (err) {
-    // The input columns cannot be standardized to satisfy the linkage keys
-    // (only reachable when the terms come from an invitation, not when they are
-    // inferred from this same input). Keep the terms; drop the unusable
-    // metadata/standardization and let the user adapt their data.
-    warnings.push(
-      "input columns may not satisfy the invitation's linkage keys: " +
-        (err instanceof Error ? err.message : String(err)) +
-        "; writing the config without metadata or standardization",
-    );
-    return { dataSpec: { linkageTerms }, warnings };
-  }
+  const standardization = getDefaultStandardization(metadata, linkageTerms, {
+    dateInputFormat,
+  });
+  return { linkageTerms, metadata, standardization };
 }
 
 // Lifted into @psilink/core so the web acceptor and the CLI accept path share

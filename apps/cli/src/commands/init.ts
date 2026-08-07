@@ -2,7 +2,6 @@ import type { Argv, Arguments } from "yargs";
 
 import {
   getDefaultLinkageTerms,
-  getLogger,
   inferDateInputFormatFromSource,
   UsageError,
 } from "@psilink/core";
@@ -130,7 +129,7 @@ export async function handler(argv: Arguments): Promise<void> {
         return;
       }
 
-      const data = await buildTemplateData(input, identity, log);
+      const data = await buildTemplateData(input, identity);
       const template = renderConfigTemplate(data);
       try {
         // Exclusive on the "create" path (the path was free at the check): if a
@@ -210,7 +209,6 @@ export function resolveInitInput(
 export async function buildTemplateData(
   input: string | undefined,
   identity: string,
-  log: ReturnType<typeof getLogger>,
 ): Promise<TemplateDataSpec> {
   if (input === undefined)
     return { linkageTerms: getDefaultLinkageTerms(identity) };
@@ -233,15 +231,13 @@ export async function buildTemplateData(
     );
   }
 
-  const { dataSpec, warnings } = buildDataSpec({
+  return buildDataSpec({
     identity,
     rows: { rawRows: [], columns: inferred.columns },
     ...(inferred.dateInputFormat !== undefined
       ? { dateInputFormat: inferred.dateInputFormat }
       : {}),
   });
-  for (const w of warnings) log.warn(w);
-  return dataSpec;
 }
 
 /**

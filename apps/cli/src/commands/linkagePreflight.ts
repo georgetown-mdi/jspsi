@@ -158,12 +158,11 @@ const ACCEPTANCE_OUTCOME: Record<AcceptMode, string> = {
  * line beneath it.
  *
  * The disclosed set is read the way the RUN resolves it (`prepareForExchange`
- * takes the spec's metadata, else infers from the column names), so the warning
- * also covers the acceptance whose metadata was dropped for an input that
- * satisfies only some linkage keys -- the run infers metadata there and meets the
- * refusal all the same. `columnNames` absent (an offline acceptance given no
- * input file) leaves nothing to compare: the disclosed set is settled by whatever
- * CSV `psilink exchange` is later given, which is what the display's
+ * takes the spec's metadata, else infers from the column names), so a caller that
+ * holds an input's columns but no metadata for them still gets the warning the
+ * run's own refusal will match. `columnNames` absent (an offline acceptance given
+ * no input file) leaves nothing to compare: the disclosed set is settled by
+ * whatever CSV `psilink exchange` is later given, which is what the display's
  * not-yet-known line already says.
  *
  * That pair cannot run: `assertPayloadSendDisclosed` refuses it inside

@@ -1487,11 +1487,10 @@ const ROWS = {
 };
 
 test("buildDataSpec: infers linkage terms, metadata, and standardization from input (invite)", () => {
-  const { dataSpec, warnings } = buildDataSpec({
+  const dataSpec = buildDataSpec({
     identity: "Agency A",
     rows: ROWS,
   });
-  expect(warnings).toEqual([]);
   expect(dataSpec.linkageTerms.identity).toBe("Agency A");
   expect(dataSpec.linkageTerms.linkageKeys.length).toBeGreaterThan(0);
   expect(dataSpec.metadata).toBeDefined();
@@ -1499,12 +1498,12 @@ test("buildDataSpec: infers linkage terms, metadata, and standardization from in
 });
 
 test("buildDataSpec: without input rows, the spec is just the supplied terms (accept)", () => {
-  const { dataSpec } = buildDataSpec({
+  const dataSpec = buildDataSpec({
     identity: "Agency B",
     rows: ROWS,
   });
   // Reuse the inferred terms as a stand-in for an invitation's terms.
-  const { dataSpec: termsOnly } = buildDataSpec({
+  const termsOnly = buildDataSpec({
     terms: dataSpec.linkageTerms,
     identity: "Agency B",
   });
@@ -1514,16 +1513,15 @@ test("buildDataSpec: without input rows, the spec is just the supplied terms (ac
 });
 
 test("buildDataSpec: supplied terms plus input infer metadata and standardization (accept)", () => {
-  const { dataSpec: inferred } = buildDataSpec({
+  const inferred = buildDataSpec({
     identity: "Agency C",
     rows: ROWS,
   });
-  const { dataSpec, warnings } = buildDataSpec({
+  const dataSpec = buildDataSpec({
     terms: inferred.linkageTerms,
     identity: "Agency C",
     rows: ROWS,
   });
-  expect(warnings).toEqual([]);
   expect(dataSpec.linkageTerms).toEqual(inferred.linkageTerms);
   expect(dataSpec.metadata).toBeDefined();
   expect(dataSpec.standardization).toBeDefined();
@@ -1537,7 +1535,7 @@ test("buildDataSpec: supplied terms plus input infer metadata and standardizatio
 function onlineBootstrapParams(
   configPath: string,
 ): Parameters<typeof runOnlineBootstrap>[0] {
-  const { dataSpec } = buildDataSpec({ identity: "Agency A", rows: ROWS });
+  const dataSpec = buildDataSpec({ identity: "Agency A", rows: ROWS });
   const connection: RunnableConnectionConfig = {
     channel: "filedrop",
     path: "/tmp/psilink-drop",
@@ -3049,9 +3047,7 @@ function csvWithRows(rows: number): string {
 }
 
 /** The parse_date input format a standardization inferred for the dob column. */
-function dobInputFormat(
-  dataSpec: ReturnType<typeof buildDataSpec>["dataSpec"],
-): unknown {
+function dobInputFormat(dataSpec: ReturnType<typeof buildDataSpec>): unknown {
   const step = (dataSpec.standardization ?? [])
     .flatMap((s) => s.steps ?? [])
     .find((s) => s.function === "parse_date");
@@ -3068,7 +3064,7 @@ async function inferInitDataSpec(
   const inferred = await inferDateInputFormatFromSource(
     openInputSource(input, opts),
   );
-  const { dataSpec } = buildDataSpec({
+  const dataSpec = buildDataSpec({
     identity: "Org",
     rows: { rawRows: [], columns: inferred.columns },
     ...(inferred.dateInputFormat !== undefined
@@ -3091,11 +3087,11 @@ test("inferDateInputFormatFromSource: the init path infers the same metadata, fi
       rows: await loadInputRows(file),
     });
     const { dataSpec: light } = await inferInitDataSpec(file);
-    expect(light.metadata).toEqual(full.dataSpec.metadata);
-    expect(light.linkageTerms).toEqual(full.dataSpec.linkageTerms);
-    expect(light.standardization).toEqual(full.dataSpec.standardization);
+    expect(light.metadata).toEqual(full.metadata);
+    expect(light.linkageTerms).toEqual(full.linkageTerms);
+    expect(light.standardization).toEqual(full.standardization);
     expect(dobInputFormat(light)).toBe("YYYY-MM-DD");
-    expect(dobInputFormat(light)).toBe(dobInputFormat(full.dataSpec));
+    expect(dobInputFormat(light)).toBe(dobInputFormat(full));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -3138,7 +3134,7 @@ test("inferDateInputFormatFromSource: a file with no dob column yields no format
       identity: "Org",
       rows: await loadInputRows(file),
     });
-    expect(light).toEqual(full.dataSpec);
+    expect(light).toEqual(full);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -3269,7 +3265,7 @@ const STRATEGY_ROWS = {
 };
 
 test("buildDataSpec: --linkage-strategy single-pass authors single-pass terms", () => {
-  const { dataSpec } = buildDataSpec({
+  const dataSpec = buildDataSpec({
     identity: "tester",
     rows: STRATEGY_ROWS,
     linkageStrategy: "single-pass",
@@ -3278,7 +3274,7 @@ test("buildDataSpec: --linkage-strategy single-pass authors single-pass terms", 
 });
 
 test("buildDataSpec: omitting the selection authors cascade (unchanged from today)", () => {
-  const { dataSpec } = buildDataSpec({
+  const dataSpec = buildDataSpec({
     identity: "tester",
     rows: STRATEGY_ROWS,
   });
@@ -3292,7 +3288,7 @@ test("buildDataSpec: a supplied terms object (accept's path) ignores the selecti
     ...getDefaultLinkageTerms("inviter"),
     linkageStrategy: "single-pass" as const,
   };
-  const { dataSpec } = buildDataSpec({
+  const dataSpec = buildDataSpec({
     terms,
     identity: "acceptor",
     rows: STRATEGY_ROWS,

@@ -1,7 +1,11 @@
 import { expect, test } from "vitest";
+import { inferMetadata } from "@psilink/core";
 import type { getLogger, LinkageTerms } from "@psilink/core";
 
-import { checkLinkageSatisfiability } from "../../src/commands/linkagePreflight";
+import {
+  checkLinkageSatisfiability,
+  warnColumnsTheInvitationWillNotAccept,
+} from "../../src/commands/linkagePreflight";
 
 // Minimal logger stub: checkLinkageSatisfiability only emits warnings (the block
 // path throws), so capture log.warn. Cast through unknown because the parameter
@@ -106,6 +110,61 @@ test("a dead key and a column-unsatisfiable key both warn (independent signals)"
   ).not.toThrow();
   expect(warns.some((w) => w.includes("can never match"))).toBe(true);
   expect(warns.some((w) => w.includes("cannot satisfy all"))).toBe(true);
+});
+
+// --- warnColumnsTheInvitationWillNotAccept ------------------------------------
+
+// Terms mirroring an invitation that accepts no payload column while this party
+// is entitled to the result -- the one pair the warning covers.
+function refusingTerms(): LinkageTerms {
+  return {
+    ...dobTerms(),
+    output: { expectsOutput: true, shareWithPartner: true },
+    payload: { send: [] },
+  };
+}
+
+test("the disclosed set is resolved from the column names when no metadata is supplied", () => {
+  // The helper resolves `metadata ?? inferMetadata(columnNames)` because that is
+  // how `prepareForExchange` resolves it at run time; a caller holding an input's
+  // columns but no metadata for them must still get the warning the run's own
+  // refusal will match. Drive that argument pairing directly rather than through
+  // an accept invocation, which always resolves metadata for an input it read.
+  const { log, warns } = makeLogger();
+  const columnNames = ["dob", "diagnosis"];
+  warnColumnsTheInvitationWillNotAccept({
+    metadata: undefined,
+    columnNames,
+    terms: refusingTerms(),
+    mode: "offline",
+    log,
+  });
+  expect(warns).toHaveLength(1);
+  expect(warns[0]).toContain("will accept no payload columns");
+  expect(warns[0]).toContain("\n  - diagnosis");
+
+  // Same set, same message, whichever half of the pair carries it.
+  const supplied = makeLogger();
+  warnColumnsTheInvitationWillNotAccept({
+    metadata: inferMetadata(columnNames),
+    columnNames,
+    terms: refusingTerms(),
+    mode: "offline",
+    log: supplied.log,
+  });
+  expect(supplied.warns).toEqual(warns);
+});
+
+test("with neither metadata nor column names there is nothing to compare", () => {
+  const { log, warns } = makeLogger();
+  warnColumnsTheInvitationWillNotAccept({
+    metadata: undefined,
+    columnNames: undefined,
+    terms: refusingTerms(),
+    mode: "offline",
+    log,
+  });
+  expect(warns).toEqual([]);
 });
 
 test("a key blocked for a missing column is not also warned as dead, and still throws", () => {
