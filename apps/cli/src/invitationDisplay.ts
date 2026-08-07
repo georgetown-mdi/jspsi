@@ -80,9 +80,8 @@ function marked(label: string, fact: ConsentFactId): string {
 /**
  * The wording the outbound-send line carries when the acceptor's own disclosed set
  * is not yet determined at prompt time -- an offline acceptance with no input file,
- * or one whose columns cannot satisfy the invitation's linkage keys, both of which
- * leave the resolved spec without metadata and leave this acceptance nothing to
- * prepare from.
+ * which leaves the resolved spec without metadata and leaves this acceptance
+ * nothing to prepare from.
  *
  * It states what actually happens next on THIS path: the acceptance records that
  * the set is unconfirmed, and `psilink exchange` resolves it from the input file it

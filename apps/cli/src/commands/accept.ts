@@ -348,12 +348,11 @@ export async function validateAccept(params: {
       log,
       INVITATION_PREFLIGHT_MESSAGING,
     );
-    const { dataSpec, warnings } = buildDataSpec({
+    const dataSpec = buildDataSpec({
       terms: myTerms,
       identity: myIdentity,
       rows,
     });
-    for (const w of warnings) log.warn(w);
     warnColumnsTheInvitationWillNotAccept({
       metadata: dataSpec.metadata,
       columnNames: rows.columns,
@@ -412,12 +411,11 @@ export async function validateAccept(params: {
       log,
       INVITATION_PREFLIGHT_MESSAGING,
     );
-  const { dataSpec, warnings } = buildDataSpec({
+  const dataSpec = buildDataSpec({
     terms: myTerms,
     identity: myIdentity,
     rows,
   });
-  for (const w of warnings) log.warn(w);
   warnColumnsTheInvitationWillNotAccept({
     metadata: dataSpec.metadata,
     columnNames: rows?.columns,
@@ -626,11 +624,10 @@ export async function handler(argv: Arguments): Promise<void> {
       //
       // The online path reads it off the PREPARED exchange -- the very object this
       // invocation transmits from -- rather than off the written spec, so the set
-      // shown is the set sent even where the spec carries no metadata of its own
-      // (an input that satisfies only some linkage keys drops it, and the run then
-      // infers one from the same CSV). The offline path has no prepared exchange to
-      // read: it writes a configuration and stops, so an absent spec metadata is
-      // genuinely not-yet-known and the display forward-references it.
+      // shown is the set sent. The offline path has no prepared exchange to read:
+      // it writes a configuration and stops, so an acceptance given no input file
+      // carries no metadata to read the set off, and the display
+      // forward-references it.
       const ownMetadata =
         ready.mode === "online"
           ? ready.prepared.metadata

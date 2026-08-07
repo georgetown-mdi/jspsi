@@ -99,6 +99,27 @@ describe("getDefaultStandardization — structure", () => {
     expect(result).toHaveLength(0);
   });
 
+  test("metadata that binds no linkage field yields an empty standardization, not a throw", () => {
+    // Totality over the unsatisfiable case is what the CLI's `buildDataSpec`
+    // relies on: it derives the default standardization for terms that arrived
+    // from a partner's invitation over whatever columns the operator's own CSV
+    // has, and writes the result. An input binding none of those fields is the
+    // worst case, and it resolves to an empty standardization rather than an
+    // error. Pin it here (CONTRIBUTING: encode a runtime fact as a check) so a
+    // future throwing step in this function or `resolveFieldColumns` trips this
+    // test rather than surfacing as a failed acceptance.
+    const boundToNothing: ColumnMetadata[] = [
+      // Right types, but no column is roled for matching.
+      { name: "SSN", type: "ssn", role: "payload", isPayload: true },
+      { name: "DOB", type: "date_of_birth", role: "ignored", isPayload: false },
+      // Roled for matching, but no linkage field has these types.
+      { name: "ID", type: "identifier", role: "linkage", isPayload: false },
+      { name: "NOTE", type: "other", role: "linkage", isPayload: false },
+    ];
+    expect(getDefaultStandardization(boundToNothing, minimalTerms)).toEqual([]);
+    expect(getDefaultStandardization([], minimalTerms)).toEqual([]);
+  });
+
   test("skips identifier and other semantic types", () => {
     const terms: LinkageTerms = {
       ...minimalTerms,

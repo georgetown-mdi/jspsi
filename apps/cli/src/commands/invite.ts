@@ -199,8 +199,8 @@ function disclosedColumnsFor(
  * detection, URL validation (online), input reading, and minting+encoding the
  * invitation. The caller's commit step performs the side effects from this
  * bundle, so any failure here aborts before the live token reaches stdout or a
- * config is written. Data-cleaning warnings are logged here (so they precede the
- * token print), so this is not literally side-effect-free.
+ * config is written. Diagnostics are logged here (so they precede the token
+ * print), so this is not literally side-effect-free.
  */
 type InviteReady =
   | {
@@ -379,12 +379,11 @@ export async function validateInvite(params: {
       );
 
     const rows = await loadInputRows(input, { allowStdin: true });
-    const { dataSpec: builtDataSpec, warnings } = buildDataSpec({
+    const builtDataSpec = buildDataSpec({
       identity,
       rows,
       linkageStrategy,
     });
-    for (const w of warnings) log.warn(w);
     noteSinglePassSelection(linkageStrategy, log);
 
     // The columns this party will transmit for matched records, computed over the
@@ -620,12 +619,11 @@ export async function validateInvite(params: {
   });
 
   const rows = await loadInputRows(resolved.input, { allowStdin: true });
-  const { dataSpec: builtDataSpec, warnings } = buildDataSpec({
+  const builtDataSpec = buildDataSpec({
     identity,
     rows,
     linkageStrategy,
   });
-  for (const w of warnings) log.warn(w);
   noteSinglePassSelection(linkageStrategy, log);
 
   // The disclosed-columns subset over the same metadata the inferred terms (and

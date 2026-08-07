@@ -57,13 +57,7 @@ vi.mock("../../src/onlineBootstrap", async () => {
   const actual = await vi.importActual<
     typeof import("../../src/onlineBootstrap")
   >("../../src/onlineBootstrap");
-  return {
-    ...actual,
-    runOnlineBootstrap: vi.fn(),
-    // Delegates to the real implementation for every test but the one that
-    // overrides a single call to reach its metadata-dropped branch.
-    buildDataSpec: vi.fn(actual.buildDataSpec),
-  };
+  return { ...actual, runOnlineBootstrap: vi.fn() };
 });
 
 import {
@@ -77,7 +71,6 @@ import {
   logDecisionFacts,
 } from "../../src/invitationDisplay";
 import {
-  buildDataSpec,
   generateSharedSecret,
   runOnlineBootstrap,
 } from "../../src/onlineBootstrap";
@@ -563,6 +556,11 @@ test("validateAccept: offline blocks (UsageError) when the CSV satisfies no link
 test("validateAccept: offline warns but proceeds when the CSV satisfies only some keys", async () => {
   // last/first name + dob satisfy the name+dob keys but not the ssn keys, so the
   // pre-flight warns (naming the unsatisfied fields) and the acceptance proceeds.
+  // The partially satisfiable input resolves a spec exactly as a fully satisfiable
+  // one does -- metadata and standardization inferred and written alongside the
+  // terms, the unsatisfied fields simply carrying no transformation -- which is
+  // what docs/CLI.md states and what the consent display reads its outbound set
+  // off.
   const options = testOptions();
   const input = writeInputCSV(["last_name", "first_name", "dob"]);
   const log = getLogger("accept-partial-test");
@@ -585,6 +583,13 @@ test("validateAccept: offline warns but proceeds when the CSV satisfies only som
           ),
       ),
     ).toBe(true);
+    expect(ready.dataSpec.metadata).toBeDefined();
+    expect(ready.dataSpec.standardization).toBeDefined();
+    // The satisfiable fields are bound; the unsatisfied ssn fields are absent
+    // rather than the whole standardization being withheld.
+    const outputs = (ready.dataSpec.standardization ?? []).map((t) => t.output);
+    expect(outputs).toContain("date_of_birth");
+    expect(outputs).not.toContain("ssn");
   } finally {
     warnSpy.mockRestore();
     fs.rmSync(input, { force: true });
@@ -722,28 +727,6 @@ test("validateAccept: online states that the acceptance itself stops, and it doe
   expect((error as Error).message).toContain("payload.send");
   expect(fs.existsSync(options.configFile)).toBe(false);
   expect(fs.existsSync(options.keyFile)).toBe(false);
-});
-
-test("validateAccept: warns on the metadata-dropped path, which the run infers metadata for", async () => {
-  // buildDataSpec keeps the terms and drops the metadata when it cannot derive a
-  // standardization, so the written configuration carries none. That does not
-  // spare the run: prepareForExchange resolves `spec.metadata ?? inferMetadata(
-  // columns)`, so the inferred disclosure meets the same refusal. Read the
-  // disclosed set the way the run will, or the message goes missing exactly where
-  // the operator most needs it.
-  vi.mocked(buildDataSpec).mockImplementationOnce((args) => ({
-    dataSpec: { linkageTerms: args.terms! },
-    warnings: ["input columns may not satisfy the invitation's linkage keys"],
-  }));
-  const { warnings, ready } = await acceptWarnings({
-    token: tokenDeclaringReceive([]),
-    columns: [...LINKAGE_COLUMNS, "diagnosis"],
-    loggerName: "accept-refused-disclosure-no-metadata",
-  });
-  expect(
-    (ready as { dataSpec: { metadata?: unknown } }).dataSpec.metadata,
-  ).toBeUndefined();
-  expect(refusedDisclosureWarning(warnings)).toContain("\n  - diagnosis");
 });
 
 test("validateAccept: stays silent where the disclosure and the invitation can agree", async () => {
