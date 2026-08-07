@@ -1,14 +1,15 @@
 # Design notes
 
-Tracked but exploratory. Files here are working notes and design musings - they
-capture reasoning and options under consideration, not decisions or
-specifications. Nothing here is binding: a note may be folded into the formal
-docs once a direction is actually chosen, or simply be discarded.
+Tracked, citeable design records: the model behind a mechanism, the options
+weighed, and the decisions taken. Nothing here is normative -- a note binds no
+implementation, and points at the spec for the normative rows rather than
+restating them. A note carries a status line stating where its subject stands,
+from a direction still open to a decision taken and built.
 
 The maturity ladder:
 
 - `scratch/` (gitignored) - personal, throwaway thinking, no audience.
-- `docs/notes/` (here) - tracked, exploratory, citeable; no decision implied.
+- `docs/notes/` (here) - tracked, citeable design records; non-normative.
 - `docs/` proper - the formal, living documentation, in two tiers:
   - `docs/` (overview) - conceptual and operational documents for program
     officers, security reviewers, compliance officers, IT staff, and new

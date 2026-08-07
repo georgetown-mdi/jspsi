@@ -1,7 +1,6 @@
 ---
 title: "PSI-Link"
 author: "Vincent Dorie"
-date: 2026-05-04
 ---
 
 # Overview
@@ -24,7 +23,7 @@ When adopting the software, program officers are likely to first conduct exchang
 
 ## Core library
 
-The core library includes the base PSI function, linkage term verification, input ingestion and cleaning, linkage key generation, and the execution of the linkage algorithms over PSI. The library also generates a [self-attested exchange record](spec/EXCHANGE_RECORD.md) at the end of each exchange -- a local, unsigned record of what was exchanged that a party can retain for its own disclosure records. Certificate-backed signing of that record into a third-party-verifiable receipt is part of the intended design but is deferred to a later release (see [ROADMAP.md](ROADMAP.md)). The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
+The core library includes the base PSI function, linkage term verification, input ingestion and cleaning, linkage key generation, and the execution of the linkage algorithms over PSI. The library also generates a [self-attested exchange record](spec/EXCHANGE_RECORD.md) at the end of each exchange -- a local, unsigned record of what was exchanged that a party can retain for its own disclosure records. Certificate-backed signing of that record into a third-party-verifiable receipt is an opt-in mode, selected through the configuration's `signing` block and checked with `psilink verify-receipt` (see [Receipt signing identities](SECURITY_DESIGN.md#receipt-signing-identities)). The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
 
 ## Command line application
 
@@ -51,8 +50,6 @@ The console works on one mounted working directory at a time, holding that one e
 A user should be able to *invite* someone to conduct an exchange, *accept* an extended invitation, and *exchange* data for previously arranged details. The bare minimum necessary to conduct an exchange is an *input* file and a *location*, although most exchanges will also use a *shared secret* and want to save the *output*. As indicated above, linkage terms, connection details, metadata, and data cleaning transformations form further exchange parameters.
 
 For the rest of this section we describe use cases as in the command line application. The application provides eight explicit subcommands - `init`, `invite`, `accept`, `exchange`, `fingerprint` (which shows this party's signing-certificate fingerprint), `verify-receipt` (which checks a stored exchange record), `probe-host-key` (which reads an SFTP server's host-key fingerprint), and `doctor` (which checks a network file drop before an exchange is attempted) - alongside a zero-setup mode in which both parties run the same command against a shared server without specifying a subcommand. The full command inventory and behavior is in [CLI.md](CLI.md). Web application versions implement the same functionality with an appropriate graphical user interface and use browser storage instead of the file system.
-
-> **Implementation status:** Those subcommands, the zero-setup mode, and the `--save` flag are all functional; see [CLI.md](CLI.md) for the authoritative command list. The command table and flows below describe the intended behavior.
 
 A typical first exchange of a recurring relationship begins with one party generating an invitation with `psilink invite` and securely transmitting it to their partner out-of-band. The partner accepts with `psilink accept`, which establishes the shared configuration and key on both sides. Both parties then run `psilink exchange` to conduct the data exchange. Subsequent exchanges use `psilink exchange` with the stored configuration and shared secret, requiring no further coordination. After any successful exchange the shared secret is rotated. As a one-step alternative, parties can run `invite` and `accept` with a server URL as an argument, in which case acceptance leads to immediately conducting an exchange.
 
@@ -102,9 +99,15 @@ The relay operates at the application layer, which has meaningful trust implicat
 
 ## Other applications
 
-It may be beneficial to be able to build the web application as a desktop Electron app, or possibly have it be able to be saved as a progressive web app. These options can behave more like system services, but will likely require additional IT review.
+It may be beneficial to be able to build the web application as a desktop Electron app, or to distribute it as an installable progressive web app. Only the manifest stub exists today: `site.webmanifest` declares standalone display and the icon set, but its `name` and `short_name` are empty and the application registers no service worker. Both options can behave more like system services, but will likely require additional IT review.
 
-## See also
+# License and disclaimer
+
+PSI-Link is free, open-source software released under the [Apache License, Version 2.0](../LICENSE.md) and will remain available at no cost. It is provided "as-is," without warranty of any kind, express or implied, including without limitation any warranties of merchantability, fitness for a particular purpose, or non-infringement. The full warranty disclaimer and limitation of liability appear in sections 7 and 8 of the Apache License.
+
+Agencies evaluating PSI-Link for operational use are responsible for their own risk assessments, authority-to-operate (ATO) determinations, and compliance reviews under applicable federal, state, or local regulations. The project documentation -- including this document, [SECURITY_DESIGN.md](SECURITY_DESIGN.md), [PROTOCOL.md](spec/PROTOCOL.md), and [COMPLIANCE.md](COMPLIANCE.md) -- is intended to support those reviews, not to substitute for them.
+
+# See also
 
 - [PROTOCOL.md](spec/PROTOCOL.md) - PSI and PSI-C algorithm details and post-linkage steps
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - threat model, authentication design, and channel security
@@ -112,9 +115,3 @@ It may be beneficial to be able to build the web application as a desktop Electr
 - [CLI.md](CLI.md) - full CLI command reference and configuration guide
 - [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md) - complete exchange reference
 - [COMPLIANCE.md](COMPLIANCE.md) - regulatory framings, data classification, and compliance considerations
-
-# License and disclaimer
-
-PSI-Link is free, open-source software released under the [Apache License, Version 2.0](../LICENSE.md) and will remain available at no cost. It is provided "as-is," without warranty of any kind, express or implied, including without limitation any warranties of merchantability, fitness for a particular purpose, or non-infringement. The full warranty disclaimer and limitation of liability appear in sections 7 and 8 of the Apache License.
-
-Agencies evaluating PSI-Link for operational use are responsible for their own risk assessments, authority-to-operate (ATO) determinations, and compliance reviews under applicable federal, state, or local regulations. The project documentation -- including this document, [SECURITY_DESIGN.md](SECURITY_DESIGN.md), [PROTOCOL.md](spec/PROTOCOL.md), and [COMPLIANCE.md](COMPLIANCE.md) -- is intended to support those reviews, not to substitute for them.

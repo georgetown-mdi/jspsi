@@ -21,7 +21,7 @@ PSI-Link is a privacy-preserving record linkage (PPRL) tool that enables partner
 
 ## Document inventory
 
-The documentation is organized in two tiers: this **overview** tier (`docs/`) of conceptual and operational documents, and a **technical specification** tier ([`docs/spec/`](spec/README.md)) of wire formats, byte encodings, normative constants, and implementation-level design for implementors and auditors. The spec tier has its own [index and routing guide](spec/README.md).
+The documentation is organized in three tiers: this **overview** tier (`docs/`) of conceptual and operational documents; a **technical specification** tier ([`docs/spec/`](spec/README.md)) of wire formats, byte encodings, normative constants, and implementation-level design for implementors and auditors; and a **design notes** tier ([`docs/notes/`](notes/README.md)) of citeable, non-normative design records -- the model behind a mechanism, the options weighed, and the decisions taken. The spec and notes tiers each have their own index.
 
 ### Overview (`docs/`)
 
@@ -51,6 +51,10 @@ The documentation is organized in two tiers: this **overview** tier (`docs/`) of
 - [CLI_DOCTOR.md](spec/CLI_DOCTOR.md) - the `psilink doctor` verdict under `--json`: the document's fields, the schema version and compatibility rule, the status and `overall` vocabularies, both modes' fixed check lists, and the exit-code mapping
 - [SERVER_JOB_API.md](spec/SERVER_JOB_API.md) - the web server's job API that drives the CLI as a subprocess for the console appliance: endpoints, the injection-closed intent schema, the operator-authored SFTP connection, the single-active-exchange lifecycle, the workdir layout, the SSE event relay, and the gate/startup rules (the console facilitates one exchange at a time; a second create is refused until it is deleted, and a restart forgets it)
 - [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md) - why the SFTP and WebRTC stacks are exact-pinned, their internal premises, the per-stack upgrade checklists, and the `allowScripts` install-script policy
+
+### Design notes ([`docs/notes/`](notes/README.md))
+
+Tracked, citeable design records: the model behind a mechanism, the options weighed, and the decisions taken. Nothing here binds an implementation; a note points at the spec for the normative rows. Its [index](notes/README.md) lists each note with its status and carries the maturity ladder from `scratch/` up to the formal tiers.
 
 ## System architecture
 
