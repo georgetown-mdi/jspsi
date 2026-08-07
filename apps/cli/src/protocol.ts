@@ -690,11 +690,12 @@ export async function runProtocol(
     // over a drop the partner had already delivered is in both, an ordinary
     // release in only these -- so folding any of them in would report the mode's
     // own lifecycle as drops and count that overlap twice. The first two are the
-    // same boundary reached two ways --
-    // the released total is every boundary that ended a session, and the forced
-    // one the subset the partner never answered -- and are stated together for
-    // that reason; the rest closed nothing at all. All are 0 in every other mode,
-    // so the guards keep a normal exchange quiet.
+    // same boundary reached two ways -- the released total sums the outcomes at
+    // which the release itself closed the session (the ordinary release, the
+    // release over a transport already half-ended, and the forced close), and
+    // the forced one is the subset the partner never answered -- and are stated
+    // together for that reason; the rest closed nothing at all. All are 0 in
+    // every other mode, so the guards keep a normal exchange quiet.
     const heldBoundaries = client?.heldBoundaryCount ?? 0;
     const heldStretches = client?.heldBoundaryStretchCount ?? 0;
     const perCycleOutcomes: {
