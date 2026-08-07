@@ -120,8 +120,7 @@ function computeKexKeys(psk, eInitPub, eRespPub, dh, iReq, rReq) {
 //   ECDH(1, U) = X(1*U) = Ux    the peer-share half, with G as the private key
 //
 // A wrong curve, a wrong base point, or a wrong shared-secret convention breaks
-// both. This replaces the RFC 7748 section 6.1 anchor the X25519 handshake
-// carried, which no longer applies.
+// both.
 const P256_ANCHOR = {
   generatorXHex:
     "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296",
