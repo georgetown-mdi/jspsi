@@ -35,6 +35,10 @@ import { markPeerWaitTimeout } from "./errors.js";
 const X25519_KEY_LEN = 32;
 const PSK_LEN = 32;
 
+// SHA-256 output length: the width of every chaining-key, handshake-hash, and
+// confirmation-tag value, and the block size the Noise chaining HKDF counts in.
+const HASH_LEN = 32;
+
 // Protocol-version tag. It is the Noise "protocol name" hashed into the initial
 // handshake hash, so it is part of the transcript covered by every derived key
 // and every confirmation tag. A future authenticated mode (e.g. a
@@ -201,12 +205,16 @@ interface SymmetricState {
 
 /**
  * HKDF as defined by the Noise Protocol Framework (rev 34, section 4.3): a
- * chaining HKDF keyed by the running chaining key. Equivalent to RFC 5869
+ * chaining HKDF keyed by the running chaining key, returning `numOutputs`
+ * 32-byte blocks. Noise's definition -- `temp_key = HMAC(ck, ikm)` then
+ * `output_i = HMAC(temp_key, output_{i-1} || byte(i))` -- is exactly RFC 5869
  * HKDF-Extract(salt = ck, ikm) followed by HKDF-Expand with an empty info
- * string, returning `numOutputs` 32-byte blocks. This differs from the
- * application-level {@link hkdfDerive} (zero salt, named info) on purpose: the
- * Noise key schedule chains the salt. Cross-checked against RFC 5869 test
- * case 3 in kex.test.ts.
+ * string, so it is issued as one `crypto.subtle` HKDF `deriveBits` call: the
+ * extract-then-expand is a single operation the platform -- and any validated
+ * module beneath it -- serves as a unit rather than a chain of HMAC calls
+ * assembled here. This differs from the application-level {@link hkdfDerive}
+ * (zero salt, named info) on purpose: the Noise key schedule chains the salt.
+ * Cross-checked against RFC 5869 test case 3 in kex.test.ts.
  *
  * @internal exported only for the RFC 5869 cross-check test.
  */
@@ -215,12 +223,24 @@ export async function noiseHkdf(
   ikm: Uint8Array<ArrayBuffer>,
   numOutputs: 2 | 3,
 ): Promise<Array<Uint8Array<ArrayBuffer>>> {
-  const tempKey = await hmacSha256(ck, ikm);
-  const o1 = await hmacSha256(tempKey, Uint8Array.of(1));
-  const o2 = await hmacSha256(tempKey, concatBytes(o1, Uint8Array.of(2)));
-  if (numOutputs === 2) return [o1, o2];
-  const o3 = await hmacSha256(tempKey, concatBytes(o2, Uint8Array.of(3)));
-  return [o1, o2, o3];
+  const key = await crypto.subtle.importKey(
+    "raw",
+    ikm,
+    { name: "HKDF" },
+    false,
+    ["deriveBits"],
+  );
+  const bits = new Uint8Array(
+    await crypto.subtle.deriveBits(
+      { name: "HKDF", hash: "SHA-256", salt: ck, info: EMPTY },
+      key,
+      numOutputs * HASH_LEN * 8,
+    ),
+  );
+  const blocks: Array<Uint8Array<ArrayBuffer>> = [];
+  for (let i = 0; i < numOutputs; i++)
+    blocks.push(bits.slice(i * HASH_LEN, (i + 1) * HASH_LEN));
+  return blocks;
 }
 
 async function initializeSymmetric(): Promise<SymmetricState> {
