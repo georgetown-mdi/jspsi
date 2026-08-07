@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import logLibrary from "loglevel";
 
 import {
@@ -31,6 +31,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   setDiagnosticSink(undefined);
   logLibrary.setLevel(
     originalLevel as Parameters<typeof logLibrary.setLevel>[0],
@@ -99,6 +101,43 @@ test("keeps the prefixer -- and its private-key redaction -- on the path", () =>
   expect(line).not.toContain("MIGkAgEA");
 });
 
+test("redacts key material on the console path after a sweep", () => {
+  // With no sink installed -- the web app, and the CLI before its bootstrap --
+  // the prefixer falls through to loglevel's console leaf, which the sweep
+  // rebuilds. Redaction has to survive on that branch too: it is the only pass
+  // that strips key material from a line bound for the browser console.
+  setDiagnosticSink(undefined);
+  const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+  const name = uniqueName("console-redacting");
+  const log = getLogger(name);
+  setLogLevel(logLibrary.levels.INFO);
+
+  log.info(
+    "key follows: -----BEGIN PRIVATE KEY-----\nMIGkAgEA\n-----END PRIVATE KEY-----",
+  );
+
+  const line = consoleInfo.mock.calls.map((args) => args.join(" ")).join("\n");
+  expect(line).toContain(`[INFO] [${name}]`);
+  expect(line).toContain("[redacted private key]");
+  expect(line).not.toContain("MIGkAgEA");
+});
+
+test("leaves a browser consumer's stored level untouched", () => {
+  // loglevel writes a level to web storage unless the assignment opts out, so
+  // every one on this path -- the sweep's, and the one the prefixer makes to
+  // rebuild a logger's methods -- must, or a run's level would outlive the page
+  // as the operator's persisted preference.
+  const storage: Record<string, string> = {};
+  vi.stubGlobal("window", { localStorage: storage });
+
+  const name = uniqueName("web");
+  logLibrary.getLogger(name);
+  setLogLevel(logLibrary.levels.SILENT);
+
+  expect(getLogger(name).getLevel()).toBe(logLibrary.levels.SILENT);
+  expect(storage).toEqual({});
+});
+
 test("getLoggerForVerbosity keeps its accumulate-and-floor semantics", () => {
   // -v/-vv choose a preferred level and the resolved log level floors it: the
   // quieter of the two wins. So a silenced run stays silent however verbose it
@@ -107,6 +146,7 @@ test("getLoggerForVerbosity keeps its accumulate-and-floor semantics", () => {
   // getLoggerForVerbosity reads -- exactly where setDefaultLevel put it, so this
   // is the same table either way.
   setLogLevel(logLibrary.levels.SILENT);
+  expect(logLibrary.getLevel()).toBe(logLibrary.levels.SILENT);
   for (const verbosity of [-1, 0, 1, 2])
     expect(
       getLoggerForVerbosity(uniqueName("floored"), verbosity).getLevel(),

@@ -20,14 +20,21 @@ import {
 export function snapshotDiagnosticSinkAndLevel(): void {
   let originalSink: DiagnosticSink | undefined;
   let originalLevel: number;
-  let originalLoggerLevels: Array<[string, number]>;
+  let originalLoggerLevels: Array<[string | symbol, number]>;
 
   beforeEach(() => {
     originalSink = getDiagnosticSink();
     originalLevel = logLibrary.getLevel();
-    originalLoggerLevels = Object.entries(logLibrary.getLoggers()).map(
-      ([name, logger]) => [name, logger.getLevel()],
-    );
+    // Reflect.ownKeys, matching core's sweep: a symbol-named logger is invisible
+    // to string enumeration, so its level would never be restored.
+    const registry = logLibrary.getLoggers() as Record<
+      string | symbol,
+      logLibrary.Logger
+    >;
+    originalLoggerLevels = Reflect.ownKeys(registry).map((name) => [
+      name,
+      registry[name].getLevel(),
+    ]);
   });
 
   afterEach(() => {

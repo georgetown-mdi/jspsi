@@ -80,6 +80,12 @@ export const getDiagnosticSink = (): DiagnosticSink | undefined =>
  * assignment passes `persist: false`, so a browser consumer's level is not
  * written to web storage behind its back.
  *
+ * A limit of resting on `setDefaultLevel` for the root: in a browser consumer
+ * where the operator has persisted a root level, loglevel skips a persisted root,
+ * so the root keeps that level and the loggers {@link getLoggerForVerbosity}
+ * builds afterwards floor against it rather than against `level`. The registry
+ * sweep still reaches every logger that already exists.
+ *
  * Call this at bootstrap, before any per-logger level is chosen: it overwrites
  * the level of every logger that exists, including one
  * {@link getLoggerForVerbosity} has already floored to a `-v` verbosity. Setting
@@ -185,5 +191,10 @@ export const setLogPrefixer = (logger: logLibrary.Logger) => {
     };
   };
 
-  logger.setLevel(logger.getLevel());
+  // A level assignment that changes no level, made for its side effect: loglevel
+  // rebuilds the logger's methods through the factory installed above. It passes
+  // `persist: false` because loglevel's default would write the level to web
+  // storage, so the first prefixed logger built after a sweep would leave the
+  // swept level in a browser consumer's storage for its next session.
+  logger.setLevel(logger.getLevel(), false);
 };

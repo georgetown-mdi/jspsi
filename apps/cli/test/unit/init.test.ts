@@ -441,9 +441,6 @@ test("handler: an existing file with no terminal fails closed (exit 64), unchang
   const dir = scratchDir();
   const configFile = path.join(dir, "psilink.yaml");
   fs.writeFileSync(configFile, "old contents\n");
-  const logErr = vi
-    .spyOn(getLogger("init"), "error")
-    .mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
@@ -453,7 +450,6 @@ test("handler: an existing file with no terminal fails closed (exit 64), unchang
 
   expect(exit).toHaveBeenCalledWith(64);
   expect(fs.readFileSync(configFile, "utf8")).toBe("old contents\n");
-  logErr.mockRestore();
 });
 
 test("handler: declining the interactive overwrite leaves the file untouched", async () => {
@@ -496,9 +492,6 @@ test("handler: confirming the interactive overwrite replaces the file", async ()
 test("handler: a malformed input file exits 64", async () => {
   const dir = scratchDir();
   const configFile = path.join(dir, "psilink.yaml");
-  const logErr = vi
-    .spyOn(getLogger("init"), "error")
-    .mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
@@ -512,14 +505,10 @@ test("handler: a malformed input file exits 64", async () => {
 
   expect(exit).toHaveBeenCalledWith(64);
   expect(fs.existsSync(configFile)).toBe(false);
-  logErr.mockRestore();
 });
 
 test("handler: an unrecognized --log-level exits 64", async () => {
   const dir = scratchDir();
-  const logErr = vi
-    .spyOn(getLogger("init"), "error")
-    .mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
@@ -532,7 +521,6 @@ test("handler: an unrecognized --log-level exits 64", async () => {
   );
 
   expect(exit).toHaveBeenCalledWith(64);
-  logErr.mockRestore();
 });
 
 test("handler: a mistyped --flag exits 64 naming it, writing no config", async () => {
