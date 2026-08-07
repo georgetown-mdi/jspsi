@@ -70,6 +70,8 @@ The statements above are about the published container image and the browser app
 
 Agencies that are required to use FIPS 140-validated cryptographic modules should treat PSI-Link as unsuitable for those workloads in its current form.
 
+Constraining an SFTP exchange's SSH layer to approved algorithms is a separate, achievable thing, and the settings for it -- with what they exclude and the host-key gap they cannot close -- are in [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md).
+
 <!-- TODO: investigate whether a FIPS-validated build path exists (for example, swapping in a FIPS-validated provider for the symmetric primitives) and document the result. -->
 
 ### Section 508 and accessibility

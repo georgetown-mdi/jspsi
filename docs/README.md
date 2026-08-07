@@ -33,6 +33,7 @@ The documentation is organized in three tiers: this **overview** tier (`docs/`) 
 - [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md) - complete field-level reference for exchange specification files
 - [CLI.md](CLI.md) - CLI commands, configuration files, invitation strings, and recovery
 - [DEPLOYMENT.md](DEPLOYMENT.md) - operating supporting services and Docker deployment of the CLI
+- [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md) - the SFTP deployment profile for agencies required to use FIPS-approved cryptography: the algorithm settings, what they exclude, and the host-key gap
 - [RELEASES.md](RELEASES.md) - versioning policy, release checklist, and artifact publication
 - [TESTING.md](TESTING.md) - test-suite reference: integration backends and profiles, the console sentinel, the browser suite, and the coverage rationale
 - [ROADMAP.md](ROADMAP.md) - roadmap of planned functionality
