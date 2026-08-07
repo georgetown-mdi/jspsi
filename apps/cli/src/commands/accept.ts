@@ -175,14 +175,6 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
   };
 }
 
-// --- Invitation decode + validation ------------------------------------------
-
-export { decodeAndValidateInvitation } from "../invitationDecode";
-
-// --- Display -----------------------------------------------------------------
-
-export { displayInvitation };
-
 // --- Validation (the no-commit phase) ----------------------------------------
 
 /**

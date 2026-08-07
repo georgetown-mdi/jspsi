@@ -67,13 +67,15 @@ vi.mock("../../src/onlineBootstrap", async () => {
 });
 
 import {
-  decodeAndValidateInvitation,
-  displayInvitation,
   handler as acceptHandler,
   resolveAcceptPositionals,
   validateAccept,
 } from "../../src/commands/accept";
-import { logDecisionFacts } from "../../src/invitationDisplay";
+import { decodeAndValidateInvitation } from "../../src/invitationDecode";
+import {
+  displayInvitation,
+  logDecisionFacts,
+} from "../../src/invitationDisplay";
 import {
   buildDataSpec,
   generateSharedSecret,
