@@ -124,3 +124,13 @@ test("getLoggerForVerbosity keeps its accumulate-and-floor semantics", () => {
       getLoggerForVerbosity(uniqueName("verbose"), verbosity).getLevel(),
     ).toBe(expected);
 });
+
+// The registry sweep enumerates with Reflect.ownKeys: loglevel admits
+// symbol-named loggers (getLoggerForVerbosity takes string | symbol), and a
+// string enumeration would leave one at its prior level.
+test("the sweep reaches a symbol-named logger", () => {
+  const logger = logLibrary.getLogger(Symbol("swept-by-name"));
+  logger.setLevel("warn");
+  setLogLevel(logLibrary.levels.SILENT);
+  expect(logger.getLevel()).toBe(logLibrary.levels.SILENT);
+});

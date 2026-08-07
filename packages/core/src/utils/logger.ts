@@ -72,7 +72,11 @@ export const getDiagnosticSink = (): DiagnosticSink | undefined =>
  * after it, so a module-scope logger materialized when its module was imported
  * -- before any flag was parsed -- would keep loglevel's `warn` default for the
  * whole run. Setting each existing logger's level explicitly closes that, and
- * `setDefaultLevel` still carries the level to loggers created later. Each sweep
+ * `setDefaultLevel` still carries the level to loggers created later. The
+ * registry is enumerated with `Reflect.ownKeys`, not `Object.values`: this
+ * module's own logger names are `string | symbol` (see
+ * {@link getLoggerForVerbosity}), and a symbol-named logger is invisible to
+ * string enumeration, which would leave it at its prior level. Each sweep
  * assignment passes `persist: false`, so a browser consumer's level is not
  * written to web storage behind its back.
  *
@@ -86,8 +90,12 @@ export const getDiagnosticSink = (): DiagnosticSink | undefined =>
  */
 export const setLogLevel = (level: logLibrary.LogLevelNumbers): void => {
   logLibrary.setDefaultLevel(level);
-  for (const existing of Object.values(logLibrary.getLoggers()))
-    existing.setLevel(level, false);
+  const registry = logLibrary.getLoggers() as Record<
+    string | symbol,
+    logLibrary.Logger
+  >;
+  for (const name of Reflect.ownKeys(registry))
+    registry[name].setLevel(level, false);
 };
 
 export const getLoggerForVerbosity = (
