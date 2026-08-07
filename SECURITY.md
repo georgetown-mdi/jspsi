@@ -1,5 +1,7 @@
 ---
 title: "Security Policy"
+review_owner: "PSI-Link maintainers"
+last_reviewed: "2026-08-07"
 ---
 
 # Security Policy

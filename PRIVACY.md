@@ -1,12 +1,14 @@
 ---
 title: "Privacy Statement"
+review_owner: "PSI-Link maintainers"
+last_reviewed: "2026-07-24"
 ---
 
 # Privacy statement
 
 PSI-Link is open-source software that lets two partner agencies find the records they have in common without revealing the records they do not share. This statement describes what the project itself collects, transmits, and retains, and what the supporting services an exchange relies on can observe. It is written for the agency security, compliance, and privacy reviewers who ask for a privacy policy by name.
 
-**Owner:** the PSI-Link maintainers. **Last reviewed:** 2026-07-24. See [Review and ownership](#review-and-ownership).
+**Owner:** the PSI-Link maintainers. See [Review and ownership](#review-and-ownership).
 
 This is not a privacy notice for your agency's own data subjects, and it is not a Privacy Impact Assessment (PIA). A PIA is completed per deployment and turns on facts only the deploying agency holds -- the system owner, the authority for collection, the populations involved, and the retention schedule. This statement and [docs/COMPLIANCE.md](docs/COMPLIANCE.md) are the source material an agency uses to complete one.
 
@@ -80,7 +82,7 @@ The project holds no personal data and cannot respond to access, correction, or 
 ## Review and ownership
 
 - **Owner:** the PSI-Link maintainers. Privacy review is a maintainer responsibility rather than a named individual's; use the reporting channels above rather than contacting a person.
-- **Last reviewed:** 2026-07-24.
+- **Last reviewed:** the `last_reviewed` date in the front matter at the top of this document.
 - **Cadence:** this statement is reviewed on any change that affects what PSI-Link collects, transmits, or retains, and at least annually regardless of whether anything changed. Every revision and its date are recorded in this repository's version history.
 
 ## See also
