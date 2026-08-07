@@ -498,9 +498,7 @@ function Resolve-DropPath {
             }
 
             # Either the letter is not there at all, or it is a network drive
-            # this session cannot see. Both used to be reported as a local
-            # folder, which sent the operator off to bind-mount a path that
-            # does not exist.
+            # this session cannot see. Neither is a local folder.
             if (Test-Elevated) {
                 return @{ Kind = 'Unknown'
                           Reason = "this window is running as Administrator, and an elevated session cannot see the drive letters you mapped as yourself -- ${letter}: is invisible here even if File Explorer shows it. Close this window, open PowerShell normally, and run the script again. If you were told to elevate in order to resolve a DFS path, you no longer need to: see the troubleshooting page, 'Reading the real path from Windows'" }
