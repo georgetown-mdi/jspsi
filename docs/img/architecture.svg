@@ -57,7 +57,7 @@
   <text class="sec-label" x="60" y="438">SECURE CHANNEL</text>
   <rect class="node n-core" x="60" y="446" width="280" height="46" rx="5"></rect>
   <text class="n-title" x="74" y="465">Channel crypto</text>
-  <text class="n-sub" x="74" y="481">X25519 (noble) / AES-GCM (WebCrypto)</text>
+  <text class="n-sub" x="74" y="481">P-256 ECDH / AES-GCM (WebCrypto)</text>
   <rect class="node n-core" x="60" y="512" width="280" height="46" rx="5"></rect>
   <text class="n-title" x="74" y="531">Transport abstraction</text>
   <text class="n-sub" x="74" y="547">MessageConnection</text>
