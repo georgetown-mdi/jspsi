@@ -3,6 +3,7 @@ import { expect, test, describe } from "vitest";
 import {
   prepareForExchange,
   assertAlgorithmImplemented,
+  assertSigningModeImplemented,
 } from "../src/exchange";
 import {
   OperatorConfigError,
@@ -12,6 +13,7 @@ import {
 
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
+import type { SigningConfig, SigningMode } from "../src/config/signing";
 import type { Standardization } from "../src/config/standardization";
 import type { CSVRow } from "../src/file";
 
@@ -249,5 +251,70 @@ describe("prepareForExchange: a deduplicating term is refused", () => {
       columns,
     );
     expect(prepared.linkageTerms.deduplicate).toBe(false);
+  });
+});
+
+// --- An unimplemented signing mode fails closed before connecting -------------
+
+describe("prepareForExchange: an unimplemented signing mode is refused", () => {
+  const prepareWithSigning = (signing?: SigningConfig) =>
+    prepareForExchange(
+      { linkageTerms: terms, metadata, signing },
+      "Tester",
+      rawRows,
+      columns,
+    );
+
+  test("mode: session-derived is refused before connecting", () => {
+    // Only certificate mode signs a receipt, so a session-derived config would
+    // otherwise run to completion and leave the operator the unsigned record.
+    // Refused with the actionable UsageError (CLI exit 64) whose message names
+    // the fixed enum literal, so an operator sees which value to change.
+    expect(() => prepareWithSigning({ mode: "session-derived" })).toThrow(
+      UsageError,
+    );
+    expect(() => prepareWithSigning({ mode: "session-derived" })).toThrow(
+      /session-derived/,
+    );
+  });
+
+  test("mode: certificate prepares normally", () => {
+    const prepared = prepareWithSigning({
+      mode: "certificate",
+      identityFile: "~/.psilink/signing-identity.json",
+    });
+    expect(prepared.rowCount).toBe(1);
+  });
+
+  test("mode: none prepares normally", () => {
+    expect(prepareWithSigning({ mode: "none" }).rowCount).toBe(1);
+  });
+
+  test("an absent signing block prepares normally", () => {
+    expect(prepareWithSigning().rowCount).toBe(1);
+  });
+});
+
+// --- assertSigningModeImplemented (the shared guard) -------------------------
+
+describe("assertSigningModeImplemented", () => {
+  test("refuses session-derived", () => {
+    expect(() => assertSigningModeImplemented("session-derived")).toThrow(
+      UsageError,
+    );
+  });
+
+  test("passes the implemented modes and an absent one", () => {
+    expect(() => assertSigningModeImplemented("certificate")).not.toThrow();
+    expect(() => assertSigningModeImplemented("none")).not.toThrow();
+    expect(() => assertSigningModeImplemented(undefined)).not.toThrow();
+  });
+
+  test("refuses a mode outside the allowlist", () => {
+    // The guard allowlists the implemented modes, so a member later added to
+    // SigningModeSchema is refused until it is implemented and allowed here.
+    expect(() =>
+      assertSigningModeImplemented("authority-backed" as SigningMode),
+    ).toThrow(UsageError);
   });
 });
