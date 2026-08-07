@@ -4,15 +4,15 @@ title: "Key Establishment and the FIPS 140-3 Boundary"
 
 # Key establishment and the FIPS 140-3 boundary: migrate the curve, keep the schedule
 
-*Status: decided. This note records the choice to move the key exchange's
-shared-secret computation to P-256 ECDH through `crypto.subtle` while retaining
-the Noise NNpsk0 key schedule and the explicit key-confirmation round, the
-alternative weighed against it and rejected, and what a scoped FIPS claim may
+*Status: decided and implemented. This note records the choice to move the key
+exchange's shared-secret computation to P-256 ECDH through `crypto.subtle` while
+retaining the Noise NNpsk0 key schedule and the explicit key-confirmation round,
+the alternative weighed against it and rejected, and what a scoped FIPS claim may
 and may not say about key establishment as a result. It extends the
 key-agreement decision in
 [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#key-agreement-design) rather than
 replacing it. The normative construction is specified in
-[PROTOCOL.md](../spec/PROTOCOL.md#x25519-authenticated-key-exchange); the
+[PROTOCOL.md](../spec/PROTOCOL.md#p-256-authenticated-key-exchange); the
 provider measurements and certificate readings underneath the reasoning are in
 [fips-provider-surface.md](fips-provider-surface.md). See
 [docs/notes/README.md](README.md).*
@@ -32,7 +32,7 @@ migration should go, because the curve was never the interesting question.
 
 - **Migrate the shared-secret computation to P-256 ECDH through
   `crypto.subtle`**, replacing the X25519 Diffie-Hellman and ephemeral key
-  generation that run in `@noble/curves` today.
+  generation that ran in `@noble/curves`.
 - **Retain the Noise NNpsk0 key schedule and the explicit, role-asymmetric
   key-confirmation round** exactly as specified today. The mixing order, the
   domain-separation labels, the transcript binding, and the two confirmation
@@ -50,8 +50,9 @@ shared secret `T` of a hybrid shared secret `Z || T`, with the handshake
 transcript as FixedInfo. Its appeal was narrative: the derivation would read as
 a named NIST key-derivation method rather than as a Noise schedule.
 
-This record is the decision. The migration is separate work, and until it lands
-key establishment runs X25519 in `@noble/curves`, outside any module boundary.
+This record is the decision and the reasoning behind it; the construction it
+produced is specified in
+[PROTOCOL.md](../spec/PROTOCOL.md#p-256-authenticated-key-exchange).
 
 ## What this extends, and what it supersedes
 
@@ -92,7 +93,7 @@ Two things in that record are superseded:
 
 Nothing here is normative. The wire format, the mixing order, the labels, and
 the protocol-version tag are specified in
-[PROTOCOL.md](../spec/PROTOCOL.md#x25519-authenticated-key-exchange), which is
+[PROTOCOL.md](../spec/PROTOCOL.md#p-256-authenticated-key-exchange), which is
 the authority for every value this note describes in prose.
 
 ## Why the schedule stays
@@ -148,16 +149,16 @@ abandons a pattern with published analysis for a bespoke equivalent with none.
 
 ## What a scoped FIPS claim may and may not say about key establishment
 
-**May say**, once the migration has landed *and* a validated module is actually
-present in the environment: every cryptographic operation in key establishment
+**May say**, where a validated module is actually present in the environment:
+every cryptographic operation in key establishment
 is performed by the module, using algorithms on certificate 4985's approved
 list -- the shared-secret computation as `KAS-ECC-SSC` per SP 800-56A Rev 3 over
 P-256, and the extract-then-expand as `KDA HKDF SP800-56Cr2`.
 
 **May not say:**
 
-- That key establishment uses a FIPS-approved algorithm while it runs on
-  X25519. It does not, on any certificate.
+- That key establishment used a FIPS-approved algorithm while it ran on X25519.
+  It did not, on any certificate; that is what the migration was for.
 - That the key exchange, the key schedule, or the protocol is validated or
   approved as a scheme.
 - That the certificate attests the composition. The schedule above the shared
@@ -277,7 +278,7 @@ the rejected option's value turned out to be reachable.
 
 - [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#key-agreement-design) -- the
   key-agreement decision this record extends.
-- [PROTOCOL.md](../spec/PROTOCOL.md#x25519-authenticated-key-exchange) -- the
+- [PROTOCOL.md](../spec/PROTOCOL.md#p-256-authenticated-key-exchange) -- the
   normative construction: wire format, mixing order, labels, and the
   protocol-version tag.
 - [fips-provider-surface.md](fips-provider-surface.md) -- what a FIPS provider
