@@ -1003,8 +1003,13 @@ Write-Info 'See the troubleshooting page, "Synced folders".'
 Write-Host ''
 Write-Host 'There is also a browser console:' -ForegroundColor Cyan
 Write-Host ''
+# The console names the shared folder to the partner, and the mount point in the
+# command below is this script's choice rather than a name anyone would
+# recognise, so the share's own folder name is passed alongside it.
+$shareFolderName = if ($SubPath) { @($SubPath -split '/' | Where-Object { $_ })[-1] } else { $Share }
 Write-Host "  docker run --rm -p 127.0.0.1:3000:3000 ``"
 Write-Host "    --env JOB_DATA_ROOT=/data --env JOB_RENDEZVOUS_DIR=/sync ``"
+Write-Host "    --env 'JOB_RENDEZVOUS_NAME=$shareFolderName' ``"
 Write-Host "    -v 'C:\path\to\your\work:/data' ``"
 Write-Host "    -v '${VolumeName}:/sync' ``"
 Write-Host "    vdorie/psi-link:latest serve"

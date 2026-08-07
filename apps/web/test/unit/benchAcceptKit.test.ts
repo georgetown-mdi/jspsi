@@ -8,7 +8,6 @@ import {
   buildAcceptKit,
 } from "@bench/acceptKit";
 import { generateInvitation } from "@psi/invitation";
-import { rendezvousLocatorName } from "@bench/inviterModel";
 
 import type { AcceptKitEndpoint } from "@bench/acceptKit";
 import type { InvitationLocation } from "@psi/invitation";
@@ -37,6 +36,46 @@ describe("accept kit, per-channel shape", () => {
     // The SFTP-only material stays off it.
     expect(text).not.toContain("REPLACE_WITH_SSH_USERNAME");
     expect(text).not.toContain("SFTP server:");
+  });
+
+  test("the folder cross-check is a check, not a claim that the names match", () => {
+    // The same folder can carry a different name on each side -- a share root
+    // mapped to a drive letter is the ordinary case -- so the sheet must not tell
+    // the partner their own name for it will be this one.
+    const text = sheet(FILEDROP);
+    expect(text).toContain("Your own name for");
+    expect(text).toContain("rather than expecting the two to match");
+  });
+
+  test("a filedrop sheet the console could not name the folder for prints no name", () => {
+    const text = sheet({ channel: "filedrop" });
+    // No name at all rather than a stand-in: the mount point the console binds
+    // the folder at is not a name any partner could check against.
+    expect(text).not.toContain("Shared folder:");
+    expect(text).toContain("could not put a name to the shared folder");
+    expect(text).toContain("Use the folder you and your partner");
+    // The route to accepting is unchanged -- it is only the name that is
+    // missing -- and the guidance blocks stay pinned.
+    expect(text).toContain("WHICH KIND OF FOLDER IS YOURS?");
+    expect(text).toContain(INVITATION_PLACEHOLDER);
+  });
+
+  test("the folder step names no partner name where the sheet has none", () => {
+    // The token always carries a locator, so accepting writes SOMETHING; on this
+    // branch it is the console's own mount point. The step that replaces it must
+    // not tell the partner it is their partner's name for the folder.
+    const text = sheet({ channel: "filedrop" });
+    expect(text).not.toContain("your partner's own name for the folder");
+    expect(text).toContain("a placeholder for the folder, not a name either");
+    // The replacement it directs is the same one the named branch directs.
+    expect(text).toContain("path: /sync");
+  });
+
+  test("the folder step names the partner's own name where the sheet has one", () => {
+    const text = sheet(FILEDROP);
+    expect(text).toContain("your partner's own name for the folder");
+    expect(text).not.toContain("a placeholder for the folder");
+    expect(text).toContain("path: /sync");
   });
 
   test("an sftp sheet names the channel and the server locator", () => {
@@ -334,13 +373,11 @@ describe("accept kit invariants", () => {
   });
 
   test("carries the shared folder's name, never the appliance path behind it", () => {
-    const appliancePath = "/data/exchanges/agency-a-agency-b";
-    const text = sheet({
-      channel: "filedrop",
-      path: rendezvousLocatorName(appliancePath),
-    });
+    // The name the console minted into the token, standing for the mount
+    // /data/exchanges/agency-a-agency-b behind it.
+    const text = sheet({ channel: "filedrop", path: "agency-a-agency-b" });
     expect(text).toContain("Shared folder:  agency-a-agency-b");
-    expect(text).not.toContain(appliancePath);
+    expect(text).not.toContain("/data/exchanges/agency-a-agency-b");
     expect(text).not.toContain("/data/exchanges");
   });
 

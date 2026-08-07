@@ -4,7 +4,7 @@ title: "What a FIPS Provider Offers in the Shipped Image"
 
 # What a FIPS provider offers in the shipped image
 
-*Status: measurement, plus two decisions taken on it. This note records what an OpenSSL FIPS provider carries and reaches inside the container image PSI-Link ships, and what the CMVP certificates approve, so the container, compliance, and crypto items can cite a measurement instead of a belief. The owner has since set FIPS 140-3 as the target standard and accepted that the Alpine base will likely give way; which certificate and base pair, and whether to pursue a FIPS claim at all, remain open. See [docs/notes/README.md](README.md).*
+*Status: measurement, plus two decisions taken on it. This note records what an OpenSSL FIPS provider carries and reaches inside the container image PSI-Link ships, and what the CMVP certificates approve, so the container, compliance, and crypto items can cite a measurement instead of a belief. The owner has since set FIPS 140-3 as the target standard and accepted that the Alpine base will likely give way. Which certificate and base pair is now settled -- AWS's certificate 5021, a 140-3 validation, on `amazonlinux:2023`, shipped as a separate variant image -- and whether to pursue a FIPS claim at all remains open. See [docs/notes/README.md](README.md).*
 
 Three unverified facts gated the whole FIPS thread: whether the provider we would ship carries X25519 key agreement, whether it carries Ed25519 signing, and whether Node's WebCrypto in the shipped image engages a configured FIPS provider at all. All three are now measured by running the real tool in an image built on this repo's `Dockerfile` runtime base. Two of the answers invert the assumption they replace.
 
@@ -116,7 +116,7 @@ The two algorithms this spike measured land in different tables, and that differ
 | X25519 | Table 7, **Allowed** | Table 8, **Non-Approved, Not Allowed** |
 | Ed25519 | Table 8, **Non-Approved** | Table 8, **Non-Approved, Not Allowed** |
 
-Neither appears in any certificate's approved-algorithm table. The 140-2 policy states the rule rather than leaving it to be inferred from table membership: use of the approved algorithms "and allowed algorithms listed in table 7" places the module in the Approved mode, while use of a Table 8 algorithm "will place the module in the non-Approved mode of operation". The EdDSA placement is deliberate -- the policy revision history records "Updated to move EdDSA to the non-Approved mode" at version 1.2, 26 January 2023.
+Neither appears in the approved-algorithm table of any of these three. The 140-2 policy states the rule rather than leaving it to be inferred from table membership: use of the approved algorithms "and allowed algorithms listed in table 7" places the module in the Approved mode, while use of a Table 8 algorithm "will place the module in the non-Approved mode of operation". The EdDSA placement is deliberate -- the policy revision history records "Updated to move EdDSA to the non-Approved mode" at version 1.2, 26 January 2023.
 
 Three statements therefore have to be kept apart, and collapsing them is how this gets written wrongly:
 
@@ -138,6 +138,19 @@ The 140-3 policy closes the usual escape hatch explicitly. Its operational-envir
 
 That points at the other shape of an answer: a distribution vendor's own certificate, where the tested environments are that vendor's OS on machines closer to how a container is actually deployed. Red Hat's covers RHEL 9 on Dell PowerEdge and IBM POWER10; AlmaLinux's covers 9.2 on AWS `a1.metal` and `m5.metal` instances. Which of the vendor certificates are FIPS 140-3 rather than 140-2 is not established here and has to be read per certificate.
 
+### Two of the forty approve EdDSA, and none approves X25519
+
+Reading all 40 policies for algorithm placement -- not only the three above -- gives an answer the OpenSSL Project's certificates alone would get wrong. **Two certificates carry EdDSA in their approved-algorithm tables**, both FIPS 140-3:
+
+- **5116** (Ctrl IQ, Rocky Linux 9, module version `Rocky9.20250210`) -- `EDDSA KeyGen`, `SigGen` and `SigVer` against CAVP certificate A6328, FIPS 186-5, with Ed25519 and Ed448 named in the SSP tables and an EdDSA SigGen known-answer test at power-on.
+- **5373** (TuxCare, module `3.2.2-f9f9d133a30b6eb5`) -- the same three services against CAVP certificate A7098, PreHash and Pure both approved.
+
+Three further certificates match on the string and are not counterexamples: 4282 and 4811 carry it only in a revision-history line recording EdDSA's move *to* the non-approved mode, and 4506 lists it under non-approved services. **X25519 has no such exception.** Across all 40 it sits in an Allowed table under 140-2 or a Not Allowed one under 140-3, never an approved one, and the two certificates that approve EdDSA do not mention it at all.
+
+Table membership is read from the caption that *follows* each table body, which is where these policies place it. Attributing a row to the caption above it names the previous table and inverts the answer -- it reports X25519 as approved on the 140-2 certificates, which it is not.
+
+Neither EdDSA exception is reachable for a redistributed image, and the reason is obtainability rather than approval. 5116's certified package sits behind an authenticated portal, and its module version string is a date shared by three distinct public binaries with no digest published in the policy, so no public material binds a specific binary to that certificate. 5373's public build reports `3.2.2-d3feeb3848008cbe` against a certified `3.2.2-f9f9d133a30b6eb5` -- a near miss, and therefore a negative result. Both were tested on x86_64, and neither names an arm64 environment, which the published image needs.
+
 ## What is settled, and what is not
 
 Settled by measurement, in the image, on the base that ships:
@@ -151,6 +164,7 @@ Settled by measurement, in the image, on the base that ships:
 Settled by reading the certificates:
 
 - Neither X25519 nor Ed25519 is an approved algorithm on any OpenSSL Project certificate. X25519 is allowed inside approved mode under 140-2 only; Ed25519 is not allowed under either standard.
+- Across all 40 active certificates, EdDSA is approved on exactly two -- 5116 and 5373 -- and X25519 on none. Neither EdDSA exception yields a verifiable certified module for a freely redistributable image.
 - No active certificate for this module covers a musl or Alpine operational environment, and the environment binds to tested hardware and OS regardless.
 
 Decided since, by the owner, and recorded here because it changes how the rows above should be read:
@@ -158,17 +172,27 @@ Decided since, by the owner, and recorded here because it changes how the rows a
 - **FIPS 140-3 is the target standard**, on the grounds that 140-2 is being retired. That forecloses X25519 inside the module: under 4985 it is Non-Approved and Not Allowed, so its "allowed" status under 140-2 is not something to build on.
 - **The Alpine base is expected to give way**, dropping musl, since no certificate reaches it.
 
-Still open:
+Settled since, and recorded in [fips-variant-image.md](fips-variant-image.md):
 
-- **Which certificate and base pair**, given that matching a distribution is not sufficient on 4985 and the vendor certificates trade that problem for a dependence on the vendor's own distribution and tested hardware.
-- **Whether any reachable pairing is a 140-3 certificate**, which the vendor certificates have to be read individually to answer.
+- **Which certificate and base pair.** Certificate 5021 on `amazonlinux:2023`,
+  installed by `dnf swap` and asserted against the built image. What makes a
+  pairing reachable at all is Management Manual 7.9.2's Level 1 porting route,
+  which needs no vendor action -- the vendor-affirmation tables alone say the
+  opposite, and that is the trap.
+- **Which standard revision certificate 5021 carries.** FIPS 140-3, at overall
+  Security Level 1, read off its own security policy -- which validates module
+  version `3.0.8-d694bfa693b76001`, the one the image pins, and names 140-2
+  nowhere. That is the project's target standard, so wording naming the revision
+  may name 140-3. The reading rests on the policy document alone; the CMVP
+  certificate page was not reachable to corroborate it
+  ([fips-variant-image.md](fips-variant-image.md)).
 
 ## What this means for the items downstream
 
-- Shipping a validated provider in the image: the mechanism works -- the module loads, serves, and is attributable -- but no certificate covers the Alpine base, and the target certificate affirms no environments beyond the twelve it tested. The deliverable is a base change, and the harder part of it is that matching a distribution does not by itself put the image inside a tested environment.
+- Shipping a validated provider in the image: delivered as a separate `-fips` variant on `amazonlinux:2023` rather than as a change to the default image, which stays on Alpine. The base change this note anticipated is what it took, and the harder part it named -- that matching a distribution does not by itself put the image inside a tested environment -- is answered by the Level 1 porting route rather than by the match. The variant's own record, including what may and may not be claimed of it, is in [fips-variant-image.md](fips-variant-image.md).
 - Documenting a FIPS deployment profile for SFTP: the provider build determines the surviving SSH algorithm set. That is now measured, not assumed.
 - Rewriting the FIPS and SC-13 claims in [COMPLIANCE.md](../COMPLIANCE.md): the current text says the modules in use are not FIPS 140-validated, which remains accurate. The rewrite's real work is the approved / allowed / not-allowed distinction above -- the SC-13 row draws it for the Ed25519 of receipt signing and leaves X25519's entry undistinguished, conflating algorithm-standard approval with module-certificate approval. Both things are true at once and the document has to say so.
-- Moving Ed25519 receipt signing off pure JS: the provider carries Ed25519, but every certificate places it outside approved mode, and under the targeted 140-3 certificate it is Not Allowed outright. Routing signing through the provider is therefore off the table -- it would take the module out of approved mode for that operation. The remaining fork is ECDSA, which is approved, or keeping the pure-JS implementation and disclosing it, which costs nothing in module terms because an algorithm run outside the module does not change the module's mode. That fork is settled -- the choice of ECDSA over P-256 through `crypto.subtle`, and what a scoped FIPS claim may and may not say about receipt signing, is recorded in [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md).
+- Moving Ed25519 receipt signing off pure JS: the provider carries Ed25519, but no OpenSSL Project certificate places it inside approved mode, and under the targeted 140-3 certificate it is Not Allowed outright. The two certificates that do approve EdDSA are unreachable, as above. Routing signing through the provider is therefore off the table -- it would take the module out of approved mode for that operation. The remaining fork is ECDSA, which is approved, or keeping the pure-JS implementation and disclosing it, which costs nothing in module terms because an algorithm run outside the module does not change the module's mode. That fork is settled -- the choice of ECDSA over P-256 through `crypto.subtle`, and what a scoped FIPS claim may and may not say about receipt signing, is recorded in [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md).
 - Deciding the key-establishment FIPS boundary: with 140-3 as the target, X25519 must not be routed through the module at all. That does not force the migration, though, and the distinction is the item's whole answer: X25519 stays outside the module today because it runs in `@noble/curves`, and an algorithm the module never performs does not affect the module's mode. So the disclosure path remains available and cheap; the migration to P-256 ECDH is what buys key establishment *inside* the boundary, and it is now the only thing that does. That fork is settled -- the choice, and what a scoped FIPS claim may and may not say about key establishment, is recorded in [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md).
 
 ## Reproducing this

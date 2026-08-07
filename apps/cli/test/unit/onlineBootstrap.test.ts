@@ -27,6 +27,7 @@ import type {
   SFTPConnectionConfig,
 } from "@psilink/core";
 
+import { saveConfig } from "../../src/config";
 import {
   connectionFromURL,
   type RunnableConnectionConfig,
@@ -1810,7 +1811,7 @@ test("runOnlineBootstrap persists the acceptor's up-front token received set int
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
-      expectedReceivedPayloadColumns: ["diagnosis", "notes"],
+      receivedPayloadLockIn: { consentedColumns: ["diagnosis", "notes"] },
     });
     const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
     expect(written.expected_payload_columns).toEqual(["diagnosis", "notes"]);
@@ -1968,7 +1969,7 @@ test("runOnlineBootstrap persists an empty token set as a strict receive-nothing
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
-      expectedReceivedPayloadColumns: [],
+      receivedPayloadLockIn: { consentedColumns: [] },
     });
     const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
     expect(written.expected_payload_columns).toEqual([]);
@@ -1993,23 +1994,217 @@ test("runOnlineBootstrap omits the received lock-in when the acceptor passes no 
   }
 });
 
-test("runOnlineBootstrap does not inject the token lock-in onto a reused pre-existing config", async () => {
-  // With reuseExistingConfig the hook keeps the operator's config untouched, so even
-  // with the acceptor's token set present no lock-in is written into their config --
-  // the reconcile step already confirmed the pre-existing config agrees.
+// --- runOnlineBootstrap: reuse-path received-payload lock-in refresh ----------
+
+/** Write the pre-existing config every reuse-refresh test below starts from: a
+ *  loadable exchange config (so a recurring run's parseExchangeSpec reload is what
+ *  the assertions read), plus a hand-authored comment and the stale lock-in a prior
+ *  acceptance recorded. The surgical write must overwrite or remove that lock-in and
+ *  leave the operator's comment and every other key alone. */
+function writeReusedConfigWithStaleLockIn(configPath: string): void {
+  saveConfig(configPath, {
+    connection: { channel: "filedrop", path: "/tmp/psilink-drop" },
+    linkageTerms: getDefaultLinkageTerms("Acceptor Org"),
+  });
+  // The note trails the lock-in rather than heading it: a comment written
+  // immediately above a key is that key's own, and the document model carries it
+  // out with the key when a subset-less acceptance removes the field.
+  fs.appendFileSync(
+    configPath,
+    "expected_payload_columns:\n  - old_col\n# operator note\n",
+  );
+}
+
+test("runOnlineBootstrap refreshes a stale received lock-in surgically on a reused config", async () => {
+  // The reuse path writes no fresh config, but the operator has just consented to
+  // THIS acceptance's disclosed set; leaving the prior acceptance's set standing
+  // would false-abort the next recurring exchange. The write is surgical: the
+  // operator's comment and other keys survive it.
   mockSuccessfulExchange(undefined);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
   const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(configPath, "preexisting: true\n");
+  writeReusedConfigWithStaleLockIn(configPath);
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
       reuseExistingConfig: true,
-      expectedReceivedPayloadColumns: ["diagnosis", "notes"],
+      receivedPayloadLockIn: { consentedColumns: ["diagnosis", "notes"] },
     });
-    // The operator's config is left exactly as it was.
-    expect(fs.readFileSync(configPath, "utf8")).toBe("preexisting: true\n");
+    const raw = fs.readFileSync(configPath, "utf8");
+    // The operator's comment and the rest of their config survive the write.
+    expect(raw).toContain("# operator note");
+    expect(raw).not.toContain("old_col");
+    const reloaded = parseExchangeSpec(YAML.parse(raw));
+    expect(reloaded.connection).toEqual({
+      channel: "filedrop",
+      path: "/tmp/psilink-drop",
+    });
+    expect(reloaded.linkageTerms).toEqual(
+      getDefaultLinkageTerms("Acceptor Org"),
+    );
+    expect(reloaded.expectedPayloadColumns).toEqual(["diagnosis", "notes"]);
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the refreshed reuse-path lock-in fixes the false-abort a stale one would have caused", async () => {
+  // The end-to-end failure this closes. The kept config holds the partner's OLD
+  // disclosed set; the partner now discloses a new set, so a recurring exchange's
+  // reconcileReceivedPayload would abort an honest exchange. After the online
+  // re-accept the config holds the NEW set and the same reconcile passes --
+  // asserting the stale set would have thrown proves the refresh changed the
+  // outcome rather than the payload simply matching either way.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  writeReusedConfigWithStaleLockIn(configPath);
+  try {
+    const staleLockIn = parseExchangeSpec(
+      YAML.parse(fs.readFileSync(configPath, "utf8")),
+    ).expectedPayloadColumns;
+    expect(staleLockIn).toEqual(["old_col"]);
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+      receivedPayloadLockIn: { consentedColumns: ["diagnosis", "notes"] },
+    });
+    // Reload exactly as a recurring `psilink exchange` would, from the on-disk file.
+    const refreshedLockIn = parseExchangeSpec(
+      YAML.parse(fs.readFileSync(configPath, "utf8")),
+    ).expectedPayloadColumns;
+    // What the partner now transmits: its new disclosed set.
+    const partnerPayload: PartnerPayload = {
+      columns: ["diagnosis", "notes"],
+      rowIndices: [],
+      rows: [],
+    };
+    expect(() =>
+      reconcileReceivedPayload(partnerPayload, refreshedLockIn),
+    ).not.toThrow();
+    expect(() => reconcileReceivedPayload(partnerPayload, staleLockIn)).toThrow(
+      /payload disclosure mismatch/,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap removes a reused config's lock-in for a subset-less invitation", async () => {
+  // An acceptance whose invitation carried no disclosed subset (an older or
+  // metadata-unknown mint) consented to no set: the prior lock-in is cleared so the
+  // recurring exchange reconciles lazily, rather than enforcing a set this
+  // acceptance never showed.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  writeReusedConfigWithStaleLockIn(configPath);
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+      receivedPayloadLockIn: { consentedColumns: undefined },
+    });
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).toContain("# operator note");
+    expect(raw).not.toContain("expected_payload_columns");
+    expect(raw).not.toContain("old_col");
+    const reloaded = parseExchangeSpec(YAML.parse(raw));
+    expect(reloaded.linkageTerms).toEqual(
+      getDefaultLinkageTerms("Acceptor Org"),
+    );
+    expect(reloaded.expectedPayloadColumns).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap writes an empty reuse-path consented set verbatim", async () => {
+  // An empty disclosed subset is a real consent ("receive nothing"), distinct from
+  // absent: it replaces the stale set as an empty list, so a later non-empty payload
+  // aborts while an empty one still passes.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  writeReusedConfigWithStaleLockIn(configPath);
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+      receivedPayloadLockIn: { consentedColumns: [] },
+    });
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).not.toContain("old_col");
+    const lockIn = parseExchangeSpec(YAML.parse(raw)).expectedPayloadColumns;
+    expect(lockIn).toEqual([]);
+    const received = (columns: string[]): PartnerPayload => ({
+      columns,
+      rowIndices: [],
+      rows: [],
+    });
+    expect(() =>
+      reconcileReceivedPayload(received(["diagnosis"]), lockIn),
+    ).toThrow(/payload disclosure mismatch/);
+    expect(() => reconcileReceivedPayload(received([]), lockIn)).not.toThrow();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap leaves a reused config's lock-in alone for a caller that owns none", async () => {
+  // The wrapper's PRESENCE is what marks the caller that owns this field. A caller
+  // with no lock-in of its own -- the online inviter, whose received set is learned
+  // by observation -- must not have its recorded set removed by the reuse refresh,
+  // which would silently reopen the fail-closed enforcement its own config carries.
+  mockSuccessfulExchange(["dob", "zip"]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  writeReusedConfigWithStaleLockIn(configPath);
+  const before = fs.readFileSync(configPath, "utf8");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+      persistObservedReceivedPayload: true,
+    });
+    expect(fs.readFileSync(configPath, "utf8")).toBe(before);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap keeps a failed reuse-path lock-in refresh non-fatal and reported", async () => {
+  // The kept config stands whatever happens to the surgical refresh: here the config
+  // path is a directory, so both refreshes' reads throw. The completed exchange must
+  // not be undone -- nothing rethrows and no configWriteError is reported (that
+  // channel's recovery text is for the fresh-config write) -- and each failure is
+  // reported. Both warns firing is what proves the two writes are caught
+  // independently: a shared catch, or a first failure escaping it, would leave the
+  // sibling refresh unattempted and only one warn behind.
+  // getLogger("bootstrap-test") is silenced above, so the warns do not print.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.mkdirSync(configPath);
+  const warn = vi.spyOn(getLogger("bootstrap-test"), "warn");
+  try {
+    const { configWriteError } = await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+      receivedPayloadLockIn: { consentedColumns: ["diagnosis"] },
+      outboundPayloadConsent: { status: "confirmed", columns: ["dob"] },
+    });
+    expect(configWriteError).toBeUndefined();
+    expect(fs.statSync(configPath).isDirectory()).toBe(true);
+    const warned = warn.mock.calls.map((call) => String(call[0]));
+    expect(
+      warned.filter((m) => m.includes("consented to receive")),
+    ).toHaveLength(1);
+    expect(
+      warned.filter((m) => m.includes("outbound-column confirmation")),
+    ).toHaveLength(1);
+  } finally {
+    warn.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -2025,7 +2220,7 @@ test("the persisted empty online-accept lock-in aborts a later non-empty payload
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
-      expectedReceivedPayloadColumns: [],
+      receivedPayloadLockIn: { consentedColumns: [] },
     });
     const reloaded = parseExchangeSpec(
       YAML.parse(fs.readFileSync(configPath, "utf8")),
@@ -2062,7 +2257,7 @@ test("runOnlineBootstrap rejects both received-payload persistence inputs at onc
     await expect(
       runOnlineBootstrap({
         ...onlineBootstrapParams(configPath),
-        expectedReceivedPayloadColumns: ["diagnosis"],
+        receivedPayloadLockIn: { consentedColumns: ["diagnosis"] },
         persistObservedReceivedPayload: true,
       }),
     ).rejects.toThrow(/mutually exclusive/);
@@ -2085,7 +2280,7 @@ test("the persisted online-accept lock-in drives fail-closed recurring enforceme
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
-      expectedReceivedPayloadColumns: ["diagnosis", "notes"],
+      receivedPayloadLockIn: { consentedColumns: ["diagnosis", "notes"] },
     });
     // Reload exactly as a recurring `psilink exchange` would, from the on-disk file.
     const reloaded = parseExchangeSpec(

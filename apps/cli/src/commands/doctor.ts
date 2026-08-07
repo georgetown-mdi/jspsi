@@ -1,7 +1,7 @@
 import type { Argv, Arguments } from "yargs";
 import logLibrary from "loglevel";
 
-import { UsageError, sanitizeForDisplay } from "@psilink/core";
+import { UsageError, redactAndSanitizeForDisplay } from "@psilink/core";
 
 import { runMountChecks } from "../doctor/mount";
 import { runProbe } from "../doctor/probe";
@@ -155,9 +155,11 @@ async function runDoctor(
  * console, and a host-side setup launcher collects and re-prints them there, so
  * roughly 50 columns of prefix wraps every line of the verdict they are asked to
  * pass on. They carry server-controlled bytes -- an NT_STATUS token and
- * smbclient's own output -- so they are escaped at that sink; the JSON form needs
- * no escaping, since JSON string encoding already escapes every control byte and
- * its consumer re-validates at its own boundary.
+ * smbclient's own output -- so they are escaped and redacted here, at the
+ * composition: the plain-line sink bypasses core's prefixer, so the per-argument
+ * private-key strip does not run behind this call. The JSON form needs no
+ * escaping, since JSON string encoding already escapes every control byte and its
+ * consumer re-validates at its own boundary.
  *
  * Dropping the prefix does not exempt them from `--log-level`: they are written
  * only when the level admits the `info` they were logged at, so `--log-level
@@ -176,5 +178,5 @@ function emit(
   }
   if (log.getLevel() > logLibrary.levels.INFO) return;
   for (const line of verdictLines(report))
-    writePlainLine(sanitizeForDisplay(line));
+    writePlainLine(redactAndSanitizeForDisplay(line));
 }

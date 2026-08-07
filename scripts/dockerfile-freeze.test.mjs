@@ -4,39 +4,39 @@ import { posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// Structural invariants of the production Dockerfile that keep the shipped
-// image's dependency tree frozen to the committed package-lock.json, and keep
-// the runtime layout the CLI's resolution depends on. Each test names the
-// runtime claim it stands in for; docs/spec/DEPENDENCY_PINS.md holds the
-// rationale.
+// Structural invariants of the Dockerfiles that keep each shipped image's
+// dependency tree frozen to the committed package-lock.json, and keep the
+// runtime layout the CLI's resolution depends on. Each test names the runtime
+// claim it stands in for; docs/spec/DEPENDENCY_PINS.md holds the rationale.
+//
+// Two images ship from this repository and both are held to the same
+// invariants: the default `Dockerfile` on node:26-alpine, and `Dockerfile.fips`
+// on Amazon Linux 2023 carrying a CMVP-validated OpenSSL FIPS provider. What
+// diverges is the OS package manager and the packages each fetches, which is
+// per-file data below rather than a loosened assertion; what the FIPS variant
+// adds on top of the shared set -- its certificate pins, its provider
+// assertion, and its fips-only OpenSSL configuration -- is asserted at the end.
+//
+// This is a static parser. It cannot observe a running process, so what a build
+// or a container actually does is CI's ground: image_smoke.yaml builds both
+// images and, for the variant, asserts through support/fips-probe/ that the
+// provider is engaged rather than merely installed.
 
 const here = dirname(fileURLToPath(import.meta.url));
-const dockerfile = readFileSync(resolve(here, "..", "Dockerfile"), "utf8");
+const repoRoot = resolve(here, "..");
+const readRepoFile = (name) => readFileSync(resolve(repoRoot, name), "utf8");
 
-// Drop comment lines, then fold "\"-continued lines into one logical
-// instruction. That order is the load-bearing half: fold first and a comment
-// line's own trailing backslash joins the instruction below it into the comment,
-// which drops that instruction -- an ownership change among them -- from every
-// assertion in this file while the build still runs it.
-//
-// The fold removes the backslash and the newline and inserts nothing, which is
-// what Docker's own parser does: a continuation with no space before the
-// backslash joins two tokens into one, and reading it as two would let a command
-// below match as something the build does not run. What the fold cannot settle
-// from here is a "#" reaching an instruction, and the refusal below is why it
-// does not have to.
-const instructions = dockerfile
-  .split("\n")
-  .filter((line) => !line.trim().startsWith("#"))
-  .join("\n")
-  .replace(/\\\r?\n/g, "")
-  .split("\n")
-  .map((line) => line.trim())
-  .filter((line) => line !== "")
-  .map((line) => {
-    const [, inst, rest] = line.match(/^(\S+)\s*(.*)$/);
-    return { inst: inst.toUpperCase(), rest };
-  });
+// Collapsed on the ASCII blanks a shell treats as separators, since indenting a
+// "\"-continued line changes the run of spaces between two tokens and nothing
+// else. Deliberately not /\s+/: that also eats U+00A0, which the shell does not
+// separate on.
+const normalize = (rest) => rest.trim().replace(/[ \t]+/g, " ");
+
+// The package managers whose installs are frozen by literal per file below. A
+// runtime-stage fetch by some other route -- curl and extract, `rpm` driven
+// directly, or another language's package manager -- is outside what this sees,
+// as docs/spec/DEPENDENCY_PINS.md records.
+const OS_PACKAGE_MANAGER = /\b(apk|apt|apt-get|dnf|microdnf|yum|pip|pip3)\b/;
 
 // The instruction classes this file reads. Every other class is refused rather
 // than modeled, because ownership and content both ride only the instructions
@@ -45,9 +45,9 @@ const instructions = dockerfile
 // `ADD --chown=node:node ... /app/x` in either stage would hand the runtime
 // account a path under /app -- and pull in something the lockfile does not
 // pin -- while every assertion in this file, all of which read COPY and RUN,
-// still passed. The Dockerfile uses nothing outside this list; a build that needs
-// another class extends it, where the review reads the instruction rather than a
-// verdict about it.
+// still passed. Neither Dockerfile uses anything outside this list; a build that
+// needs another class extends it, where the review reads the instruction rather
+// than a verdict about it.
 const REVIEWED_INSTRUCTIONS = [
   "ARG",
   "COPY",
@@ -60,50 +60,150 @@ const REVIEWED_INSTRUCTIONS = [
   "WORKDIR",
 ];
 
-const lastFromIndex = instructions.reduce(
-  (last, { inst }, index) => (inst === "FROM" ? index : last),
-  -1,
-);
-const builder = instructions.slice(0, lastFromIndex);
-const runtime = instructions.slice(lastFromIndex);
+// The ownership verbs the parse in analyze() reads: their path operands are
+// extracted and tested against the writable trees.
+const PARSED_OWNERSHIP_VERB = /^(?:chown|chgrp|chmod)\s/;
 
-// Resolve the runtime stage's COPY destinations against the WORKDIR in effect
-// at each instruction, so assertions hold absolute in-image paths. Each RUN is
-// kept with that same WORKDIR, since a path operand it writes relative resolves
-// against it too.
-const runtimeCopies = [];
-const runtimeRunsWithCwd = [];
-{
-  let cwd = "/";
-  for (const { inst, rest } of runtime) {
-    if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
-    if (inst === "RUN") runtimeRunsWithCwd.push({ run: rest, cwd });
-    if (inst !== "COPY") continue;
-    const tokens = rest.split(/\s+/);
-    const flags = tokens.filter((t) => t.startsWith("--"));
-    const paths = tokens.filter((t) => !t.startsWith("--"));
-    const sources = paths.slice(0, -1);
-    const rawDest = paths[paths.length - 1];
-    // A directory destination (trailing "/" or ".") receives the source's
-    // basename; a file destination is the path itself.
-    const dests =
-      rawDest.endsWith("/") || rawDest === "."
-        ? sources.map((s) => posix.resolve(cwd, rawDest, posix.basename(s)))
-        : [posix.resolve(cwd, rawDest)];
-    runtimeCopies.push({ flags, sources, dests });
+function analyze(file) {
+  const dockerfile = readRepoFile(file);
+
+  // Drop comment lines, then fold "\"-continued lines into one logical
+  // instruction. That order is the load-bearing half: fold first and a comment
+  // line's own trailing backslash joins the instruction below it into the
+  // comment, which drops that instruction -- an ownership change among them --
+  // from every assertion in this file while the build still runs it.
+  //
+  // The fold removes the backslash and the newline and inserts nothing, which is
+  // what Docker's own parser does: a continuation with no space before the
+  // backslash joins two tokens into one, and reading it as two would let a
+  // command below match as something the build does not run. What the fold
+  // cannot settle from here is a "#" reaching an instruction, and the refusal
+  // asserted per image below is why it does not have to.
+  const instructions = dockerfile
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("#"))
+    .join("\n")
+    .replace(/\\\r?\n/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [, inst, rest] = line.match(/^(\S+)\s*(.*)$/);
+      return { inst: inst.toUpperCase(), rest };
+    });
+
+  const lastFromIndex = instructions.reduce(
+    (last, { inst }, index) => (inst === "FROM" ? index : last),
+    -1,
+  );
+  const builder = instructions.slice(0, lastFromIndex);
+  const runtime = instructions.slice(lastFromIndex);
+
+  // Resolve the runtime stage's COPY destinations against the WORKDIR in effect
+  // at each instruction, so assertions hold absolute in-image paths. Each RUN is
+  // kept with that same WORKDIR, since a path operand it writes relative
+  // resolves against it too.
+  const runtimeCopies = [];
+  const runtimeRunsWithCwd = [];
+  {
+    let cwd = "/";
+    for (const { inst, rest } of runtime) {
+      if (inst === "WORKDIR") cwd = posix.resolve(cwd, rest);
+      if (inst === "RUN") runtimeRunsWithCwd.push({ run: rest, cwd });
+      if (inst !== "COPY") continue;
+      const tokens = rest.split(/\s+/);
+      const flags = tokens.filter((t) => t.startsWith("--"));
+      const paths = tokens.filter((t) => !t.startsWith("--"));
+      const sources = paths.slice(0, -1);
+      const rawDest = paths[paths.length - 1];
+      // A directory destination (trailing "/" or ".") receives the source's
+      // basename; a file destination is the path itself.
+      const dests =
+        rawDest.endsWith("/") || rawDest === "."
+          ? sources.map((s) => posix.resolve(cwd, rawDest, posix.basename(s)))
+          : [posix.resolve(cwd, rawDest)];
+      runtimeCopies.push({ flags, sources, dests });
+    }
   }
+
+  const runsIn = (stage) =>
+    stage.filter(({ inst }) => inst === "RUN").map(({ rest }) => rest);
+
+  // Each RUN read as the several commands it runs, split on the operators that
+  // separate one from the next. The runtime stage's carry the WORKDIR their
+  // instruction runs under. This reads the instruction text, so what it does NOT
+  // reach is: ownership a RUN assigns through a shell variable holding the verb
+  // or the path (`$SETUP /app`, `chown -R node:node "$DIR"`), ownership assigned
+  // inside a script the RUN invokes rather than on the instruction line, a verb
+  // outside the enumerated set below, and anything the base image already did.
+  const splitCommands = (run) =>
+    normalize(run)
+      .split(/&&|\|\||[;|]/)
+      .map((command) => command.trim())
+      .filter((command) => command !== "");
+
+  const runtimeShellCommands = runtimeRunsWithCwd.flatMap(({ run, cwd }) =>
+    splitCommands(run).map((command) => ({ command, cwd })),
+  );
+
+  return {
+    file,
+    dockerfile,
+    instructions,
+    builder,
+    runtime,
+    runtimeCopies,
+    runtimeShellCommands,
+    // The builder stage's commands, read the same way. Its files cross into the
+    // runtime stage through `COPY --from=builder`, so ownership assigned there
+    // is on the same footing as ownership assigned here.
+    builderShellCommands: runsIn(builder).flatMap(splitCommands),
+    // A chown/chgrp/chmod's path operands: its argv less the command name, its
+    // flags, and its first operand, which is the owner, group, or mode --
+    // unless a --reference flag supplied that instead, in which case every
+    // operand is a path. Each is resolved against the instruction's WORKDIR, so
+    // a relative operand and a `..` traversal (`/work/../app`) are tested as the
+    // path the build would write rather than as the text the author typed.
+    ownershipCommands: runtimeShellCommands
+      .filter(({ command }) => PARSED_OWNERSHIP_VERB.test(command))
+      .map(({ command, cwd }) => {
+        const argv = command.split(" ").slice(1);
+        const operands = argv.filter((token) => !token.startsWith("-"));
+        const pathOperands = argv.some((token) =>
+          token.startsWith("--reference"),
+        )
+          ? operands
+          : operands.slice(1);
+        return {
+          command,
+          paths: pathOperands.map((path) => posix.resolve(cwd, path)),
+        };
+      }),
+    allRuntimeDests: runtimeCopies.flatMap(({ dests }) => dests),
+    builderRuns: runsIn(builder),
+    runtimeRuns: runsIn(runtime),
+    // Every package-manager instruction in the FILE, not just the runtime
+    // stage: both images build their runtime stage FROM an earlier stage of
+    // their own, so a package installed there ships just as surely.
+    osInstalls: instructions
+      .filter(
+        ({ inst, rest }) => inst === "RUN" && OS_PACKAGE_MANAGER.test(rest),
+      )
+      .map(({ rest }) => `RUN ${normalize(rest)}`),
+    npmrcCopies: instructions
+      .filter(({ inst, rest }) => inst === "COPY" && /\.npmrc/.test(rest))
+      .map(({ rest }) => `COPY ${normalize(rest)}`),
+    runtimeEnv: Object.fromEntries(
+      runtime
+        .filter(({ inst }) => inst === "ENV")
+        .map(({ rest }) => {
+          const [, key, value] = rest.match(/^(\S+?)=(.*)$/) ?? [];
+          return [key, value];
+        })
+        .filter(([key]) => key !== undefined),
+    ),
+  };
 }
-const allRuntimeDests = runtimeCopies.flatMap(({ dests }) => dests);
-
-const builderRuns = builder
-  .filter(({ inst }) => inst === "RUN")
-  .map(({ rest }) => rest);
-
-// Collapsed on the ASCII blanks a shell treats as separators, since indenting a
-// "\"-continued line changes the run of spaces between two tokens and nothing
-// else. Deliberately not /\s+/: that also eats U+00A0, which the shell does not
-// separate on.
-const normalize = (rest) => rest.trim().replace(/[ \t]+/g, " ");
 
 // The instruction that puts the root .npmrc in the builder, frozen. The
 // committed file's bytes are held below; this holds which file the builder
@@ -113,28 +213,217 @@ const normalize = (rest) => rest.trim().replace(/[ \t]+/g, " ");
 // arrive without being named in the instruction at all, which this does not
 // reach and docs/spec/DEPENDENCY_PINS.md records as a limit.
 const EXPECTED_NPMRC_COPY = "COPY .npmrc package.json package-lock.json ./";
-const npmrcCopies = instructions
-  .filter(({ inst, rest }) => inst === "COPY" && /\.npmrc/.test(rest))
-  .map(({ rest }) => `COPY ${normalize(rest)}`);
 
-// The runtime stage's whole OS-package surface, frozen by literal the way the
-// .npmrc COPY above is. The npm tree is copied from the builder and resolves
-// nothing, so this one install is the only dependency the image build fetches --
-// which is the claim docs/spec/DEPENDENCY_PINS.md records as a single named
-// exception, and a claim prose cannot hold: a second package, or a wider spec on
-// this line, ships unreviewed while the sentence still reads as one package.
-const EXPECTED_OS_INSTALL = "RUN apk add --no-cache samba-client";
-const OS_PACKAGE_MANAGER = /\b(apk|apt|apt-get|pip|pip3)\b/;
-const runtimeRuns = runtimeRunsWithCwd.map(({ run }) => run);
+// Each image's whole OS-package surface, frozen by literal the way the .npmrc
+// COPY above is. The npm tree is copied from the builder and resolves nothing,
+// so these installs are the only dependencies an image build fetches from a
+// distribution mirror -- which is the claim docs/spec/DEPENDENCY_PINS.md
+// records, and a claim prose cannot hold: a second package, or a wider spec on
+// one of these lines, ships unreviewed while the sentence still reads as the
+// reviewed set.
+const IMAGES = [
+  {
+    file: "Dockerfile",
+    osInstalls: ["RUN apk add --no-cache samba-client"],
+  },
+  {
+    file: "Dockerfile.fips",
+    osInstalls: [
+      "RUN dnf -y --releasever=${AL2023_RELEASEVER} install tar gzip xz findutils libatomic && dnf clean all",
+      "RUN dnf -y --releasever=${AL2023_RELEASEVER} install samba-client openssl && dnf clean all",
+      "RUN dnf -y --releasever=${AL2023_RELEASEVER} swap openssl-fips-provider-latest ${FIPS_PROVIDER_PACKAGE}-${FIPS_PROVIDER_VERSION} && dnf clean all",
+    ],
+  },
+].map((spec) => ({ ...spec, image: analyze(spec.file) }));
+
+// Follow the ENTRYPOINT to the script that actually runs node. The FIPS variant
+// puts a reporting preamble in front of the shared dispatch script, so the
+// chain can be more than one file; every script on it must be copied into the
+// runtime stage, or the image starts by failing to exec a path that is not
+// there.
+function dispatchChain(image) {
+  const entrypoint = image.runtime.find(({ inst }) => inst === "ENTRYPOINT");
+  const entrypointArgv = JSON.parse(entrypoint.rest);
+  const chain = [entrypointArgv[entrypointArgv.length - 1]];
+  let script = readRepoFile(posix.basename(chain[chain.length - 1]));
+  while (!/^\s*exec\s+node\b/m.test(script)) {
+    const handoff = script
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => /^exec\s+\S+\.sh\b/.test(line));
+    if (handoff === undefined || chain.length > 4) {
+      throw new Error(
+        `${chain[chain.length - 1]} neither runs node nor execs another shipped script`,
+      );
+    }
+    chain.push(handoff.replace(/^exec\s+/, "").split(/\s+/)[0]);
+    script = readRepoFile(posix.basename(chain[chain.length - 1]));
+  }
+  return { entrypointArgv, chain, script };
+}
+
+for (const { file, osInstalls, image } of IMAGES) {
+  describe(`${file} dependency freeze`, () => {
+    it("uses ADD nowhere, nor any other instruction class this file does not parse", () => {
+      expect(
+        image.instructions
+          .filter(({ inst }) => inst === "ADD")
+          .map(({ inst, rest }) => `${inst} ${rest}`),
+      ).toEqual([]);
+      expect(
+        [...new Set(image.instructions.map(({ inst }) => inst))].filter(
+          (inst) => !REVIEWED_INSTRUCTIONS.includes(inst),
+        ),
+      ).toEqual([]);
+    });
+
+    it("carries no # inside an instruction, so this parse and Docker's cannot disagree", () => {
+      // Comment lines are gone before the fold in analyze(), so a "#" reaching
+      // an instruction is either text Docker takes literally mid-line or a form
+      // whose reading depends on where each parser thinks the instruction ended.
+      // Neither Dockerfile has one, and refusing it is what keeps the fold from
+      // having to agree with Docker about a case no build here exercises.
+      expect(
+        image.instructions
+          .filter(({ inst, rest }) => inst.includes("#") || rest.includes("#"))
+          .map(({ inst, rest }) => `${inst} ${rest}`),
+      ).toEqual([]);
+    });
+
+    it("installs only with npm ci, never npm install", () => {
+      expect(image.dockerfile).not.toMatch(/\bnpm\s+install\b/);
+      expect(image.builderRuns.some((run) => /\bnpm ci\b/.test(run))).toBe(
+        true,
+      );
+    });
+
+    it("copies the committed lockfile into the builder before the first npm ci", () => {
+      const firstCi = image.builder.findIndex(
+        ({ inst, rest }) => inst === "RUN" && /\bnpm ci\b/.test(rest),
+      );
+      const lockCopy = image.builder.findIndex(
+        ({ inst, rest }) =>
+          inst === "COPY" && rest.includes("package-lock.json"),
+      );
+      expect(lockCopy).toBeGreaterThanOrEqual(0);
+      expect(firstCi).toBeGreaterThan(lockCopy);
+    });
+
+    it("copies the root .npmrc into the builder before the first npm ci, and copies no other", () => {
+      // Without it the image builds under npm's defaults: strict-allow-scripts
+      // is off, and a package that gains an install script installs unreviewed.
+      expect(image.npmrcCopies).toEqual([EXPECTED_NPMRC_COPY]);
+      const firstCi = image.builder.findIndex(
+        ({ inst, rest }) => inst === "RUN" && /\bnpm ci\b/.test(rest),
+      );
+      const npmrcCopy = image.builder.findIndex(
+        ({ inst, rest }) => inst === "COPY" && /\.npmrc/.test(rest),
+      );
+      expect(npmrcCopy).toBeGreaterThanOrEqual(0);
+      expect(firstCi).toBeGreaterThan(npmrcCopy);
+    });
+
+    it("ships a production-only tree: the builder's last npm command is npm ci --omit=dev", () => {
+      const npmRuns = image.builderRuns.filter((run) => /\bnpm\b/.test(run));
+      expect(npmRuns.length).toBeGreaterThan(0);
+      expect(npmRuns[npmRuns.length - 1]).toMatch(/\bnpm ci\b.*--omit=dev/);
+    });
+
+    it("runs no npm in the runtime stage, so the copied tree is what ships", () => {
+      expect(image.runtimeRuns.filter((run) => /\bnpm\b/.test(run))).toEqual(
+        [],
+      );
+    });
+
+    it("installs exactly the reviewed OS packages", () => {
+      expect(image.osInstalls).toEqual(osInstalls);
+    });
+
+    it("copies the builder's node_modules into the runtime stage", () => {
+      const copy = image.runtimeCopies.find(({ sources }) =>
+        sources.includes("/build/node_modules"),
+      );
+      expect(copy).toBeDefined();
+      expect(copy.flags).toContain("--from=builder");
+      expect(copy.dests).toEqual(["/app/node_modules"]);
+    });
+
+    it("copies both workspace link targets so the node_modules links resolve", () => {
+      // node_modules/@psilink/core -> ../../packages/core and
+      // node_modules/psilink -> ../apps/cli must not dangle.
+      expect(image.allRuntimeDests).toContain(
+        "/app/packages/core/package.json",
+      );
+      expect(image.allRuntimeDests).toContain("/app/apps/cli/package.json");
+    });
+  });
+
+  describe(`${file} runtime layout`, () => {
+    // The runtime ENTRYPOINT is a dispatch script serving two roles: the default
+    // CLI and, on a `serve` first argument, the web console server. The
+    // node/--expose-gc and worker-colocation invariants live in that script, so
+    // they are read from its `exec node ...` lines rather than from the
+    // ENTRYPOINT argv directly.
+    const { entrypointArgv, chain, script } = dispatchChain(image);
+    const execArgv = (predicate) => {
+      const line = script
+        .split("\n")
+        .map((l) => l.trim())
+        .find((l) => /^exec\s+node\b/.test(l) && predicate(l));
+      return line.replace(/^exec\s+/, "").split(/\s+/);
+    };
+    const cliArgv = execArgv((l) => l.includes("--expose-gc"));
+    const cliEntryPath = cliArgv.find((t) => t.endsWith("index.js"));
+
+    it("ships every script on the entrypoint chain", () => {
+      expect(entrypointArgv).toEqual([chain[0]]);
+      for (const scriptPath of chain) {
+        expect(image.allRuntimeDests).toContain(scriptPath);
+      }
+    });
+
+    it("runs the copied CLI entry under node with --expose-gc", () => {
+      expect(cliArgv[0]).toBe("node");
+      expect(cliArgv).toContain("--expose-gc");
+      expect(cliEntryPath).toBeDefined();
+      expect(image.allRuntimeDests).toContain(cliEntryPath);
+    });
+
+    it("places the PSI worker entry beside the CLI entry", () => {
+      // psiWorkerHost resolves `<__dirname>/psiWorker.worker.js`; anywhere else
+      // and createPsiEngine silently falls back to the in-process engine.
+      expect(image.allRuntimeDests).toContain(
+        posix.join(posix.dirname(cliEntryPath), "psiWorker.worker.js"),
+      );
+    });
+
+    it("runs the web server entry, under a copied directory, for the serve role", () => {
+      const serveArgv = execArgv((l) => l.includes(".output"));
+      const serverEntry = serveArgv.find((t) => t.includes(".output"));
+      expect(serverEntry).toBeDefined();
+      // The server entry lives under a directory the runtime stage copies in.
+      expect(
+        image.allRuntimeDests.some(
+          (dest) => serverEntry === dest || serverEntry.startsWith(dest + "/"),
+        ),
+      ).toBe(true);
+    });
+  });
+}
 
 // The account both roles run as, and the one instruction that makes the image
-// habitable for it, frozen by literal the way the OS install above is. Which
+// habitable for it, frozen by literal the way the OS installs above are. Which
 // directories are handed over is the whole substance of running unprivileged:
 // /work is where the CLI writes its result and rotated key file, and the console
 // cannot boot at all without a scratch directory under root-owned /run. Prose in
 // docs/DEPLOYMENT.md tells operators the uid a bind mount must be writable by, so
 // a silent change of it, or of what the account may write, is a change to
 // documented deployment behavior rather than an implementation detail.
+//
+// Scoped to the default image: the FIPS variant carries no USER and makes no
+// unprivileged claim, and its dnf transactions put the word `install` in front
+// of the refusal below, which reads that verb as an ownership assignment. A
+// variant that drops privilege later extends this block rather than widening it.
 const RUNTIME_USER = "node";
 const EXPECTED_WRITABLE_SETUP =
   "RUN mkdir -p /work /run/psilink/sftp-credentials " +
@@ -150,39 +439,10 @@ const WRITABLE_TREES = ["/work", "/run/psilink"];
 const withinWritableTree = (path) =>
   WRITABLE_TREES.some((tree) => path === tree || path.startsWith(`${tree}/`));
 
-// The one mode change outside those trees, frozen by literal the way the OS
-// install above is: the entrypoint script has to be executable, and the bit says
-// nothing about who owns it.
+// The one mode change outside those trees, frozen by literal: the entrypoint
+// script has to be executable, and the bit says nothing about who owns it.
 const EXPECTED_MODE_CHANGE_OUTSIDE = "chmod +x /app/docker-entrypoint.sh";
 
-// Each runtime RUN read as the several commands it runs, split on the operators
-// that separate one from the next, each carrying the WORKDIR its instruction
-// runs under. This reads the instruction text, so what it does NOT reach is:
-// ownership a RUN assigns through a shell variable holding the verb or the path
-// (`$SETUP /app`, `chown -R node:node "$DIR"`), ownership assigned inside a
-// script the RUN invokes rather than on the instruction line, a verb outside the
-// enumerated set below, and anything the base image already did.
-const runtimeShellCommands = runtimeRunsWithCwd.flatMap(({ run, cwd }) =>
-  normalize(run)
-    .split(/&&|\|\||[;|]/)
-    .map((command) => command.trim())
-    .filter((command) => command !== "")
-    .map((command) => ({ command, cwd })),
-);
-
-// The builder stage's commands, read the same way. Its files cross into the
-// runtime stage through `COPY --from=builder`, so ownership assigned there is
-// on the same footing as ownership assigned here.
-const builderShellCommands = builderRuns.flatMap((run) =>
-  normalize(run)
-    .split(/&&|\|\||[;|]/)
-    .map((command) => command.trim())
-    .filter((command) => command !== ""),
-);
-
-// The ownership verbs the parse below reads: their path operands are extracted
-// and tested against the writable trees.
-const PARSED_OWNERSHIP_VERB = /^(?:chown|chgrp|chmod)\s/;
 // The verbs that hand a path to an account by a route that parse does not read
 // -- install's -o/-g/-m, setfacl's ACL entry -- plus any of the parsed ones
 // reached other than as a command's leading word (`sh -c 'chown ...'`, `xargs
@@ -193,122 +453,132 @@ const ANY_OWNERSHIP_VERB = /\b(?:chown|chgrp|chmod|install|setfacl)\b/;
 // The dash-leading tokens that parse reads on one of those verbs: -R (or
 // --recursive), and --reference=FILE, which is what moves the first operand from
 // an owner or a mode to a path. Any other is refused rather than classified,
-// because a mode is
-// spelled like a flag: `chmod -R -w /app` takes the write bit off /app, and a
-// parse that reads every dash-leading token as an option drops the mode, takes
-// /app for the mode instead, and hands the guard below an empty path set. The
-// stage passes -R alone.
+// because a mode is spelled like a flag: `chmod -R -w /app` takes the write bit
+// off /app, and a parse that reads every dash-leading token as an option drops
+// the mode, takes /app for the mode instead, and hands the guard below an empty
+// path set. The stage passes -R alone.
 const READ_OWNERSHIP_FLAGS = /^(?:-R|--recursive|--reference=\S+)$/;
 
-// A chown/chgrp/chmod's path operands: its argv less the command name, its
-// flags, and its first operand, which is the owner, group, or mode -- unless a
-// --reference flag supplied that instead, in which case every operand is a
-// path. Each is resolved against the instruction's WORKDIR, so a relative
-// operand and a `..` traversal (`/work/../app`) are tested as the path the
-// build would write rather than as the text the author typed.
-const ownershipCommands = runtimeShellCommands
-  .filter(({ command }) => PARSED_OWNERSHIP_VERB.test(command))
-  .map(({ command, cwd }) => {
-    const argv = command.split(" ").slice(1);
-    const operands = argv.filter((token) => !token.startsWith("-"));
-    const pathOperands = argv.some((token) => token.startsWith("--reference"))
-      ? operands
-      : operands.slice(1);
-    return {
-      command,
-      paths: pathOperands.map((path) => posix.resolve(cwd, path)),
-    };
+describe("the unprivileged account the default image runs as", () => {
+  const image = IMAGES.find(({ file }) => file === "Dockerfile").image;
+
+  it("drops to a single non-root runtime user for both roles", () => {
+    const users = image.runtime
+      .filter(({ inst }) => inst === "USER")
+      .map(({ rest }) => normalize(rest));
+    expect(users).toEqual([RUNTIME_USER]);
   });
 
-describe("Dockerfile dependency freeze", () => {
-  it("uses ADD nowhere, nor any other instruction class this file does not parse", () => {
+  it("declares that user after the last build step, so the ENTRYPOINT inherits it", () => {
+    // A USER ahead of a COPY or RUN would either fail the build or leave the
+    // dropped account owning /app; one after the last of them, with no second
+    // USER to undo it, is what makes the entrypoint's node process unprivileged.
+    const userIndex = image.runtime.findIndex(({ inst }) => inst === "USER");
+    const lastBuildStep = image.runtime.reduce(
+      (last, { inst }, index) =>
+        inst === "RUN" || inst === "COPY" ? index : last,
+      -1,
+    );
+    expect(userIndex).toBeGreaterThan(lastBuildStep);
+  });
+
+  it("hands that user every directory the container writes", () => {
+    expect(image.runtimeRuns.map((run) => `RUN ${normalize(run)}`)).toContain(
+      EXPECTED_WRITABLE_SETUP,
+    );
+  });
+
+  it("assigns ownership only through the forms the two tests below parse", () => {
+    // The guard on those tests reads a leading chown/chgrp/chmod and its
+    // operands. Every other way an instruction can name one of those verbs --
+    // wrapped in `sh -c`, driven by xargs or find, or written as install or
+    // setfacl -- is refused here, so an ownership change cannot reach /app by
+    // taking a form the parse skips over.
     expect(
-      instructions
-        .filter(({ inst }) => inst === "ADD")
-        .map(({ inst, rest }) => `${inst} ${rest}`),
+      image.runtimeShellCommands
+        .filter(
+          ({ command }) =>
+            ANY_OWNERSHIP_VERB.test(command) &&
+            !PARSED_OWNERSHIP_VERB.test(command),
+        )
+        .map(({ command }) => command),
     ).toEqual([]);
+    // The same refusal one altitude down, over the argv of the ones it does
+    // read: a dash-leading token outside the two the parse understands decides
+    // which operand is the mode and which are paths, so it is refused rather
+    // than guessed at.
     expect(
-      [...new Set(instructions.map(({ inst }) => inst))].filter(
-        (inst) => !REVIEWED_INSTRUCTIONS.includes(inst),
+      image.ownershipCommands.flatMap(({ command }) =>
+        command
+          .split(" ")
+          .slice(1)
+          .filter(
+            (token) =>
+              token.startsWith("-") && !READ_OWNERSHIP_FLAGS.test(token),
+          )
+          .map((token) => `${token} in: ${command}`),
       ),
     ).toEqual([]);
   });
 
-  it("carries no # inside an instruction, so this parse and Docker's cannot disagree", () => {
-    // Comment lines are gone before the fold above, so a "#" reaching an
-    // instruction is either text Docker takes literally mid-line or a form whose
-    // reading depends on where each parser thinks the instruction ended. The
-    // Dockerfile has none, and refusing one is what keeps the fold from having to
-    // agree with Docker about a case no build here exercises.
+  it("assigns no ownership in the builder stage, whose files the runtime copies in", () => {
+    // `COPY --from=builder` carries the builder's files into /app, and what
+    // ownership they arrive with is Docker's rule rather than this file's to
+    // model. The route is closed instead: the builder assigns no ownership at
+    // all, so nothing crosses the stage boundary already handed to an account.
     expect(
-      instructions
-        .filter(({ inst, rest }) => inst.includes("#") || rest.includes("#"))
-        .map(({ inst, rest }) => `${inst} ${rest}`),
+      image.builderShellCommands.filter((command) =>
+        ANY_OWNERSHIP_VERB.test(command),
+      ),
+    ).toEqual([]);
+    expect(
+      image.builder
+        .filter(({ inst }) => inst === "COPY")
+        .flatMap(({ rest }) => rest.split(/\s+/))
+        .filter((token) => /^--(?:chown|chmod)/.test(token)),
     ).toEqual([]);
   });
 
-  it("installs only with npm ci, never npm install", () => {
-    expect(dockerfile).not.toMatch(/\bnpm\s+install\b/);
-    expect(builderRuns.some((run) => /\bnpm ci\b/.test(run))).toBe(true);
-  });
-
-  it("copies the committed lockfile into the builder before the first npm ci", () => {
-    const firstCi = builder.findIndex(
-      ({ inst, rest }) => inst === "RUN" && /\bnpm ci\b/.test(rest),
+  it("gives that user no path outside those directories, so /app stays root-owned", () => {
+    // Every chown and chgrp in the stage, and every COPY that assigns ownership
+    // as it lands. A path outside the two writable trees is code, or a mount
+    // point, that the entrypoint's own process could then rewrite -- a group
+    // handed over no less than an owner, since the account carries its group.
+    const handedOverPaths = image.ownershipCommands
+      .filter(({ command }) => /^(?:chown|chgrp) /.test(command))
+      .flatMap(({ paths }) => paths);
+    expect(handedOverPaths.length).toBeGreaterThan(0);
+    expect(handedOverPaths.filter((path) => !withinWritableTree(path))).toEqual(
+      [],
     );
-    const lockCopy = builder.findIndex(
-      ({ inst, rest }) => inst === "COPY" && rest.includes("package-lock.json"),
-    );
-    expect(lockCopy).toBeGreaterThanOrEqual(0);
-    expect(firstCi).toBeGreaterThan(lockCopy);
-  });
-
-  it("copies the root .npmrc into the builder before the first npm ci, and copies no other", () => {
-    // Without it the image builds under npm's defaults: strict-allow-scripts is
-    // off, and a package that gains an install script installs unreviewed.
-    expect(npmrcCopies).toEqual([EXPECTED_NPMRC_COPY]);
-    const firstCi = builder.findIndex(
-      ({ inst, rest }) => inst === "RUN" && /\bnpm ci\b/.test(rest),
-    );
-    const npmrcCopy = builder.findIndex(
-      ({ inst, rest }) => inst === "COPY" && /\.npmrc/.test(rest),
-    );
-    expect(npmrcCopy).toBeGreaterThanOrEqual(0);
-    expect(firstCi).toBeGreaterThan(npmrcCopy);
-  });
-
-  it("ships a production-only tree: the builder's last npm command is npm ci --omit=dev", () => {
-    const npmRuns = builderRuns.filter((run) => /\bnpm\b/.test(run));
-    expect(npmRuns.length).toBeGreaterThan(0);
-    expect(npmRuns[npmRuns.length - 1]).toMatch(/\bnpm ci\b.*--omit=dev/);
-  });
-
-  it("runs no npm in the runtime stage, so the copied tree is what ships", () => {
-    expect(runtimeRuns.filter((run) => /\bnpm\b/.test(run))).toEqual([]);
-  });
-
-  it("installs one OS package in the runtime stage, the reviewed one", () => {
     expect(
-      runtimeRuns
-        .filter((run) => OS_PACKAGE_MANAGER.test(run))
-        .map((run) => `RUN ${normalize(run)}`),
-    ).toEqual([EXPECTED_OS_INSTALL]);
+      image.runtimeCopies
+        .filter(({ flags }) => flags.some((f) => f.startsWith("--chown")))
+        .flatMap(({ dests }) => dests)
+        .filter((dest) => !withinWritableTree(dest)),
+    ).toEqual([]);
   });
 
-  it("copies the builder's node_modules into the runtime stage", () => {
-    const copy = runtimeCopies.find(({ sources }) =>
-      sources.includes("/build/node_modules"),
-    );
-    expect(copy).toBeDefined();
-    expect(copy.flags).toContain("--from=builder");
-    expect(copy.dests).toEqual(["/app/node_modules"]);
-  });
-
-  it("copies both workspace link targets so the node_modules links resolve", () => {
-    // node_modules/@psilink/core -> ../../packages/core and
-    // node_modules/psilink -> ../apps/cli must not dangle.
-    expect(allRuntimeDests).toContain("/app/packages/core/package.json");
-    expect(allRuntimeDests).toContain("/app/apps/cli/package.json");
+  it("changes no mode outside those directories but the entrypoint's executable bit", () => {
+    // A mode is the other way the account reaches what it must not write: a
+    // group- or world-writable /app needs no chown to be rewritable. Outside the
+    // writable trees the whole set of mode changes is held to the reviewed
+    // literal rather than to a reading of what each mode grants.
+    expect(
+      image.ownershipCommands
+        .filter(
+          ({ command, paths }) =>
+            command.startsWith("chmod ") &&
+            paths.some((path) => !withinWritableTree(path)),
+        )
+        .map(({ command }) => command),
+    ).toEqual([EXPECTED_MODE_CHANGE_OUTSIDE]);
+    expect(
+      image.runtimeCopies
+        .filter(({ flags }) => flags.some((f) => f.startsWith("--chmod")))
+        .flatMap(({ dests }) => dests)
+        .filter((dest) => !withinWritableTree(dest)),
+    ).toEqual([]);
   });
 });
 
@@ -353,7 +623,7 @@ describe("the root .npmrc the builder installs under", () => {
   // release workflow exports to a shared build cache, so it may state
   // configuration and nothing else: registry credentials belong in the
   // user-level ~/.npmrc, which no build reads.
-  const committed = readFileSync(resolve(here, "..", ".npmrc"));
+  const committed = readFileSync(resolve(repoRoot, ".npmrc"));
 
   it("is the file this literal was reviewed as, byte for byte", () => {
     // The string compare is the one that prints a diff; the byte compare is the
@@ -400,177 +670,271 @@ describe("the root .npmrc the builder installs under", () => {
   });
 });
 
-describe("Dockerfile runtime layout", () => {
-  // The runtime ENTRYPOINT is a dispatch script serving two roles: the default
-  // CLI and, on a `serve` first argument, the web console server. The
-  // node/--expose-gc and worker-colocation invariants moved into the script, so
-  // they are read from its `exec node ...` lines rather than from the ENTRYPOINT
-  // argv directly.
-  const entrypoint = runtime.find(({ inst }) => inst === "ENTRYPOINT");
-  const entrypointArgv = JSON.parse(entrypoint.rest);
-  const entrypointScriptPath = entrypointArgv[entrypointArgv.length - 1];
-  const entrypointScript = readFileSync(
-    resolve(here, "..", posix.basename(entrypointScriptPath)),
-    "utf8",
-  );
-  const execArgv = (predicate) => {
-    const line = entrypointScript
-      .split("\n")
-      .map((l) => l.trim())
-      .find((l) => /^exec\s+node\b/.test(l) && predicate(l));
-    return line.replace(/^exec\s+/, "").split(/\s+/);
-  };
-  const cliArgv = execArgv((l) => l.includes("--expose-gc"));
-  const cliEntryPath = cliArgv.find((t) => t.endsWith("index.js"));
-
-  it("ships the dispatch entrypoint script", () => {
-    expect(entrypointArgv).toEqual([entrypointScriptPath]);
-    expect(allRuntimeDests).toContain(entrypointScriptPath);
-  });
-
-  it("runs the copied CLI entry under node with --expose-gc", () => {
-    expect(cliArgv[0]).toBe("node");
-    expect(cliArgv).toContain("--expose-gc");
-    expect(cliEntryPath).toBeDefined();
-    expect(allRuntimeDests).toContain(cliEntryPath);
-  });
-
-  it("places the PSI worker entry beside the CLI entry", () => {
-    // psiWorkerHost resolves `<__dirname>/psiWorker.worker.js`; anywhere else
-    // and createPsiEngine silently falls back to the in-process engine.
-    expect(allRuntimeDests).toContain(
-      posix.join(posix.dirname(cliEntryPath), "psiWorker.worker.js"),
+// What the FIPS variant adds beyond the shared invariants above. Each of these
+// is a claim the image makes about a CMVP certificate, and each is the kind of
+// claim that goes quietly false: the package name is shared by ten builds with
+// ten different modules, only one of them certified, and a configuration that
+// names one of OpenSSL's two top-level keys instead of both configures one of
+// the two consumers and leaves the other running as though unconfigured.
+describe("Dockerfile.fips certificate pins", () => {
+  const image = IMAGES.find(({ file }) => file === "Dockerfile.fips").image;
+  const argDefault = (name) => {
+    const arg = image.instructions.find(
+      ({ inst, rest }) => inst === "ARG" && rest.startsWith(`${name}=`),
     );
+    return arg?.rest.slice(name.length + 1);
+  };
+
+  it("pins the certified provider NVR and the module version the certificate names", () => {
+    // Certificate 5021. The package and version decide which build is
+    // installed; the module version string is what the installed module reports
+    // about itself, and it is the one of the two a package name cannot lie
+    // about.
+    expect(argDefault("FIPS_PROVIDER_PACKAGE")).toBe(
+      "openssl-fips-provider-certified",
+    );
+    expect(argDefault("FIPS_PROVIDER_VERSION")).toBe("3.0.8-1.amzn2023.0.1");
+    expect(argDefault("FIPS_MODULE_VERSION")).toBe("3.0.8-d694bfa693b76001");
   });
 
-  it("drops to a single non-root runtime user for both roles", () => {
-    const users = runtime
-      .filter(({ inst }) => inst === "USER")
-      .map(({ rest }) => normalize(rest));
-    expect(users).toEqual([RUNTIME_USER]);
+  it("pins a release snapshot rather than tracking the moving repository", () => {
+    // AWS retains superseded NVRs, so a dated snapshot resolves the same
+    // packages on a later rebuild; `latest` does not.
+    expect(argDefault("AL2023_RELEASEVER")).toMatch(/^2023\.\d+\.\d{8}$/);
   });
 
-  it("declares that user after the last build step, so the ENTRYPOINT inherits it", () => {
-    // A USER ahead of a COPY or RUN would either fail the build or leave the
-    // dropped account owning /app; one after the last of them, with no second
-    // USER to undo it, is what makes the entrypoint's node process unprivileged.
-    const userIndex = runtime.findIndex(({ inst }) => inst === "USER");
-    const lastBuildStep = runtime.reduce(
-      (last, { inst }, index) =>
-        inst === "RUN" || inst === "COPY" ? index : last,
+  it("fails the build unless the installed package and the activated module match those pins", () => {
+    // The check is what keeps the certificate claim from being prose. Its two
+    // halves answer different questions -- which package landed, and which
+    // module the loader actually activated -- and dropping either leaves the
+    // other satisfiable by a build that ships an uncertified module.
+    const assertion = image.runtimeRuns.find(
+      (run) => /\btest\b/.test(run) && /\bopenssl list -providers\b/.test(run),
+    );
+    expect(assertion).toBeDefined();
+    expect(assertion).toContain("${FIPS_MODULE_VERSION}");
+    const packageAssertion = image.runtimeRuns.find(
+      (run) => /\brpm -qf\b/.test(run) && /\btest\b/.test(run),
+    );
+    expect(packageAssertion).toBeDefined();
+    expect(packageAssertion).toContain("${FIPS_PROVIDER_PACKAGE}");
+    expect(packageAssertion).toContain("${FIPS_PROVIDER_VERSION}");
+    // Asked of the module file the loader will open, not of the package name.
+    expect(packageAssertion).toContain("/usr/lib64/ossl-modules/fips.so");
+  });
+
+  it("runs every package transaction before the fips-only configuration is in force", () => {
+    // Measured: under this configuration dnf's own Python dies on
+    // `unsupported hash type blake2s(in FIPS mode)`. A dnf instruction that
+    // lands after the ENV therefore breaks the build -- or, worse, is added to
+    // a stage where it silently does nothing.
+    const opensslConfIndex = image.runtime.findIndex(
+      ({ inst, rest }) => inst === "ENV" && rest.startsWith("OPENSSL_CONF="),
+    );
+    expect(opensslConfIndex).toBeGreaterThanOrEqual(0);
+    const lastPackageIndex = image.runtime.reduce(
+      (last, { inst, rest }, index) =>
+        inst === "RUN" && OS_PACKAGE_MANAGER.test(rest) ? index : last,
       -1,
     );
-    expect(userIndex).toBeGreaterThan(lastBuildStep);
+    expect(lastPackageIndex).toBeLessThan(opensslConfIndex);
   });
 
-  it("hands that user every directory the container writes", () => {
-    expect(runtimeRuns.map((run) => `RUN ${normalize(run)}`)).toContain(
-      EXPECTED_WRITABLE_SETUP,
-    );
+  it("points OPENSSL_CONF and OPENSSL_MODULES at what the image actually carries", () => {
+    expect(image.allRuntimeDests).toContain(image.runtimeEnv.OPENSSL_CONF);
+    expect(image.runtimeEnv.OPENSSL_MODULES).toBe("/usr/lib64/ossl-modules");
   });
 
-  it("assigns ownership only through the forms the two tests below parse", () => {
-    // The guard on those tests reads a leading chown/chgrp/chmod and its
-    // operands. Every other way an instruction can name one of those verbs --
-    // wrapped in `sh -c`, driven by xargs or find, or written as install or
-    // setfacl -- is refused here, so an ownership change cannot reach /app by
-    // taking a form the parse skips over.
+  it("carries the pinned module version into the image as an ENV", () => {
+    // The entrypoint names the module from this value rather than reading one
+    // back, which is sound only because the assertion above already compared it
+    // against what the installed module reports. Both halves are needed: drop
+    // the runtime stage's ARG redeclaration and the ENV expands to the empty
+    // string, leaving the per-run assurance line naming no module at all.
+    expect(image.runtimeEnv.FIPS_MODULE_VERSION).toBe("${FIPS_MODULE_VERSION}");
     expect(
-      runtimeShellCommands
-        .filter(
-          ({ command }) =>
-            ANY_OWNERSHIP_VERB.test(command) &&
-            !PARSED_OWNERSHIP_VERB.test(command),
-        )
-        .map(({ command }) => command),
-    ).toEqual([]);
-    // The same refusal one altitude down, over the argv of the ones it does
-    // read: a dash-leading token outside the two the parse understands decides
-    // which operand is the mode and which are paths, so it is refused rather
-    // than guessed at.
-    expect(
-      ownershipCommands.flatMap(({ command }) =>
-        command
-          .split(" ")
-          .slice(1)
-          .filter(
-            (token) =>
-              token.startsWith("-") && !READ_OWNERSHIP_FLAGS.test(token),
-          )
-          .map((token) => `${token} in: ${command}`),
-      ),
-    ).toEqual([]);
-  });
-
-  it("assigns no ownership in the builder stage, whose files the runtime copies in", () => {
-    // `COPY --from=builder` carries the builder's files into /app, and what
-    // ownership they arrive with is Docker's rule rather than this file's to
-    // model. The route is closed instead: the builder assigns no ownership at
-    // all, so nothing crosses the stage boundary already handed to an account.
-    expect(
-      builderShellCommands.filter((command) =>
-        ANY_OWNERSHIP_VERB.test(command),
-      ),
-    ).toEqual([]);
-    expect(
-      builder
-        .filter(({ inst }) => inst === "COPY")
-        .flatMap(({ rest }) => rest.split(/\s+/))
-        .filter((token) => /^--(?:chown|chmod)/.test(token)),
-    ).toEqual([]);
-  });
-
-  it("gives that user no path outside those directories, so /app stays root-owned", () => {
-    // Every chown and chgrp in the stage, and every COPY that assigns ownership
-    // as it lands. A path outside the two writable trees is code, or a mount
-    // point, that the entrypoint's own process could then rewrite -- a group
-    // handed over no less than an owner, since the account carries its group.
-    const handedOverPaths = ownershipCommands
-      .filter(({ command }) => /^(?:chown|chgrp) /.test(command))
-      .flatMap(({ paths }) => paths);
-    expect(handedOverPaths.length).toBeGreaterThan(0);
-    expect(handedOverPaths.filter((path) => !withinWritableTree(path))).toEqual(
-      [],
-    );
-    expect(
-      runtimeCopies
-        .filter(({ flags }) => flags.some((f) => f.startsWith("--chown")))
-        .flatMap(({ dests }) => dests)
-        .filter((dest) => !withinWritableTree(dest)),
-    ).toEqual([]);
-  });
-
-  it("changes no mode outside those directories but the entrypoint's executable bit", () => {
-    // A mode is the other way the account reaches what it must not write: a
-    // group- or world-writable /app needs no chown to be rewritable. Outside the
-    // writable trees the whole set of mode changes is held to the reviewed
-    // literal rather than to a reading of what each mode grants.
-    expect(
-      ownershipCommands
-        .filter(
-          ({ command, paths }) =>
-            command.startsWith("chmod ") &&
-            paths.some((path) => !withinWritableTree(path)),
-        )
-        .map(({ command }) => command),
-    ).toEqual([EXPECTED_MODE_CHANGE_OUTSIDE]);
-    expect(
-      runtimeCopies
-        .filter(({ flags }) => flags.some((f) => f.startsWith("--chmod")))
-        .flatMap(({ dests }) => dests)
-        .filter((dest) => !withinWritableTree(dest)),
-    ).toEqual([]);
-  });
-
-  it("runs the web server entry, under a copied directory, for the serve role", () => {
-    const serveArgv = execArgv((l) => l.includes(".output"));
-    const serverEntry = serveArgv.find((t) => t.includes(".output"));
-    expect(serverEntry).toBeDefined();
-    // The server entry lives under a directory the runtime stage copies in.
-    expect(
-      allRuntimeDests.some(
-        (dest) => serverEntry === dest || serverEntry.startsWith(dest + "/"),
+      image.runtime.some(
+        ({ inst, rest }) => inst === "ARG" && rest === "FIPS_MODULE_VERSION",
       ),
     ).toBe(true);
+  });
+});
+
+// The two pins that decide what the variant's userland and its Node runtime are
+// made of. The build's own checksum step compares the tarball against whatever
+// hash the RUN carries, so it cannot notice a committed hash that has drifted
+// from the value docs/spec/DEPENDENCY_PINS.md records as resolved and reviewed;
+// the base digest has no build-time reader at all. These literals are what holds
+// both.
+describe("Dockerfile.fips base image and Node runtime pins", () => {
+  const image = IMAGES.find(({ file }) => file === "Dockerfile.fips").image;
+
+  // The multi-arch index digest, which is the one a multi-platform build can
+  // resolve: a platform-specific manifest digest names one architecture and
+  // fails on the other.
+  const EXPECTED_BASE =
+    "amazonlinux:2023@sha256:694092ae18877ed4e3cb9b643759ba95df1f12af12528fefa18f60f79d4c1568";
+
+  // The sha256 of each architecture's official nodejs.org tarball, keyed by the
+  // node_arch the `case` selects beside it.
+  const EXPECTED_TARBALL_SHA256 = {
+    x64: "982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee",
+    arm64: "afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d",
+  };
+
+  const nodeFetch = image.instructions.find(
+    ({ inst, rest }) => inst === "RUN" && rest.includes("nodejs.org"),
+  );
+
+  it("builds every stage from that base digest or from another stage of its own", () => {
+    // A tag resolves to whatever the registry serves that day, and the base
+    // rootfs is coupled to the release snapshot the dnf lines pin: the two are
+    // the same Amazon Linux release, not merely compatible ones.
+    const declaredStages = new Set();
+    const externalBases = [];
+    for (const { inst, rest } of image.instructions) {
+      if (inst !== "FROM") continue;
+      const tokens = normalize(rest).split(" ");
+      if (!declaredStages.has(tokens[0])) externalBases.push(tokens[0]);
+      const as = tokens.findIndex((token) => token.toUpperCase() === "AS");
+      if (as !== -1) declaredStages.add(tokens[as + 1]);
+    }
+    expect(externalBases).toEqual([EXPECTED_BASE]);
+  });
+
+  it("checks the fetched Node tarball against the committed hash for its architecture", () => {
+    expect(nodeFetch).toBeDefined();
+    for (const [nodeArch, sha256] of Object.entries(EXPECTED_TARBALL_SHA256)) {
+      expect(normalize(nodeFetch.rest)).toContain(
+        `node_arch=${nodeArch}; node_sha256=${sha256}`,
+      );
+    }
+    // Piped into the checker, rather than merely present in the instruction.
+    expect(nodeFetch.rest).toMatch(
+      /echo "\$\{node_sha256\} +node-\$\{NODE_VERSION\}-linux-\$\{node_arch\}\.tar\.xz" \| sha256sum -c -/,
+    );
+  });
+
+  it("fetches no checksum file anywhere in the build", () => {
+    // A checksum file fetched beside the tarball would be served by whatever
+    // served the tarball, and would make the literals above decorative. Asserted
+    // over every RUN rather than over the one that fetches the tarball: the
+    // instruction that reintroduces it need not be the instruction that fetches.
+    for (const { inst, rest } of image.instructions) {
+      if (inst !== "RUN") continue;
+      expect(rest).not.toContain("SHASUMS256.txt");
+    }
+  });
+
+  it("aborts the layer when the checksum fails rather than carrying on", () => {
+    // The pin rests on the checker's non-zero exit reaching `set -e`, and two
+    // edits defang it without touching a hash, so every assertion above stays
+    // green through both: appending `|| true` to the checker, and dropping the
+    // `e` from `set -eux`, after which a FAILED checksum prints and the RUN
+    // walks on into `tar`. These two are what hold the property the literals are
+    // for.
+    expect(normalize(nodeFetch.rest)).toMatch(/^set -eux;/);
+    expect(normalize(nodeFetch.rest)).toMatch(/\| sha256sum -c -;/);
+  });
+
+  it("carries those hashes as literals rather than as overridable ARGs", () => {
+    // `docker build --build-arg` moves an ARG, so a hash carried as one moves
+    // with the artifact it is supposed to hold. NODE_VERSION stays an ARG,
+    // which is why a Node bump edits these two literals in the same commit.
+    const argDefaults = image.instructions
+      .filter(({ inst }) => inst === "ARG")
+      .map(({ rest }) => rest);
+    for (const sha256 of Object.values(EXPECTED_TARBALL_SHA256)) {
+      expect(argDefaults.some((arg) => arg.includes(sha256))).toBe(false);
+      expect(nodeFetch.rest).toContain(sha256);
+    }
+  });
+});
+
+// The variant's per-run provider report is the exit status of a probe the image
+// runs at every container start, so the probe and everything it imports have to
+// be in the image. A path that is not there warns on every run, which reads
+// exactly like a provider that failed to load.
+describe("the engagement probe the FIPS variant runs at startup", () => {
+  const image = IMAGES.find(({ file }) => file === "Dockerfile.fips").image;
+  const preamble = readRepoFile(posix.basename(dispatchChain(image).chain[0]));
+  const probePath = /\bnode\s+(\/\S+\.mjs)\b/.exec(preamble)?.[1];
+
+  it("runs a probe the runtime stage copies in", () => {
+    expect(probePath).toBeDefined();
+    expect(image.allRuntimeDests).toContain(probePath);
+  });
+
+  it("copies in every module that probe imports", () => {
+    // Read from the committed source of the copied file rather than from the
+    // Dockerfile's source list, so an import added to the probe without a
+    // matching COPY reddens here instead of at the operator's first run.
+    const copy = image.runtimeCopies.find(({ dests }) =>
+      dests.includes(probePath),
+    );
+    const source = readRepoFile(copy.sources[copy.dests.indexOf(probePath)]);
+    const imports = [...source.matchAll(/\bfrom\s+"(\.[^"]+)"/g)].map(
+      ([, specifier]) => posix.resolve(posix.dirname(probePath), specifier),
+    );
+    expect(imports.length).toBeGreaterThan(0);
+    for (const imported of imports) {
+      expect(image.allRuntimeDests).toContain(imported);
+    }
+  });
+});
+
+describe("the fips-only OpenSSL configuration the variant ships", () => {
+  const image = IMAGES.find(({ file }) => file === "Dockerfile.fips").image;
+  const copy = image.runtimeCopies.find(({ dests }) =>
+    dests.includes(image.runtimeEnv.OPENSSL_CONF),
+  );
+
+  // Sections of an OpenSSL configuration file, with comments and blanks
+  // dropped. The keys before the first section header are the top-level ones,
+  // held under "".
+  const sections = {};
+  {
+    let current = "";
+    for (const raw of readRepoFile(copy.sources[0]).split("\n")) {
+      const line = raw.replace(/#.*$/, "").trim();
+      if (line === "") continue;
+      const header = /^\[\s*([^\]\s]+)\s*\]$/.exec(line);
+      if (header) {
+        current = header[1];
+        sections[current] ??= {};
+        continue;
+      }
+      const [key, ...value] = line.split("=");
+      (sections[current] ??= {})[key.trim()] = value.join("=").trim();
+    }
+  }
+  const init = sections[""].nodejs_conf;
+
+  it("names the same init section under BOTH top-level keys", () => {
+    // Measured: Node's bundled OpenSSL applies `nodejs_conf` and silently
+    // ignores a configuration written under `openssl_conf`, while the Amazon
+    // Linux 2023 openssl CLI is the opposite. A file naming one of them
+    // configures one consumer and leaves the other running unconfigured --
+    // which is indistinguishable, by inspection, from a provider that cannot
+    // be engaged at all.
+    expect(sections[""].openssl_conf).toBe(init);
+    expect(init).toBeTruthy();
+  });
+
+  it("activates the FIPS and base providers and NOT the default provider", () => {
+    // Leaving `default` activated is what turns the whole arrangement into a
+    // fallback: an algorithm the certified module does not carry then succeeds
+    // through an uncertified implementation instead of failing.
+    const providers = sections[sections[init].providers];
+    expect(Object.keys(providers).sort()).toEqual(["base", "fips"]);
+    for (const section of Object.values(providers)) {
+      expect(sections[section].activate).toBe("1");
+    }
+  });
+
+  it("requires fips=yes as the default property", () => {
+    expect(sections[sections[init].alg_section].default_properties).toBe(
+      "fips=yes",
+    );
   });
 });

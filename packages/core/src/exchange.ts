@@ -8,8 +8,10 @@ import {
   StandardizedKeyIterable,
 } from "./standardization.js";
 import { columnValues, inferDateFormat } from "./utils/date.js";
-import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
-import { sanitizeErrorForDisplay } from "./utils/sanitizeErrorForDisplay.js";
+import {
+  redactAndSanitizeForDisplay,
+  sanitizeErrorForDisplay,
+} from "./utils/sanitizeErrorForDisplay.js";
 import type { CSVRow } from "./file.js";
 import { PSIParticipant } from "./participant.js";
 import type { PsiEngine } from "./psiEngine.js";
@@ -420,7 +422,9 @@ export function prepareForExchange(
   // reviewed the same escaped form when agreeing to the terms (displayInvitation).
   log.info(
     "will link using keys:",
-    linkageTerms.linkageKeys.map((k) => sanitizeForDisplay(k.name)).join(", "),
+    linkageTerms.linkageKeys
+      .map((k) => redactAndSanitizeForDisplay(k.name))
+      .join(", "),
   );
 
   const dataset = buildStandardizedDataset(

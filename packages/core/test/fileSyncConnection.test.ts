@@ -1451,6 +1451,53 @@ test("a dropped providerOptions key is logged with a warning", async () => {
   ).toBe(true);
 });
 
+test("a marker in a dropped providerOptions key does not delete the guidance", async () => {
+  // The key is the operator's own config, but it is composed AHEAD of the
+  // default-deny explanation, and the log prefixer's per-argument pass fails
+  // closed from a BEGIN marker to the end of the argument. Redacting the key
+  // where it is interpolated is what keeps the explanation the operator has to
+  // act on; without it this line renders as the label and nothing else.
+  const [, logs] = await withCapturedLogs(async () => {
+    await captureSftpConnectOptions({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      providerOptions: { "-----BEGIN A PRIVATE KEY-----": "x" },
+    });
+  });
+  const line = logs.find(
+    (l) => l.level === "WARN" && l.message.includes("providerOptions"),
+  );
+  expect(line).toBeDefined();
+  expect(line?.message).toContain("[redacted private key]");
+  expect(line?.message).toContain("not in the allowed set of SFTP");
+  expect(line?.message).toContain("default-deny precaution");
+});
+
+test("a marker in a dropped algorithms sub-key does not delete the guidance", async () => {
+  // The same ordering hazard one level down: the sub-key filter composes the
+  // rejected sub-key ahead of the list of what may be tuned and of the reason
+  // host-key-type negotiation is not among them. A key reaching the top-level
+  // allowlist branch never enters this filter, so this composition needs its
+  // own delivery to pin it.
+  const [, logs] = await withCapturedLogs(async () => {
+    await captureSftpConnectOptions({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      providerOptions: {
+        algorithms: { "-----BEGIN A PRIVATE KEY-----": ["aes256-ctr"] },
+      },
+    });
+  });
+  const line = logs.find(
+    (l) =>
+      l.level === "WARN" && l.message.includes("providerOptions.algorithms."),
+  );
+  expect(line).toBeDefined();
+  expect(line?.message).toContain("[redacted private key]");
+  expect(line?.message).toContain("may be tuned");
+  expect(line?.message).toContain("not operator-overridable");
+});
+
 // --- open (filedrop) ---------------------------------------------------------
 
 test("open sets path and marks connected for filedrop config", async () => {

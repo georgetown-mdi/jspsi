@@ -438,11 +438,8 @@ describe("deposit persists a managed record of the party's side", () => {
     const secret = generateSharedSecret();
     const deposit = buildManagedDeposit(
       {
-        side: "inviter",
-        exchangeFile: composeManagedExchangeFile({
-          connection: webrtcLocator,
-          linkageTerms,
-        }),
+        documentParts: { side: "inviter", linkageTerms },
+        connection: webrtcLocator,
         sharedSecret: secret,
         choices: { label: "Riverbend quarterly" },
       },
@@ -462,11 +459,8 @@ describe("deposit persists a managed record of the party's side", () => {
     const secret = generateSharedSecret();
     const deposit = buildManagedDeposit(
       {
-        side: "acceptor",
-        exchangeFile: composeManagedExchangeFile({
-          connection: webrtcLocator,
-          linkageTerms,
-        }),
+        documentParts: { side: "acceptor", linkageTerms },
+        connection: webrtcLocator,
         sharedSecret: secret,
         choices: { label: "Riverbend quarterly" },
       },
@@ -485,11 +479,8 @@ describe("deposit persists a managed record of the party's side", () => {
     await createManagedExchange(
       buildManagedDeposit(
         {
-          side: "inviter",
-          exchangeFile: composeManagedExchangeFile({
-            connection: webrtcLocator,
-            linkageTerms,
-          }),
+          documentParts: { side: "inviter", linkageTerms },
+          connection: webrtcLocator,
           sharedSecret: generateSharedSecret(),
           choices: { label: "Invited partnership" },
         },
@@ -499,11 +490,8 @@ describe("deposit persists a managed record of the party's side", () => {
     await createManagedExchange(
       buildManagedDeposit(
         {
-          side: "acceptor",
-          exchangeFile: composeManagedExchangeFile({
-            connection: webrtcLocator,
-            linkageTerms,
-          }),
+          documentParts: { side: "acceptor", linkageTerms },
+          connection: webrtcLocator,
           sharedSecret: generateSharedSecret(),
           choices: { label: "Accepted partnership" },
         },

@@ -276,10 +276,12 @@ export interface SftpSessionControls {
   withholdCloseOnDisconnect: boolean;
   /**
    * Accept the TCP connection and never complete the SSH handshake: while set,
-   * each newly accepted connection's socket is stopped from ever writing, so the
-   * server's identification string and key exchange never reach the client and a
+   * each newly accepted connection's socket is stopped from ever writing, so a
    * dial hangs, established but never ready, until the client's own connect
-   * deadline (ssh2's `readyTimeout`) expires. This is the partner server a dial
+   * deadline (ssh2's `readyTimeout`) expires. The mute takes hold as the
+   * connection is accepted, which is after ssh2 has written the server's
+   * identification string, so the client hears that one line and nothing after
+   * it -- the key exchange never reaches it. This is the partner server a dial
    * spends its whole budget against. Read as each connection is accepted, so it
    * governs every connection established while it is set and leaves earlier ones
    * untouched; false by default. In-process only, like the fault hooks: a native
@@ -293,8 +295,55 @@ export interface SftpSessionControls {
    * connection already accepted under it. The backend's own `stop()` calls this
    * before ending its connections, for the same reason it stops withholding
    * closes: a muted socket cannot answer the disconnect that ends it.
+   *
+   * A session {@link vanishActiveSession} muted is in that pool as well, and is
+   * released WHOLE here -- its closers with its write, and it counts as vanished
+   * no longer -- so unstalling one connection's dial cannot leave another's
+   * session answering again but still impossible to close. Re-arm a vanish that
+   * is still wanted afterwards.
    */
   stopStallingHandshakes(): void;
+  /**
+   * Make the currently established session VANISH: from this call on, nothing
+   * the server produces for it reaches the wire and the server can no longer
+   * close it, so a client with an operation outstanding never gets its reply and
+   * a client with nothing outstanding sees a session that simply went quiet. No
+   * FIN, no reset, no ssh2 `'end'` or `'close'` -- the partner appliance that
+   * stopped answering without hanging up, which the adapter can only discover by
+   * its own liveness deadline.
+   *
+   * Distinct from {@link withholdCloseOnDisconnect}, which is armed before a
+   * connection is accepted and fires only in response to the client's own
+   * disconnect: this one is invoked mid-exchange against a live session that has
+   * asked for nothing. It composes with the caps -- a capped session that is
+   * also vanished is ended server-side while the client hears nothing of it.
+   *
+   * Throws when no session is established or its socket cannot be reached,
+   * rather than silently doing nothing: a test whose vanish quietly missed would
+   * assert "the client heard nothing" against a server that was answering all
+   * along. In-process only, like the fault hooks.
+   */
+  vanishActiveSession(): void;
+  /**
+   * Bring every vanished session back: hand the real write and the real closers
+   * back to each socket {@link vanishActiveSession} silenced, so the connection
+   * can be closed from either side again. The backend's own `stop()` calls this
+   * before ending its connections -- a vanished socket cannot answer that end(),
+   * which would leave `server.close()` waiting forever -- and a test calls it
+   * before its own teardown for the same reason.
+   *
+   * A socket the withheld-close or stalled-handshake control silenced as well is
+   * released here too: each replaced method is held in one place, so whichever
+   * of these releases reaches a socket first hands the real one back. That keeps
+   * teardown terminating regardless of the order the controls are stopped in;
+   * re-arm a control that is still wanted afterwards.
+   *
+   * The release runs whole or not at all in the other direction too: because the
+   * vanish silences its socket in the pools those two controls draw from,
+   * {@link stopWithholdingCloses} and {@link stopStallingHandshakes} each finish
+   * the vanish release they reach rather than leaving half of one standing.
+   */
+  restoreVanishedSessions(): void;
   /**
    * Stop withholding closes entirely: clear {@link withholdCloseOnDisconnect} so
    * later connections close normally, and hand the real closers back to every
@@ -304,6 +353,12 @@ export interface SftpSessionControls {
    * since a client's `end()` awaits a close a silenced server never sends -- and
    * a teardown typically dials once more (the pre-drain reconnect), which the
    * flag would silence in turn.
+   *
+   * A session {@link vanishActiveSession} silenced is in that pool as well, and
+   * is released WHOLE here -- its write with its closers, and it counts as
+   * vanished no longer -- so releasing one connection's withheld close cannot
+   * leave another's session closable but still mute. Re-arm a vanish that is
+   * still wanted afterwards.
    */
   stopWithholdingCloses(): void;
   /**

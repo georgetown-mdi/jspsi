@@ -281,6 +281,224 @@ describe("SFTP session controls: stalled handshake", () => {
     controls.stallHandshakeOnConnect = true;
     expect(() => controls.onConnectionAccepted(undefined)).not.toThrow();
   });
+
+  test("stopping one control leaves the other's hold on a socket in place", () => {
+    // A socket accepted under both controls is silenced on both halves; stopping
+    // one hands back only the half it took.
+    const controls = createSftpSessionControls();
+    const { socket, end, write } = stubSocket();
+    controls.withholdCloseOnDisconnect = true;
+    controls.stallHandshakeOnConnect = true;
+    controls.onConnectionAccepted(socket);
+    controls.stopStallingHandshakes();
+
+    socket.write("x");
+    socket.end();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(end).not.toHaveBeenCalled();
+  });
+});
+
+describe("SFTP session controls: vanished session", () => {
+  const flushImmediate = (): Promise<void> =>
+    new Promise((resolve) => setImmediate(resolve));
+
+  test("a vanished session neither answers nor closes", () => {
+    const controls = createSftpSessionControls();
+    const { conn } = stubConnection();
+    const { socket, end, destroy, write } = stubSocket();
+    controls.onConnectionAccepted(socket);
+    controls.onConnectionReady(conn, socket);
+    // Nothing was armed beforehand and the client has asked for nothing: this
+    // fires against a live session, unlike withholdCloseOnDisconnect.
+    controls.vanishActiveSession();
+
+    expect(socket.write("a reply the client never sees")).toBe(true);
+    socket.end();
+    socket.destroy();
+    expect(write).not.toHaveBeenCalled();
+    expect(end).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  test("restoring hands the real write and closers back", () => {
+    const controls = createSftpSessionControls();
+    const { conn } = stubConnection();
+    const { socket, end, destroy, write } = stubSocket();
+    controls.onConnectionReady(conn, socket);
+    controls.vanishActiveSession();
+    controls.restoreVanishedSessions();
+
+    socket.write("x");
+    socket.end();
+    socket.destroy();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(end).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test("vanishing throws when no session is established", () => {
+    const controls = createSftpSessionControls();
+    expect(() => controls.vanishActiveSession()).toThrow(
+      /no SSH session is currently established/,
+    );
+  });
+
+  test("vanishing throws when the session's socket is unreachable", () => {
+    // Silently doing nothing here would let "the client heard nothing" pass
+    // against a server that was answering all along.
+    const controls = createSftpSessionControls();
+    controls.onConnectionReady(stubConnection().conn);
+    expect(() => controls.vanishActiveSession()).toThrow(
+      /transport socket is unreachable/,
+    );
+  });
+
+  test("it targets the established session, leaving other sockets alone", () => {
+    const controls = createSftpSessionControls();
+    const earlier = stubSocket();
+    controls.onConnectionReady(stubConnection().conn, earlier.socket);
+    const later = stubSocket();
+    controls.onConnectionReady(stubConnection().conn, later.socket);
+    controls.vanishActiveSession();
+
+    earlier.socket.write("x");
+    later.socket.write("x");
+    expect(earlier.write).toHaveBeenCalledTimes(1);
+    expect(later.write).not.toHaveBeenCalled();
+  });
+
+  test("a cap that fires on a vanished session still reaches nobody", async () => {
+    const controls = createSftpSessionControls();
+    const { conn, end: connEnd } = stubConnection();
+    const { socket, end, write } = stubSocket();
+    controls.maxOps = 1;
+    controls.onConnectionReady(conn, socket);
+    controls.vanishActiveSession();
+    controls.recordOp(conn);
+    await flushImmediate();
+
+    // The server both caps the session and never closes it cleanly: its own
+    // teardown runs, and not a byte of it reaches the client.
+    expect(connEnd).toHaveBeenCalledTimes(1);
+    socket.write("x");
+    socket.end();
+    expect(write).not.toHaveBeenCalled();
+    expect(end).not.toHaveBeenCalled();
+  });
+
+  test("restoring reaches a socket whose connection was already released", () => {
+    // A capped session is released server-side while the client still hears
+    // nothing, so the release cannot be what holds the restore.
+    const controls = createSftpSessionControls();
+    const { conn } = stubConnection();
+    const { socket, end, write } = stubSocket();
+    controls.onConnectionReady(conn, socket);
+    controls.vanishActiveSession();
+    controls.releaseConnection(conn);
+    controls.restoreVanishedSessions();
+
+    socket.write("x");
+    socket.end();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  test("either release order hands back the real methods, never a stub", () => {
+    // Each replaced method is held in one place, so a socket both controls
+    // silenced is restored by whichever release reaches it first and the other
+    // cannot reinstate a stub over the real one.
+    const withholdFirst = createSftpSessionControls();
+    const a = stubSocket();
+    withholdFirst.withholdCloseOnDisconnect = true;
+    withholdFirst.onConnectionAccepted(a.socket);
+    withholdFirst.onConnectionReady(stubConnection().conn, a.socket);
+    withholdFirst.vanishActiveSession();
+    withholdFirst.stopWithholdingCloses();
+    withholdFirst.restoreVanishedSessions();
+
+    a.socket.end();
+    a.socket.write("x");
+    expect(a.end).toHaveBeenCalledTimes(1);
+    expect(a.write).toHaveBeenCalledTimes(1);
+
+    const vanishFirst = createSftpSessionControls();
+    const b = stubSocket();
+    vanishFirst.withholdCloseOnDisconnect = true;
+    vanishFirst.onConnectionAccepted(b.socket);
+    vanishFirst.onConnectionReady(stubConnection().conn, b.socket);
+    vanishFirst.vanishActiveSession();
+    vanishFirst.restoreVanishedSessions();
+    vanishFirst.stopWithholdingCloses();
+
+    b.socket.end();
+    b.socket.write("x");
+    expect(b.end).toHaveBeenCalledTimes(1);
+    expect(b.write).toHaveBeenCalledTimes(1);
+  });
+
+  test("stopping the stall control releases a vanished socket in full", () => {
+    // The stall control and the vanish share one pool of muted sockets, so the
+    // stop that unblocks a later dial reaches a session vanished on another
+    // connection. Handing back only the write it finds there would leave that
+    // socket answering again while still impossible to close.
+    const controls = createSftpSessionControls();
+    const stalled = stubSocket();
+    controls.stallHandshakeOnConnect = true;
+    controls.onConnectionAccepted(stalled.socket);
+    const vanished = stubSocket();
+    controls.onConnectionReady(stubConnection().conn, vanished.socket);
+    controls.vanishActiveSession();
+
+    controls.stopStallingHandshakes();
+
+    vanished.socket.write("x");
+    vanished.socket.end();
+    vanished.socket.destroy();
+    expect(vanished.write).toHaveBeenCalledTimes(1);
+    expect(vanished.end).toHaveBeenCalledTimes(1);
+    expect(vanished.destroy).toHaveBeenCalledTimes(1);
+    stalled.socket.write("x");
+    expect(stalled.write).toHaveBeenCalledTimes(1);
+
+    // The released socket is no longer vanished, so a control re-armed on it is
+    // not silently disarmed by the next restore.
+    controls.withholdCloseOnDisconnect = true;
+    controls.onConnectionAccepted(vanished.socket);
+    controls.restoreVanishedSessions();
+    vanished.socket.end();
+    expect(vanished.end).toHaveBeenCalledTimes(1);
+  });
+
+  test("stopping the withheld-close control releases a vanished socket in full", () => {
+    // The mirror image: the withheld-close control and the vanish share one pool
+    // of silenced closers, and a socket left closable but mute is no more usable
+    // a measurement than one left mute but closable.
+    const controls = createSftpSessionControls();
+    const silenced = stubSocket();
+    controls.withholdCloseOnDisconnect = true;
+    controls.onConnectionAccepted(silenced.socket);
+    const vanished = stubSocket();
+    controls.onConnectionReady(stubConnection().conn, vanished.socket);
+    controls.vanishActiveSession();
+
+    controls.stopWithholdingCloses();
+
+    vanished.socket.write("x");
+    vanished.socket.end();
+    vanished.socket.destroy();
+    expect(vanished.write).toHaveBeenCalledTimes(1);
+    expect(vanished.end).toHaveBeenCalledTimes(1);
+    expect(vanished.destroy).toHaveBeenCalledTimes(1);
+    silenced.socket.end();
+    expect(silenced.end).toHaveBeenCalledTimes(1);
+
+    controls.stallHandshakeOnConnect = true;
+    controls.onConnectionAccepted(vanished.socket);
+    controls.restoreVanishedSessions();
+    vanished.socket.write("y");
+    expect(vanished.write).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("SFTP session controls: op counting and handshakes", () => {

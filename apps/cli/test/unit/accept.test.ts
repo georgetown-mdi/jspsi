@@ -2887,11 +2887,11 @@ test("handler: hostile terms stay printable ASCII on the prompt's own sink", asy
 // --- handler: online accept threads the token lock-in to the persistence layer
 
 test("handler: online accept forwards the token's disclosed set to runOnlineBootstrap", async () => {
-  // The one wiring this task adds on the accept side: the online handler must pass
-  // token.disclosedPayloadColumns to runOnlineBootstrap as
-  // expectedReceivedPayloadColumns, so the fresh config persists the consented
-  // received-column lock-in (runOnlineBootstrap's own tests cover the write). It is
-  // mocked here so no connection is opened; --consent-to-terms skips the prompt.
+  // The accept-side wiring: the online handler must pass
+  // token.disclosedPayloadColumns to runOnlineBootstrap as the acceptance's
+  // receivedPayloadLockIn, so the config records the consented received-column
+  // lock-in (runOnlineBootstrap's own tests cover the write). It is mocked here so
+  // no connection is opened; --consent-to-terms skips the prompt.
   const { dir, input, configFile, keyFile } = offlineAcceptFixture();
   const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
   runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
@@ -2916,15 +2916,66 @@ test("handler: online accept forwards the token's disclosed set to runOnlineBoot
     expect(exit).not.toHaveBeenCalled();
     expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
     const passed = runOnlineBootstrapMock.mock.calls[0][0];
-    expect(passed.expectedReceivedPayloadColumns).toEqual([
-      "diagnosis",
-      "notes",
-    ]);
+    expect(passed.receivedPayloadLockIn).toEqual({
+      consentedColumns: ["diagnosis", "notes"],
+    });
     // A fresh (non-reuse) config, so the lock-in is actually written.
     expect(passed.reuseExistingConfig).toBe(false);
   } finally {
     exit.mockRestore();
     // Module-level mock: reset so no later test inherits this call/impl.
+    runOnlineBootstrapMock.mockReset();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: online accept-reuse forwards the lock-in the kept config must be refreshed to", async () => {
+  // A re-accept over a config that reconciles for reuse still carries this
+  // acceptance's consented set to the persistence layer, which refreshes the kept
+  // config's field in place -- the reuse branch must not be a no-op, or the next
+  // recurring exchange would enforce the previous acceptance's set against an
+  // honest partner. A subset-less invitation forwards the decision with no columns,
+  // which removes the stale field rather than leaving it.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    // A config whose linkage terms and connection agree with the invitation and the
+    // URL below, so reconciliation keeps it.
+    writeExistingConfig(configFile, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+    });
+    for (const disclosed of [["diagnosis", "notes"], undefined]) {
+      runOnlineBootstrapMock.mockClear();
+      const encoded = await encodeInvitation({
+        ...sampleToken(FUTURE()),
+        disclosedPayloadColumns: disclosed,
+      });
+      await acceptHandler({
+        _: [],
+        $0: "psilink",
+        args: ["file:///mnt/share", encoded, input],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+      expect(exit).not.toHaveBeenCalled();
+      expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
+      const passed = runOnlineBootstrapMock.mock.calls[0][0];
+      expect(passed.reuseExistingConfig).toBe(true);
+      // Strict: the subset-less case must forward the DECISION with no columns,
+      // which removes the field, not an absent decision, which leaves it standing.
+      expect(passed.receivedPayloadLockIn).toStrictEqual({
+        consentedColumns: disclosed,
+      });
+    }
+  } finally {
+    exit.mockRestore();
     runOnlineBootstrapMock.mockReset();
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -230,7 +230,7 @@ function stubRendezvousMounted(): void {
       const url = String(input);
       if (url === "/api/jobs/rendezvous")
         return Promise.resolve(
-          jsonResponse({ configured: true, path: "/mnt/rendezvous" }),
+          jsonResponse({ configured: true, locator: "rendezvous-folder" }),
         );
       if (url === "/api/jobs/inputs")
         return Promise.resolve(jsonResponse({ configured: true, files: [] }));
@@ -342,7 +342,7 @@ function stubServerJobAccept(options: AcceptStubOptions = {}): {
       captured.push({ url, method: init?.method ?? "GET" });
       if (url === "/api/jobs/rendezvous")
         return Promise.resolve(
-          jsonResponse({ configured: true, path: "/mnt/rendezvous" }),
+          jsonResponse({ configured: true, locator: "rendezvous-folder" }),
         );
       if (url === "/api/jobs/inputs")
         return Promise.resolve(

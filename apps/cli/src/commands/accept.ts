@@ -6,6 +6,7 @@ import type { Argv, Arguments } from "yargs";
 import {
   describeDecodeError,
   deriveAcceptedLinkageTerms,
+  deriveOutboundPayloadConsent,
   disclosedColumnNames,
   getLogger,
   parseExchangeSpec,
@@ -549,9 +550,10 @@ function reconcileAcceptConfig(params: {
   log.info(
     conn.warnings.length === 0
       ? `the existing configuration at ${configPath} matches ${against}; ` +
-          "it will be reused unchanged."
-      : `the existing configuration at ${configPath} will be reused unchanged; ` +
-          "the connection differences above apply to this exchange only.",
+          "it will be reused with its connection and linkage settings unchanged."
+      : `the existing configuration at ${configPath} will be reused with its ` +
+          "connection and linkage settings unchanged; the connection " +
+          "differences above apply to this exchange only.",
   );
   // The kept config's own output terms ride back with the verdict: the later
   // run is governed by them, and this diff deliberately compares no output
@@ -638,28 +640,23 @@ export async function handler(argv: Arguments): Promise<void> {
       // infers one from the same CSV). The offline path has no prepared exchange to
       // read: it writes a configuration and stops, so an absent spec metadata is
       // genuinely not-yet-known and the display forward-references it.
-      const ownOutboundSend =
+      const ownMetadata =
         ready.mode === "online"
-          ? disclosedColumnNames(ready.prepared.metadata)
-          : ready.dataSpec.metadata !== undefined
-            ? disclosedColumnNames(ready.dataSpec.metadata)
-            : undefined;
+          ? ready.prepared.metadata
+          : ready.dataSpec.metadata;
+      const ownOutboundSend =
+        ownMetadata !== undefined
+          ? disclosedColumnNames(ownMetadata)
+          : undefined;
       // This party's consent to its OWN outbound set, recorded into the
       // configuration this acceptance writes so a later run cannot transmit a set no
-      // party chose. What is recorded is exactly what the prompt below shows (or
-      // what --consent-to-terms records advance consent to), so the two cannot
-      // differ. `pending` where the set is not resolvable here: the first run that
-      // can resolve it shows and confirms it before connecting, and an unattended
-      // run refuses instead. Nothing at all where the invitation gives the inviting
-      // party no result -- the payload step then transmits nothing whatever the
-      // input holds, so there is no disclosure to consent to, matching the display's
-      // no-payload line and the run-time check's own output gate.
-      const outboundPayloadConsent: OutboundPayloadConsent | undefined = !ready
-        .dataSpec.linkageTerms.output.shareWithPartner
-        ? undefined
-        : ownOutboundSend === undefined
-          ? { status: "pending" }
-          : { status: "confirmed", columns: ownOutboundSend };
+      // party chose. Derived from the same metadata the display's set resolves from,
+      // so what is recorded is exactly what the prompt below shows (or what
+      // --consent-to-terms records advance consent to).
+      const outboundPayloadConsent = deriveOutboundPayloadConsent(
+        ready.dataSpec.linkageTerms.output,
+        ownMetadata,
+      );
       // What a REUSED config's record becomes. The later run is governed by the
       // kept config's own terms, and reconciliation compares no output field, so
       // an invitation whose mirror says "nothing transmitted" cannot decide that
@@ -734,15 +731,20 @@ export async function handler(argv: Arguments): Promise<void> {
           }),
           eventStream: options.eventStream,
           reuseExistingConfig: ready.reuseExistingConfig,
-          // Persist the consented received-column lock-in into the fresh config so
-          // the later `psilink exchange` enforces it, the online sibling of the
-          // offline path's expectedPayloadColumns write below. The set is known up
-          // front from the token (in the inviter's namespace), so it rides the
-          // acceptance hook's first write; reconcileReceivedPayload then fails closed
-          // on a divergent received payload. Absent -- and reconciled lazily -- when
-          // the invitation carried no disclosed subset. No-op on the reuse path,
-          // which keeps the operator's config untouched.
-          expectedReceivedPayloadColumns: ready.token.disclosedPayloadColumns,
+          // Persist the consented received-column lock-in so the later `psilink
+          // exchange` enforces it, the online sibling of the offline path's
+          // expectedPayloadColumns write below. The set is known up front from the
+          // token (in the inviter's namespace), so it rides the acceptance hook's
+          // first write on a fresh config and refreshes the kept config's field
+          // surgically on the reuse path -- the operator has just re-consented on
+          // THIS acceptance, and a prior acceptance's set left standing would
+          // false-abort the next recurring exchange. reconcileReceivedPayload then
+          // fails closed on a divergent received payload. Consented columns of
+          // undefined -- an invitation carrying no disclosed subset -- record no
+          // lock-in and remove a stale one, leaving the exchange to reconcile lazily.
+          receivedPayloadLockIn: {
+            consentedColumns: ready.token.disclosedPayloadColumns,
+          },
           // Record this party's consent to its own outbound set in the same fresh
           // write, so a later `psilink exchange` from this configuration is held to
           // the columns just consented to here. The reuse path writes no fresh

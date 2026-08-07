@@ -368,13 +368,55 @@ describe("fetchJobRendezvous", () => {
 
   test("returns a configured mount from a clean 200 without retrying", async () => {
     const fetchImpl = vi.fn(() =>
-      Promise.resolve(jsonResponse({ configured: true, path: "/mnt/rvz" })),
+      Promise.resolve(
+        jsonResponse({
+          configured: true,
+          locator: "study-a",
+          folderName: "study-a",
+        }),
+      ),
     );
     expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
       configured: true,
-      path: "/mnt/rvz",
+      locator: "study-a",
+      folderName: "study-a",
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test("carries a locator with no folder name as unnamed, not as unconfigured", async () => {
+    // The mount is usable and the invitation can carry the locator; only the
+    // shared folder's own name is missing, which the accept kit degrades on.
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({ configured: true, locator: "rendezvous" }),
+      ),
+    );
+    expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
+      configured: true,
+      locator: "rendezvous",
+    });
+  });
+
+  test("drops a malformed folder name rather than printing it as one", async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({ configured: true, locator: "study-a", folderName: 7 }),
+      ),
+    );
+    expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
+      configured: true,
+      locator: "study-a",
+    });
+  });
+
+  test("treats a configured body naming no locator as unavailable", async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(jsonResponse({ configured: true })),
+    );
+    expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
+      configured: false,
+    });
   });
 
   test("treats a clean 200 unconfigured as definitive (no retry)", async () => {
@@ -402,11 +444,11 @@ describe("fetchJobRendezvous", () => {
       .fn()
       .mockResolvedValueOnce(new Response(null, { status: 503 }))
       .mockResolvedValueOnce(
-        jsonResponse({ configured: true, path: "/mnt/rvz" }),
+        jsonResponse({ configured: true, locator: "study-a" }),
       );
     expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
       configured: true,
-      path: "/mnt/rvz",
+      locator: "study-a",
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });

@@ -63,8 +63,10 @@ export type {
 export {
   sanitizeErrorForDisplay,
   redactPrivateKeyMaterial,
+  redactAndSanitizeForDisplay,
   MAX_ERROR_CAUSE_DEPTH,
 } from "./utils/sanitizeErrorForDisplay";
+export { reconcileHostKeyFingerprints } from "./hostKeyReconciliation";
 export { describeDecodeError } from "./utils/describeDecodeError";
 export { compileLinearRegex } from "./utils/linearRegex";
 export type { CompiledLinearRegex } from "./utils/linearRegex";

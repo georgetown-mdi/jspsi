@@ -21,7 +21,7 @@ import {
   isProtocolTempName,
   retryPromise,
   sanitizeErrorForDisplay,
-  sanitizeForDisplay,
+  redactAndSanitizeForDisplay,
 } from "@psilink/core";
 
 import { createCappedSink } from "./frameSizeGuard";
@@ -4225,7 +4225,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         `a cleanup delete was re-issued ${MAX_DEFERRED_CLEANUP_REISSUES} ` +
           `times on this SFTP connection without succeeding, so it is not ` +
           `recorded again and its file is left behind: ` +
-          sanitizeForDisplay(path),
+          redactAndSanitizeForDisplay(path),
       );
       return;
     }
@@ -4237,7 +4237,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       this.log.debug(
         `${MAX_DEFERRED_CLEANUP_DELETES} cleanup deletes are already recorded ` +
           `for re-issue on this SFTP connection, so this one is not recorded ` +
-          `and its file is left behind: ${sanitizeForDisplay(path)}`,
+          `and its file is left behind: ${redactAndSanitizeForDisplay(path)}`,
       );
       return;
     }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { keyTypeFromBlob, UsageError } from "@psilink/core";
+import logLibrary from "loglevel";
+import { getLogger, keyTypeFromBlob, UsageError } from "@psilink/core";
 import type { PresentedHostKey, SFTPConnectionConfig } from "@psilink/core";
 
 import {
@@ -7,6 +8,13 @@ import {
   probeHostKeyLines,
   type ProbeHostKeyDeps,
 } from "../../src/commands/probeHostKey";
+import { configureStderrLogging } from "../../src/util/cli";
+import {
+  captureStdio,
+  snapshotDiagnosticSinkAndLevel,
+} from "../loggingTestSupport";
+
+snapshotDiagnosticSinkAndLevel();
 
 const FP = "SHA256:" + "A".repeat(43);
 
@@ -191,6 +199,44 @@ describe("probeHostKeyLines formats and validates the presented key", () => {
     expect(human.summary).toContain(
       "presented a ecdsa-sha2-nistp521-cert-v01@openssh.com host key",
     );
+  });
+
+  test("a private-key marker in the probed host cannot delete the verify step", async () => {
+    // The host is the one fragment of this summary that can still carry a real
+    // marker: a percent-encoded --sftp-url decodes back to literal spaces, so
+    // the URL parse is no bound here (the key type's charset bound already rules
+    // out the other). It sits ahead of the out-of-band verification step, and
+    // the log sink redacts the whole line it is given, so the fragment is
+    // redacted where it is interpolated instead. Asserted on the bytes stderr
+    // wrote, not on the returned string.
+    const marker = "-----BEGIN OPENSSH PRIVATE KEY-----";
+    const human = await probeHostKeyLines(
+      {
+        sftpUrl: `sftp://${encodeURIComponent(marker)}`,
+        connectTimeoutSeconds: 10,
+        json: false,
+        verbosity: 0,
+      },
+      makeDeps({ fingerprint: FP, keyType: "ssh-ed25519" }),
+    );
+
+    const captured = captureStdio();
+    const sink = configureStderrLogging();
+    logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+    try {
+      getLogger("probe-host-key-redaction").info(human.summary!);
+    } finally {
+      sink.close();
+      captured.restore();
+    }
+
+    const rendered = captured.stderrWrites.join("");
+    expect(rendered).toContain("[redacted private key]");
+    expect(rendered).toContain(
+      "Verify it matches the server's published fingerprint out-of-band " +
+        "before pinning it.",
+    );
+    expect(rendered).toContain(FP);
   });
 
   test("a non-canonical fingerprint is rejected before any line is produced", async () => {

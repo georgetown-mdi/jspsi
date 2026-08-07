@@ -447,7 +447,11 @@ describe("console inviter transports and sample data", () => {
   test("with a rendezvous mount and no sftp server the filedrop card runs here by default", async () => {
     stubJobApi({
       sftp: { configured: false },
-      rendezvous: { configured: true, path: "/mnt/rendezvous" },
+      rendezvous: {
+        configured: true,
+        locator: "rendezvous-folder",
+        folderName: "rendezvous-folder",
+      },
     });
     mount(createElement(InviterBench));
     await reachReviewCreate();
@@ -588,10 +592,14 @@ describe("console inviter mint and run", () => {
       .toHaveTextContent("Exchange complete");
   });
 
-  test("a filedrop invitation carries only the rendezvous folder name, not its absolute path", async () => {
+  test("a filedrop invitation carries the shared folder's name the console reported", async () => {
     stubJobApi({
       sftp: { configured: false },
-      rendezvous: { configured: true, path: "/srv/exchanges/psilink" },
+      rendezvous: {
+        configured: true,
+        locator: "psilink",
+        folderName: "psilink",
+      },
     });
     mount(createElement(InviterBench));
     await reachReviewCreate();
@@ -610,8 +618,9 @@ describe("console inviter mint and run", () => {
       document.querySelector(`.${styles.revealArea}`) as HTMLTextAreaElement
     ).value;
     const token = await decodeInvitation(encoded);
-    // The partner-bound token discloses only the shared folder's name (the basename),
-    // never the appliance's resolved absolute path.
+    // The partner-bound token discloses only the shared folder's name; no path on
+    // the appliance is representable in it -- the mount is never sent to the
+    // browser to begin with.
     expect(token.connectionEndpoint).toEqual({
       channel: "filedrop",
       path: "psilink",
@@ -1187,7 +1196,11 @@ describe("console inviter partner accept kit", () => {
     try {
       stubJobApi({
         sftp: { configured: false },
-        rendezvous: { configured: true, path: "/srv/exchanges/psilink" },
+        rendezvous: {
+          configured: true,
+          locator: "psilink",
+          folderName: "psilink",
+        },
       });
       mount(createElement(InviterBench));
       await reachReviewCreate();
@@ -1210,6 +1223,33 @@ describe("console inviter partner accept kit", () => {
       // it stays off the token: the shared folder's name is the whole locator.
       expect(sheet.text).toContain("Shared folder:  psilink");
       expect(sheet.text).not.toContain("/srv/exchanges");
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("a filedrop sheet omits the folder name the console could not report", async () => {
+    const downloads = captureDownloads();
+    try {
+      // A console whose mount point was chosen for it and whose folder it cannot
+      // name: the locator still mints, and the sheet asks for no name check.
+      stubJobApi({
+        sftp: { configured: false },
+        rendezvous: { configured: true, locator: "rendezvous" },
+      });
+      mount(createElement(InviterBench));
+      await reachReviewCreate();
+      await page.getByRole("button", { name: "Create the invitation" }).click();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Your invitation is ready");
+
+      await page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).click();
+      const sheet = await capturedSheet(downloads);
+
+      expect(sheet.text).not.toContain("Shared folder:");
+      expect(sheet.text).toContain("could not put a name to the shared folder");
+      expect(sheet.text).toContain("accept PASTE_YOUR_INVITATION");
     } finally {
       downloads.restore();
     }

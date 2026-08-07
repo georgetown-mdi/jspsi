@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { JOB_DATA_ROOT_ENV } from "./gate";
+import { browseSegment } from "./workInputName";
 
 /**
  * The environment variable naming the operator-mounted rendezvous directory a
@@ -15,8 +16,31 @@ import { JOB_DATA_ROOT_ENV } from "./gate";
  */
 export const JOB_RENDEZVOUS_DIR_ENV = "JOB_RENDEZVOUS_DIR";
 
+/**
+ * The environment variable naming the SHARED FOLDER the rendezvous mount stands
+ * for -- the folder the operator picked, as they and their partner know it --
+ * rather than the container mount point it is bound to. It exists because the
+ * mount point is not always the operator's to name: a launcher that picks the
+ * mount point itself binds every operator's folder at the same fixed path, so
+ * the mount point's own last segment names the launcher's layout instead of the
+ * folder. Set it, and the invitation's advisory locator carries this name.
+ *
+ * Unset is the operator-authored mount, where the mount point IS the operator's
+ * naming and its last segment is the folder's name. A value that is not a bare
+ * folder name -- empty, `.`/`..`, or carrying a path separator, a control
+ * character, or more than the shared segment rule's 255 characters
+ * ({@link browseSegment}) -- leaves the console with no name rather than falling back to the mount
+ * point, because a caller that set this variable has already said the mount
+ * point does not name the folder.
+ *
+ * Server-side configuration, never a browser-sent value: it reaches the partner
+ * in the invitation's locator and on the accept kit.
+ */
+export const JOB_RENDEZVOUS_NAME_ENV = "JOB_RENDEZVOUS_NAME";
+
 declare global {
-  var jobRendezvousDirConfig: { resolvedDir?: string } | undefined;
+  var jobRendezvousDirConfig:
+    { resolvedDir?: string; folderName?: string } | undefined;
 }
 
 /** Resolve the rendezvous directory to an absolute path from
@@ -36,6 +60,67 @@ export function resolveJobRendezvousDir(
   return path.resolve(resolved);
 }
 
+/** The last non-empty segment of a directory path, on either separator, or the
+ * empty string when it has none (the filesystem root). Separator-agnostic so a
+ * path authored on Windows reduces the same way one authored on POSIX does. */
+function lastPathSegment(dirPath: string): string {
+  const segments = dirPath.split(/[/\\]+/).filter((part) => part.length > 0);
+  return segments.length > 0 ? segments[segments.length - 1] : "";
+}
+
+/** A bare folder name, or undefined when the value cannot be one. Nothing here
+ * is a security boundary -- the value is the operator's own -- but a name that
+ * carries a separator would put a path fragment in the partner's invitation,
+ * and one that is empty or a relative-path segment names no folder at all.
+ * The shape rule is {@link browseSegment}, the single-segment predicate the
+ * job surfaces share so their callers cannot drift; a folder name keeps its
+ * leading dot, exactly as a browse segment does. */
+function usableFolderName(value: string): string | undefined {
+  const name = value.trim();
+  return browseSegment(name) ? name : undefined;
+}
+
+/**
+ * The shared folder's own name, or undefined when the console cannot name it.
+ * {@link JOB_RENDEZVOUS_NAME_ENV} when it is set, else the resolved mount's own
+ * last segment -- the operator-authored mount, whose mount point they chose.
+ * A set-but-unusable name resolves to undefined rather than falling back to the
+ * mount point (see {@link JOB_RENDEZVOUS_NAME_ENV}), and so does a mount with no
+ * last segment at all.
+ */
+export function resolveJobRendezvousFolderName(
+  env: NodeJS.ProcessEnv,
+  rendezvousDir: string | undefined,
+): string | undefined {
+  const configured = env[JOB_RENDEZVOUS_NAME_ENV];
+  if (configured !== undefined) return usableFolderName(configured);
+  if (rendezvousDir === undefined) return undefined;
+  return usableFolderName(lastPathSegment(rendezvousDir));
+}
+
+/**
+ * The advisory locator a filedrop invitation minted on this console carries: the
+ * shared folder's name where the console can name it, else the rendezvous
+ * mount's own last segment, which names nothing about the host machine and is
+ * what the partner's CLI remaps anyway. Undefined when no rendezvous directory
+ * is configured, and for the one configured mount that reduces to no segment at
+ * all (the filesystem root).
+ *
+ * The two are separate because only the first is safe to PRINT as the shared
+ * folder's name: the accept kit and the console's own confirm line take the
+ * folder name and say nothing where there is none, while the token always needs
+ * a locator (core's endpoint schema requires a filedrop directory).
+ */
+export function resolveJobRendezvousLocator(
+  rendezvousDir: string | undefined,
+  folderName: string | undefined,
+): string | undefined {
+  if (folderName !== undefined) return folderName;
+  if (rendezvousDir === undefined) return undefined;
+  const segment = lastPathSegment(rendezvousDir);
+  return segment.length > 0 ? segment : undefined;
+}
+
 /**
  * Resolve the rendezvous directory once and memoize it on globalThis, so dev-mode
  * HMR does not re-read it. Undefined when the variable is unset.
@@ -43,10 +128,29 @@ export function resolveJobRendezvousDir(
 export function useJobRendezvousDir(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  globalThis.jobRendezvousDirConfig ??= {
-    resolvedDir: resolveJobRendezvousDir(env),
-  };
-  return globalThis.jobRendezvousDirConfig.resolvedDir;
+  return useJobRendezvousConfig(env).resolvedDir;
+}
+
+/** The shared folder's name for the memoized rendezvous mount, or undefined when
+ * the console cannot name it. See {@link resolveJobRendezvousFolderName}. */
+export function useJobRendezvousFolderName(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  return useJobRendezvousConfig(env).folderName;
+}
+
+function useJobRendezvousConfig(env: NodeJS.ProcessEnv): {
+  resolvedDir?: string;
+  folderName?: string;
+} {
+  if (globalThis.jobRendezvousDirConfig === undefined) {
+    const resolvedDir = resolveJobRendezvousDir(env);
+    globalThis.jobRendezvousDirConfig = {
+      resolvedDir,
+      folderName: resolveJobRendezvousFolderName(env, resolvedDir),
+    };
+  }
+  return globalThis.jobRendezvousDirConfig;
 }
 
 /** Whether `child` is `parent` or nested under it (a lexical containment test over

@@ -4,7 +4,7 @@ import {
   CONSENT_BASIS_MARKERS,
   CONSENT_FACTS,
   PROPOSED_NOT_APPLIED_NOTES,
-  sanitizeForDisplay,
+  redactAndSanitizeForDisplay,
   summarizeInvitation,
 } from "@psilink/core";
 
@@ -325,7 +325,7 @@ export function logDecisionFacts(
     logList(
       emit,
       "    ",
-      ownOutboundSend.map((column) => sanitizeForDisplay(column)),
+      ownOutboundSend.map((column) => redactAndSanitizeForDisplay(column)),
     );
   }
 

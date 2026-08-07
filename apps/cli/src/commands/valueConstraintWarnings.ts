@@ -1,6 +1,6 @@
 import {
   getLogger,
-  sanitizeForDisplay,
+  redactAndSanitizeForDisplay,
   summarizeDatasetConstraintViolations,
 } from "@psilink/core";
 import type { PreparedExchange } from "@psilink/core";
@@ -34,7 +34,7 @@ export function warnOnValueConstraints(
     log.warn(
       `value constraint warning: ${summary.count} cleaned ` +
         `value${summary.count === 1 ? "" : "s"} of linkage field ` +
-        `"${sanitizeForDisplay(summary.field)}" flagged "${summary.label}" ` +
+        `"${redactAndSanitizeForDisplay(summary.field)}" flagged "${summary.label}" ` +
         "(warn-not-enforce; the exchange still proceeds).",
     );
 }

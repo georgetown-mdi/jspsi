@@ -183,9 +183,12 @@ algorithm name.
 **May not say:**
 
 - That receipt signing uses a FIPS-approved algorithm while it runs on Ed25519.
-  It does not, on any certificate, and under certificate 4985 Ed25519 is
-  Non-Approved and Not Allowed. This is a present-tense claim about shipped code,
-  and it stays false until the migration lands.
+  It does not on any OpenSSL Project certificate, and under certificate 4985
+  Ed25519 is Non-Approved and Not Allowed. Two of the forty active certificates
+  do approve EdDSA, and neither yields a verifiable certified module for a
+  freely redistributable image -- see
+  [fips-provider-surface.md](fips-provider-surface.md). This is a present-tense
+  claim about shipped code, and it stays false until the migration lands.
 - That the receipt, the certificate format, or the signed-receipt protocol is
   validated or approved. A certificate attests algorithms; the canonical
   encoding, the domain separation, the per-signer binding, and the

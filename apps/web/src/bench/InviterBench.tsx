@@ -74,7 +74,6 @@ import {
   inviterLedgerRows,
   inviterRailFacts,
   isCliTransport,
-  rendezvousLocatorName,
   resetToRecommended,
   reviewValidation,
   sealEditor,
@@ -84,7 +83,6 @@ import {
 } from "./inviterModel";
 import {
   buildManagedDeposit,
-  composeManagedDocument,
   webrtcLocatorFromEndpoint,
 } from "./manageOfferModel";
 import { downloadSampleCsvs, sampleInviterFile } from "./sampleData";
@@ -252,7 +250,9 @@ export function InviterBench() {
   const [sftpSaveFilePreferred, setSftpSaveFilePreferred] = useState(false);
   // The console's rendezvous mount, fetched once on a console build. Undefined before
   // it resolves; `configured` gates the filedrop transport (offered iff a directory is
-  // mounted) and `path` is the advisory locator minted into a filedrop invitation.
+  // mounted), `locator` is the advisory locator minted into a filedrop invitation, and
+  // `folderName` is the shared folder's own name, present only where the console has
+  // one to show as the folder's name.
   const [rendezvous, setRendezvous] = useState<JobRendezvousConfig>();
   const [demoActive, setDemoActive] = useState(false);
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
@@ -434,27 +434,24 @@ export function InviterBench() {
       const connection = webrtcLocatorFromEndpoint(
         webrtcEndpointFromLocation(invitationLocation()),
       );
-      const exchangeFile = composeManagedDocument(
-        {
-          linkageTerms: invitation.linkageTerms,
-          ...(invitation.metadata !== undefined
-            ? { metadata: invitation.metadata }
-            : {}),
-          ...(invitation.standardization !== undefined
-            ? { standardization: invitation.standardization }
-            : {}),
-          // The token's own published set (including the strict empty set), so
-          // the persisted send-side commitment is the one the partner locked in
-          // -- never a re-derivation that could drift from it.
-          disclosedPayloadColumns: invitation.disclosedPayloadColumns,
-        },
-        connection,
-      );
       await createManagedExchange(
         buildManagedDeposit(
           {
-            side: "inviter",
-            exchangeFile,
+            documentParts: {
+              side: "inviter",
+              linkageTerms: invitation.linkageTerms,
+              ...(invitation.metadata !== undefined
+                ? { metadata: invitation.metadata }
+                : {}),
+              ...(invitation.standardization !== undefined
+                ? { standardization: invitation.standardization }
+                : {}),
+              // The token's own published set (including the strict empty set),
+              // so the persisted send-side commitment is the one the partner
+              // locked in -- never a re-derivation that could drift from it.
+              disclosedPayloadColumns: invitation.disclosedPayloadColumns,
+            },
+            connection,
             sharedSecret: invitation.sharedSecret,
             ...(sourceHandle !== undefined
               ? { inputFileHandle: sourceHandle }
@@ -819,18 +816,25 @@ export function InviterBench() {
       connectionEndpoint = sftpEndpoint;
       kitEndpoint = sftpEndpoint;
     } else if (transport === "filedrop") {
-      // A console filedrop server-job carries the rendezvous directory's NAME (its
-      // basename) as the invitation's advisory locator, so the partner can confirm the
-      // shared folder without the token disclosing the appliance's absolute path. The
-      // mount is server-side; a missing path means the rendezvous state changed
-      // mid-create, so refuse rather than mint a code with no locator.
-      if (rendezvous?.path === undefined) return;
-      const filedropEndpoint = {
-        channel: "filedrop" as const,
-        path: rendezvousLocatorName(rendezvous.path),
+      // A console filedrop server-job carries a NAME as the invitation's advisory
+      // locator, never the appliance's absolute path; the server decides which name
+      // that is. The mount is server-side, so a missing locator means the rendezvous
+      // state changed mid-create: refuse rather than mint a code with none.
+      if (rendezvous?.locator === undefined) return;
+      connectionEndpoint = {
+        channel: "filedrop",
+        path: rendezvous.locator,
       };
-      connectionEndpoint = filedropEndpoint;
-      kitEndpoint = filedropEndpoint;
+      // The sheet is the one place that CALLS the locator the shared folder's name,
+      // so it gets the name only where the console has one; where the locator is
+      // the mount point it was bound at, the sheet says nothing rather than
+      // asking the partner to match a name that is not the folder's.
+      kitEndpoint = {
+        channel: "filedrop",
+        ...(rendezvous.folderName === undefined
+          ? {}
+          : { path: rendezvous.folderName }),
+      };
     }
     setMinting(true);
     setCreateAlert(undefined);

@@ -24,14 +24,19 @@
  * The rendezvous locator the sheet prints back, in the two shapes the console
  * mints: an sftp locator (host, optional port, optional remote directory) or a
  * filedrop locator (the shared folder's NAME, never the appliance's absolute
- * path -- see `rendezvousLocatorName`). Credential-free by construction, as the
- * invitation endpoint it is copied from is.
+ * path). Credential-free by construction, as the invitation endpoint it is
+ * copied from is.
+ *
+ * The filedrop name is optional because the console cannot always name the
+ * shared folder: where the rendezvous mount point was chosen by a launcher
+ * rather than by the operator, the mount point is not the folder's name, and the
+ * sheet omits the name rather than telling the partner to match one that is not.
  */
 import { PLACEHOLDER_SSH_USERNAME } from "@psilink/core";
 
 export type AcceptKitEndpoint =
   | { channel: "sftp"; host: string; port?: number; path?: string }
-  | { channel: "filedrop"; path: string };
+  | { channel: "filedrop"; path?: string };
 
 /** The inputs the sheet is built from. */
 export interface AcceptKitInput {
@@ -105,15 +110,28 @@ function heading(title: string): Array<string> {
  * locator the invitation the partner already holds carries, and on the filedrop
  * channel it is the shared folder's name rather than any path on the inviter's
  * machine.
+ *
+ * The filedrop cross-check is a check, not a promise of equality: the same
+ * shared folder can carry a different name on each side -- a share root mapped
+ * to a drive letter is the ordinary case -- so the sheet asks the partner to
+ * check the name against what they were told rather than to match it.
  */
 function rendezvousLines(endpoint: AcceptKitEndpoint): Array<string> {
   if (endpoint.channel === "filedrop")
-    return [
-      `  Shared folder:  ${printable(endpoint.path)}`,
-      "",
-      "That is the folder's name as your partner sees it. Yours is the same",
-      "folder reached your own way -- check the name matches before you go on.",
-    ];
+    return endpoint.path === undefined
+      ? [
+          "Your partner's console could not put a name to the shared folder, so",
+          "there is no name here to check. Use the folder you and your partner",
+          "agreed on.",
+        ]
+      : [
+          `  Shared folder:  ${printable(endpoint.path)}`,
+          "",
+          "That is what your partner calls the shared folder. Your own name for",
+          "it can differ -- a mapped drive letter, or a folder you named",
+          "yourself -- so check it against the folder you were told to use",
+          "rather than expecting the two to match.",
+        ];
   const port = endpoint.port === undefined ? "" : `:${endpoint.port}`;
   return [
     `  SFTP server:    ${printable(endpoint.host)}${port}`,
@@ -266,9 +284,35 @@ function opening(endpoint: AcceptKitEndpoint): Array<string> {
   ];
 }
 
+/**
+ * The opening of the step that repoints psilink at the partner's own copy of
+ * the shared folder, which turns on whether the sheet could name that folder.
+ * Named, accepting wrote the inviter's name for it. Unnamed, what accepting
+ * wrote is the console's own mount point -- the token always carries a locator
+ * -- so the step calls it a placeholder rather than a name either side chose,
+ * and directs the same replacement.
+ */
+function repointStepOpening(named: boolean): Array<string> {
+  return named
+    ? [
+        "2. Point psilink at your own copy of the shared folder. Accepting wrote",
+        "   your partner's own name for the folder; what psilink needs is where",
+        "   that folder is on your machine. Open psilink.yaml and set:",
+      ]
+    : [
+        "2. Point psilink at your own copy of the shared folder. Accepting wrote",
+        "   a placeholder for the folder, not a name either of you chose; what",
+        "   psilink needs is where that folder is on your machine. Open",
+        "   psilink.yaml and set:",
+      ];
+}
+
 /** The filedrop routing decision: a network drive or DFS path needs the
  * launcher, any folder Docker can open takes the direct commands. */
-function filedropBody(version: string | undefined): Array<string> {
+function filedropBody(
+  version: string | undefined,
+  named: boolean,
+): Array<string> {
   return [
     ...heading("STEP 1 -- WHICH KIND OF FOLDER IS YOURS?"),
     "The answer decides everything below. Pick one.",
@@ -345,9 +389,7 @@ function filedropBody(version: string | undefined): Array<string> {
     "   every command on this sheet, for example",
     `   -v "C:\\Users\\you\\exchange":${WORK_MOUNT}`,
     "",
-    "2. Point psilink at your own copy of the shared folder. Accepting wrote",
-    "   the folder's name as your partner sees it; what psilink needs is",
-    "   where that folder is on your machine. Open psilink.yaml and set:",
+    ...repointStepOpening(named),
     "",
     "     connection:",
     "       channel: filedrop",
@@ -478,7 +520,7 @@ export function buildAcceptKit({
   const lines = [
     ...opening(endpoint),
     ...(endpoint.channel === "filedrop"
-      ? filedropBody(version)
+      ? filedropBody(version, endpoint.path !== undefined)
       : sftpBody(version)),
     ...closing(version),
   ];

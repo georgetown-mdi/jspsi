@@ -33,7 +33,11 @@ import type {
   WebRTCConnectionConfig,
 } from "@psilink/core";
 
-import { persistOutboundPayloadConsent, saveConfig } from "./config";
+import {
+  persistExpectedPayloadColumns,
+  persistOutboundPayloadConsent,
+  saveConfig,
+} from "./config";
 import { detectFileConflicts } from "./fileUtils";
 import { resolveConnectionCredentials } from "./util/atSignRefs";
 import { establishHostKeyTrust, type HostKeyPersistence } from "./hostKeyTrust";
@@ -627,10 +631,13 @@ export function observedReceivedColumnsForSave(
  * `saveConfig` strips any shared-secret material regardless, so moving the write
  * into the hook changes only when the config is persisted, not what is persisted.
  *
- * With `reuseExistingConfig`, the config write is skipped entirely: the accept
- * path has already reconciled a pre-existing config against the invitation and
- * the URL and keeps it untouched (the rotated key is still saved by
- * `runProtocol`). Otherwise the hook re-gates the config path immediately before
+ * With `reuseExistingConfig`, the config write is skipped: the accept path has
+ * already reconciled a pre-existing config against the invitation and the URL, so
+ * its connection, linkage, and operator content stand (the rotated key is still
+ * saved by `runProtocol`). The acceptance's own machine-managed consent records --
+ * the received-payload lock-in and the outbound-payload consent -- are the
+ * exception, refreshed surgically in place so neither lags the acceptance the
+ * operator just consented to. Otherwise the hook re-gates the config path immediately before
  * writing -- so a config that appeared between the pre-network conflict check
  * and this write is not silently overwritten, matching the offline path's
  * `provisionConfigAndKey` re-gate -- and surfaces a conflict as a non-fatal
@@ -656,7 +663,10 @@ export async function runOnlineBootstrap(params: {
    * the offline invite/accept paths, which never reach runProtocol.
    */
   eventStream?: boolean;
-  /** Keep a pre-existing, already-reconciled config: skip the config write. */
+  /**
+   * Keep a pre-existing, already-reconciled config: skip the config write, and
+   * refresh only the acceptance's machine-managed consent records in place.
+   */
   reuseExistingConfig?: boolean;
   /**
    * Crystallize the received-payload set this party OBSERVES during the exchange
@@ -671,52 +681,63 @@ export async function runOnlineBootstrap(params: {
    */
   persistObservedReceivedPayload?: boolean;
   /**
-   * The received-payload column set the online ACCEPTOR consented to UP FRONT from
-   * the invitation token (`token.disclosedPayloadColumns`), to persist into the
-   * freshly-written config's `expectedPayloadColumns` so a later recurring `psilink
-   * exchange` fails closed on a divergent received payload (reconcileReceivedPayload)
-   * -- the online sibling of the offline-accept persistence. Unlike
-   * `persistObservedReceivedPayload` (the inviter's
-   * observe-then-persist, which learns its set only AFTER the exchange and writes it
-   * in a SECOND post-exchange write), this set is known BEFORE the exchange, so it
-   * rides the acceptance hook's FIRST write. An empty array is a real "receive
-   * nothing" lock-in (a later non-empty payload aborts), mirroring the offline path
-   * -- distinct from the observe path, which drops an ambiguous empty observation;
-   * `undefined` persists no field, leaving the recurring path to reconcile lazily.
-   * No-op on the reuse path, which writes no fresh config. The invitation bounds this
-   * set to `MAX_PAYLOAD_ENTRIES` at intake, so it needs no cap check here (unlike the
+   * The online ACCEPTOR's received-payload lock-in for THIS acceptance: the set it
+   * consented to UP FRONT from the invitation token
+   * (`token.disclosedPayloadColumns`), recorded as the config's
+   * `expectedPayloadColumns` so a later recurring `psilink exchange` fails closed on
+   * a divergent received payload (reconcileReceivedPayload) -- the online sibling of
+   * the offline-accept persistence. Unlike `persistObservedReceivedPayload` (the
+   * inviter's observe-then-persist, which learns its set only AFTER the exchange and
+   * writes it in a SECOND post-exchange write), this set is known BEFORE the
+   * exchange, so it rides the acceptance hook's FIRST write on a fresh config and a
+   * surgical in-place refresh of the kept config on the reuse path.
+   *
+   * The WRAPPER's presence -- not the columns inside it -- marks a caller that owns
+   * this field. `consentedColumns: undefined` is an acceptance whose invitation
+   * carried no disclosed subset (an older or metadata-unknown mint): it records no
+   * field on a fresh config and REMOVES a stale one under reuse, leaving the
+   * recurring path to reconcile lazily. An absent parameter is a caller with no
+   * lock-in of its own (the online INVITER, whose received set is learned by
+   * observation), whose config keeps whatever field it already has. An empty array
+   * is a real "receive nothing" lock-in (a later non-empty payload aborts),
+   * mirroring the offline path -- distinct from the observe path, which drops an
+   * ambiguous empty observation. The invitation bounds this set to
+   * `MAX_PAYLOAD_ENTRIES` at intake, so it needs no cap check here (unlike the
    * observe path's unbounded source).
    */
-  expectedReceivedPayloadColumns?: string[];
+  receivedPayloadLockIn?: { consentedColumns: string[] | undefined };
   /**
    * The ACCEPTOR's consent to its OWN outbound payload set, to persist into the
    * freshly-written config so a later recurring `psilink exchange` sends exactly
    * the columns consented to here or stops to ask (assertOutboundPayloadConsented).
-   * The send-side counterpart of `expectedReceivedPayloadColumns` above, and known
+   * The send-side counterpart of `receivedPayloadLockIn` above, and known
    * at the same moment -- what the acceptance displayed -- so it rides the same
    * first write. `undefined` persists no field, which is the online INVITER (its
    * own set is authored at mint and pinned as `disclosedPayloadColumns`) and an
-   * acceptance that transmits nothing to its partner. No-op on the reuse path,
-   * which writes no fresh config.
+   * acceptance that transmits nothing to its partner. On the reuse path the
+   * record is refreshed in place on the kept config, beside the
+   * `receivedPayloadLockIn` refresh.
    */
   outboundPayloadConsent?: OutboundPayloadConsent;
 }): Promise<{ configWriteError?: unknown }> {
   // The two received-payload persistence inputs are mutually exclusive by design:
-  // the online ACCEPTOR passes expectedReceivedPayloadColumns (its set is known up
-  // front from the token, folded into the hook's first write), while the online
-  // INVITER and the zero-setup --save party pass persistObservedReceivedPayload
-  // (their set is learned only by observation, crystallized in a second write after
-  // the exchange). No caller sets both; this encodes that invariant as a check
-  // rather than caller discipline, because if both were set the observe-on-save
-  // second write would silently clobber the acceptor's up-front token lock-in.
+  // the online ACCEPTOR passes receivedPayloadLockIn (its set is known up front from
+  // the token, folded into the hook's first write and refreshed in place under
+  // reuse), while the online INVITER and the zero-setup --save party pass
+  // persistObservedReceivedPayload (their set is learned only by observation,
+  // crystallized in a second write after the exchange). No caller sets both; this
+  // encodes that invariant as a check rather than caller discipline, because if both
+  // were set the observe-on-save second write would silently clobber the acceptor's
+  // up-front token lock-in, and the reuse refresh would overwrite a field the
+  // observing party owns.
   if (
     params.persistObservedReceivedPayload &&
-    params.expectedReceivedPayloadColumns !== undefined
+    params.receivedPayloadLockIn !== undefined
   )
     throw new Error(
-      "runOnlineBootstrap received both expectedReceivedPayloadColumns (the " +
-        "acceptor's up-front token lock-in) and persistObservedReceivedPayload " +
-        "(the inviter's observe-on-save); these are mutually exclusive.",
+      "runOnlineBootstrap received both receivedPayloadLockIn (the acceptor's " +
+        "up-front token lock-in) and persistObservedReceivedPayload (the " +
+        "inviter's observe-on-save); these are mutually exclusive.",
     );
 
   // `connection` is already narrowed to the channels runProtocol supports
@@ -812,24 +833,54 @@ export async function runOnlineBootstrap(params: {
         keyPersisted = true;
         if (params.reuseExistingConfig) {
           // The reconcile check already confirmed the pre-existing config agrees
-          // with the invitation and URL; keep it untouched. The rotated key is
-          // saved by runProtocol above; nothing is written here, so
-          // `configWritten` stays false (no fresh config was persisted).
+          // with the invitation and URL; its connection and linkage blocks are
+          // kept untouched. The rotated key is saved by runProtocol above; no
+          // fresh config is written here, so `configWritten` stays false.
           //
-          // One machine-managed field is the exception: the operator has just
-          // consented to THIS acceptance's outbound set, and leaving a prior
-          // acceptance's record stale would make the next recurring run stop
-          // for a set the operator never declined -- the same rationale as the
-          // offline reuse branch's surgical write, at this hook's same
-          // post-handshake timing as the fresh write below. Gated on a defined
-          // record: the caller derives the reuse-path value from the KEPT
-          // config's own output terms (the accept handler's reuse derivation),
-          // so undefined here means that config itself does not transmit -- a
-          // leftover record is then inert against those same terms -- and the
-          // operator's config stays byte-identical.
-          // A failure is non-fatal like the observed-payload write below: the
-          // exchange has completed, the kept config stands, and the stale
-          // record only makes the next run show the columns and ask again.
+          // The two machine-managed consent records are the exception, each
+          // refreshed surgically in place: the operator has just consented to
+          // THIS acceptance's received and outbound sets, and leaving a prior
+          // acceptance's value stale would false-abort the next recurring
+          // exchange against an honest partner (the received lock-in) or stop it
+          // for a set the operator never declined (the outbound record) -- the
+          // same rationale as the offline reuse branch's writes, at this hook's
+          // same post-handshake timing as the fresh write below. Each is gated on
+          // its own caller's input and caught independently, so one failure
+          // neither skips the other nor is fatal: this hook runs after the
+          // handshake but before the data exchange, and a failed record write
+          // must not abort a viable run -- the kept config retains its prior
+          // state, and runProtocol treats a hook throw as non-fatal.
+          //
+          // The received lock-in follows the ACCEPTANCE's decision, so its gate
+          // is the presence of a lock-in at all: consented columns of undefined
+          // is a subset-less invitation, which REMOVES a stale field rather than
+          // leave a set this acceptance did not consent to, while a caller that
+          // owns no lock-in (the inviter, which learns its received set by
+          // observation) never reaches this write.
+          if (params.receivedPayloadLockIn !== undefined) {
+            try {
+              persistExpectedPayloadColumns(
+                params.configPath,
+                params.receivedPayloadLockIn.consentedColumns,
+              );
+            } catch (err) {
+              getLogger(params.loggerName).warn(
+                `the exchange continues and the existing configuration at ` +
+                  `${params.configPath} stands, but recording the columns you ` +
+                  `consented to receive in it failed; the next 'psilink ` +
+                  `exchange' holds the received payload to the set that ` +
+                  `configuration already records, and checks it against no ` +
+                  `consented set if it records none: ` +
+                  sanitizeErrorForDisplay(err),
+              );
+            }
+          }
+          // The outbound record's removal case follows the KEPT config's own
+          // output terms rather than this parameter being absent: the caller
+          // derives the reuse-path value from those terms (the accept handler's
+          // reuse derivation), so undefined here means that config itself does
+          // not transmit -- a leftover record is then inert against those same
+          // terms -- and the record is left as it stands.
           if (params.outboundPayloadConsent !== undefined) {
             try {
               persistOutboundPayloadConsent(
@@ -838,7 +889,7 @@ export async function runOnlineBootstrap(params: {
               );
             } catch (err) {
               getLogger(params.loggerName).warn(
-                `the exchange succeeded and the existing configuration at ` +
+                `the exchange continues and the existing configuration at ` +
                   `${params.configPath} stands, but recording your ` +
                   `outbound-column confirmation in it failed; the next ` +
                   `'psilink exchange' compares against the previously ` +
@@ -848,7 +899,6 @@ export async function runOnlineBootstrap(params: {
               );
             }
           }
-          //
           // Unlike the offline path (provisionConfigAndKey re-gates the config's
           // presence before writing the key) and the non-reuse branch below
           // (which re-gates before saveConfig), there is deliberately no config
@@ -878,11 +928,15 @@ export async function runOnlineBootstrap(params: {
           ...params.dataSpec,
           // The online ACCEPTOR's up-front token lock-in rides this first write:
           // the set is known before the exchange (unlike the inviter's observed set,
-          // written in the second write below). Folded with the same `!== undefined`
-          // discriminant the offline-accept path uses -- an empty array is a real
-          // "receive nothing" lock-in, only an absent set stays lazy.
-          ...(params.expectedReceivedPayloadColumns !== undefined
-            ? { expectedPayloadColumns: params.expectedReceivedPayloadColumns }
+          // written in the second write below). Folded on the consented columns with
+          // the same `!== undefined` discriminant the offline-accept path uses -- an
+          // empty array is a real "receive nothing" lock-in, only an absent set stays
+          // lazy.
+          ...(params.receivedPayloadLockIn?.consentedColumns !== undefined
+            ? {
+                expectedPayloadColumns:
+                  params.receivedPayloadLockIn.consentedColumns,
+              }
             : {}),
           // The acceptor's own outbound-set consent rides the same write, from the
           // same moment: the set was displayed and consented to before this
@@ -915,8 +969,8 @@ export async function runOnlineBootstrap(params: {
     // disk. Gated on: persistObservedReceivedPayload (only the inviter, which
     // learns its received set by observation; the online accept path knows its set
     // up front from the token and does not pass this), configWritten (a fresh
-    // config the hook actually wrote -- never the reuse path, which keeps the
-    // operator's config untouched, nor a hook that failed), and a non-empty
+    // config the hook actually wrote -- never the reuse path, whose in-place
+    // consent-record refreshes leave it false, nor a hook that failed), and a non-empty
     // observation (observedReceivedColumnsForSave drops the ambiguous empty case).
     // Unlike the hook's first saveConfig this write is deliberately NOT preceded by
     // a detectFileConflicts re-gate: it overwrites the config THIS run wrote at
@@ -987,9 +1041,10 @@ export async function runOnlineBootstrap(params: {
 /**
  * Log the post-exchange outcome of an online invite/accept run. On a clean run
  * both files were written. When a pre-existing config was reused
- * (`reuseExistingConfig`), only the rotated key was saved and the config was
- * left untouched, so the message reflects that rather than claiming a fresh
- * write. When the config write failed at acceptance (`configWriteError` set),
+ * (`reuseExistingConfig`), the rotated key was saved and the config was kept,
+ * refreshed only in its machine-managed consent records, so the message
+ * reflects reuse rather than claiming a fresh write. When the config write
+ * failed at acceptance (`configWriteError` set),
  * the rotated key was still saved but the config was not, so the message must
  * not claim otherwise -- the underlying error was already logged at error level
  * by `runProtocol`, so this only corrects the summary and points back to it. The

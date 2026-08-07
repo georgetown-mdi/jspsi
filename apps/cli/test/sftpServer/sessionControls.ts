@@ -16,10 +16,10 @@ export interface DroppableConnection {
 }
 
 /**
- * The slice of a connection's transport socket the withheld-close control
- * reaches: the two methods that would otherwise close it from the server side.
- * Narrowing to this lets the hub be driven by a stub in its own unit test, with
- * no live socket.
+ * The slice of a connection's transport socket the silencing controls reach to
+ * stop it closing: the two methods that would otherwise close it from the server
+ * side. Narrowing to this lets the hub be driven by a stub in its own unit test,
+ * with no live socket.
  */
 export interface ClosableSocket {
   end(...args: unknown[]): unknown;
@@ -27,10 +27,9 @@ export interface ClosableSocket {
 }
 
 /**
- * A connection's transport socket as the accept-time controls reach it: the two
- * closers the withheld-close control replaces, plus the one write the
- * stalled-handshake control replaces (every server-side byte of the SSH
- * identification exchange and key exchange goes through it).
+ * A connection's transport socket as the silencing controls reach it: the two
+ * closers plus the one write every server-side byte goes through, from the SSH
+ * identification exchange to each SFTP reply.
  */
 export interface ControlledSocket extends ClosableSocket {
   write(...args: unknown[]): unknown;
@@ -62,6 +61,9 @@ export const COUNTED_SFTP_OPS = [
 interface TrackedSession {
   opsServed: number;
   dropped: boolean;
+  // The connection's transport socket, when the backend could reach it: what
+  // vanishActiveSession silences on a session that is already established.
+  socket?: ControlledSocket;
   lifetimeTimer?: NodeJS.Timeout;
   idleTimer?: NodeJS.Timeout;
 }
@@ -121,8 +123,17 @@ export interface SftpSessionControlHub extends SftpSessionControls {
    * controls are off, and when the backend cannot reach the socket.
    */
   onConnectionAccepted(socket: ControlledSocket | undefined): void;
-  /** Record a completed SSH handshake and begin tracking the connection. */
-  onConnectionReady(conn: DroppableConnection): void;
+  /**
+   * Record a completed SSH handshake and begin tracking the connection. The
+   * socket is kept against the connection so a mid-exchange control can reach
+   * the established session's transport; the hub tolerates a backend that cannot
+   * supply it, and {@link SftpSessionControls.vanishActiveSession} then throws
+   * rather than pretending to have silenced it.
+   */
+  onConnectionReady(
+    conn: DroppableConnection,
+    socket?: ControlledSocket | undefined,
+  ): void;
   /** Count one SFTP operation on a tracked connection, applying the op caps. */
   recordOp(conn: DroppableConnection): void;
   /** Stop tracking a connection and cancel its pending drops. */
@@ -138,18 +149,81 @@ export interface SftpSessionControlHub extends SftpSessionControls {
  */
 export function createSftpSessionControls(): SftpSessionControlHub {
   const sessions = new Map<DroppableConnection, TrackedSession>();
-  // Sockets the withheld-close control has silenced, against the real methods it
-  // replaced, so stopWithholdingCloses can hand them back.
-  const withheldSockets = new Map<
+  // Sockets whose closers have been silenced, against the real methods they
+  // replaced. Both the withheld-close control and the vanish control silence
+  // closers; holding each socket's real pair in ONE place is what makes the
+  // releases order-independent -- whichever runs first hands the real closers
+  // back and the other finds nothing left to restore.
+  const silencedSockets = new Map<
     ClosableSocket,
     { end: ClosableSocket["end"]; destroy: ClosableSocket["destroy"] }
   >();
-  // The same, for the sockets the stalled-handshake control has muted, so
-  // stopStallingHandshakes can hand their write back.
-  const stalledSockets = new Map<
+  // The same, for the sockets whose write has been muted by the
+  // stalled-handshake control or the vanish control.
+  const mutedSockets = new Map<
     ControlledSocket,
     { write: ControlledSocket["write"] }
   >();
+  // Sockets the vanish control has silenced. Membership only: the real methods
+  // live in the two maps above. Kept independently of `sessions` so a vanished
+  // connection that is then released -- by a cap ending it server-side, say --
+  // can still be handed its real methods back.
+  const vanishedSockets = new Set<ControlledSocket>();
+
+  // Stop a socket ever closing itself. Reads still drain, so the connection
+  // serves traffic normally; ssh2's server ends this socket itself when a
+  // client's DISCONNECT arrives, so half-open alone does not keep it quiet and
+  // both closers have to go.
+  const silenceClosers = (socket: ClosableSocket): void => {
+    if (silencedSockets.has(socket)) return;
+    silencedSockets.set(socket, {
+      end: socket.end.bind(socket),
+      destroy: socket.destroy.bind(socket),
+    });
+    socket.end = () => socket;
+    socket.destroy = () => socket;
+  };
+
+  const restoreClosers = (socket: ClosableSocket): void => {
+    const real = silencedSockets.get(socket);
+    if (!real) return;
+    socket.end = real.end;
+    socket.destroy = real.destroy;
+    silencedSockets.delete(socket);
+  };
+
+  // Stop a socket ever writing. Nothing the server produces reaches the wire,
+  // while reads still drain, so the TCP connection is genuinely established and
+  // stays open. `true` is write()'s "buffered, keep writing" answer, so the
+  // server's own protocol code sees a healthy socket.
+  const muteWrites = (socket: ControlledSocket): void => {
+    if (mutedSockets.has(socket)) return;
+    mutedSockets.set(socket, { write: socket.write.bind(socket) });
+    socket.write = () => true;
+  };
+
+  const restoreWrites = (socket: ControlledSocket): void => {
+    const real = mutedSockets.get(socket);
+    if (!real) return;
+    socket.write = real.write;
+    mutedSockets.delete(socket);
+  };
+
+  // Hand every vanished socket back BOTH halves the vanish took. A vanish mutes
+  // a socket's write and silences its closers in one act, and it silences them
+  // in the pools the withheld-close and stalled-handshake controls draw from, so
+  // a release of either of those reaches a vanished socket too and has to finish
+  // the job: a socket answering again while still impossible to close -- or the
+  // reverse -- is neither the black hole a case measured over nor a real socket,
+  // and nothing read from it would mean anything. Every release path ends here,
+  // so a vanished socket is wholly silenced or wholly its own.
+  const releaseVanished = (): void => {
+    for (const socket of vanishedSockets) {
+      restoreWrites(socket);
+      restoreClosers(socket);
+    }
+    vanishedSockets.clear();
+  };
   // Request-meter state. `inFlight` holds one reqid -> opcode map per live SFTP
   // session; the maps are cleared in place on reset() so a recorder keeps its
   // reference across windows.
@@ -376,49 +450,63 @@ export function createSftpSessionControls(): SftpSessionControlHub {
 
     onConnectionAccepted(socket: ControlledSocket | undefined): void {
       if (socket === undefined) return;
-      if (hub.withholdCloseOnDisconnect && !withheldSockets.has(socket)) {
-        withheldSockets.set(socket, {
-          end: socket.end.bind(socket),
-          destroy: socket.destroy.bind(socket),
-        });
-        // ssh2's server ends this socket itself when the client's DISCONNECT
-        // arrives, so half-open alone does not keep it quiet: both closers have to
-        // go. Reads still drain, so the connection serves traffic normally right up
-        // to the disconnect it then ignores.
-        socket.end = () => socket;
-        socket.destroy = () => socket;
-      }
-      if (hub.stallHandshakeOnConnect && !stalledSockets.has(socket)) {
-        stalledSockets.set(socket, { write: socket.write.bind(socket) });
-        // Nothing the server produces reaches the wire, starting with its SSH
-        // identification string, so the client's handshake cannot advance past
-        // waiting for it. Reads still drain, so the TCP connection is genuinely
-        // established and stays open -- what the client waits out is its own
-        // connect deadline. `true` is write()'s "buffered, keep writing" answer,
-        // so the server's own protocol code sees a healthy socket.
-        socket.write = () => true;
-      }
+      // The client's disconnect is served normally right up to the close this
+      // then ignores.
+      if (hub.withholdCloseOnDisconnect) silenceClosers(socket);
+      // Muted as the connection is accepted, which is after ssh2 has written the
+      // server's identification string and before its key exchange: the client
+      // hears that one line and nothing after it, so its handshake cannot
+      // advance and the dial waits out its own connect deadline.
+      if (hub.stallHandshakeOnConnect) muteWrites(socket);
     },
 
     stopWithholdingCloses(): void {
       hub.withholdCloseOnDisconnect = false;
-      for (const [socket, real] of withheldSockets) {
-        socket.end = real.end;
-        socket.destroy = real.destroy;
-      }
-      withheldSockets.clear();
+      for (const socket of [...silencedSockets.keys()]) restoreClosers(socket);
+      // A vanished socket's closers are in that pool, so the loop above has just
+      // half-released every vanished session; the rest of each release follows.
+      releaseVanished();
     },
 
     stopStallingHandshakes(): void {
       hub.stallHandshakeOnConnect = false;
-      for (const [socket, real] of stalledSockets) socket.write = real.write;
-      stalledSockets.clear();
+      for (const socket of [...mutedSockets.keys()]) restoreWrites(socket);
+      // The same on the muted half: a vanish mutes as well as silences, so this
+      // loop reaches every vanished session too.
+      releaseVanished();
     },
 
-    onConnectionReady(conn: DroppableConnection): void {
+    vanishActiveSession(): void {
+      if (!activeConnection) {
+        throw new Error(
+          "vanishActiveSession: no SSH session is currently established",
+        );
+      }
+      const socket = sessions.get(activeConnection)?.socket;
+      if (!socket) {
+        throw new Error(
+          "vanishActiveSession: the active session's transport socket is " +
+            "unreachable, so nothing would be silenced",
+        );
+      }
+      // Both halves make the black hole: muting alone leaves the server free to
+      // close the connection, which the client would hear as an 'end'.
+      muteWrites(socket);
+      silenceClosers(socket);
+      vanishedSockets.add(socket);
+    },
+
+    restoreVanishedSessions(): void {
+      releaseVanished();
+    },
+
+    onConnectionReady(
+      conn: DroppableConnection,
+      socket?: ControlledSocket | undefined,
+    ): void {
       handshakes += 1;
       activeConnection = conn;
-      const session: TrackedSession = { opsServed: 0, dropped: false };
+      const session: TrackedSession = { opsServed: 0, dropped: false, socket };
       sessions.set(conn, session);
       if (hub.maxLifetimeMs > 0) {
         session.lifetimeTimer = setTimeout(
