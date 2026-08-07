@@ -391,7 +391,7 @@ for the web application, its deployment profile:
   acceptor's connection through the single consumer `connectionFromEndpoint`
   (`apps/cli`), which also applies the mirror swap for a split-directory
   endpoint. The CLI has no WebRTC transport.
-- **Browser, public profile.** `webrtc` only. A file-sync endpoint names a
+- **Browser, hosted profile.** `webrtc` only. A file-sync endpoint names a
   directory or an SFTP host the browser cannot reach.
 - **Browser, console profile.** `webrtc`, `filedrop`, and `sftp`. The console
   build runs a file-sync exchange through its job API rather than in the page, so

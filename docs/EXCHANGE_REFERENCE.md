@@ -981,8 +981,10 @@ What inference assigns, when it runs:
 |--------|--------|--------|--------------|
 | A recognized linkage name (`ssn`, `dob`, `first_name`, `phone`, `email`, `zip`, and their aliases) | the matching semantic type | `linkage` | `false` |
 | `id` or `identifier` | `identifier` | `identifier` | `true` |
-| A name ending in `_id` | `identifier` | `payload` | `true` |
+| A name ending in `_id` | `identifier` | `identifier` when it is the header's only `identifier`-typed column, otherwise `payload` | `true` |
 | Anything else | `other` | `payload` | `true` |
+
+Both identifier rows produce `type: identifier`, and that type is what decides the `role`: a header carrying exactly one `identifier`-typed column roles it `identifier` whatever its name, so a lone `case_id` indexes the records. A header carrying several gives `role: identifier` to a column named `id` or `identifier` when one is present, and to no column at all otherwise -- two `_id` columns and nothing else leaves both roled `payload`, so none of this party's columns indexes its own records in the result.
 
 The two identifier rows are the ones to check before an exchange: an inferred identifier column is transmitted, so a party that does not intend to disclose its own record keys authors a `metadata` block and sets `is_payload: false` on them. Inference never assigns `ignored` -- that role is opt-in only.
 
