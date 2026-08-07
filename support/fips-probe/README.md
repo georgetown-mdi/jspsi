@@ -113,10 +113,10 @@ instead, which is what it is designed to do.
   output of its own. The probe above writes the configurations it measures,
   which is what makes its verdict attributable and also why it cannot answer
   this: it replaces the arrangement an operator gets. This replaces nothing and
-  reaches ENGAGED only when `fips.so` is mapped into the process, psilink's four
-  call shapes -- AES-256-GCM, HKDF-SHA-256, HMAC-SHA-256 and SHA-256 -- all
-  succeed, and an MD5 digest and a below-minimum RSA keygen both fail beside
-  them.
+  reaches ENGAGED only when `fips.so` is mapped into the process, psilink's five
+  call shapes -- AES-256-GCM, HKDF-SHA-256, HMAC-SHA-256, SHA-256 and P-256
+  ECDH -- all succeed, and an MD5 digest and a below-minimum RSA keygen both
+  fail beside them.
 - `image-engagement.mjs` -- the gate around that module: no arguments, a JSON
   transcript and a verdict line on stdout, and an exit status the FIPS image's
   entrypoint and `image_smoke.yaml` both read. The two callers share one module

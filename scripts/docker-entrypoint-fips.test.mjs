@@ -183,7 +183,7 @@ for (const [shell, label] of SHELLS) {
 // being no FIPS provider to load. The cases below are therefore written against
 // the decision rule rather than against a fixed verdict -- each asserts that the
 // failure list, the verdict and the exit status agree with the legs actually
-// measured, which holds whatever the host serves. Whether psilink's four call
+// measured, which holds whatever the host serves. Whether psilink's five call
 // shapes survive the certified module is CI's to measure against a real build.
 describe("the engagement probe the image ships", () => {
   const result = spawnSync(process.execPath, [PROBE], {
@@ -204,6 +204,7 @@ describe("the engagement probe the image ships", () => {
     ["hkdf_derive_bits", "the HKDF-SHA-256 derivation failed"],
     ["hmac_sha256_sign", "the HMAC-SHA-256 signature failed"],
     ["sha256_digest", "the SHA-256 digest failed"],
+    ["ecdh_p256_derive_bits", "the P-256 ECDH derivation failed"],
   ];
 
   it.each(PRODUCT_LEGS)("completes psilink's %s call shape", (leg) => {
