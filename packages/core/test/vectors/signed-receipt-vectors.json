@@ -1,10 +1,25 @@
 {
+  "description": "Cross-implementation vectors for the psilink-signed-receipt/v2 step: ECDSA over P-256 with SHA-256 across the signer-bound receipt content. Each vector fixes a private key, an identity, a session key, a handshake role, and the shared content. The certificate fingerprint and the per-exchange binder are known answers. The signature is NOT -- ECDSA signing is randomized -- so it is verify-only and was produced by the openssl CLI (see externalAnchors) over signed bytes the generator assembles from the spec: a suite that accepts it is accepting a signature made outside this codebase, over a byte layout stated independently of the module under test. Regenerate with generate-signed-receipt-vectors.mjs.",
+  "construction": {
+    "recordVersion": "psilink-signed-receipt/v2",
+    "algorithm": "ecdsa-p256-sha256",
+    "contentDomain": "psilink-signed-receipt-content/v2",
+    "binderLabel": "psilink-signed-receipt-binder-v1:<role>",
+    "signedBytes": "canonicalBytes({ domain: contentDomain, content: { termsHash, initiatorToResponderPayload, responderToInitiatorPayload, binder }, signer: { fingerprint, role } }) (RFC 8785)",
+    "signatureEncoding": "64 bytes, r || s, each field element left-padded to 32 bytes. Not DER: a field of any other length is rejected rather than decoded."
+  },
   "vectors": [
     {
       "name": "initiator-both-directions",
-      "description": "The initiator signs the receipt content bound to its own fingerprint and initiator role: the agreed-terms hash, the two directional session-keyed payload MACs (initiator->responder and responder->initiator, here fixed stand-in values), and the initiator-role binder. Any implementation seeded identically and given this session key and content must reproduce the fingerprint, the binder, and the Ed25519 signature.",
-      "seed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "description": "The initiator signs the receipt content bound to its own fingerprint and initiator role: the agreed-terms hash, the two directional session-keyed payload MACs (initiator->responder and responder->initiator, here fixed stand-in values), and the initiator-role binder. Any implementation given this private key, session key, and content must reproduce the fingerprint and the binder, and must accept the checked-in signature.",
       "identity": "Party A, Agency A\napartyA@agency-a.gov",
+      "privateKey": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "HxQBRr-xslH4T03b4NTNz9d6_ZhKlSDjV5QCH4MSu54",
+        "y": "7JlaCLH6dwTfPcwLUKlmUmP7dxH5X5-KRJxQluR8iSs",
+        "d": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A"
+      },
       "sessionKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
       "role": "initiator",
       "content": {
@@ -15,15 +30,21 @@
       },
       "expected": {
         "binder": "DqMqfqQWT3ezinyelof-x2r-aBMbuAnCpIFjI7cVvOY",
-        "signature": "5RptKWyOT6DIH6z9u9Mud83jLmE4Ba6wls7a4YanlB6J92C1aOjlgVilzqdw35pYzWfSQ1sVQThdxq6ZX3nIAA",
-        "fingerprint": "Sca4aRt1lvldlctLS479DsbBpT0RbeEFkCv2knS5imU"
+        "fingerprint": "CIVlpmkCengeNsTi8PJNiOD5YyPJa3u8A1y_VdEut98",
+        "signature": "mFOhiSelwG6tdBZdnp23xkHagwYfrmu5kE2snr62D-mRNvJmi7nX7t0Tic7l8wZI1rg2XOnvkTdHyV_Ani29Dg"
       }
     },
     {
       "name": "responder-distinct-identity",
       "description": "The responder signs the same directional content bound to its own fingerprint and responder role (both parties key the two directions identically). Uses the same session key but a distinct identity; its role names the responder-role binder derivation to pin that label too. That responder-role binder is a derivation not produced in a live exchange, where both parties fold in the initiator-role binder -- the vector pins the label for cross-implementation coverage.",
-      "seed": "ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQ",
       "identity": "Party B, Agency B",
+      "privateKey": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "QoqCTqfPVq0qZO02i3ExXYDO6EYAfP8dLuosPw-SFTc",
+        "y": "MErlmPmN0Q0fECgRpOLRYcP9i7sZPUslvulQrIOcD50",
+        "d": "ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQ"
+      },
       "sessionKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
       "role": "responder",
       "content": {
@@ -34,9 +55,13 @@
       },
       "expected": {
         "binder": "3DJfxbSxC4qxQyR19BpTZiCp1dhxwV6BBmxyzc6S3T0",
-        "signature": "pvANvwV4hKI2CVAFo17L4-ywZPFjmoCXSUxHQpAfFamA8lbez1XDtQCI_utWwf8NRL3N7pVZ67mkcU9QGGB2CQ",
-        "fingerprint": "NSacZYsbzydLuAbdmEXvqVypCseszb1tA9YDIEssDWQ"
+        "fingerprint": "5NCJKqlerPYrNUBLOKZpXB7aKEbKjruZIGc6ckSNlN4",
+        "signature": "ZCYUWi1_NVY70FWoT92_Z4mMRKyqGmH7E4SjdAtRpWF5zmSEbkMBxJEkk7cM85f52pp_rw4KQSX-it1F-CEqwA"
       }
     }
-  ]
+  ],
+  "externalAnchors": {
+    "signatureProducer": "OpenSSL 3.0.20 7 Apr 2026 (Library: OpenSSL 3.0.20 7 Apr 2026)",
+    "note": "Every checked-in signature was produced by the openssl CLI named above (openssl dgst -sha256 -sign, DER read back through openssl asn1parse and re-encoded as the fixed-length raw r||s), over signed bytes this generator assembles from docs/spec/EXCHANGE_RECORD.md. A suite that verifies them is therefore accepting a signature produced outside this codebase, over a byte layout stated independently of signedReceipt.ts."
+  }
 }

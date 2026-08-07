@@ -7,38 +7,80 @@ import {
   computeCertificateFingerprint,
   deriveReceiptBinder,
   generateSigningIdentity,
+  parseCertificate,
+  parseSigningIdentity,
   signReceiptContent,
+  verifyCertificateSelfSignature,
   verifyReceiptSignature,
 } from "@psilink/core";
 
-import vectorsRaw from "../../../../packages/core/test/vectors/signed-receipt-vectors.json?raw";
+import certVectorsRaw from "../../../../packages/core/test/vectors/signing-cert-vectors.json?raw";
+import receiptVectorsRaw from "../../../../packages/core/test/vectors/signed-receipt-vectors.json?raw";
 
-// The companion to packages/core/test/signedReceipt.test.ts's vector suite: it
-// runs the SAME checked-in signed-receipt vectors through the browser build of
-// @psilink/core in real Chromium. The Node suite proves Node reproduces the
-// vectors and this suite proves the browser reproduces the same fingerprint,
-// binder, and signature, so a signature produced by one implementation (the CLI,
-// Node) is byte-identical to -- and verifiable by -- the other (the web build,
-// browser). This is the cross-implementation determinism the signed-receipt work
-// requires. The step uses only platform-neutral primitives (crypto.subtle,
-// TextEncoder, the pure-JS canonicalizer, @noble/curves), so it holds by
-// construction; the test guards against a regression introducing a platform
-// dependency.
+import type {
+  P256PrivateJwk,
+  SigningCertificate,
+  SigningIdentity,
+} from "@psilink/core";
+
+// The companion to packages/core/test/signedReceipt.test.ts and
+// signingIdentity.test.ts: it runs the SAME checked-in vectors through the
+// browser build of @psilink/core in real Chromium.
+//
+// ECDSA signing is randomized, so "both builds reproduce the same signature" is
+// no longer available as the cross-implementation guarantee. Three things stand
+// in its place, and each fails here if the browser build and core diverge.
+//
+//   1. The deterministic anchors -- the certificate public coordinates, the
+//      certificate fingerprint, and the per-exchange binder -- are still known
+//      answers, reproduced from a fixed private key. A divergence in the
+//      canonical encoding, the domain labels, or the HKDF breaks them.
+//   2. Each direction of the signature contract, measured rather than argued.
+//      Core -> browser: a signature produced outside this build (by openssl, in
+//      the Node-side generator, over bytes the generator states from the spec)
+//      must verify here. Browser -> core: a signature this build produces must
+//      verify under the SAME fixed key and content that the checked-in one does,
+//      and the Node suite asserts the mirror image of both. Verification is over
+//      the signed bytes, so a build whose byte layout diverged rejects the fixed
+//      signature outright.
+//   3. Key rejection. Part of it is delegated to crypto.subtle.importKey, a
+//      different implementation on each platform (Node's OpenSSL, Chromium's
+//      BoringSSL), so the rejections are re-asserted here through the module's
+//      own entry points. These assert the OUTCOME on this platform without
+//      claiming which layer produced it: the Node suite drives importKey
+//      directly, and is where that split is measured.
+//
+// The step uses only platform-neutral primitives (crypto.subtle, TextEncoder,
+// the pure-JS canonicalizer), so it holds by construction; these tests guard
+// against a regression introducing a platform dependency.
 
 type ReceiptContent = Parameters<typeof signReceiptContent>[1];
 
 interface ReceiptVector {
   name: string;
-  seed: string;
   identity: string;
+  privateKey: P256PrivateJwk;
   sessionKey: string;
   role: "initiator" | "responder";
   content: ReceiptContent;
-  expected: { binder: string; signature: string; fingerprint: string };
+  expected: { binder: string; fingerprint: string; signature: string };
 }
 
-const vectors = (JSON.parse(vectorsRaw) as { vectors: Array<ReceiptVector> })
-  .vectors;
+interface CertVector {
+  name: string;
+  identity: string;
+  privateKey: P256PrivateJwk;
+  expected: { publicKeyX: string; publicKeyY: string; fingerprint: string };
+  identityFile: SigningIdentity;
+  certificate: SigningCertificate;
+}
+
+const receiptVectors = (
+  JSON.parse(receiptVectorsRaw) as { vectors: Array<ReceiptVector> }
+).vectors;
+const certVectors = (
+  JSON.parse(certVectorsRaw) as { vectors: Array<CertVector> }
+).vectors;
 
 function b64uToBytes(s: string): Uint8Array<ArrayBuffer> {
   const padded =
@@ -50,32 +92,157 @@ function b64uToBytes(s: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-describe("signed receipt in the browser", () => {
-  test.each(vectors)(
-    "$name: browser build reproduces the fingerprint, binder, and signature",
+function bytesToB64u(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+describe("signing certificates in the browser", () => {
+  test.each(certVectors)(
+    "$name: the browser build reproduces the public key and fingerprint",
     async (vector) => {
-      const identity = generateSigningIdentity(vector.identity, {
-        seed: b64uToBytes(vector.seed),
+      const identity = await generateSigningIdentity(vector.identity, {
+        privateKey: vector.privateKey,
       });
-      const fingerprint = await computeCertificateFingerprint(
-        identity.certificate,
+      expect(identity.certificate.publicKey.x).toBe(vector.expected.publicKeyX);
+      expect(identity.certificate.publicKey.y).toBe(vector.expected.publicKeyY);
+      expect(await computeCertificateFingerprint(identity.certificate)).toBe(
+        vector.expected.fingerprint,
       );
-      expect(fingerprint).toBe(vector.expected.fingerprint);
+    },
+  );
 
-      const binder = await deriveReceiptBinder(
-        b64uToBytes(vector.sessionKey),
-        vector.role,
+  test.each(certVectors)(
+    "$name: the browser build accepts the foreign-signed certificate and identity file",
+    async (vector) => {
+      // Core -> browser for the certificate self-signature: the checked-in
+      // signature was made outside this build, and the browser's verifier -- and
+      // therefore its reconstruction of the signed bytes -- accepts it.
+      await expect(parseCertificate(vector.certificate)).resolves.toBeDefined();
+      await expect(
+        parseSigningIdentity(vector.identityFile),
+      ).resolves.toBeDefined();
+      expect(await computeCertificateFingerprint(vector.certificate)).toBe(
+        vector.expected.fingerprint,
       );
-      expect(binder).toBe(vector.expected.binder);
+    },
+  );
 
+  test.each(certVectors)(
+    "$name: the browser build rejects the certificate with one signature bit flipped",
+    async (vector) => {
+      const signature = b64uToBytes(vector.certificate.signature);
+      signature[0] ^= 0x01;
+      const tampered = {
+        ...vector.certificate,
+        signature: bytesToB64u(signature),
+      };
+      expect(await verifyCertificateSelfSignature(tampered)).toBe(false);
+    },
+  );
+
+  test("the browser build rejects an off-curve key, the identity element, and a non-canonical coordinate", async () => {
+    // The rejections the Node suite makes, re-asserted on this platform through
+    // the module rather than through importKey: the outcome is what has to hold
+    // in the browser, and which layer refuses is the Node suite's measurement.
+    const [vector] = certVectors as [CertVector];
+    const withPublicKey = (x: string, y: string) => ({
+      ...vector.certificate,
+      publicKey: { ...vector.certificate.publicKey, x, y },
+    });
+    const { x, y } = vector.privateKey;
+
+    const offCurveY = b64uToBytes(y);
+    offCurveY[31] ^= 0x01;
+    await expect(
+      parseCertificate(withPublicKey(x, bytesToB64u(offCurveY))),
+    ).rejects.toThrow(/is not a valid P-256 point/);
+
+    const zero = bytesToB64u(new Uint8Array(32));
+    await expect(parseCertificate(withPublicKey(zero, zero))).rejects.toThrow(
+      /is not a valid P-256 point/,
+    );
+
+    // A coordinate carrying a 33rd leading zero byte is the same point under a
+    // different string, and therefore a second fingerprint for one key. The
+    // fixed 32-byte length is the module's pin rather than importKey's, so it
+    // must hold here whatever this platform's importKey would have admitted.
+    const padded = new Uint8Array(33);
+    padded.set(b64uToBytes(x), 1);
+    await expect(
+      parseCertificate(withPublicKey(bytesToB64u(padded), y)),
+    ).rejects.toThrow(/must be 32 bytes, got 33/);
+  });
+
+  test("the browser build rejects an identity file whose private key is not its certificate's", async () => {
+    // The keypair-agreement check is a signature probe rather than a platform
+    // behavior, so this holds on any runtime; asserting it here is what makes
+    // that platform-independence a check instead of a claim.
+    const [a, b] = certVectors as [CertVector, CertVector];
+    await expect(
+      parseSigningIdentity({ ...a.identityFile, privateKey: b.privateKey }),
+    ).rejects.toThrow(/does not match its certificate's public key/);
+    await expect(
+      parseSigningIdentity({
+        ...a.identityFile,
+        privateKey: { ...a.privateKey, d: b.privateKey.d },
+      }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("signed receipt in the browser", () => {
+  test.each(receiptVectors)(
+    "$name: the browser build reproduces the fingerprint and binder",
+    async (vector) => {
+      const identity = await generateSigningIdentity(vector.identity, {
+        privateKey: vector.privateKey,
+      });
+      expect(await computeCertificateFingerprint(identity.certificate)).toBe(
+        vector.expected.fingerprint,
+      );
+      expect(
+        await deriveReceiptBinder(b64uToBytes(vector.sessionKey), vector.role),
+      ).toBe(vector.expected.binder);
+    },
+  );
+
+  test.each(receiptVectors)(
+    "$name: a signature produced outside the browser build verifies inside it",
+    async (vector) => {
+      const identity = await generateSigningIdentity(vector.identity, {
+        privateKey: vector.privateKey,
+      });
+      expect(
+        await verifyReceiptSignature(
+          identity.certificate,
+          vector.content,
+          vector.expected.signature,
+          vector.role,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  test.each(receiptVectors)(
+    "$name: a signature the browser build produces verifies over the same fixed key and content",
+    async (vector) => {
+      // The other direction. Signing and verification share one construction of
+      // the signed bytes, and the test above already showed this build's bytes
+      // match the ones the checked-in signature covers, so a signature made here
+      // is over those same bytes -- which is what the Node suite verifies from
+      // its side.
+      const identity = await generateSigningIdentity(vector.identity, {
+        privateKey: vector.privateKey,
+      });
       const signature = await signReceiptContent(
         identity,
         vector.content,
         vector.role,
       );
-      expect(signature).toBe(vector.expected.signature);
-      // The signature the browser produced verifies -- a cross-implementation
-      // signer's output is accepted by the verifier (bytes bound to the same role).
+      expect(signature).not.toBe(vector.expected.signature);
+      expect(b64uToBytes(signature)).toHaveLength(64);
       expect(
         await verifyReceiptSignature(
           identity.certificate,
@@ -84,6 +251,43 @@ describe("signed receipt in the browser", () => {
           vector.role,
         ),
       ).toBe(true);
+    },
+  );
+
+  test.each(receiptVectors)(
+    "$name: the browser build rejects a flipped bit, the other role, and mutated content",
+    async (vector) => {
+      const identity = await generateSigningIdentity(vector.identity, {
+        privateKey: vector.privateKey,
+      });
+      const otherRole =
+        vector.role === "initiator" ? "responder" : ("initiator" as const);
+      const flipped = b64uToBytes(vector.expected.signature);
+      flipped[0] ^= 0x01;
+      expect(
+        await verifyReceiptSignature(
+          identity.certificate,
+          vector.content,
+          bytesToB64u(flipped),
+          vector.role,
+        ),
+      ).toBe(false);
+      expect(
+        await verifyReceiptSignature(
+          identity.certificate,
+          vector.content,
+          vector.expected.signature,
+          otherRole,
+        ),
+      ).toBe(false);
+      expect(
+        await verifyReceiptSignature(
+          identity.certificate,
+          { ...vector.content, termsHash: "bXV0YXRlZA" },
+          vector.expected.signature,
+          vector.role,
+        ),
+      ).toBe(false);
     },
   );
 });

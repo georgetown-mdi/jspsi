@@ -162,10 +162,12 @@ export interface ResolveSigningIdentityInput {
  * @throws {UsageError} if no identity is available to bind a new key.
  * @internal exported for testing
  */
-export function resolveSigningIdentity(input: ResolveSigningIdentityInput): {
+export async function resolveSigningIdentity(
+  input: ResolveSigningIdentityInput,
+): Promise<{
   identity: SigningIdentity;
   action: SigningIdentityAction;
-} {
+}> {
   // A file that exists but is unreadable (malformed/inconsistent) normally
   // surfaces as an error. With --force the user has explicitly asked to
   // regenerate, so an unreadable existing file is treated as a file to replace
@@ -173,7 +175,7 @@ export function resolveSigningIdentity(input: ResolveSigningIdentityInput): {
   let existing: SigningIdentity | undefined;
   let replacingUnreadable = false;
   try {
-    existing = loadSigningIdentity(input.identityPath);
+    existing = await loadSigningIdentity(input.identityPath);
   } catch (err) {
     if (!input.force) throw err;
     input.log.warn(
@@ -210,7 +212,7 @@ export function resolveSigningIdentity(input: ResolveSigningIdentityInput): {
         '--identity "Name, Organization, contact" or set ' +
         "linkage_terms.identity in the config",
     );
-  const identity = generateSigningIdentity(identityString);
+  const identity = await generateSigningIdentity(identityString);
 
   // A genuine first creation (no file on disk at all) is exclusive, so two
   // concurrent invocations cannot both generate and silently overwrite each
@@ -233,7 +235,7 @@ export function resolveSigningIdentity(input: ResolveSigningIdentityInput): {
         return { identity, action: "Created" };
       } catch (err) {
         if (!(err instanceof FileExistsError)) throw err;
-        const winner = loadSigningIdentity(input.identityPath);
+        const winner = await loadSigningIdentity(input.identityPath);
         if (winner !== undefined) {
           input.log.warn(
             "another process created the signing identity concurrently; " +
@@ -349,7 +351,7 @@ export async function handler(argv: Arguments): Promise<void> {
       identityFileArg ?? hints.identityFile ?? defaultSigningIdentityPath(),
     );
 
-    const { identity, action } = resolveSigningIdentity({
+    const { identity, action } = await resolveSigningIdentity({
       identityPath,
       identityArg,
       configIdentity: hints.identity,

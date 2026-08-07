@@ -75,5 +75,7 @@ PSI-Link's security properties depend on several upstream cryptographic componen
 | Dependency          | Role                                        | Upstream                                                            |
 | ------------------- | ------------------------------------------- | ------------------------------------------------------------------- |
 | `@openmined/psi.js` | PSI primitive (vendored WASM)               | [OpenMined/PSI](https://github.com/OpenMined/PSI)                   |
-| `@noble/curves`     | Receipt signing (Ed25519)                   | [paulmillr/noble-curves](https://github.com/paulmillr/noble-curves) |
-| Web Crypto API      | P-256 ECDH keygen and key agreement, SHA-256, HMAC-SHA-256, HKDF | Platform-provided; report to browser/runtime vendor    |
+| Web Crypto API      | P-256 ECDH keygen and key agreement, P-256 ECDSA receipt signing, SHA-256, HMAC-SHA-256, HKDF | Platform-provided; report to browser/runtime vendor    |
+
+`@noble/curves` is a declared dependency of `@psilink/core` that no code path
+reaches: every cryptographic operation runs through the Web Crypto API.

@@ -727,7 +727,7 @@ export async function prepareDataset(
 
 /**
  * Resolve the signed-receipt inputs from the exchange config's `signing` block,
- * loading this party's signing identity from disk. Returns `null` (skip the
+ * loading this party's signing identity from disk. Resolves `null` (skip the
  * signing step, leaving the unsigned-record path unchanged) unless the block sets
  * `mode: certificate` -- the only mode this step supports; `none` and
  * `session-derived` are no-ops here. A `certificate`-mode block with no readable
@@ -745,14 +745,14 @@ export async function prepareDataset(
  * @throws {UsageError} when `mode: certificate` is set but no signing identity
  *   exists at the resolved path, or the file is malformed/unreadable.
  */
-export function resolveSigningPersist(
+export async function resolveSigningPersist(
   signing: SigningConfig | undefined,
-): SigningPersist | null {
+): Promise<SigningPersist | null> {
   if (signing === undefined || signing.mode !== "certificate") return null;
   const identityPath = expandTilde(
     signing.identityFile ?? defaultSigningIdentityPath(),
   );
-  const identity = loadSigningIdentity(identityPath);
+  const identity = await loadSigningIdentity(identityPath);
   if (identity === undefined)
     throw new UsageError(
       `signing is configured (mode: certificate) but no signing identity was ` +
@@ -919,7 +919,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // configured for certificate mode, which leaves the exchange unsigned.
     let signing: SigningPersist | null;
     try {
-      signing = resolveSigningPersist(exchangeDataSpec.signing);
+      signing = await resolveSigningPersist(exchangeDataSpec.signing);
     } catch (err) {
       exitWithError(log, err, err instanceof UsageError ? 64 : 69);
     }

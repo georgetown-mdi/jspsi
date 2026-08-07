@@ -21,7 +21,7 @@ measurements and certificate readings underneath the reasoning are in
 
 With FIPS 140-3 as the target standard, certificate 4985 carries ECDSA on its
 approved-algorithm list and places Ed25519 in Table 8, Non-Approved and Not
-Allowed. Receipt signing runs Ed25519 in `@noble/curves`, outside any module. The
+Allowed. Receipt signing ran Ed25519 in `@noble/curves`, outside any module. The
 fork is the one key establishment faced -- disclose the boundary, or migrate to
 an algorithm the certificate approves -- plus one apparent third option that has
 to be cleared away first, because the provider measurements found Ed25519 present
@@ -31,8 +31,8 @@ in every build tried.
 
 - **Migrate both signing operations to ECDSA over P-256 through
   `crypto.subtle`**: the certificate self-signature and the receipt signature
-  alike, replacing the Ed25519 signing, verification, and key generation that run
-  in `@noble/curves` today.
+  alike, replacing the Ed25519 signing, verification, and key generation that ran
+  in `@noble/curves`.
 - **Everything above the signature stays.** The canonical encoding, the domain
   separation that keeps a signature and a fingerprint from being confused, the
   per-signer fingerprint-and-role binding, the pinned self-signed trust model,
@@ -52,8 +52,13 @@ would be elective.
 either other option, and is eliminated before the real fork is reached. See below
 for why the measurement that makes it look available is not a green light.
 
-This record is the decision. The migration is separate work, and until it lands
-receipt signing runs Ed25519 in `@noble/curves`, outside any module boundary.
+The migration is implemented. The normative constructions -- the certificate
+body, the EC JWK public key, the pinned signature encoding, and the load-time
+rejections -- are specified in
+[PROTOCOL.md](../spec/PROTOCOL.md#signing-identity-and-certificate-pinning) and
+[EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#signed-receipt); this record
+keeps the reasoning and the two design choices the migration was left to settle
+(below).
 
 ## Why migrate rather than disclose
 
@@ -155,9 +160,10 @@ current fixtures do. Measured: a fixed private-key JWK imported through
 `importKey` round-trips exactly, which is what a vector must carry instead. From
 such a fixed key the certificate fingerprint, the binder, and the canonical
 signed bytes all still reproduce byte for byte; the pinned signature field does
-not, and becomes a verify-only vector. Re-shaping those fixtures is the largest
-single piece of the migration work, and it is driven by the platform's key
-generation as much as by the algorithm's randomness.
+not, and becomes a verify-only vector. Re-shaping those fixtures was the largest
+single piece of the migration, driven by the platform's key generation as much as
+by the algorithm's randomness; what replaced reproduce-the-signature is settled
+below.
 
 **Non-malleability is surrendered, with a measured blast radius.** A third party
 holding a receipt can transform `s` into `-s mod n` and produce a different
@@ -172,8 +178,8 @@ party could break in a copy without invalidating anything the artifact attests.
 
 ## What a scoped FIPS claim may and may not say about receipt signing
 
-**May say**, once the migration has landed *and* a validated module is actually
-present in the environment: the signature and verification operations of receipt
+**May say**, where a validated module is actually present in the environment:
+the signature and verification operations of receipt
 signing are performed by the module, using ECDSA, which is on certificate 4985's
 approved-algorithm list. A claim that additionally names the curve and hash is
 written by reading the certificate's approved-algorithm table for its tested
@@ -182,13 +188,13 @@ algorithm name.
 
 **May not say:**
 
-- That receipt signing uses a FIPS-approved algorithm while it runs on Ed25519.
-  It does not on any OpenSSL Project certificate, and under certificate 4985
-  Ed25519 is Non-Approved and Not Allowed. Two of the forty active certificates
-  do approve EdDSA, and neither yields a verifiable certified module for a
-  freely redistributable image -- see
-  [fips-provider-surface.md](fips-provider-surface.md). This is a present-tense
-  claim about shipped code, and it stays false until the migration lands.
+- That an EdDSA build of receipt signing would be FIPS-approved. It is not on
+  any OpenSSL Project certificate, and under certificate 4985 Ed25519 is
+  Non-Approved and Not Allowed. Two of the forty active certificates do approve
+  EdDSA, and neither yields a verifiable certified module for a freely
+  redistributable image -- see
+  [fips-provider-surface.md](fips-provider-surface.md). This is why the algorithm
+  moved rather than the disclosure.
 - That the receipt, the certificate format, or the signed-receipt protocol is
   validated or approved. A certificate attests algorithms; the canonical
   encoding, the domain separation, the per-signer binding, and the
@@ -207,22 +213,78 @@ algorithm name.
   primitive, and that boundary is stated in
   [PROTOCOL.md](../spec/PROTOCOL.md#signing-identity-and-certificate-pinning).
 
-## Open question
+## The two questions the migration settled
 
-One question this decision deliberately leaves to the migration, because
-answering it here would be settling a design choice with runtime consequence
-without the code in front of anyone:
+### Malleability: narrow the claim rather than enforce a canonical `s`
 
-- **Whether the implementation should reject a non-canonical (high-`s`)
-  signature.** Measured: WebCrypto verifies both `s` and `-s mod n`, and its sign
-  operation gives the caller no control over which it emits, so enforcing a
-  canonical `s` means a check in application code above `crypto.subtle` -- one
-  more composition of the kind this note's claim language is careful about, added
-  to restore a property the algorithm does not have. The alternative is to narrow
-  [EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#dual-signed-record-file)'s
-  byte-identical-artifact statement to what remains true. Nothing in the tree
-  depends on the answer today, which is why it can wait for the migration rather
-  than gating this decision.
+This decision deliberately left open whether the implementation should reject a
+non-canonical (high-`s`) signature. It does not.
+
+Re-measured on the target runtime: WebCrypto verifies both `s` and `-s mod n`,
+and its sign operation gives the caller no control over which it emits. Enforcing
+a canonical `s` therefore means a check in application code above
+`crypto.subtle`, added to restore a property the algorithm does not have -- one
+more composition of exactly the kind this note's claim language is careful to
+disclaim, and one that would sit on the receipt-verification path forever.
+
+What it would buy is nothing the tree uses. The measured blast radius above holds:
+no signature is hashed, committed to, deduped, or used as an identifier anywhere,
+and the exchange record's commitments do not cover one. The single claim resting
+on non-malleability was
+[EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#dual-signed-record-file)'s
+statement that both parties write a byte-identical artifact, and that statement
+was narrowed instead: the two parties' files agree because each copies the
+signature the partner sent rather than re-deriving it, which is a property of how
+the parties assemble the file and not of the format, and two records are compared
+by verifying them rather than by hashing them. A holder who negates an `s` gets a
+differing copy that still verifies and still attests the same facts.
+
+Should a later feature want to identify a receipt by its bytes -- a dedupe index,
+a content-addressed store -- the canonical-`s` check becomes worth its cost, and
+that feature is where it belongs.
+
+### Cross-implementation guarantee: pin the message, not the signature
+
+Reproduce-the-signature was the project's cross-implementation guarantee for the
+receipt format, and randomized signing ends it. Of the candidates weighed --
+verify-only vectors, a live browser round-trip, an externally produced signature,
+and the surviving deterministic anchors -- the migration takes all four, layered,
+because each covers something the others do not:
+
+1. **The deterministic anchors stay known answers.** The certificate fingerprint
+   covers the body and never the signature, and the receipt binder is an HKDF
+   output, so both remain byte-pinned in the vectors and reproduced by the Node
+   and browser suites. These are what a divergence in the canonical encoder, the
+   domain labels, or the key derivation breaks, and that is the largest class of
+   cross-implementation failure the format can suffer.
+2. **The checked-in signatures become verify-only, and are produced by
+   `openssl`.** This is the layer that replaces reproduction, and the reasoning
+   is that ECDSA verification is over the *message*: an implementation that
+   accepts a fixed signature under a fixed key has necessarily reconstructed the
+   same signed bytes. Pinning a signature therefore pins the byte layout just as
+   a known-answer signature did, without needing the signature to be
+   reproducible. Producing it with `openssl` rather than with the module under
+   test is what makes it evidence about something outside this codebase; the
+   generator assembles the signed bytes from the spec rather than importing them
+   from `signedReceipt.ts`, so a drift between the specification and the
+   implementation surfaces as a vector that stops verifying.
+3. **Both directions are covered without a live cross-process round trip.**
+   Signing and verification share one construction of the signed bytes within a
+   build, and layer 2 establishes that a build's bytes are the ones the fixed
+   signature covers; so a signature that build produces is over those same bytes.
+   The Node suite and the browser suite each assert both halves against the same
+   checked-in file, which is what makes "the CLI signs, the web app verifies"
+   hold in both directions. A live browser-to-Node round trip would need test
+   plumbing to carry bytes across the process boundary and would prove strictly
+   less: it would exercise one signature rather than the layout.
+4. **Negative twins accompany every positive.** A flipped signature bit, the
+   opposite signer role, and mutated content are each asserted to fail, on both
+   platforms. Without these a verifier that returned `true` unconditionally would
+   pass every check above.
+
+The cost of the `openssl` leg is that regenerating the vectors needs the CLI on
+`PATH`; the generators say so in their headers, and the checked-in vectors are
+what the suites read.
 
 ## Where the evidence comes from
 

@@ -54,19 +54,20 @@ afterEach(() => {
 // A minimal schema-valid dual-signed record (the certificates self-verify; these
 // are the checked-in signing-cert vectors' identities, reused for a valid shape).
 const certA = {
-  version: "psilink-signing-cert/v1" as const,
-  algorithm: "ed25519" as const,
+  version: "psilink-signing-cert/v2" as const,
+  algorithm: "ecdsa-p256-sha256" as const,
   identity: "Party A",
   publicKey: {
-    kty: "OKP" as const,
-    crv: "Ed25519" as const,
-    x: "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+    kty: "EC" as const,
+    crv: "P-256" as const,
+    x: "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
+    y: "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q",
   },
   signature:
-    "8WKs03xb2bO9IsxziElnQeQ4v6--9DKTCRl5RyasydYD5THhQBBQwUD0nDHK7Lqm8NqgxczxhKX7JjJWlJiyAQ",
+    "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g",
 };
 const record: DualSignedRecord = {
-  version: "psilink-signed-receipt/v1",
+  version: "psilink-signed-receipt/v2",
   content: {
     termsHash: "dGVybXNIYXNo",
     initiatorToResponderPayload: "aTJyUGF5bG9hZA",

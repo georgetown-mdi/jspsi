@@ -1,13 +1,7 @@
-import { ed25519 } from "@noble/curves/ed25519.js";
 import { z } from "zod";
 
 import { canonicalBytes } from "./utils/canonical.js";
-import {
-  fromBase64Url,
-  hkdfDerive,
-  hmacSha256,
-  toBase64Url,
-} from "./utils/crypto.js";
+import { hkdfDerive, hmacSha256, toBase64Url } from "./utils/crypto.js";
 import {
   ConnectionError,
   receiveParsed,
@@ -18,6 +12,13 @@ import {
   computeCertificateFingerprint,
   verifyPresentedCertificate,
 } from "./signingIdentity.js";
+import {
+  decodeEcdsaSignature,
+  importPrivateSigningKey,
+  importPublicSigningKey,
+  signWithP256,
+  verifyWithP256,
+} from "./signingKeys.js";
 
 import type { HandshakeRole } from "./types.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
@@ -75,18 +76,21 @@ import type { SigningCertificate, SigningIdentity } from "./signingIdentity.js";
 
 // --- Versions and domains ----------------------------------------------------
 
-/** Single recognized format version for a v1 dual-signed record; a reader
- * rejects any other value rather than migrating it. */
-export const SIGNED_RECEIPT_VERSION = "psilink-signed-receipt/v1";
+/** Single recognized format version for a dual-signed record; a reader rejects
+ * any other value rather than migrating it. It moves with the certificate format
+ * the record embeds, so a record written under a different signature scheme is
+ * refused by this discriminant as well as by the embedded certificate's own. */
+export const SIGNED_RECEIPT_VERSION = "psilink-signed-receipt/v2";
 
 // Domain-separation label folded into the signed receipt-content bytes, kept
 // distinct from every other label derived from the canonical encoder (the
 // agreed-terms hash, the record commitments, and the certificate
 // signature/fingerprint domains in signingIdentity.ts). A signature over the
 // receipt content can therefore never be replayed as a certificate self-signature
-// or vice versa. v2: the signed bytes now bind the signer's fingerprint and role
-// (see receiptSignatureBytes); nothing is released, so the shape change is a
-// version bump, not a migration.
+// or vice versa. Its version tracks the shape of the bytes it covers -- the
+// shared content plus the signer's fingerprint and role -- which the signature
+// algorithm does not change; the embedded certificate's own version separates a
+// v1 certificate from a v2 one inside those bytes.
 const RECEIPT_CONTENT_DOMAIN = "psilink-signed-receipt-content/v2";
 
 // HKDF info label for the per-direction payload MAC key, derived from the session
@@ -118,10 +122,6 @@ const RECEIPT_BINDER_LABEL = "psilink-signed-receipt-binder-v1";
 // Length of a directional payload MAC key and the HMAC-SHA-256 output, matching
 // the 32-byte session-derived tokens HKDF produces from the same session key.
 const RECEIPT_PAYLOAD_MAC_BYTES = 32;
-
-// Ed25519 signature byte length; a signature that decodes to any other length is
-// rejected with a precise message rather than a downstream verification failure.
-const ED25519_SIGNATURE_BYTES = 64;
 
 // Length of the per-exchange binder, matching the 32-byte session-derived tokens
 // (deriveAbortToken, deriveAeadKey) HKDF produces from the same session key.
@@ -325,12 +325,12 @@ function receiptSignatureBytes(
 // --- Sign / verify -----------------------------------------------------------
 
 /**
- * Sign the receipt content with `identity`'s Ed25519 private key, returning the
- * unpadded base64url signature over the signer-bound canonical bytes (the shared
- * content plus this signer's own certificate fingerprint and handshake role, see
- * {@link receiptSignatureBytes}). The signature is deterministic (Ed25519), so both
- * an implementation and its cross-implementation twin produce the same signature
- * for the same content, signer, and key.
+ * Sign the receipt content with `identity`'s P-256 private key, returning the
+ * unpadded base64url ECDSA signature over the signer-bound canonical bytes (the
+ * shared content plus this signer's own certificate fingerprint and handshake
+ * role, see {@link receiptSignatureBytes}). ECDSA signing is randomized, so two
+ * calls over identical input produce different signatures; what reproduces across
+ * implementations is the signed bytes, and therefore which signatures verify.
  *
  * @param identity  This party's signing identity.
  * @param content   The shared receipt content both parties sign.
@@ -342,24 +342,23 @@ export async function signReceiptContent(
   signerRole: HandshakeRole,
 ): Promise<string> {
   const fingerprint = await computeCertificateFingerprint(identity.certificate);
-  const seed = fromBase64Url(identity.privateKey.d);
-  const signature = ed25519.sign(
+  const key = await importPrivateSigningKey(identity.privateKey);
+  return signWithP256(
+    key,
     receiptSignatureBytes(content, fingerprint, signerRole),
-    seed,
   );
-  return toBase64Url(signature);
 }
 
 /**
- * Whether `signature` is a valid Ed25519 signature over `content` bound to the
+ * Whether `signature` is a valid ECDSA P-256 signature over `content` bound to the
  * signer identified by `certificate` and `signerRole`, under `certificate`'s public
  * key. The signed bytes are reconstructed from the shared content plus the signer's
  * OWN certificate fingerprint and role, so a signature made by one party does not
  * verify when checked as the other's (its bound signer differs). A boolean verdict,
  * never a throw: a malformed signature or public key is a `false`, so a caller
- * feeding a partner-supplied signature always gets a verdict. Strict RFC 8032
- * verification (zip215: false), matching the certificate self-signature check, so a
- * signature this accepts a strict cross-implementation verifier also accepts.
+ * feeding a partner-supplied signature always gets a verdict. The signature must be
+ * the fixed-length raw `r || s` encoding; any other length is a `false` rather than
+ * a decode attempt.
  *
  * This checks only the signature; the certificate's trust (pin + self-signature)
  * and identity binding MUST already have been gated by
@@ -375,21 +374,19 @@ export async function verifyReceiptSignature(
   signerRole: HandshakeRole,
 ): Promise<boolean> {
   let sig: Uint8Array<ArrayBuffer>;
-  let pub: Uint8Array<ArrayBuffer>;
+  let key: CryptoKey;
   try {
-    sig = fromBase64Url(signature);
-    pub = fromBase64Url(certificate.publicKey.x);
+    sig = decodeEcdsaSignature(signature, "receipt signature");
+    key = await importPublicSigningKey(certificate.publicKey);
   } catch {
     return false;
   }
-  if (sig.length !== ED25519_SIGNATURE_BYTES) return false;
   const fingerprint = await computeCertificateFingerprint(certificate);
   try {
-    return ed25519.verify(
+    return await verifyWithP256(
+      key,
       sig,
       receiptSignatureBytes(content, fingerprint, signerRole),
-      pub,
-      { zip215: false },
     );
   } catch {
     return false;
@@ -407,8 +404,8 @@ export async function verifyReceiptSignature(
  */
 export interface SignedReceiptParty {
   certificate: SigningCertificate;
-  /** Ed25519 signature (unpadded base64url) over the receipt content bound to this
-   * party's fingerprint and role. */
+  /** ECDSA P-256 signature (unpadded base64url raw `r || s`) over the receipt
+   * content bound to this party's fingerprint and role. */
   signature: string;
 }
 
@@ -416,8 +413,13 @@ export interface SignedReceiptParty {
  * A dual-signed exchange record: the mutually-verifiable receipt content plus both
  * parties' certificates and signatures. Serialized via the canonical encoding so
  * the verification item can parse it back. Roles are fixed by the handshake
- * (initiator / responder), NOT by "local"/"partner", so both parties write a
- * byte-identical artifact for the same exchange.
+ * (initiator / responder), NOT by "local"/"partner", so both parties write the
+ * same record: the same content, the same certificates, and each party's own
+ * signature in the same slot. The two files are byte-identical because each party
+ * copies the signature the other sent rather than re-deriving it; a third party
+ * holding a record can re-encode either signature (ECDSA is malleable in `s`) and
+ * produce a differing copy that still verifies, so the artifacts are compared by
+ * verifying them, not by hashing the file.
  */
 export interface DualSignedRecord {
   version: typeof SIGNED_RECEIPT_VERSION;
@@ -456,12 +458,13 @@ const base64UrlSchema = z
 // verifyPresentedCertificate checks the self-signature and pin.
 const boundedWireCertificateSchema: z.ZodType<SigningCertificate> = z.object({
   version: z.literal(SIGNING_CERTIFICATE_VERSION),
-  algorithm: z.literal("ed25519"),
+  algorithm: z.literal("ecdsa-p256-sha256"),
   identity: z.string().min(1).max(MAX_TEXT_LENGTH),
   publicKey: z.object({
-    kty: z.literal("OKP"),
-    crv: z.literal("Ed25519"),
+    kty: z.literal("EC"),
+    crv: z.literal("P-256"),
     x: base64UrlSchema,
+    y: base64UrlSchema,
   }),
   signature: base64UrlSchema,
 });

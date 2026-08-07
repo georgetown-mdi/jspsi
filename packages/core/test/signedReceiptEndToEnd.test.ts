@@ -54,13 +54,24 @@ function prepared(identity: string, output: Output, rows: typeof serverRows) {
 
 const both: Output = { expectsOutput: true, shareWithPartner: true };
 
-// Deterministic identities and a fixed session key so both parties derive the
-// same binder.
-const identityA = generateSigningIdentity("Initiator Co", {
-  seed: new Uint8Array(32).map((_, i) => i),
+// Fixed keys and a fixed session key so both parties derive the same binder.
+const identityA = await generateSigningIdentity("Initiator Co", {
+  privateKey: {
+    kty: "EC",
+    crv: "P-256",
+    x: "GVQtflhIdfyWtA4RGHj1T0I9SSp06yAE1StWzYqyOgc",
+    y: "9aIOTbxzjvOD_-qU-bR7fvyonZyFmNRUYARsDEronE4",
+    d: "Cw4RFBcaHSAjJiksLzI1ODs-QURHSk1QU1ZZXF9iZWg",
+  },
 });
-const identityB = generateSigningIdentity("Responder Co", {
-  seed: new Uint8Array(32).map((_, i) => (i + 50) & 0xff),
+const identityB = await generateSigningIdentity("Responder Co", {
+  privateKey: {
+    kty: "EC",
+    crv: "P-256",
+    x: "BTjKXg73U-P7scjs7x2b4PTBObeQCmUWxRZUphXgOco",
+    y: "vrypj5auTCXlpWtQ7dzQVRiLOO5FYAFEK2N6hkO_fnQ",
+    d: "yM3S19zh5uvw9fr_BAkOExgdIicsMTY7QEVKT1RZXmM",
+  },
 });
 const fingerprintA = await computeCertificateFingerprint(identityA.certificate);
 const fingerprintB = await computeCertificateFingerprint(identityB.certificate);

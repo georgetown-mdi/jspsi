@@ -1,4 +1,3 @@
-import { ed25519 } from "@noble/curves/ed25519.js";
 import { z } from "zod";
 
 import { camelizeKeys } from "./utils/camelizeKeys.js";
@@ -9,9 +8,19 @@ import {
   sha256,
   toBase64Url,
 } from "./utils/crypto.js";
-import { UsageError } from "./errors.js";
+import {
+  SigningError,
+  assertPrivateKeyMatchesPublic,
+  decodeEcdsaSignature,
+  generateP256PrivateJwk,
+  importPrivateSigningKey,
+  importPublicSigningKey,
+  signWithP256,
+  verifyWithP256,
+} from "./signingKeys.js";
 
 import type { CanonicalValue } from "./utils/canonical.js";
+import type { P256PrivateJwk, P256PublicJwk } from "./signingKeys.js";
 
 // The long-lived signing identity that backs certificate-mode exchange receipts
 // (Phase 2). Each party generates one keypair and one self-signed certificate
@@ -28,73 +37,48 @@ import type { CanonicalValue } from "./utils/canonical.js";
 // canonical bytes, reusing the project's single canonicalization primitive
 // rather than introducing an X.509/ASN.1 surface; see docs/SECURITY_DESIGN.md
 // for the rationale and the extensibility seam toward an authority-backed mode.
+//
+// Key handling, the signature encoding, and the algorithm parameters live in
+// signingKeys.ts, the one chokepoint this module and signedReceipt.ts share.
+
+export { SigningError } from "./signingKeys.js";
+export type { P256PrivateJwk, P256PublicJwk } from "./signingKeys.js";
 
 // --- Versions and domains ----------------------------------------------------
 
-/** Single recognized certificate format version for v1; a reader rejects any
- * other value rather than migrating it. Doubles as the format discriminant: a
- * future authority-backed (X.509) representation would be a distinct version. */
-export const SIGNING_CERTIFICATE_VERSION = "psilink-signing-cert/v1";
+/** Single recognized certificate format version; a reader rejects any other
+ * value rather than migrating it. Doubles as the format discriminant over the
+ * signature scheme and the public-key representation together, so a document
+ * written under a different version is refused rather than reinterpreted under
+ * this one; a future authority-backed (X.509) representation would likewise be a
+ * distinct version. */
+export const SIGNING_CERTIFICATE_VERSION = "psilink-signing-cert/v2";
 
 /** Single recognized version for the on-disk signing identity file (private key
  * + certificate). */
-export const SIGNING_IDENTITY_VERSION = "psilink-signing-identity/v1";
+export const SIGNING_IDENTITY_VERSION = "psilink-signing-identity/v2";
 
 // Domain-separation labels folded into the bytes that are signed and hashed.
 // They keep a certificate self-signature cryptographically distinct from a
-// receipt signature (a later phase) and from the fingerprint pre-image, so a
-// signature or digest produced in one context can never be replayed as another.
-// Keep them distinct -- this is the same domain-separation discipline used for
-// the exchange-record commitments and the agreed-terms hash.
+// receipt signature and from the fingerprint pre-image, so a signature or digest
+// produced in one context can never be replayed as another. Keep them distinct
+// -- this is the same domain-separation discipline used for the exchange-record
+// commitments and the agreed-terms hash. They are not versioned alongside the
+// certificate format: the body's own `version` field is inside the bytes both
+// labels cover, so a v1 and a v2 body already separate.
 const CERTIFICATE_SIGNATURE_DOMAIN = "psilink-signing-cert-signature/v1";
 const CERTIFICATE_FINGERPRINT_DOMAIN = "psilink-signing-cert-fingerprint/v1";
 
-// Ed25519 byte lengths. Public key and private seed are 32 bytes; an EdDSA
-// signature is 64. Used to reject a malformed or wrong-curve key/signature with
-// a precise message rather than a downstream verification failure.
-const ED25519_KEY_BYTES = 32;
-const ED25519_SIGNATURE_BYTES = 64;
+/** The one signature algorithm supported by this certificate version: ECDSA
+ * over P-256 with SHA-256, the signature encoded as the fixed-length raw
+ * `r || s` (IEEE P1363). A field rather than an implicit assumption so an
+ * authority-backed mode (which may carry another scheme) can add a value without
+ * changing the certificate shape. */
+export type SigningAlgorithm = "ecdsa-p256-sha256";
 
-/** The one signature algorithm supported in v1. A field rather than an implicit
- * assumption so an authority-backed mode (which may carry RSA or ECDSA) can add
- * a value without changing the certificate shape. */
-export type SigningAlgorithm = "ed25519";
-
-// --- Errors ------------------------------------------------------------------
-
-/**
- * Thrown for any signing-identity or certificate problem: a malformed or
- * unsupported key/certificate, a failed self-signature, an unpinned or
- * mismatched partner fingerprint, or a receipt identity the certificate does not
- * authorize. Extends {@link UsageError} so the CLI classifies it as a
- * configuration/usage problem (exit 64), consistent with how a malformed key
- * file is handled.
- */
-// Exit-code mapping and the deferred trust-error split: docs/spec/PROTOCOL.md,
-// Signing identity and certificate pinning.
-export class SigningError extends UsageError {
-  constructor(message: string) {
-    super(message);
-    this.name = "SigningError";
-  }
-}
+const SIGNING_ALGORITHM: SigningAlgorithm = "ecdsa-p256-sha256";
 
 // --- Types -------------------------------------------------------------------
-
-/** Ed25519 public key as a JWK (RFC 8037 OKP). `x` is the 32-byte public key,
- * unpadded base64url. */
-export interface Ed25519PublicJwk {
-  kty: "OKP";
-  crv: "Ed25519";
-  x: string;
-}
-
-/** Ed25519 private key as a JWK (RFC 8037 OKP): the public `x` plus the 32-byte
- * private seed `d`, both unpadded base64url. As sensitive as any private key;
- * persisted owner-read-only and never shared. */
-export interface Ed25519PrivateJwk extends Ed25519PublicJwk {
-  d: string;
-}
 
 /**
  * The signed content of a certificate -- the "to-be-signed" body. The
@@ -109,14 +93,14 @@ export interface CertificateBody {
   /** The party's self-asserted identity (its `linkage_terms.identity`). A
    * receipt is authorized only if its asserted identity matches this exactly. */
   identity: string;
-  publicKey: Ed25519PublicJwk;
+  publicKey: P256PublicJwk;
 }
 
 /** A self-signed certificate: the {@link CertificateBody} plus a signature over
  * it made with the body's own public key. */
 export interface SigningCertificate extends CertificateBody {
-  /** Ed25519 signature (unpadded base64url) over the domain-separated canonical
-   * bytes of the body, by the body's public key. */
+  /** ECDSA P-256 signature (unpadded base64url raw `r || s`) over the
+   * domain-separated canonical bytes of the body, by the body's public key. */
   signature: string;
 }
 
@@ -128,7 +112,7 @@ export interface SigningCertificate extends CertificateBody {
  */
 export interface SigningIdentity {
   version: typeof SIGNING_IDENTITY_VERSION;
-  privateKey: Ed25519PrivateJwk;
+  privateKey: P256PrivateJwk;
   certificate: SigningCertificate;
 }
 
@@ -142,27 +126,29 @@ const base64UrlSchema = z
   .string()
   .regex(/^[A-Za-z0-9_-]+$/, "must be an unpadded base64url string");
 
-const Ed25519PublicJwkSchema: z.ZodType<Ed25519PublicJwk> = z.object({
-  kty: z.literal("OKP"),
-  crv: z.literal("Ed25519"),
+const P256PublicJwkSchema: z.ZodType<P256PublicJwk> = z.object({
+  kty: z.literal("EC"),
+  crv: z.literal("P-256"),
   x: base64UrlSchema,
+  y: base64UrlSchema,
 });
 
-const Ed25519PrivateJwkSchema: z.ZodType<Ed25519PrivateJwk> = z.object({
-  kty: z.literal("OKP"),
-  crv: z.literal("Ed25519"),
+const P256PrivateJwkSchema: z.ZodType<P256PrivateJwk> = z.object({
+  kty: z.literal("EC"),
+  crv: z.literal("P-256"),
   x: base64UrlSchema,
+  y: base64UrlSchema,
   d: base64UrlSchema,
 });
 
 const SigningAlgorithmSchema: z.ZodType<SigningAlgorithm> =
-  z.literal("ed25519");
+  z.literal(SIGNING_ALGORITHM);
 
 const CertificateBodyShape = {
   version: z.literal(SIGNING_CERTIFICATE_VERSION),
   algorithm: SigningAlgorithmSchema,
   identity: z.string().min(1),
-  publicKey: Ed25519PublicJwkSchema,
+  publicKey: P256PublicJwkSchema,
 };
 
 /**
@@ -182,63 +168,9 @@ export const SigningCertificateSchema: z.ZodType<SigningCertificate> = z.object(
 
 const SigningIdentitySchema: z.ZodType<SigningIdentity> = z.object({
   version: z.literal(SIGNING_IDENTITY_VERSION),
-  privateKey: Ed25519PrivateJwkSchema,
+  privateKey: P256PrivateJwkSchema,
   certificate: SigningCertificateSchema,
 });
-
-// --- Low-level key handling --------------------------------------------------
-
-/**
- * Decode and validate an Ed25519 public key from its JWK `x`, returning the raw
- * 32 bytes. Rejects a wrong-length key, a non-decodable point, and a small-order
- * (degenerate) point -- so the cert-load path never trusts a stored coordinate
- * that is not a real, full-order public key (security requirement: reject
- * degenerate keys on load).
- */
-function decodePublicKey(x: string): Uint8Array<ArrayBuffer> {
-  let bytes: Uint8Array<ArrayBuffer>;
-  try {
-    bytes = fromBase64Url(x);
-  } catch {
-    throw new SigningError("certificate public key is not valid base64url");
-  }
-  if (bytes.length !== ED25519_KEY_BYTES)
-    throw new SigningError(
-      `certificate public key must be ${ED25519_KEY_BYTES} bytes, got ` +
-        `${bytes.length}`,
-    );
-  let point: { isSmallOrder: () => boolean };
-  try {
-    point = ed25519.Point.fromBytes(bytes);
-  } catch (err) {
-    throw new SigningError(
-      "certificate public key is not a valid Ed25519 point: " +
-        (err instanceof Error ? err.message : String(err)),
-    );
-  }
-  if (point.isSmallOrder())
-    throw new SigningError(
-      "certificate public key is a small-order (degenerate) Ed25519 point",
-    );
-  return bytes;
-}
-
-/** Decode and length-check the private seed `d`. The point-validity of the
- * matching public key is checked separately via {@link decodePublicKey}. */
-function decodePrivateSeed(d: string): Uint8Array<ArrayBuffer> {
-  let bytes: Uint8Array<ArrayBuffer>;
-  try {
-    bytes = fromBase64Url(d);
-  } catch {
-    throw new SigningError("signing private key is not valid base64url");
-  }
-  if (bytes.length !== ED25519_KEY_BYTES)
-    throw new SigningError(
-      `signing private key must be ${ED25519_KEY_BYTES} bytes, got ` +
-        `${bytes.length}`,
-    );
-  return bytes;
-}
 
 // --- Canonical inputs --------------------------------------------------------
 
@@ -254,6 +186,7 @@ function certificateBody(cert: CertificateBody): CanonicalValue {
       kty: cert.publicKey.kty,
       crv: cert.publicKey.crv,
       x: cert.publicKey.x,
+      y: cert.publicKey.y,
     },
   };
 }
@@ -278,9 +211,11 @@ function fingerprintInput(cert: CertificateBody): Uint8Array<ArrayBuffer> {
  * Compute a certificate's fingerprint: the unpadded base64url SHA-256 over the
  * domain-separated canonical encoding of the certificate body. The body carries
  * both the public key and the asserted identity, so the fingerprint binds them
- * together -- pinning a fingerprint pins that key-to-identity binding. The same
- * logical certificate yields the same fingerprint on any implementation (RFC
- * 8785); see docs/spec/CANONICAL_ENCODING.md.
+ * together -- pinning a fingerprint pins that key-to-identity binding. It covers
+ * the body and never the signature, so it stays a known answer for a given key
+ * and identity even though ECDSA signing is randomized. The same logical
+ * certificate yields the same fingerprint on any implementation (RFC 8785); see
+ * docs/spec/CANONICAL_ENCODING.md.
  */
 export async function computeCertificateFingerprint(
   cert: CertificateBody,
@@ -292,58 +227,50 @@ export async function computeCertificateFingerprint(
 
 /** Options for {@link generateSigningIdentity}. */
 export interface GenerateSigningIdentityOptions {
-  /** A 32-byte seed for deterministic generation. Production callers omit this
-   * (a fresh CSPRNG key is generated); tests and the checked-in cross-
-   * implementation vectors inject it to make generation reproducible. */
-  seed?: Uint8Array;
+  /** A fixed P-256 private key to bind instead of generating a fresh one.
+   * Production callers omit this -- `crypto.subtle.generateKey` takes no seed,
+   * so a fixed key is the only way to make generation reproducible; tests and
+   * the checked-in cross-implementation vectors supply one. */
+  privateKey?: P256PrivateJwk;
 }
 
 /**
- * Generate a new long-lived signing identity bound to `identity`: a fresh
- * Ed25519 keypair, a self-signed certificate carrying `identity` and the public
- * key, and the private key. Deterministic given `options.seed`.
+ * Generate a new long-lived signing identity bound to `identity`: a P-256
+ * keypair, a self-signed certificate carrying `identity` and the public key, and
+ * the private key. The certificate's fingerprint is fully determined by the key
+ * and the identity; the self-signature is not, because ECDSA signing is
+ * randomized.
  *
- * @throws {SigningError} if `identity` is empty.
+ * @throws {SigningError} if `identity` is empty or `options.privateKey` is not a
+ *   valid P-256 private key.
  */
-export function generateSigningIdentity(
+export async function generateSigningIdentity(
   identity: string,
   options: GenerateSigningIdentityOptions = {},
-): SigningIdentity {
+): Promise<SigningIdentity> {
   if (identity.length === 0)
     throw new SigningError(
       "cannot generate a signing identity for an empty identity string",
     );
 
-  // noble/curves contract: keygen() returns the 32-byte Ed25519 *seed* as
-  // `secretKey` (NOT a 64-byte expanded key), and sign() takes that same seed.
-  // We store the seed as the JWK `d`. If a future noble version returned an
-  // expanded key here, decodePrivateSeed's 32-byte length check on load would
-  // reject it rather than letting an inconsistent `d` produce signatures that
-  // fail to verify.
-  const { secretKey, publicKey } =
-    options.seed !== undefined
-      ? ed25519.keygen(options.seed)
-      : ed25519.keygen();
-  const secret = secretKey as Uint8Array<ArrayBuffer>;
-  const pub = publicKey as Uint8Array<ArrayBuffer>;
+  const jwk = options.privateKey ?? (await generateP256PrivateJwk());
+  // Import even a freshly generated key rather than trusting the exported JWK:
+  // the call that makes the key usable for signing is also the one that pins its
+  // coordinates to the canonical encoding the fingerprint binds.
+  const signingKey = await importPrivateSigningKey(jwk);
 
   const body: CertificateBody = {
     version: SIGNING_CERTIFICATE_VERSION,
-    algorithm: "ed25519",
+    algorithm: SIGNING_ALGORITHM,
     identity,
-    publicKey: { kty: "OKP", crv: "Ed25519", x: toBase64Url(pub) },
+    publicKey: { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y },
   };
-  const signature = ed25519.sign(signatureInput(body), secret);
+  const signature = await signWithP256(signingKey, signatureInput(body));
 
   return {
     version: SIGNING_IDENTITY_VERSION,
-    privateKey: {
-      kty: "OKP",
-      crv: "Ed25519",
-      x: toBase64Url(pub),
-      d: toBase64Url(secret),
-    },
-    certificate: { ...body, signature: toBase64Url(signature) },
+    privateKey: { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y, d: jwk.d },
+    certificate: { ...body, signature },
   };
 }
 
@@ -351,35 +278,24 @@ export function generateSigningIdentity(
 
 /**
  * Assert a certificate's self-signature, throwing a {@link SigningError} that
- * names the specific failure: a malformed or degenerate public key, a malformed
- * signature, or a signature that does not verify. This is the throwing form used
- * on every load and trust path so a degenerate key is reported as such rather
- * than masquerading as a failed signature; it decodes the public key exactly
- * once. Pure check; does not consult any pin or identity.
+ * names the specific failure: a malformed or off-curve public key, a malformed
+ * or wrong-length signature, or a signature that does not verify. This is the
+ * throwing form used on every load and trust path so a bad key is reported as
+ * such rather than masquerading as a failed signature. Pure check; does not
+ * consult any pin or identity.
  *
  * @throws {SigningError}
  */
-function assertCertificateSelfSignature(cert: SigningCertificate): void {
-  // decodePublicKey throws a precise SigningError for a malformed/degenerate key.
-  const pub = decodePublicKey(cert.publicKey.x);
-  let sig: Uint8Array<ArrayBuffer>;
-  try {
-    sig = fromBase64Url(cert.signature);
-  } catch {
-    throw new SigningError("certificate signature is not valid base64url");
-  }
-  if (sig.length !== ED25519_SIGNATURE_BYTES)
-    throw new SigningError(
-      `certificate signature must be ${ED25519_SIGNATURE_BYTES} bytes, got ` +
-        `${sig.length}`,
-    );
-  // Strict RFC 8032 verification (zip215: false): reject the non-canonical R/A
-  // point encodings that noble's default (zip215: true) would accept, so any
-  // certificate we accept is one a strict cross-implementation verifier also
-  // accepts. Signing is deterministic and canonical, so our own certificates
-  // verify under either setting; this only tightens what a foreign certificate
-  // must satisfy.
-  if (!ed25519.verify(sig, signatureInput(cert), pub, { zip215: false }))
+async function assertCertificateSelfSignature(
+  cert: SigningCertificate,
+): Promise<void> {
+  // Each of these throws a precise SigningError naming what is wrong.
+  const key = await importPublicSigningKey(cert.publicKey);
+  const signature = decodeEcdsaSignature(
+    cert.signature,
+    "certificate signature",
+  );
+  if (!(await verifyWithP256(key, signature, signatureInput(cert))))
     throw new SigningError(
       "certificate self-signature does not verify; the certificate is " +
         "malformed or has been tampered with",
@@ -388,17 +304,18 @@ function assertCertificateSelfSignature(cert: SigningCertificate): void {
 
 /**
  * Whether a certificate's self-signature is valid: that `certificate.signature`
- * is a valid Ed25519 signature over the certificate body under the body's own
- * public key. The boolean counterpart to {@link assertCertificateSelfSignature}
- * for callers that only need a yes/no (the precise reason is available from the
- * asserting form). Returns `false` for a malformed signature, a degenerate
- * public key, or a signature that does not verify.
+ * is a valid ECDSA P-256 signature over the certificate body under the body's
+ * own public key. The boolean counterpart to
+ * {@link assertCertificateSelfSignature} for callers that only need a yes/no
+ * (the precise reason is available from the asserting form). Resolves `false`
+ * for a malformed signature, an invalid public key, or a signature that does not
+ * verify.
  */
-export function verifyCertificateSelfSignature(
+export async function verifyCertificateSelfSignature(
   cert: SigningCertificate,
-): boolean {
+): Promise<boolean> {
   try {
-    assertCertificateSelfSignature(cert);
+    await assertCertificateSelfSignature(cert);
     return true;
   } catch {
     return false;
@@ -410,57 +327,51 @@ export function verifyCertificateSelfSignature(
 /**
  * Parse, validate, and self-verify a certificate from a raw value (e.g. the
  * result of `JSON.parse`). Snake_case keys are camelized first. Beyond schema
- * validation this rejects a degenerate public key and a certificate whose
- * self-signature does not verify, so a parsed certificate is always internally
- * consistent (it does not establish trust -- that is the pin's job).
+ * validation this rejects a public key that is not a canonically encoded point
+ * on P-256 and a certificate whose self-signature does not verify, so a parsed
+ * certificate is always internally consistent (it does not establish trust --
+ * that is the pin's job). A certificate carrying any other `version` is rejected
+ * by the schema rather than reinterpreted under this scheme.
  *
  * @throws {ZodError} if the shape is invalid.
- * @throws {SigningError} if the key is malformed/degenerate or the
- *   self-signature does not verify.
+ * @throws {SigningError} if the key is malformed or the self-signature does not
+ *   verify.
  */
-export function parseCertificate(raw: unknown): SigningCertificate {
+export async function parseCertificate(
+  raw: unknown,
+): Promise<SigningCertificate> {
   const cert = SigningCertificateSchema.parse(camelizeKeys(raw));
-  // Decodes the public key (rejecting a malformed/degenerate one) and verifies
-  // the self-signature in one pass, each failure with its own precise message.
-  assertCertificateSelfSignature(cert);
+  await assertCertificateSelfSignature(cert);
   return cert;
 }
 
 /**
  * Parse, validate, and self-verify a signing identity (private key +
  * certificate) from a raw value. In addition to {@link parseCertificate}'s
- * checks, this verifies that the private key matches the certificate's public
- * key, so a tampered or mismatched identity file is rejected on load rather than
- * producing receipts that fail to verify.
+ * checks, this verifies that the private key is a valid P-256 key belonging with
+ * the public coordinates stored beside it and that those coordinates are the
+ * certificate's, so a tampered or mismatched identity file is rejected on load
+ * rather than producing receipts that fail to verify.
  *
  * @throws {ZodError} if the shape is invalid.
  * @throws {SigningError} if a key is malformed, the self-signature does not
  *   verify, or the private and certificate public keys disagree.
  */
-export function parseSigningIdentity(raw: unknown): SigningIdentity {
+export async function parseSigningIdentity(
+  raw: unknown,
+): Promise<SigningIdentity> {
   const id = SigningIdentitySchema.parse(camelizeKeys(raw));
   // Validates the certificate (key + self-signature) the same way a standalone
   // certificate would be checked.
-  parseCertificate(id.certificate);
-  const seed = decodePrivateSeed(id.privateKey.d);
-  const derivedPub = ed25519.getPublicKey(seed) as Uint8Array<ArrayBuffer>;
-  let storedPub: Uint8Array<ArrayBuffer>;
-  let certPub: Uint8Array<ArrayBuffer>;
-  try {
-    storedPub = fromBase64Url(id.privateKey.x);
-    certPub = fromBase64Url(id.certificate.publicKey.x);
-  } catch {
-    throw new SigningError(
-      "signing identity public key is not valid base64url",
-    );
-  }
-  // The private key must match both the public key stored alongside it and the
-  // one in the certificate it issued; otherwise the file is inconsistent.
-  if (!bytesEqual(derivedPub, storedPub) || !bytesEqual(derivedPub, certPub))
-    throw new SigningError(
-      "signing identity is inconsistent: the private key does not match its " +
-        "certificate's public key",
-    );
+  await parseCertificate(id.certificate);
+  const privateKey = await importPrivateSigningKey(id.privateKey);
+  await assertPrivateKeyMatchesPublic(
+    privateKey,
+    id.privateKey,
+    id.certificate.publicKey,
+    "signing identity is inconsistent: the private key does not match its " +
+      "certificate's public key",
+  );
   return id;
 }
 
@@ -573,10 +484,10 @@ export async function assertPartnerCertificateTrusted(
         "certificate cannot be trusted; obtain the partner's fingerprint " +
         "out-of-band and set signing.partner_fingerprint",
     );
-  // Surface the precise reason (degenerate key vs. failed signature) with
+  // Surface the precise reason (invalid key vs. failed signature) with
   // partner-facing context rather than a single generic message.
   try {
-    assertCertificateSelfSignature(certificate);
+    await assertCertificateSelfSignature(certificate);
   } catch (err) {
     throw new SigningError(
       "partner certificate is not valid: " +

@@ -23,43 +23,45 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("loadSigningIdentity returns undefined when the file does not exist", () => {
-  expect(loadSigningIdentity(path.join(dir, "missing.json"))).toBeUndefined();
+test("loadSigningIdentity resolves undefined when the file does not exist", async () => {
+  await expect(
+    loadSigningIdentity(path.join(dir, "missing.json")),
+  ).resolves.toBeUndefined();
 });
 
 test("save then load round-trips and preserves the fingerprint", async () => {
   const idPath = path.join(dir, "signing-identity.json");
-  const id = generateSigningIdentity("Party A, Agency A");
+  const id = await generateSigningIdentity("Party A, Agency A");
   saveSigningIdentity(idPath, id);
   const before = await computeCertificateFingerprint(id.certificate);
 
-  const loaded = loadSigningIdentity(idPath);
+  const loaded = await loadSigningIdentity(idPath);
   expect(loaded).toEqual(id);
   expect(await computeCertificateFingerprint(loaded!.certificate)).toBe(before);
 });
 
-test("saveSigningIdentity writes the file owner-read-only on Unix", () => {
+test("saveSigningIdentity writes the file owner-read-only on Unix", async () => {
   if (process.platform === "win32") return;
   const idPath = path.join(dir, "signing-identity.json");
-  saveSigningIdentity(idPath, generateSigningIdentity("Party A"));
+  saveSigningIdentity(idPath, await generateSigningIdentity("Party A"));
   const mode = fs.statSync(idPath).mode & 0o777;
   expect(mode).toBe(0o600);
 });
 
-test("saveSigningIdentity creates parent directories", () => {
+test("saveSigningIdentity creates parent directories", async () => {
   const idPath = path.join(dir, "nested", "deeper", "signing-identity.json");
-  saveSigningIdentity(idPath, generateSigningIdentity("Party A"));
+  saveSigningIdentity(idPath, await generateSigningIdentity("Party A"));
   expect(fs.existsSync(idPath)).toBe(true);
 });
 
-test("loadSigningIdentity throws UsageError on invalid JSON", () => {
+test("loadSigningIdentity rejects with UsageError on invalid JSON", async () => {
   const idPath = path.join(dir, "bad.json");
   fs.writeFileSync(idPath, "{ not json", { mode: 0o600 });
-  expect(() => loadSigningIdentity(idPath)).toThrow(UsageError);
+  await expect(loadSigningIdentity(idPath)).rejects.toThrow(UsageError);
 });
 
-test("loadSigningIdentity does not echo file content on an invalid-JSON file", () => {
-  // The identity file holds the Ed25519 private key. A JSON parse failure must
+test("loadSigningIdentity does not echo file content on an invalid-JSON file", async () => {
+  // The identity file holds the P-256 private key. A JSON parse failure must
   // report path-only: Node's JSON.parse echoes a snippet of the source start in
   // its message (here exactly the leading 10 chars), so a file that begins with
   // the key would otherwise leak it. The 10-char marker leads the file so the old
@@ -69,7 +71,7 @@ test("loadSigningIdentity does not echo file content on an invalid-JSON file", (
   fs.writeFileSync(idPath, `${MARKER} not json`, { mode: 0o600 });
   let caught: unknown;
   try {
-    loadSigningIdentity(idPath);
+    await loadSigningIdentity(idPath);
   } catch (err) {
     caught = err;
   }
@@ -79,22 +81,22 @@ test("loadSigningIdentity does not echo file content on an invalid-JSON file", (
   expect((caught as Error).message).not.toContain(MARKER);
 });
 
-test("loadSigningIdentity throws UsageError on a malformed identity", () => {
+test("loadSigningIdentity rejects with UsageError on a malformed identity", async () => {
   const idPath = path.join(dir, "malformed.json");
   fs.writeFileSync(idPath, JSON.stringify({ version: "wrong" }), {
     mode: 0o600,
   });
-  expect(() => loadSigningIdentity(idPath)).toThrow(UsageError);
+  await expect(loadSigningIdentity(idPath)).rejects.toThrow(UsageError);
 });
 
-test("loadSigningIdentity throws UsageError on a tampered (inconsistent) identity", () => {
+test("loadSigningIdentity rejects with UsageError on a tampered (inconsistent) identity", async () => {
   const idPath = path.join(dir, "tampered.json");
-  const id = generateSigningIdentity("Party A");
-  const other = generateSigningIdentity("Party A");
+  const id = await generateSigningIdentity("Party A");
+  const other = await generateSigningIdentity("Party A");
   // swap in a private key that no longer matches the certificate's public key
-  id.privateKey.d = other.privateKey.d;
+  id.privateKey = other.privateKey;
   fs.writeFileSync(idPath, JSON.stringify(id), { mode: 0o600 });
-  expect(() => loadSigningIdentity(idPath)).toThrow(UsageError);
+  await expect(loadSigningIdentity(idPath)).rejects.toThrow(UsageError);
 });
 
 test("defaultSigningIdentityPath is per-user, not per-working-directory", () => {
