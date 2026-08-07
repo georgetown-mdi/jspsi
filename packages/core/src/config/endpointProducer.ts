@@ -56,7 +56,7 @@ export const PLACEHOLDER_SSH_USERNAME = "REPLACE_WITH_SSH_USERNAME";
  * inbound stays inbound, its outbound stays outbound. The mirror swap that makes
  * the two parties images of each other lives solely at the accept-side
  * `connectionFromEndpoint`; swapping here too would double-swap and undo it. A
- * shared (single-`path`) connection emits a single `path` as before. Guarding on
+ * shared (single-`path`) connection emits a single `path`. Guarding on
  * `inboundPath` is enough to read `outboundPath`: the connection reaching here is
  * built and schema-validated, whose both-or-neither refine rejects a half pair,
  * so the pair is always whole (`outboundPath` is statically `string | undefined`

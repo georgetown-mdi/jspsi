@@ -701,7 +701,6 @@ export function reconcileReceivedPayload(
   );
 }
 
-/** Maps a validated payload wire message into a {@link PartnerPayload}. */
 function toPartnerPayload(msg: PayloadWireMessage): PartnerPayload {
   if (!msg.hasData) return { columns: [], rowIndices: [], rows: [] };
   return { columns: msg.columns, rowIndices: msg.rowIndices, rows: msg.rows };
@@ -841,8 +840,6 @@ export function buildOutputTable(
   const hasPartnerCols = partnerPayload.columns.length > 0;
   const ourBaseName = ourIdCol ? ourIdCol.name : "row_id";
 
-  // Partner payload columns keep their original names, prefixed with their_ only
-  // on collision with our identifier column.
   const valueHeaders = partnerPayload.columns.map((c) =>
     c !== ourBaseName ? c : `their_${c}`,
   );

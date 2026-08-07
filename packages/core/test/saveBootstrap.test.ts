@@ -76,7 +76,6 @@ test("both parties --save: each learns the other advertised save intent", async 
 
 test("one party --save: each side correctly learns whether the other saved", async () => {
   const [a, b] = createMessagePipe();
-  // A saves, B does not.
   const [resA, resB] = await Promise.all([
     runSide(a, "initiator", termsA, true),
     runSide(b, "responder", termsB, false),
@@ -87,7 +86,6 @@ test("one party --save: each side correctly learns whether the other saved", asy
 
 test("one party --save (responder saves): intent flows in both directions", async () => {
   const [a, b] = createMessagePipe();
-  // Initiator does not save; responder does.
   const [resA, resB] = await Promise.all([
     runSide(a, "initiator", termsA, false),
     runSide(b, "responder", termsB, true),

@@ -8,9 +8,9 @@ import type { FieldValue } from "../src/standardization";
 // The Node half of the transform-regex cross-build contract. The vectors in
 // transform-regex-vectors.json carry the output each step produced on the
 // JavaScript `RegExp` engine (computed by generate-transform-regex-vectors.mjs);
-// runPipeline now runs those steps on the linear-time engine (re2js). Asserting
+// runPipeline runs those steps on the linear-time engine (re2js). Asserting
 // the engine reproduces every vector pins that in-dialect patterns are
-// byte-identical to the previous engine for the patterns and inputs these vectors
+// byte-identical to `RegExp` for the patterns and inputs these vectors
 // cover -- including every bundled default-template pattern. That corpus
 // deliberately excludes the inputs where re2js and `new RegExp` differ (e.g. `.`
 // over a non-BMP code point, `\s` being ASCII-only); those are exercised

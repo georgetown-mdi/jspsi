@@ -11,10 +11,10 @@ import {
   TransportPublishIndeterminateError,
 } from "../src/errors";
 
-// These assertions guard the operator-facing-error audit (board item 199419757):
-// the terminal transport/directory UsageError family carries a recovery-hint tag
-// and a concrete operator next step so the CLI's hint-walker suppresses its
-// generic "retry without re-inviting" advisory (which would contradict a terminal
+// These assertions guard the operator-facing-error audit: the terminal
+// transport/directory UsageError family carries a recovery-hint tag and a
+// concrete operator next step so the CLI's hint-walker suppresses its generic
+// "retry without re-inviting" advisory (which would contradict a terminal
 // refusal). They pin the tag and a stable fragment of the appended step, not a
 // brittle full-string match, and confirm the exit-64 classification (instanceof
 // UsageError) the appended prose must not disturb.
@@ -24,9 +24,7 @@ describe("terminal transport/directory error taxonomy", () => {
     expect(err).toBeInstanceOf(UsageError);
     expect(err.name).toBe("FrameSizeExceededError");
     expect(err.psilinkRecoveryHintEmitted).toBe(true);
-    // The call-site fault detail is preserved verbatim at the front...
     expect(err.message).toMatch(/^inbound frame exceeds the cap\. /);
-    // ...and the class appends a concrete operator next step.
     expect(err.message).toContain("contact your partner");
   });
 

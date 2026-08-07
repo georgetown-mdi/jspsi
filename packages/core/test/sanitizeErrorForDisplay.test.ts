@@ -268,7 +268,6 @@ describe("sanitizeErrorForDisplay", () => {
     test("redacts a PKCS#8 ENCRYPTED PRIVATE KEY block and a key with no trailing newline", () => {
       const enc = `-----BEGIN ENCRYPTED PRIVATE KEY-----\n${KEY_BODY}\n-----END ENCRYPTED PRIVATE KEY-----`;
       expect(sanitizeErrorForDisplay(new Error(enc))).not.toContain(KEY_BODY);
-      // No newline between the body and the END marker.
       const tight = `-----BEGIN PRIVATE KEY-----${KEY_BODY}-----END PRIVATE KEY-----`;
       expect(sanitizeErrorForDisplay(new Error(tight))).not.toContain(KEY_BODY);
     });

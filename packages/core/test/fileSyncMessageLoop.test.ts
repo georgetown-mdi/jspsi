@@ -31,11 +31,6 @@ import { getLoggerForVerbosity } from "../src/utils/logger";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { DISPLAY_TRUNCATION_MARKER } from "../src/utils/sanitizeForDisplay";
 
-// Per-seam contract coverage for the pure message-loop classification helpers.
-// Before the split these were only exercised behind FileSyncConnection's
-// poll()/send(); these tests pin the filename form, the policy defaults, and the
-// loop-file grammar branches directly.
-
 describe("messageFilename", () => {
   test("no-timestamp form is <id>-<byteCount>.json", () => {
     expect(

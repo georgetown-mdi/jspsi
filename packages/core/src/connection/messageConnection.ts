@@ -134,7 +134,7 @@ export interface TransportControls {
    *
    * Kept distinct from {@link fail} as a named transition - a clean remote
    * close versus an abnormal drop - so a future close-capable transport can map
-   * its clean-close signal here. Behaviorally the two now converge: a buffered
+   * its clean-close signal here. Behaviorally the two converge: a buffered
    * frame is drained ahead of either terminal error, so a clean close arriving
    * with the peer's final frame still queued returns that frame first either
    * way.

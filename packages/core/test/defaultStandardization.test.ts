@@ -166,14 +166,14 @@ describe("getDefaultStandardization — structure", () => {
 // --- Default chains never emit the empty string ------------------------------
 
 describe('default chains: a blank input yields null, never ""', () => {
-  // The empty-string-as-matchable-key change (link.ts removeDuplicatesAndUndefineds
-  // now drops only undefined, not every falsy value) rests on the premise that the
+  // Empty-string-as-matchable-key (link.ts removeDuplicatesAndUndefineds drops
+  // only undefined, not every falsy value) rests on the premise that the
   // default per-type cleaning maps a blank value to null, so a fully-default
   // exchange never emits "" as a key and is unaffected. docs/spec/PROTOCOL.md (Key
   // input data) and the CHANGELOG state this as prose; pin it as a check here so a
   // future default chain that let a blank fall through to "" trips this test rather
   // than silently widening default matching (CONTRIBUTING: encode a runtime fact as
-  // a check). null (record excluded) and "" (a matchable key) are now distinct
+  // a check). null (record excluded) and "" (a matchable key) are distinct
   // outcomes downstream, so toBeNull also asserts the value is not "".
   const blanks = ["", " ", "   ", "\t", " \t\n "];
   const transformations = getDefaultStandardization(fullMetadata, minimalTerms);
@@ -195,8 +195,8 @@ describe('default chains: a blank input yields null, never ""', () => {
   }
 
   // A non-blank "junk" cell that CLEANS to empty (separators or punctuation a
-  // type strips entirely) is the other half of "blank/'' cleaned value" in item
-  // 203074970: it never arrives as whitespace but reduces to "" partway through.
+  // type strips entirely) is the other half of the "blank/'' cleaned value"
+  // case: it never arrives as whitespace but reduces to "" partway through.
   // Every default type drops these characters, so each maps to null for the same
   // reason a literal blank does; pin it so a chain that let a cleaned-empty value
   // survive trips this test.
@@ -216,13 +216,12 @@ describe('default chains: a blank input yields null, never ""', () => {
 // --- SSN / SSN4 explicit blank-drop ------------------------------------------
 
 describe("default SSN / SSN4 pipelines: explicit blank-drop before pad_left", () => {
-  // Item 203074970: SSN/SSN4 pad a cleaned value to a fixed width, so a value
-  // that cleaned to empty would pad into an all-zeros placeholder ("000000000" /
-  // "0000") before reaching any null-mapping step -- dropped only as a side
-  // effect of the terminal placeholder null_if happening to list that value. An
-  // explicit `null_if ""` placed BEFORE pad_left drops the empty value as empty,
-  // so the blank-cell footgun (live since item 203074741 stopped dropping "" at
-  // the linkage layer) is prevented here and stays prevented even if an operator
+  // SSN/SSN4 pad a cleaned value to a fixed width, so a value that cleaned to
+  // empty would pad into an all-zeros placeholder ("000000000" / "0000") before
+  // reaching any null-mapping step -- dropped only as a side effect of the
+  // terminal placeholder null_if happening to list that value. An explicit
+  // `null_if ""` placed BEFORE pad_left drops the empty value as empty, so the
+  // blank-cell footgun is prevented here and stays prevented even if an operator
   // edits the placeholder list. Pin the step's presence, its position, and the
   // fact that it -- not the placeholder null_if -- carries the blank-drop.
   const cases: Array<{ type: "ssn" | "ssn4"; column: string }> = [

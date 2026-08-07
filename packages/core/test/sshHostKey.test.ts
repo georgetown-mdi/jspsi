@@ -25,8 +25,8 @@ async function verifyHostKeyFingerprint(
 function buildEd25519Blob(): Uint8Array<ArrayBuffer> {
   const { publicKey } = generateKeyPairSync("ed25519");
   const spki = publicKey.export({ type: "spki", format: "der" }) as Buffer;
-  const rawKey = spki.slice(12, 44); // 32 bytes
-  const blob = new Uint8Array(4 + 11 + 4 + 32); // 51 bytes total
+  const rawKey = spki.slice(12, 44);
+  const blob = new Uint8Array(4 + 11 + 4 + 32);
   const view = new DataView(blob.buffer);
   view.setUint32(0, 11, false); // length of "ssh-ed25519"
   blob.set(new TextEncoder().encode("ssh-ed25519"), 4);

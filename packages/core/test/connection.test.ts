@@ -427,12 +427,6 @@ test("max_reconnect_attempts at the ceiling is accepted", () => {
 });
 
 test("max_reconnect_attempts above the ceiling is rejected", () => {
-  // The footgun this closes: the field was z.int().nonnegative() with no upper
-  // bound, so a value near Number.MAX_SAFE_INTEGER was accepted and became a
-  // linear self-inflicted connect hang (~N seconds at the 1s inter-attempt floor).
-  // One past the ceiling is now rejected on the config/programmatic path, so an
-  // over-ceiling --max-reconnect-attempts override caught at the CLI boundary is
-  // also caught here by the merged-options re-validation.
   const result = safeParseConnectionConfig({
     ...sftpBase,
     options: { max_reconnect_attempts: MAX_RECONNECT_ATTEMPTS + 1 },
@@ -468,7 +462,6 @@ test("provider_options keys pass through verbatim (snake_case preserved)", () =>
     ready_timeout: 5000,
     debug_mode: true,
   });
-  // The known schema field was camelized as usual.
   expect(result.options?.peerTimeoutMs).toBe(120000);
 });
 

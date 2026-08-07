@@ -926,8 +926,8 @@ const filedropPathSchema = z
   .refine(
     (p) =>
       p.startsWith("/") || // Unix or UNC with forward slashes
-      /^[A-Za-z]:[/\\]/.test(p) || // Windows drive letter (C:\ or C:/)
-      p.startsWith("\\\\"), // Windows UNC (\\server\share)
+      /^[A-Za-z]:[/\\]/.test(p) ||
+      p.startsWith("\\\\"),
     { message: "path must be an absolute path" },
   );
 

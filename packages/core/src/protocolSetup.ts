@@ -57,17 +57,15 @@ const MAX_ABORT_REASONS = 256;
 // terms-exchange abort that blames the (valid) linkage terms. It never affects
 // agreement, so dropping a bad value is the correct, contract-preserving outcome.
 //
-// The earlier bare `.optional().catch(undefined)` collapsed two cases into one
-// `undefined`: a field genuinely absent (a partner that observed no host key, a
-// file-drop or proxy path) and a field present on the wire but rejected. That
-// erased the only signal an operator could use to tell a benign no-host-key
-// partner from a non-conforming one. Instead, parse the raw field and tag it:
+// The raw field is parsed and tagged rather than collapsed to one `undefined`:
 // an absent field and a well-formed value both report `malformed: false` (with
 // `value` set only in the latter), while a present-but-invalid or over-bound
-// value reports `malformed: true` with no `value`. The fail-soft contract is
-// unchanged -- a malformed advertisement still yields no usable host key and
-// never aborts -- but the malformed signal now survives for the CLI to log at
-// debug (see TermsExchangeResult.partnerHostKeyMalformed).
+// value reports `malformed: true` with no `value`. That keeps the signal an
+// operator needs to tell a benign no-host-key partner (one that observed none,
+// on a file-drop or proxy path) from a non-conforming one: a malformed
+// advertisement yields no usable host key and never aborts, but the malformed
+// signal survives for the CLI to log at debug (see
+// TermsExchangeResult.partnerHostKeyMalformed).
 const hostKeyAdvertisement = z.object({
   fingerprint: z.string().max(100),
   keyType: z.string().max(64),
@@ -445,8 +443,7 @@ async function reconcileProtocolVersion(
  * messages, and the partner's is read back as
  * {@link TermsExchangeResult.partnerRecordCount}. It rides the terms exchange
  * rather than a dedicated round-trip because that is the one bidirectional
- * exchange both parties always perform; folding it here removes the separate
- * count send/receive that role resolution used to run. It is per-party role and
+ * exchange both parties always perform. It is per-party role and
  * element-bounds metadata carried on the envelope beside `linkageTerms`, never
  * inside them, so it does not enter the canonical/agreed-terms hash.
  *
@@ -514,8 +511,6 @@ export async function exchangeTerms(
       : {};
 
   if (handshakeRole === "initiator") {
-    // Message 1: send our terms (carrying our record count and protocol version,
-    // and our save intent and observed host key when set).
     await conn.send({
       linkageTerms: localTerms,
       recordCount: localRecordCount,
@@ -597,7 +592,6 @@ export async function exchangeTerms(
       throw new Error(`linkage terms are incompatible: ${errors.join("; ")}`);
     }
 
-    // Message 3: send our proceed decision.
     await conn.send({ decision: "proceed" });
 
     return {
@@ -667,8 +661,6 @@ export async function exchangeTerms(
       throw new Error(`linkage terms are incompatible: ${errors.join("; ")}`);
     }
 
-    // Message 2: send our terms + proceed decision (carrying our record count
-    // and protocol version, and our save intent and observed host key).
     await conn.send({
       linkageTerms: localTerms,
       decision: "proceed",
@@ -679,7 +671,6 @@ export async function exchangeTerms(
       ...hostKeyField,
     });
 
-    // Message 3: receive initiator's final decision.
     const msg = await receiveParsed(conn, decisionMessage);
     if (msg.decision === "abort") {
       throw new Error(
@@ -714,7 +705,7 @@ export async function exchangeTerms(
  * they agree on whether this single frame is sent without further negotiation;
  * sending it directly after terms means the initiator emits message 3 of the
  * terms exchange and then this frame back-to-back -- a brief speaker-stutter, the
- * only frame that follows the terms exchange now that role resolution is local.
+ * only frame that follows the terms exchange.
  *
  * The secret is a base64url-encoded 32 random bytes -- the same format as a
  * rotation token (see auth.ts) and {@link SHARED_SECRET_REGEX} -- so it drops
@@ -769,8 +760,7 @@ function pickRole(
  * This is a pure local computation with no connection I/O: both parties' record
  * counts ride the terms exchange (see {@link exchangeTerms}), so by the time the
  * terms are agreed each party holds its own count and the partner's, and the role
- * follows without a further message. Both output cases resolve locally -- the
- * separate two-message count round-trip this used to run is gone.
+ * follows without a further message. Both output cases resolve locally.
  *
  * When exactly one party has `expectsOutput: true`, that party is the receiver
  * regardless of the counts -- it is the only party that learns the result. When

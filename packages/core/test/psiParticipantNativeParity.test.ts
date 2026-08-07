@@ -9,7 +9,7 @@ import { sortAssociationTable } from "../src/testing";
 import { loadNativeAddonOrSkip } from "./utils/nativeAddon";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
-// Cross-backend parity (board item 199653275): a party running the native N-API
+// Cross-backend parity: a party running the native N-API
 // addon and a party running the WASM engine must complete a full identify-
 // intersection round and agree, in BOTH role assignments. This is the end-to-end
 // consequence of the byte-for-byte interop the wire-vector tests pin: since the

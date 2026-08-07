@@ -106,12 +106,10 @@ test("object member separators are not counted as array elements", () => {
 // --- String handling (applies to both bounds) ---------------------------------
 
 test("colons inside string values are not counted as keys", () => {
-  // One object, one member, whose value is a string packed with colons.
   expect(check('{"url":"a:b:c:d:e:f:g:h:i:j"}', { keys: 4 })).toBe(false);
 });
 
 test("commas inside string values are not counted as elements", () => {
-  // One array, one element, whose value is a string packed with commas.
   expect(check('["a,b,c,d,e,f,g,h,i,j"]', { elements: 4 })).toBe(false);
 });
 

@@ -121,12 +121,6 @@ test("a legitimately large association table parses", async () => {
 });
 
 // --- numberArrayMessage: direct-`.parse()` send-before-parse site -------------
-// The joiner's final received frame -- the starter's original-index list -- is
-// read by a direct `parseOrProtocolError(numberArrayMessage, ...)` AFTER the
-// status acknowledgement is sent (so a malformed frame cannot strand the
-// partner). It is the one residual flat array read off a direct `.parse()`
-// rather than receiveParsed, so before the single-issue bound a pathological
-// count surfaced a BARE RangeError instead of a clean ConnectionError.
 
 // Replaces the value the Nth receive() on `conn` resolves with, leaving the send
 // path and every other receive untouched. The real frame is still drained from

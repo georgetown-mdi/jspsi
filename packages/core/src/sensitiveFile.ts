@@ -118,12 +118,11 @@ export function editSensitiveYamlDocument(
  * {@link UsageError} naming `fileLabel` only, never the parser's message (which
  * can echo a leading span of the source -- channel 4).
  *
- * Routes through {@link parseBoundedJson} rather than a bare `JSON.parse`: now
- * that this chokepoint lives in core, it inherits the structural pre-bound that
- * stops a pathological object/array from driving the parser into an uncatchable,
- * process-terminating abort -- a protection the CLI-only version lacked. Both the
- * bound's byte-free error and `JSON.parse`'s source-bearing one are caught here
- * and replaced with the path-only failure.
+ * Routes through {@link parseBoundedJson} rather than a bare `JSON.parse`, so
+ * it inherits the structural pre-bound that stops a pathological object/array
+ * from driving the parser into an uncatchable, process-terminating abort. Both
+ * the bound's byte-free error and `JSON.parse`'s source-bearing one are caught
+ * here and replaced with the path-only failure.
  */
 export function parseSensitiveJson(source: string, fileLabel: string): unknown {
   try {

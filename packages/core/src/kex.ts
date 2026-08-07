@@ -528,7 +528,6 @@ export async function runKex(
   const mySecret = ephemeral.secretKey;
 
   if (handshakeRole === "initiator") {
-    // Message 1: send our ephemeral public key and our request-encryption flag.
     await conn.send({
       kexMsg: "1",
       e: toBase64Url(myPublic),
@@ -578,7 +577,6 @@ export async function runKex(
       throw new ConnectionError(GENERIC_FAILURE, "security");
     }
 
-    // Message 3: send our confirmation.
     await conn.send({
       kexMsg: "3",
       confirm: toBase64Url(initiatorConfirm),
@@ -620,7 +618,6 @@ export async function runKex(
         requestEncryption,
       );
 
-    // Message 2: send our ephemeral + confirmation + our request-encryption flag.
     await conn.send({
       kexMsg: "2",
       e: toBase64Url(myPublic),

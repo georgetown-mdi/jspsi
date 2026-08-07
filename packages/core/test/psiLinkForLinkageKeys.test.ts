@@ -29,8 +29,6 @@ const metadata: ColumnMetadata[] = [
   },
 ];
 
-// Two keys: SSN+LN+DOB (precise), then SSN+LN1+FN1 (looser). This replicates
-// the cascade tested in the original psiLinkForLinkageKeys.test.ts.
 const terms: LinkageTerms = {
   version: "1.0.0",
   identity: "test",

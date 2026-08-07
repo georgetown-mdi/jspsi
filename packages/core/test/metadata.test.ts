@@ -37,11 +37,6 @@ test("zip_code: linkage role, not payload by default", () => {
 });
 
 test("an inferred zip column is excluded from the disclosed set", () => {
-  // The observable disclosure consequence, pinned at the boundary preparePayload
-  // gathers on (disclosedColumnNames over isDisclosedToPartner): a `zip` column is
-  // NOT sent to the partner, while an unrecognized `notes` column still is. This is
-  // the behavior change a `zip` column previously inferred as `other` (and sent);
-  // pin it so a regression in the alias mapping cannot silently start disclosing it.
   const disclosed = disclosedColumnNames(
     inferMetadata(["first_name", "last_name", "zip", "notes"]),
   );
@@ -300,8 +295,6 @@ test("safeParseMetadata accepts names differing only in case (matching is exact)
 // --- column-name length bound -------------------------------------------------
 
 test("safeParseMetadata rejects an empty column name", () => {
-  // An empty name is now rejected at config parse rather than parsing cleanly and
-  // being skipped later at record build (the build-time governance validation).
   const result = safeParseMetadata([
     { name: "", type: "other", role: "payload", is_payload: true },
   ]);

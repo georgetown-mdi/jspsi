@@ -434,19 +434,9 @@ test("data consumer (deliver): a frame after a terminal latch is a non-throwing 
 });
 
 // --- send-liveness (the encrypt-then-send window) ----------------------------
-// A parked receive() keeps the ref'd idle timer armed, so a silent peer is
-// caught. The sender's encrypt-then-send window parks no receive(), so before
-// this guard a transport hand-off that orphaned (its callback never firing, all
-// lower per-op deadlines `.unref()`'d) let the event loop drain to a silent
-// exit 0. These pin that a send now holds a ref'd guard across the hand-off and
-// clears it on every settlement/terminal path.
 
 test("send: an orphaned hand-off with no parked receive fails terminally, not silently", async () => {
   const { conn, send } = makeQueued({ inactivityTimeoutMs: 20 });
-  // The transport accepts the write but never resolves -- a mid-exchange drop in
-  // the encrypt-then-send window, where no receive() is parked to keep the idle
-  // timer armed. Before the guard this call would hang and the loop drain to
-  // exit 0; now it must reject terminally.
   send.mockReturnValue(new Promise(() => {}));
   const err = await expectRejectionKind(conn.send("x"), "transport");
   expect(err.message).toContain("lost during the exchange");
@@ -656,7 +646,6 @@ test("errorMessage stringifies non-Error values without throwing", () => {
 });
 
 test("asConnectionError routes its message through errorMessage", () => {
-  // The deliberate behavior change: an empty-message Error becomes "Error".
   const err = asConnectionError(new Error(""), "transport");
   expect(err).toBeInstanceOf(ConnectionError);
   expect(err.kind).toBe("transport");

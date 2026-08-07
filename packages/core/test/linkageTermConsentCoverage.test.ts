@@ -12,7 +12,6 @@ import {
 
 import type { LinkageTerms } from "../src/config/linkageTerms.js";
 
-/** Absolute path of a repository file named relative to this test. */
 function repoPath(relative: string): string {
   return fileURLToPath(new URL(relative, import.meta.url));
 }

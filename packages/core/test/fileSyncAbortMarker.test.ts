@@ -192,7 +192,6 @@ function plantPeerMarker(
   );
 }
 
-// Resolves with the first emitted error, or rejects on timeout.
 function nextError(conn: FileSyncConnection, ms = 1000): Promise<unknown> {
   return new Promise((resolve, reject) => {
     conn.once("error", resolve);

@@ -157,8 +157,7 @@ export interface PreparedExchange {
  *
  * When a real count-only run path lands, REPLACE this refusal with it and ungate
  * the client-side gates in the same change -- flipping `APPLIED_SETTINGS.psiC`
- * alone is not sufficient while this refusal stands. The full ungate checklist is
- * tracked on the product board under "Implement count-only PSI".
+ * alone is not sufficient while this refusal stands.
  *
  * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`: on the
  * accept side the algorithm is adopted verbatim from the partner's invitation
@@ -523,7 +522,7 @@ export interface ExchangeResult {
    * exchange, so neither front end can write it. The table is still computed
    * inside {@link runExchange} (the sender needs it to extract its own outgoing
    * payload) and is withheld only here, at the return. A both-output exchange, and
-   * the receiver of a one-sided exchange, get the table as before. The withholding
+   * the receiver of a one-sided exchange, get the table. The withholding
    * predicate is exactly the one that gates the audit record's committed
    * association table, so the returned result and the record stay one rule: a
    * helper neither receives the table nor binds it in its record.

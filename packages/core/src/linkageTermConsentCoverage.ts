@@ -85,7 +85,6 @@ export interface ExcludedTerm {
 /** @internal */
 export type LinkageTermClassification = ConsentRelevantTerm | ExcludedTerm;
 
-/** A copy of `terms` with `edit` applied, leaving the original untouched. */
 function edited(
   terms: LinkageTerms,
   edit: (draft: LinkageTerms) => void,
@@ -95,7 +94,6 @@ function edited(
   return draft;
 }
 
-/** The transform pipeline the probe base's first linkage-key element declares. */
 function probeTransform(terms: LinkageTerms): Array<TransformStep> {
   const transform = terms.linkageKeys[0].elements[0].transform;
   if (transform === undefined)
@@ -103,7 +101,6 @@ function probeTransform(terms: LinkageTerms): Array<TransformStep> {
   return transform;
 }
 
-/** The probe base's linkage field of the given semantic type. */
 function fieldOfType<T extends LinkageField["type"]>(
   terms: LinkageTerms,
   type: T,

@@ -346,8 +346,6 @@ export class PSIParticipant {
     return this.engine.receiveServerSetup(setupBytes);
   }
 
-  // Host-side element-count guard, then hand the response to the engine to match
-  // against the setup held by the preceding receiveServerSetup.
   private computeAssociationTable(
     responseBytes: Uint8Array,
   ): Promise<[Array<number>, Array<number>]> {

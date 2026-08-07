@@ -21,8 +21,7 @@ import {
 // rejected at terms validation, before any per-row execution and before both
 // parties commit to terms they could not evaluate identically. This is fail
 // closed and BY CONSTRUCTION -- a pattern that compiles cannot backtrack
-// catastrophically -- superseding the best-effort `redos-detector` static screen
-// this module replaced. The normative dialect is pinned in docs/spec/PROTOCOL.md
+// catastrophically. The normative dialect is pinned in docs/spec/PROTOCOL.md
 // ("Transform regular-expression dialect").
 //
 // `parse_date` is deliberately NOT screened here: it is not a raw-pattern step,

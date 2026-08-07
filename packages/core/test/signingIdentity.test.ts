@@ -318,15 +318,12 @@ describe("signing-cert-vectors.json", () => {
 
   test("the two vectors cross-reject (mismatched identity and fingerprint)", async () => {
     const [a, b] = vectors;
-    // mismatched identity binding: A's cert does not authorize B's identity
     expect(certificateAuthorizesIdentity(a.certificate, b.identity)).toBe(
       false,
     );
-    // non-matching fingerprint: A's cert is not trusted under B's pinned value
     await expect(
       assertPartnerCertificateTrusted(a.certificate, b.expected.fingerprint),
     ).rejects.toThrow(SigningError);
-    // but each is trusted under its own pin and authorizes its own identity
     await expect(
       verifyPresentedCertificate({
         certificate: a.certificate,

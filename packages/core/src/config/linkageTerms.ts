@@ -312,7 +312,6 @@ interface NameConstraints {
    * have been removed.
    */
   affixesAllowed?: boolean;
-  /** Values that must not appear in the data. */
   exclude?: string[];
 }
 
@@ -356,7 +355,6 @@ const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
 interface DateConstraints {
   /** Dates must be able to be parsed as valid dates. */
   validOnly?: boolean;
-  /** Values that must not appear in the data. */
   exclude?: string[];
 }
 
@@ -385,7 +383,6 @@ const SSNConstraintsSchema: z.ZodType<SSNConstraints> = z.object({
 
 /** Constraints applicable to any semantic type. */
 interface AnyConstraints {
-  /** Values that must not appear in the data. */
   exclude?: string[];
 }
 
@@ -623,8 +620,7 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
   // The four `tier: "regex"` functions compile their raw `pattern` / `delimiter`
   // under the linear-time engine. applyElementTransform compiles each step once per
   // distinct transform array (memoized), so this caps that one-time compile and
-  // source-parse cost, preserving the parse-cost ceiling the removed redos-detector
-  // screen provided (see MAX_TRANSFORM_PATTERN_LENGTH). The engine bounds
+  // source-parse cost (see MAX_TRANSFORM_PATTERN_LENGTH). The engine bounds
   // backtracking by construction (a pattern that compiles cannot blow up
   // exponentially); this length cap is the orthogonal source-length sanity bound.
   // It measures the COERCED source the factory actually compiles
@@ -685,8 +681,8 @@ export interface LinkageKeyElement {
   /**
    * Expands a single value into multiple candidates before hashing.
    * - `transpositions`: all two-digit transpositions.
-   * - `edit_distances`: all single-character deletions up to the constraint
-   *   `maxLength`.
+   * - `edit_distances`: all single-character deletions, matching values
+   *   within one edit distance.
    * - `adjacent_years`: +/- 1 year from the date.
    */
   generateFuzzyComparisons?: GenerateFuzzyComparisons;
@@ -721,7 +717,6 @@ const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> = z.object({
  * un-swapped order. This catches data entry errors where names are reversed.
  */
 export interface LinkageKey {
-  /** Human-readable name for this linkage key. */
   name: string;
   /** Ordered list of field-derived elements combined to form the key. */
   elements: LinkageKeyElement[];

@@ -91,7 +91,6 @@ test("mintExchangeFile: the serialized YAML is snake_case and carries the placeh
   const raw = parseYaml(yaml) as Record<string, unknown>;
   const connection = raw["connection"] as Record<string, unknown>;
   const server = connection["server"] as Record<string, unknown>;
-  // On-disk keys are snake_case (linkage_terms, not linkageTerms).
   expect(raw).toHaveProperty("linkage_terms");
   expect(raw).not.toHaveProperty("linkageTerms");
   // The one identity field a locator cannot carry is seeded for the operator.
@@ -357,7 +356,6 @@ test("connectionFromLocator: no credential field appears in a webrtc expansion, 
     expect(connection.server).not.toHaveProperty(forbidden);
     expect(connection).not.toHaveProperty(forbidden);
   }
-  // The server object carries ONLY the three locator fields.
   expect(Object.keys(connection.server).sort()).toEqual(
     ["host", "path", "port"].sort(),
   );

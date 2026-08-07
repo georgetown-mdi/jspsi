@@ -292,10 +292,6 @@ describe("buildReceiptContent (session-keyed directional payload MACs)", () => {
   });
 
   test("the empty-payload direction is not a public constant (session-keyed)", async () => {
-    // The empty payload previously digested to a public SHA-256 constant, leaking
-    // flow direction to any third party. Under the session-keyed MAC, two different
-    // session keys give the empty direction two different MACs, so it is no longer a
-    // recognizable constant.
     const macKeyA = await hkdfDerive(
       sessionKey,
       "psilink-signed-receipt-payload-v1:initiator-to-responder",
@@ -413,7 +409,6 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
     expect(recInit.content).toEqual(shared);
     expect(recInit.initiator.certificate).toEqual(identityA.certificate);
     expect(recInit.responder.certificate).toEqual(identityB.certificate);
-    // Each party's signature verifies against the shared content bound to its role.
     expect(
       await verifyReceiptSignature(
         recInit.initiator.certificate,
@@ -430,8 +425,6 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
         "responder",
       ),
     ).toBe(true);
-    // The two signature blocks are NOT interchangeable: the initiator's signature
-    // does not verify when checked as the responder's (its bound role differs).
     expect(
       await verifyReceiptSignature(
         recInit.initiator.certificate,

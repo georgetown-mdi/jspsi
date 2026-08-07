@@ -99,10 +99,9 @@ export interface HostKeyRefusal {
 
 /**
  * SFTP session setup as a self-contained, stateful subsystem
- * {@link FileSyncConnection} composes. Owns the observed-host-key state the
- * connection used to hold inline and exposes the connect-option building,
- * host-key-verifier install, and host-key probe the connection delegates to.
- * External behavior is byte-identical to the inline form; see
+ * {@link FileSyncConnection} composes. Owns the observed-host-key state and
+ * exposes the connect-option building, host-key-verifier install, and host-key
+ * probe the connection delegates to. See
  * docs/SECURITY_DESIGN.md (Transport-layer authentication) and
  * docs/spec/CHANNEL_SECURITY.md (SFTP host-key verification).
  *

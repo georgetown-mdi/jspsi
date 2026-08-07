@@ -93,7 +93,7 @@ test("preparePayload: identifier column is sent as a plain payload column", () =
 });
 
 test("preparePayload: missing column value becomes null", () => {
-  const sparse = [{ ssn: "001", patient_id: "P0" }]; // no 'diagnosis'
+  const sparse = [{ ssn: "001", patient_id: "P0" }];
   const result = preparePayload(sparse, metaWithId, [[0], [0]]);
   if (!result.hasData) throw new Error("expected hasData:true");
   expect(result.rowIndices).toEqual([0]);
@@ -109,7 +109,7 @@ test("preparePayload: a short row omitting a prototype-member column sends null,
     { name: "toString", type: "other", role: "payload", isPayload: true },
     { name: "constructor", type: "other", role: "payload", isPayload: true },
   ];
-  const sparse = [{ ssn: "001" }]; // omits both 'toString' and 'constructor'
+  const sparse = [{ ssn: "001" }];
   const result = preparePayload(sparse, metaProto, [[0], [0]]);
   if (!result.hasData) throw new Error("expected hasData:true");
   expect(result.columns).toEqual(["toString", "constructor"]);
@@ -197,7 +197,7 @@ test("buildOutputTable: a short row omitting a prototype-member identifier colum
       isPayload: false,
     },
   ];
-  const sparse = [{ ssn: "001" }]; // omits the 'toString' identifier column
+  const sparse = [{ ssn: "001" }];
   const partnerPayload: PartnerPayload = {
     columns: ["partner_id"],
     rowIndices: [0],
@@ -394,7 +394,6 @@ test("assertPayloadSendDisclosed: an absent payload is a no-op, a present-but-em
   expect(() =>
     assertPayloadSendDisclosed({ send: [] }, meta, SHARING_OUTPUT),
   ).toThrow(/diagnosis/);
-  // Nothing disclosed and nothing declared still agree.
   expect(() =>
     assertPayloadSendDisclosed({ send: [] }, metaLinkageOnly, SHARING_OUTPUT),
   ).not.toThrow();
@@ -685,7 +684,6 @@ test("assertDisclosureMatchesCommitment: an absent commitment is a no-op (lazy)"
   expect(() =>
     assertDisclosureMatchesCommitment(undefined, metaWithId),
   ).not.toThrow();
-  // Even against metadata that discloses nothing.
   expect(() =>
     assertDisclosureMatchesCommitment(undefined, metaLinkageOnly),
   ).not.toThrow();
@@ -729,11 +727,9 @@ test("assertDisclosureMatchesCommitment: a column now disclosed but not committe
 });
 
 test("assertDisclosureMatchesCommitment: an empty commitment is strict 'disclose nothing'", () => {
-  // Committed [] but metadata discloses columns -> rejected.
   expect(() => assertDisclosureMatchesCommitment([], metaWithId)).toThrow(
     UsageError,
   );
-  // Committed [] and metadata discloses nothing -> accepted.
   expect(() =>
     assertDisclosureMatchesCommitment([], metaLinkageOnly),
   ).not.toThrow();
@@ -957,7 +953,6 @@ test("exchangePayloads: each party receives the other's payload", async () => {
     payloadB,
   );
 
-  // A sent payloadA (patient_id + diagnosis for rows 0 and 2); B receives it
   expect(receivedByB.columns).toEqual(["patient_id", "diagnosis"]);
   expect(receivedByB.rowIndices).toEqual([0, 2]);
   expect(receivedByB.rows).toEqual([
@@ -965,7 +960,6 @@ test("exchangePayloads: each party receives the other's payload", async () => {
     ["P2", "C"],
   ]);
 
-  // B sent payloadB (diagnosis only for rows 1 and 3); A receives it
   expect(receivedByA.columns).toEqual(["diagnosis"]);
   expect(receivedByA.rowIndices).toEqual([1, 3]);
   expect(receivedByA.rows).toEqual([["B"], ["D"]]);
@@ -1022,7 +1016,6 @@ test("exchangePayloads: malformed data from partner rejects the initiator", asyn
   const initiatorPromise = exchangePayloads(connA, "initiator", {
     hasData: false,
   });
-  // Responder sends garbage instead of a valid payload message.
   await connB.receive();
   await connB.send({ unexpected: true });
   await expect(initiatorPromise).rejects.toThrow();
@@ -1033,7 +1026,6 @@ test("exchangePayloads: malformed data from partner rejects the responder", asyn
   const responderPromise = exchangePayloads(connB, "responder", {
     hasData: false,
   });
-  // Initiator sends garbage instead of a valid payload message.
   await connA.send({ unexpected: true });
   await expect(responderPromise).rejects.toThrow();
 });
@@ -1043,13 +1035,12 @@ test("exchangePayloads: rowIndices/rows length mismatch rejects the receiver", a
   const initiatorPromise = exchangePayloads(connA, "initiator", {
     hasData: false,
   });
-  // Responder sends a structurally valid message but with mismatched lengths.
   await connB.receive();
   await connB.send({
     hasData: true,
     columns: ["patient_id"],
     rowIndices: [0, 1],
-    rows: [["P0"]], // only one row for two indices
+    rows: [["P0"]],
   });
   await expect(initiatorPromise).rejects.toThrow();
 });
@@ -1171,10 +1162,10 @@ test("exchangePayloads: a pathological-count rowIndices array fails cleanly, not
 });
 
 test("exchangePayloads: a pathological-count rows array fails cleanly, not with a RangeError", async () => {
-  // ~4M invalid (non-array) ROWS. #220 made each ROW single-issue (capping a row
-  // of millions of invalid cells), but left the outer row COUNT unbounded -- so
-  // millions of invalid rows still accumulate one issue per row and burn the
-  // event loop (`Invalid string length` at the top). The outer `rows` is now a
+  // ~4M invalid (non-array) ROWS. Each ROW is single-issue (capping a row of
+  // millions of invalid cells), but an unbounded outer row COUNT would let
+  // millions of invalid rows accumulate one issue per row and burn the event
+  // loop (`Invalid string length` at the top). The outer `rows` is a
   // single-issue validator too, so the whole 2-D structure yields one issue.
   const [connA, connB] = createMessagePipe();
   const initiatorPromise = exchangePayloads(connA, "initiator", {
@@ -1261,10 +1252,9 @@ test("exchangePayloads: the column-name length bound counts UTF-16 code units", 
   // code points or graphemes fails here: an astral (surrogate-pair) character
   // counts as its two code units, not one visible character.
   const astral = "\u{1D54F}"; // U+1D54F, one visible char, two UTF-16 code units
-  const atBound = astral.repeat(MAX_NAME_LENGTH / 2); // exactly MAX_NAME_LENGTH units
+  const atBound = astral.repeat(MAX_NAME_LENGTH / 2);
   expect(atBound.length).toBe(MAX_NAME_LENGTH);
 
-  // At the bound: accepted and round-tripped unchanged.
   const [acceptA, acceptB] = createMessagePipe();
   const acceptP = exchangePayloads(acceptA, "initiator", { hasData: false });
   await acceptB.receive();
@@ -1276,7 +1266,6 @@ test("exchangePayloads: the column-name length bound counts UTF-16 code units", 
   });
   expect((await acceptP).columns).toEqual([atBound]);
 
-  // One code unit over: rejected as a clean protocol error.
   const [rejectA, rejectB] = createMessagePipe();
   const rejectP = exchangePayloads(rejectA, "initiator", { hasData: false });
   await rejectB.receive();
@@ -1360,14 +1349,10 @@ test("buildOutputTable: partner columns use plain names when no collision", () =
     metaWithId,
     partnerPayload,
   );
-  // The partner row-index column (row_id) sits between our column and the
-  // partner payload columns.
   expect(headers).toEqual(["patient_id", "row_id", "partner_id", "notes"]);
 });
 
 test("buildOutputTable: their_ prefix disambiguates same-named columns", () => {
-  // Both datasets have a column named "patient_id"; the their_ prefix on the
-  // partner column keeps them distinct.
   const partnerPayload: PartnerPayload = {
     columns: ["patient_id"],
     rowIndices: [0],
@@ -1406,7 +1391,7 @@ test("buildOutputTable: partner row-index header falls back past colliding partn
     "row_id",
     "their_row_id",
   ]);
-  expect(new Set(headers).size).toBe(headers.length); // all distinct
+  expect(new Set(headers).size).toBe(headers.length);
   expect(rows[0]).toEqual(["P0", "3", "A", "B"]); // partner index in column 2
 });
 
@@ -1491,14 +1476,14 @@ test("buildOutputTable: CSV-escapes values containing commas", () => {
 test("buildOutputTable: throws when partner payload is missing an association table index", () => {
   const partnerPayload: PartnerPayload = {
     columns: ["partner_id"],
-    rowIndices: [0], // missing index 1
+    rowIndices: [0],
     rows: [["Q0"]],
   };
   expect(() =>
     buildOutputTable(
       [
         [0, 1],
-        [0, 1], // their index 1 has no corresponding payload row
+        [0, 1],
       ],
       rawRows,
       metaWithId,
@@ -1540,7 +1525,6 @@ test("buildOutputTable: CSV-escapes values containing carriage returns", () => {
 });
 
 test("buildOutputTable: falls back to row index when rawRows entry is missing", () => {
-  // associationTable[0] references index 5, which is out of range for rawRows
   const partnerPayload: PartnerPayload = {
     columns: [],
     rowIndices: [],
@@ -1548,7 +1532,7 @@ test("buildOutputTable: falls back to row index when rawRows entry is missing", 
   };
   const { rows } = buildOutputTable(
     [[5], [0]],
-    rawRows, // only has indices 0-4
+    rawRows,
     metaWithId,
     partnerPayload,
   );
@@ -1562,12 +1546,7 @@ test("buildOutputTable: throws when association table arrays have different leng
     rows: [],
   };
   expect(() =>
-    buildOutputTable(
-      [[0, 1], [0]], // length 2 vs length 1
-      rawRows,
-      metaWithId,
-      partnerPayload,
-    ),
+    buildOutputTable([[0, 1], [0]], rawRows, metaWithId, partnerPayload),
   ).toThrow("2");
 });
 
@@ -1575,7 +1554,7 @@ test("buildOutputTable: null partner payload cells are emitted as empty strings"
   const partnerPayload: PartnerPayload = {
     columns: ["partner_id", "notes"],
     rowIndices: [0],
-    rows: [[null, "note0"]], // partner_id is null for this row
+    rows: [[null, "note0"]],
   };
   const { rows } = buildOutputTable(
     [[0], [0]],
@@ -1592,7 +1571,7 @@ test("buildOutputTable: throws when partner payload rowIndices and rows have dif
   const partnerPayload: PartnerPayload = {
     columns: ["partner_id"],
     rowIndices: [0, 1],
-    rows: [["Q0"]], // length 1 vs rowIndices length 2
+    rows: [["Q0"]],
   };
   expect(() =>
     buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
@@ -1602,7 +1581,7 @@ test("buildOutputTable: throws when partner payload rowIndices and rows have dif
 test("buildOutputTable: throws when partner payload rowIndices contains duplicates", () => {
   const partnerPayload: PartnerPayload = {
     columns: ["partner_id"],
-    rowIndices: [0, 0], // duplicate
+    rowIndices: [0, 0],
     rows: [["Q0"], ["Q0"]],
   };
   expect(() =>

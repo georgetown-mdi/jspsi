@@ -36,7 +36,6 @@ const CAUSE_SEPARATOR = "\ncaused by: ";
  */
 const UNREADABLE_LINK = "[unreadable error]";
 
-/** Replacement for a redacted private-key block. */
 const REDACTED_PRIVATE_KEY = "[redacted private key]";
 
 /**

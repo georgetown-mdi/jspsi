@@ -145,7 +145,7 @@ export type PeerHelloProvenance = "presentAtEntry" | "appearedAfterEntry";
 // terminal for the same reason. Peer-id recovery is always filename-based; this
 // function validates the body only.
 //
-// The hello is the only control file with a body, so the gate now reads only it
+// The hello is the only control file with a body, so the gate reads only it
 // (the schema is HelloEnvelopeSchema at every call site). The acknowledgment
 // marker is a zero-length file matched by name existence, so it needs no gate:
 // a zero-byte file has no partial-sync window to guard.
@@ -587,8 +587,7 @@ export interface RendezvousOptions {
 }
 
 // The connection-owned state the coordinator reads and writes across the seam.
-// Three kinds, each chosen so it cannot shift observable timing versus the
-// inline form:
+// Three kinds:
 //   - SHARED OBJECT REFERENCES (never copies): responsibleFiles and
 //     foreignFileSnapshot are the same Set instances poll()/cleanup()/close()
 //     hold, so every add/delete/clear/forEach here is observed there.
@@ -634,8 +633,7 @@ export interface RendezvousDeps {
  * connection's identity/config through {@link RendezvousDeps} accessors and
  * writes role/peerId/handshakeRole back through its setters at the commit sites,
  * mutating the connection's responsibleFiles/foreignFileSnapshot Sets by shared
- * reference. External behavior is byte-identical to the inline form; the
- * protocol is specified in docs/spec/FILE_SYNC.md and
+ * reference. The protocol is specified in docs/spec/FILE_SYNC.md and
  * docs/spec/CHANNEL_SECURITY.md.
  *
  * @internal
@@ -1355,7 +1353,7 @@ export class FileSyncRendezvous {
       // detection time, so it is the single point of asymmetric failure in the
       // symmetric-detection guarantee: if the put fails at exactly this moment
       // there is no durable advertisement for the peer to read -- whatever the
-      // write order -- and the peer degrades to the legacy peer-timeout. Retry
+      // write order -- and the peer degrades to the peer-timeout. Retry
       // the write up to a small bounded budget at the polling cadence to raise
       // the odds it lands before the peer would otherwise time out (the peer is
       // concurrently polling, so the advertisement need not arrive on the first

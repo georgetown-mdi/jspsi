@@ -657,7 +657,7 @@ export const STANDARDIZATION_FUNCTION_NAMES: readonly string[] = [
  * - `regex` -- the raw-pattern family (`replace_regex`, `extract_regex`,
  *   `filter_regex`, `split_on`), whose param is an operator-authored regular
  *   expression. These patterns run under the linear-time engine (see
- *   utils/linearRegex.ts), so an unbounded pattern can no longer hang on
+ *   utils/linearRegex.ts), so an unbounded pattern cannot hang on
  *   adversarial input; the tier instead marks raw-pattern inputs an editor should
  *   validate against the dialect ({@link patternConformsToDialect}, the same
  *   check {@link regexPatternSchema} applies) and present with extra care, since a
@@ -718,9 +718,8 @@ const noParams = z.object({});
  * validated to compile under the linear-time dialect ({@link patternConformsToDialect})
  * -- the same engine the regex factories run, so the editor accepts the patterns an
  * exchange will execute and rejects what RE2 drops (backreferences, lookaround).
- * This replaces the danger-tier "catastrophic backtracking is the editor's
- * problem" gate: under a non-backtracking engine there is no danger tier to gate,
- * only the dialect to conform to. See docs/spec/PROTOCOL.md.
+ * Under a non-backtracking engine there is no danger tier to gate, only the
+ * dialect to conform to. See docs/spec/PROTOCOL.md.
  *
  * The length cap matches {@link MAX_TRANSFORM_PATTERN_LENGTH} (the same bound the
  * linkage-terms validation gate applies to wire patterns). The dialect refine below
@@ -1281,7 +1280,7 @@ export class StandardizedDataset {
 /**
  * How one declared linkage field resolves to an input column -- the single
  * binding the dataset builder and the satisfiability checker both consume, so
- * the two can no longer encode the resolution rules independently and drift (the
+ * the two cannot encode the resolution rules independently and drift (the
  * detector-vs-runtime divergence class). Produced by {@link resolveFieldColumns}.
  *
  * @internal The return shape of an internal resolution primitive; exported only
@@ -1730,7 +1729,7 @@ export function assertStandardizationMatchesTerms(
  * the available data standardizations. The verdict is derived from the same
  * {@link resolveFieldColumns} binding the exchange's {@link buildStandardizedDataset}
  * uses: a field is producible exactly when the shared resolution bound it to a
- * column that is present in `columns`. The checker no longer re-derives the
+ * column that is present in `columns`. The checker does not re-derive the
  * binding itself, so it cannot diverge from the runtime -- the HIGH-severity
  * direction (a field the builder cannot produce but the checker passes) is
  * impossible by construction.
@@ -1926,7 +1925,7 @@ export function assessLinkageSatisfiability(
   // The set of field names that are BOTH declared and producible. A key element
   // referencing a name absent from this set is unsatisfiable -- whether the field
   // is declared-but-unproducible (in `unsatisfied`) or not declared at all. The
-  // latter is now rejected upstream by LinkageTermsSchema's referential-integrity
+  // latter is rejected upstream by LinkageTermsSchema's referential-integrity
   // refine (a key element `field` must name a declared linkage field), so a
   // schema-validated terms set cannot reach here with an undeclared reference;
   // this filter is kept as defense-in-depth for any terms not built through that
@@ -1974,8 +1973,8 @@ export function assessLinkageSatisfiability(
 // "Does a cleaned value meet a field's declared constraints?" -- the value-level
 // companion to validateStandardizationAgainstTerms (which checks only NAMES: that
 // standardization outputs map to declared fields, and that step function names are
-// known). Promoted out of the web workbench so the web's constraint badges and the
-// CLI's prepare-path warnings run ONE implementation.
+// known). The web's constraint badges and the CLI's prepare-path warnings run
+// ONE implementation.
 // Warn-not-enforce throughout, matching the LinkageField constraint contract ("the
 // application warns if violated but does not enforce them", config/linkageTerms.ts):
 // nothing here throws or rejects a value; each surface decides how to present the
