@@ -7,10 +7,14 @@ title: "Pinned Dependency Internals and Upgrade Checklists"
 Two dependency stacks are reached past their public APIs, so their internals are
 load-bearing and their versions are exact-pinned; a third dependency, the PSI
 crypto addon, is a vendored local fork. This document records the internal
-premises each rests on and the checklist to re-verify them before a bump merges.
-The review requirement itself is in
+premises each rests on, the checklist to re-verify them before a bump merges,
+and the install-time policies that stand beside them: npm's install-script
+verdicts, the GitHub Action pin mirror, and the residuals npm's resolver leaves
+in this workspace. The review requirement itself is in
 [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy); this is the spec-tier
-complement -- the premises and the procedure.
+complement -- the premises and the procedure. What the two container images
+freeze, pin, and install on top of that tree is in
+[CONTAINER_IMAGES.md](CONTAINER_IMAGES.md).
 
 ## Why these are exact-pinned
 
@@ -27,361 +31,39 @@ complement -- the premises and the procedure.
   precisely because the bound parses its wire format -- and pulled out of the
   routine Dependabot batch into a reviewed `webrtc-stack` group
   (`.github/dependabot.yml`).
-- **PSI crypto addon (`@openmined/psi.js`).** A psilink fork vendored as a local
-  `file:` tarball (`lib/openmined-psi.js-<version>.tgz`), not a registry package,
-  because it ships native N-API prebuilds and carries fork patches upstream does
-  not. Pinned by construction (a `file:` path resolves to exactly the committed
-  bytes); the review gate is the committed integrity sidecar and the crypto-code
-  review requirement. See [The vendored @openmined/psi.js addon](#the-vendored-openminedpsijs-addon).
+- **PSI crypto addon (`@openmined/psi.js`).** Pinned by construction: a psilink
+  fork vendored as a local `file:` tarball
+  (`lib/openmined-psi.js-<version>.tgz`), whose path resolves to exactly the
+  committed bytes. See
+  [The vendored @openmined/psi.js addon](#the-vendored-openminedpsijs-addon).
 
 ## The vendored @openmined/psi.js addon
 
-`@openmined/psi.js` is vendored as a local tarball (`lib/openmined-psi.js-<version>.tgz`, a `file:` dependency), not a registry package, because it is a psilink fork that ships **native N-API prebuilds** upstream does not (board item 199653275). The prebuilds cover the platforms the CLI deploys on -- Linux x64/arm64 in both glibc and musl (Alpine) variants, macOS, and Windows x64 -- so a Node deployment loads the native backend (roughly an order of magnitude faster than WASM; see [PROTOCOL.md](PROTOCOL.md)), and any platform without a prebuild falls back to the always-correct WASM build. The browser always uses WASM.
+`@openmined/psi.js` is vendored as a local tarball (`lib/openmined-psi.js-<version>.tgz`, a `file:` dependency), not a registry package, because it is a psilink fork that ships **native N-API prebuilds** upstream does not. The prebuilds cover the platforms the CLI deploys on -- Linux x64/arm64 in both glibc and musl (Alpine) variants, macOS, and Windows x64 -- so a Node deployment loads the native backend (roughly an order of magnitude faster than WASM; see [PROTOCOL.md](PROTOCOL.md)), and any platform without a prebuild falls back to the always-correct WASM build. The browser always uses WASM.
 
 **Integrity.** npm records no `integrity` hash for a `file:` tarball in the lockfile, so the committed sidecar `lib/<tarball>.sha256` is the integrity check in its place: the setup action (`.github/actions/setup/action.yml`) runs `sha256sum -c` against it before install, the Alpine leg re-checks it before a native wire-vector verify (`.github/workflows/native_alpine.yaml`), and the release publish job re-checks it before building the shipped Docker image (`.github/workflows/release.yaml`, the "Verify vendored native tarball integrity" step, since that job builds from its own checkout rather than the test job's artifact), so a swapped or corrupted tarball fails the build. Because npm caches a `file:` dependency by its version string, a rebuild that keeps the same version (below) MUST regenerate the sidecar AND force a reinstall, or both the check and the installed bytes would keep the stale content.
 
 **The worker-teardown fix.** The fork carries a fix, in every artifact from `2.0.6-seclink.2` onward, for a `worker_threads` teardown segfault: running any masking op inside a worker and then tearing the worker down crashed the whole process (exit 139, which a worker-thread segfault is not contained below), because BoringSSL lazily initializes per-thread state whose `__cxa_thread_atexit` destructor fired AFTER the N-API environment was already torn down. The fork's fix is a `napi_add_env_cleanup_hook` (in the fork's `private_set_intersection/napi/psi_napi.cpp`) that calls `OPENSSL_thread_stop()` to release that per-thread state while the environment is still alive. Without it, running the PSI crypto off the event-loop-owning thread -- the CLI's worker offload -- would segfault at the end of every native-backend exchange; with it the worker tears down cleanly, which is what lets the offload use the native backend at all rather than pinning the worker to WASM. The `apps/cli` real-worker integration test (`test/integration/psiWorkerRealWorker.test.ts`) is the regression guard: a reintroduced segfault crashes the test process rather than letting it assert.
 
-**Runtime dependency surface.** The fork declares exactly two runtime dependencies: `google-protobuf`, whose jspb runtime backs the `psi_pb` wire types and whose package the shipped type declarations import, and `node-gyp-build`, which `psi_native_node.js` requires to resolve a prebuild. Upstream additionally declares a gRPC / protoc codegen set (`@grpc/grpc-js`, `protoc-gen-js`, `protoc-gen-ts`, `ts-protoc-gen`) as runtime `dependencies`, and nothing the tarball ships loads any of it -- the published entry points require only `crypto`/`fs` (`psi_wasm_node.js`), `url` (`psi_wasm_web.js`, `psi_wasm_worker.js`) and `node-gyp-build`. Declared as runtime dependencies they pulled `@grpc/proto-loader` and `protobufjs` into every psilink install, and ran `protoc-gen-js`'s postinstall, which downloads a protoc plugin binary and unpacks it with `adm-zip` -- an advisory with no available fix, reaching psilink by no other path. The fork carries them as `devDependencies` instead, so they serve its own bundle build and reach no consumer. Note `google-protobuf` and `protobufjs` are distinct libraries; the PSI path uses jspb from the former, so removing the latter does not perturb it. `scripts/vendored-psi-deps.test.mjs` holds this line as a CI check rather than as prose: it asserts against the committed lockfile that the vendored package declares only those two packages and that no gRPC or proto-codegen package appears anywhere in the tree, so a re-roll that regresses the fork's manifest fails red instead of silently restoring the surface.
+**Runtime dependency surface.** The fork declares exactly two runtime dependencies: `google-protobuf`, whose jspb runtime backs the `psi_pb` wire types and whose package the shipped type declarations import, and `node-gyp-build`, which `psi_native_node.js` requires to resolve a prebuild. Upstream additionally declares a gRPC / protoc codegen set (`@grpc/grpc-js`, `protoc-gen-js`, `protoc-gen-ts`, `ts-protoc-gen`) as runtime `dependencies`, and nothing the tarball ships loads any of it -- the published entry points require only `crypto`/`fs` (`psi_wasm_node.js`), `url` (`psi_wasm_web.js`, `psi_wasm_worker.js`) and `node-gyp-build`. Declared as runtime dependencies they pulled `@grpc/proto-loader` and `protobufjs` into every psilink install, and ran `protoc-gen-js`'s postinstall, which downloads a protoc plugin binary and unpacks it with `adm-zip` -- an advisory with no available fix, reaching psilink by no other path. The fork carries the three protoc packages as `devDependencies` instead, so they serve its own bundle build and reach no consumer, and declares `@grpc/grpc-js` nowhere in its manifest at all. Note `google-protobuf` and `protobufjs` are distinct libraries; the PSI path uses jspb from the former, so removing the latter does not perturb it. `scripts/vendored-psi-deps.test.mjs` holds this line as a CI check rather than as prose: it asserts against the committed lockfile that the vendored package declares only those two packages and that no gRPC or proto-codegen package appears anywhere in the tree, so a re-roll that regresses the fork's manifest fails red instead of silently restoring the surface.
 
 **Rebuilding or bumping.** The addon is built from the fork's own Docker build image, not from this repo. On any rebuild -- a fork change, an upstream merge, or a version bump -- regenerate the sidecar (`sha256sum <tarball> > <tarball>.sha256`), and if the version string did not change, remove `node_modules/@openmined/psi.js` and reinstall so npm re-fetches the new bytes past its version cache. A rebuild that touches the native crypto is crypto-code review scope (see [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy)).
 
-## The Docker image's dependency freeze
+## Inlined dependencies and their remediation path
 
-The shipped CLI image resolves no npm dependency at image-build time and installs
-nothing at container runtime; one OS package, named below, is fetched from the
-Alpine mirror while the image is built. The Dockerfile's builder stage installs with
-`npm ci` against the committed `package-lock.json` -- which installs exactly the
-locked tree, verifying each registry package against the lockfile's integrity
-hash, and fails the build if a manifest and the lockfile disagree -- then, after
-building, re-runs `npm ci --omit=dev` for the production-only tree, and the
-runtime stage copies that `node_modules` unchanged. Every runtime dependency and
-transitive in the image is therefore the exact version in the committed
-lockfile: a rebuild without a lockfile change cannot re-resolve a caret range,
-and the image ships the same tree CI tested and the release SBOM records
-(`npm sbom --package-lock-only --omit=dev -w packages/core -w apps/cli`, scoped
-to match this same install; see [RELEASES.md](../RELEASES.md)).
+A dependency inlined into a built artifact is not resolved at runtime, so a
+transitive bump does not reach it: remediating an advisory against one requires
+bumping the dependency and rebuilding and re-releasing `@psilink/core`. Which
+dependencies that covers is therefore an upgrade-path fact, not a build detail.
 
-Why this is correctness-critical rather than hygiene: `re2js` executes the
-agreed linkage transforms' regexes that standardize values before PSI key
-derivation, so the two parties' regex engines must behave byte-identically or
-the derived keys silently mismatch -- no error, just missed matches. The freeze
-covers it and every other external the core CJS build resolves from
-`node_modules` at runtime (`yaml`, `canonicalize`, `@noble/curves`, ...), which
-their caret manifest ranges would otherwise leave free to re-resolve at image
-build time, letting two images of nominally the same release diverge. The
-vendored `@openmined/psi.js` tarball participates as the committed bytes in
-`lib/`; npm records no integrity hash for a `file:` tarball, so its sha256
-sidecar remains the integrity check (see above).
+`@openmined/psi.js` and [`canonicalize`](https://www.npmjs.com/package/canonicalize)
+are inlined into every build. `canonicalize` is inlined because from 3.0.0 it
+ships ESM-only and a bare `require` of it fails in the CJS bundle; it is the
+RFC 8785 serializer behind [CANONICAL_ENCODING.md](CANONICAL_ENCODING.md).
 
-The structural invariants are enforced by `scripts/dockerfile-freeze.test.mjs`
-(run by `npm run test:scripts`, a CI static check), over both `Dockerfile` and
-the FIPS variant's `Dockerfile.fips` alike: every install is `npm ci`, the
-lockfile and the root `.npmrc` are copied into the builder before the first
-install, the shipped tree is the `--omit=dev` one, the runtime stage runs no npm
-at all, each file's OS-package installs are exactly the reviewed set, and the
-copied layout keeps the workspace links and the PSI worker entry where the CLI
-resolves them.
-
-Those invariants are read off `COPY` and `RUN`, so the test refuses every other
-instruction class outright, in either stage, rather than modeling it. `ADD` is
-the one that names itself: it fetches a remote source and takes the same
-`--chown`/`--chmod` flags `COPY` does, so it can both pull in a build input the
-lockfile does not pin and land files with an ownership no assertion here reads. A
-build that needs another class extends the test's reviewed list in the same diff.
-
-The `node:26-alpine` base image is digest-pinned in both stages to its
-multi-arch index digest, so the Node runtime and Alpine userland beneath the
-frozen `node_modules` no longer drift between rebuilds. The tradeoff is that a
-base patch (a Node or musl fix) no longer arrives automatically on a rebuild:
-bumping the base is a deliberate digest update. Pin the multi-arch index digest,
-not a platform-specific one, or the multi-platform release build cannot resolve
-every architecture; obtain it with `docker buildx imagetools inspect
-node:26-alpine`.
-
-**The one OS package the build fetches.** The runtime stage runs
-`apk add --no-cache samba-client`, which is a dependency resolved at image-build
-time and the single exception to the paragraphs above. It is in the image rather
-than fetched when it is used because of what uses it: the Windows file-drop setup
-scripts (`support/windows-network-filedrop/`) run their SMB probe inside this
-image, and the networks that probe exists to diagnose are the ones where a
-container cannot reach the Alpine mirror at all. HTTPS interception there fails
-the fetch with
-
-    error:0A000086:SSL routines:tls_post_process_server_certificate:certificate verify failed
-    ...
-    samba-client (no such package): required by: world[samba-client]
-
-so a probe that has to install the package stops before it has tested anything.
-Installing it while the image is built moves that fetch onto the machine that
-publishes the image.
-
-It floats: the instruction names no version, so a rebuild takes whatever the
-mirror carries for the pinned base's Alpine release. Measured on the base digest
-pinned here (Alpine 3.24.1): `samba-client-4.23.8-r0` and 44 dependencies, 45
-packages newly present and none removed. `apk`'s trailing `OK:` line reports the
-post-install total rather than the increment, so it reads
-`OK: 11.1 MiB in 18 packages` on the bare base and `OK: 63.1 MiB in 63 packages`
-after, on `aarch64`; the built `arm64` image goes from 520,152,837 to
-574,778,898 bytes, an increase of 54,626,061. The same 63 packages resolve on
-`x86_64`, where the post-install total is 54.2 MiB, so the multi-arch release
-build is not left short a package. An exact version pin was rejected because
-Alpine carries exactly one version of a package per release branch, so a pin
-hard-fails the build the moment the mirror supersedes it:
-`apk add --no-cache --simulate samba-client=4.23.7-r0` on that base answers
-
-    ERROR: unable to select packages:
-      samba-client-4.23.8-r0:
-        breaks: world[samba-client=4.23.7-r0]
-
-while `=4.23.8-r0` resolves. A pin would therefore convert every upstream samba
-patch into a red build, costing more than the drift it prevents. What the float
-costs is that two rebuilds of the same commit can ship different `samba-client`
-versions, and that the package is outside the release SBOM, which `npm sbom`
-generates from the npm tree. That is acceptable here in a way it is not for
-`re2js`: nothing in an exchange reaches this package. It is used only by the
-setup-time probe, over a share the operator is testing, never by the CLI or the
-console during a run.
-
-Two checks bound it. `scripts/dockerfile-freeze.test.mjs` holds every
-`apk`/`apt`/`apt-get`/`dnf`/`microdnf`/`yum`/`pip` instruction in the file to a
-per-file list of literals, the way it holds the `.npmrc` COPY, so a second
-install or a wider spec on one of those lines reddens rather than shipping. It
-reads the whole file rather than the runtime stage alone, because both images
-build their runtime stage `FROM` an earlier stage of their own and a package
-installed there ships just as surely. A fetch by some other route -- curl and
-extract, `rpm` driven directly, or another language's package manager -- is
-outside what it sees. `image_smoke.yaml` asserts each built image provides
-`smbclient` (`docker run --rm --entrypoint sh <image> -c 'command -v smbclient'`),
-so a build that resolved the package away fails the pull request rather than an
-operator's setup run.
-
-**What the 45 packages add beyond `smbclient`.** Invocation is not the only cost:
-these libraries sit in the image that runs every exchange, so an advisory against
-any of them applies to that image whether or not an exchange reaches the code,
-and none of them is in the release SBOM either. Measured on the pinned base at
-`aarch64` (`apk list -I` before and after), they are the samba client libraries
-and their record stores (`samba-client-libs`, `samba-common`, `samba-libs`,
-`samba-util-libs`, `libsmbclient`, `libwbclient`, `libauth-samba`, `ldb`,
-`talloc`, `tdb-libs`, `tevent`, `lmdb`, `gdbm`), an authentication and directory
-stack (`linux-pam`, `libldap`, `libsasl`, `utmps-libs`, `skalibs-libs`), a
-TLS/crypto stack (`gnutls`, `nettle`, `gmp`, `libtasn1`, `p11-kit`, `libffi`),
-compression and archive libraries (`libarchive`, `xz-libs`, `zstd-libs`,
-`lz4-libs`, `libbz2`, `brotli-libs`), and a tail of support libraries
-(`readline`, the `ncurses` set, `popt`, `icu-libs`, `icu-data-en`, `libexpat`,
-`jansson`, `libidn2`, `libunistring`, `acl-libs`, `libcap2`). No `smbd`, `nmbd`
-or `winbindd` is installed, so nothing added listens.
-
-`linux-pam` also gives the image its first setgid binary. Measured with
-
-    find / -xdev -type f \( -perm -2000 -o -perm -4000 \) -exec ls -l {} +
-
-which reports nothing on the pinned base digest at either architecture, and after
-the install reports exactly `-rwxr-sr-x 1 root shadow /usr/sbin/unix_chkpwd` and
-no setuid file at all -- on the built `arm64` image, and at `x86_64` on the
-pinned base plus that one instruction. It sits beside the PAM helpers `faillock`,
-`mkhomedir_helper`, `pam_namespace_helper`, `pam_timestamp_check` and
-`pwhistory_helper`, none of them setgid. The runtime stage declares `USER node`,
-so the process the setgid bit would elevate is unprivileged and the bit has to be
-read as a boundary rather than as the formality it is for uid 0. What bounds
-exploitability is a single measured property of the image rather than of the
-package -- `/etc/shadow` carries no usable hash (`root` is `*`, every other
-account `!`), so `unix_chkpwd` has nothing to verify against. Whether that
-account already carries group `shadow`, which would make the bit grant it nothing
-in the first place, is not measured here and nothing rests on it;
-`docker run --rm --entrypoint id <image> -Gn node` settles it against a built
-image. Nothing stands behind the one property that does carry the conclusion, so
-re-measure it if a change gives any account in the image a password hash, or if
-the image gains a second setgid or any setuid file; the `find` above settles
-both.
-
-**The helper image the setup scripts run the probe in is a mutable tag.** It is
-`vdorie/psi-link:latest` in both scripts, and floating it is deliberate: the
-scripts are downloaded on their own rather than shipped with a release, so they
-cannot name the digest of a release they do not know they belong to, and a
-diagnostic pinned tighter than the thing it diagnoses would test an image the
-exchange will not run. The limit that comes with it is recorded rather than
-closed. The helper container receives the share password in its environment
-(`--env SMB_PASS`) and, for the volume check, a bind of the CIFS volume, so the
-plaintext credential and read/write access to the partner's drop folder go to
-whatever the tag resolves to at pull time -- and that pull happens on exactly the
-HTTPS-intercepting networks the probe exists to diagnose. A digest, or a released
-version tag, is what would make a substituted image detectable there; how a
-separately downloaded script would learn either is the open part.
-
-## The FIPS variant image's pins
-
-`Dockerfile.fips` builds a second image on Amazon Linux 2023 carrying the
-CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution. It is
-not published; why it exists, what may be claimed of it, and what stops working
-inside it are in
-[fips-variant-image.md](../notes/fips-variant-image.md). Everything above about
-the npm freeze applies to it unchanged -- same lockfile, same `npm ci`, same
-`--omit=dev` runtime tree, same freeze test. What follows is what it pins
-beyond that, and the second OS-package inventory that comes with it.
-
-**Six pins, four of them compared against the artifact inside the build.**
-
-| Pin | Value | How it is held |
-| --- | --- | --- |
-| Release snapshot | `--releasever=2023.12.20260727` on every `dnf` transaction | Shape-checked as a dated snapshot in `scripts/dockerfile-freeze.test.mjs` |
-| Provider package and version | `openssl-fips-provider-certified` at `3.0.8-1.amzn2023.0.1` | `rpm -qf` on the installed `fips.so`, asserted in the build |
-| Module version string | `3.0.8-d694bfa693b76001` | `openssl list -providers` read back, asserted in the build |
-| Base image | `amazonlinux:2023@sha256:694092ae18877ed4e3cb9b643759ba95df1f12af12528fefa18f60f79d4c1568`, the multi-arch index digest | Named in the `FROM` instead of the tag; the literal held in `scripts/dockerfile-freeze.test.mjs` |
-| Node runtime tarball, `x64` | `982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee` | `sha256sum -c` against the literal committed in the fetching `RUN`; the literal held in `scripts/dockerfile-freeze.test.mjs` |
-| Node runtime tarball, `arm64` | `afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d` | as above |
-
-All three certificate pins are build `ARG`s, so what the assertions catch is a
-package layer that drifts under the committed values rather than an operator who
-changes those values. The three do not move together, and that is what keeps a
-partial override from passing. The `dnf swap` and the `rpm -qf` assertion both
-read `FIPS_PROVIDER_PACKAGE` and `FIPS_PROVIDER_VERSION`, so overriding those
-moves the install and its own check in step; `FIPS_MODULE_VERSION` appears in no
-`dnf` line and is read by the read-back assertion and by the `ENV` of the same
-name the runtime stage exports from it. That `ENV` is the value the entrypoint's
-per-run report names, and it is trustworthy at run time for exactly one reason:
-the assertion that compares it against the module the loader activates has
-already run in the same stage, so no green build can carry an `ENV` naming a
-module other than the one installed. A build driven by hand
-with `--build-arg` over the install pins alone therefore installs a different
-NVR, satisfies the `rpm -qf` half, and fails on the module version the loader
-reports -- it goes red, not green. A green build carrying a different module
-takes an override of the module version as well, which is a statement of which
-module was intended. What holds the committed defaults themselves is
-`scripts/dockerfile-freeze.test.mjs`, which pins all three as literals, and no
-CI path passes a build-arg -- `image_smoke.yaml` passes none, and the release
-workflow does not build this image.
-
-**The two tarball hashes are deliberately not `ARG`s.** Each is a literal in the
-`RUN` that fetches the tarball, selected by the same `case` arm that selects the
-architecture's tarball name. An `ARG` is overridable at
-`docker build --build-arg`, which is the limit the paragraph above records for
-the certificate pins: tolerable there, because a second assertion reads the
-installed module back and a partial override goes red, and not tolerable here,
-because nothing else in the build looks at the tarball. `NODE_VERSION` stays an
-`ARG`, so overriding it alone fetches bytes the committed hash does not cover
-and fails at the checksum -- a Node bump means moving the version and both
-hashes together. That the check fails closed, on bytes that do not match and on
-an arch arm that paired a tarball with the other architecture's hash, is driven
-against the real `sha256sum` in `scripts/docker-entrypoint-fips.test.mjs`.
-
-The release-snapshot pin is for reproducibility rather than for the certificate:
-AWS retains superseded NVRs, and a dated snapshot is immutable while
-`--releasever=latest` accumulates. That is why the freeze test holds its shape
-rather than its value: the property worth guarding is that the build names a
-dated snapshot at all, and a deliberate bump to a newer one should not have to
-edit the test. Unlike the rows below it, then, this pin's exact value is held by
-review rather than by a check. Sampled across AWS's published snapshots,
-every snapshot from the packages' first appearance (between `2023.6.20250107`
-and `2023.7.20250428`) onward still resolves and still serves both certified
-NVRs, from a content-addressed blobstore.
-
-The module-version pin is the one that cannot be skipped. Ten NVRs share the
-`openssl-fips-provider-latest` package name and carry ten different modules with
-ten different `fips.so` hashes, exactly one of them certified, so the package
-name settles nothing:
-
-    3.2.2-1.amzn2023.0.1 -> 3.2.2-799901ad7ab41d45   <- the one certificate 5438 names
-    3.2.2-1.amzn2023.0.2 -> 3.2.2-6a2d04a6952ab14a
-    3.5.5-1.amzn2023.0.5 -> 3.5.5-f06cf76f53649b34   <- stock in amazonlinux:2023
-    3.5.7-2.amzn2023.0.1 -> 3.5.7-89ade9f4d5e93a4c
-
-The `-certified` name this image uses is a different package with one published
-NVR, so a `dnf update` has nothing to move it to; the assertion is what catches
-a future one that is not certified.
-
-**The base image digest and the snapshot pin name one release, not two.** The
-snapshot pin covers the package layer and not the base rootfs, and the two are
-coupled: a base far newer than the pinned snapshot can put that snapshot's
-packages in conflict with what the base already carries. The digest in the table
-above closes that. It is the multi-arch index digest, which is what a
-multi-platform build can resolve -- a platform-specific manifest digest names one
-architecture and fails on the other -- and it was resolved on 2026-08-06 with
-`docker buildx imagetools inspect amazonlinux:2023`, both of whose per-arch
-manifests carry `org.opencontainers.image.created: 2026-08-04`. The rootfs at
-that digest reports `PRETTY_NAME="Amazon Linux 2023.12.20260727"` on `amd64` and
-`arm64` alike, which is the release `AL2023_RELEASEVER` names, so the base and
-the packages are the same snapshot rather than two compatible ones. Bumping the
-base means re-resolving the digest and re-reading that release out of each
-architecture's rootfs -- `docker create` plus `docker cp` of `/etc/os-release`
-reads the foreign architecture without emulating or executing it -- and moving
-`AL2023_RELEASEVER` to match.
-
-**What the build fetches, beyond the npm tree.** Two mirrors rather than the
-default image's one:
-
-- `dnf` from the pinned Amazon Linux snapshot, for `tar`, `gzip`, `xz`,
-  `findutils`, `libatomic`, `samba-client`, `openssl`, and the provider swap.
-  RPM signatures are verified against the key the base image carries.
-- `nodejs.org`, for the official Node 26 tarball, whose bytes are checked against
-  the per-architecture hash committed in the fetching `RUN` rather than against a
-  checksum file fetched beside them. Amazon Linux 2023 packages nodejs20,
-  nodejs22 and nodejs24 only and the root `package.json` requires `>=26`, and
-  `libatomic` is the one shared library the stock image lacks for that binary
-  (without it `node` exits 127). What that pin does and does not establish about
-  the tarball's provenance, and the one-time verification behind the two values,
-  are in [fips-variant-image.md](../notes/fips-variant-image.md).
-
-`smbclient` comes from `samba-client` here rather than from Alpine's package of
-the same name, at 4.17.12, so `image_smoke.yaml`'s `command -v smbclient`
-assertion holds against both images unchanged. It costs 53 packages on this
-base against Alpine's 45, including `systemd`, `dbus`, `pam`,
-`cryptsetup-libs`, `device-mapper` and `util-linux` -- a heavier closure, and
-one that includes an init system.
-
-**The second inventory.** These figures are a measurement of the reference build
-this image was derived from, on `aarch64`, against the Alpine image built the
-same day. They are the right order of magnitude rather than exact for what
-`Dockerfile.fips` produces: the reference additionally installed `binutils`
-(29,160,927 bytes installed) to read the module version out of `fips.so` with
-`strings`, which this build does not need because it reads the version back
-through `openssl list` instead. Nothing has been measured on `x86_64`.
-
-**The variant's setuid/setgid surface is unmeasured.** The Alpine inventory above
-records that surface, the command that produces it, and why the one setgid
-binary it found is not a boundary today. No equivalent measurement exists for
-this image, whose closure is materially larger and carries `systemd`, `pam`,
-`cryptsetup-libs`, `device-mapper` and `util-linux`. The Alpine reasoning --
-that the container runs as uid 0 with no `USER`, so a setgid helper grants
-nothing that being root does not already grant -- applies here for the same
-reason, and that is the ground the gap sits on rather than a measurement. Run
-
-    find / -xdev -type f \( -perm -2000 -o -perm -4000 \) -exec ls -l {} +
-
-against the first built image and record the result here beside the Alpine one.
-
-| | Alpine image | FIPS variant (reference build) |
-| --- | --- | --- |
-| Image size | 575,506,781 bytes (576 MB) | 1,055,721,059 bytes (1056 MB) |
-| OS packages | 63 | 167 |
-| Packages carrying a GPL-3.0 or LGPL-3.0 term | the 6 samba ones | 39 |
-
-Where the 480 MB goes: the two base rootfs are almost the same weight
-(`amazonlinux:2023` 183 MB, `node:26-alpine` 178 MB), but Amazon Linux bundles
-no Node, so the 222 MB tarball is additive, and its dependency closures are
-fatter -- glibc/libgcc/libstdc++ 67 MB, `python3` (in the base image, for `dnf`)
-55 MB, the samba client stack 44 MB, `systemd` (a `samba-client` dependency)
-31 MB, `dnf`/`rpm`/`libsolv`/`librepo` 11 MB. The certified `fips.so` itself is
-1.2 MB.
-
-**The licence consequence is wider than the default image's, and is open.** The
-GPL-3.0 finding recorded above for Alpine's `samba-client` reappears here on
-`samba-client`, `samba-client-libs`, `samba-common`, `samba-common-libs`,
-`libsmbclient` and `libwbclient`, and is joined by a GPLv3 base userland
-Alpine's busybox and musl do not have: `bash`, `coreutils-single`, `diffutils`,
-`findutils`, `gawk`, `grep`, `gzip`, `sed`, `tar`, `readline`, `gdbm-libs`,
-`gnupg2-minimal`, `gnutls`, `libtasn1`, `libassuan`, plus the LGPL-3.0 samba
-record stores (`libtalloc`, `libtdb`, `libtevent`, `libldb`). Four more carry an
-unconditional v3 term from elsewhere in the closure: `binutils`,
-`elfutils-debuginfod-client`, `libidn2` and `mpfr`. `libgcc`, `libstdc++`,
-`libatomic` and `libgomp` carry
-"GPL-3.0-or-later WITH GCC-exception-3.1", the runtime exception, which is the
-normal case for a linked C++ runtime. The remaining six of the 39 --
-`elfutils-libelf`, `elfutils-libs`, `elfutils-default-yama-scope`, `gmp`,
-`libunistring` and `nettle` -- offer a GPLv2-or-later arm beside the LGPLv3 one,
-so they carry a v3 term only under the arm taken. Whether that breadth changes
-this project's distribution posture is a licensing call rather than a
-measurement, and it is not settled here.
+`re2js` and `yaml` are inlined only into the standalone UMD browser build. The
+ESM and CJS builds keep them external, so a transitive bump does remediate them
+for the CJS-based CLI.
 
 ## The install-script policy (`allowScripts`)
 
@@ -449,7 +131,7 @@ The rest are limits rather than refusals:
 - A dependency a **dependent's own manifest** introduces from a git or remote-URL source is one npm refuses name-keyed verdicts for while its lockfile entry can look like a registry install. The override model above reaches only the ones the root manifest introduces; for the rest the lockfile records a spec the check does not read. None exists here, and adding one goes through the dependency review in [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy).
 - The rules above were measured against npm 11.17 and are modeled here rather than re-derived from the npm in use, so a release that changes npm's matcher needs them re-measured.
 
-**What the dead-key rule costs.** Requiring every entry to match a package the lockfile installs means the map cannot carry a standing "never run this package's scripts" verdict for a package absent from the tree. That is what dropping `protoc-gen-js: false` gives up, and `strict-allow-scripts` recovers most of it: a reintroduced `protoc-gen-js` arrives with no verdict, so the install fails and its `postinstall` does not run, where an unset flag would have let it install, warn once, and run. What the standing denial would have added beyond that is a verdict already recorded -- under the flag the install stops and waits for a review rather than carrying the earlier answer. The protection lives in a stronger control regardless -- `scripts/vendored-psi-deps.test.mjs` fails if that package appears anywhere in the committed lockfile at all, which no install-script verdict does.
+**What the dead-key rule costs.** Requiring every entry to match a package the lockfile installs means the map cannot carry a standing "never run this package's scripts" verdict for a package absent from the tree. `strict-allow-scripts` recovers most of that: a package arriving with no verdict fails the install and its `postinstall` does not run, where an unset flag would have let it install, warn once, and run -- so the install stops and waits for a review rather than carrying an answer recorded earlier. For `protoc-gen-js`, the one package such a standing denial would cover, the protection lives in a stronger control regardless: `scripts/vendored-psi-deps.test.mjs` fails if that package appears anywhere in the committed lockfile at all, which no install-script verdict does.
 
 ## GitHub Action pins and the composite mirror
 
@@ -496,9 +178,19 @@ it enforces this repo's mirror invariant and confirms no tool's coverage. It
 reads `uses:` references only, so an action reached another way is invisible to
 it, and its ref-agreement rule binds only actions appearing in both trees.
 
-## The crossws peer conflict blocks the release SBOM
+## npm resolution residuals
 
-`npm sbom` refuses to run, so release step 9 in [RELEASES.md](../RELEASES.md) cannot currently produce the CycloneDX BOM that records the release's dependency and license set. This is a known upstream-driven breakage with no local fix worth taking; it is recorded here so the dead ends below are not re-walked.
+Three records of what npm's resolver leaves behind in this workspace: a peer
+conflict that blocks the release SBOM, what the mere presence of a root
+`overrides` block does to a later install, and the one override this repository
+carries. Their normative residue is short -- release step 9 is blocked, the
+`brace-expansion` override exists, and a CI check watches for the upstream move
+that retires it -- and the measurement behind each is kept so the dead ends are
+not re-walked.
+
+### The crossws peer conflict blocks the release SBOM
+
+`npm sbom` refuses to run, so release step 9 in [RELEASES.md](../RELEASES.md) cannot currently produce the CycloneDX BOM that records the release's dependency and license set. This is a known upstream-driven breakage with no local fix worth taking.
 
 ```
 npm error code ESBOMPROBLEMS
@@ -515,7 +207,7 @@ The other candidates fail outright: `overrides` scoped to the parent or to the a
 
 **Resolution path.** This clears upstream, without action here, once `h3` v2 ships stable (so `@tanstack/start-server-core` stops depending on a prerelease) or `nitropack` / `h3@1.x` move to the 0.4 line -- at which point the ranges are mutually satisfiable, npm hoists one version that satisfies everyone, and the release-scoped `npm sbom` runs again. A dev-inclusive `npm sbom` stays refused past that point, on two further entries the [`brace-expansion` override](#the-brace-expansion-advisory-is-fixed-by-a-root-override) contributes; the release command does not run one. Until then, treat step 9 as blocked and re-check after any `@tanstack/*` or `nitropack` bump. A local workaround should be reconsidered only if a release becomes due before upstream converges, and then only alongside a fix for the `custom-entry.ts` type seam.
 
-## What a root `overrides` block changes about later installs
+### What a root `overrides` block changes about later installs
 
 The root `package.json` carries an `overrides` block, and two npm behaviors follow
 from its mere presence. They are separate questions, and the second is the one an
@@ -559,7 +251,7 @@ remedy, for the reason the brace-expansion record states of the same route: it
 drifts on the order of 180 unrelated package versions, which is a far larger
 review surface than the bump being landed.
 
-## The brace-expansion advisory is fixed by a root override
+### The brace-expansion advisory is fixed by a root override
 
 The root `package.json` carries `"overrides": { "brace-expansion": "^5.0.8" }`,
 which holds `npm audit --package-lock-only` at `found 0 vulnerabilities` against
@@ -569,9 +261,7 @@ process crash), which affects every version at or below 5.0.7 and names 5.0.8 as
 its first patch, with no patched 2.x, 3.x or 4.x line. Without the override the
 audit reports 9 high-severity findings -- one advisory rolled up through the
 nine packages that depend on it, which npm answers `No fix available` -- against
-two copies at 2.1.2 nested under `archiver-utils` and `readdir-glob`. This
-supersedes the accept recorded here before the override, which left those two
-copies in the tree as development-only.
+two copies at 2.1.2 nested under `archiver-utils` and `readdir-glob`.
 
 **Why no bump reaches it.** `nitropack@2.13.4` is the current release and
 declares `archiver: ^7.0.1`. Under archiver 7, `archiver-utils` reaches
@@ -614,7 +304,8 @@ nitropack archiving its own build output. The brace patterns expanded there come
 from this repository's build configuration, not from partner, operator, or
 network input, so nothing an attacker controls reaches the expansion the
 advisory describes, and the shipped CLI image installs `--omit=dev` (see [The
-Docker image's dependency freeze](#the-docker-images-dependency-freeze)). That
+Docker image's dependency
+freeze](CONTAINER_IMAGES.md#the-docker-images-dependency-freeze)). That
 bounds the urgency rather than the fix, which clears the advisory at the cost
 recorded next.
 
@@ -684,18 +375,18 @@ The internal assumptions the adapter relies on:
 - `STATUS_CODE.EOF === 1` and `OPEN_MODE.WRITE | CREAT | EXCL === 0x2A`, the numeric SFTP constants the adapter hard-codes (it does not import them: ssh2 exposes their runtime values only from the internal `lib/protocol/SFTP.js`, not from its package entry point, and `@types/ssh2` types them only as a compile-time `sftp` namespace). These are fixed SFTPv3 wire-protocol values, so they are extremely unlikely to renumber, but confirm them against `STATUS_CODE`/`OPEN_MODE` in the source below if the surrounding code moves.
 - `STATUS_CODE.FAILURE === 4` (`SSH_FX_FAILURE`), the third numeric SFTP constant the adapter hard-codes: `rename()` retries a transient server failure only on this status (the source still exists, so a re-issue is safe) and treats every other status as terminal, and `createExclusive` maps it to an `exists()`-disambiguated `EEXIST`. The premise is that ssh2-sftp-client surfaces a server `FAILURE` on its high-level `rename` as numeric `err.code === 4` -- it passes ssh2's raw status through `fmtError` onto `err.code`, the same `4` `createExclusive` reads from the raw `open` callback. If a future version remaps `rename`'s `err.code` to a non-numeric string (e.g. `ERR_GENERIC_CLIENT`) or renumbers `FAILURE`, the retry silently stops firing -- the transient-rename flake returns, with no correctness break; the `ssh2SftpAdapter` unit tests pin the numeric-`4` behavior.
 - ssh2-sftp-client stores the raw wrapper on `this.sftp`, assigned in its `'ready'` handler on each `connect()` and otherwise only cleared -- the LIBRARY performs no auto-reconnect of its own. Two adapter behaviors rest on this. (1) The captured-wrapper reads in `list()`/`createExclusive()` (`const { sftp } = ...` at method entry) assume nothing swaps `this.sftp` under an in-flight operation, and issuance order is not what holds that up -- the adapter issues operations concurrently (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md)). The library's assignment discipline is: `this.sftp` is assigned only from a `connect()` whose "already connected" guard passed, so every assignment is preceded by a clear, and only events implying the old transport has ENDED clear it. Driven against a real ssh2 server, no run reassigned the property while a `list()`/`createExclusive()` capture was live, identically with `ephemeralSessions` true and false; on the mid-exchange recovery path against a partner withholding its connection close, the forced close fails the captured wrapper's outstanding requests 210-221 ms BEFORE the fresh wrapper is assigned, across six samples, all the same sign, and the re-issue then captures the fresh wrapper. A capture that DID go stale would be inert rather than misrouted: a request issued on a SUPERSEDED `SFTPWrapper` neither transmits nor calls back (measured directly after a completed recovery -- `staleWrapper.realpath(".", cb)` produced no callback at 1500 ms and none again at 2000 ms, while the fresh wrapper answered the identical call in 0-2 ms), and the fresh session is a different ssh2 channel on a different socket, so it cannot answer that request either; the holding operation would ride its own per-operation deadline rather than read another session's reply. Re-verify on a bump that the assignment still happens only behind that guard and the clear still only on an ended transport -- a version that reassigned the property under a live transport would put a stale capture under a live operation -- and that a superseded wrapper still cannot transmit on the fresh channel, which is what keeps a stale capture a deadline rather than a cross-session misroute. One shape is unmeasured: `listOnce`'s late-`opendir` branch issues `sftp.close(openedHandle)` on the capture AFTER the listing has settled, the one place a superseded wrapper could still be issued against, and the in-process test backend can withhold a response forever but cannot answer one LATE, so that branch was not reachable; nor was any of this driven against a native `sshd`. (2) Recovery re-dials by calling `connect()` again and deliberately does NOT call the library's `end()` first, resting on ssh2-sftp-client clearing `this.sftp` on a clean drop, and on the forced close below clearing it where a drop did not (so `connect()`'s "already connected" guard cannot fire either way), and on `end()` latching a permanent `endCalled` flag that disables the global `'close'` listener's `this.sftp` clear -- which is why calling it would break detection of a LATER idle drop. If a future version stopped clearing `this.sftp` on a clean close/end, or reset `endCalled` on `connect()`, re-verify the recovery re-dial path.
-- The connection-per-poll (ephemeral-session) mode's idle-boundary release (`releaseForIdle`, gated on the internal `ephemeralSessions` option; see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md)) is a NEW caller that DELIBERATELY closes the session, leaving the adapter in the same cleared-session state a server drop produces. The recovery path above tells the two apart by the session boundary the release records, not by that state: a re-establishment following a release that was itself what ended the session is neither counted nor warned, while an unexpected loss still is -- including one the release itself closed over, which records a boundary of its own (see the half-close bullet below). It drives the underlying ssh2 `Client`'s own `end()` (reached via `this.client`, the same seam `setNoDelay` uses -- NOT ssh2-sftp-client's `end()`, which would latch `endCalled` and permanently disable the global `'close'` listener the mode depends on) and then AWAITS the `Client`'s `'close'` event to know the teardown finished before the poll loop idles. The load-bearing premise is that `Client.end()` EMITS `'close'`, not merely `'end'`: `releaseForIdle` awaits exactly `'close'` (via `Client.once('close', ...)`, bounded by a local `CLIENT_CLOSE_TIMEOUT_MS` backstop so a withheld close cannot hang the loop), and it is that `'close'` -- not `'end'` -- that fires ssh2-sftp-client's constructor `globalListener` to clear `this.sftp`, leaving the adapter in the exact cleared-session state a server drop produces, ready for the next cycle's `ensureConnected` to re-dial. A session still SET after that wait is reachable on the pinned version with no dependency change at all: `Client.end()` is `_sock.end()` and the `Client` emits `'close'` only from the socket's own `'close'`, so a partner that accepts the disconnect and never closes the connection leaves it in half-close and the local backstop settles the release first (measured against a real ssh2 server: the release spends its full bound, `this.sftp` is still set, `_sock.writableEnded` is true and `readableEnded` false). That state is not a surviving session -- the transport is already ended, so it can carry nothing and an operation issued on it does not settle -- and the release does not hand it to the next cycle: it forces the socket closed (next bullet). The seam is not assumed: in this mode `connect()` verifies that the `Client` still exposes `end`, `once`, and `removeListener`, and fails the dial with one error naming the seam and this document if any of them has moved.
+- The connection-per-poll (ephemeral-session) mode's idle-boundary release (`releaseForIdle`, gated on the internal `ephemeralSessions` option; see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md)) is a NEW caller that DELIBERATELY closes the session, leaving the adapter in the same cleared-session state a server drop produces; what tells a deliberate release apart from a drop, and what each records, counts and warns, is specified in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md). It drives the underlying ssh2 `Client`'s own `end()` (reached via `this.client`, the same seam `setNoDelay` uses -- NOT ssh2-sftp-client's `end()`, which would latch `endCalled` and permanently disable the global `'close'` listener the mode depends on) and then AWAITS the `Client`'s `'close'` event to know the teardown finished before the poll loop idles. The load-bearing premise is that `Client.end()` EMITS `'close'`, not merely `'end'`: `releaseForIdle` awaits exactly `'close'` (via `Client.once('close', ...)`, bounded by a local `CLIENT_CLOSE_TIMEOUT_MS` backstop so a withheld close cannot hang the loop), and it is that `'close'` -- not `'end'` -- that fires ssh2-sftp-client's constructor `globalListener` to clear `this.sftp`, leaving the adapter in the exact cleared-session state a server drop produces, ready for the next cycle's `ensureConnected` to re-dial. A session still SET after that wait is reachable on the pinned version with no dependency change at all: `Client.end()` is `_sock.end()` and the `Client` emits `'close'` only from the socket's own `'close'`, so a partner that accepts the disconnect and never closes the connection leaves it in half-close and the local backstop settles the release first (measured against a real ssh2 server: the release spends its full bound, `this.sftp` is still set, `_sock.writableEnded` is true and `readableEnded` false). That state is not a surviving session -- the transport is already ended, so it can carry nothing and an operation issued on it does not settle -- and the release does not hand it to the next cycle: it forces the socket closed (next bullet). The seam is not assumed: in this mode `connect()` verifies that the `Client` still exposes `end`, `once`, and `removeListener`, and fails the dial with one error naming the seam and this document if any of them has moved.
 - The forced close reaches one further internal: `net.Socket`'s own `destroy()` on the socket the bullet above names (`this.client._sock.destroy`), which `connect()` verifies in this mode alongside the seams above. On the branch where the release's own `end()` ended the transport but no `'close'` arrived within the bound, the release destroys that socket and awaits the `Client`'s `'close'` under a second, shorter bound (`FORCED_CLOSE_TIMEOUT_MS`), then CHECKS that `this.sftp` actually cleared -- the one premise here `connect()` cannot verify, because nothing at connect time destroys the socket, so it is read back at the boundary and raised there instead. Measured against a real ssh2 server: the clear is NOT synchronous with `destroy()` (it still reads set in the same tick), the `Client`'s `'close'` follows in single-digit milliseconds, `this.sftp` is then cleared, the next `ensureConnected` dials, and the re-dial is charged to neither reconnect counter. The alternative shape -- leave the socket alone and clear the session property instead -- was measured and rejected: `connect()` refuses outright while the property is set (`connect: An existing SFTP connection is already defined`), and the abandoned half-open socket stays alive, so when the partner eventually does close it, the global `'close'` listener clears the FRESH session's property and the next operation fails as an unexpected end -- a spurious counted drop, plus a leaked descriptor per cycle. The forced close's bound is the one liveness timer in this adapter left ref'd: the socket it waits on has just been destroyed, so nothing else holds the loop open and an unref'd timer would let the process exit (code 0, mid-exchange) instead of reaching that check -- measured both ways. Re-verify on an ssh2 bump that `_sock` is still a `net.Socket` exposing `destroy()` and that destroying it still drives the `Client`'s `'close'`.
-- The connection's TERMINAL close (`SSH2SFTPClientAdapter.end`) rests on one of the same seams for the same reason, in BOTH session modes -- nothing on that path is gated on `ephemeralSessions`. ssh2-sftp-client's `end()` drives the ssh2 `Client`'s `end()` (a socket half-close) and resolves only from its own `'close'` handler, so a partner that accepts the disconnect and never closes the connection leaves that promise pending indefinitely (measured against a real ssh2 server with the close withheld: still pending at 20 s with `ephemeralSessions` false and at 20 s with it true; 3 ms against a server that closes). The adapter races that one `end()` against `CLIENT_CLOSE_TIMEOUT_MS` and, past it, destroys `this.client._sock` beneath it. The datum that makes this clean rather than an abandonment: destroying the socket beneath a PENDING `end()` RESOLVES that promise, it does not reject it (measured: resolved 2 ms after `destroy()`, with `_sock.destroyed` already `true` synchronously in the same tick). So `end()` returns normally, and the adapter awaits that same promise again under `FORCED_CLOSE_TIMEOUT_MS` -- REF'D, for the reason the release's forced close uses a ref'd timer. An `end()` that REJECTS is treated as the same open connection, not as a completed close: ssh2-sftp-client raises that rejection from the temporary `'error'` listener it installs for the call, whose `endListener`/`closeListener` are gated off by `endCalled`, so it closes nothing and leaves the socket exactly as a withheld close does. Only a RESOLVED `end()` means the partner closed the connection; the other two outcomes both take the forced-close path, and the rejection is re-raised behind it (core logs it at debug), so WHERE THE DESTROY LANDS no caller -- including one sharing the memoized close -- sees it over a socket still alive. Where it does not, that property does not hold: the seam-unavailable branch destroys nothing at all and returns on its warning, and the rejecting `end()` is still re-raised behind it, over a socket this side never closed. Destroying, rather than merely bounding the wait and abandoning the client, is what the fix requires: the abandoned half-open socket is a ref'd libuv handle, and the CLI's success path exits by event-loop drain, so bounding alone returns the caller over a process that never exits (measured pre-fix, in a child process against a withholding server: `close()` had neither returned nor let the process exit 60 s later). The read-back is `_sock.destroyed`, the one premise `connect()` cannot check because nothing at connect time destroys the socket; each of the three degraded branches -- the seam unavailable, the bounded destroy raising, and a socket that does not report itself closed -- draws a warning naming this document rather than a throw, since `end()` is best-effort by contract and core logs its rejection at debug, and none of them emits the informational line the successful close ends on.
-- That terminal close WIDENS the reach of one of these seams into the default held-session mode, which does NOT verify it at dial time: `connect()` runs the seam check only when `ephemeralSessions` is set, so in the default mode `client._sock.destroy` is first reached at teardown. That is deliberate -- failing a dial over a teardown-only mechanism would ground every default-mode exchange on a bump that costs it nothing -- so the terminal close resolves its seam lazily and, when it has moved, warns (naming the seam and this document) and returns bounded. It requires only what it drives: `_sock.destroy`, and NOT the `end`/`once`/`removeListener`/`writableEnded` the idle release needs, which it never calls. Requiring the wider set would let a bump that relocated one of those disable a forced destroy that would still have worked -- the observable outcome being a completed run that never exits, since the surviving half-open socket is a ref'd handle. Consequence for an upgrade: in the default mode a relocated `_sock` no longer fails loudly at connect; it surfaces as that teardown warning, and as the recovery warning in the next bullet, with the connection left to the operating system.
-- The mid-exchange session recovery widens that reach further, in BOTH session modes and beyond the destroy: a partner that drops the SFTP session and then withholds its connection close leaves the same half-open transport the release's bullets describe, with no release involved. Measured against a real ssh2 server made to drop an active session with its close withheld: the operation on the wire is never answered and ends on the adapter's own per-operation deadline, the socket beneath the `Client` reads `writableEnded: true, readableEnded: false, destroyed: false`, and `this.sftp` is still SET -- identical with `ephemeralSessions` true and false. The control: the same drop against a partner that DOES close clears the property and recovers on one re-dial, in 228 ms. So the recovery gate reads the TRANSPORT and not the session property alone: a session still set over a transport either half of which has ended is the loss it is, whatever the operation rejected with, and recovering it drives the release's forced close -- `Client.once`/`removeListener` for the `'close'`, `_sock.destroy`, and Node's `_sock.writableEnded`/`readableEnded` as the ended-transport reading -- before the re-dial, so the dial runs over a DESTROYED socket and ssh2-sftp-client's "already connected" guard cannot fire. Those seams are resolved AT USE rather than at dial time, in both modes and unlike the release's, for the reason the previous bullet gives: the severity here is a warning plus the operation's own terminal failure, never a failed dial, so a bump that relocated one costs an exchange nothing it had not already lost. The read-back that the destroyed transport took the session with it is the release's, reported rather than raised. Re-verify on a bump that a server-side session drop with the close withheld still leaves `this.sftp` set over an ended `_sock`, and that destroying that socket still drives the `Client`'s `'close'` and the property clear; `apps/cli/test/integration/heldSessionWithheldClose.test.ts` drives it end to end and `dialDeferral.test.ts` censuses the socket the re-dial is issued over. Only the in-process backend can be made to withhold a close, so none of this is verified against a native `sshd`.
+- The connection's TERMINAL close (`SSH2SFTPClientAdapter.end`) reaches one of the same seams in BOTH session modes -- nothing on that path is gated on `ephemeralSessions`. The control itself, its two bounds, and what each degraded branch warns are specified in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md); four library premises carry it, each measured against a real ssh2 server. (1) ssh2-sftp-client's `end()` drives the ssh2 `Client`'s `end()` (a socket half-close) and resolves only from its own `'close'` handler, so a partner that accepts the disconnect and never closes the connection leaves that promise pending indefinitely -- measured with the close withheld, still pending at 20 s with `ephemeralSessions` false and at 20 s with it true, against 3 ms with a server that closes. (2) Destroying the socket beneath a PENDING `end()` RESOLVES that promise rather than rejecting it (measured: resolved 2 ms after `destroy()`, with `_sock.destroyed` already `true` synchronously in the same tick), which is what makes the forced path a settlement of the call it raced rather than an abandonment of it. (3) An `end()` that REJECTS closed nothing: ssh2-sftp-client raises that rejection from the temporary `'error'` listener it installs for the call, whose `endListener`/`closeListener` are gated off by `endCalled`, so the socket is left exactly as a withheld close leaves it -- which is why a rejection is treated as the same open connection and not as a completed close. (4) An abandoned half-open socket is a ref'd libuv handle, and the CLI's success path exits by event-loop drain, so bounding the wait without destroying returns the caller over a process that never exits (measured in a child process against a withholding server: `close()` had neither returned nor let the process exit 60 s later). Re-verify all four on a bump, along with `_sock.destroyed` as the read-back -- the one premise `connect()` cannot check, because nothing at connect time destroys the socket, so it is read at the boundary instead.
+- The default held-session mode does not verify the destroy seam at dial time: `connect()` runs its seam check only when `ephemeralSessions` is set, so there the terminal close resolves `client._sock.destroy` lazily and, where it has moved, warns (naming the seam and this checklist) and returns bounded rather than throwing. Failing a dial over a teardown-only mechanism would ground every default-mode exchange on a bump that costs it nothing. The close requires only what it drives -- `_sock.destroy`, and NOT the `end`/`once`/`removeListener`/`writableEnded` the idle release needs -- so a bump that relocated one of the wider set cannot disable a forced destroy that would still have worked. Consequence for an upgrade: in the default mode a relocated `_sock` does not fail a dial; it surfaces as that teardown warning, and as the recovery warning in the next bullet, with the connection left to the operating system.
+- The mid-exchange session recovery widens that reach further, in BOTH session modes and beyond the destroy: a partner that drops the SFTP session and then withholds its connection close leaves the same half-open transport the release's bullets describe, with no release involved. Measured against a real ssh2 server made to drop an active session with its close withheld: the operation on the wire is never answered and ends on the adapter's own per-operation deadline, the socket beneath the `Client` reads `writableEnded: true, readableEnded: false, destroyed: false`, and `this.sftp` is still SET -- identical with `ephemeralSessions` true and false. The control: the same drop against a partner that DOES close clears the property and recovers on one re-dial, in 228 ms. What the adapter does with that reading is specified in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md); what it reaches here is the release's forced close -- `Client.once`/`removeListener` for the `'close'`, `_sock.destroy`, and Node's `_sock.writableEnded`/`readableEnded` as the ended-transport reading -- ahead of the re-dial, so the dial runs over a DESTROYED socket and ssh2-sftp-client's "already connected" guard cannot fire. Those seams are resolved AT USE rather than at dial time, in both modes and unlike the release's, for the reason the previous bullet gives: the severity here is a warning plus the operation's own terminal failure, never a failed dial, so a bump that relocated one costs an exchange nothing it had not already lost. Re-verify on a bump that a server-side session drop with the close withheld still leaves `this.sftp` set over an ended `_sock`, and that destroying that socket still drives the `Client`'s `'close'` and the property clear; `apps/cli/test/integration/heldSessionWithheldClose.test.ts` drives it end to end and `dialDeferral.test.ts` censuses the socket the re-dial is issued over. Only the in-process backend can be made to withhold a close, so none of this is verified against a native `sshd`.
 - That recovery reaches one premise further, into the ORDER in which the pinned stack delivers a drop, because ssh2-sftp-client's per-operation listeners settle the operation -- and clear `this.sftp` -- from the ssh2 `Client`'s `'end'` as well as its `'close'`. Measured against a real ssh2 server made to drop an active session CLEANLY under an in-flight operation, at each of the first three opcodes of the operation: every high-level call rejects between the `Client`'s `'end'` and its `'close'` -- `get`, `put`, `delete`, `rename`, `exists` and the library's own `list`, each with an `Unexpected end event` message -- with `this.sftp` already cleared at that `'end'`; the raw `readdir` the adapter's `list`/`createExclusive` drive instead rejects with `No response from server` AFTER the `'close'`, cleared by it. So the side of the `'close'` a tear lands on follows the ROUTE, not the operation's name, and a route can settle later than its own listener fires -- the adapter's chunked `put` settles through its bounded source, a hop past the library's rejection. The socket does not separate the two -- at the high-level rejection it reads `writable: false, writableEnded: true, readableEnded: true, destroyed: true`, which is what it reads once the whole sequence has run as well -- so the still-owed reading is taken from the `Client`'s own `'end'`/`'close'` pair, one persistent listener pair per adapter on the same `Client.on` seam the keyboard-interactive answer handler uses. It is needed because a dial issued while that `'close'` is owed is failed by ssh2-sftp-client's connect-time listeners (`getConnection: Unexpected end event`) while the handshake it started runs on unowned at the server, so the recovery drives the previous bullet's forced close whether or not the session property is still set, and waits the `'close'` out before dialing. A `Client` exposing no `on()` leaves no reading to take, and the flag's unwritten default is the same value a delivered sequence leaves, so the retirement separates the two by whether the watch attached and treats an unwatched `Client` as *cannot tell* rather than as *nothing owed*. It warns once per adapter, naming the seam and this checklist, and takes the conservative branch: the forced close, then the dial. Driven against a mocked `Client` in `apps/cli/test/unit/ssh2SftpAdapter.test.ts` on the two shapes the relocation can take. With `on()` gone and `once()` still in place, a `get`/`put`/`exists` torn in flight still recovers on ONE dial (`this.sftp` cleared, `_sock.destroy` driving the `'close'`), so the seam costs the reading and a wait, not the recovery -- the wait being that on a transport whose `'close'` had ALREADY landed the forced close spends the full `FORCED_CLOSE_TIMEOUT_MS`, since a `'close'` listener armed after the event never resolves early. With the whole `EventEmitter` surface gone -- Node's `once()` is itself implemented in terms of `on()`, so a `Client` that has actually lost the surface loses both -- the forced close has no seam either, and the dial is refused under a second warning, leaving the operation the `ERR_NOT_CONNECTED` it already had rather than a connect error and a spent budget: the same severity choice the previous bullet makes. Neither shape is reached on the pinned versions: `new (require('ssh2').Client)()` reads `instanceof EventEmitter` true on `ssh2@1.17.0`, with `on`, `once`, and `removeListener` all functions. Re-verify on a bump that a clean server-side drop under a high-level operation still settles it from the `Client`'s `'end'`, ahead of the `'close'` and with `this.sftp` already cleared, that destroying the socket still drives that `'close'`, and that the `Client` still exposes the `on()` the reading is taken through; `apps/cli/test/integration/inflightDropRecovery.test.ts` drives the operation classes and a sweep of cut positions inside one transfer, `inflightDropExchange.test.ts` holds a two-party exchange cut mid-message to a two-sided contract -- delivering the message or rejecting the sender's `send()`, and where the cut tears the reply to a publish the partner then consumes, rejecting it as an undetermined outcome rather than as a determined non-delivery -- `concurrentOpDropRecovery.test.ts` holds a cut that tears SEVERAL operations at once to settling every one of them on the tear, and `dialDeferral.test.ts` censuses the socket the re-dial is issued over. Only the in-process backend can be made to cut a session this way, so none of this is verified against a native `sshd`, and the measured shapes are `ssh2.Connection.end()` at a counted opcode and the same `end()` from inside the RENAME handler, on either side of that request's `fs.rename` -- not the whole class of clean drops.
 - ssh2's `Client.connect()` issued on a socket that is still WRITABLE defers the attempt behind `once('close', ...)` and arms no `readyTimeout` for the deferred attempt, so psilink's `serverConnectTimeoutMs`-derived bound silently does not apply to it: measured on the pinned versions, a second `connect()` on a live socket (`writable === true`, `readyTimeout: 5000`) was still unsettled at 45016 ms with no `'ready'` and no `'error'`, and the same at the ssh2-sftp-client layer (44998 ms) with its session property force-cleared. The precondition is narrower than "an open connection": `writable === true` -- a transport not yet ended -- TOGETHER WITH a cleared session. Neither an ended transport (`writableEnded: true, destroyed: false`) nor a destroyed one defers; a dial on either settles in dial-scale time (~220 ms measured). No adapter path reaches the deferring state, and that is a CHECK rather than a note: `apps/cli/test/integration/dialDeferral.test.ts` drives each dial path against the real stack -- against a partner that withholds its close, and against one that cuts cleanly under an in-flight high-level operation -- records the state of the socket beneath every dial the adapter issues, and fails if any is `writable`, if any dial does not settle, or if the live-session gate stops firing. The library mechanism itself still exists, so the unreachability is a property of psilink's dial gates (`ensureConnected`'s `if (sftp) return true`, and `shouldRecoverFromSessionLoss`, which refuses a set session unless its transport has ENDED) plus the three forced closes above, which leave an ended transport DESTROYED rather than writable -- and the recovery's runs before its own re-dial, so that dial too is issued over a destroyed socket. That is exactly what the check pins. See [connection-per-poll-sftp.md](../notes/connection-per-poll-sftp.md) for the driven measurement behind it, the two barriers, and the caveats on its scope.
-- That release also reads Node's own half-close flags on the socket the bullets above reach (`this.client._sock.readableEnded` / `.writableEnded`) to tell WHO ended the transport. `readableEnded` marks a teardown the PEER began: ssh2 emits `'end'` on the peer's FIN and `'close'` only after it, and ssh2-sftp-client's global `'end'` listener leaves `this.sftp` SET, so a release landing in that window would otherwise drive a no-op `end()`, see the `'close'` promptly, and record its deliberate-release exemption over a server-side drop -- which would then be neither counted nor warned. `writableEnded` is read at two points and answers a different question at each. BEFORE the release drives its own `end()`, a `writableEnded` transport is one something OTHER than this release ended -- ssh2 answering a partner's `SSH_MSG_DISCONNECT` is the shape it is read for, the withheld-close drop the recovery bullet above measures, and what the reading establishes is only that the end was not this release's -- so the release does take a session away while the LOSS is not its own doing: it records a boundary that says a release took the session, so an operation issued afterwards still re-establishes rather than being issued into the gap, and that boundary carries no exemption, so an operation the drop TORE is counted and warned like any other. A drop that tore nothing is counted nowhere, and the release is what meets it: its `end()` draws no `'close'` from a transport this side had already ended and whose peer withholds one of its own, so the release spends its bound and forces the socket closed, reporting that boundary as a forced release instead. Measured against the in-process server driven to drop a session with its close withheld and the wire empty: the release forces the close (`forcedReleaseCount` 1, its operator line once), `reconnects` and the mid-exchange sub-count both stay 0, and the next operation's pre-establish gate dials exactly once -- `apps/cli/test/integration/ephemeralSessionExchange.test.ts` drives it. AFTER that `end()`, the same flag is the transport-is-ended premise above, kept as a runtime check rather than a claim, and it decides what a still-set session gets: `true` is the partner withholding its close, so the release forces it (previous bullet) and keeps whichever boundary it recorded before the close; `false` is an `end()` that did not end the socket, so the session may genuinely still be live -- it is held for the cycle, and the release takes its boundary back as well as naming the changelog, because a reading that a release took the session standing over a live one would exempt that session's next real drop from the counters and the operator warning, or send that session's next operation through a re-establishment it does not need. Both are plain `net.Socket` properties rather than ssh2 internals, so only the `_sock` seam itself is at risk on a bump, and `connect()` verifies in this mode that `_sock` reports `writableEnded` -- a socket that does not is a failed dial rather than a boundary that silently stops meaning anything.
-- The adapter's session-transition serialization (`end()` takes the same FIFO lock every dial and release takes; see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md)) puts two `end()` CALLERS on the adapter at once -- the caller's own `end()` and the re-entrant `end()` the recovery runs when `closing` is latched while a re-dial is completing -- but drives only one close: `end()` memoizes the connection's terminal close, so the second caller awaits the first instead of driving the client's `end()` again. A unit test pins that a concurrent pair yields one `client.end()`, one socket `destroy()`, and one line to the operator. ssh2's own idempotence sits behind that memo as a backstop rather than the guarantee: it guards `Client.end()`'s body with `isWritable(this._sock)`, so a second call is a no-op that raises nothing, and ssh2-sftp-client's `end()` is likewise idempotent via its `endCalled` latch. Still worth confirming on a bump -- a version that dropped the `isWritable` guard or made a second `Client.end()` throw is a behavior change to note -- but the re-entrant teardown no longer rests on it.
+- That release also reads Node's own half-close flags on the socket the bullets above reach (`this.client._sock.readableEnded` / `.writableEnded`) to tell WHO ended the transport, because the session property alone does not say. `readableEnded` marks a teardown the PEER began: ssh2 emits `'end'` on the peer's FIN and `'close'` only after it, and ssh2-sftp-client's global `'end'` listener leaves `this.sftp` SET, so without that flag a release landing in the window between the two would drive a no-op `end()`, see the `'close'` promptly, and read a server-side drop as a release of its own. `writableEnded` is read at two points and answers a different question at each. BEFORE the release drives its own `end()`, a `writableEnded` transport is one something OTHER than this release ended -- ssh2 answering a partner's `SSH_MSG_DISCONNECT` is the shape it is read for, alongside the withheld-close drop the recovery bullet above measures. AFTER that `end()`, the same flag is the transport-is-ended premise above, kept as a runtime check rather than a claim: `true` is the partner withholding its close, over a transport this side had already ended, so the release draws no `'close'`, spends its bound and forces the socket shut; `false` is an `end()` that did not end the socket, so the session may genuinely still be live. What each of those readings then records, counts and warns is specified in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md). Measured against the in-process server driven to drop a session with its close withheld and the wire empty: the release forces the close and emits its operator line once, `reconnects` and the mid-exchange sub-count both stay 0, and the next operation's pre-establish gate dials exactly once -- `apps/cli/test/integration/ephemeralSessionExchange.test.ts` drives it. Both flags are plain `net.Socket` properties rather than ssh2 internals, so only the `_sock` seam itself is at risk on a bump, and `connect()` verifies in this mode that `_sock` reports `writableEnded` -- a socket that does not is a failed dial rather than a reading that silently stops meaning anything.
+- The adapter's session-transition serialization (`end()` takes the same FIFO lock every dial and release takes; see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md)) can put two `end()` CALLERS on the adapter at once, and its memoized terminal close is what holds them to one client `end()`. ssh2's own idempotence sits behind that memo as a backstop rather than as the guarantee: it guards `Client.end()`'s body with `isWritable(this._sock)`, so a second call is a no-op that raises nothing, and ssh2-sftp-client's `end()` is likewise idempotent via its `endCalled` latch. Confirm both on a bump -- a version that dropped the `isWritable` guard or made a second `Client.end()` throw is a behavior change to note -- though the re-entrant teardown does not rest on either.
 - That serialization's acquire is BOUNDED (`TRANSITION_ACQUIRE_TIMEOUT_MS`, 10 s), and the one waiter whose expiry still closes something is teardown: it gives up ssh2-sftp-client's `end()` and destroys `this.client._sock` while the transition it was waiting on -- typically a dial mid-handshake -- still holds the client. Three premises about the pinned stack carry that branch, each MEASURED against a real ssh2 server made to accept the TCP connection and never write a byte (not even its SSH identification string), so the client's dial hangs established but never ready. First, ssh2-sftp-client's `end()` driven mid-handshake closes NOTHING: it short-circuits on the session the handshake has not restored and RESOLVED in 1 ms with the socket untouched (`destroyed: false, writable: true`) and the dial still pending -- which is why this branch reaches the destroy and never `end()`, and why it cannot reuse the terminal close's forced branch (that one waits out the `end()` it captured; this teardown has none and must not create one). "Must not" is measured rather than preferred: an `end()` driven mid-handshake AHEAD of the destroy also disables it, leaving the parked `connect()` unsettled 3 s later where the destroy on its own settles it inside that same 1-5 ms. Second, destroying the socket beneath a mid-handshake attempt SETTLES that attempt rather than leaving it pending: `_sock.destroyed` reads `true` synchronously on return from `destroy()`, the parked `connect()` rejects 1-5 ms later across five samples, and with no retry budget left the `TCPSocketWrap` handle is gone one tick after and a child process that does nothing further exits code 0 about 50 ms later. Third, that rejection is a plain `Error` with `code: "ERR_GENERIC_CLIENT"` and message `getConnection: Unexpected close event` -- indistinguishable from a genuine peer close, so nothing may tell the two apart by matching the error. The consequence that is psilink's own code rather than the library's: with retry budget left, `connect()`'s loop re-dials on a FRESH socket about a second after the destroy and the process stays alive for the remainder of the dial budget (measured), so that loop reads the teardown latch between attempts. Re-verify all three on a bump: a version that left the attempt pending after the destroy, or that resolved `end()` by actually closing the transport mid-handshake, changes what an expired teardown wait does. The bound itself rests on none of them -- it is a fixed ceiling on the WAIT, not on the transition being waited on -- so it does not inherit the per-attempt `readyTimeout` premise a dial-side ceiling would have. See [connection-per-poll-sftp.md](../notes/connection-per-poll-sftp.md) for the driven measurement and its limits (the stall is imposed at accept time, so a server that answers the identification string and then stalls mid-key-exchange is a different, unmeasured shape).
-- ssh2-sftp-client exposes the underlying ssh2 `Client` as `this.client`, and ssh2's `Client.setNoDelay(true)` toggles `TCP_NODELAY` on the live socket. `connect()` calls it once after the connection is established to disable Nagle's algorithm -- a per-round-trip latency optimization for the chatty rendezvous protocol (see board item 199674097). Unlike every other premise here this one carries no correctness weight: the call is guarded and non-fatal, so a future version that relocates the `Client` or drops `setNoDelay` makes the adapter log a warning and continue with Nagle enabled (slower, still correct) rather than fail.
-- The ssh2 `Client` exposes its underlying `net.Socket` on `this.client._sock`, and ssh2 exposes `setNoDelay` but *not* `setKeepAlive`, so `connect()` reaches the socket directly to enable kernel TCP keepalive (`_sock.setKeepAlive(true, SFTP_TCP_KEEPALIVE_DELAY_MS)`) -- the transport-layer backstop beneath the application heartbeat (board item 208035324; see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md)). Like `setNoDelay` this carries no correctness weight: the call is guarded and non-fatal, so a version that renames or relocates `_sock`, or one where `_sock` is not a `net.Socket` exposing `setKeepAlive`, makes the adapter log a warning and continue without kernel keepalive (the application heartbeat still defeats the server idle timeout) rather than fail.
+- ssh2-sftp-client exposes the underlying ssh2 `Client` as `this.client`, and ssh2's `Client.setNoDelay(true)` toggles `TCP_NODELAY` on the live socket. `connect()` calls it once after the connection is established to disable Nagle's algorithm -- a per-round-trip latency optimization for the chatty rendezvous protocol. Unlike every other premise here this one carries no correctness weight: the call is guarded and non-fatal, so a future version that relocates the `Client` or drops `setNoDelay` makes the adapter log a warning and continue with Nagle enabled (slower, still correct) rather than fail.
+- The ssh2 `Client` exposes its underlying `net.Socket` on `this.client._sock`, and ssh2 exposes `setNoDelay` but *not* `setKeepAlive`, so `connect()` reaches the socket directly to enable kernel TCP keepalive (`_sock.setKeepAlive(true, SFTP_TCP_KEEPALIVE_DELAY_MS)`) -- the transport-layer backstop beneath the application heartbeat (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md)). Like `setNoDelay` this carries no correctness weight: the call is guarded and non-fatal, so a version that renames or relocates `_sock`, or one where `_sock` is not a `net.Socket` exposing `setKeepAlive`, makes the adapter log a warning and continue without kernel keepalive (the application heartbeat still defeats the server idle timeout) rather than fail.
 - The application heartbeat issues its no-op keepalive through ssh2-sftp-client's *public* `realPath(".")`, so it adds no internal-API coupling of its own, and the ssh2-sftp-client concurrency premise governing it is much narrower than "two operations must not be in flight on one client at once". Overlap on a HEALTHY session is safe: driven against a real ssh2 server, 16 distinct pairs issued in the same event-loop turn, 5 rounds each (80 pair executions), covering `get` against `get`/`put`/`delete`/`rename`/`exists`, `list` against `get`/`list`/`createExclusive`, `createExclusive`+`exists`, `put`+`delete`, `rename`+`exists`, `safeDelete`+`get`, and the heartbeat's own `realPath(".")` beat against `get`, `list`, `createExclusive` and another beat. Every operation returned the correct result for the server state at the time -- including the later rounds' application-level answers to state an earlier round had changed, a `code: 2` on re-deleting and an `EEXIST` on re-creating an existing lock -- with no hang, no cross-talk and no mis-routed error. A NON-FATAL failure of one member does not disturb the other either (6 arms: a failing `get` (ENOENT), `createExclusive` (EEXIST) or `delete` (ENOENT) alongside a `list` parked on the wire, each of the three driven once on a healthy session and once with a drop following the failure; each failure got its own correct error and the survivor was unaffected), because `removeTempListeners` removes by identity, so the survivor's own listeners stay installed. What overlapping operations DO cross is the SESSION-LOSS rejection: `addTempListeners` PREPENDS its per-operation listeners, so the most recently issued high-level operation's listener runs first and consumes the ssh2 `Client`'s `'end'`, and the earlier operation's listener is then suppressed by the library's `eventHandled` bookkeeping and never rejects it. Issuance ORDER therefore decides which of two concurrent operations takes which path out of a session loss, and the two paths do not have the same outcome: measured on a clean partner-side drop, reversing the order within a pair reversed which member the rejection landed on -- between `exists` and `get`, where it reversed which of the two failed, and between the beat and a `get` alike. The beat is not special with respect to that crossing (it behaves as any other high-level operation, its being a beat mattering only in that its own outcome is swallowed), and the adapter issues concurrent operations of its own with no suppression of any kind, so the beat suppression covers the beat and nothing else -- what it is still worth is in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md). Re-verify on a bump that `addTempListeners` still prepends and its `_resetEventFlags`/`eventHandled` bookkeeping still suppresses the earlier listener once a later one has consumed the event (the ordering the crossing rests on), and that `removeTempListeners` still removes by identity (what leaves a survivor its own listeners); a version that serialized operations internally, or gave each operation its own connection-level listeners, retires the crossing rather than changing it. WHETHER the members that do not take the rejection settle at all is a separate question from which one takes it, and is measured separately, because the recovery re-dial that the taker enters is what the others are outstanding across. Driven against a real ssh2 server made to cut a session cleanly with several operations on the wire: a raw-wrapper `list` (batched one name per READDIR, so it spans hundreds of opcodes) alongside a high-level `get` of 8 MiB, in both issue orders and at five cut positions inside the pair, 50 runs; and forty-way `Promise.allSettled` `delete` and `Promise.all` `safeDelete` fan-outs, 18 runs each. Every member settled on the TEAR rather than on its own per-operation deadline, and every one inside the recovery chokepoint was re-issued and returned its own correct result -- the pair in 278-495 ms and the `delete` fan-out's forty members in 224-260 ms, against a 3000 ms deadline set for the runs. The tear ORDER follows the operation kind and not issue order: the high-level `get` is settled from the `Client`'s `'end'` and enters recovery first in both orders, and the raw `list` from the `'close'` the retirement waits out, 0.13-0.47 ms after it. The beat as the outstanding member was driven under both partner classes -- parked on the wire by a withheld REALPATH response at a clean cut, and issued into the transport a withheld connection close leaves half-open (outstanding 2.0-2.8 s, settled 1.4-2.5 ms after the forced close's `'close'`, never at its own 3000 ms deadline) -- and rejected in both with `realPath: Unexpected close event`, never a stall. A beat is parked on the wire through the in-process server's `REALPATH` withhold, the same `inject.withholdOn` seam its other served opcodes carry. `apps/cli/test/integration/concurrentOpDropRecovery.test.ts` holds each of these shapes against that server -- the pair in both issue orders, both fan-outs, and the beat under both partner classes -- at one cut position and one execution apiece; the cut-position sweeps and repeats behind the counts and ranges above were driven ad hoc and are not in the tree, so a bump re-drives the shapes rather than reproducing those samples. Re-verify on a bump that a member NOT taking the loss rejection still settles from the transport's own lifecycle rather than being left outstanding, since that is what keeps the stall exclusion above from swallowing a genuine loss. The runs' limits: nothing was driven in any state for the `rename()` re-issue's existence probe against anything; and at a session death specifically, nothing was driven for `get` against `put`/`delete`/`rename`, for `list`+`list`, `put`+`delete` or `rename`+`exists`, or for `keepalive` against `createExclusive` or another `keepalive`. Core's own concurrency -- a `send()` running alongside the free-running poll loop -- put two operations on the wire at the tear in 12 of the 20 runs driven across ten cut points, and none of those runs reached the window above at all (every message was delivered and every `send()` resolved), so the shapes above measure the adapter under such concurrency rather than showing the poll loop producing it at a drop. Nothing was driven against a native `sshd`, and the withheld-close class cannot be. What the same per-operation listeners COST is measured on the same premise, because concurrency on one `Client` is what makes them stack. `addTempListeners` attaches exactly one `'end'`, one `'close'` and one `'error'` listener per in-flight operation and `removeTempListeners` takes all three off when it settles, so a fan of width `w` peaks at `w + 2` on `'end'` and `'close'` and `w + 1` on `'error'` above the persistent 2/2/1 a connected client carries (ssh2-sftp-client's three constructor `globalListener`s, plus the adapter's own `'end'`/`'close'` transport-lifecycle watch). Node's default ceiling is 10 (`events.defaultMaxListeners`, which `client.getMaxListeners()` reads back), so a concurrent fan of 8 is silent, 9 emits two `MaxListenersExceededWarning`s (`'end'`, `'close'`) and 10 or more emits three -- identical in the default held-session mode and under `connection_per_poll`. Node raises that warning through `process.emitWarning` and never through `console`, so in a real child process it lands on stderr only (0 occurrences on stdout, where the CLI's own `[INFO]` operator lines go) and neither the integration suite's console sentinel nor `withCapturedLogs` can observe it; an in-process `process.on('warning', ...)` can, and is the seam the checks use. Its verbatim first line is `(node:NNNNN) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 end listeners added to [Client]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit`. The stacking is BOUNDED rather than a leak: every shape driven came back to the exact persistent baseline on every event name once its fan settled, including a 512-wide fan whose peak was 1,541 concurrent listeners. So the adapter raises the ceiling on that one `Client` at construction to `SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS`, DERIVED in code from the bounds that admit a fan onto the emitter rather than picked, and SUMMED rather than maxed so that nothing rests on two fans being unable to overlap: `2 * MAX_DIRECTORY_ENTRIES` (16384) for core's rendezvous entry sweep, plus `MAX_DEFERRED_CLEANUP_DELETES` (64) for the `connection_per_poll` cleanup drain's concurrent re-issue, plus 3 for what runs beside a fan, plus the persistent 2 -- which is 16453. The entry sweep's term is TWICE the listing bound because that sweep is scoped to a party's DIRECTORIES rather than to one listing: `sweepProtocolFiles` merges the inbound listing's peer hellos and unexpected protocol files with the outbound listing's own leftovers into one array and fans a delete per element of it in a single `Promise.allSettled`. Under a split inbound/outbound scope those are two listings, each refused separately at `MAX_DIRECTORY_ENTRIES`, so one fan carries their union; under a shared scope the two collapse to one listing and the term is slack. That same term covers the three narrower delete fans core's entry scan (`scanEntryDirectory`) issues ahead of the sweep -- the orphaned-temp sweep and the leftover-abort-marker sweep over the inbound listing, and the split-mode outbound-orphan sweep over the outbound one -- each a `Promise.all` of `safeDelete` over a SUBSET of one guarded listing and so at most `MAX_DIRECTORY_ENTRIES`, half the term. Each is awaited to completion before the next is issued and before `sweepProtocolFiles`, so none of them stacks on another or on the sweep, and the widest fan the entry scan puts on the client at any instant is the sweep's own. The drain's term is added to it rather than maxed against it because the entry sweep's deletes reach the same recovery chokepoint that sets the drain running. The ceiling is seated AT that peak rather than one above it, because Node warns only STRICTLY above a ceiling: an emitter whose maximum is `n` is silent at `n` listeners and warns on the `n + 1`th, driven both at a toy value (max 3: silent at 3, warns at 4) and at the adapter's own (max 16453: silent at 16453, warns at 16454), of which only the second is a committed check. Every enumerated fan, all of them at their bounds at once, is therefore silent, and the first listener past the enumeration is what warns. The `3` is MEASURED rather than summed: a best-effort backstop held to evidence rather than an exhaustive count of what core can put on one connection, so the concurrency it is meant to COVER is not a list of addends that totals it. An ordinary two-party exchange and its `connection_per_poll` variant are driven with the listener probe on each party's client and the widest headroom either party spends above its idle baseline is asserted to stay within it; both shapes spend 2 of the 3, on `'close'` and at teardown -- the pair ssh2-sftp-client's `end()` parks while it waits the close out, its own close handler plus the per-operation `'close'` bracket the `end()` call itself takes. What the term is meant to cover is that teardown pair together with the heartbeat's `realPath(".")` beat, the poll loop's own operation, and a `send()` resuming from the protocol continuation; which of those can be in flight together is core's business rather than the adapter's, which is why the term rests on the driven shapes instead of on that list. Crossing the ceiling costs a spurious warning and nothing else, which is what lets the one fan with no cap of its own -- the connection cleanup's `Promise.all` over this party's unconsumed `responsibleFiles` -- rest on the entry sweep's term as an assumption (those writes are entries of a directory this party's own poll listing enumerates) rather than on an enforced cap. It would only need revisiting if a fan appeared that no term governs; a bump that changed the trio's SIZE or stopped removing it on settle invalidates the derivation and the boundedness respectively, which is why both are on the checklist below. Raising the ceiling gives up nothing that detected a real leak, because the ceiling never did: it fires at most once per emitter and event name (Node re-arms it when a listener array is rebuilt, so a later fan on the same client may warn again or not at all, and a fresh adapter always warns) and says nothing about whether the listeners came off. `apps/cli/test/integration/sharedClientListenerCeiling.test.ts` pins the accounting itself instead -- exact peak and exact return to baseline on every event name -- and holds no warning reaching the seam. Its runs reach fans of 9, 40 and 512, a fan of 9 issued after a `connection_per_poll` release and re-dial (which is also what pins that the emitter each operation attaches to is the one the constructor raised and that a re-dial does not replace it), the deferred-cleanup drain driven to its full 64 record cap (70 attempted, 64 admitted, 6 refused), a deliberately leaking shape that attaches one listener per operation and removes none, which the accounting reports and the raised ceiling does not, the strictly-above boundary at the derived value itself, and the two whole-exchange shapes the `3` rests on. The runs' limits: no fan at or near the derived 16453 was driven, nor one at the 8192 listing bound itself, nor a split-scope entry sweep at any width -- the doubled term is derived from the sweep's own construction and the per-listing refusal, not measured at scale; the concurrency term is backstopped only over the two exchange shapes named above, so a core-side concurrency neither reaches is unmeasured and would cost the spurious warning back; the uncapped `responsibleFiles` cleanup fan was driven only ad hoc, at 20 unconsumed sends, and is not in the tree, so a bump re-drives it rather than reproducing that sample; the strictly-above boundary's toy-value arm (max 3) was driven ad hoc as well and is not in the tree, the committed check holding that boundary only at the derived value itself; the stdout/stderr split was likewise measured ad hoc, through a child process, and no committed check holds it; and nothing here was driven against a native `sshd`.
 - A malformed reply to the in-flight request itself is bounded by the adapter's wall-clock deadline, not by `cleanupRequests`, because ssh2 has already deleted the request from `_requests` by the time `doFatalSFTPError` runs: the `NAME` and `DATA` response handlers delete it unconditionally before the parse/check that calls `doFatalSFTPError`, and the `HANDLE` handler deletes it inside its malformed branch (on a defined request id) immediately before that call. All three leave nothing for `cleanupRequests` to fail. If a future ssh2 instead deleted after the fatal path (or stopped deleting in the `HANDLE` malformed branch), `cleanupRequests` would begin failing in-flight requests too - which would change the mechanism but not break it (the deadline still bounds the operation). The deadline must stay regardless; the `liveness` fault-injection unit test below proves the current ordering.
 - ssh2-sftp-client's `put(src, dest)` pipes a non-Buffer `src` into the write stream (`_put`'s else-branch, `rdr.pipe(wtr)`), and that write stream consumes under ack-driven backpressure -- ssh2's `WriteStream._write` calls its stream callback (releasing the next pull) only after the server acknowledges the write. The `put` liveness idle window rests on both: the adapter hands `put` a Readable that streams the payload in `SFTP_PUT_PROGRESS_CHUNK_BYTES` (64 KiB) chunks and resets the window each time a chunk is pulled, so a withheld write ack stalls the pull and trips the window while a slow-but-progressing upload keeps resetting it. It rests further on ssh2's `SFTP.write` chaining a buffer larger than `_maxWriteLen` into multiple WRITE packets and firing the stream callback only after the *last* ack -- which is precisely *why* the source is chunked rather than handed over whole: a single whole-buffer write surfaces no progress until completion, making a large legitimate upload indistinguishable from a stall for its full duration. If a future version buffers a provided stream eagerly instead of piping it under backpressure, the window's progress signal would no longer track the server and the bound would need rework; if it merely acks per-sub-write incrementally, the chunking becomes redundant but harmless. This uses only the public stream interface (it does not drive the raw `SFTPWrapper`), so it adds no new internal coupling beyond these behavioral premises. The `ssh2SftpAdapter` unit tests pin the stall-fires and slow-but-progressing-does-not behaviors and byte-exact upload through the chunked source; the integration suite uploads real payloads through it.

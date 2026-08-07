@@ -15,8 +15,9 @@ contributors.
 A document in this tier always has an overview-tier counterpart it complements,
 and each states the split in its intro: the overview says what a control or
 format is for and what it protects against; the spec says how it is constructed.
-(One document, [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md), is a deliberate
-exception -- see the note below.)
+(Two documents, [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md) and
+[CONTAINER_IMAGES.md](CONTAINER_IMAGES.md), are deliberate exceptions -- see the
+note below.)
 
 ## Index
 
@@ -30,11 +31,12 @@ exception -- see the note below.)
 | [CLI_DOCTOR.md](CLI_DOCTOR.md) | The `psilink doctor` verdict emitted under `--json`: the document's fields, the schema version and the compatibility rule, the `overall` and per-check status vocabularies, both modes' fixed ordered check-id lists, the human-only fields the JSON withholds together with the bound on the tool-output excerpt, and the exit code each verdict maps to. | Implementors of a setup launcher, security auditors | What the two modes check and the `SMB_*` inputs they read (see [CLI.md](../CLI.md#checking-a-network-file-drop)); the CLI-wide exit-code table (see [CLI.md](../CLI.md#exit-codes)); the rendezvous semantics the checks exercise (see [FILE_SYNC.md](FILE_SYNC.md)) |
 | [SERVER_JOB_API.md](SERVER_JOB_API.md) | The web server's job API that drives the CLI as a subprocess for the console appliance: the endpoint table and status codes, the injection-closed exchange and zero-setup intent schemas, the operator-authored SFTP connection and its validation, the composed CLI config, the workdir layout and modes, the SSE event relay with full-history replay and trust-boundary re-validation, the exit-code reconciliation and cancellation escalation, the `JOB_DATA_ROOT`/`JOB_CLI_BINARY`/`JOB_SECRETS_DIR` semantics and the startup and reachability rules, the memory-only single-active-exchange lifetime a restart forgets, and the two graduation artifacts beside it: the recurring-run hand-off the API serves and the client-composed partner accept kit it does not. | Implementors of a supervising process, security auditors | What the feature is for and how an operator enables it (see [DEPLOYMENT.md](../DEPLOYMENT.md#server-job-api)); the single-party-appliance trust invariant (see [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#single-party-appliance-trust-boundary)); the fd-3 event stream this consumes (see [CLI_EVENTS.md](CLI_EVENTS.md)) |
 | [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md) | The self-attested exchange record **format**: the record and verification-keys file shapes, the format version, the HMAC commitment scheme and agreed-terms hash, the governance metadata, the disclosure framing, and the record's privacy properties. | Security auditors, external implementors, compliance reviewers, developers | The PSI protocol that produces the exchange (see [PROTOCOL.md](PROTOCOL.md)); the exchange-agreement format that supplies the governance fields (see [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md)); the canonical byte encoding (see [CANONICAL_ENCODING.md](CANONICAL_ENCODING.md)) |
-| [EXCHANGE_FILE.md](EXCHANGE_FILE.md) | The downloadable exchange-file artifact's compatibility contract: that a minted file IS the shared CLI config schema (no parallel format), the mint-layer guarantees (no `authentication` block, no representable credential, the SFTP placeholder username), the web/CLI versioning policy (strict-reject vs strip, breaking changes in scope, no artifact back-compat), the invitation channel-binding rule, and the secret's key-file provisioning path (`invite`/`accept`/`exchange --invitation`). | Security auditors, implementors | The field-level meaning of any config field (see [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md)); the invitation-token wire format and its endpoint sub-schemas (see [FILE_SYNC.md](FILE_SYNC.md)); the owner-only key-file write discipline (see [CREDENTIAL_STORAGE.md](CREDENTIAL_STORAGE.md)) |
+| [EXCHANGE_FILE.md](EXCHANGE_FILE.md) | The downloadable exchange-file artifact's compatibility contract: that a minted file IS the shared CLI config schema (no parallel format), the mint-layer guarantees (no `authentication` block, no representable credential, the SFTP placeholder username), the web/CLI versioning policy (strict-reject vs strip, breaking changes in scope, no artifact back-compat), the invitation channel-binding rule, and the secret's key-file provisioning path (`invite`/`accept`/`exchange --invitation`). | Security auditors, implementors | The field-level meaning of any config field (see [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md)); the invitation token's endpoint sub-schemas and their version-bump policy (see [FILE_SYNC.md](FILE_SYNC.md)) -- the token's own wire format is specified in no document of this tier; the owner-only key-file write discipline (see [CREDENTIAL_STORAGE.md](CREDENTIAL_STORAGE.md)) |
 | [CANONICAL_ENCODING.md](CANONICAL_ENCODING.md) | The normative RFC 8785 (JCS) byte encoding the receipts, record commitments, and agreed-terms hash are computed over, with worked examples. Written so an independent implementation reproduces byte-identical output. | External implementors, security auditors | What the encoding is for and what it protects against -- that is the **Canonical encoding** overview in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#canonical-encoding); how receipts use these bytes (see [PROTOCOL.md](PROTOCOL.md#third-party-verifiable-proof-of-a-data-flow)); the record format (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)) |
 | [CREDENTIAL_STORAGE.md](CREDENTIAL_STORAGE.md) | The owner-only on-disk write path shared by the credential, signing-identity, exchange-record, and result-CSV files: the POSIX exclusive-create and atomic-rename discipline, the `fsync` durability and cross-write crash-ordering guarantee, the macOS `F_FULLFSYNC` and NFSv4-ACL caveats, the writable-and-readable-parent pre-flight, and the Windows ACL-narrowing and load-check internals. | Security auditors, implementors | What the files contain and the operator-facing required permissions, warnings, and remediation -- that is the **Key file security** overview in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#key-file-security) |
 | [MANAGED_EXCHANGE_RECORD.md](MANAGED_EXCHANGE_RECORD.md) | The browser-persisted managed-exchange record shape: this party's exchange-file document plus the local-only fields (the secret, expiry policy, side, label, input-file handle, schedule, and run bookkeeping) split into what persists across runs versus what is supplied at each run (input content never persists; at most a persisted file handle, a pointer), the credential-free connection composition and its three named implementation pieces, the local `side` role dispatch, the persist-before-success crash-consistency ordering, the linear-secret single-owner invariant, the derived-never-stored rendezvous-id and rotation values, and the export artifact's custody model, rollback caveats, and CLI-separable format. | Security auditors, implementors | The browser at-rest threat model, rollback and metadata-at-rest analyses, and egress-hardening limits (see [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges)); the managed exchange lifecycle overview (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)); the exchange-file artifact contract the document reuses (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md)) |
-| [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md) | Why the `ssh2`/`ssh2-sftp-client` and `peerjs`/`peerjs-js-binarypack` stacks are exact-pinned, the internal premises the CLI SFTP adapter and the web inbound bound rest on, the per-stack checklist to re-verify them before a bump, and the `allowScripts` install-script policy (what npm enforces from it, why allows are version-pinned and denials are not). | Maintainers upgrading a pinned dependency | The controls the premises support (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md)); the dependency-review requirement (see [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy)) |
+| [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md) | Why the `ssh2`/`ssh2-sftp-client` and `peerjs`/`peerjs-js-binarypack` stacks are exact-pinned, the internal premises the CLI SFTP adapter and the web inbound bound rest on, the per-stack checklist to re-verify them before a bump, the vendored `@openmined/psi.js` addon, the `allowScripts` install-script policy (what npm enforces from it, why allows are version-pinned and denials are not), the GitHub Action pin mirror, and the residuals npm's resolver leaves in this workspace. | Maintainers upgrading a pinned dependency | The controls the premises support (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md)); how the container images freeze and pin what they install (see [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md)); the dependency-review requirement (see [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy)) |
+| [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md) | How the shipped CLI image (`Dockerfile`) and the unpublished FIPS variant (`Dockerfile.fips`) freeze their npm tree to the committed lockfile, what each pins by digest, hash, or NVR and what holds each pin, and the two reviewed OS-package install lines -- with the built-image measurements behind them kept in a clearly labelled non-normative section. | Maintainers building or vetting an image, security auditors | Why the npm dependencies themselves are exact-pinned and the per-stack upgrade checklists (see [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md)); the release and SBOM procedure (see [RELEASES.md](../RELEASES.md)) |
 
 ## Where does my content go?
 
@@ -58,11 +60,12 @@ Within this tier, route by topic:
 - **The CLI machine-interface event stream (`--event-stream`): fd, NDJSON framing, event fields, or the terminal-error category rules** -> [CLI_EVENTS.md](CLI_EVENTS.md).
 - **The `psilink doctor` `--json` verdict: a field, the version rule, a `status`/`overall` value, a check id, or the exit-code mapping** -> [CLI_DOCTOR.md](CLI_DOCTOR.md).
 - **The web server's job API (endpoints, the exchange-intent schema, the workdir layout, the SSE relay, the gate/startup rules, the job lifetime)** -> [SERVER_JOB_API.md](SERVER_JOB_API.md).
-- **A pinned-dependency internal premise, its upgrade checklist (`ssh2`, `peerjs`), the `allowScripts` install-script policy, or a GitHub Action pin invariant** -> [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
+- **A pinned-dependency internal premise, its upgrade checklist (`ssh2`, `peerjs`), the vendored PSI addon, the `allowScripts` install-script policy, a GitHub Action pin invariant, or an npm-resolution residual** -> [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
+- **A container image's npm/Docker freeze, base-image digest pin, OS-package install line, or the FIPS variant's pin table** -> [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md).
 
 ### Two overlaps to disambiguate
 
-- **Self-attested record: placement vs format.** Its *protocol placement* -- where it sits in the exchange and the receipt that will later sign it -- lives in [PROTOCOL.md](PROTOCOL.md) (the "Self-attested record" subsection). Its *on-disk format* -- file shapes, commitment scheme, governance metadata -- lives in [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md). Both are spec-tier, so there is no cross-tier break; open the format doc for the bytes and the protocol doc for the placement.
+- **Self-attested record: placement vs format.** Its *protocol placement* -- where it sits in the exchange, beside the separate signed receipt -- lives in [PROTOCOL.md](PROTOCOL.md) (the "Self-attested record" subsection). Its *on-disk format* -- file shapes, commitment scheme, governance metadata -- lives in [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md). Both are spec-tier, so there is no cross-tier break; open the format doc for the bytes and the protocol doc for the placement.
 - **Channel security: construction vs key-exchange wire format.** The AEAD construction and the transport bounds are in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md); the key-exchange wire format that produces the session key those keys derive from is in [PROTOCOL.md](PROTOCOL.md#x25519-authenticated-key-exchange).
 
 ### Tier-inversion note: the filename grammar
@@ -77,14 +80,23 @@ is deliberate and recorded: do **not** "tidy" the filename grammar down into
 FILE_SYNC.md defers to it; moving it would silently break FILE_SYNC's invariant
 references.
 
-### Maintainer-runbook exception: DEPENDENCY_PINS.md
+### Maintainer-runbook exception: DEPENDENCY_PINS.md and CONTAINER_IMAGES.md
 
-[DEPENDENCY_PINS.md](DEPENDENCY_PINS.md) bends the two tier rules above, on
-purpose. Its counterpart is [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy)
-(the dependency-review requirement), not a `docs/` overview; its content is a
-re-verification **procedure** over spec-level premises, not a construction; and
-it adds maintainers upgrading a pinned dependency to the tier's implementor and
-auditor audience. It lives here anyway because its substance is spec-tier -- the
+[DEPENDENCY_PINS.md](DEPENDENCY_PINS.md) and
+[CONTAINER_IMAGES.md](CONTAINER_IMAGES.md) bend the two tier rules above, on
+purpose. Their counterparts are
+[CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy) (the dependency-review
+requirement) and [RELEASES.md](../RELEASES.md) (the build and release procedure),
+not a `docs/` overview; their content is a re-verification **procedure** over
+spec-level premises, not a construction; and they add maintainers upgrading a
+pinned dependency or building an image to the tier's implementor and auditor
+audience. They live here anyway because their substance is spec-tier -- the
 numeric SFTP constants, the BinaryPack marker table, and the ssh2 listener
-premises that [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md) rests on -- so it belongs
-beside that doc, not in a separate runbook tier for a single file.
+premises that [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md) rests on, and the exact
+digests, hashes, and version rows that fix what a built image contains -- so they
+belong beside that doc, not in a separate runbook tier.
+
+CONTAINER_IMAGES.md additionally carries a clearly labelled **non-normative**
+measured-inventories section. Those figures record what a built image was
+observed to contain; they bind no build, and nothing in this tier may cite them
+as a requirement.

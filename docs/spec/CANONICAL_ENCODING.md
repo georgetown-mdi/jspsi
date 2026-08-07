@@ -41,10 +41,13 @@ platform-independent.
 
 This encoding is the single canonicalization primitive for everything that is
 hashed, committed, or signed: the agreed-terms object embedded in a receipt, the
-[self-attested record](EXCHANGE_RECORD.md), the receipt itself, and the signing
-certificate -- whose
+commitments and agreed-terms hash of the
+[self-attested record](EXCHANGE_RECORD.md) -- whose own serialized form is
+ordinary pretty-printed JSON rather than canonical bytes, since the record is
+unsigned -- the receipt itself, and the signing certificate, whose
 self-signature is computed over, and whose pinned fingerprint is a SHA-256 of,
-the canonical bytes of its body (see
+the **domain-separated** canonical bytes of its body, each under its own
+distinct domain label (see
 [PROTOCOL.md](PROTOCOL.md#signing-identity-and-certificate-pinning)). It
 supersedes ad hoc `JSON.stringify` and key-sorting for those artifacts. Equality
 checks that must match a hashed form -- for example the cross-party
@@ -67,8 +70,9 @@ A value to be canonically encoded is one of:
 | array | ordered list of values in this domain |
 | object | unordered set of string-keyed members whose values are in this domain |
 
-Everything else is **rejected** rather than coerced, because silent coercion is
-the classic way two implementations diverge:
+Everything else is **rejected** rather than coerced -- as is a value of the
+shapes above that carries a member an encoder would substitute or drop --
+because silent coercion is the classic way two implementations diverge:
 
 - `undefined` -- as an object member value, an array element, or the top-level
   value. An absent field is expressed by **omitting the key**, never by a
@@ -80,9 +84,19 @@ the classic way two implementations diverge:
   anything else that is not a plain JSON object. **Binary data is not a member
   of the domain**; it must be encoded to a string first (see
   [Binary fields](#binary-fields)).
+- A callable `toJSON` on an object or an array, own or inherited, enumerable or
+  not. An encoder that honored it would serialize what `toJSON()` returns
+  instead of the value it was handed, so such a value is rejected even though
+  its shape is otherwise in the domain.
+- A sparse array hole -- a missing element, as at the second position of
+  `[1, , 3]`. An explicit gap is written as `null`.
+- An own property of an array that is not an element index (`length` aside),
+  and a symbol-keyed property on an array or an object. Only the elements
+  `[0, length)` and an object's string keys are encoded, so such a property
+  would be dropped without a trace.
 
-A conforming implementation MUST reject an out-of-domain value with an error
-rather than emit bytes for it.
+A conforming implementation MUST reject each of these with an error rather than
+emit bytes for it.
 
 ## Encoding rules
 
@@ -266,15 +280,10 @@ character string and `canonicalBytes(value)` returns its UTF-8 bytes. Numeric
 schema fields use `safeIntegerSchema`. None of this is required to reproduce the
 bytes; the normative definition is RFC 8785 over the value domain above.
 
-The `canonicalize` package is bundled (inlined) into `@psilink/core`'s built
-artifacts rather than resolved at runtime, because from 3.0.0 it ships ESM-only
-and a bare `require` of it fails in the CJS bundle. One operational consequence:
-a future `canonicalize` security advisory cannot be remediated by a transitive
-dependency bump alone -- it requires bumping the dependency and rebuilding and
-re-releasing `@psilink/core`. This matches `@openmined/psi.js`, which is
-likewise inlined into every build. (`re2js` and `yaml` are inlined only into the
-standalone UMD browser build; the ESM and CJS builds keep them external, so a
-transitive bump does remediate them for the CJS-based CLI.)
+The `canonicalize` package is inlined into `@psilink/core`'s built artifacts
+rather than resolved at runtime; why, and what that costs when an advisory
+lands against it, are in
+[DEPENDENCY_PINS.md](DEPENDENCY_PINS.md#inlined-dependencies-and-their-remediation-path).
 
 ## See also
 

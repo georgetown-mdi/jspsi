@@ -13,12 +13,17 @@ complement to the **Key file security** overview in
 [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#key-file-security), which says what
 these files protect and carries the operator-facing required permissions,
 warnings, and remediation commands; this document covers how each write is
-constructed. The same construction governs four owner-only artifacts -- the key
-file (`.psilink.key`), the signing identity, the self-attested exchange record
-(see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)), and the result CSV -- so it is
-specified once here and referenced from each. It does not cover what the files
-contain or the threat model (see [SECURITY_DESIGN.md](../SECURITY_DESIGN.md)).
-Intended readers are security auditors and implementors.
+constructed. The same construction governs every owner-only artifact written in
+one shot -- the key file (`.psilink.key`), the signing identity, the
+self-attested exchange record and the private verification-keys file beside it
+(see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)), the dual-signed receipt, and the
+operator config `psilink.yaml` -- so it is specified once here and referenced
+from each. The result CSV is owner-only on the same principle but is streamed to
+its destination rather than written through that construction; its writer is
+specified in [Result CSV output](#result-csv-output). This document does not
+cover what the files contain or the threat model (see
+[SECURITY_DESIGN.md](../SECURITY_DESIGN.md)). Intended readers are security
+auditors and implementors.
 
 ## POSIX write discipline
 
@@ -59,7 +64,8 @@ On Unix the owner-only guarantee is enforced through the POSIX mode bits
 governed separately from the mode bits, so an ACL entry a file inherits from its
 parent directory's inheritable ACEs can grant another principal access that a
 `0600` mode does not remove. This affects every owner-only artifact written into
-such a directory (the key file, signing identity, exchange records, and the
+such a directory (the key file, the signing identity, the exchange record and
+its verification keys, the dual-signed receipt, the operator config, and the
 result CSV), since each lands either in place or on a fresh inode that still
 inherits the directory's ACEs. The operator-facing remediation (`ls -le` to
 inspect, `chmod -N` to clear) is in
@@ -125,8 +131,13 @@ directory-inherited extended ACL on macOS is not stripped by the `0600` mode).
 
 Unlike the credential writers, the CSV is streamed directly to the output path
 (the result set may be large) rather than written through the
-temp-file-and-rename they use, and the operator-supplied output path is not
-symlink-hardened; the owner-only guarantee is the same. Writing the result to
+temp-file-and-rename they use, and on POSIX the operator-supplied output path is
+not symlink-hardened: the destination is opened `O_WRONLY | O_CREAT` with
+neither `O_NOFOLLOW` nor `O_EXCL`, so a symlink already at that path is
+followed. On Windows a link at that path is not followed: any existing
+destination is unlinked (which removes the link itself, not its target) and
+recreated on an exclusive descriptor before its ACL is narrowed. The owner-only
+guarantee is the same on both. Writing the result to
 stdout (no output path given) applies no permission handling -- in particular,
 redirecting stdout to a file with a shell `>` leaves that file at the shell's
 umask, since the shell, not the CLI, creates it; pass an output path to get the
