@@ -145,10 +145,12 @@ jobs:
       - name: Scripts tests
         run: npm run test:scripts
       # Blocking half of the dependency audit, over the production tree the
-      # shipped image runs: the same scope as the release SBOM and as the
-      # Dockerfile's runtime `npm ci --omit=dev`, and the same command string
-      # CONTRIBUTING.md's Dependency Policy and docs/RELEASES.md step 4 hand a
-      # maintainer, so the local run and the gate cannot diverge. It answers
+      # shipped image runs: the release SBOM's scope -- the two workspaces the
+      # Dockerfile's runtime `npm ci --omit=dev` installs, plus apps/web, whose
+      # runtime dependencies ship inside the pre-bundled Nitro output rather
+      # than through an install -- and the same command string CONTRIBUTING.md's
+      # Dependency Policy and docs/RELEASES.md step 4 hand a maintainer, so the
+      # local run and the gate cannot diverge. It answers
       # `found 0 vulnerabilities` against the committed lockfile, so it gates on
       # any finding at all: no `--audit-level`, because relaxing the threshold to
       # clear one accepted finding is a standing acceptance of every future
