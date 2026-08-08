@@ -114,7 +114,11 @@ const ACCEPTED = [
   ["apps/web", WEB_OUTSIDE_SRC, "@psilink/core"],
 ];
 
-describe("the cross-workspace import ban", () => {
+// Whichever apps/web case runs first builds the TypeScript program the web
+// config parses against, which outruns the default per-test timeout on a CI
+// runner. The timeout rides the whole suite rather than one case because a `-t`
+// filter decides which one pays; every case is a single lint call otherwise.
+describe("the cross-workspace import ban", { timeout: 60_000 }, () => {
   it("lints the apps/web cases against files that exist", () => {
     for (const path of [
       WEB_SRC,
