@@ -22,9 +22,21 @@ import { describe, expect, it } from "vitest";
 // The apps/web cases name files that exist, where the core and cli cases do not:
 // the web config parses with type information against apps/web/tsconfig.json,
 // which fails on a path that is in no TypeScript program.
+//
+// That type-aware parse is also what makes the single-run pin below load-bearing.
+// typescript-eslint infers a "single run" whenever CI=true -- which every CI
+// runner sets -- and in that mode the first parse of a path answers from the file
+// on DISK, not from the text handed to lintText. No apps/web file reaches into a
+// sibling workspace, so a case that lands on a path's first parse reports zero
+// problems with the ban fully intact: the refusals fail loudly and the
+// acceptances pass vacuously. "lints the text it is handed" is the check that the
+// pin holds, on paths no other case here touches so that it stays a first parse
+// whatever order the cases run in.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
+
+process.env.TSESTREE_SINGLE_RUN = "false";
 
 const eslint = new ESLint({ cwd: repoRoot });
 
@@ -49,6 +61,14 @@ const CLI_SRC = resolve(repoRoot, "apps/cli/src/boundaryFixture.ts");
 const CLI_TEST = resolve(repoRoot, "apps/cli/test/unit/boundaryFixture.ts");
 const WEB_SRC = resolve(repoRoot, "apps/web/src/utils/serverConfig.ts");
 const WEB_OUTSIDE_SRC = resolve(repoRoot, "apps/web/vite.config.ts");
+
+// Reserved for the first-parse check: one apps/web path in the TypeScript
+// program on each side of src/, linted by nothing else here.
+const WEB_SRC_FIRST_PARSE = resolve(repoRoot, "apps/web/src/utils/seo.ts");
+const WEB_OUTSIDE_SRC_FIRST_PARSE = resolve(
+  repoRoot,
+  "apps/web/nitro.config.ts",
+);
 
 // The reaches each guarded tree must refuse. The bare package names are live
 // specifiers, not hypotheticals: npm workspaces symlinks apps/cli and apps/web
@@ -96,8 +116,28 @@ const ACCEPTED = [
 
 describe("the cross-workspace import ban", () => {
   it("lints the apps/web cases against files that exist", () => {
-    for (const path of [WEB_SRC, WEB_OUTSIDE_SRC]) {
+    for (const path of [
+      WEB_SRC,
+      WEB_OUTSIDE_SRC,
+      WEB_SRC_FIRST_PARSE,
+      WEB_OUTSIDE_SRC_FIRST_PARSE,
+    ]) {
       expect(existsSync(path), `${path} no longer exists`).toBe(true);
+    }
+  });
+
+  it("lints the text it is handed, not the file on disk", async () => {
+    for (const filePath of [WEB_SRC_FIRST_PARSE, WEB_OUTSIDE_SRC_FIRST_PARSE]) {
+      const [result] = await eslint.lintText(
+        "this is not typescript !!! (((\n",
+        {
+          filePath,
+        },
+      );
+      expect(
+        result.messages.map((message) => message.message).join("; "),
+        `${filePath}: the source on disk was linted instead, so every apps/web case landing on a first parse is vacuous`,
+      ).toMatch(/Parsing error/);
     }
   });
 
