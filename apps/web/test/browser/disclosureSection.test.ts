@@ -1,6 +1,6 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 import { page } from "vitest/browser";
 
@@ -8,6 +8,7 @@ import { createElement } from "react";
 
 import { DisclosureSection } from "@components/DisclosureSection";
 
+import { restoreMatchMedia, stubReducedMotion } from "./reducedMotion";
 import { createAppMount } from "./renderApp";
 
 // The shared disclosure idiom both data-prep editors use (the inviter's rail
@@ -24,7 +25,6 @@ const PANEL_TEXT = "Attached: MOU-2025-0042";
 const COLLAPSED_SUMMARY = "None";
 
 const app = createAppMount();
-let originalMatchMedia: typeof window.matchMedia;
 
 // The panel body is a real ELEMENT, never a bare string: the collapsed-panel poll
 // below reads `firstElementChild`, so an element node is what makes it discriminating.
@@ -35,23 +35,6 @@ let originalMatchMedia: typeof window.matchMedia;
 // would pass vacuously and the regression would slip through. Keep this an element.
 const PANEL_BODY = () =>
   createElement("p", { "data-testid": "panel-body" }, PANEL_TEXT);
-
-// Simulate the OS prefers-reduced-motion signal the theme switch honors. Mantine's
-// Collapse reads it through useReducedMotion, which resolves the matchMedia match in
-// a post-mount effect (not on the first render), so the polls below wait for that
-// effect to settle the reduced-motion code path rather than assuming it is immediate.
-function setReducedMotion(prefersReduced: boolean) {
-  window.matchMedia = (query: string) => ({
-    matches: query.includes("prefers-reduced-motion") ? prefersReduced : false,
-    media: query,
-    onchange: null,
-    addEventListener: () => undefined,
-    removeEventListener: () => undefined,
-    addListener: () => undefined,
-    removeListener: () => undefined,
-    dispatchEvent: () => false,
-  });
-}
 
 function render(open: boolean) {
   app.render(
@@ -65,13 +48,9 @@ function render(open: boolean) {
   );
 }
 
-beforeEach(() => {
-  originalMatchMedia = window.matchMedia;
-});
-
 afterEach(() => {
   app.unmount();
-  window.matchMedia = originalMatchMedia;
+  restoreMatchMedia();
 });
 
 function toggle() {
@@ -80,7 +59,7 @@ function toggle() {
 
 describe("DisclosureSection: aria-controls resolves under a reduced-motion preference", () => {
   test("the collapsed toggle's aria-controls resolves to a present, hidden wrapper", async () => {
-    setReducedMotion(true);
+    stubReducedMotion(true);
     render(false);
 
     await expect.element(toggle()).toBeInTheDocument();
@@ -110,7 +89,7 @@ describe("DisclosureSection: aria-controls resolves under a reduced-motion prefe
   });
 
   test("the open toggle's aria-controls resolves to the now-visible panel", async () => {
-    setReducedMotion(true);
+    stubReducedMotion(true);
     render(true);
 
     await expect.element(toggle()).toBeInTheDocument();
@@ -128,7 +107,7 @@ describe("DisclosureSection: aria-controls resolves under a reduced-motion prefe
 
 describe("DisclosureSection: the toggle button nests only phrasing content", () => {
   test("the collapsed toggle button, summary shown, has no flow-content descendants", async () => {
-    setReducedMotion(false);
+    stubReducedMotion(false);
     app.render(
       createElement(DisclosureSection, {
         label: LABEL,
@@ -156,7 +135,7 @@ describe("DisclosureSection: the toggle button nests only phrasing content", () 
 
 describe("DisclosureSection: no regression without a reduced-motion preference", () => {
   test("the collapsed toggle's aria-controls still resolves to a present wrapper", async () => {
-    setReducedMotion(false);
+    stubReducedMotion(false);
     render(false);
 
     await expect.element(toggle()).toBeInTheDocument();

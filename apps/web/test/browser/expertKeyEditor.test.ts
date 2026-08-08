@@ -1,6 +1,6 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 import { page } from "vitest/browser";
 
@@ -12,6 +12,7 @@ import { seedAdvancedInvite } from "@psi/advancedInvite";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 
+import { restoreMatchMedia, stubReducedMotion } from "./reducedMotion";
 import { createAppMount } from "./renderApp";
 
 import type { KeyVerdict } from "@bench/inviterModel";
@@ -28,20 +29,6 @@ const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
 // invariant against the accessibility tree once respectReducedMotion is on.
 
 const app = createAppMount();
-let originalMatchMedia: typeof window.matchMedia;
-
-function setReducedMotion(prefersReduced: boolean) {
-  window.matchMedia = (query: string) => ({
-    matches: query.includes("prefers-reduced-motion") ? prefersReduced : false,
-    media: query,
-    onchange: null,
-    addEventListener: () => undefined,
-    removeEventListener: () => undefined,
-    addListener: () => undefined,
-    removeListener: () => undefined,
-    dispatchEvent: () => false,
-  });
-}
 
 function render() {
   const { draft } = seedAdvancedInvite("County Health Dept", ALL_COLUMNS);
@@ -70,18 +57,14 @@ function keyToggleIds(): Array<string> {
   ).map((el) => el.getAttribute("aria-controls")!);
 }
 
-beforeEach(() => {
-  originalMatchMedia = window.matchMedia;
-});
-
 afterEach(() => {
   app.unmount();
-  window.matchMedia = originalMatchMedia;
+  restoreMatchMedia();
 });
 
 describe("ExpertKeyEditor: per-key disclosures stay resolvable under reduced motion", () => {
   test("every collapsed key toggle's aria-controls resolves to a present, hidden wrapper", async () => {
-    setReducedMotion(true);
+    stubReducedMotion(true);
     render();
 
     // The editor renders at least one key card.

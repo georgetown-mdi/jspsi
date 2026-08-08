@@ -20,6 +20,7 @@ import {
   hostileTerms,
   hostileVariants,
 } from "@psilink/core/testing";
+import { restoreMatchMedia, stubReducedMotion } from "./reducedMotion";
 import { createAppMount } from "./renderApp";
 
 import type { ComponentProps } from "react";
@@ -539,25 +540,11 @@ describe("InvitationTerms: a key disclosure stays mounted but hidden under a red
   // Force the reduced-motion configuration -- the OS signal (matchMedia) and the
   // theme switch that honors it -- and assert each disclosure's panel is present,
   // hidden, and its aria-controls still resolves to its wrapper.
-  let originalMatchMedia: typeof window.matchMedia;
-
   beforeEach(() => {
-    originalMatchMedia = window.matchMedia;
-    window.matchMedia = (query: string) => ({
-      matches: query.includes("prefers-reduced-motion"),
-      media: query,
-      onchange: null,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      addListener: () => undefined,
-      removeListener: () => undefined,
-      dispatchEvent: () => false,
-    });
+    stubReducedMotion(true);
   });
 
-  afterEach(() => {
-    window.matchMedia = originalMatchMedia;
-  });
+  afterEach(restoreMatchMedia);
 
   test("every disclosure's aria-controls resolves to a present, hidden panel while collapsed under reduced motion", async () => {
     app.render(createElement(InvitationTerms, { linkageTerms: terms }));
