@@ -9,17 +9,32 @@ import {
 
 /**
  * Register beforeEach/afterEach hooks that snapshot core's process-wide
- * diagnostic sink and loglevel's level before each test and restore both after,
- * so a test that installs a sink or changes the level never bleeds into the next.
+ * diagnostic sink and every logger's level before each test and restore them
+ * after, so a test that installs a sink or changes the level never bleeds into
+ * the next. The per-logger snapshot covers the whole loglevel registry, not just
+ * the root level: `configureLogging` applies the level across the loggers that
+ * already exist (core's `setLogLevel`), so restoring the root alone would leave a
+ * `silent` case's level on the named loggers for the rest of the file.
  * @internal test-only
  */
 export function snapshotDiagnosticSinkAndLevel(): void {
   let originalSink: DiagnosticSink | undefined;
   let originalLevel: number;
+  let originalLoggerLevels: Array<[string | symbol, number]>;
 
   beforeEach(() => {
     originalSink = getDiagnosticSink();
     originalLevel = logLibrary.getLevel();
+    // Reflect.ownKeys, matching core's sweep: a symbol-named logger is invisible
+    // to string enumeration, so its level would never be restored.
+    const registry = logLibrary.getLoggers() as Record<
+      string | symbol,
+      logLibrary.Logger
+    >;
+    originalLoggerLevels = Reflect.ownKeys(registry).map((name) => [
+      name,
+      registry[name].getLevel(),
+    ]);
   });
 
   afterEach(() => {
@@ -27,6 +42,10 @@ export function snapshotDiagnosticSinkAndLevel(): void {
     logLibrary.setLevel(
       originalLevel as Parameters<typeof logLibrary.setLevel>[0],
     );
+    for (const [name, level] of originalLoggerLevels)
+      logLibrary
+        .getLogger(name)
+        .setLevel(level as Parameters<typeof logLibrary.setLevel>[0], false);
   });
 }
 

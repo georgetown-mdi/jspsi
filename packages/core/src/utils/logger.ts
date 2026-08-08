@@ -59,6 +59,54 @@ export const setDiagnosticSink = (sink: DiagnosticSink | undefined): void => {
 export const getDiagnosticSink = (): DiagnosticSink | undefined =>
   diagnosticSink;
 
+/**
+ * Apply `level` as the diagnostic log level for EVERY logger -- the ones that
+ * already exist as well as the ones built later. This is the level counterpart of
+ * {@link setDiagnosticSink}: an application's logging bootstrap (the CLI's
+ * `configureLogging`) resolves the operator's requested level and installs it
+ * here, so a `silent` run is silent and a `debug` run is detailed no matter when
+ * a logger was constructed.
+ *
+ * The sweep over loglevel's registry is what makes it reach backwards.
+ * `setDefaultLevel` alone governs only the root logger and the loggers built
+ * after it, so a module-scope logger materialized when its module was imported
+ * -- before any flag was parsed -- would keep loglevel's `warn` default for the
+ * whole run. Setting each existing logger's level explicitly closes that, and
+ * `setDefaultLevel` still carries the level to loggers created later. The
+ * registry is enumerated with `Reflect.ownKeys`, not `Object.values`: this
+ * module's own logger names are `string | symbol` (see
+ * {@link getLoggerForVerbosity}), and a symbol-named logger is invisible to
+ * string enumeration, which would leave it at its prior level. Each sweep
+ * assignment passes `persist: false`, so a browser consumer's level is not
+ * written to web storage behind its back.
+ *
+ * A limit of resting on `setDefaultLevel` for the root: in a browser consumer
+ * where the operator has persisted a root level, loglevel skips a persisted root,
+ * so the root keeps that level and the loggers {@link getLoggerForVerbosity}
+ * builds afterwards floor against it rather than against `level`. The registry
+ * sweep still reaches every logger that already exists. A persisted per-logger
+ * key has the same effect one level down: a logger built after the sweep whose
+ * name carries a persisted level comes up at that level rather than the swept
+ * default.
+ *
+ * Call this at bootstrap, before any per-logger level is chosen: it overwrites
+ * the level of every logger that exists, including one
+ * {@link getLoggerForVerbosity} has already floored to a `-v` verbosity. Setting
+ * a level also rebuilds that logger's methods from its own factory (loglevel
+ * installs `noop` for the disabled ones), so a reference captured to a logger's
+ * method beforehand -- a test spy, a destructured `log.warn` -- is stale
+ * afterwards; call the method off the logger instead.
+ */
+export const setLogLevel = (level: logLibrary.LogLevelNumbers): void => {
+  logLibrary.setDefaultLevel(level);
+  const registry = logLibrary.getLoggers() as Record<
+    string | symbol,
+    logLibrary.Logger
+  >;
+  for (const name of Reflect.ownKeys(registry))
+    registry[name].setLevel(level, false);
+};
+
 export const getLoggerForVerbosity = (
   name: string | symbol,
   verbosity: number,
@@ -146,5 +194,10 @@ export const setLogPrefixer = (logger: logLibrary.Logger) => {
     };
   };
 
-  logger.setLevel(logger.getLevel());
+  // A level assignment that changes no level, made for its side effect: loglevel
+  // rebuilds the logger's methods through the factory installed above. It passes
+  // `persist: false` because loglevel's default would write the level to web
+  // storage, so the first prefixed logger built after a sweep would leave the
+  // swept level in a browser consumer's storage for its next session.
+  logger.setLevel(logger.getLevel(), false);
 };

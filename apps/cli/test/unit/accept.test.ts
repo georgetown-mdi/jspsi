@@ -2377,15 +2377,14 @@ test("handler: a mistyped --flag exits 64 naming it, before decode/prompt/write"
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-unknown-"));
   const configFile = path.join(dir, "psilink.yaml");
   const keyFile = path.join(dir, ".psilink.key");
-  const errors: string[] = [];
-  const logErr = vi
-    .spyOn(getLogger("accept"), "error")
-    .mockImplementation((...a: unknown[]) => {
-      errors.push(a.map(String).join(" "));
-    });
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
+  // Read the rejection where the operator does, at a level that keeps it: the
+  // handler applies --log-level to every logger, so `silent` drops this message
+  // like any other, and a logger method spied before the run is replaced by the
+  // one the level installs.
+  const { stderrWrites, restore } = captureStdio();
   try {
     const encoded = await encodeInvitation(
       sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
@@ -2396,16 +2395,16 @@ test("handler: a mistyped --flag exits 64 naming it, before decode/prompt/write"
       args: ["--server-usernam", "u", encoded, "input.csv"],
       "config-file": configFile,
       "key-file": keyFile,
-      "log-level": "silent",
+      "log-level": "error",
       record: false,
     } as unknown as Arguments);
     expect(exit).toHaveBeenCalledWith(64);
-    expect(errors.join("\n")).toContain("--server-usernam");
+    expect(stderrWrites.join("")).toContain("--server-usernam");
     expect(promptConfirmMock).not.toHaveBeenCalled();
     expect(fs.existsSync(configFile)).toBe(false);
     expect(fs.existsSync(keyFile)).toBe(false);
   } finally {
-    logErr.mockRestore();
+    restore();
     exit.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }

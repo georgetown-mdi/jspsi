@@ -9,6 +9,7 @@ import {
   getLogger,
   sanitizeErrorForDisplay,
   setDiagnosticSink,
+  setLogLevel,
   UsageError,
 } from "@psilink/core";
 
@@ -267,10 +268,9 @@ export function exitWithError(
  * `buildDataSpec` throw plain `Error`s carrying `exitCode`, so a missing input
  * file keeps its own exit code rather than collapsing to 69.
  *
- * The error logger is created from `loggerName` lazily in the catch, so the body
- * is free to apply the configured log level (via `setDefaultLevel`) before
- * creating its own logger -- loglevel binds a logger's level at creation, so the
- * body's logger must be made after the level is set. `process.exit` is typed
+ * The error logger is created from `loggerName` lazily in the catch, so it picks
+ * up whatever sink and level the body installed rather than binding to the
+ * defaults before the command has parsed its flags. `process.exit` is typed
  * `never`, so values produced inside `body` keep their definite-assignment
  * narrowing.
  */
@@ -447,8 +447,6 @@ export function configureLogFile(logFilePath: string): LogSink {
     );
   }
 
-  // The install/restore is bracketed by installLogSink; it does not
-  // retro-redirect loggers that already exist (see the limitation above).
   return installLogSink(
     (line) => {
       try {
@@ -549,14 +547,19 @@ export interface ConfiguredLogging {
 /**
  * The one logging bootstrap every command handler shares: pick the diagnostic
  * sink ({@link configureLogFile} when `logFile` is given, else the default
- * {@link configureStderrLogging}), apply the resolved `logLevel`, and build the
- * logger named `name` -- in that order, because core's sink must be installed and
- * the level set before {@link getLogger} constructs the logger that inherits
- * them. Returns the logger, a prefix-free writer onto the same destination
+ * {@link configureStderrLogging}), apply the resolved `logLevel` across every
+ * logger (core's `setLogLevel`), and build the logger named `name`. Returns the
+ * logger, a prefix-free writer onto the same destination
  * ({@link ConfiguredLogging.writePlainLine}), and a single `close` that restores
  * the prior sink and releases any file descriptor, so a handler installs and
  * tears down its logging through one call rather than repeating the
  * sink/level/getLogger/close sequence.
+ *
+ * Neither the sink nor the level depends on this running before a logger is
+ * built: core resolves the sink per log call, and `setLogLevel` sweeps the
+ * loggers that already exist as well as setting the default for later ones. That
+ * is what carries `--log-level` to the two loggers constructed at import time
+ * (`file-utils`, `cleaning`), which a command's own bootstrap can never precede.
  *
  * `logLevel` and `logFile` are resolved by the caller -- through
  * {@link LOG_LEVELS} inline, or `parseCommonBootstrapArgs` -- so this helper does
@@ -576,7 +579,7 @@ export function configureLogging(params: {
     logFile !== undefined
       ? configureLogFile(logFile)
       : configureStderrLogging();
-  logLibrary.setDefaultLevel(logLevel);
+  setLogLevel(logLevel);
   const log = getLogger(name);
   return {
     log,

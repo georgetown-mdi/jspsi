@@ -22,6 +22,7 @@ export {
 export {
   getLogger,
   getLoggerForVerbosity,
+  setLogLevel,
   setLogPrefixer,
   setDiagnosticSink,
   getDiagnosticSink,

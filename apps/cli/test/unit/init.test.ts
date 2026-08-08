@@ -27,6 +27,7 @@ import {
   resolveInitInput,
 } from "../../src/commands/init";
 import { buildDataSpec, loadInputRows } from "../../src/onlineBootstrap";
+import { captureStdio } from "../loggingTestSupport";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
 // promptConfirm is mocked so the handler's interactive overwrite branch is
@@ -341,8 +342,17 @@ test("decideOverwrite: an existing path with no interactive prompt fails closed 
 
 // --- handler -----------------------------------------------------------------
 
+// The handler applies its --log-level to every logger, so a run leaves the
+// command's diagnostics on stderr unless it is asked for silence; default to
+// silence here to keep the suite's output clean, and let a case that reads the
+// command's own message override the level and capture stderr.
 function argvFor(overrides: Record<string, unknown>): Arguments {
-  return { _: [], $0: "psilink", ...overrides } as unknown as Arguments;
+  return {
+    _: [],
+    $0: "psilink",
+    "log-level": "silent",
+    ...overrides,
+  } as unknown as Arguments;
 }
 
 test("handler: writes a parseable template and no key file, then exits 0", async () => {
@@ -410,29 +420,27 @@ test("handler: a file appearing after the check fails closed (exit 64)", async (
   writeFileOwnerOnlyMock.mockImplementationOnce(() => {
     throw new FileExistsError(configFile);
   });
-  const logErr = vi
-    .spyOn(getLogger("init"), "error")
-    .mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
+  // Read the message where the operator does: the handler's level reaches every
+  // logger, so a logger method spied before the run is replaced by the one the
+  // level installs.
+  const { stderrWrites, restore } = captureStdio();
 
-  await initHandler(argvFor({ "config-file": configFile }));
-
-  expect(exit).toHaveBeenCalledWith(64);
-  expect(logErr).toHaveBeenCalledWith(
-    expect.stringContaining("after the overwrite check"),
+  await initHandler(
+    argvFor({ "config-file": configFile, "log-level": "error" }),
   );
-  logErr.mockRestore();
+
+  restore();
+  expect(exit).toHaveBeenCalledWith(64);
+  expect(stderrWrites.join("")).toContain("after the overwrite check");
 });
 
 test("handler: an existing file with no terminal fails closed (exit 64), unchanged", async () => {
   const dir = scratchDir();
   const configFile = path.join(dir, "psilink.yaml");
   fs.writeFileSync(configFile, "old contents\n");
-  const logErr = vi
-    .spyOn(getLogger("init"), "error")
-    .mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
@@ -442,7 +450,6 @@ test("handler: an existing file with no terminal fails closed (exit 64), unchang
 
   expect(exit).toHaveBeenCalledWith(64);
   expect(fs.readFileSync(configFile, "utf8")).toBe("old contents\n");
-  logErr.mockRestore();
 });
 
 test("handler: declining the interactive overwrite leaves the file untouched", async () => {
@@ -485,9 +492,6 @@ test("handler: confirming the interactive overwrite replaces the file", async ()
 test("handler: a malformed input file exits 64", async () => {
   const dir = scratchDir();
   const configFile = path.join(dir, "psilink.yaml");
-  const logErr = vi
-    .spyOn(getLogger("init"), "error")
-    .mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
@@ -501,14 +505,10 @@ test("handler: a malformed input file exits 64", async () => {
 
   expect(exit).toHaveBeenCalledWith(64);
   expect(fs.existsSync(configFile)).toBe(false);
-  logErr.mockRestore();
 });
 
 test("handler: an unrecognized --log-level exits 64", async () => {
   const dir = scratchDir();
-  const logErr = vi
-    .spyOn(getLogger("init"), "error")
-    .mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
@@ -521,7 +521,6 @@ test("handler: an unrecognized --log-level exits 64", async () => {
   );
 
   expect(exit).toHaveBeenCalledWith(64);
-  logErr.mockRestore();
 });
 
 test("handler: a mistyped --flag exits 64 naming it, writing no config", async () => {
@@ -530,25 +529,24 @@ test("handler: a mistyped --flag exits 64 naming it, writing no config", async (
   // an input path.
   const dir = scratchDir();
   const configFile = path.join(dir, "psilink.yaml");
-  const errors: string[] = [];
-  const logErr = vi
-    .spyOn(getLogger("init"), "error")
-    .mockImplementation((...a: unknown[]) => {
-      errors.push(a.map(String).join(" "));
-    });
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
+  const { stderrWrites, restore } = captureStdio();
 
   await initHandler(
-    argvFor({ "config-file": configFile, args: ["--identit", "x"] }),
+    argvFor({
+      "config-file": configFile,
+      "log-level": "error",
+      args: ["--identit", "x"],
+    }),
   );
 
+  restore();
   expect(exit).toHaveBeenCalledWith(64);
-  expect(errors.join("\n")).toContain("--identit");
+  expect(stderrWrites.join("")).toContain("--identit");
   expect(fs.existsSync(configFile)).toBe(false);
   expect(writeFileOwnerOnlyMock).not.toHaveBeenCalled();
-  logErr.mockRestore();
 });
 
 test("handler: a `-`-leading input positional is not treated as an option", async () => {
@@ -557,24 +555,23 @@ test("handler: a `-`-leading input positional is not treated as an option", asyn
   // (exit 64) -- not the unknown-option path, and never a silently-dropped flag.
   const dir = scratchDir();
   const configFile = path.join(dir, "psilink.yaml");
-  const errors: string[] = [];
-  const logErr = vi
-    .spyOn(getLogger("init"), "error")
-    .mockImplementation((...a: unknown[]) => {
-      errors.push(a.map(String).join(" "));
-    });
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
+  const { stderrWrites, restore } = captureStdio();
 
   await initHandler(
-    argvFor({ "config-file": configFile, args: ["-not-a-flag.csv"] }),
+    argvFor({
+      "config-file": configFile,
+      "log-level": "error",
+      args: ["-not-a-flag.csv"],
+    }),
   );
 
+  restore();
   expect(exit).toHaveBeenCalledWith(64);
-  expect(errors.join("\n")).not.toContain("Unknown argument");
-  expect(errors.join("\n")).toContain("-not-a-flag.csv");
-  logErr.mockRestore();
+  expect(stderrWrites.join("")).not.toContain("Unknown argument");
+  expect(stderrWrites.join("")).toContain("-not-a-flag.csv");
 });
 
 // --- helpers -----------------------------------------------------------------
