@@ -20,6 +20,10 @@
 // spread into it can carry a `model` of its own and settle the tier at run time,
 // so the spread is itself a violation whether or not a literal sits beside it.
 //
+// The block reader and the lexer below are the shared half:
+// check-workflow-args-resolve.mjs imports them to scan the same two script
+// shapes for its own rule.
+//
 // The scan lexes a block rather than pattern-matching it: strings, template
 // literals, regex literals, and comments are read as tokens, so a `model: 'opus'`
 // sitting in a prompt template or a comment is not a pin, and a parenthesis inside
@@ -213,7 +217,7 @@ function readRegex(code, start) {
  * templateMiddle / templateEnd around the tokens of each substitution, so braces
  * and parentheses inside template TEXT never reach the structural scan.
  */
-function tokenize(code) {
+export function tokenize(code) {
   const tokens = [];
   const braces = [];
   let i = 0;
@@ -301,7 +305,9 @@ function tokenize(code) {
   return tokens;
 }
 
-const isPunct = (token, text) => token?.kind === "punct" && token.text === text;
+/** Whether a token is the given punctuator. */
+export const isPunct = (token, text) =>
+  token?.kind === "punct" && token.text === text;
 
 // Index of the `)` balancing the `(` at openIndex, or -1 when the call never
 // closes (a truncated block).
@@ -383,7 +389,8 @@ function optionsPins(tokens, openIndex, closeIndex) {
   return { models, spread };
 }
 
-const lineOf = (code, index) => code.slice(0, index).split("\n").length;
+/** The 1-based line a character index falls on. */
+export const lineOf = (code, index) => code.slice(0, index).split("\n").length;
 
 function summarize(text) {
   const firstLine = text.split("\n")[0].trim();

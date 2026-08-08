@@ -51,6 +51,35 @@ describe("panel command wiring", () => {
   });
 });
 
+// Every delivery that is not an object of named arguments, and so resolves no
+// field the panel needs. Tolerating one convenes the panel on the literal text
+// "undefined" rather than stopping.
+const UNRESOLVABLE = [[], 42, "text", true, null, undefined];
+
+describe.each(SHAPES)("panel argument shape ($shape args)", ({ deliver }) => {
+  const run = runner(deliver);
+
+  it("refuses a delivery that is not an object of named arguments", async () => {
+    for (const delivered of UNRESOLVABLE) {
+      await expect(
+        run(delivered, () => {
+          throw new Error("must not spawn");
+        }),
+        JSON.stringify(delivered),
+      ).rejects.toThrow(
+        /expected an object of named arguments, or the JSON text of one/,
+      );
+    }
+  });
+
+  it("resolves an object of named arguments and convenes the panel", async () => {
+    const verdicts = await run({ question: QUESTION, docs: [] }, () =>
+      answer("fail closed"),
+    );
+    expect(verdicts).toHaveLength(3);
+  });
+});
+
 describe.each(SHAPES)("panel ($shape args)", ({ deliver }) => {
   const run = runner(deliver);
 

@@ -20,6 +20,7 @@
     "check:enforcement-claims": "node scripts/check-enforcement-claims.mjs",
     "check:egress-claims": "node scripts/check-egress-claims.mjs",
     "check:workflow-agent-models": "node scripts/check-workflow-agent-models.mjs",
+    "check:workflow-args-resolve": "node scripts/check-workflow-args-resolve.mjs",
     "check:action-pin-drift": "node scripts/check-action-pin-drift.mjs",
     "check:dependabot-ignore-shape": "node scripts/check-dependabot-ignore-shape.mjs",
     "check:brace-expansion-override": "node scripts/check-brace-expansion-override.mjs",

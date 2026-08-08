@@ -34,8 +34,43 @@ const SCHEMA = {
 };
 
 // The harness may hand a script its arguments as JSON text rather than as the
-// object the caller passed.
-const input = typeof args === "string" ? JSON.parse(args) : args;
+// object the caller passed. Any other delivery -- an array, a bare scalar, null,
+// nothing at all -- carries no named field, and reading one off it yields
+// undefined rather than failing, so the round would reach its agents with holes
+// where the caller's arguments belong. Resolving fails closed on it instead, and
+// `npm run check:workflow-args-resolve` holds every read of `args` in a
+// committed Workflow script to the one call below.
+function resolveWorkflowArgs(delivered) {
+  const expected = "an object of named arguments, or the JSON text of one";
+  let resolved = delivered;
+  if (typeof delivered === "string") {
+    try {
+      resolved = JSON.parse(delivered);
+    } catch (cause) {
+      throw new Error(`args is text that is not JSON; expected ${expected}.`, {
+        cause,
+      });
+    }
+  }
+  if (
+    resolved === null ||
+    typeof resolved !== "object" ||
+    Array.isArray(resolved)
+  ) {
+    const got =
+      resolved === null
+        ? "null"
+        : Array.isArray(resolved)
+          ? "an array"
+          : resolved === undefined
+            ? "nothing"
+            : `a ${typeof resolved}`;
+    throw new Error(`args resolved to ${got}; expected ${expected}.`);
+  }
+  return resolved;
+}
+
+const input = resolveWorkflowArgs(args);
 
 const docsClause =
   input.docs && input.docs.length
