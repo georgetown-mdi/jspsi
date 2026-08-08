@@ -363,9 +363,6 @@ export interface CommonBootstrapOptions {
 export function parseCommonBootstrapArgs(
   argv: Arguments,
 ): CommonBootstrapOptions {
-  // An unrecognized value raises a UsageError that propagates out of this parse
-  // function for the caller to map to an exit; a parse function must not exit the
-  // process itself.
   const logLevel = logLevelFlag(argv);
 
   // Each single-value (string/number) option is read through singleValue so a
