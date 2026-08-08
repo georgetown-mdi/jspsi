@@ -152,6 +152,8 @@ const OUTCOME_UNCERTAIN =
  * at or before the persist provably precedes any data leaving this party:
  *
  * - `"input"` -- the pre-connection input guard, before any connection.
+ * - `"consent"` -- a send-side disclosure gate refusing inside the pre-connection
+ *   prepare, likewise before any connection.
  * - `"auth"` -- a `security`-kind failure the classifier stamps ONLY before the data
  *   exchange begins ({@link ../psi/managedRun.ts}, `rerunFailureLastRun` reads the
  *   phase boundary), so an `"auth"` kind provably predates any payload -- a
@@ -171,6 +173,7 @@ function disclosurePrecedesExchange(
 ): boolean {
   return (
     failureKind === "input" ||
+    failureKind === "consent" ||
     failureKind === "auth" ||
     failureKind === "storage"
   );
@@ -179,11 +182,12 @@ function disclosurePrecedesExchange(
 /**
  * The disclosure line for a non-succeeded run, mapped conservatively from the run's
  * outcome and `failureKind`. A run that never completed a handshake (`"missed"`,
- * `"desynced"`) or failed at or before the rotation persist (`"input"`, `"auth"`,
- * `"storage"`) provably disclosed nothing -- no payload had left this party. A run
- * that failed after the handshake (`"transport"`, `"cancelled"`, or an unrecorded
- * kind) may have failed mid-data-exchange, so the line asserts neither way and points
- * at the record file offered at run completion as the authoritative account.
+ * `"desynced"`) or failed at or before the rotation persist (`"input"`, `"consent"`,
+ * `"auth"`, `"storage"`) provably disclosed nothing -- no payload had left this
+ * party. A run that failed after the handshake (`"transport"`, `"cancelled"`, or an
+ * unrecorded kind) may have failed mid-data-exchange, so the line asserts neither way
+ * and points at the record file offered at run completion as the authoritative
+ * account.
  */
 function nonSucceededDisclosure(lastRun: ManagedExchangeLastRun): string {
   // A no-show and a rotation-desync both mean no handshake completed, so no data was

@@ -132,6 +132,11 @@ describe("runHistoryEntries renders around the most recent run", () => {
     },
     {
       outcome: "failed" as const,
+      failureKind: "consent" as const,
+      label: "Failed",
+    },
+    {
+      outcome: "failed" as const,
       failureKind: "auth" as const,
       label: "Failed",
     },

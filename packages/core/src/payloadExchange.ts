@@ -18,7 +18,7 @@ import {
   receiveParsed,
 } from "./connection/messageConnection.js";
 import { singleIssueArray } from "./utils/singleIssueArray.js";
-import { UsageError } from "./errors.js";
+import { OutboundDisclosureRefusalError, UsageError } from "./errors.js";
 
 /** The payload received from the exchange partner after PSI linkage. */
 export interface PartnerPayload {
@@ -360,11 +360,12 @@ export function assertPayloadSendDisclosed(
  * The names are this party's own (metadata- and config-derived) and, like the
  * sibling send-side guard's, are interpolated raw into the error.
  *
- * @throws {UsageError} when a present `committed` set is not exactly the columns
- *   this party's metadata currently discloses. A {@link UsageError} so the CLI
- *   classifies it as a local configuration error (exit 64) -- self-attributed and
- *   pre-connection -- distinct from {@link reconcileReceivedPayload}'s
- *   partner-attributed protocol abort (exit 69).
+ * @throws {OutboundDisclosureRefusalError} when a present `committed` set is not
+ *   exactly the columns this party's metadata currently discloses. A
+ *   {@link UsageError} subclass, so the CLI classifies it as a local configuration
+ *   error (exit 64) -- self-attributed and pre-connection -- distinct from
+ *   {@link reconcileReceivedPayload}'s partner-attributed protocol abort (exit 69),
+ *   and a caller that bookkeeps failures tells this refusal from a transport fault.
  */
 export function assertDisclosureMatchesCommitment(
   committed: string[] | undefined,
@@ -407,7 +408,7 @@ export function assertDisclosureMatchesCommitment(
         `expects [${shown}].`,
     );
   }
-  throw new UsageError(
+  throw new OutboundDisclosureRefusalError(
     `this party can no longer honor the payload disclosure it committed to when ` +
       `this exchange was established: it ${problems.join(" and ")}. The partner ` +
       `locked in the committed columns, so proceeding would make its exchange ` +
@@ -562,19 +563,20 @@ export function assessOutboundPayloadConsent(
  * rendered. The remedies name no command, since both a CLI run and a browser
  * acceptance reach this; the surface that catches it supplies its own invocation.
  *
- * A {@link UsageError} so the CLI classifies it as a local configuration error
- * (exit 64) -- self-attributed and pre-connection -- rather than a transport
- * failure (69).
+ * An {@link OutboundDisclosureRefusalError}, so the CLI's `instanceof UsageError`
+ * check classifies it as a local configuration error (exit 64) -- self-attributed
+ * and pre-connection -- rather than a transport failure (69), and a caller that
+ * bookkeeps failures tells this refusal from a transport fault.
  */
 export function outboundPayloadConsentRefusal(
   verdict: OutboundPayloadConsentConfirmationRequired,
-): UsageError {
+): OutboundDisclosureRefusalError {
   const shown =
     verdict.columns.length === 0
       ? "no columns"
       : `[${verdict.columns.join(", ")}]`;
   if (verdict.reason === "unconfirmed")
-    return new UsageError(
+    return new OutboundDisclosureRefusalError(
       `this exchange has not confirmed which of its own columns it sends to the ` +
         `partner for matched records, and would send ${shown}. Accepting an ` +
         `invitation settles what you RECEIVE; what you SEND comes from your own ` +
@@ -596,7 +598,7 @@ export function outboundPayloadConsentRefusal(
       `it would no longer send ${verdict.removed.length > 1 ? "columns" : "a column"} ` +
         `you did confirm ([${verdict.removed.join(", ")}])`,
     );
-  return new UsageError(
+  return new OutboundDisclosureRefusalError(
     `the columns this exchange sends to the partner for matched records are not ` +
       `the ones you confirmed for it: ${changes.join(" and ")}. Your input file ` +
       `decides the set, so a changed file changes your disclosure -- and the ` +
@@ -618,8 +620,8 @@ export function outboundPayloadConsentRefusal(
  * flow -- refuses here rather than transmitting a set neither party chose. It is a
  * no-op for every party with no consent record on file, which is every non-acceptor.
  *
- * @throws {UsageError} when a recorded consent does not cover the set this run
- *   would transmit. See {@link outboundPayloadConsentRefusal}.
+ * @throws {OutboundDisclosureRefusalError} when a recorded consent does not cover
+ *   the set this run would transmit. See {@link outboundPayloadConsentRefusal}.
  */
 export function assertOutboundPayloadConsented(
   consent: OutboundPayloadConsent | undefined,

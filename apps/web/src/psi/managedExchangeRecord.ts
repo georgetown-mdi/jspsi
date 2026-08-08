@@ -100,12 +100,13 @@ export interface ManagedExchangeSchedule {
 export type ManagedExchangeRunOutcome =
   "succeeded" | "failed" | "desynced" | "missed";
 
-/** For a non-succeeded outcome, the kind of failure. Closed enum: a benign
- * pre-run `"input"` problem (a missing file or a rejected column shape) is
- * detected before any connection and never routed through desync/attack
- * framing. */
+/** For a non-succeeded outcome, the kind of failure. Closed enum: the two benign
+ * pre-run problems -- an `"input"` problem (a missing file or a rejected column
+ * shape) and a `"consent"` refusal (this run's outbound disclosure is not the set
+ * this exchange recorded agreeing to send) -- are detected before any connection
+ * and never routed through desync/attack framing. */
 export type ManagedExchangeFailureKind =
-  "auth" | "transport" | "storage" | "input" | "cancelled";
+  "auth" | "transport" | "storage" | "input" | "consent" | "cancelled";
 
 /** Run bookkeeping the backup state and the desync UX read. Every field is a
  * timestamp or a closed enum -- deliberately no free-text field, so the record
@@ -189,7 +190,7 @@ export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
   at: z.iso.datetime(),
   outcome: z.enum(["succeeded", "failed", "desynced", "missed"]),
   failureKind: z
-    .enum(["auth", "transport", "storage", "input", "cancelled"])
+    .enum(["auth", "transport", "storage", "input", "consent", "cancelled"])
     .optional(),
 });
 

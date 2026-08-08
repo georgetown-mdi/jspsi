@@ -323,6 +323,12 @@ already defines:
   can succeed until the operator re-points the handle or drops a conforming
   file, so it is actionable at its moment (see [The input file each
   run](#the-input-file-each-run)).
+- **This needs you: what this run would send is not what was agreed.** A
+  pre-connection disclosure refusal on an unattended run -- the input file this
+  period discloses a different set of columns than the exchange recorded agreeing
+  to send -- likewise blocks every later window, and for the same reason is never
+  offered as retryable (see [What the setup consent carries across
+  runs](#what-the-setup-consent-carries-across-runs)).
 - **This needs you: a run failed with no benign explanation.** A handshake that
   ran and failed closed with no recorded benign cause (the Tier-2 case; see
   [Telling a desync from an attack](#telling-a-desync-from-an-attack)) is the
@@ -737,6 +743,25 @@ or changing a cadence is not in that class (a schedule is neither a term nor a
 credential), and neither are this party's own local acts: pausing, deleting,
 migrating the exchange to another device, or dropping the next extract at the
 agreed path.
+
+What the standing input file discloses is the one part of that agreement a
+later period can move without anyone re-authoring anything: the set a run sends
+is resolved from the file's own columns, so a refreshed extract with a changed
+shape would send a set nobody agreed to. Two pre-connection gates hold it --
+the set this party committed to send when the exchange was established, and the
+set it confirmed for itself -- and a run whose resolved disclosure is not that
+set is **refused before connecting**, in either direction: sending less than
+was agreed is a mismatch no less than sending more.
+
+That refusal is its own benign state, recorded as such in the run bookkeeping
+(see [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)) and never
+routed through the desync/attack framing -- nothing connected, and nothing left
+the device. It is also the one benign failure a surface must **not** present as
+retryable: unlike a transport drop, a later attempt on the same file settles the
+same disclosure, so the remedy is the operator's -- run the exchange with the
+file whose columns were agreed, or set the exchange up again to settle a new
+disclosure with the partner. Presenting it as a connection blip with retry copy
+would leave a scheduled exchange failing every window with no step named.
 
 A re-invite reopens **the secret, not the agreement**. On the inviter's side
 nothing is re-authored: the fresh invitation is composed from the stored

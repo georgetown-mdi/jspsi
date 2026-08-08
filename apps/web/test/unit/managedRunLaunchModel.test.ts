@@ -149,6 +149,22 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
     expect(failure.recovery).toBe("retry");
     expect(failure.message).not.toMatch(/attack|tamper|desync/i);
   });
+
+  test("a recorded consent refusal is its own benign state naming what it sends", () => {
+    const failure = classifyManagedRunFailure(
+      new Error("refused before connecting"),
+      record({ lastRun: failed("consent") }),
+      undefined,
+      NOW,
+    );
+    expect(failure.kind).toBe("consent");
+    expect(failure.recovery).toBe("reconfirm");
+    // The copy names settling what this exchange sends, not retrying a connection,
+    // and never reads as attack framing.
+    expect(failure.message).toMatch(/sends|send/i);
+    expect(failure.message).toMatch(/not a connection problem/i);
+    expect(failure.message).not.toMatch(/attack|tamper|desync|impersonat/i);
+  });
 });
 
 describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", () => {
@@ -159,6 +175,16 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
       NOW,
     );
     expect(failure?.kind).toBe("unexplained");
+  });
+
+  test("a stored consent refusal surfaces the consent tier at the next visit", () => {
+    const failure = managedRunFailureFromRecord(
+      record({ lastRun: failed("consent") }),
+      undefined,
+      NOW,
+    );
+    expect(failure?.kind).toBe("consent");
+    expect(failure?.recovery).toBe("reconfirm");
   });
 
   test("a stored storage failure surfaces the storage tier at the next visit", () => {
@@ -240,6 +266,19 @@ describe("managedRunRetryable and managedRunReinvites", () => {
         ),
       ),
     ).toBe(false);
+  });
+
+  test("a consent refusal is neither retryable in place nor a direct re-invite", () => {
+    // The remedy is settling what this exchange sends; retrying the same input
+    // refuses identically, and re-minting the secret does not touch the disclosure.
+    const failure = classifyManagedRunFailure(
+      new Error("refused before connecting"),
+      record({ lastRun: failed("consent") }),
+      undefined,
+      NOW,
+    );
+    expect(managedRunRetryable(failure)).toBe(false);
+    expect(managedRunReinvites(failure)).toBe(false);
   });
 
   test("the storage and imported tiers re-invite; the unexplained tier does not (it gates first)", () => {

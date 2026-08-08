@@ -27,7 +27,7 @@
  *   module only supplies the phases it gates.
  */
 
-import { ConnectionError } from "@psilink/core";
+import { ConnectionError, OutboundDisclosureRefusalError } from "@psilink/core";
 
 import {
   ManagedExchangeExpiredError,
@@ -168,8 +168,9 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
 
   // Whether the data exchange began before the failure -- captured at the phase
   // boundary runManagedExchange marks, consumed by the classification below so a
-  // security-kind error is "auth" only pre-data-exchange and "transport" once
-  // payload flow could have started.
+  // tier that claims nothing was disclosed (a security-kind error's "auth", a
+  // disclosure refusal's "consent") is stamped only pre-data-exchange, and a
+  // failure once payload flow could have started records "transport".
   let dataExchangeStarted = false;
 
   // The input guard, the single-writer lock, the persist-before-success rotation,
@@ -201,7 +202,8 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
     // best-effort (the benign `input` rejection and the `storage` persist
     // failure); a pre-run expiry and a lock already held stay deliberately
     // unrecorded (no run began, and the record's own `expires` already carries a
-    // lapse). Everything else -- the handshake, transport, and cancelled failures
+    // lapse). Everything else -- the consent refusal the pre-connection prepare
+    // raises, and the handshake, transport, and cancelled failures
     // runManagedExchange documents as the runner's to classify and record -- is
     // stamped here.
     const lastRun = rerunFailureLastRun(
@@ -260,17 +262,25 @@ export function remapLapsedRunFailure(
  *   {@link ManagedExchangeLockUnavailableError}: deliberately unrecorded -- no
  *   run began, and a lapse is already carried by the record's own `expires`.
  *
- * Everything else is this run's to stamp: a cancelled run (`aborted`, checked
- * first so a teardown-provoked error on a cancelled run is not misread) records
- * `"cancelled"`; a `security`-kind {@link ConnectionError} records `"auth"` only
- * when it fired BEFORE the data exchange began (`!dataExchangeStarted`) -- the
- * authenticated handshake failing closed, which provably precedes any payload. A
- * security-kind error once payload flow could have started (core's
- * `EncryptedMessageConnection` raising on a tampered frame mid-exchange) is not
- * that pre-disclosure failure, so it records `"transport"` (the neither-way
- * disclosure bucket), as does any other failure. The outcome is always
- * `"failed"` -- `"desynced"` is the later desync-tiering item's call, not this
- * classifier's.
+ * Everything else is this run's to stamp. A core
+ * {@link OutboundDisclosureRefusalError} -- one of the two send-side disclosure
+ * gates refusing inside the pre-connection prepare -- records `"consent"` when it
+ * fired BEFORE the data exchange began (`!dataExchangeStarted`), and is read
+ * BEFORE the abort probe: unlike a teardown-provoked error it is a deterministic
+ * local state that refuses identically on the next run, so attributing it to the
+ * operator's cancellation would drop the only remedy the record can name. A
+ * cancelled run (`aborted`) then records `"cancelled"`, so a teardown-provoked
+ * error on a cancelled run is not misread. A `security`-kind
+ * {@link ConnectionError} likewise records `"auth"` only when it fired before the
+ * data exchange began -- the authenticated handshake failing closed, which provably
+ * precedes any payload. Both guards carry the same weight: `"consent"` and `"auth"`
+ * are the two tiers whose copy tells the operator nothing left this device, so
+ * neither is stamped on a failure the phase boundary says could have followed
+ * payload flow. A refusal or security-kind error once payload flow could have
+ * started (core's `EncryptedMessageConnection` raising on a tampered frame
+ * mid-exchange) records `"transport"` (the neither-way disclosure bucket), as does
+ * any other failure. The outcome is always `"failed"` -- `"desynced"` is the later
+ * desync-tiering item's call, not this classifier's.
  */
 export function rerunFailureLastRun(
   error: unknown,
@@ -285,6 +295,8 @@ export function rerunFailureLastRun(
     error instanceof RotationPersistError
   )
     return undefined;
+  if (error instanceof OutboundDisclosureRefusalError && !dataExchangeStarted)
+    return failedRun(at, "failed", "consent");
   if (aborted) return failedRun(at, "failed", "cancelled");
   if (
     error instanceof ConnectionError &&
