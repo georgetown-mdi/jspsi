@@ -131,7 +131,7 @@ The runtime measurements agree with the tables, which is a useful cross-check th
 ### A Table 13 row that does not say what it appears to say
 
 Certificate 4985's Table 13 (Non-Approved Services) carries a **Key Derivation** row, "Derive keys (key derivation key passed in by the calling process)", over `X942KDF-CONCAT`, `X963KDF`, `HKDF` and `OneStep KDF`. Read on its own it says that HKDF with a caller-supplied key is a non-approved service -- which would put PSI-Link's whole key schedule, and the collapsed `deriveBits` call that
-[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) lands on `KDA HKDF SP800-56Cr2`, outside the approved set. It does not say that, and the reading is worth landing here because it will otherwise be met cold by whoever reads the certificate next.
+[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) lands on an approved `KDA HKDF` row, outside the approved set. It does not say that, and the reading is worth landing here because it will otherwise be met cold by whoever reads the certificate next.
 
 **Table 13 is the service view of Table 8, and each row carries Table 8's qualification with it.** The correspondence was checked entry for entry: every algorithm named across Table 13's eight rows appears in Table 8 (Non-Approved, Not Allowed Algorithms), and Table 8 names none that Table 13 omits. So the Key Derivation row's four algorithms each arrive with the condition Table 8 states for them, and none of those conditions is "when the caller supplies the key":
 

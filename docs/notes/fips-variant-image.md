@@ -151,11 +151,21 @@ version this image pins -- at overall Security Level 1 against
 FIPS 140-3. The document names 140-3 throughout and 140-2 nowhere. The
 certificate is Active with a 2030-05-25 sunset.
 
-The limit on that reading: it rests on the security policy document alone. The
-CMVP certificate page was not reachable to cross-check it, so a second source has
-not been consulted. The policy is the authoritative document for a validation and
-is unambiguous here, but a published claim naming the revision is resting on one
-reading rather than two.
+That reading rests on two sources. The CMVP certificate page for 5021 agrees
+with the policy on every field it renders: `Standard: FIPS 140-3`,
+`Overall Level 1`, `Status: Active`, `Sunset Date: 5/25/2030`, vendor Amazon Web
+Services, Inc., and an initial validation on 5/26/2025 by atsec. The status and
+the sunset date are the two the page alone carries -- the policy PDF states
+neither -- so the sentence above naming them is the certificate page's, not the
+policy's.
+
+The limit is narrower than the reading, and worth stating exactly. The page
+renders no module-version field, no tested-configuration section and no
+approved-algorithm section, so the module version string, the operational
+environments and the algorithm tables are corroborated by nothing beyond the
+policy. Those are in
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests),
+single-sourced and marked as such.
 
 ## The three tiers a claim has to distinguish
 
@@ -203,19 +213,25 @@ validated module is nobody's certified business but this project's.
 ## What does not work in the FIPS image
 
 Publishing this list is normal practice rather than an admission; Red Hat,
-GitLab, Elastic, Splunk, HashiCorp and Chainguard all publish one. Everything
-here was measured in the image rather than reasoned about.
+GitLab, Elastic, Splunk, HashiCorp and Chainguard all publish one. Every entry
+rests on a measurement in the image rather than on reasoning about one. Where
+what an operator sees also depends on psilink's own handling of a measured
+absence, the entry separates the two.
 
 - **SFTP against a server that offers only `curve25519` key exchange.**
-  Permanent, with no client-side fix. The certified module carries no X25519, so
-  `crypto.generateKeyPairSync('x25519')` throws; `ssh2` builds its key-exchange
-  list statically at module load with no runtime capability probe, so it still
-  advertises both curve25519 entries, the server prefers one, and the handshake
-  dies in `KEXECDH_INIT` with
-  `error:0308010C:digital envelope routines::unsupported`. Both ends had
-  `ecdh-sha2-nistp256` on the table and it was simply not reached. Where the
-  server does offer an alternative the fix is configuration psilink already
-  accepts, and a full authenticated exchange over SFTP completes with it:
+  Permanent, with no client-side fix. The measured part is the primitive: the
+  certified module carries no X25519, so `crypto.generateKeyPairSync('x25519')`
+  throws in this image. What that produces at the handshake is psilink's own
+  behaviour rather than a second measurement taken here -- it withholds from its
+  offer every key exchange built on a primitive the running process cannot
+  perform, so a server with nothing else to offer is refused cleanly at
+  negotiation, with an error naming the missing primitive and pointing at the
+  server's administrator or at a different host, instead of winning the
+  negotiation and then dying mid-handshake on a raw OpenSSL string
+  ([EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#key-exchange-algorithms-and-the-hosts-crypto-provider)).
+  Where the server does offer an alternative the fix is configuration psilink
+  already accepts, and a full authenticated exchange over SFTP completes with
+  it:
 
       connection:
         provider_options:
@@ -330,6 +346,63 @@ provider that agreed a key while exporting or admitting a different encoding of
 the same point would break the handshake as completely as one that refused the
 curve.
 
+### Three conditions the certificate attaches to those five
+
+All five call shapes are on certificate 5021's approved-algorithm table, at the
+parameters psilink uses; the rows and the CAVP certificate ids are in
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests).
+Table membership is not the whole answer for three of them, because the policy
+states a condition on each somewhere other than that table. None of the three is
+settled by a measurement, and none is settled here. They are recorded because a
+claim written from Table 5 alone would not carry them.
+
+**AES-GCM with an externally supplied IV is a non-approved service.** Table 7
+(Non-Approved, Not Allowed Algorithms) lists `AES GCM (external IV)` for
+authenticated encryption, and section 2.7.1 (p. 22) says how the module tells
+the two services apart: it "provides a non-approved AES GCM encryption service
+which accepts arbitrary external IVs from the operator", requested "by invoking
+the `EVP_EncryptInit_ex2` API function with a non-NULL iv value", and "the API
+will set a non-approved service indicator". WebCrypto exposes no internal-IV
+mode -- `AesGcmParams.iv` is a required member -- so every `crypto.subtle`
+AES-GCM call supplies an IV by construction, on any platform, and psilink's is a
+deterministic sequence-number counter rather than a random value. Which of the
+two services the AEAD lands on is therefore not decided by table membership. It
+is decided by the indicator the module sets, which means driving the module and
+reading it back. The approved routes the policy names are the internal-IV
+service (Scenario 2 of FIPS 140-3 IG C.H) and the TLS 1.2 and TLS 1.3 scenarios;
+psilink is on none of them as written.
+
+**The SP 800-56Ar3 assurances are conditioned on a TLS application.** Section
+2.7.4 (p. 23) opens: "To comply with the assurances found in Section 5.6.2 of SP
+800-56Ar3, the operator must use the module together with an application that
+implements the TLS protocol." psilink is not one -- its P-256 ECDH runs inside a
+Noise NNpsk0 handshake over psilink's own transport. The section's two remaining
+sentences are the ones psilink meets: the ephemeral key pairs are generated
+through `crypto.subtle` into the same module rather than imported from outside
+it, which is the probe's ECDH leg as much as the handshake's, and the peer
+public key is validated inside the module either way. So the
+`KAS-ECC-SSC Sp800-56Ar3` security function is available to name; the section
+5.6.2 assurances are not, on this certificate's own terms. Whether
+that sentence bounds the algorithm's approved status or only the assurance claim
+under IG D.F is a policy reading this note cannot settle, which is why the claim
+language in
+[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) names
+the security function and stops there. Certificate 4985 states no equivalent, so
+the condition belongs to the certificate this image pairs with rather than to
+the algorithm.
+
+**HKDF is scoped to a key-agreement context.** Section 2.10 (p. 24), of the
+module's `KDA OneStep`, `KDA TwoStep` and HKDF: "These implementations shall
+only be used to generate secret keys in the context of an SP 800-56Ar3 key
+agreement scheme." psilink's collapsed `deriveBits` sits downstream of a P-256
+ECDH, which is an `ephemeralUnified` scheme under that publication, so the head
+of the chain qualifies. Whether every derivation in the Noise schedule -- which
+also mixes the pre-shared secret -- sits "in the context of" that scheme is the
+composition question
+[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) already
+records as unattested, arriving here as a stated restriction rather than an
+inference.
+
 ## What it costs
 
 Measured on the reference build of this image, against the Alpine image built
@@ -400,16 +473,26 @@ reading -- Docker Hub is not reachable from the development container and no
 
 ## What is not settled
 
-- **A second reading of certificate 5021's standard revision.** The security
-  policy names FIPS 140-3 unambiguously (above), so the question that gated
-  wording is answered; what is unsettled is only that the CMVP certificate page
-  has not been consulted to corroborate it.
+- **A second reading of the module version, the tested environments, and the
+  algorithm tables.** The certificate page corroborates the standard revision,
+  the security level, the status and the sunset date, and renders none of those
+  three sections (above), so they rest on the security policy alone.
+- **Which AES-GCM service the AEAD requests under the certified module.** The
+  policy makes an externally supplied IV a non-approved service and says the
+  module sets a non-approved indicator for it (above); every `crypto.subtle`
+  AES-GCM call supplies an IV by construction. Reading that indicator back from
+  the module is what settles it, and no probe leg does today.
 - **Whether `openssl-libs` 3.5.x loading the certified 3.0.8 module is inside
   the validation.** It is measured to load, self-test and serve, and AWS's own
   packaging permits the pairing -- the certified package declares
   `Conflicts: openssl-libs < 1:3.2.2-1`, a floor rather than an equality -- but
-  the module's security policy names a specific `openssl-3.0.8` build. That is a
-  policy question, not a measurable one.
+  the module's security policy names an `openssl-3.0.8` RPM as its distribution
+  vehicle rather than a required host libcrypto, at two NVRs that disagree with
+  each other
+  ([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests)),
+  and carries no porting clause and no user-affirmation clause. That is a policy
+  question, not a measurable one, and there is no policy text that narrows it in
+  either direction.
 - **Whether the GPL-3.0 breadth changes the distribution posture.** Measured and
   listed; the call is not a measurement's to make.
 - **`x86_64`.** Every measurement behind this note was taken on `aarch64`. Both

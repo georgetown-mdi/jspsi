@@ -218,6 +218,18 @@ The `-certified` name this image uses is a different package with one published
 NVR, so a `dnf update` has nothing to move it to; the assertion is what catches
 a future one that is not certified.
 
+The security policy is the other reason that pin carries the weight, because it
+names no package this image installs and does not agree with itself about the
+one it does name. Its installation and administrator-guidance sections (11.1 and
+11.2, p. 65) name `openssl-3.0.8-1.amzn2023.0.17`; its end-of-life section
+(11.6, p. 65) names `openssl-3.0.8-1.amzn2023.0.9`. Both are NVRs of the
+distribution's `openssl` package rather than of either `-certified` package, and
+the inconsistency between them is recorded rather than resolved -- neither is
+the value this image pins, and nothing here turns on which of the two the policy
+meant. The module version string is the identifier the policy is consistent
+about, giving it in section 1.1 (p. 6), again in section 11.2 (p. 65) as the
+value the Crypto Officer reads back, and in all six rows of Tables 2 and 3.
+
 **The base image digest and the snapshot pin name one release, not two.** The
 snapshot pin covers the package layer and not the base rootfs, and the two are
 coupled: a base far newer than the pinned snapshot can put that snapshot's
@@ -256,6 +268,98 @@ assertion holds against both images unchanged. It costs 53 packages on this
 base against Alpine's 45, including `systemd`, `dbus`, `pam`,
 `cryptsetup-libs`, `device-mapper` and `util-linux` -- a heavier closure, and
 one that includes an init system.
+
+## What certificate 5021 attests
+
+The provider pins above name CMVP certificate 5021, "Amazon Linux 2023 OpenSSL
+FIPS Provider". Its two sources are the certificate page, which carries
+`FIPS 140-3`, `Overall Level 1`, `Status: Active`, a `5/25/2030` sunset date,
+and an initial validation on `5/26/2025` by atsec information security
+corporation; and the module's own non-proprietary security policy, document
+version 1.2 of 2025-05-14, which is the authority for every table below. The
+page renders no module-version, tested-configuration or approved-algorithm
+section, so the rows here are single-sourced on the policy. Why the image pairs
+with this certificate, what a claim about the image may say, and the conditions
+the policy attaches to three of the algorithm rows are in
+[fips-variant-image.md](../notes/fips-variant-image.md).
+
+### The tested operational environments
+
+Section 2.2, Table 3 (pp. 8-9), complete -- three hardware platforms, each
+tested with the processor's cryptographic acceleration on and off:
+
+| Operating system | Hardware platform | Processors | PAA/PAI | Hypervisor or host OS |
+| --- | --- | --- | --- | --- |
+| Amazon Linux 2023 | EC2 `c7g.metal` | AWS Graviton3 | Yes | N/A |
+| Amazon Linux 2023 | EC2 `c6i.metal` | Intel Xeon Platinum 8375C | Yes | N/A |
+| Amazon Linux 2023 | AWS Snowball | AMD EPYC 7702 | Yes | N/A |
+| Amazon Linux 2023 | EC2 `c7g.metal` | AWS Graviton3 | No | N/A |
+| Amazon Linux 2023 | EC2 `c6i.metal` | Intel Xeon Platinum 8375C | No | N/A |
+| Amazon Linux 2023 | AWS Snowball | AMD EPYC 7702 | No | N/A |
+
+Every row carries module version `3.0.8-d694bfa693b76001`, the string the pin
+table above holds. Table 2 (Tested Module Identification, p. 8) names the same
+three platforms with `fips.so` as the file and `HMAC-SHA-256` as its integrity
+test.
+
+**Six tested environments, and no vendor-affirmed ones.** Section 2.2 is titled
+"Tested and Vendor Affirmed Module Version and Identification" and carries only
+the two tested tables; Table 3's caption is followed directly by section 2.3,
+Excluded Components. The second half of that heading is phrased from the table's
+contents deliberately, because an absence is all there is to phrase it from:
+this policy states no sentence denying vendor affirmation. Other certificates
+do -- 4985's policy says "No operational environments are vendor affirmed" -- so
+quoting that sentence against 5021 would be a misquotation.
+
+**None of the six is a container, and none is a virtual machine.** Every row is
+bare metal with `Hypervisor or Host OS: N/A`. The variant image is therefore not
+running in a tested operational environment on any host, which is what
+[fips-variant-image.md](../notes/fips-variant-image.md) reasons from rather than
+around.
+
+### The approved-algorithm rows behind the measured call shapes
+
+The variant's entrypoint probe makes five call shapes, and those five are what a
+"dispatches into the validated module" claim may name
+([fips-variant-image.md](../notes/fips-variant-image.md)). Each is on Table 5
+(Approved Algorithms, pp. 9-13), under the row name and CAVP certificate ids the
+policy records:
+
+| Call shape | Table 5 row | CAVP certificates | Properties | Reference |
+| --- | --- | --- | --- | --- |
+| AES-256-GCM, 12-byte IV | `AES-GCM` | A4614, A4615, A4616, A4617, A4620, A4621, A4622, A4623, A4624, A4625, A4626, A4627, A4628 | `Direction - Decrypt, Encrypt`; `IV Generation - External, Internal`; `IV Generation Mode - 8.2.1, 8.2.2`; `Key Length - 128, 192, 256` | SP 800-38D |
+| HKDF-SHA-256 | `KDA HKDF Sp800-56Cr1` | A4603 | `Derived Key Length - 2048`; `Shared Secret Length: 224-2048 Increment 8`; `HMAC Algorithm` including `SHA2-256` | SP 800-56C Rev. 2 |
+| HMAC-SHA-256 | `HMAC-SHA2-256` | A4608, A4612, A4618, A4629, A4630, A4631, A4632 | `Key Length: 112-524288 Increment 8` | FIPS 198-1 |
+| SHA-256 | `SHA2-256` | A4608, A4612, A4618, A4629, A4630, A4631, A4632 | `Message Length: 0-65536 Increment 8`; `Large Message Sizes - 1, 2, 4, 8` | FIPS 180-4 |
+| P-256 ECDH | `KAS-ECC-SSC Sp800-56Ar3` | A4612, A4618, A4629, A4630, A4631, A4632 | `Domain Parameter Generation Methods - P-224, P-256, P-384, P-521`; `Scheme - ephemeralUnified`; `KAS Role - initiator, responder` | SP 800-56A Rev. 3 |
+
+Three of those properties bound a value `packages/core/src` chooses, and all
+three are satisfied: the HKDF row's shared-secret window is 224-2048 bits
+against a 256-bit shared secret, its tested derived-key length 2048 bits against
+a 256-bit output, and the HMAC row's key-length floor 112 bits against a 256-bit
+key.
+
+**The HKDF row's name and its reference column disagree, and the policy resolves
+it in prose.** The row is named `KDA HKDF Sp800-56Cr1` while its reference
+column reads `SP 800-56C Rev. 2`; section 2.10 (p. 24) states the attribution
+directly -- the module's `KDA OneStep`, `KDA TwoStep` and HKDF are "compliant
+with SP 800-56Cr1 (HKDF) and SP 800-56Cr2 (KDA OneStep, KDA TwoStep)". A
+citation that names this module's HKDF therefore names Cr1 and CAVP certificate
+`A4603`, not the Cr2 row and cert `A3548` that certificate 4985 carries.
+
+**Table 5 membership is not the whole answer for three of the five.** The
+policy attaches a condition to AES-GCM, to the SP 800-56Ar3 assurances behind
+the ECDH row, and to the use context of HKDF, each stated outside Table 5. They
+are recorded in
+[fips-variant-image.md](../notes/fips-variant-image.md), which is where what may
+be claimed of the image is reasoned about.
+
+**X25519 and Ed25519 appear in no table of this policy.** Neither string occurs
+anywhere in its 71 pages, and the policy's non-approved-but-allowed categories
+are empty by explicit statement ("N/A for this module", stated twice -- with and
+without security claimed), so there is no status either algorithm could hold
+under this certificate. That is a different statement from the one certificate
+4985 supports, whose Non-Approved, Not Allowed table names both.
 
 ## The runtime posture measured on each built image
 
