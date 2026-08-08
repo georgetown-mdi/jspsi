@@ -16,9 +16,9 @@ name: Nightly Core Stress Tests
 
 on:
   schedule:
-    # 04:17 UTC nightly. No other scheduled workflow exists in this repo, so there
-    # is no cross-job contention; the off-the-hour minute follows GitHub's guidance
-    # to avoid top-of-hour congestion on the shared scheduler. Two GitHub behaviors
+    # 04:17 UTC nightly, an hour clear of the weekly scans in codeql.yaml and
+    # dependency_audit.yaml, and off the hour per GitHub's guidance to avoid
+    # top-of-hour congestion on the shared scheduler. Two GitHub behaviors
     # to know: a `schedule` trigger only fires from the workflow as it exists on the
     # default branch, so no nightly runs until this file lands there (use the manual
     # dispatch below to exercise it before then); and GitHub disables a scheduled

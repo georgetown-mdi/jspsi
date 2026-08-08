@@ -5,10 +5,11 @@ name: Dependency Review
 # check when the PR introduces a dependency carrying a known security advisory at
 # or above the severity threshold, or one under a denied copyleft license -- both
 # configured below. It complements Dependabot, which only
-# opens update PRs for dependencies already present, and the manual `npm audit`
-# step in the Dependency Policy: this catches a vulnerable *new* dependency at the
-# moment it is added, as an automated PR gate. It is distinct from the CodeQL SAST
-# spike -- this gates the dependency-graph diff of a PR, not first-party code.
+# opens update PRs for dependencies already present, and the production-scope
+# `npm audit` step in static_checks.yaml, which gates the existing shipped tree:
+# this catches a vulnerable *new* dependency at the moment it is added, before it
+# is in any tree for the audit to see. It is distinct from the CodeQL analysis --
+# this gates the dependency-graph diff of a PR, not first-party code.
 #
 # Kept as its own workflow (rather than a job in static_checks.yaml) so it carries
 # a dedicated status-check name and stays focused on supply-chain review. Like
@@ -50,9 +51,9 @@ jobs:
         uses: actions/dependency-review-action@v5
         with:
           # Fail a PR that newly introduces a dependency with a moderate-or-higher
-          # advisory. This and the license deny-list below are the only automated
-          # supply-chain PR gates (npm audit is a manual Dependency Policy step),
-          # and both fire only on what a PR adds, not the existing tree, so a
+          # advisory. Both this and the license deny-list below fire only on what
+          # a PR adds, not the existing tree -- which the production-scope
+          # `npm audit` step in static_checks.yaml covers instead -- so a
           # strict-ish threshold adds little friction.
           fail-on-severity: moderate
           # Fail a PR that newly introduces a dependency under a strong-copyleft

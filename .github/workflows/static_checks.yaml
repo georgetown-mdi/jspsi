@@ -11,6 +11,11 @@ name: Static Checks
 # tsconfig.test.json files that cover test sources (the build/composite configs
 # exclude test/ so test code never reaches the emitted dist). It resolves
 # @psilink/core from the built package, so packages/core is built first.
+#
+# The job's `name:` is its required-status-check identity on main and staging, so
+# it stays `Typecheck, Lint, Format` even as steps accumulate past those three:
+# renaming it leaves a required check pending forever on every pull request until
+# branch protection is edited to match.
 
 on:
   pull_request:
@@ -139,3 +144,29 @@ jobs:
       # guarded -- no workflow invoked it before this step was added.
       - name: Scripts tests
         run: npm run test:scripts
+      # Blocking half of the dependency audit, over the production tree the
+      # shipped image runs: the release SBOM's scope -- the two workspaces the
+      # Dockerfile's runtime `npm ci --omit=dev` installs, plus apps/web, whose
+      # runtime dependencies ship inside the pre-bundled Nitro output rather
+      # than through an install -- and the same command string CONTRIBUTING.md's
+      # Dependency Policy and docs/RELEASES.md step 4 hand a maintainer, so the
+      # local run and the gate cannot diverge. It answers
+      # `found 0 vulnerabilities` against the committed lockfile, so it gates on
+      # any finding at all: no `--audit-level`, because relaxing the threshold to
+      # clear one accepted finding is a standing acceptance of every future
+      # finding below it, and no allowlist or per-advisory suppression, because
+      # whether a package ships is a property npm recomputes on every run -- an
+      # advisory that crosses onto a production edge blocks here by itself, where
+      # a written exception would keep suppressing after its reason expired.
+      #
+      # This scope holds the exact-pinned SFTP and WebRTC stacks, so a red gate
+      # over one of them is resolved by the deliberate, security-reviewed bump
+      # docs/spec/DEPENDENCY_PINS.md specifies -- never by `npm audit fix`, which
+      # the Dependency Policy forbids there precisely because it lands unreviewed.
+      # Development-tree findings are outside this scope by construction and are
+      # reported by dependency_audit.yaml rather than gated here.
+      #
+      # Last, so an advisory standing open over the production tree does not mask
+      # the typecheck, lint, and format results every contributor iterates on.
+      - name: Dependency audit (production scope)
+        run: npm audit --omit=dev -w packages/core -w apps/cli -w apps/web

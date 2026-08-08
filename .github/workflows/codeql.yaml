@@ -14,9 +14,26 @@ name: CodeQL
 # license. Findings surface as code-scanning alerts in the repository Security
 # tab.
 #
-# Advisory, not a merge gate: alerts are informational and this is left off the
-# required-status-check list until its false-positive rate on real PRs is known.
-# Promote it to a required check later if it earns it.
+# A merge gate. Two check runs come out of this analysis and both belong on the
+# required-status-check list for main and staging: `Analyze
+# (JavaScript/TypeScript)`, the job below, so an analysis that fails to run
+# cannot be waved through; and `CodeQL`, the code-scanning results check GitHub
+# raises from the uploaded SARIF, which is the half that turns red when a pull
+# request introduces an alert. Neither is path-filtered, so neither can
+# path-skip into the permanently-pending state a required check falls into when
+# its workflow is skipped -- the footgun image_smoke.yaml documents.
+#
+# What promoted it, measured 2026-08-08 over the code-scanning alert history
+# since the 2026-07-23 baseline scan: 234 pull-request analyses across 178 pull
+# requests, of which exactly one reported any result -- a staging-to-main merge
+# pull request carrying two alerts already in the baseline, not findings on its
+# diff. Every alert in the repository was created by that first baseline scan;
+# none has been raised by a pull request. The baseline's 27 alerts are all
+# triaged closed (17 fixed, 5 dismissed false-positive, 5 dismissed won't-fix),
+# so the gate turns on against an empty board rather than blocking unrelated
+# work. That false-positive rate on real pull requests is what the earlier
+# advisory posture was waiting on. If it rises, move back to advisory and record
+# why -- dismissing findings to keep the gate green is the dishonest exit.
 #
 # JavaScript/TypeScript needs no build step (build-mode: none): CodeQL extracts
 # the sources directly, so unlike the build/test workflows this neither runs the
