@@ -129,7 +129,7 @@ There is no token, so anything that widens that publish binding widens the unaut
 
 A file reference is the preferred path and never puts a secret through the web server: it is resolved only by the CLI child at exchange time. Referencing a credential file inside the one mounted `JOB_DATA_ROOT` folder is allowed and raises only a non-blocking warning, since that folder is written during the exchange and, if you sync it with your partner, could expose the credential. For isolation, mount a separate read-only `JOB_SECRETS_DIR` and reference the credential there instead -- recommended hardening, not a requirement. An encrypted private key's passphrase file works in a single mount the same way. A pasted value does cross the appliance's loopback API and is written to a file so the exchange can use it -- but never to the data root or the partner-synced rendezvous directory; it goes to an internal, owner-only location that is wiped at every startup, and it is deleted when the connection is cleared or the exchange is deleted.
 
-The host-key fingerprint is always a literal pin -- the appliance never prompts to trust a host key (stage a rotation by listing the old and new fingerprints together). An authored connection is held in memory, scoped to the single exchange, and forgotten on restart or when the exchange is deleted. The appliance runs one exchange at a time, and the container needs network egress and DNS to the server's host and port -- shared-directory exchanges need none. The in-app authoring request and each validation rule are in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md#authoring-the-sftp-connection).
+The host-key fingerprint is always a literal pin -- the appliance never prompts to trust a host key (stage a rotation by listing the old and new fingerprints together). An authored connection is held in memory, scoped to the single exchange, and forgotten on restart or when the exchange is deleted. The appliance runs one exchange at a time, and the container needs network egress and DNS to the server's host and port -- shared-directory exchanges need none. Confining that egress to the one endpoint, so a compromised container process cannot reach anything else, is in [Restricting the container's outbound network access](#restricting-the-containers-outbound-network-access). The in-app authoring request and each validation rule are in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md#authoring-the-sftp-connection).
 
 **Graduating to a scheduled run.** The console is a prototyping tool: once an exchange works, the recurring production version graduates to the plain CLI plus cron or the Windows Task Scheduler. The console shows a recurring-run hand-off -- the portable `psilink.yaml` (or the zero-setup command), a cron and a Task Scheduler example, and the caveats -- filling in the portable settings that carried over from the run while showing the machine-specific paths as placeholders the operator sets on the scheduling machine. It is composed the moment the exchange starts and is available from then on, collapsed while the run is in flight and expanded once it completes, so the operator can set the schedule up in parallel rather than only afterwards. It never displays the shared secret or a container-internal path; for an invitation run it points at the on-disk `.psilink.key` to copy. The endpoint contract is in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md#the-recurring-run-hand-off) and the command-line reference in [CLI.md](CLI.md#recurring-exchange).
 
@@ -266,6 +266,8 @@ By default the image runs the headless CLI. Mount a working directory and pass C
 docker run --rm -v "$PWD":/work vdorie/psi-link exchange input.csv
 ```
 
+What the container needs to reach while it runs, and how to hold it to that, is in [Restricting the container's outbound network access](#restricting-the-containers-outbound-network-access).
+
 ### Running the web console appliance
 
 Pass `serve` as the first argument to run the single-party console appliance instead. The image bakes the `console` web build (see [Server job API](#server-job-api)), so no build-time configuration is needed; the Nitro server listens on port 3000. Publish that port to the host loopback so the appliance is reachable only from the operator's own machine. The simplest console is a single mount and a single environment variable; run it in the foreground and stop it with Ctrl-C when the exchange is done, since nothing needs to persist between exchanges (results stay in the mounted directory):
@@ -295,6 +297,122 @@ docker run --rm \
 `JOB_RENDEZVOUS_NAME` is what a shared-directory invitation tells the partner to look for. The mount point above is named for the container's layout, so without it the invitation and the accept kit would call the shared folder `rendezvous`; name the mount point after the folder instead and it can be left unset.
 
 `JOB_CLI_BINARY` is pre-set in the image and needs no operator value. Setting `JOB_DATA_ROOT` turns the job API on; leave it unset and `serve` runs the web UI and peer-coordination server only. The `-p 127.0.0.1:3000:3000` publish binding is what keeps the unauthenticated API reachable only from the operator's own machine, and what widening it costs is in [Server job API](#server-job-api).
+
+### Restricting the container's outbound network access
+
+An exchange gives the container one reason to reach the network: the SFTP connection to the server the two parties agreed on. Holding its outbound access to that one endpoint is defense in depth -- were the process ever compromised, through a dependency vulnerability or partner-supplied material that got past the protocol's own bounds, an egress allowlist bounds what it could reach or exfiltrate to. No exchange needs it to work and nothing in PSI-Link depends on it; it is hardening an operator applies deliberately.
+
+`docker run` has no egress allowlist of its own, and the image runs unprivileged (see [The user the image runs as](#the-user-the-image-runs-as)), so nothing inside the container can set network rules for itself either. Restricting egress is therefore host configuration rather than a container flag. What each role needs outbound:
+
+- **A shared-directory (filedrop) exchange needs no egress at all**, in either role. The rendezvous directory is a mount, and the host performs whatever network file access it stands for, so the container itself reaches nothing.
+- **An SFTP exchange needs TCP to the server's host and port**, plus name resolution for that host unless it is named by address. This is the same in both roles: the console drives the same CLI as a subprocess inside the same container, and the console's "read the fingerprint from the server" probe reaches that same endpoint.
+- **The console's own web and job-API traffic is inbound, not egress.** The browser connects in over the published loopback port, and the console serves its assets and its peer-coordination server from inside the container. `-p 127.0.0.1:3000:3000` governs who may reach in and stays exactly as it is (see [Running the web console appliance](#running-the-web-console-appliance)).
+
+#### No egress at all
+
+For a shared-directory exchange on the CLI, take the network away outright:
+
+```sh
+docker run --rm --network none -v "$PWD":/work vdorie/psi-link exchange input.csv
+```
+
+This is the strongest option here and the only portable one -- a `docker run` flag with no host configuration behind it. It is not an option for the console appliance, whose browser traffic has to reach the published port; a console that will only ever run shared-directory exchanges takes the allowlist below with no SFTP entry in it, which denies the same traffic outbound.
+
+A network file drop is the one place where something still reaches out: `psilink doctor probe` talks to the SMB server from inside the container (see [Checking a network file drop](CLI.md#checking-a-network-file-drop)). Run the checks before you take the network away, or allow tcp/445 to the file server while you run them. The exchange itself, over the mounted directory, still needs nothing.
+
+#### An allowlist for an SFTP exchange
+
+These steps are host-specific and Linux-only. They assume Docker Engine on a Linux host with its default iptables integration (the daemon's `iptables` setting left on), and root on that host to write firewall rules. The rules are host state: they govern every container on the network you create, they do not travel with the image or a Compose file, and they last until you delete them or the host reboots -- persist them with your distribution's own mechanism (`iptables-persistent`, a `firewalld` direct rule, a systemd unit) if the deployment is a lasting one.
+
+**Docker Desktop -- on macOS, Windows, or Linux -- and rootless Docker do not work this way.** The container's traffic is routed inside a virtual machine or a user-mode network stack these rules do not reach, and neither engine offers a supported equivalent. There, `--network none` above still restricts a shared-directory exchange, while an SFTP exchange's egress restriction has to come from the host's own firewall or from the network the machine sits on -- which covers the whole machine rather than this container.
+
+**1. Give the container a network of its own, with a subnet you chose.**
+
+```sh
+docker network create --subnet 172.31.240.0/29 psilink-egress
+```
+
+The subnet is pinned rather than taken from Docker's default pool because the rules below name it, and a pool-assigned subnet can differ from one create to the next. Any private range the host does not already route elsewhere will do.
+
+**2. Write the rules into the `DOCKER-USER` chain**, the chain Docker leaves for operator rules and consults ahead of its own. Every rule is scoped to that subnet as its source, so it governs what this container may reach and leaves other containers, and everything arriving at the host, alone.
+
+```sh
+SUBNET=172.31.240.0/29
+SFTP_ADDR=203.0.113.24     # the address your SFTP server resolves to
+SFTP_PORT=22               # connection.server.port; 22 when unset
+RESOLVER=192.0.2.53        # the resolver you hand the container in step 3
+
+# Replies on an already-permitted connection, matched before anything below.
+sudo iptables -I DOCKER-USER 1 -s "$SUBNET" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+# The one endpoint an exchange needs.
+sudo iptables -I DOCKER-USER 2 -s "$SUBNET" -p tcp -d "$SFTP_ADDR" --dport "$SFTP_PORT" -j ACCEPT
+# Name resolution -- omit both if you pin the server by address instead.
+sudo iptables -I DOCKER-USER 3 -s "$SUBNET" -p udp -d "$RESOLVER" --dport 53 -j ACCEPT
+sudo iptables -I DOCKER-USER 4 -s "$SUBNET" -p tcp -d "$RESOLVER" --dport 53 -j ACCEPT
+# Everything else the container tries to reach.
+sudo iptables -I DOCKER-USER 5 -s "$SUBNET" -j DROP
+```
+
+The explicit rule numbers are load-bearing. `-I` inserts at the position you give it and at the top of the chain when you give none, so numbering them is what keeps the `DROP` last instead of first; `-A` would append past the chain's own trailing `RETURN`, where a rule is never reached. Read the result back with `sudo iptables -L DOCKER-USER -n --line-numbers` before running anything against it, and verify it as below rather than trusting the listing.
+
+**3. Run the container on that network.** Nothing else about either invocation changes.
+
+```sh
+# Headless CLI
+docker run --rm --network psilink-egress --dns 192.0.2.53 \
+  -v "$PWD":/work vdorie/psi-link exchange input.csv
+
+# Console appliance
+docker run --rm --network psilink-egress --dns 192.0.2.53 \
+  -p 127.0.0.1:3000:3000 \
+  --env JOB_DATA_ROOT=/data \
+  -v /host/work:/data \
+  vdorie/psi-link:latest serve
+```
+
+`--dns` names the resolver the container uses, so the address the rules permit is one you chose rather than whatever the host's `/etc/resolv.conf` happens to carry. Drop the flag along with the two resolver rules if you pin the server by address.
+
+#### Substituting your own endpoint
+
+`SFTP_ADDR` and `SFTP_PORT` stand for the server the two parties agreed on; there is no built-in endpoint to allow.
+
+- **Headless CLI**: `connection.server.host` and `connection.server.port` from your `psilink.yaml`, the port being 22 when unset (see [`connection.server`](EXCHANGE_REFERENCE.md#connectionserver)).
+- **Console appliance**: the host and port you enter when you author the connection in the console (see [Server job API](#server-job-api)). Re-authoring against a different server means revisiting the rules.
+
+A hostname that resolves to several addresses needs a rule per address. Confirm the set with `dig +short <host>` and re-confirm it whenever the server's operator changes anything: an address that moves out from under the allowlist stops the exchange with a connection failure rather than a warning.
+
+**Pinning the server by address instead.** Naming the server by address in the connection takes name resolution out of the picture entirely: drop the two resolver rules and the `--dns` flag, and the allowlist is one endpoint and nothing else. What authenticates the server is its host key, pinned as `host_key_fingerprint` -- mandatory for a console-authored connection, and effectively so for a containerized CLI run, which has no terminal and so fails closed rather than establishing trust on first use (see [SFTP host-key trust](CLI.md#sftp-host-key-trust)). Identifying the server by address therefore costs no authentication. What it costs is maintenance: an address the server's operator changes has to be changed in the configuration and in the rules.
+
+#### Verify it rather than assuming it
+
+An allowlist that silently drops name resolution, and one whose `DROP` sits above the rules meant to permit anything, both look identical to a working one until an exchange fails. Check both directions with `probe-host-key`, which connects far enough to read the server's host key and sends no credential (see [Reading a host key with `probe-host-key`](CLI.md#reading-a-host-key-with-probe-host-key)); it exits 0 when it reached the server and 69 when it could not.
+
+```sh
+# Permitted: the endpoint you allowed. Prints a fingerprint, exits 0.
+docker run --rm --network psilink-egress --dns 192.0.2.53 \
+  vdorie/psi-link probe-host-key sftp://sftp.partner.example --connect-timeout 10s
+
+# Blocked: the same host on a port you did not allow. Exits 69.
+docker run --rm --network psilink-egress --dns 192.0.2.53 \
+  vdorie/psi-link probe-host-key sftp://sftp.partner.example:2222 --connect-timeout 10s
+
+# Blocked: a host you did not allow. Run it a second time without
+# `--network psilink-egress`: a probe that fails for its own reasons proves
+# nothing, so it has to succeed off the restricted network to count.
+docker run --rm --network psilink-egress --dns 192.0.2.53 \
+  vdorie/psi-link probe-host-key sftp://some.other.host --connect-timeout 10s
+```
+
+Probing by name is also the name-resolution check, since it succeeds only if the container both resolved the name and reached the address. A probe that fails by name and succeeds against the address says resolution is what the rules are dropping -- permit the resolver, or pin the server by address.
+
+Finally, start the console once on the restricted network and confirm it still loads at `http://127.0.0.1:3000`. The publish binding governs what arrives at the container and these rules govern what leaves it, but a mistake in either is worth catching before an exchange rather than during one.
+
+#### What the restriction does not cover
+
+- **The host and the operator's browser are unaffected.** This bounds one container's reach, not the machine's.
+- **Name resolution is a permitted channel whenever you allow a resolver.** Pin the server by address and drop the resolver rules if you need that closed too.
+- **Traffic the host delivers to itself is not forwarded**, so `DOCKER-USER` is not where a container reaching a service on the host's own address is decided; close that at the host's `INPUT` chain if it matters to you.
+- **It is not a substitute for the controls that carry the exchange.** The partner's material is untrusted whatever the container may reach, and what bounds it is the exchange protocol itself (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security)); what bounds who reaches the console is the publish binding (see [Server job API](#server-job-api)).
 
 ### Key file permissions in containers
 
