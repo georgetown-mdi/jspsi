@@ -5,7 +5,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
@@ -13,10 +12,7 @@ import "@mantine/core/styles.css";
 import { BenchLobby } from "@bench/BenchLobby";
 import { DirectExchangeBench } from "@bench/DirectExchangeBench";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 // The bench components touch the router seam.
 vi.mock("@tanstack/react-router", async () =>
@@ -239,24 +235,11 @@ const CONFIGURED_SFTP = {
   port: 2222,
 };
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 afterEach(async () => {
-  // Flush any in-flight fetch resolution before the synchronous unmount, so teardown
-  // never races a render.
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  await flushPendingUpdates();
+  app.unmount();
   window.localStorage.clear();
   vi.unstubAllGlobals();
 });
@@ -281,7 +264,7 @@ async function reachConfirm() {
 describe("direct exchange confirm and run", () => {
   test("previews the inferred terms, gates Run on the affirmation, and runs a zero-setup job", async () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP });
-    mount(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeBench));
     await reachConfirm();
 
     // The browser-side terms preview renders under the direct-exchange framing: the
@@ -297,8 +280,8 @@ describe("direct exchange confirm and run", () => {
         }),
       )
       .toBeInTheDocument();
-    expect(container?.textContent).not.toContain("Exchange proposal");
-    expect(container?.textContent).not.toContain("must review and consent");
+    expect(app.container.textContent).not.toContain("Exchange proposal");
+    expect(app.container.textContent).not.toContain("must review and consent");
 
     // The two fixed symmetry notices frame the preview.
     await expect
@@ -369,7 +352,7 @@ describe("direct exchange confirm and run", () => {
 
   test("a terms mismatch surfaces clearly through the job-error path", async () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP });
-    mount(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeBench));
     await reachConfirm();
     await page.getByRole("checkbox").click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
@@ -397,7 +380,7 @@ describe("direct exchange confirm and run", () => {
 
   test("Start over after a terminal failure frees the slot and re-enables Run", async () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP, jobStatus: "failed" });
-    mount(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeBench));
     await reachConfirm();
     await page.getByRole("checkbox").click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
@@ -461,7 +444,7 @@ describe("direct exchange confirm and run", () => {
 
   test("an invalid identity names the fault at the field and blocks Run", async () => {
     stubJobApi({ sftp: CONFIGURED_SFTP });
-    mount(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeBench));
     await reachConfirm();
     // Affirm first, so the identity guard is the only thing gating Run.
     await page.getByRole("checkbox").click();
@@ -490,7 +473,7 @@ describe("direct exchange confirm and run", () => {
     await expect
       .element(page.getByRole("button", { name: "Run the exchange" }))
       .toBeEnabled();
-    expect(container?.textContent).not.toContain(
+    expect(app.container.textContent).not.toContain(
       "Identity cannot begin with a dash",
     );
   });
@@ -515,7 +498,7 @@ describe("console direct re-attaches on a busy create", () => {
       conflict: { jobId: "job-live", status: "running" },
       handoff: REATTACH_HANDOFF,
     });
-    mount(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeBench));
     await reachConfirm();
     await page.getByRole("checkbox").click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
@@ -589,7 +572,7 @@ describe("console direct re-attaches on a busy create", () => {
       sftp: CONFIGURED_SFTP,
       conflict: { jobId: "job-live", status: "running", holdProbe: true },
     });
-    mount(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeBench));
     await reachConfirm();
     await page.getByRole("checkbox").click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
@@ -641,7 +624,7 @@ describe("console direct re-attaches on a busy create", () => {
       sftp: CONFIGURED_SFTP,
       conflict: { jobId: "job-live", probeStatus: 404 },
     });
-    mount(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeBench));
     await reachConfirm();
     await page.getByRole("checkbox").click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
@@ -662,7 +645,7 @@ describe("console direct re-attaches on a busy create", () => {
 describe("direct exchange transport step", () => {
   test("with no rendezvous mount the shared-directory option is disabled", async () => {
     stubJobApi({ sftp: CONFIGURED_SFTP, rendezvous: { configured: false } });
-    mount(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeBench));
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
     await expect
@@ -687,7 +670,7 @@ describe("direct exchange transport step", () => {
         folderName: "agency-a-agency-b",
       },
     });
-    mount(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeBench));
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
     await page
@@ -705,7 +688,7 @@ describe("direct exchange transport step", () => {
       sftp: { configured: false },
       rendezvous: { configured: true, locator: "rendezvous" },
     });
-    mount(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeBench));
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
     await page
@@ -742,7 +725,7 @@ describe("direct exchange host-key probe (direct ceremony)", () => {
   test("the interstitial and out-of-band affirmation gate the fill", async () => {
     // SFTP unconfigured so the authoring form (with its probe) is reachable.
     stubJobApi({ sftp: { configured: false } });
-    mount(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeBench));
     await openDirectServerForm();
 
     await page
@@ -782,7 +765,7 @@ describe("direct exchange host-key probe (direct ceremony)", () => {
 describe("console lobby direct-exchange card", () => {
   test("offers a third card that links to the direct-exchange route", async () => {
     stubJobApi();
-    mount(createElement(BenchLobby));
+    app.render(createElement(BenchLobby));
     const link = page.getByRole("link", { name: "Run a direct exchange" });
     await expect.element(link).toBeInTheDocument();
     await expect.element(link).toHaveAttribute("href", "/direct");
@@ -792,7 +775,7 @@ describe("console lobby direct-exchange card", () => {
 describe("console lobby recurring-exchange surface", () => {
   test("offers no /saved recurring-exchange pointer", async () => {
     stubJobApi();
-    mount(createElement(BenchLobby));
+    app.render(createElement(BenchLobby));
     // The lobby is fully rendered once its heading is present; the recurring
     // pointer is not a console concept, so neither framing nor the /saved link
     // stands.

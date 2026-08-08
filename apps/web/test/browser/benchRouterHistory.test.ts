@@ -5,7 +5,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so components render with their real geometry
 // (the bench browser suites' shared discipline).
@@ -23,10 +22,8 @@ import { createBrowserHistory } from "@tanstack/react-router";
 
 import { InviterBench } from "@bench/InviterBench";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
 import type { RouterHistory } from "@tanstack/react-router";
 
 // Nothing in this suite mints an invitation, so no rendezvous listen ever fires.
@@ -37,22 +34,9 @@ vi.mock("@psi/exchangeLifecycle", () => ({
   runExchangeLifecycle: () => Promise.resolve(),
 }));
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
+const app = createAppMount();
 
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
-
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
+afterEach(app.unmount);
 
 function routerIndex(): number {
   return (window.history.state as { __TSR_index: number }).__TSR_index;
@@ -74,7 +58,7 @@ describe("bench steps under the router's patched history", () => {
       actions.push(action.type),
     );
     try {
-      mount(createElement(InviterBench));
+      app.render(createElement(InviterBench));
       await expect
         .element(page.getByLabelText("Your name"))
         .toBeInTheDocument();

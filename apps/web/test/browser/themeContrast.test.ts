@@ -4,7 +4,6 @@ import { afterEach, describe, expect, test } from "vitest";
 import { userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
 import {
@@ -24,10 +23,9 @@ import { IconCheck, IconCopy } from "@tabler/icons-react";
 import "@bench/tokens.css";
 import benchStyles from "@bench/bench.module.css";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
 import type { ComponentType, ReactNode } from "react";
-import type { Root } from "react-dom/client";
 
 // Button / Checkbox / Text / TextInput / Alert / ActionIcon are polymorphic factory
 // components; this is a `.ts` file (the browser project globs `.ts`, not `.tsx`, so no
@@ -100,8 +98,7 @@ const PrimaryActionIcon = ActionIcon as unknown as ComponentType<{
 //    (red's light-variant, red-9-on-red-1 = 4.51:1) already clears the floor, so a
 //    floor-only check would not notice that token regressing back to its default.
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
+const app = createAppMount();
 
 // Exact computed colours the resolver paints, pinned by the token cases below so a
 // case cannot pass on a coincidental value or a default that happens to clear the
@@ -119,25 +116,13 @@ const STATUS_TEXT = {
   green: "rgb(34, 104, 58)",
 } as const;
 
-function mount(scheme: "light" | "dark", node: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(node, { forceColorScheme: scheme }));
-}
-
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
+afterEach(app.unmount);
 
 /** Wait for a mounted element (createRoot.render is not synchronous), then return
  * it. */
 async function waitForEl(selector: string): Promise<HTMLElement> {
-  await expect.poll(() => container!.querySelector(selector)).not.toBeNull();
-  return container!.querySelector(selector) as HTMLElement;
+  await expect.poll(() => app.container.querySelector(selector)).not.toBeNull();
+  return app.container.querySelector(selector) as HTMLElement;
 }
 
 /** Move the pointer off `el`, then return its resting (non-hover) background.
@@ -198,7 +183,9 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
     { scheme: "dark" as const, expectedText: "rgb(0, 0, 0)" },
   ]) {
     test(`filled-primary button label is AA-legible (${scheme})`, async () => {
-      mount(scheme, createElement(FilledButton, null, "Continue"));
+      app.render(createElement(FilledButton, null, "Continue"), {
+        forceColorScheme: scheme,
+      });
       const btn = await waitForEl(".mantine-Button-root");
       await expect.poll(() => getComputedStyle(btn).color).toBe(expectedText);
       const backgroundColor = await restingBackground(btn);
@@ -207,12 +194,12 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
     });
 
     test(`consent checkbox checkmark is AA-legible (${scheme})`, async () => {
-      mount(
-        scheme,
+      app.render(
         createElement(PrimaryCheckbox, {
           defaultChecked: true,
           "aria-label": "consent",
         }),
+        { forceColorScheme: scheme },
       );
       // The checkmark (CheckIcon, currentColor) sits in .mantine-Checkbox-icon; its
       // fill is --checkbox-icon-color and its background is the filled box (the input).
@@ -231,13 +218,13 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
       // --ai-color, routed to the per-scheme contrast variable by the theme override
       // (the wiring the unit test proves for --ai-color; this pins it at the render
       // level, the half Mantine resolves color-scheme-blind).
-      mount(
-        scheme,
+      app.render(
         createElement(
           PrimaryActionIcon,
           { "aria-label": "copy" },
           createElement(IconCopy),
         ),
+        { forceColorScheme: scheme },
       );
       const ai = await waitForEl(".mantine-ActionIcon-root");
       // Measure the glyph's OWN paint (its SVG stroke), not the ActionIcon root's
@@ -262,13 +249,13 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
       // tint, both per scheme (light: cyan-9 on cyan-1; dark: cyan-0 on
       // darken(cyan-9, .5)) -- no override touches the light variant, so this reads
       // exactly what Mantine paints, including the dark branch.
-      mount(
-        scheme,
+      app.render(
         createElement(
           PrimaryActionIcon,
           { variant: "light", "aria-label": "copied" },
           createElement(IconCheck),
         ),
+        { forceColorScheme: scheme },
       );
       const ai = await waitForEl(".mantine-ActionIcon-root");
       const glyph = await waitForEl(".mantine-ActionIcon-root svg");
@@ -287,7 +274,9 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
   // a lower contrast than the resting fill (cyan-9) -- then prove restingBackground
   // moves the pointer off, clears :hover, and reads a resting fill clearing AA.
   test("restingBackground clears a stale hover before measuring", async () => {
-    mount("light", createElement(FilledButton, null, "Continue"));
+    app.render(createElement(FilledButton, null, "Continue"), {
+      forceColorScheme: "light",
+    });
     const btn = await waitForEl(".mantine-Button-root");
     await expect
       .poll(() => getComputedStyle(btn).color)
@@ -319,8 +308,7 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
   // individually clears an arithmetic floor -- the two could still be pinned
   // to the same value and pass a floor-only check.
   test("a Button rendered as an anchor inside .page keeps its filled label legible", async () => {
-    mount(
-      "light",
+    app.render(
       createElement(
         "div",
         { className: benchStyles.page },
@@ -330,6 +318,7 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
           "Create an invitation",
         ),
       ),
+      { forceColorScheme: "light" },
     );
     const btn = await waitForEl(".mantine-Button-root");
     const backgroundColor = await restingBackground(btn);
@@ -358,8 +347,7 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
     test(`dimmed text is AA-legible (${scheme})`, async () => {
       // c="dimmed" -> --mantine-color-dimmed, raised by the resolver in both schemes
       // (Mantine's gray-6 / dark-2 default fails 4.5:1 on the body).
-      mount(
-        scheme,
+      app.render(
         bodySurface(
           createElement(
             ColoredText,
@@ -367,6 +355,7 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
             "Secondary supporting text",
           ),
         ),
+        { forceColorScheme: scheme },
       );
       const text = await waitForEl('[data-testid="dimmed"]');
       const surface = await waitForEl('[data-testid="surface"]');
@@ -382,12 +371,12 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
       // --mantine-color-placeholder, raised by the resolver in both schemes (Mantine's
       // gray-5 / dark-3 default is the lightest failing token, 2.08:1 / 2.47:1). The
       // placeholder paints on the input's own fill (white light / dark-6 dark).
-      mount(
-        scheme,
+      app.render(
         createElement(AppInput, {
           placeholder: "Your name",
           "aria-label": "name",
         }),
+        { forceColorScheme: scheme },
       );
       const input = await waitForEl("input");
       const placeholderColor = getComputedStyle(input, "::placeholder").color;
@@ -407,14 +396,14 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
   test("error validation text is AA-legible (light)", async () => {
     // --mantine-color-error, raised by the resolver in light (Mantine's red-6 default
     // = 3.28:1 on the white page fails the 1.4.3 validation-text floor).
-    mount(
-      "light",
+    app.render(
       bodySurface(
         createElement(AppInput, {
           "aria-label": "field",
           error: "This field is required",
         }),
       ),
+      { forceColorScheme: "light" },
     );
     // The input references its validation message (the --mantine-color-error text)
     // through aria-describedby; resolve that element within the container -- scoped
@@ -442,8 +431,7 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
     // catch that component reverting its c prop to "green" -- driving the real
     // component to its imported state would pull its import-validation deps' mocks
     // into this shared harness. That call-site is guarded by its own comment instead.
-    mount(
-      "light",
+    app.render(
       bodySurface(
         createElement(
           ColoredText,
@@ -454,6 +442,7 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
           "Terms imported",
         ),
       ),
+      { forceColorScheme: "light" },
     );
     const text = await waitForEl('[data-testid="success"]');
     const surface = await waitForEl('[data-testid="surface"]');
@@ -473,13 +462,13 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
       // resolver in light (Mantine's yellow-9 on yellow-1 = 2.69:1 fails even 3:1;
       // red-9 on red-1 = 4.51:1 is a fragile hairline). The Alert owns both the title
       // colour and its tint background, so this is self-contained.
-      mount(
-        "light",
+      app.render(
         createElement(
           StatusAlert,
           { color, title: "Heads up" },
           "Body copy for the alert.",
         ),
+        { forceColorScheme: "light" },
       );
       const alert = await waitForEl('[role="alert"]');
       // Scope the title lookup to the alert and poll for it, so a Mantine markup

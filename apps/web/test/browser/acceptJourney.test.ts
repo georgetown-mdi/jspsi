@@ -5,7 +5,6 @@ import { afterEach, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so components render with their real geometry:
 // without it the Stepper's completed-step icon has no size bound and blankets
@@ -21,10 +20,7 @@ import {
 import { WAITING_STAGE_ID, stagesFor } from "@bench/exchangeRun";
 import { AcceptorBench } from "@bench/AcceptorBench";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount } from "./renderApp";
 
 import type {
   InvitationToken,
@@ -147,28 +143,17 @@ function csvFile(content: string): File {
   return new File([content], "cohort_intake.csv", { type: "text/csv" });
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   settledRun.capturedSignal = undefined;
   window.location.hash = "";
 });
 
 test("acceptor journey reaches Done with a downloadable result driven only through the UI", async () => {
   window.location.hash = await encodeRunToken();
-  mount(createElement(AcceptorBench));
+  app.render(createElement(AcceptorBench));
 
   // Review configuration -> Continue. The decode-to-terms handoff is the acquire
   // phase's own state reaching the first rendered screen.

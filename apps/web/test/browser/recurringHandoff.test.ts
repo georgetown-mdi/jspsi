@@ -5,17 +5,13 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
 
 import { RecurringHandoff } from "@bench/RecurringHandoff";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 const JOB_ID = "job-9";
 
@@ -97,22 +93,11 @@ function stubHandoff(body: unknown | null): void {
   );
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 afterEach(async () => {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  await flushPendingUpdates();
+  app.unmount();
   vi.unstubAllGlobals();
 });
 
@@ -121,13 +106,13 @@ const HANDOFF_HEADING = "Run this exchange on a schedule";
 describe("RecurringHandoff panel", () => {
   test("shows the Direct-run command and both scheduler snippets", async () => {
     stubHandoff(COMMAND_HANDOFF);
-    mount(createElement(RecurringHandoff, { jobId: JOB_ID }));
+    app.render(createElement(RecurringHandoff, { jobId: JOB_ID }));
 
     await expect
       .element(page.getByRole("heading", { name: HANDOFF_HEADING }))
       .toBeInTheDocument();
 
-    const text = () => container?.textContent ?? "";
+    const text = () => app.container.textContent;
     // The command template, including the portable pin and the placeholder credential.
     expect(text()).toContain("psilink sftp://sftp.example.gov:2222/exchange");
     expect(text()).toContain("--server-host-key-fingerprint=SHA256:");
@@ -147,13 +132,13 @@ describe("RecurringHandoff panel", () => {
 
   test("quotes a spaced Direct label POSIX for cron and cmd-style for Windows", async () => {
     stubHandoff(SPACED_COMMAND_HANDOFF);
-    mount(createElement(RecurringHandoff, { jobId: JOB_ID }));
+    app.render(createElement(RecurringHandoff, { jobId: JOB_ID }));
 
     await expect
       .element(page.getByRole("heading", { name: HANDOFF_HEADING }))
       .toBeInTheDocument();
 
-    const text = () => container?.textContent ?? "";
+    const text = () => app.container.textContent;
     // The cron line honors POSIX single quotes; the Windows /TR example escapes
     // the cmd-honored double quotes so schtasks preserves them.
     expect(text()).toContain("'--identity=Agency A'");
@@ -162,13 +147,13 @@ describe("RecurringHandoff panel", () => {
 
   test("shows the config template and the key-file copy step for an invitation run", async () => {
     stubHandoff(CONFIG_HANDOFF);
-    mount(createElement(RecurringHandoff, { jobId: JOB_ID }));
+    app.render(createElement(RecurringHandoff, { jobId: JOB_ID }));
 
     await expect
       .element(page.getByRole("heading", { name: HANDOFF_HEADING }))
       .toBeInTheDocument();
 
-    const text = () => container?.textContent ?? "";
+    const text = () => app.container.textContent;
     // The config template and the fixed exchange command.
     expect(text()).toContain("channel: sftp");
     expect(text()).toContain("psilink exchange input.csv results.csv");
@@ -180,10 +165,10 @@ describe("RecurringHandoff panel", () => {
 
   test("renders nothing when the hand-off is unavailable (non-blocking)", async () => {
     stubHandoff(null);
-    mount(createElement(RecurringHandoff, { jobId: JOB_ID }));
+    app.render(createElement(RecurringHandoff, { jobId: JOB_ID }));
     // Give the fetch a tick to resolve to a 404, then confirm the panel never
     // appears (only the provider's injected <style> occupies the container).
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(container?.textContent).not.toContain(HANDOFF_HEADING);
+    expect(app.container.textContent).not.toContain(HANDOFF_HEADING);
   });
 });

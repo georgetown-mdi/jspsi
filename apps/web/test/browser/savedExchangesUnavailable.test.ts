@@ -5,16 +5,12 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
 
 import { SavedExchanges, SavedExchangesHome } from "@bench/SavedExchanges";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount } from "./renderApp";
 
 // The store-unavailable behavior, rendered, for both routes. When the managed store
 // cannot be opened at all (private mode with storage blocked, an engine without
@@ -40,26 +36,13 @@ vi.mock("@psi/managedExchangeStore", async (importOriginal) => {
   };
 });
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
+const app = createAppMount();
 
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
-
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
+afterEach(app.unmount);
 
 describe("store unavailable", () => {
   test("the home route renders the quick path directly, no degrade banner", async () => {
-    mount(createElement(SavedExchangesHome));
+    app.render(createElement(SavedExchangesHome));
 
     // The one-off flow itself, not the list's degrade message.
     await expect
@@ -86,7 +69,7 @@ describe("store unavailable", () => {
   });
 
   test("the always-list route degrades with a clear message, not an error", async () => {
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     await expect
       .element(

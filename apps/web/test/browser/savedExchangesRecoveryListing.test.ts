@@ -6,7 +6,6 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 import { page } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
 
@@ -25,11 +24,9 @@ import {
 import { SavedExchanges } from "@bench/SavedExchanges";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
 
 // The read-failed recovery listing, against real Chromium (real IndexedDB). Unlike
 // savedExchangesFailed.test.ts, which mocks the strict read to always reject, this
@@ -100,25 +97,14 @@ async function rawLocalPut(id: string, value: unknown): Promise<void> {
   }
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 beforeEach(async () => {
   await clearManagedExchanges();
 });
 
 afterEach(async () => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   await clearManagedExchanges();
 });
 
@@ -138,7 +124,7 @@ describe("read-failed recovery listing", () => {
     // Precondition: the strict list read rejects wholesale on the bad record.
     await expect(listManagedExchanges()).rejects.toThrow();
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     // The read-failed surface stands, and the recovery listing shows both entries.
     await expect
@@ -183,7 +169,7 @@ describe("read-failed recovery listing", () => {
       schemaVersion: "psilink-managed-exchange/v2",
     });
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     await expect
       .element(page.getByText("Riverbend quarterly"))
@@ -211,7 +197,7 @@ describe("recovery listing: the delete confirm's backup custody note", () => {
     });
     if (seedState) await seedState(good.id);
     await expect(listManagedExchanges()).rejects.toThrow();
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
     await expect
       .element(page.getByText(label === "" ? "(unnamed exchange)" : label))
       .toBeInTheDocument();
@@ -260,7 +246,7 @@ describe("recovery listing: the delete confirm's backup custody note", () => {
     await rawLocalPut(good.id, { backup: { backedUpAt: "not-an-instant" } });
     await expect(listManagedLocalState()).rejects.toThrow();
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
     await expect
       .element(page.getByText("Doubtful partnership"))
       .toBeInTheDocument();

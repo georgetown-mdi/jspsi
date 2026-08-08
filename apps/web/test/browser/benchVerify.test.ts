@@ -5,7 +5,6 @@ import { afterEach, describe, expect, test } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import {
   buildExchangeRecord,
@@ -15,7 +14,7 @@ import {
 
 import { VerifyReceiptBench } from "@bench/VerifyReceiptBench";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
 import type {
   AssociationTable,
@@ -24,8 +23,6 @@ import type {
   LinkageTerms,
   VerificationKeys,
 } from "@psilink/core";
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
 
 const LOCAL_TERMS: LinkageTerms = {
   version: "1.0.0",
@@ -78,15 +75,7 @@ function csvFile(name: string, content: string): File {
   return new File([content], name, { type: "text/csv" });
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 // The Mantine Dropzone renders a hidden file input; the page's dropzones appear
 // in DOM order (record, keys, then the two re-supply CSVs once the section is
@@ -99,18 +88,13 @@ function fileInputAt(index: number): HTMLElement {
 // The page mounts its dropzones after the first render; wait for the heading so
 // the file inputs exist before the first upload.
 async function mountVerifyBench() {
-  mount(createElement(VerifyReceiptBench));
+  app.render(createElement(VerifyReceiptBench));
   await expect
     .element(page.getByRole("heading", { level: 1 }))
     .toHaveTextContent("Verify a receipt");
 }
 
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
+afterEach(app.unmount);
 
 describe("verify receipt bench", () => {
   test("full happy path: record + keys + re-supplied files reach a verified verdict", async () => {

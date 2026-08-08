@@ -5,14 +5,10 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import { NotFound } from "@components/NotFound";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount } from "./renderApp";
 
 // NotFound reaches the home route through Mantine's polymorphic `component` prop
 // (`<Button component={Link} to="/">`). With the stubbed Link surfacing `to` as
@@ -23,28 +19,16 @@ vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-// Mount under the real app provider config, the way the running app composes it.
-function mount(node: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(node));
-}
+const app = createAppMount();
 
 afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   vi.restoreAllMocks();
 });
 
 describe("NotFound", () => {
   test("'Start over' renders as a link to the home route", async () => {
-    mount(createElement(NotFound));
+    app.render(createElement(NotFound));
 
     // role=link (not button) confirms Mantine honoured `component={Link}` rather
     // than falling back to its default <button>; the href confirms `to` was
@@ -59,7 +43,7 @@ describe("NotFound", () => {
     const back = vi
       .spyOn(window.history, "back")
       .mockImplementation(() => undefined);
-    mount(createElement(NotFound));
+    app.render(createElement(NotFound));
 
     const goBack = page.getByRole("button", { name: "Go back" });
     await expect.element(goBack).toBeInTheDocument();
@@ -69,7 +53,7 @@ describe("NotFound", () => {
   });
 
   test("shows a default message when given no children", async () => {
-    mount(createElement(NotFound));
+    app.render(createElement(NotFound));
 
     await expect
       .element(page.getByText("The page you are looking for does not exist."))

@@ -5,16 +5,12 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
 
 import { ManageExchangeOffer } from "@bench/ManageExchangeOffer";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount } from "./renderApp";
 
 // The offer's store-availability gate, rendered. Before the form, the panel probes
 // whether this browser can open the managed store at all: when it can, the label and
@@ -34,28 +30,17 @@ vi.mock("@psi/managedExchangeStore", () => ({
   probeManagedStoreOpen: () => probeStoreOpen(),
 }));
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   probeStoreOpen.mockReset();
 });
 
 describe("manage-exchange offer store gate", () => {
   test("an available store renders the label and max-age form", async () => {
     probeStoreOpen.mockResolvedValue(true);
-    mount(
+    app.render(
       createElement(ManageExchangeOffer, {
         status: "idle",
         handleCaptured: false,
@@ -82,7 +67,7 @@ describe("manage-exchange offer store gate", () => {
 
   test("an unavailable store renders the honest state and no form inputs", async () => {
     probeStoreOpen.mockResolvedValue(false);
-    mount(
+    app.render(
       createElement(ManageExchangeOffer, {
         status: "idle",
         handleCaptured: false,

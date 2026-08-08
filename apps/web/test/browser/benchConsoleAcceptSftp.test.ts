@@ -5,7 +5,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
@@ -19,10 +18,7 @@ import {
 import { AcceptorBench } from "@bench/AcceptorBench";
 import { SERVER_JOB_KEEP_OPEN_BODY } from "@bench/BenchRunSurface";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type {
   ConnectionEndpoint,
@@ -213,22 +209,11 @@ function stubSftpAccept(): {
   };
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 afterEach(async () => {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  await flushPendingUpdates();
+  app.unmount();
   window.location.hash = "";
   window.localStorage.clear();
   vi.unstubAllGlobals();
@@ -254,7 +239,7 @@ describe("console SFTP accept unsupported-shape gate", () => {
   test("a split-directory SFTP endpoint is refused at review, pointing at the CLI", async () => {
     stubSftpAccept();
     window.location.hash = await encodeToken(SPLIT_SFTP_ENDPOINT);
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
 
     await expect
       .element(page.getByText("Invitation from County Health Department"))
@@ -279,7 +264,7 @@ describe("console SFTP accept: author-then-launch", () => {
   test("blocks launch until the operator authors a connection with a fingerprint", async () => {
     stubSftpAccept();
     window.location.hash = await encodeToken(SFTP_ENDPOINT);
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     await reachColumnsStep();
 
     // The partner-named server is shown, and launch is blocked with an explanatory
@@ -302,7 +287,7 @@ describe("console SFTP accept: author-then-launch", () => {
   test("authors from the operator's own fields and runs on the appliance", async () => {
     const api = stubSftpAccept();
     window.location.hash = await encodeToken(SFTP_ENDPOINT);
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     await reachColumnsStep();
 
     // The partner-supplied locator is shown before authoring.

@@ -5,7 +5,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
@@ -19,10 +18,7 @@ import {
 import { AcceptorBench } from "@bench/AcceptorBench";
 import { SERVER_JOB_KEEP_OPEN_BODY } from "@bench/BenchRunSurface";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type {
   ConnectionEndpoint,
@@ -101,24 +97,12 @@ const WEBRTC_ENDPOINT: ConnectionEndpoint = {
   path: "/api/",
 };
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 afterEach(async () => {
-  // Let the async decode's state update flush before the synchronous unmount, so
-  // teardown never races a render.
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  // The invitation decode is async, so its state update can land at unmount.
+  await flushPendingUpdates();
+  app.unmount();
   window.location.hash = "";
   // A server-job accept persists a strand-recovery record; clear it so the next
   // test's idle bench does not re-attach to a prior run's id.
@@ -129,7 +113,7 @@ afterEach(async () => {
 describe("console acceptor unsupported-shape gate", () => {
   test("a single-directory filedrop is blocked when no rendezvous mount is configured", async () => {
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
 
     // The terms still render (transparency), but with no rendezvous mount the honest
     // block replaces the Continue action and names the env var to set.
@@ -153,7 +137,7 @@ describe("console acceptor unsupported-shape gate", () => {
 
   test("a webrtc invitation is out of scope on the appliance, pointing at the web app", async () => {
     window.location.hash = await encodeToken(WEBRTC_ENDPOINT);
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
 
     await expect
       .element(page.getByText("Invitation from County Health Department"))
@@ -183,7 +167,7 @@ describe("console acceptor never renders the recurring-save offer", () => {
   // offer panel.
   test("a webrtc invitation is blocked at review with no offer", async () => {
     window.location.hash = await encodeToken(WEBRTC_ENDPOINT);
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
 
     // The unsupported block replaces the Continue action, so the flow never reaches the
     // launched step the offer needs.
@@ -229,7 +213,7 @@ describe("console acceptor advisory shared-folder locator", () => {
   test("shows the partner's locator read-only and sanitized at the consent step", async () => {
     stubRendezvousMounted();
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
 
     // With a rendezvous mount configured the accept is runnable: the Continue action
     // replaces the unsupported block. Advancing reaches the consent step.
@@ -406,7 +390,7 @@ describe("console acceptor server-job keep-open callout", () => {
   test("holds the callout while the appliance runs the accept, then clears it once the run settles", async () => {
     const api = stubServerJobAccept();
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
 
     // Review -> consent: the rendezvous mount makes the filedrop accept runnable.
     await page
@@ -465,7 +449,7 @@ describe("console acceptor re-attaches on a busy create", () => {
       handoff: REATTACH_HANDOFF,
     });
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     await reachAcceptStart();
 
     // The busy create re-attaches to the occupying exchange under recovery-style
@@ -529,7 +513,7 @@ describe("console acceptor re-attaches on a busy create", () => {
       conflict: { jobId: "job-live", status: "running", holdProbe: true },
     });
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     await reachAcceptStart();
 
     // The moment the 409 is known -- before the probe settles -- the surface heads

@@ -5,7 +5,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so components render with their real
 // geometry: without it the Stepper's completed-step icon has no size
@@ -30,10 +29,7 @@ import { BenchLobby } from "@bench/BenchLobby";
 import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount } from "./renderApp";
 
 import type {
   InvitationToken,
@@ -243,24 +239,13 @@ function csvFile(content: string): File {
   return new File([content], "cohort_intake.csv", { type: "text/csv" });
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 afterEach(() => {
   // Backstop for the fake-Date test below: a failure between useFakeTimers and
   // its finally must not leak a frozen clock into the rest of the suite.
   vi.useRealTimers();
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   navigation.calls.length = 0;
   csvLoadHarness.defer = false;
   csvLoadHarness.fail = undefined;
@@ -279,7 +264,7 @@ async function consentAndName() {
 
 describe("bench lobby: review invitation", () => {
   test("a pasted token navigates to the accept bench with the token in the hash", async () => {
-    mount(createElement(BenchLobby));
+    app.render(createElement(BenchLobby));
     await expect.element(page.getByLabelText("Invitation")).toBeInTheDocument();
 
     // A deep-link URL: the token is everything after the first '#'.
@@ -295,7 +280,7 @@ describe("bench lobby: review invitation", () => {
   });
 
   test("Review invitation is disabled until the field holds a usable token", async () => {
-    mount(createElement(BenchLobby));
+    app.render(createElement(BenchLobby));
     const review = page.getByRole("button", { name: "Review invitation" });
     // Empty field: nothing to review, so the action is withheld.
     await expect.element(review).toBeDisabled();
@@ -323,7 +308,7 @@ describe("bench lobby: review invitation", () => {
 describe("acceptor bench: decode gate", () => {
   test("an expired invitation renders the focused cannot-accept alert", async () => {
     window.location.hash = await encodeExpiredToken();
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
 
     const alert = page.getByText("Cannot accept this invitation");
     await expect.element(alert).toBeInTheDocument();
@@ -343,7 +328,7 @@ describe("acceptor bench: decode gate", () => {
 
   test("an empty fragment renders the cannot-accept alert", async () => {
     window.location.hash = "";
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     await expect
       .element(page.getByText("Cannot accept this invitation"))
       .toBeInTheDocument();
@@ -354,7 +339,7 @@ describe("acceptor bench: decode gate", () => {
 
   test("a ready decode moves focus to the terms heading", async () => {
     window.location.hash = await encodeAcceptToken();
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     const heading = page.getByText("Invitation from County Health Department");
     await expect.element(heading).toBeInTheDocument();
     // headingRef + tabIndex=-1 on InvitationTerms's own heading, so a
@@ -381,7 +366,7 @@ describe("acceptor bench: decode gate", () => {
         path: "/api/",
       },
     });
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
 
     await expect
       .element(page.getByText("Cannot accept this invitation"))
@@ -397,7 +382,7 @@ describe("acceptor bench: decode gate", () => {
 describe("acceptor bench: review terms", () => {
   test("renders the full expanded terms with the unverified-name note and no condensation toggle", async () => {
     window.location.hash = await encodeAcceptToken();
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
 
     // The terms heading names the partner and takes focus on ready.
     await expect
@@ -441,7 +426,7 @@ describe("acceptor bench: review terms", () => {
 
   test("Continue advances to the consent step", async () => {
     window.location.hash = await encodeAcceptToken();
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     await expect
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
@@ -458,7 +443,7 @@ describe("acceptor bench: review terms", () => {
 describe("acceptor bench: consent gate and parse-behind-consent", () => {
   async function reachConsent() {
     window.location.hash = await encodeAcceptToken();
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     await expect
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
@@ -586,7 +571,7 @@ describe("acceptor bench: consent-step legal-agreement display", () => {
 
   async function reachConsentWith(terms: LinkageTerms) {
     window.location.hash = await encodeAcceptToken(terms);
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     await expect
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
@@ -659,7 +644,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
   // Consent, name, choose a file, and press Accept to land on the columns step.
   async function reachColumns(content: string) {
     window.location.hash = await encodeAcceptToken();
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     await expect
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
@@ -1024,7 +1009,7 @@ describe("acceptor columns step: disclosure summary sanitization", () => {
     );
     const verdict = acceptorVerdict(columns, acceptorTerms, editorState);
     const noop = () => undefined;
-    mount(
+    app.render(
       createElement(AcceptorColumnsStep, {
         linkageTerms: acceptorTerms,
         columns,
@@ -1087,7 +1072,7 @@ describe("acceptor columns step: the send summary is gated on the inviting party
       rows,
     );
     const noop = () => undefined;
-    mount(
+    app.render(
       createElement(AcceptorColumnsStep, {
         linkageTerms,
         columns,
@@ -1110,11 +1095,11 @@ describe("acceptor columns step: the send summary is gated on the inviting party
     await expect
       .element(page.getByText("What you will send to your partner"))
       .toBeInTheDocument();
-    expect(container!.textContent).toContain(noPayloadSentence);
-    expect(container!.textContent).not.toContain("For each matched row:");
+    expect(app.container.textContent).toContain(noPayloadSentence);
+    expect(app.container.textContent).not.toContain("For each matched row:");
     // The step's own lead-in drops its "except the columns you mark as shared"
     // clause with the disclosure it would have promised.
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "Nothing here is sent to your partner.",
     );
     // And the spoken account with it: the grid's live region at the disclosure
@@ -1138,11 +1123,11 @@ describe("acceptor columns step: the send summary is gated on the inviting party
     await expect
       .element(page.getByTestId("disclosure-summary-announcement"))
       .toHaveTextContent("Columns sent to your partner: risk_score.");
-    expect(container!.textContent).not.toContain(noPayloadSentence);
+    expect(app.container.textContent).not.toContain(noPayloadSentence);
     await expect
       .element(page.getByText("For each matched row:", { exact: false }))
       .toHaveTextContent("risk_score");
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "Nothing here is sent to your partner except the columns you mark as shared.",
     );
   });
@@ -1163,7 +1148,7 @@ describe("acceptor columns step: the send summary is gated on the inviting party
     await expect
       .element(page.getByTestId("disclosure-summary-announcement"))
       .toHaveTextContent("Columns sent to your partner: risk_score.");
-    expect(container!.textContent).not.toContain(noPayloadSentence);
+    expect(app.container.textContent).not.toContain(noPayloadSentence);
     await expect
       .element(page.getByText("For each matched row:", { exact: false }))
       .toHaveTextContent("risk_score");
@@ -1177,7 +1162,7 @@ describe("acceptor bench: run and completion", () => {
   // once the captured lifecycle exists so callers can drive its seams right away.
   async function reachRun(hash?: string) {
     window.location.hash = hash ?? (await encodeRunToken());
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     await expect
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
@@ -1393,7 +1378,7 @@ describe("acceptor bench: run and completion", () => {
     // footer attests "the results above are all your partner received about your
     // data," so a ledger that hid this column would make that attestation false.
     window.location.hash = await encodeRunToken();
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     await expect
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
@@ -1716,7 +1701,7 @@ describe("acceptor bench: run and completion", () => {
     // partial-coverage advisory at launch, which the run surfaces in both the
     // work column's Problems block and its own amber alert.
     window.location.hash = await encodeRunToken();
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
     await expect
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();

@@ -5,7 +5,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so components render with their real
 // geometry: without it the Stepper's completed-step icon has no size
@@ -17,10 +16,7 @@ import { encodeInvitation, generateSharedSecret } from "@psilink/core";
 import { deepLinkFor, tokenFromInput } from "@psi/invitation";
 import { AcceptorBench } from "@bench/AcceptorBench";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount } from "./renderApp";
 
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 
@@ -67,21 +63,10 @@ async function mintInvitation(): Promise<string> {
   return encodeInvitation(token);
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   window.location.hash = "";
   vi.restoreAllMocks();
 });
@@ -106,7 +91,7 @@ describe("deep-link landing on the bench acceptor", () => {
     // The /accept route runs client-side and mounts AcceptorBench, which reads the
     // token from the fragment. Set the fragment and mount the same component.
     window.location.hash = token;
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
 
     // The decoded terms render: the inviter identity heading proves the token rode
     // the fragment through to a successful decode, not a "cannot accept" error.

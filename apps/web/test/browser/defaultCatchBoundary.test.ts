@@ -5,15 +5,11 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import { DefaultCatchBoundary } from "@components/DefaultCatchBoundary";
 import { whenDiagnostic } from "@utils/diagnostics";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount } from "./renderApp";
 
 // The router seams DefaultCatchBoundary touches beyond the shared Link/navigate
 // stub:
@@ -54,21 +50,14 @@ vi.mock("@tanstack/react-router", async () => ({
 // the gate. The gate's own env/flag logic is covered by test/unit/diagnostics.test.ts.
 vi.mock("@utils/diagnostics", () => ({ whenDiagnostic: vi.fn() }));
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-// Mount under the real app provider config, the way the running app composes it.
-function mount(node: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(node));
-}
+const app = createAppMount();
 
 // DefaultCatchBoundary takes ErrorComponentProps; it reads only `error`, but the
 // type requires `reset`, so a no-op stands in for it.
 function mountBoundary(error: Error = new Error("boom")) {
-  mount(createElement(DefaultCatchBoundary, { error, reset: () => undefined }));
+  app.render(
+    createElement(DefaultCatchBoundary, { error, reset: () => undefined }),
+  );
 }
 
 // DefaultCatchBoundary routes its caught-error console.error through
@@ -82,10 +71,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   routerMock.matchedRouteId = "/some-route";
   vi.restoreAllMocks();
   routerMock.invalidate.mockReset();

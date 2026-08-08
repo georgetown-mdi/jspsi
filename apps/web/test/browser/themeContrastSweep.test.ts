@@ -4,7 +4,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so the swept surfaces render with their real
 // geometry and painted backgrounds (the .page ground, the input fills), not the
@@ -18,11 +17,10 @@ import { BenchLobby } from "@bench/BenchLobby";
 import { InviterBench } from "@bench/InviterBench";
 import { VerifyReceiptBench } from "@bench/VerifyReceiptBench";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
 
 // BREADTH contrast sweep over the primary rendered web routes, complementing --
 // not replacing -- test/browser/themeContrast.test.ts. That harness pins a
@@ -123,21 +121,10 @@ vi.mock("@psi/exchangeLifecycle", () => ({
   runExchangeLifecycle: () => Promise.resolve(),
 }));
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(scheme: "light" | "dark", node: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(node, { forceColorScheme: scheme }));
-}
+const app = createAppMount();
 
 afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   window.location.hash = "";
 });
 
@@ -350,9 +337,9 @@ async function mountAndSweep(
   scheme: "light" | "dark",
   node: ReactNode,
 ): Promise<ReturnType<typeof sweepContrast>> {
-  mount(scheme, node);
-  await expect.poll(() => container!.querySelector("h1")).not.toBeNull();
-  for (const control of container!.querySelectorAll<HTMLElement>(
+  app.render(node, { forceColorScheme: scheme });
+  await expect.poll(() => app.container.querySelector("h1")).not.toBeNull();
+  for (const control of app.container.querySelectorAll<HTMLElement>(
     ".mantine-Button-root, .mantine-ActionIcon-root",
   )) {
     if (control.matches(":hover")) {
@@ -360,7 +347,7 @@ async function mountAndSweep(
       await expect.poll(() => control.matches(":hover")).toBe(false);
     }
   }
-  return sweepContrast(container!);
+  return sweepContrast(app.container);
 }
 
 const ROUTES: Array<{ route: string; node: () => Promise<ReactNode> }> = [

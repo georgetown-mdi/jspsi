@@ -6,7 +6,6 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 import { page } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
 
@@ -22,11 +21,9 @@ import {
 import { BenchLobby } from "@bench/BenchLobby";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
 
 // The component's delete goes through this module. It is mocked so the delete-failure
 // test can make a single delete reject while every other case uses the real
@@ -78,25 +75,14 @@ function newExchange(
   };
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 beforeEach(async () => {
   await clearManagedExchanges();
 });
 
 afterEach(async () => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   deleteOverride = undefined;
   await clearManagedExchanges();
 });
@@ -105,7 +91,7 @@ describe("home route: conditional on a stored exchange existing", () => {
   test("populated -> the list surface renders at the home route", async () => {
     await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
 
-    mount(createElement(SavedExchangesHome));
+    app.render(createElement(SavedExchangesHome));
 
     await expect
       .element(page.getByText("Riverbend quarterly"))
@@ -116,7 +102,7 @@ describe("home route: conditional on a stored exchange existing", () => {
   });
 
   test("empty -> the quick path renders at the home route, not an empty list", async () => {
-    mount(createElement(SavedExchangesHome));
+    app.render(createElement(SavedExchangesHome));
 
     // The first-run landing is the quick (invite/accept) path: its two primary
     // actions, not the list's designed empty state.
@@ -146,7 +132,7 @@ describe("home route: conditional on a stored exchange existing", () => {
 
 describe("lobby: the recurring-exchange pointer is gated on a saved exchange", () => {
   test("no saved exchange -> the restore-from-backup pointer stands, the run-again framing is withheld", async () => {
-    mount(createElement(BenchLobby));
+    app.render(createElement(BenchLobby));
 
     // The restore path must stay discoverable with nothing saved: a wholesale
     // eviction leaves no rows yet is exactly when a backup import matters.
@@ -164,7 +150,7 @@ describe("lobby: the recurring-exchange pointer is gated on a saved exchange", (
   test("a saved exchange -> the run-again framing appears", async () => {
     await createManagedExchange(newExchange());
 
-    mount(createElement(BenchLobby));
+    app.render(createElement(BenchLobby));
 
     await expect
       .element(
@@ -178,7 +164,7 @@ describe("saved list route: the always-list surface", () => {
   test("populated: a stored exchange appears as a runnable row", async () => {
     await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     await expect
       .element(page.getByText("Riverbend quarterly"))
@@ -189,7 +175,7 @@ describe("saved list route: the always-list surface", () => {
   });
 
   test("empty: the designed empty state, not a blank list", async () => {
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     // The empty state explains what a managed exchange is and offers create,
     // accept, and the standing import affordance.
@@ -211,7 +197,7 @@ describe("saved list route: the always-list surface", () => {
   });
 
   test("the empty state's create link points at the quick path, accept at the accept flow", async () => {
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     const createLink = page.getByRole("link", {
       name: "Set up a recurring exchange",
@@ -230,7 +216,7 @@ describe("saved list route: the always-list surface", () => {
     await markManagedExchangeBackedUp(backedUp.id, "2026-07-10T09:00:00.000Z");
     await createManagedExchange(newExchange({ label: "Fresh partnership" }));
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     await expect
       .element(page.getByText("Backed up as of", { exact: false }))
@@ -243,7 +229,7 @@ describe("saved list route: the always-list surface", () => {
   test("a populated list offers the quick path as a one-off alternative", async () => {
     await createManagedExchange(newExchange());
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     const quick = page.getByRole("link", {
       name: "Set up or accept an exchange",
@@ -255,7 +241,7 @@ describe("saved list route: the always-list surface", () => {
   test("a populated list offers a first-class create entry into the invite/configure flow", async () => {
     await createManagedExchange(newExchange());
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     const create = page.getByRole("link", {
       name: "Set up a recurring exchange",
@@ -272,7 +258,7 @@ describe("saved list route: the always-list surface", () => {
       newExchange({ label: "Accepted partnership", side: "acceptor" }),
     );
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     await expect
       .element(page.getByText("You invite", { exact: false }))
@@ -287,7 +273,7 @@ describe("saved list route: delete is a first-class, always-available action", (
   test("delete confirms, then removes the exchange from the list", async () => {
     await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     await expect
       .element(page.getByText("Riverbend quarterly"))
@@ -325,7 +311,7 @@ describe("saved list route: delete is a first-class, always-available action", (
     );
     await markManagedExchangeBackedUp(created.id, "2026-07-10T09:00:00.000Z");
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     await expect
       .element(page.getByText("Backed up as of", { exact: false }))
@@ -351,7 +337,7 @@ describe("saved list route: delete is a first-class, always-available action", (
   test("a never-backed-up exchange's confirm carries no custody note", async () => {
     await createManagedExchange(newExchange({ label: "Fresh partnership" }));
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     await page.getByRole("button", { name: "Delete" }).click();
 
@@ -373,7 +359,7 @@ describe("saved list route: delete is a first-class, always-available action", (
     );
     await markManagedExchangeSpent(created.id, "2026-07-12T09:00:00.000Z");
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     await expect
       .element(page.getByRole("button", { name: "Open" }))
@@ -391,7 +377,7 @@ describe("saved list route: delete is a first-class, always-available action", (
     // must not close silently over a row that is still there.
     deleteOverride = () => Promise.reject(new Error("delete failed"));
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     await expect
       .element(page.getByText("Riverbend quarterly"))
@@ -422,7 +408,7 @@ describe("saved list route: delete is a first-class, always-available action", (
     await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
     deleteOverride = () => Promise.reject(new Error("delete failed"));
 
-    mount(createElement(SavedExchanges));
+    app.render(createElement(SavedExchanges));
 
     await page.getByRole("button", { name: "Delete" }).click();
     await page
