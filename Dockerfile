@@ -101,6 +101,15 @@ FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951
 # docs/spec/DEPENDENCY_PINS.md, which also holds the residual npm float.
 RUN apk add --no-cache samba-client
 
+# samba-client pulls in linux-pam, whose /usr/sbin/unix_chkpwd lands setgid
+# `shadow`. Neither role authenticates a Unix account, so the bit buys the image
+# nothing, and taking it off makes the helper a non-boundary outright rather than
+# one whose reach rests on what /etc/shadow happens to carry. image_smoke.yaml
+# measures the built image's whole setuid/setgid inventory against the empty set
+# this leaves, so a second bit cannot arrive unremarked; see
+# docs/spec/CONTAINER_IMAGES.md.
+RUN chmod g-s /usr/sbin/unix_chkpwd
+
 WORKDIR /app
 COPY --from=builder /build/node_modules node_modules
 COPY --from=builder /build/packages/core/package.json packages/core/
