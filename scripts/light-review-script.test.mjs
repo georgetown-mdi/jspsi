@@ -207,26 +207,59 @@ describe.each(SHAPES)("light-review role mode ($shape args)", ({ deliver }) => {
   });
 });
 
+const lensArgs = { docs: [], role: null, claims: [] };
+const review = {
+  findings: [{ name: "n", description: "d", severity: "nit", file: "a.ts" }],
+  simplerShape: { simpler: false, reason: "no" },
+};
+const clusters = {
+  clusters: [
+    {
+      name: "n",
+      description: "d",
+      severity: "nit",
+      file: "a.ts",
+      flaggedBy: 1,
+      verification: "confirmed",
+      verificationNote: "read it",
+    },
+  ],
+};
+const lensReply = (prompt, options) =>
+  options.label === "consolidator" ? clusters : review;
+
+// Every delivery that is not an object of named arguments, and so resolves no
+// field the round needs. Tolerating one runs the whole round on prompts whose
+// arguments are missing rather than stopping.
+const UNRESOLVABLE = [[], 42, "text", true, null, undefined];
+
+describe.each(SHAPES)(
+  "light-review argument shape ($shape args)",
+  ({ deliver }) => {
+    const run = runner(deliver);
+
+    it("refuses a delivery that is not an object of named arguments", async () => {
+      for (const delivered of UNRESOLVABLE) {
+        await expect(
+          run(delivered, () => {
+            throw new Error("must not spawn");
+          }),
+          JSON.stringify(delivered),
+        ).rejects.toThrow(
+          /expected an object of named arguments, or the JSON text of one/,
+        );
+      }
+    });
+
+    it("resolves an object of named arguments and runs the round on it", async () => {
+      const result = await run(lensArgs, lensReply);
+      expect(result.reviewerCount).toBe(3);
+    });
+  },
+);
+
 describe.each(SHAPES)("light-review lens mode ($shape args)", ({ deliver }) => {
   const run = runner(deliver);
-  const lensArgs = { docs: [], role: null, claims: [] };
-  const review = {
-    findings: [{ name: "n", description: "d", severity: "nit", file: "a.ts" }],
-    simplerShape: { simpler: false, reason: "no" },
-  };
-  const clusters = {
-    clusters: [
-      {
-        name: "n",
-        description: "d",
-        severity: "nit",
-        file: "a.ts",
-        flaggedBy: 1,
-        verification: "confirmed",
-        verificationNote: "read it",
-      },
-    ],
-  };
 
   it("refuses claims handed to it without a role to run them under", async () => {
     for (const role of [null, undefined]) {
@@ -242,9 +275,7 @@ describe.each(SHAPES)("light-review lens mode ($shape args)", ({ deliver }) => {
   });
 
   it("consolidates what the reviewers that returned found", async () => {
-    const result = await run(lensArgs, (prompt, options) =>
-      options.label === "consolidator" ? clusters : review,
-    );
+    const result = await run(lensArgs, lensReply);
     expect(result.reviewerCount).toBe(3);
     expect(result.clusters).toEqual(clusters.clusters);
   });

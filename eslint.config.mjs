@@ -115,6 +115,7 @@ export default tseslint.config(
       // `args`, `agent`, and `parallel` injected, ending in a top-level return
       // that no ES module parser accepts. Prettier formats these files; their
       // agent() model pins are checked by `npm run check:workflow-agent-models`
+      // and their handling of `args` by `npm run check:workflow-args-resolve`,
       // and both are executed as function bodies by their colocated tests.
       "scripts/*-workflow.mjs",
     ],

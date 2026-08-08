@@ -88,6 +88,16 @@ jobs:
       # approval.
       - name: Workflow agent models
         run: npm run check:workflow-agent-models
+      # A Workflow script's arguments arrive as `args`, either as the caller's
+      # object or as JSON text of it. Any other delivery carries no named field
+      # and reads as undefined rather than failing, so the round spawns its
+      # agents with the caller's arguments simply missing from the prompts. Every
+      # committed script resolves once through resolveWorkflowArgs(args), which
+      # fails closed on a shape it cannot use; this fails on any other read of
+      # `args` in the same scanned blocks, so the guard cannot be sidestepped one
+      # field at a time.
+      - name: Workflow args resolve
+        run: npm run check:workflow-args-resolve
       # Holds every action pin in .github/actions identical to one in
       # .github/workflows, the path the github-actions Dependabot block is
       # configured against, so a release or advisory surfacing on the workflow
