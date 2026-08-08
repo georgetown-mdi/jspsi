@@ -2727,6 +2727,48 @@ describe("FileSyncRendezvous entry-present peer hello window", () => {
     expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
   });
 
+  // The pair a lockless run killed just after it acked leaves behind: the peer's
+  // hello, and that run's own zero-length ack of it. Both residue shapes reach
+  // the same class of outcome -- a terminal UsageError, bounded well inside the
+  // budget, naming the file that has to go, and destroying neither -- but by
+  // different guards: an ack is an unexpected protocol file, so the pair is
+  // refused at entry and never reaches the unanswered-hello window the lone
+  // hello is timed by.
+  test("a leftover hello paired with a leftover ack of it is refused at entry", async () => {
+    const KILLED_ID = "aeb0f2c1-6d5f-4a17-9c02-7e51b8d4a390";
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, LEFTOVER_ID, flags);
+    const ack = ackMarkerName(KILLED_ID, helloStem(LEFTOVER_ID));
+    files.set(`${DIR}/${ack}`, Buffer.alloc(0));
+    const p = makeParty("aaa", { ...flags, ...budget() }, files);
+
+    const started = Date.now();
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    const elapsed = Date.now() - started;
+
+    expect(err).toBeInstanceOf(UsageError);
+    // Bounded: the refusal lands at entry, so neither the peer-wait budget nor
+    // the window inside it is what ended this run.
+    expect(elapsed).toBeLessThan(1000);
+    // Not a peer-wait timeout, so a consumer offers neither the both-swept
+    // advice nor anything else that blames the partner for a silence this run
+    // never waited out.
+    expect(isPeerWaitTimeout(err)).toBe(false);
+    // Attributed at the rendered boundary, which walks the cause chain: the
+    // refusal and its recovery step lead, and the ack is named below them.
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(rendered).toContain("--sweep-exchange-files");
+    expect(rendered).toContain(ack);
+    // Neither file is this party's to remove, and the operator was just told to
+    // clear them by hand.
+    expect(files.has(`${DIR}/${helloName(LEFTOVER_ID)}`)).toBe(true);
+    expect(files.has(`${DIR}/${ack}`)).toBe(true);
+  });
+
   test("records nothing when no peer hello predated the run", async () => {
     const files = new Map<string, Buffer>();
     placePeerHello(files, "zzz", flags);

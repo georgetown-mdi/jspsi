@@ -9,6 +9,8 @@ import {
   ConnectionClosedError,
   PeerAbortError,
   TransportPublishIndeterminateError,
+  isPeerWaitTimeout,
+  markPeerWaitTimeout,
 } from "../src/errors";
 
 // These assertions guard the operator-facing-error audit: the terminal
@@ -106,6 +108,62 @@ describe("errors whose recovery hint is per instance, not per class", () => {
       (err as { psilinkRecoveryHintEmitted?: unknown })
         .psilinkRecoveryHintEmitted,
     ).toBeUndefined();
+  });
+});
+
+describe("isPeerWaitTimeout cause-chain walk", () => {
+  test("finds the tag on an error two links down another error's cause", () => {
+    // No path inside this package wraps a tagged error, so the chain walk is
+    // exercised only from outside -- and a top-level property check passes every
+    // other suite. This is the case that separates the two.
+    const tagged = markPeerWaitTimeout(
+      new Error("synchronization has timed out"),
+    );
+    const middle = new Error("the exchange failed", { cause: tagged });
+    const outer = new Error("psilink exited", { cause: middle });
+
+    expect(isPeerWaitTimeout(outer)).toBe(true);
+    // The tag is the only own enumerable property markPeerWaitTimeout adds, and
+    // it sits on the innermost error alone: neither wrapper carries one, so a
+    // top-level read of the outer error finds nothing to answer with.
+    expect(Object.keys(tagged)).toHaveLength(1);
+    expect(Object.keys(outer)).toEqual([]);
+    expect(Object.keys(middle)).toEqual([]);
+  });
+
+  test("returns false on a cause cycle rather than walking it forever", () => {
+    // The cycle is built out of counting accessors rather than plain properties:
+    // without the seen-set the walk never returns, which would hang the run
+    // instead of failing it, so the chain refuses to be read past its own length.
+    let reads = 0;
+    const outer = new Error("outer");
+    const inner = new Error("inner");
+    const link = (from: Error, to: Error): void => {
+      Object.defineProperty(from, "cause", {
+        configurable: true,
+        get() {
+          reads += 1;
+          if (reads > 8)
+            throw new Error("the cause chain was walked past its own length");
+          return to;
+        },
+      });
+    };
+    link(outer, inner);
+    link(inner, outer);
+
+    expect(isPeerWaitTimeout(outer)).toBe(false);
+    expect(reads).toBe(2);
+  });
+
+  test("finds a tag that sits inside a cause cycle", () => {
+    const tagged = markPeerWaitTimeout(
+      new Error("synchronization has timed out"),
+    );
+    const outer = new Error("outer", { cause: tagged });
+    (tagged as { cause?: unknown }).cause = outer;
+
+    expect(isPeerWaitTimeout(outer)).toBe(true);
   });
 });
 

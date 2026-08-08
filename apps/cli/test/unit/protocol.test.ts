@@ -237,6 +237,7 @@ import {
   MESSAGE_HEADER_BYTES,
   AEAD_ENVELOPE_VERSION,
   sanitizeErrorForDisplay,
+  sanitizeForDisplay,
   DISPLAY_TRUNCATION_MARKER,
 } from "@psilink/core";
 import type { ExchangeRecord, VerificationKeys } from "@psilink/core";
@@ -1094,6 +1095,35 @@ test("the residue guidance renders in full for a configured peer_id longer than 
   expect(rendered).toContain("remove only if it persists");
 });
 
+// The residue filename is partner-chosen text that reaches the operator only
+// through this guidance, and the escaping happens at ONE altitude: the fragment
+// is composed RAW into the error and sanitizeErrorForDisplay escapes the whole
+// chain once where it is shown. Twice is not cosmetic -- sanitizeForDisplay
+// doubles a literal backslash on every pass, so one backslash in the name would
+// reach the operator as four and the name they are told to remove would not be
+// the name on disk. Both halves are asserted, because the presence check alone
+// passes on the doubled output too.
+test.each([
+  ["a literal backslash", "back\\slash"],
+  ["a non-ASCII code point", "你好"],
+  ["a control byte", "\x1b[31mred"],
+  ["an astral code point", "\u{1f600}"],
+])(
+  "a residue filename carrying %s is escaped once at the rendered boundary",
+  async (_, leftoverId) => {
+    const err = await runIntoLeftoverPeerHello(leftoverId);
+
+    const rendered = sanitizeErrorForDisplay(err);
+    const once = sanitizeForDisplay(`${leftoverId}-hello.json`);
+    expect(rendered).toContain(once);
+    expect(rendered).not.toContain(sanitizeForDisplay(once));
+    // The whole guidance survives the per-link cap, so the escaped name is the
+    // one the operator reads rather than a clipped prefix of it.
+    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(rendered).toContain("remove only if it persists");
+  },
+);
+
 // --- Both-parties-swept retry advice -----------------------------------------
 
 // Runs a lone party against the shared folder with no partner ever arriving.
@@ -1188,6 +1218,17 @@ async function runPartyToKeyExchangeTimeout(
   expect(result.status).toBe("rejected");
   return (result as PromiseRejectedResult).reason;
 }
+
+// The gate tests below compare against the imported constant, so rewriting
+// the constant to assert a definite cause keeps every one of them green. Only
+// the party that swept FIRST can observe the collision -- its own live hello
+// vanished; the second can only infer it, and a run that swept and then timed
+// out because the partner never started reads this line too. The hedge is what
+// keeps it a likely cause rather than a wrong diagnosis, so it is pinned on the
+// words.
+test("the both-swept advice is phrased as a likely cause, not a diagnosis", () => {
+  expect(BOTH_SWEPT_GUIDANCE).toContain("appear to have");
+});
 
 test("the both-swept advice appears on a flagged run that fails waiting for the partner", async () => {
   const err = await runLonePartyWithNoPartner({
