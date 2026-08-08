@@ -74,9 +74,10 @@ export class OperatorConfigError extends UsageError {
 
 /**
  * The family of pre-connection refusals raised when this party can no longer make
- * the outbound disclosure it recorded agreeing to. Two send-side gates raise it,
- * both from {@link prepareForExchange} and both comparing this party's OWN current
- * metadata against its OWN recorded set:
+ * the outbound disclosure it recorded agreeing to. The two send-side gates raise
+ * it from {@link prepareForExchange}, and a non-interactive caller that cannot ask
+ * for confirmation raises it through the same refusal builder; every raise
+ * compares this party's OWN current metadata against its OWN recorded set:
  *
  * - `assertDisclosureMatchesCommitment` -- the column set this party committed to
  *   send when the exchange was established has drifted from what its metadata now
