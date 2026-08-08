@@ -3133,6 +3133,170 @@ test("handler: offline accept-reuse writes an empty consented set verbatim (stri
   }
 });
 
+// --- accept-reuse warns when the re-acceptance drops the lock-in -------------
+
+// The distinctive clause of the removal warning, kept apart from the column list
+// and the remedy the assertions check separately.
+const DROPPED_LOCK_IN_CLAUSE =
+  "removes the received-payload lock-in recorded in";
+
+/**
+ * Every warning a reuse acceptance emits over a config recording `recorded` as
+ * its received-payload lock-in, re-accepted from an invitation carrying
+ * `disclosed`. Both accept-reuse paths reconcile the same kept config, so `mode`
+ * drives either through one fixture; the saved connection agrees with the online
+ * URL, so the reuse verdict carries no connection warning of its own.
+ */
+async function reuseLockInWarnings(params: {
+  recorded: string[] | undefined;
+  disclosed: string[] | undefined;
+  loggerName: string;
+  mode?: "online" | "offline";
+}): Promise<string[]> {
+  const { recorded, disclosed, loggerName, mode = "offline" } = params;
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-lockin-"));
+  const configFile = path.join(dir, "psilink.yaml");
+  const keyFile = path.join(dir, ".psilink.key");
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
+  );
+  saveConfig(configFile, {
+    connection: { channel: "sftp", server: { host: "host" } },
+    linkageTerms: getDefaultLinkageTerms("Acceptor Org"),
+    ...(recorded !== undefined ? { expectedPayloadColumns: recorded } : {}),
+  });
+  const log = getLogger(loggerName);
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation({
+      ...sampleToken(FUTURE()),
+      disclosedPayloadColumns: disclosed,
+    });
+    const ready = await validateAccept({
+      resolved:
+        mode === "online"
+          ? {
+              mode: "online",
+              url: new URL("sftp://host"),
+              invitation: encoded,
+              input,
+            }
+          : { mode: "offline", invitation: encoded, input },
+      options: testOptions({ configFile, keyFile }),
+      log,
+    });
+    // Every case here is a reuse: a warning about the kept config's lock-in is
+    // meaningless if the config was not kept.
+    expect(ready.reuseExistingConfig).toBe(true);
+    return warnSpy.mock.calls.map((c) => String(c[0]));
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** The one dropped-lock-in warning in `warnings`, asserted to be exactly one. */
+function droppedLockInWarning(warnings: string[]): string {
+  const dropped = warnings.filter((m) => m.includes(DROPPED_LOCK_IN_CLAUSE));
+  expect(dropped).toHaveLength(1);
+  return dropped[0];
+}
+
+test("validateAccept: offline reuse warns, naming the columns, when the re-acceptance drops the lock-in", async () => {
+  // The kept config records what the operator consented to receive; this
+  // invitation carries no disclosed subset, so accepting it removes that record
+  // and leaves the next exchange reconciling lazily. One warning, naming the
+  // columns being given up, while the operator can still decline.
+  const warnings = await reuseLockInWarnings({
+    recorded: ["diagnosis", "notes"],
+    disclosed: undefined,
+    loggerName: "accept-lockin-drop-offline",
+  });
+  const dropped = droppedLockInWarning(warnings);
+  // One column per line, so a name carrying the list separator cannot be misread
+  // as two entries.
+  expect(dropped).toContain("\n  - diagnosis");
+  expect(dropped).toContain("\n  - notes");
+  expect(dropped).toContain("accepts whatever columns the partner transmits");
+});
+
+test("validateAccept: online reuse warns when the re-acceptance drops the lock-in", async () => {
+  // The second accept-reuse path: the online acceptance refreshes the same kept
+  // config, so the same removal must be visible there -- and it lands before any
+  // network activity, so the operator sees it at the same prompt.
+  const warnings = await reuseLockInWarnings({
+    recorded: ["diagnosis"],
+    disclosed: undefined,
+    loggerName: "accept-lockin-drop-online",
+    mode: "online",
+  });
+  expect(droppedLockInWarning(warnings)).toContain("\n  - diagnosis");
+});
+
+test("validateAccept: reuse stays silent when the acceptance records a lock-in of its own", async () => {
+  // Nothing is dropped when this acceptance consents to a set: an unchanged set
+  // leaves the record as it stands, and a changed one is a refresh the operator
+  // just consented to. Neither loses the check, so neither warns.
+  const unchanged = await reuseLockInWarnings({
+    recorded: ["diagnosis"],
+    disclosed: ["diagnosis"],
+    loggerName: "accept-lockin-unchanged",
+  });
+  expect(unchanged.filter((m) => m.includes(DROPPED_LOCK_IN_CLAUSE))).toEqual(
+    [],
+  );
+  const changed = await reuseLockInWarnings({
+    recorded: ["diagnosis"],
+    disclosed: ["notes"],
+    loggerName: "accept-lockin-changed",
+  });
+  expect(changed.filter((m) => m.includes(DROPPED_LOCK_IN_CLAUSE))).toEqual([]);
+});
+
+test("validateAccept: reuse stays silent when the acceptance newly sets the lock-in", async () => {
+  // A kept config that recorded no lock-in loses nothing by gaining one.
+  const warnings = await reuseLockInWarnings({
+    recorded: undefined,
+    disclosed: ["diagnosis"],
+    loggerName: "accept-lockin-newly-set",
+  });
+  expect(warnings.filter((m) => m.includes(DROPPED_LOCK_IN_CLAUSE))).toEqual(
+    [],
+  );
+});
+
+test("validateAccept: reuse warns that a recorded receive-nothing consent is dropped", async () => {
+  // The strictest lock-in of all -- an empty recorded set, which aborts on any
+  // transmitted column -- has no column names to list, so the warning has to name
+  // the consent itself rather than fall silent on an empty list.
+  const warnings = await reuseLockInWarnings({
+    recorded: [],
+    disclosed: undefined,
+    loggerName: "accept-lockin-drop-empty",
+  });
+  expect(droppedLockInWarning(warnings)).toContain(
+    "no columns at all (a strict receive-nothing consent)",
+  );
+});
+
+test("validateAccept: the dropped lock-in's column names are escaped for display", async () => {
+  // The recorded set is the partner's namespace, carried into the config by an
+  // earlier acceptance, so a name planted with a terminal escape must not reach
+  // the operator raw when this warning reads it back out.
+  const hostile = `notes${ESC}[0m`;
+  const warnings = await reuseLockInWarnings({
+    recorded: [hostile],
+    disclosed: undefined,
+    loggerName: "accept-lockin-drop-escaping",
+  });
+  const dropped = droppedLockInWarning(warnings);
+  expect(dropped).toContain(sanitizeForDisplay(hostile));
+  expect(dropped).not.toContain(ESC);
+});
+
 // --- handler: the acceptance records consent to its OWN outbound set ---------
 
 // The acceptor's outbound column set is authored by no party: the invitation

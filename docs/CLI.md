@@ -198,6 +198,8 @@ One limit of the pairing: psilink does not verify that the terminal took what it
 
 If `--config-file` is not used and a configuration file already exists at the default path, its linkage terms are compared against the invitation's; any disagreement causes acceptance to fail. The user is shown which values differ and instructed to resolve the conflict before retrying with the same invitation string or to supply an alternative configuration file path.
 
+A reused configuration keeps its connection block and linkage terms, but the record of what you consented to *receive* is refreshed to the invitation you have just accepted, so it never lags behind the disclosure you were shown. When that invitation declares no disclosed columns, the record is removed rather than left at a set this acceptance never showed you, and a warning names the columns it held: dropping it means the next `psilink exchange` accepts whatever columns the partner transmits instead of holding the received payload to a consented set. To keep the check, ask the inviting party for an invitation that declares the columns it sends.
+
 A pre-existing key file is treated differently from a configuration file: it is never reconciled or reused, because silently reusing a stale authentication token must never happen. If `--key-file` is not used and a key file already exists at the default path, acceptance fails outright and the user is told to delete it or supply a different key file path. In this way, accepting an invitation does not cause files to be unwittingly overwritten.
 
 ### Checking your input against the terms
