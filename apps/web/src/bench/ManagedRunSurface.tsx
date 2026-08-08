@@ -238,13 +238,14 @@ export function ManagedRunSurface({ id }: { id: string }) {
         // the classified, sanitized copy.
         whenDiagnostic(() => console.error(error));
         // The tier is derived from the record's OWN bookkeeping, which the run path
-        // just stamped (the auth/transport/input/storage failureKind), so the record
-        // and its import marker are reloaded before classifying -- an unattended run's
-        // failure would surface through the same tiers at the next visit. A corrupted
-        // record or sibling entry makes the reload reject (a ZodError); rather than
-        // skip setFailure entirely (spinner clears, no error UI, unhandled rejection),
-        // fall back to the closure's own record and no sibling state, so the original
-        // error still surfaces through the generic tier.
+        // just stamped (the auth/transport/storage/input/consent/cancelled
+        // failureKind), so the record and its import marker are reloaded before
+        // classifying -- an unattended run's failure would surface through the same
+        // tiers at the next visit. A corrupted record or sibling entry makes the
+        // reload reject (a ZodError); rather than skip setFailure entirely (spinner
+        // clears, no error UI, unhandled rejection), fall back to the closure's own
+        // record and no sibling state, so the original error still surfaces through
+        // the generic tier.
         const [reloaded, local] = await Promise.all([
           getManagedExchange(record.id),
           getManagedLocalState(record.id),
