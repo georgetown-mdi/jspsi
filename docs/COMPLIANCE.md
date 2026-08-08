@@ -46,7 +46,7 @@ The table below maps PSI-Link's design to relevant NIST SP 800-53 Rev 5 control 
 | SC-28 | Protection of Information at Rest | The shared secret is the only persistent credential. It is stored with mode `0600` on Unix and a restricted ACL on Windows; see [SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security). PSI-Link applies access control at rest rather than encryption: the key file, the signing identity, the exchange records and the result CSV are written unencrypted at those same owner-only permissions, so at-rest confidentiality is the deploying agency's storage or full-disk encryption. |
 | AU-12 | Audit Record Generation | PSI-Link does not capture PII in log output; see [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling). |
 | SI-2 | Flaw Remediation | Coordinated vulnerability disclosure with a 90-day fix target; CVE assignment for confirmed vulnerabilities; patch releases follow the process in [RELEASES.md](RELEASES.md). |
-| SI-7 | Software, Firmware, and Information Integrity | Release tags are signed with the maintainer's SSH key; container images are signed with Cosign; a CycloneDX SBOM is attached to each GitHub Release. |
+| SI-7 | Software, Firmware, and Information Integrity | Release tags are signed with the maintainer's SSH key; container images are signed with Cosign and carry a SLSA build provenance attestation over the same digest; a CycloneDX SBOM is attached to each GitHub Release. See [Release integrity](#release-integrity). |
 
 ### FedRAMP and StateRAMP
 
@@ -180,7 +180,9 @@ A CycloneDX SBOM is generated as part of the release checklist and attached to e
 
 Container images are signed with Cosign and release tags are signed with the maintainer's SSH key. Verification procedures are documented in [RELEASES.md#verifying-a-release](RELEASES.md#verifying-a-release).
 
-<!-- TODO: add SLSA provenance attestation to the release workflow and document verification here. -->
+Each released image additionally carries a SLSA build provenance attestation. The release workflow generates it over the published manifest-list digest -- the same digest Cosign signs -- and it is signed through Sigstore against the workflow's OIDC identity rather than a maintainer-held key. What it attests to is the build: the source repository and commit the image was built from, and the workflow that produced it. The signature and the attestation therefore answer different questions -- who published the image, and how it was built -- and a reviewer working through supply-chain integrity checks both. The verification command is in [RELEASES.md#build-provenance](RELEASES.md#build-provenance).
+
+Two limits are worth stating for an assessment. The build and the attestation are produced by a workflow in the same repository as the source, not by an isolated trusted builder, so the statement is trustworthy to the extent that repository's Actions configuration is. And PSI-Link makes no claim to a specific SLSA build level; the attestation is evidence a reviewer can evaluate, not a level assertion.
 
 ## Authority to Operate
 

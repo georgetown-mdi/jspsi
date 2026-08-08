@@ -27,6 +27,7 @@ Each release produces:
 | Docker image   | Docker Hub (`vdorie/psi-link`) | `vdorie/psi-link:X.Y.Z`, `vdorie/psi-link:X.Y`, `vdorie/psi-link:latest` |
 | GitHub Release | GitHub Releases                | Tag `vX.Y.Z`                                                             |
 | Launchers      | GitHub Release assets          | `start-psilink.sh`, `Start-Psilink.ps1`, `Setup-PsilinkFileDrop.ps1`     |
+| Build provenance | GitHub attestation store     | Subject `docker.io/vdorie/psi-link` at the released manifest digest      |
 
 The single `vdorie/psi-link` image carries both the CLI and the web console appliance; which role it runs is decided by its first argument (see [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment)).
 
@@ -119,7 +120,7 @@ git push origin vX.Y.Z
 
 ### 8. Build and publish the container image `[CI]`
 
-The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds the multi-platform image and pushes it to Docker Hub, signs it with Cosign, and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). Ahead of the build it checks the pushed tag against the version step 2 set in `apps/cli/package.json` and fails the release when the two disagree: the image build bakes that version into the console's partner accept kit, so a tag pushed ahead of the bump would publish an image telling the partner to run the release before it. Ensure the `DOCKER_USERNAME` and `DOCKER_TOKEN` repository secrets are set before tagging.
+The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds the multi-platform image and pushes it to Docker Hub, signs it with Cosign, attests its build provenance (see [Build provenance](#build-provenance)), and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). Ahead of the build it checks the pushed tag against the version step 2 set in `apps/cli/package.json` and fails the release when the two disagree: the image build bakes that version into the console's partner accept kit, so a tag pushed ahead of the bump would publish an image telling the partner to run the release before it. Ensure the `DOCKER_USERNAME` and `DOCKER_TOKEN` repository secrets are set before tagging.
 
 If you must build and push by hand -- for a workflow outage or a local test -- follow the multi-platform buildx instructions in `apps/cli/README.md` (creating `multiarch-builder` and running `docker buildx build --push` from the repository root).
 
@@ -186,6 +187,30 @@ cosign verify --key cosign.pub vdorie/psi-link:X.Y.Z
 ```
 
 `cosign.pub` is the public signing key at the repository root. Install Cosign before running this command (see the Cosign documentation for your platform).
+
+### Build provenance
+
+The Cosign signature answers who published the image; the SLSA build provenance attestation answers how it was built -- which source repository and commit the build ran from, and which workflow produced it. They are complementary rather than alternatives, so verify both.
+
+The release workflow attests the manifest-list digest, the same digest Cosign signs and the launchers carry, and stores the attestation against this repository. Verify by digest:
+
+```sh
+docker pull vdorie/psi-link:X.Y.Z
+docker inspect --format '{{index .RepoDigests 0}}' vdorie/psi-link:X.Y.Z
+gh attestation verify oci://docker.io/vdorie/psi-link@sha256:... \
+  --repo georgetown-mdi/jspsi \
+  --signer-workflow georgetown-mdi/jspsi/.github/workflows/release.yaml
+```
+
+The subject is recorded as `docker.io/vdorie/psi-link`, the same reference the Cosign step signs under. Neither the attest step nor this verify command has been driven against a published release yet, and reference canonicalization is the untested edge: if verification reports no matching attestation for an image that is certainly attested, check the reference host first -- Docker Hub's OCI-canonical name is `index.docker.io`, and the first real release is what settles whether the alias matches.
+
+Notes on the command:
+
+- It needs the [GitHub CLI](https://cli.github.com/) (`gh`), not Cosign. `cosign verify-attestation` reads attestations Cosign attached to the image in the registry; this one is held by GitHub, and `gh` fetches it from there rather than from Docker Hub.
+- `--signer-workflow` is what makes the check specific: `--repo` alone is satisfied by any attestation this repository produced, from any workflow in it.
+- The attested subject is the multi-platform manifest list, which is what the release publishes and what the digest above resolves to. A per-architecture digest read out of that index is not itself an attested subject.
+
+What the attestation is and is not evidence of, for an agency assessment, is in [COMPLIANCE.md#release-integrity](COMPLIANCE.md#release-integrity).
 
 ### Source integrity
 
