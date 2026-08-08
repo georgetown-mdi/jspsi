@@ -1,0 +1,70 @@
+name: Dependency Audit
+
+# Informational half of the dependency audit: `npm audit` over the WHOLE
+# workspace tree, development dependencies included, on a schedule rather than on
+# a pull request. It gates nothing and blocks no merge.
+#
+# The blocking half is the production-scope audit step in static_checks.yaml,
+# covering the tree the shipped image runs and failing a pull request on any
+# finding. That scoping leaves the development tree ungated, and a build
+# dependency still carries attack surface not shipping does not remove -- an
+# install script reaching CI secrets, or poisoning build output -- so this keeps
+# that tree in view without stopping merges over it.
+#
+# What it is not evidence of. `npm audit` reports published advisories about
+# known bugs; it does not detect a malicious or hijacked package at all. That
+# threat is carried by `strict-allow-scripts=true` in .npmrc, which fails an
+# install outright on a package with no `allowScripts` verdict, and by the
+# Dependabot cooldown in .github/dependabot.yml. A finding here is triaged on its
+# own terms rather than cleared by `npm audit fix`; how the last development-tree
+# advisory was resolved, and what holds it resolved, is in
+# docs/spec/DEPENDENCY_PINS.md.
+#
+# The whole tree reports `found 0 vulnerabilities` against the committed
+# lockfile, so this starts from zero and a nonzero result is news. It is left to
+# fail on a finding: a scheduled workflow cannot gate a merge whatever its
+# conclusion, and a run that is green either way is a report nobody reads.
+
+on:
+  schedule:
+    # 05:47 UTC Monday, matching the weekly Dependabot and CodeQL cadence -- an
+    # advisory published against the development tree surfaces alongside the
+    # update pull requests that might answer it. Off the hour and off the other
+    # two workflows' minutes, per GitHub's guidance on top-of-hour scheduler
+    # congestion. Two GitHub behaviors to know: a `schedule` trigger fires only
+    # from the workflow as it exists on the default branch, so nothing runs until
+    # this file lands there (use the manual dispatch below before then); and
+    # GitHub disables a scheduled workflow after ~60 days without repository
+    # activity, emailing the last committer.
+    - cron: "47 5 * * 1"
+  # On-demand run, e.g. to confirm a development-tree finding is resolved without
+  # waiting for the schedule.
+  workflow_dispatch:
+
+# One audit at a time per ref; do not cancel an in-flight run -- this only guards
+# a manual dispatch racing the weekly schedule.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# Least privilege: reading the repository is all the audit needs.
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Whole-tree dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # Deliberately not the ./.github/actions/setup prologue: `--package-lock-only`
+      # below resolves the audit from the committed lockfile alone, so this needs
+      # neither `npm ci` nor the @psilink/core build. Nothing in the development
+      # tree is installed or executed to produce a report about the development
+      # tree.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+      - name: Whole-tree npm audit
+        run: npm audit --package-lock-only
