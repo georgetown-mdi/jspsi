@@ -177,11 +177,14 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
 
   const server = new Server({ hostKeys: [hostKey.private] }, (client) => {
     clients.add(client);
-    // Before any SSH traffic: a connection accepted while the withheld-close
-    // control is armed keeps its socket for the whole exchange, so the control
-    // has to reach it here rather than at the disconnect it is meant to ignore --
-    // and the stalled-handshake control has to reach it before the server writes
-    // the identification string it is meant to withhold.
+    // The earliest point a control can reach the socket: a connection accepted
+    // while the withheld-close control is armed keeps its socket for the whole
+    // exchange, so that control has to reach it here rather than at the
+    // disconnect it is meant to ignore. ssh2 writes the server's identification
+    // string on the accepted socket and emits this only once the client's has
+    // arrived, so the stalled-handshake control's mute takes hold on a
+    // connection that has already exchanged identification lines -- which is the
+    // stall a case driving it measures against.
     sessionControls.onConnectionAccepted(
       (client as unknown as SocketBearingConnection)._sock,
     );

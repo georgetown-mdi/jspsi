@@ -304,6 +304,35 @@ export interface SftpSessionControls {
    */
   stopStallingHandshakes(): void;
   /**
+   * How many connections {@link stallHandshakeOnConnect} is holding
+   * mid-handshake right now. A case drives a parked dial only once the
+   * connection behind it is counted here: a client's socket exists from the
+   * moment it starts connecting, which is before this server has accepted
+   * anything, so a case that reads the socket alone can act on a handshake the
+   * stall has not reached yet -- and then measures an ordinary handshake in
+   * flight instead of a stalled one.
+   *
+   * A session {@link vanishActiveSession} silenced is muted in the same pool and
+   * is not counted, matching what {@link closeStalledConnections} reaches.
+   */
+  stalledConnectionCount(): number;
+  /**
+   * Close every connection {@link stallHandshakeOnConnect} is holding
+   * mid-handshake, from the server's own side: the socket really goes, so a
+   * client parked on that dial hears a peer close rather than a teardown it
+   * drove itself. It is the control arm for a case comparing the two: it ends a
+   * parked dial the partner's way, at the same handshake stage, which nothing
+   * the client does to its own socket can produce.
+   *
+   * The stall itself is left armed, so a later dial parks the same way. A
+   * session {@link vanishActiveSession} silenced is muted in the same pool and
+   * is skipped: a vanished session the server can still close is not the black
+   * hole its cases measure over.
+   *
+   * In-process only, like the fault hooks.
+   */
+  closeStalledConnections(): void;
+  /**
    * Make the currently established session VANISH: from this call on, nothing
    * the server produces for it reaches the wire and the server can no longer
    * close it, so a client with an operation outstanding never gets its reply and
