@@ -27,7 +27,7 @@ Each release produces:
 | Docker image   | Docker Hub (`vdorie/psi-link`) | `vdorie/psi-link:X.Y.Z`, `vdorie/psi-link:X.Y`, `vdorie/psi-link:latest` |
 | GitHub Release | GitHub Releases                | Tag `vX.Y.Z`                                                             |
 | Launchers      | GitHub Release assets          | `start-psilink.sh`, `Start-Psilink.ps1`, `Setup-PsilinkFileDrop.ps1`     |
-| Build provenance | This repository's GitHub attestation store | Subject `docker.io/vdorie/psi-link` at the released manifest digest |
+| Build provenance | GitHub attestation store     | Subject `docker.io/vdorie/psi-link` at the released manifest digest      |
 
 The single `vdorie/psi-link` image carries both the CLI and the web console appliance; which role it runs is decided by its first argument (see [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment)).
 
@@ -201,6 +201,8 @@ gh attestation verify oci://docker.io/vdorie/psi-link@sha256:... \
   --repo georgetown-mdi/jspsi \
   --signer-workflow georgetown-mdi/jspsi/.github/workflows/release.yaml
 ```
+
+The subject is recorded as `docker.io/vdorie/psi-link`, the same reference the Cosign step signs under. Neither the attest step nor this verify command has been driven against a published release yet, and reference canonicalization is the untested edge: if verification reports no matching attestation for an image that is certainly attested, check the reference host first -- Docker Hub's OCI-canonical name is `index.docker.io`, and the first real release is what settles whether the alias matches.
 
 Notes on the command:
 
