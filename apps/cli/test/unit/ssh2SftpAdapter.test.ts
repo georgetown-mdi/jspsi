@@ -6221,6 +6221,39 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     }
   });
 
+  test("a second release that closes nothing draws a second warning", async () => {
+    // The one degraded outcome deliberately off the shared warn cadence: it
+    // keeps no run total, so a paced line would say "1" every time it fired and
+    // the operator could not tell one occurrence from ten. Every occurrence is
+    // its own record instead, which only a second one can measure -- the shared
+    // cadence's interval is wide enough that it would swallow this line.
+    vi.useFakeTimers();
+    try {
+      const { client, rawClient } = ephemeralClient(wrapperMethods());
+      rawClient.end = vi.fn();
+      const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+      const warn = vi.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      install(adapter, client);
+
+      await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+      for (let cycle = 0; cycle < 2; cycle += 1) {
+        const release = adapter.releaseForIdle();
+        await vi.advanceTimersByTimeAsync(5_000);
+        await release;
+      }
+
+      expect(
+        warn.mock.calls
+          .map((call) => String(call[0]))
+          .filter((line) => line.includes("still writable")),
+      ).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("a release that finds the PEER tearing the connection down charges that drop and does not latch", async () => {
     // ssh2 emits 'end' on the peer's FIN and 'close' only after, and
     // ssh2-sftp-client's global 'end' listener leaves its session property set, so
