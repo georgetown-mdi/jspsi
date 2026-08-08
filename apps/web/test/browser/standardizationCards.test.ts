@@ -5,29 +5,20 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import { authoredLinkageFields } from "@psilink/core";
 
 import { StandardizationCards } from "@components/StandardizationCards";
 import { columnSamplesFromRows } from "@psi/columnSamples";
 
+import { createAppMount } from "./renderApp";
 import { expandFieldCards } from "./fieldCards";
-import { renderApp } from "./renderApp";
-
-import type { Root } from "react-dom/client";
 
 import type { Metadata, Standardization } from "@psilink/core";
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
+const app = createAppMount();
 
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
+afterEach(app.unmount);
 
 // Two first_name columns (a maiden and a current name) plus a date, so a same-typed
 // field has a second column free to bind -- the multi-field scenario the add/remove
@@ -54,22 +45,17 @@ function render(
   standardization: Standardization,
   overrides: Partial<CardsProps> = {},
 ) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(
-    renderApp(
-      createElement(StandardizationCards, {
-        standardization,
-        declaredFields: authoredLinkageFields(metadata, standardization),
-        metadata,
-        columnSamples,
-        onStepsChange: () => {},
-        onInputColumnChange: () => {},
-        onMissingField: "skip",
-        ...overrides,
-      }),
-    ),
+  app.render(
+    createElement(StandardizationCards, {
+      standardization,
+      declaredFields: authoredLinkageFields(metadata, standardization),
+      metadata,
+      columnSamples,
+      onStepsChange: () => {},
+      onInputColumnChange: () => {},
+      onMissingField: "skip",
+      ...overrides,
+    }),
   );
 }
 

@@ -5,7 +5,6 @@ import { afterEach, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so components render with their real geometry:
 // without it the Stepper's completed-step icon has no size bound and blankets
@@ -21,10 +20,7 @@ import {
 import { WAITING_STAGE_ID, stagesFor } from "@bench/exchangeRun";
 import { AcceptorBench } from "@bench/AcceptorBench";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount } from "./renderApp";
 
 import type {
   InvitationToken,
@@ -47,35 +43,17 @@ import type {
 // seam mocked). Driving from a higher composition point would only add the
 // router shell this suite already stubs away, not more real handoff.
 
-// Stub the router seam. AcceptorBench's recovery links and lobby use it; the
-// journey never navigates, so a plain anchor and a no-op navigate suffice.
-// (vitest hoists vi.mock above the imports.)
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+// AcceptorBench's recovery links and lobby touch the router seam; the journey
+// never navigates.
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
-// Stub the rendezvous module: importing it runs a top-level config load that
-// reads `process` (absent in the browser runner). Its dial function only runs
-// inside the real lifecycle's acquire closure, which the lifecycle stub below
-// replaces wholesale, so it is never invoked.
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// The rendezvous dial runs only inside the real lifecycle's acquire closure,
+// which the lifecycle stub below replaces wholesale, so it is never invoked.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 // stagesFor reads only the linkage terms off the prepared exchange, so a
 // terms-only stand-in drives the real acceptor stage-tree derivation for the
@@ -165,28 +143,17 @@ function csvFile(content: string): File {
   return new File([content], "cohort_intake.csv", { type: "text/csv" });
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   settledRun.capturedSignal = undefined;
   window.location.hash = "";
 });
 
 test("acceptor journey reaches Done with a downloadable result driven only through the UI", async () => {
   window.location.hash = await encodeRunToken();
-  mount(createElement(AcceptorBench));
+  app.render(createElement(AcceptorBench));
 
   // Review configuration -> Continue. The decode-to-terms handoff is the acquire
   // phase's own state reaching the first rendered screen.

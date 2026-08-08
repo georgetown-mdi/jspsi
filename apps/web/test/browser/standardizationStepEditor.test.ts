@@ -5,34 +5,18 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement, useState } from "react";
-import { createRoot } from "react-dom/client";
 
 import { StandardizationPreview } from "@components/StandardizationPreview";
 import { StandardizationStepEditor } from "@components/StandardizationStepEditor";
 import { columnSamplesFromRows } from "@psi/columnSamples";
 
-import { renderApp } from "./renderApp";
-
-import type { Root } from "react-dom/client";
+import { createAppMount } from "./renderApp";
 
 import type { LinkageField, StandardizationStep } from "@psilink/core";
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
+const app = createAppMount();
 
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
-
-function render(node: ReturnType<typeof createElement>) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(node));
-}
+afterEach(app.unmount);
 
 const FIRST_NAME: LinkageField = { name: "fn", type: "first_name" };
 
@@ -90,7 +74,7 @@ function EditorWithPreview({
 
 describe("StandardizationPreview renders each pipeline outcome distinctly", () => {
   test("a cleaned value", async () => {
-    render(
+    app.render(
       previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
@@ -104,7 +88,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
   });
 
   test("a dropped (null) value", async () => {
-    render(
+    app.render(
       previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
@@ -118,7 +102,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
   });
 
   test("a fan-out (Set) into several candidates", async () => {
-    render(
+    app.render(
       previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
@@ -136,7 +120,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
 
   test("an empty cleaned value is shown distinctly from a dropped value", async () => {
     // remove_dashes turns "---" into "" -- a value (an empty PSI key), not a drop.
-    render(
+    app.render(
       previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
@@ -154,7 +138,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
 
   test("an incomplete step shows guidance instead of crashing the preview", async () => {
     // pad_left with no length yet throws when compiled; the preview must catch it.
-    render(
+    app.render(
       previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
@@ -178,7 +162,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
     // compile cost the cap exists to bound. The preview gates on isStepValid, so
     // the oversized source never reaches compile and the operator sees the same
     // guidance the inline length error already explains.
-    render(
+    app.render(
       previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
@@ -200,7 +184,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
   });
 
   test("a value that violates a field constraint is badged (warn, not blocked)", async () => {
-    render(
+    app.render(
       previewElement({
         // allowedCharacters "A-Z " -> a lowercase residue is flagged.
         field: {
@@ -224,7 +208,7 @@ describe("StandardizationStepEditor", () => {
     // [coalesce -> null_if] over "X": coalesce passes "X" through, null_if drops
     // it. Swapped to [null_if -> coalesce], null_if drops "X" and coalesce then
     // substitutes "Z" -- a vivid order-dependent flip from dropped to a value.
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -255,7 +239,7 @@ describe("StandardizationStepEditor", () => {
   test("a typed param input rejects an out-of-type value and accepts a valid one", async () => {
     // substring.start refuses 0 (positions are 1-indexed); seeding 0 shows the
     // descriptor's own message, and a valid value clears it.
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -285,7 +269,7 @@ describe("StandardizationStepEditor", () => {
     // update, so the controlled input is not remounted between keystrokes; typing
     // a multi-digit value lands every digit (a per-keystroke remount would drop
     // focus and lose all but the first).
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -300,7 +284,7 @@ describe("StandardizationStepEditor", () => {
 
   test("clearing a param drops the key rather than writing undefined", async () => {
     const onStepsChange = vi.fn<(steps: Array<StandardizationStep>) => void>();
-    render(
+    app.render(
       createElement(StandardizationStepEditor, {
         fieldLabel: "First name",
         inputColumn: "n",
@@ -319,7 +303,7 @@ describe("StandardizationStepEditor", () => {
   });
 
   test("the add menu surfaces each function's plain-language consequence", async () => {
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -340,7 +324,7 @@ describe("StandardizationStepEditor", () => {
   });
 
   test("adds a step from the grouped menu and removes it again", async () => {
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -374,7 +358,7 @@ describe("StandardizationStepEditor", () => {
 
 describe("StandardizationStepEditor raw-pattern authoring (per-party, ungated)", () => {
   test("the add menu offers raw-pattern steps", async () => {
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -398,7 +382,7 @@ describe("StandardizationStepEditor raw-pattern authoring (per-party, ungated)",
   });
 
   test("a default pipeline's regex step is editable, with its advanced badge", async () => {
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -418,7 +402,7 @@ describe("StandardizationStepEditor raw-pattern authoring (per-party, ungated)",
   });
 
   test("adding a regex step exposes an editable pattern the preview reflects", async () => {
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -444,7 +428,7 @@ describe("StandardizationStepEditor raw-pattern authoring (per-party, ungated)",
   });
 
   test("an out-of-dialect pattern surfaces the dialect error inline", async () => {
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -463,7 +447,7 @@ describe("StandardizationStepEditor raw-pattern authoring (per-party, ungated)",
   });
 
   test("split_on's includeOriginal renders as a labeled switch, its delimiter as a pattern input", async () => {
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -487,7 +471,7 @@ describe("StandardizationStepEditor raw-pattern authoring (per-party, ungated)",
 describe("StandardizationStepEditor input-column binding", () => {
   test("offers a labeled column selector when more than one column has the field's type, and rebinds on change", async () => {
     const onInputColumnChange = vi.fn<(column: string) => void>();
-    render(
+    app.render(
       createElement(StandardizationStepEditor, {
         fieldLabel: "First name",
         inputColumn: "maiden_col",
@@ -510,7 +494,7 @@ describe("StandardizationStepEditor input-column binding", () => {
   });
 
   test("shows the bound column read-only when only one column has the field's type", async () => {
-    render(
+    app.render(
       createElement(StandardizationStepEditor, {
         fieldLabel: "First name",
         inputColumn: "maiden_col",
@@ -533,7 +517,7 @@ describe("StandardizationStepEditor input-column binding", () => {
 
 describe("StandardizationStepEditor accessibility", () => {
   test("removing a step keeps focus on a neighbor instead of dropping it to <body>", async () => {
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -556,7 +540,7 @@ describe("StandardizationStepEditor accessibility", () => {
   });
 
   test("removing the last step moves focus to the Add button", async () => {
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -573,7 +557,7 @@ describe("StandardizationStepEditor accessibility", () => {
   });
 
   test("moving a step to the first slot keeps focus on an enabled control", async () => {
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -595,7 +579,7 @@ describe("StandardizationStepEditor accessibility", () => {
   });
 
   test("the step list announces the debounced summary via one polite live region, not the whole table", async () => {
-    render(
+    app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
         inputColumn: "n",
@@ -612,7 +596,7 @@ describe("StandardizationStepEditor accessibility", () => {
       .toBeInTheDocument();
     // Exactly one polite live region for the step list (the preview adds none): the
     // summary is announced through it, not by marking the whole list aria-live.
-    const regions = container!.querySelectorAll(
+    const regions = app.container.querySelectorAll(
       '[role="status"][aria-live="polite"]',
     );
     expect(regions).toHaveLength(1);
@@ -637,7 +621,7 @@ describe("preview outcomes reach assistive tech by text/label, not color alone",
   test("the empty-value chip exposes its meaning as a label, not just an orange color", async () => {
     // remove_dashes turns "---" into "" -- an empty key. The chip is icon-style, so
     // its meaning must reach a screen reader as a label.
-    render(
+    app.render(
       previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
@@ -651,7 +635,7 @@ describe("preview outcomes reach assistive tech by text/label, not color alone",
   });
 
   test("a constraint violation is a labelled badge, distinct from the value color", async () => {
-    render(
+    app.render(
       previewElement({
         field: {
           name: "fn",
@@ -669,7 +653,7 @@ describe("preview outcomes reach assistive tech by text/label, not color alone",
   });
 
   test("a dropped value carries the word 'dropped', not a color cue alone", async () => {
-    render(
+    app.render(
       previewElement({
         field: FIRST_NAME,
         inputColumn: "n",

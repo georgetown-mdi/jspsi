@@ -3,15 +3,13 @@
 import { afterEach, describe, expect, test } from "vitest";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
 import { Checkbox, Radio } from "@mantine/core";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
 import type { ComponentType, ReactNode } from "react";
-import type { Root } from "react-dom/client";
 
 // Radio / Radio.Group / Checkbox are polymorphic factory components; the browser
 // project globs `.ts` (no JSX), and createElement cannot resolve their overloaded
@@ -41,26 +39,13 @@ const CASCADE_DESCRIPTION =
 const AGREEMENT_DESCRIPTION =
   "Reference, purpose, and expiry your partner must enter identically.";
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
+const app = createAppMount();
 
-function mount(node: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(node));
-}
-
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
+afterEach(app.unmount);
 
 async function waitForInput(selector: string): Promise<HTMLInputElement> {
-  await expect.poll(() => container!.querySelector(selector)).not.toBeNull();
-  return container!.querySelector(selector) as HTMLInputElement;
+  await expect.poll(() => app.container.querySelector(selector)).not.toBeNull();
+  return app.container.querySelector(selector) as HTMLInputElement;
 }
 
 // Every id token in aria-describedby must resolve to a present element, and one of
@@ -79,7 +64,7 @@ function expectDescribedBy(input: HTMLInputElement, descriptionText: string) {
 
 describe("Mantine Radio/Checkbox description a11y association", () => {
   test("a Radio.Group option's description is aria-describedby the input", async () => {
-    mount(
+    app.render(
       createElement(
         AppRadioGroup,
         { label: "Linkage strategy", value: "cascade" },
@@ -96,7 +81,7 @@ describe("Mantine Radio/Checkbox description a11y association", () => {
   });
 
   test("a Checkbox's description is aria-describedby the input", async () => {
-    mount(
+    app.render(
       createElement(AppCheckbox, {
         label: "Attach a legal agreement",
         description: AGREEMENT_DESCRIPTION,
@@ -108,7 +93,7 @@ describe("Mantine Radio/Checkbox description a11y association", () => {
   });
 
   test("a Checkbox with no description carries no dangling aria-describedby", async () => {
-    mount(
+    app.render(
       createElement(AppCheckbox, {
         "aria-label": "Allow several records to match one partner record",
       }),

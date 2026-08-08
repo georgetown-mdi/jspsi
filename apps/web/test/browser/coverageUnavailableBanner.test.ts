@@ -1,11 +1,10 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 import { page } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import { declaredFieldsFor, editorFromCsv } from "@bench/inviterModel";
 import { columnSamplesFromRows } from "@psi/columnSamples";
@@ -13,10 +12,9 @@ import { columnSamplesFromRows } from "@psi/columnSamples";
 import { AcceptorCleaningStep } from "@bench/AcceptorCleaningStep";
 import { CleaningTab } from "@bench/CleaningTab";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
 import type { AcquiredCsv } from "@bench/inviterModel";
-import type { Root } from "react-dom/client";
 
 // A minimal file whose seeded terms carry a few cleaning fields, so both surfaces
 // mount their standardization workbench alongside the banner under test.
@@ -30,42 +28,28 @@ const csv: AcquiredCsv = {
 
 const columnSamples = columnSamplesFromRows(csv.rawRows, csv.columns);
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
+const app = createAppMount();
 
-beforeEach(() => {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-});
-
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
+afterEach(app.unmount);
 
 function renderCleaningTab(coverageUnavailable: boolean) {
   const editor = editorFromCsv("Dana Okafor", csv);
-  root!.render(
-    renderApp(
-      createElement(CleaningTab, {
-        editor,
-        columnSamples,
-        expertMode: false,
-        rates: null,
-        pending: false,
-        coverageUnavailable,
-        onFieldSteps: () => undefined,
-        onFieldInput: () => undefined,
-        onFieldAdded: () => undefined,
-        onFieldRemoved: () => undefined,
-        onResetCleaning: () => undefined,
-        cleaningError: undefined,
-        onBack: () => undefined,
-      }),
-    ),
+  app.render(
+    createElement(CleaningTab, {
+      editor,
+      columnSamples,
+      expertMode: false,
+      rates: null,
+      pending: false,
+      coverageUnavailable,
+      onFieldSteps: () => undefined,
+      onFieldInput: () => undefined,
+      onFieldAdded: () => undefined,
+      onFieldRemoved: () => undefined,
+      onResetCleaning: () => undefined,
+      cleaningError: undefined,
+      onBack: () => undefined,
+    }),
   );
 }
 
@@ -97,24 +81,22 @@ describe("the Cleaning surfaces' coverage-unavailable banner", () => {
     // editor so the standardization workbench's fields resolve (its
     // onMissingField="throw" contract) while the banner renders above it.
     const editor = editorFromCsv("Dana Okafor", csv);
-    root!.render(
-      renderApp(
-        createElement(AcceptorCleaningStep, {
-          declaredFields: declaredFieldsFor(editor.draft),
-          metadata: editor.draft.metadata,
-          standardization: editor.draft.standardization,
-          columnSamples,
-          rates: null,
-          ratesPending: false,
-          coverageUnavailable: true,
-          deadKeyCount: 0,
-          cleaningResetKey: "",
-          onFieldSteps: () => undefined,
-          onFieldInput: () => undefined,
-          onReset: () => undefined,
-          onBack: () => undefined,
-        }),
-      ),
+    app.render(
+      createElement(AcceptorCleaningStep, {
+        declaredFields: declaredFieldsFor(editor.draft),
+        metadata: editor.draft.metadata,
+        standardization: editor.draft.standardization,
+        columnSamples,
+        rates: null,
+        ratesPending: false,
+        coverageUnavailable: true,
+        deadKeyCount: 0,
+        cleaningResetKey: "",
+        onFieldSteps: () => undefined,
+        onFieldInput: () => undefined,
+        onReset: () => undefined,
+        onBack: () => undefined,
+      }),
     );
 
     await expect

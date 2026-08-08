@@ -5,7 +5,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
@@ -15,31 +14,15 @@ import { decodeInvitation } from "@psilink/core";
 import { InviterBench } from "@bench/InviterBench";
 import styles from "@bench/bench.module.css";
 
+import { createAppMount, flushPendingUpdates } from "./renderApp";
 import { captureDownloads } from "./captureDownloads";
-import { renderApp } from "./renderApp";
 
 import type { CapturedDownload } from "./captureDownloads";
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
 
-// Stub the router seam the bench components touch (the appShell.test.ts pattern).
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+// The bench components touch the router seam.
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 // This suite exercises the CONSOLE build; the hosted-profile behaviors stay pinned
 // by bench.test.ts, which runs on the real default profile.
@@ -49,13 +32,11 @@ vi.mock("@utils/clientConfig", () => ({
   psilinkVersion: () => undefined,
 }));
 
-// Stub the rendezvous module: importing it runs a top-level config load that reads
-// `process` (absent in the browser runner). Nothing here drives the browser
-// transport (it is disabled on the console), so its functions are never called.
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// Nothing here drives the browser transport (it is disabled on the console), so
+// the rendezvous functions are never called.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 const CLIENTS_FILE = {
   name: "clients.csv",
@@ -253,26 +234,13 @@ function stubJobApi(options: StubOptions = {}): {
   };
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 afterEach(async () => {
-  // Let any in-flight fetch resolution and its state update flush before the
-  // synchronous unmount, so teardown never races a render (which corrupts React's
-  // scheduler for the rest of the file). The picker and coverage seams are
-  // fetch-driven, so a resolution can otherwise land exactly at unmount.
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  // The picker and coverage seams are fetch-driven, so a resolution can
+  // otherwise land exactly at unmount.
+  await flushPendingUpdates();
+  app.unmount();
   // A server-job run persists a strand-recovery record; clear it so the next
   // test's idle bench does not re-attach to a prior run's id.
   window.localStorage.clear();
@@ -305,7 +273,7 @@ async function reachReviewCreate() {
 describe("console inviter file picker states", () => {
   test("an empty listing shows the no-usable-files state", async () => {
     stubJobApi({ listing: { configured: true, files: [] } });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await expect
       .element(
         page.getByText("No usable files in the work directory", {
@@ -317,7 +285,7 @@ describe("console inviter file picker states", () => {
 
   test("an unconfigured work directory names the env var to set", async () => {
     stubJobApi({ listing: { configured: false, files: [] } });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     // An unset JOB_INPUT_DIR is a deployment-config gap, distinct from an
     // empty-but-mounted directory: name the env var, do not tell the operator to
     // place a file in a directory that is not configured.
@@ -336,7 +304,7 @@ describe("console inviter file picker states", () => {
 
   test("a populated listing shows the file rows", async () => {
     stubJobApi({ listing: { configured: true, files: [CLIENTS_FILE] } });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
   });
 
@@ -344,7 +312,7 @@ describe("console inviter file picker states", () => {
     stubJobApi({
       listing: { configured: true, readable: false, files: [] },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     // A mounted-but-unreadable directory tells the operator to check the mount, not
     // to place a file that may already be there (the empty-directory copy).
     await expect
@@ -361,7 +329,7 @@ describe("console inviter file picker states", () => {
 
   test("a profile fault names its reason instead of a generic message", async () => {
     stubJobApi({ profileErrorCode: "too_large" });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     await expect
@@ -375,7 +343,7 @@ describe("console inviter file picker states", () => {
 describe("console inviter two-stage pick", () => {
   test("selecting a file shows a pre-commit confirm panel with columns, rows, and samples", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
     await page.getByRole("button", { name: "Select clients.csv" }).click();
 
@@ -404,7 +372,7 @@ describe("console inviter two-stage pick", () => {
 describe("console inviter transports and sample data", () => {
   test("the Browser card is disabled and the sample seed is hidden", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     // The in-place sample seed is gone; the download stays.
     await expect
       .element(page.getByRole("button", { name: "download the CSVs" }))
@@ -427,7 +395,7 @@ describe("console inviter transports and sample data", () => {
     stubJobApi({
       sftp: { configured: true, host: "sftp.example.gov", port: 2222 },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     // SFTP is selected by default and shows the run-here copy plus the single
     // connection's locator as static text (no picker).
@@ -453,7 +421,7 @@ describe("console inviter transports and sample data", () => {
         folderName: "rendezvous-folder",
       },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await expect
       .element(page.getByLabelText("Over a shared directory, run here"))
@@ -465,7 +433,7 @@ describe("console inviter transports and sample data", () => {
       sftp: { configured: false },
       rendezvous: { configured: false },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await expect
       .element(
@@ -487,7 +455,7 @@ describe("console inviter mint and run", () => {
         path: "/drops/psilink",
       },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
 
     // The ledger/answers seeded from the profile: the file and its row count.
@@ -601,7 +569,7 @@ describe("console inviter mint and run", () => {
         folderName: "psilink",
       },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     // Filedrop is the default (a rendezvous mount, no sftp server) and runs here.
     await expect
@@ -629,7 +597,7 @@ describe("console inviter mint and run", () => {
 
   test("the coverage sweep posts the mounted-file name only", async () => {
     const api = stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
@@ -668,7 +636,7 @@ describe("console inviter never renders the recurring-save offer", () => {
     const api = stubJobApi({
       sftp: { configured: true, host: "dr.example.gov", port: 2222 },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
 
     // The offer's mount precondition is unreachable: SFTP is the default and the
@@ -732,14 +700,13 @@ describe("console inviter run teardown and abandonment", () => {
     const api = stubJobApi({
       sftp: { configured: true, host: "dr.example.gov", port: 2222 },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachRunningRun(api);
 
     // Unmount stands in for a navigation / reload / tab close. It must NOT POST a
     // cancel: the appliance keeps running the exchange and the recovery panel is
     // the way back. This is the whole point of the strand-recovery change.
-    root?.unmount();
-    root = undefined;
+    app.unmount();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(api.captured.some((r) => r.url === "/api/jobs/job-7/cancel")).toBe(
       false,
@@ -750,7 +717,7 @@ describe("console inviter run teardown and abandonment", () => {
     const api = stubJobApi({
       sftp: { configured: true, host: "dr.example.gov", port: 2222 },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachRunningRun(api);
 
     // A non-retryable (security) failure offers start-over; mark the job terminal
@@ -790,7 +757,7 @@ describe("console inviter run teardown and abandonment", () => {
     const api = stubJobApi({
       sftp: { configured: true, host: "dr.example.gov", port: 2222 },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachRunningRun(api);
 
     // A retryable (exchange) failure offers Try again; mark the job terminal on the
@@ -833,7 +800,7 @@ describe("console inviter run teardown and abandonment", () => {
 describe("console inviter picker accessibility", () => {
   test("the picker stages are real h2 headings", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await expect
       .element(
         page.getByRole("heading", {
@@ -852,7 +819,7 @@ describe("console inviter picker accessibility", () => {
 
   test("a polite status region announces the loaded listing", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await vi.waitFor(() => {
       const status = document.querySelector(
         '[role="status"][aria-live="polite"]',
@@ -863,7 +830,7 @@ describe("console inviter picker accessibility", () => {
 
   test("selecting a file moves focus to the confirm stage", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     // The stage swap sends focus to the confirm panel so a screen-reader user is not
     // stranded on the row button that just unmounted.
@@ -890,7 +857,7 @@ describe("console inviter picker accessibility", () => {
         ],
       },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await expect
       .element(page.getByRole("button", { name: "Select clients.csv" }))
       .toBeInTheDocument();
@@ -903,7 +870,7 @@ describe("console inviter picker accessibility", () => {
 describe("console inviter picker re-profile", () => {
   test("re-profiling with unchanged columns keeps the draft; changed columns reset it", async () => {
     const api = stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
@@ -949,7 +916,7 @@ describe("console inviter picker re-profile", () => {
         ],
       },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
@@ -965,7 +932,7 @@ describe("console inviter picker re-profile", () => {
 describe("console inviter sample-data copy", () => {
   test("links the deployment guide instead of promising a walkthrough", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     const link = page.getByRole("link", { name: "deployment guide" });
     await expect.element(link).toBeInTheDocument();
     await expect
@@ -996,7 +963,7 @@ describe("console inviter re-attaches on a busy create", () => {
       conflict: { jobId: "job-live", status: "running" },
       handoff: REATTACH_HANDOFF,
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await page.getByRole("button", { name: "Create the invitation" }).click();
 
@@ -1079,7 +1046,7 @@ describe("console inviter re-attaches on a busy create", () => {
       sftp: { configured: true, host: "dr.example.gov", port: 2222 },
       conflict: { jobId: "job-live", status: "running", holdProbe: true },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await page.getByRole("button", { name: "Create the invitation" }).click();
 
@@ -1157,7 +1124,7 @@ describe("console inviter partner accept kit", () => {
           path: "/drops/psilink",
         },
       });
-      mount(createElement(InviterBench));
+      app.render(createElement(InviterBench));
       await reachReviewCreate();
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await expect
@@ -1202,7 +1169,7 @@ describe("console inviter partner accept kit", () => {
           folderName: "psilink",
         },
       });
-      mount(createElement(InviterBench));
+      app.render(createElement(InviterBench));
       await reachReviewCreate();
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await expect
@@ -1237,7 +1204,7 @@ describe("console inviter partner accept kit", () => {
         sftp: { configured: false },
         rendezvous: { configured: true, locator: "rendezvous" },
       });
-      mount(createElement(InviterBench));
+      app.render(createElement(InviterBench));
       await reachReviewCreate();
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await expect
@@ -1273,7 +1240,7 @@ describe("console inviter recurring hand-off availability", () => {
       sftp: { configured: true, host: "dr.example.gov", port: 2222 },
       handoff: SHARE_HANDOFF,
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect

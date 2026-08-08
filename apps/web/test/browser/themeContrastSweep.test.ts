@@ -4,7 +4,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so the swept surfaces render with their real
 // geometry and painted backgrounds (the .page ground, the input fills), not the
@@ -18,11 +17,10 @@ import { BenchLobby } from "@bench/BenchLobby";
 import { InviterBench } from "@bench/InviterBench";
 import { VerifyReceiptBench } from "@bench/VerifyReceiptBench";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
 
 // BREADTH contrast sweep over the primary rendered web routes, complementing --
 // not replacing -- test/browser/themeContrast.test.ts. That harness pins a
@@ -105,36 +103,17 @@ async function encodeAcceptToken(): Promise<string> {
   return encodeInvitation(token);
 }
 
-// Router seam: the lobby's action cards and the "recurring" links are Links;
-// render them as plain anchors so the surfaces mount without the router. The
-// bench.test.ts / benchAccept.test.ts pattern. (vitest hoists vi.mock.)
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-    ...rest
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-    [prop: string]: unknown;
-  }) =>
-    createElement(
-      "a",
-      { ...rest, href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+// The lobby's action cards and the "recurring" links are Links; the stubbed
+// plain anchors let those surfaces mount without the router.
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
-// Stub the rendezvous module: importing it runs a top-level config load that
-// reads `process` (absent in the browser runner). Its dial/listen functions run
-// only inside a run lifecycle these initial mounts never start.
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// The rendezvous dial and listen run only inside a run lifecycle these initial
+// mounts never start.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 // Stub the run lifecycle so nothing dials; no run is launched from an initial
 // mount, but the stub keeps the import inert either way.
@@ -142,21 +121,10 @@ vi.mock("@psi/exchangeLifecycle", () => ({
   runExchangeLifecycle: () => Promise.resolve(),
 }));
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(scheme: "light" | "dark", node: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(node, { forceColorScheme: scheme }));
-}
+const app = createAppMount();
 
 afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   window.location.hash = "";
 });
 
@@ -369,9 +337,9 @@ async function mountAndSweep(
   scheme: "light" | "dark",
   node: ReactNode,
 ): Promise<ReturnType<typeof sweepContrast>> {
-  mount(scheme, node);
-  await expect.poll(() => container!.querySelector("h1")).not.toBeNull();
-  for (const control of container!.querySelectorAll<HTMLElement>(
+  app.render(node, { forceColorScheme: scheme });
+  await expect.poll(() => app.container.querySelector("h1")).not.toBeNull();
+  for (const control of app.container.querySelectorAll<HTMLElement>(
     ".mantine-Button-root, .mantine-ActionIcon-root",
   )) {
     if (control.matches(":hover")) {
@@ -379,7 +347,7 @@ async function mountAndSweep(
       await expect.poll(() => control.matches(":hover")).toBe(false);
     }
   }
-  return sweepContrast(container!);
+  return sweepContrast(app.container);
 }
 
 const ROUTES: Array<{ route: string; node: () => Promise<ReactNode> }> = [

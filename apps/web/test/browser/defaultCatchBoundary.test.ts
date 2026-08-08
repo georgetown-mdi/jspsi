@@ -5,21 +5,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import { DefaultCatchBoundary } from "@components/DefaultCatchBoundary";
 import { whenDiagnostic } from "@utils/diagnostics";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
-
-// Stub the router seams DefaultCatchBoundary touches, the same pattern
-// notFound.test.ts / appShell.test.ts use, since a real RouterProvider trips a
-// duplicate-React dispatcher error under the browser runner. The mock surfaces:
-//   - Link as a plain <a href={to}>, so the polymorphic `component={Link}` Home
-//     button is exercised on the Mantine side (the `to` is forwarded as href);
+// The router seams DefaultCatchBoundary touches beyond the shared Link/navigate
+// stub:
 //   - useRouter().invalidate as a spy, so the retry action's call is observable;
 //   - rootRouteId plus a useMatch that runs the component's real `select` over a
 //     test-controlled route id, so toggling `routerMock.matchedRouteId` drives
@@ -36,7 +29,8 @@ const routerMock = vi.hoisted(() => ({
   matchedRouteId: "/some-route",
 }));
 
-vi.mock("@tanstack/react-router", () => ({
+vi.mock("@tanstack/react-router", async () => ({
+  ...(await import("./moduleMocks")).reactRouterMock(),
   rootRouteId: routerMock.rootId,
   useRouter: () => ({ invalidate: routerMock.invalidate }),
   useMatch: ({ select }: { select: (state: { id: string }) => unknown }) =>
@@ -47,20 +41,6 @@ vi.mock("@tanstack/react-router", () => ({
       { "data-testid": "error-component" },
       error instanceof Error ? error.message : String(error),
     ),
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
 }));
 
 // Mock the diagnostic gate so both of its states are testable here: the default
@@ -70,21 +50,14 @@ vi.mock("@tanstack/react-router", () => ({
 // the gate. The gate's own env/flag logic is covered by test/unit/diagnostics.test.ts.
 vi.mock("@utils/diagnostics", () => ({ whenDiagnostic: vi.fn() }));
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-// Mount under the real app provider config, the way the running app composes it.
-function mount(node: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(node));
-}
+const app = createAppMount();
 
 // DefaultCatchBoundary takes ErrorComponentProps; it reads only `error`, but the
 // type requires `reset`, so a no-op stands in for it.
 function mountBoundary(error: Error = new Error("boom")) {
-  mount(createElement(DefaultCatchBoundary, { error, reset: () => undefined }));
+  app.render(
+    createElement(DefaultCatchBoundary, { error, reset: () => undefined }),
+  );
 }
 
 // DefaultCatchBoundary routes its caught-error console.error through
@@ -98,10 +71,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   routerMock.matchedRouteId = "/some-route";
   vi.restoreAllMocks();
   routerMock.invalidate.mockReset();

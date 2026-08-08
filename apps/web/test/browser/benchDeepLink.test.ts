@@ -5,7 +5,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so components render with their real
 // geometry: without it the Stepper's completed-step icon has no size
@@ -17,44 +16,22 @@ import { encodeInvitation, generateSharedSecret } from "@psilink/core";
 import { deepLinkFor, tokenFromInput } from "@psi/invitation";
 import { AcceptorBench } from "@bench/AcceptorBench";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount } from "./renderApp";
 
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 
-// The router seam AcceptorBench touches. It reads the token from
-// window.location.hash and links home; a plain-anchor Link is all this test
-// exercises (a real RouterProvider trips a duplicate-React dispatcher error under
-// the browser runner, the reason the bench browser suite stubs the router too).
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+// AcceptorBench reads the token from window.location.hash and links home, so a
+// plain-anchor Link is all this test exercises of the router seam.
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
-// AcceptorBench transitively imports the rendezvous/lifecycle modules, whose
-// top-level config load reads `process` (absent in the browser runner). This test
-// never launches an exchange (it stops at the decoded review screen), so stub both
-// so the modules load without evaluating that config -- the benchAccept.test.ts
-// pattern.
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// AcceptorBench transitively imports the rendezvous and lifecycle modules, and
+// this test never launches an exchange (it stops at the decoded review screen),
+// so both are stubbed.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 vi.mock("@psi/exchangeLifecycle", () => ({
   runExchangeLifecycle: () => Promise.resolve(),
 }));
@@ -86,21 +63,10 @@ async function mintInvitation(): Promise<string> {
   return encodeInvitation(token);
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   window.location.hash = "";
   vi.restoreAllMocks();
 });
@@ -125,7 +91,7 @@ describe("deep-link landing on the bench acceptor", () => {
     // The /accept route runs client-side and mounts AcceptorBench, which reads the
     // token from the fragment. Set the fragment and mount the same component.
     window.location.hash = token;
-    mount(createElement(AcceptorBench));
+    app.render(createElement(AcceptorBench));
 
     // The decoded terms render: the inviter identity heading proves the token rode
     // the fragment through to a successful decode, not a "cannot accept" error.

@@ -6,7 +6,6 @@ import { getDefaultLinkageTerms } from "@psilink/core";
 import { page } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
 
@@ -16,7 +15,7 @@ import {
 } from "@psi/managedExchangeRecord";
 import { ManagedExchangeDetail } from "@bench/ManagedExchangeDetail";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
 import type {
   ManagedExchangeLastRun,
@@ -24,32 +23,17 @@ import type {
   ManagedExchangeSide,
   NewManagedExchange,
 } from "@psi/managedExchangeRecord";
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The managed exchange detail sections, rendered: the read-only configuration with
 // its re-invite affordance (never an edit control over the terms), the editable
 // local fields, and the self-attested record view (no signed-receipt claim). The
-// Link is stubbed to a plain anchor so the record view's /verify link renders
-// outside a router.
+// stubbed Link is what lets the record view's /verify link render outside a
+// router.
 
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    children,
-    ...rest
-  }: {
-    to?: string;
-    children?: ReactNode;
-    [prop: string]: unknown;
-  }) =>
-    createElement(
-      "a",
-      { ...rest, href: typeof to === "string" ? to : "#" },
-      children,
-    ),
-}));
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 const webrtcLocator: WebRTCExchangeLocator = {
   channel: "webrtc",
@@ -78,26 +62,13 @@ function record(
   });
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
+const app = createAppMount();
 
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
-
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
+afterEach(app.unmount);
 
 describe("managed exchange detail configuration", () => {
   test("the inviter sees read-only terms with a re-invite affordance, not an edit control", async () => {
-    mount(
+    app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
         onSaveLocalFields: () => Promise.resolve(),
@@ -136,7 +107,7 @@ describe("managed exchange detail configuration", () => {
   });
 
   test("the acceptor is told different terms mean a new exchange, not shown a mint button", async () => {
-    mount(
+    app.render(
       createElement(ManagedExchangeDetail, {
         record: record("acceptor"),
         onSaveLocalFields: () => Promise.resolve(),
@@ -174,32 +145,27 @@ describe("managed exchange detail configuration", () => {
     let reinviteFailed = false;
 
     function render() {
-      root?.render(
-        renderApp(
-          createElement(ManagedExchangeDetail, {
-            record: record("inviter"),
-            onSaveLocalFields: () => Promise.resolve(),
-            onReinviteToChangeTerms: () => {
-              reinviting = true;
-              reinviteFailed = false;
+      app.render(
+        createElement(ManagedExchangeDetail, {
+          record: record("inviter"),
+          onSaveLocalFields: () => Promise.resolve(),
+          onReinviteToChangeTerms: () => {
+            reinviting = true;
+            reinviteFailed = false;
+            render();
+            void promise.catch(() => {
+              reinviting = false;
+              reinviteFailed = true;
               render();
-              void promise.catch(() => {
-                reinviting = false;
-                reinviteFailed = true;
-                render();
-              });
-            },
-            canReinvite: true,
-            reinviting,
-            reinviteFailed,
-          }),
-        ),
+            });
+          },
+          canReinvite: true,
+          reinviting,
+          reinviteFailed,
+        }),
       );
     }
 
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
     render();
 
     const button = page.getByRole("button", {
@@ -233,7 +199,7 @@ describe("managed exchange detail configuration", () => {
 describe("managed exchange detail local fields", () => {
   test("the label and max-age policy edit in place, calling the save with the edits", async () => {
     const saved: Array<ManagedExchangeLocalEdits> = [];
-    mount(
+    app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
         onSaveLocalFields: (edits) => {
@@ -262,7 +228,7 @@ describe("managed exchange detail local fields", () => {
   });
 
   test("reads back the current derived bound: a lapse date when expires is set", async () => {
-    mount(
+    app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter", {
           tokenMaxAgeDays: 90,
@@ -284,7 +250,7 @@ describe("managed exchange detail local fields", () => {
   });
 
   test("reads back no age bound when expires is absent", async () => {
-    mount(
+    app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
         onSaveLocalFields: () => Promise.resolve(),
@@ -311,7 +277,7 @@ describe("managed exchange detail record view", () => {
       at: "2026-07-01T09:00:00.000Z",
       outcome: "succeeded",
     };
-    mount(
+    app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter", { lastRun }),
         onSaveLocalFields: () => Promise.resolve(),
@@ -347,7 +313,7 @@ describe("managed exchange detail record view", () => {
       outcome: "failed",
       failureKind: "transport",
     };
-    mount(
+    app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter", { lastRun }),
         onSaveLocalFields: () => Promise.resolve(),

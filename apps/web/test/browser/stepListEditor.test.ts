@@ -5,31 +5,16 @@ import { afterEach, describe, expect, test } from "vitest";
 import { page } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import { StepListEditor } from "@components/StepListEditor";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
 import type { EditableStep } from "@components/StepListEditor";
-import type { Root } from "react-dom/client";
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
+const app = createAppMount();
 
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
-
-function render(node: ReturnType<typeof createElement>) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(node));
-}
+afterEach(app.unmount);
 
 // The cross-party trust boundary: the token-embedded key-element transform editor
 // (ExpertKeyEditor) drives StepListEditor with NO `allowRawPatterns`, so a
@@ -44,7 +29,7 @@ describe("StepListEditor: a token-embedded regex stays read-only without allowRa
   };
 
   test("an existing regex step is read-only (no editable pattern), marked advanced", async () => {
-    render(
+    app.render(
       createElement(StepListEditor, {
         steps: [regexStep],
         onStepsChange: () => {},
@@ -64,7 +49,7 @@ describe("StepListEditor: a token-embedded regex stays read-only without allowRa
   });
 
   test("the raw-pattern family is not offered in the add menu", async () => {
-    render(
+    app.render(
       createElement(StepListEditor, {
         steps: [],
         onStepsChange: () => {},

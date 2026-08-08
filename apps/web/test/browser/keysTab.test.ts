@@ -1,21 +1,19 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 import { page } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import { editorFromCsv, editorWithAuthoredDraft } from "@bench/inviterModel";
 
 import { KeysTab } from "@bench/KeysTab";
 import { consoleAcquiredCsv } from "@bench/consoleAcquiredCsv";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
 import type { AcquiredCsv } from "@bench/inviterModel";
-import type { Root } from "react-dom/client";
 
 // A minimal file carrying a date_of_birth column, so the seeded default keys
 // include one built from it (the element the dead-key transform below targets).
@@ -57,45 +55,31 @@ function withDeadDobKey(editor: ReturnType<typeof editorFromCsv>) {
   return editorWithAuthoredDraft(editor, { ...editor.draft, keys });
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
+const app = createAppMount();
 
 function render() {
   const editor = withDeadDobKey(editorFromCsv("Dana Okafor", csv));
-  root!.render(
-    renderApp(
-      createElement(KeysTab, {
-        editor,
-        csv,
-        expertMode: false,
-        onExpertMode: () => undefined,
-        onKeyEnabled: () => undefined,
-        onKeyMoved: () => undefined,
-        onAuthoredDraft: () => undefined,
-        onStrategy: () => undefined,
-        onAlgorithm: () => undefined,
-        onDeduplicate: () => undefined,
-        onImport: () => undefined,
-        keysError: undefined,
-        announce: () => undefined,
-        onBack: () => undefined,
-      }),
-    ),
+  app.render(
+    createElement(KeysTab, {
+      editor,
+      csv,
+      expertMode: false,
+      onExpertMode: () => undefined,
+      onKeyEnabled: () => undefined,
+      onKeyMoved: () => undefined,
+      onAuthoredDraft: () => undefined,
+      onStrategy: () => undefined,
+      onAlgorithm: () => undefined,
+      onDeduplicate: () => undefined,
+      onImport: () => undefined,
+      keysError: undefined,
+      announce: () => undefined,
+      onBack: () => undefined,
+    }),
   );
 }
 
-beforeEach(() => {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-});
-
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
+afterEach(app.unmount);
 
 describe("KeysTab: the guided-list dead-key badge", () => {
   test('reads "won\'t match" and carries an explanatory aria-label', async () => {
@@ -127,25 +111,23 @@ describe("KeysTab: expert import/export over a rows-withheld console shape", () 
       dateInputFormat: "%m/%d/%Y",
     });
     const editor = editorFromCsv("Dana Okafor", consoleCsv);
-    root!.render(
-      renderApp(
-        createElement(KeysTab, {
-          editor,
-          csv: consoleCsv,
-          expertMode: true,
-          onExpertMode: () => undefined,
-          onKeyEnabled: () => undefined,
-          onKeyMoved: () => undefined,
-          onAuthoredDraft: () => undefined,
-          onStrategy: () => undefined,
-          onAlgorithm: () => undefined,
-          onDeduplicate: () => undefined,
-          onImport: () => undefined,
-          keysError: undefined,
-          announce: () => undefined,
-          onBack: () => undefined,
-        }),
-      ),
+    app.render(
+      createElement(KeysTab, {
+        editor,
+        csv: consoleCsv,
+        expertMode: true,
+        onExpertMode: () => undefined,
+        onKeyEnabled: () => undefined,
+        onKeyMoved: () => undefined,
+        onAuthoredDraft: () => undefined,
+        onStrategy: () => undefined,
+        onAlgorithm: () => undefined,
+        onDeduplicate: () => undefined,
+        onImport: () => undefined,
+        keysError: undefined,
+        announce: () => undefined,
+        onBack: () => undefined,
+      }),
     );
 
     await expect

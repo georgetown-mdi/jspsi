@@ -5,7 +5,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
@@ -15,31 +14,14 @@ import { decodeInvitation } from "@psilink/core";
 import { InviterBench } from "@bench/InviterBench";
 import styles from "@bench/bench.module.css";
 
-import { renderApp } from "./renderApp";
-
-import type { ReactNode } from "react";
-import type { Root } from "react-dom/client";
+import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 // The console SFTP connection-authoring flow: the operator drives PUT /api/jobs/sftp
 // from a file-reference credential (a secrets-mount locator or a typed @path). This
 // suite exercises the console build; the hosted behaviors stay pinned by bench.test.ts.
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
@@ -47,10 +29,9 @@ vi.mock("@utils/clientConfig", () => ({
   psilinkVersion: () => undefined,
 }));
 
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 const FINGERPRINT = `SHA256:${"A".repeat(43)}`;
 // A distinct valid fingerprint the probe returns, so a test can tell a
@@ -207,22 +188,11 @@ function stubJobApi(options: StubOptions = {}): {
   return { captured };
 }
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-function mount(content: ReactNode) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(content));
-}
+const app = createAppMount();
 
 afterEach(async () => {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  await flushPendingUpdates();
+  app.unmount();
   window.localStorage.clear();
   vi.unstubAllGlobals();
 });
@@ -272,7 +242,7 @@ async function openFormForProbe() {
 describe("console SFTP connection authoring", () => {
   test("the empty state offers authoring and blocks Create until a connection lands", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     // Unconfigured SFTP is the default; the card invites authoring rather than
     // silently degrading to save-a-file.
@@ -288,7 +258,7 @@ describe("console SFTP connection authoring", () => {
 
   test("authors a connection from a picked secrets file, then runs it here", async () => {
     const api = stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openAndFillForm();
 
@@ -345,7 +315,7 @@ describe("console SFTP connection authoring", () => {
 
   test("authors from the de-emphasized paste-the-value fallback", async () => {
     const api = stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openAndFillForm();
 
@@ -386,7 +356,7 @@ describe("console SFTP connection authoring", () => {
 
   test("a collapsed paste keeps an armed value visible with a Clear control", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openAndFillForm();
 
@@ -415,7 +385,7 @@ describe("console SFTP connection authoring", () => {
 
   test("an emptied paste surfaces its own message at the paste field", async () => {
     const api = stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openAndFillForm();
 
@@ -445,7 +415,7 @@ describe("console SFTP connection authoring", () => {
 
   test("scopes the never-uploaded note to the file reference, not the paste", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openAndFillForm();
     // The file-reference note scopes the never-uploaded claim to the file itself.
@@ -465,7 +435,7 @@ describe("console SFTP connection authoring", () => {
 
   test("authors from a typed @path escape hatch", async () => {
     const api = stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openAndFillForm();
     await userEvent.fill(
@@ -487,7 +457,7 @@ describe("console SFTP connection authoring", () => {
 
   test("a signing fingerprint is caught before any PUT", async () => {
     const api = stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await page.getByRole("button", { name: "Add connection" }).click();
     await userEvent.fill(
@@ -514,7 +484,7 @@ describe("console SFTP connection authoring", () => {
 
   test("revealing the add form focuses the first field, with no edit note", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await page.getByRole("button", { name: "Add connection" }).click();
     await expect
@@ -534,7 +504,7 @@ describe("console SFTP connection authoring", () => {
         port: 2222,
       },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await page.getByRole("button", { name: "Edit connection" }).click();
     await expect
@@ -544,7 +514,7 @@ describe("console SFTP connection authoring", () => {
 
   test("an invalid port under collapsed Advanced surfaces on Save", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openAndFillForm();
     // Open Advanced, enter an out-of-range port, then collapse it again.
@@ -565,7 +535,7 @@ describe("console SFTP connection authoring", () => {
           "psilink writes the exchange's working files and results into.",
       ],
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openAndFillForm();
     await userEvent.fill(
@@ -584,7 +554,7 @@ describe("console SFTP connection authoring", () => {
 
   test("a 413 shows the too-large message, not the reachability one", async () => {
     stubJobApi({ putStatus: 413 });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openAndFillForm();
     await userEvent.fill(
@@ -599,7 +569,7 @@ describe("console SFTP connection authoring", () => {
 
   test("probe-to-fill reads the fingerprint, fills the field, and Save PUTs it", async () => {
     const api = stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openFormForProbe();
 
@@ -641,7 +611,7 @@ describe("console SFTP connection authoring", () => {
     const api = stubJobApi({
       probe: { status: 200, body: { status: "unreachable" } },
     });
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openFormForProbe();
 
@@ -670,7 +640,7 @@ describe("console SFTP connection authoring", () => {
 
   test("editing the host clears a presented probe result (no stale fill)", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openFormForProbe();
 
@@ -693,7 +663,7 @@ describe("console SFTP connection authoring", () => {
 
   test("the deliberate save-a-file alternative routes to the save surface", async () => {
     stubJobApi();
-    mount(createElement(InviterBench));
+    app.render(createElement(InviterBench));
     await reachReviewCreate();
     await page
       .getByRole("button", {
