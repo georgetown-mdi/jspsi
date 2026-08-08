@@ -1,0 +1,15 @@
+# Accepted exceptions to the container image vulnerability scan that
+# .github/workflows/image_smoke.yaml runs on a pull request and
+# .github/workflows/release.yaml runs ahead of a publish.
+#
+# That scan fails on a vulnerability in the image's OS package layer that is
+# HIGH or CRITICAL and has a fix available. An entry here exempts one
+# vulnerability id from it, and is a reviewed decision rather than a way to
+# quiet a build: write the reason it was accepted and the date it was accepted
+# above the id, so a reader can tell an assessed exception from a forgotten one.
+#
+#   # 2026-01-01: the affected code path is unreachable from either image role,
+#   # and the fix is expected in the next base image point release.
+#   CVE-0000-00000
+#
+# Nothing is accepted today.

@@ -1,20 +1,24 @@
 name: Image Smoke
 
-# Pull-request smoke test for the container images this repository ships: the
-# default CLI + web-console appliance image (the same Dockerfile release.yaml
-# ships) and the FIPS variant (Dockerfile.fips, which is built and smoked here
-# but published nowhere). Release builds the default image only at a version
-# tag, so this is the sole pre-merge check that either image actually builds and
-# that both of its roles run: the headless CLI and the `serve` web console.
+# Smoke test for the container images this repository ships: the default CLI +
+# web-console appliance image (the same Dockerfile release.yaml ships) and the
+# FIPS variant (Dockerfile.fips, which is built and smoked here but published
+# nowhere). Release builds the default image only at a version tag, so this is
+# the sole pre-merge check that either image actually builds and that both of
+# its roles run: the headless CLI and the `serve` web console.
 #
 # It builds single-arch (native amd64, no QEMU) and loads each image into the
 # runner's Docker so it can run it -- deliberately faster and simpler than the
 # release job's multi-arch build+push, since nothing is published here.
 #
-# Scoped by path to changes that can affect an image. If this is made a required
-# status check, configure branch protection so a path-skipped run does not block
-# an unrelated PR -- a skipped required check otherwise stays pending.
+# The pull-request trigger is scoped by path to changes that can affect an
+# image. If this is made a required status check, configure branch protection so
+# a path-skipped run does not block an unrelated PR -- a skipped required check
+# otherwise stays pending.
 on:
+  # An on-demand run: how a maintainer re-checks the images after bumping the
+  # base digest, without waiting for the schedule or opening a pull request.
+  workflow_dispatch:
   pull_request:
     branches: [main, staging]
     paths:
@@ -41,13 +45,23 @@ on:
       # change to their schema breaks it here rather than in a release build.
       - "test_data/**"
       - ".github/workflows/image_smoke.yaml"
+      # The exception list the vulnerability scan below reads.
+      - ".github/trivyignore"
+  # Weekly re-run against a refreshed vulnerability database. The base images
+  # are pinned by digest, so a vulnerability published against one of them
+  # reaches an operator with nothing in this repository changed -- no path above
+  # matches, and no other trigger fires. Monday, matching the Dependabot cadence
+  # in .github/dependabot.yml, as codeql.yaml does for the same reason.
+  schedule:
+    - cron: "45 5 * * 1"
 
 # Cancel a superseded run when a newer commit lands on the same PR/branch.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
-# Least privilege: this gate only needs to read the repo and build locally.
+# Least privilege at the top level; the smoke job widens to what the scan's
+# SARIF upload needs.
 permissions:
   contents: read
 
@@ -55,6 +69,11 @@ jobs:
   smoke:
     name: Build and smoke the ${{ matrix.variant }} image
     runs-on: ubuntu-latest
+    permissions:
+      # actions/checkout.
+      contents: read
+      # Upload the vulnerability scan's SARIF as code-scanning alerts.
+      security-events: write
     # The FIPS leg's exchange step runs a real two-party exchange over a polled
     # file drop, so this bound is well above the default-image leg's needs.
     timeout-minutes: 60
@@ -536,10 +555,11 @@ jobs:
       # traversal under an unprivileged account cannot enter a root-only
       # directory -- it would report an absence it never measured.
       #
-      # Last in the job on purpose: a failing step skips every step after it, and
-      # an inventory that has drifted is worth less than the variant's provider
-      # assertions and its end-to-end exchange, which have to keep running while
-      # the drift is diagnosed.
+      # After the functional smokes on purpose: a failing step skips every step
+      # after it, and an inventory that has drifted is worth less than the
+      # variant's provider assertions and its end-to-end exchange, which have to
+      # keep running while the drift is diagnosed. The vulnerability scan below
+      # sits after this one for the same reason.
       - name: Measure the image's setuid and setgid files
         run: |
           set -euo pipefail
@@ -604,3 +624,86 @@ jobs:
             exit 1
           fi
           echo "the ${{ matrix.variant }} image's setuid/setgid files are the recorded inventory"
+
+      # The OS package layer, which nothing else covers: Dependabot, the
+      # dependency review gate and the release `npm audit` all stop at the npm
+      # tree, so a vulnerability in the base image or one of its system packages
+      # would otherwise reach an operator unflagged. The base is pinned by
+      # digest, which is why the weekly schedule above exists -- a vulnerability
+      # published against a pin nothing has touched has no other trigger.
+      #
+      # The scope and the threshold, set here rather than left to a default:
+      #   - `vuln-type: os` keeps this to the layer the npm-side gates do not
+      #     reach; a second gate over the npm tree would answer to a different
+      #     threshold from the first and disagree with it.
+      #   - `scanners: vuln` keeps a secret or misconfiguration finding from
+      #     failing a step whose threshold is written for vulnerabilities.
+      #   - `severity` and `ignore-unfixed` are the threshold: HIGH and above,
+      #     fixable only. A gate that fires on a vulnerability no bump can
+      #     resolve is unactionable and gets switched off, so an unfixable
+      #     finding is deliberately invisible here.
+      #   - accepted exceptions are in .github/trivyignore, each id carrying the
+      #     reason it was accepted.
+      #
+      # A finding is a prompt to bump the base digest in the Dockerfile: the pin
+      # is deliberate, so nothing on the npm side resolves it, and the docker
+      # ecosystem in .github/dependabot.yml opens that bump on its own weekly
+      # schedule rather than in answer to this.
+      #
+      # Scoped to the default image, as the unprivileged-account steps above
+      # are, but for a different reason: the variant is published nowhere
+      # (docs/RELEASES.md), so nothing its package closure carries reaches an
+      # operator, and gating a pull request on it would block a merge over an
+      # image no one can pull.
+      - name: Scan the image for OS-layer vulnerabilities
+        id: vulnerability_scan
+        if: matrix.fips == 'false'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ matrix.tag }}
+          scanners: vuln
+          vuln-type: os
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          trivyignores: .github/trivyignore
+          exit-code: "1"
+          format: sarif
+          output: trivy-image.sarif
+          # Holds the SARIF to the same severities the gate answers to, so the
+          # Security tab does not collect alerts for findings no run here fails
+          # on.
+          limit-severities-for-sarif: true
+
+      # Puts the findings in the Security tab beside the CodeQL alerts rather
+      # than only in this job's log. It runs whether the scan passed or failed --
+      # a failing gate is exactly the run whose findings someone needs to read --
+      # and is skipped when the scan step itself did not run.
+      #
+      # A pull request from a fork carries a read-only token, so there this would
+      # fail on the permission rather than on anything it found. The gate above
+      # still runs on such a pull request, and the step below is what its
+      # findings reach.
+      - name: Upload the image scan to code scanning
+        id: image_scan_upload
+        if: >-
+          ${{ !cancelled()
+          && steps.vulnerability_scan.outcome != 'skipped'
+          && (github.event_name != 'pull_request'
+          || github.event.pull_request.head.repo.full_name == github.repository) }}
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-image.sarif
+          category: container-image-${{ matrix.variant }}
+
+      # The scan writes its report to a file rather than to stdout, so a run
+      # whose upload did not succeed would fail the gate while showing nothing
+      # it found. This puts the report where such a run can still be read.
+      # Conditioned on the upload's outcome rather than on the fork predicate
+      # above, so any other reason the alerts do not land is covered too.
+      - name: Report the scan findings in the job log
+        if: >-
+          ${{ !cancelled()
+          && steps.vulnerability_scan.outcome != 'skipped'
+          && steps.image_scan_upload.outcome != 'success' }}
+        run: cat trivy-image.sarif

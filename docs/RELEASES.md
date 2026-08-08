@@ -65,6 +65,20 @@ cosign verify --key cosign.pub docker.io/vdorie/psi-link@sha256:...
 
 A digest that verifies is the image the maintainer signed. `cosign.pub` is the public signing key at the repository root. Verify by digest when the reference comes from a launcher, as here; verify by tag when it comes from the release notes (see [Verifying a Release](#verifying-a-release)).
 
+## Image vulnerability scan
+
+Every release image is scanned for OS-layer vulnerabilities before it is published. The release workflow builds the image single-arch, scans it, and only then authenticates to Docker Hub and pushes, so an image the workflow published is an image that passed the scan. The hand-built push in [step 8](#8-build-and-publish-the-container-image-ci) is the one path around that.
+
+**What the gate is.** Trivy, over the image's OS package layer, failing the release on a vulnerability that is HIGH or CRITICAL _and_ has a fix available. An unfixable finding does not block a release: a gate that fires on something no bump can resolve is unactionable and ends up switched off. The npm dependency tree is covered separately -- by Dependabot, the [dependency review workflow](../.github/workflows/dependency_review.yaml), and [step 4](#4-review-and-audit-dependencies) below -- so this gate deliberately does not reach it.
+
+**Where the threshold lives.** On the scan step itself, as literal inputs: `.github/workflows/release.yaml` for this gate and `.github/workflows/image_smoke.yaml` for the pre-merge one. Accepted exceptions are in `.github/trivyignore`, each vulnerability id carrying the reason it was accepted and the date.
+
+**What a finding means.** The base image is pinned by digest deliberately (see [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md)), so a finding is a prompt to bump that pin rather than something a dependency update resolves. Edit the digest in `Dockerfile`, let the pre-merge scan confirm the new base on that pull request, then tag.
+
+**When it runs.** On every pull request that can change the image, on a weekly schedule against a refreshed vulnerability database, and again in the release workflow ahead of the push. The scheduled run is the one that catches a vulnerability published against a base image nothing in this repository has touched. Pull-request and scheduled findings surface as code-scanning alerts in the repository Security tab; the release gate reports on the run's summary page.
+
+**What it does not cover.** It reads the amd64 build, while a release publishes amd64 and arm64; both come from the same digest-pinned base and the same committed lockfile, so the package set it reads is the one that ships, but a vulnerability in an architecture-specific binary alone is outside it. The FIPS variant is not scanned -- it is published nowhere, so nothing its package closure carries reaches an operator.
+
 ## Release Checklist
 
 Work through these steps for every release. Steps marked with `[CI]` are automated; the remainder require a maintainer.
@@ -97,6 +111,8 @@ npm audit --omit=dev -w packages/core -w apps/cli -w apps/web
 
 Resolve any high-severity findings before proceeding. For any dependency added since the last release, verify license compatibility (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
 
+This covers the npm tree only. The image's OS package layer is gated separately, in CI, by the [image vulnerability scan](#image-vulnerability-scan).
+
 The unscoped `npm audit` additionally reports development-tree findings, which are triaged separately rather than at release time; how the last one was resolved, and what holds it resolved, is recorded in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-brace-expansion-advisory-is-fixed-by-a-root-override).
 
 ### 5. Run the full test suite
@@ -120,9 +136,9 @@ git push origin vX.Y.Z
 
 ### 8. Build and publish the container image `[CI]`
 
-The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds the multi-platform image and pushes it to Docker Hub, signs it with Cosign, attests its build provenance (see [Build provenance](#build-provenance)), and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). Ahead of the build it checks the pushed tag against the version step 2 set in `apps/cli/package.json` and fails the release when the two disagree: the image build bakes that version into the console's partner accept kit, so a tag pushed ahead of the bump would publish an image telling the partner to run the release before it. Ensure the `DOCKER_USERNAME` and `DOCKER_TOKEN` repository secrets are set before tagging.
+The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds the multi-platform image and pushes it to Docker Hub, signs it with Cosign, attests its build provenance (see [Build provenance](#build-provenance)), and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). Ahead of the build it checks the pushed tag against the version step 2 set in `apps/cli/package.json` and fails the release when the two disagree: the image build bakes that version into the console's partner accept kit, so a tag pushed ahead of the bump would publish an image telling the partner to run the release before it. It then builds the image single-arch and scans it, and pushes nothing if the scan fails (see [Image vulnerability scan](#image-vulnerability-scan)). Ensure the `DOCKER_USERNAME` and `DOCKER_TOKEN` repository secrets are set before tagging.
 
-If you must build and push by hand -- for a workflow outage or a local test -- follow the multi-platform buildx instructions in `apps/cli/README.md` (creating `multiarch-builder` and running `docker buildx build --push` from the repository root).
+If you must build and push by hand -- for a workflow outage or a local test -- follow the multi-platform buildx instructions in `apps/cli/README.md` (creating `multiarch-builder` and running `docker buildx build --push` from the repository root). A hand-built push bypasses the [image vulnerability scan](#image-vulnerability-scan) the workflow runs ahead of its own; scan the image yourself before pushing it, at the threshold the workflow sets.
 
 ### 9. Generate and attach the SBOM
 
