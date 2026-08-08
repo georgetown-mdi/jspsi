@@ -441,10 +441,9 @@ export function markPeerWaitTimeout<E extends object>(error: E): E {
 
 /**
  * Whether `error`, or anything in its `cause` chain, carries the
- * {@link markPeerWaitTimeout} tag. Every tag site inside this package tags the
- * error it throws, so the walk is what this exported classifier offers a
- * consumer that wraps a tagged error before asking -- not a path any of those
- * sites takes; a seen-set guards against a pathological `cause` cycle.
+ * {@link markPeerWaitTimeout} tag. Walking the chain keeps the answer right
+ * wherever the wrapping happens -- in a consumer or a future internal path
+ * alike; a seen-set guards against a pathological `cause` cycle.
  */
 export function isPeerWaitTimeout(error: unknown): boolean {
   const seen = new Set<unknown>();
