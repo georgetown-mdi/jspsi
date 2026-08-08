@@ -24,23 +24,9 @@ import type { Root } from "react-dom/client";
 // unavailable degrade. The load's failure classification is unit-tested; this file
 // proves both routes render the read-failed surface, not the quick path.
 
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    children,
-    ...rest
-  }: {
-    to?: string;
-    children?: ReactNode;
-    [prop: string]: unknown;
-  }) =>
-    createElement(
-      "a",
-      { ...rest, href: typeof to === "string" ? to : "#" },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 // The store opens, but the record read rejects: the post-open read failure the load
 // classifies as `failed`. The rest of the store module is left intact.

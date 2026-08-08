@@ -38,35 +38,19 @@ import type {
 // The hosted acceptor journey (which rejects SFTP outright) stays pinned by
 // acceptJourney.test.ts.
 
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
   isConsoleBuild: () => true,
 }));
 
-// The unsupported gate and the server-job accept never dial; stub the rendezvous
-// module so importing it does not run its config load (which reads `process`).
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// The unsupported gate and the server-job accept never dial.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 const FINGERPRINT = `SHA256:${"A".repeat(43)}`;
 

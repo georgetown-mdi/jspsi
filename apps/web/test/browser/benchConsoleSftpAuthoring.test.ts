@@ -23,23 +23,9 @@ import type { Root } from "react-dom/client";
 // The console SFTP connection-authoring flow: the operator drives PUT /api/jobs/sftp
 // from a file-reference credential (a secrets-mount locator or a typed @path). This
 // suite exercises the console build; the hosted behaviors stay pinned by bench.test.ts.
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
@@ -47,10 +33,9 @@ vi.mock("@utils/clientConfig", () => ({
   psilinkVersion: () => undefined,
 }));
 
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 const FINGERPRINT = `SHA256:${"A".repeat(43)}`;
 // A distinct valid fingerprint the probe returns, so a test can tell a

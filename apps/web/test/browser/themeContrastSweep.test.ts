@@ -105,36 +105,17 @@ async function encodeAcceptToken(): Promise<string> {
   return encodeInvitation(token);
 }
 
-// Router seam: the lobby's action cards and the "recurring" links are Links;
-// render them as plain anchors so the surfaces mount without the router. The
-// bench.test.ts / benchAccept.test.ts pattern. (vitest hoists vi.mock.)
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-    ...rest
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-    [prop: string]: unknown;
-  }) =>
-    createElement(
-      "a",
-      { ...rest, href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+// The lobby's action cards and the "recurring" links are Links; the stubbed
+// plain anchors let those surfaces mount without the router.
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
-// Stub the rendezvous module: importing it runs a top-level config load that
-// reads `process` (absent in the browser runner). Its dial/listen functions run
-// only inside a run lifecycle these initial mounts never start.
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// The rendezvous dial and listen run only inside a run lifecycle these initial
+// mounts never start.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 // Stub the run lifecycle so nothing dials; no run is launched from an initial
 // mount, but the stub keeps the import inert either way.

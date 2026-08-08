@@ -18,24 +18,10 @@ import { renderApp } from "./renderApp";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
-// Stub the router seam the bench components touch.
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+// The bench components touch the router seam.
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 // This suite exercises the CONSOLE build (the direct-exchange flow is console-only).
 vi.mock("@utils/clientConfig", () => ({
@@ -43,13 +29,11 @@ vi.mock("@utils/clientConfig", () => ({
   isConsoleBuild: () => true,
 }));
 
-// Stub the rendezvous module: importing it runs a top-level config load that reads
-// `process` (absent in the browser runner). The direct flow drives no browser
-// transport, so its functions are never called.
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// The direct flow drives no browser transport, so the rendezvous functions are
+// never called.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 const CLIENTS_FILE = {
   name: "clients.csv",

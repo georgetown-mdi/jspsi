@@ -41,32 +41,16 @@ import type {
   PreparedExchange,
 } from "@psilink/core";
 
-// Stub the router seam. useNavigate returns a captured spy so the lobby paste
-// test can assert the navigation target and hash; Link renders a plain anchor.
-// (vitest hoists vi.mock above the imports.)
+// Capture what the router seam was navigated to, so the lobby paste test can
+// assert the target and hash.
 const navigation = vi.hoisted(() => ({
   calls: [] as Array<unknown>,
 }));
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => (options: unknown) => {
-    navigation.calls.push(options);
-    return undefined;
-  },
-}));
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock({
+    onNavigate: (options) => navigation.calls.push(options),
+  }),
+);
 
 // Defer or fail the CSV parse per-test to observe the parse-behind-consent gate
 // (the loader is untouched until "Accept and continue" fires with consent) and
@@ -105,14 +89,11 @@ vi.mock("@psi/csvParseController", async (importOriginal) => {
   };
 });
 
-// Stub the rendezvous module: importing it runs a top-level config load that
-// reads `process` (absent in the browser runner). Its dial function only runs
-// inside the run lifecycle's acquire closure, which the lifecycle stub below
-// never invokes (the bench.test.ts pattern).
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// The rendezvous dial runs only inside the run lifecycle's acquire closure,
+// which the lifecycle stub below never invokes.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 // Stub the run lifecycle so launching an exchange never dials: record each
 // invocation's options so a test can drive the captured onStages/onStage/

@@ -15,11 +15,8 @@ import { renderApp } from "./renderApp";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
-// Stub the router seams DefaultCatchBoundary touches, the same pattern
-// notFound.test.ts / appShell.test.ts use, since a real RouterProvider trips a
-// duplicate-React dispatcher error under the browser runner. The mock surfaces:
-//   - Link as a plain <a href={to}>, so the polymorphic `component={Link}` Home
-//     button is exercised on the Mantine side (the `to` is forwarded as href);
+// The router seams DefaultCatchBoundary touches beyond the shared Link/navigate
+// stub:
 //   - useRouter().invalidate as a spy, so the retry action's call is observable;
 //   - rootRouteId plus a useMatch that runs the component's real `select` over a
 //     test-controlled route id, so toggling `routerMock.matchedRouteId` drives
@@ -36,7 +33,8 @@ const routerMock = vi.hoisted(() => ({
   matchedRouteId: "/some-route",
 }));
 
-vi.mock("@tanstack/react-router", () => ({
+vi.mock("@tanstack/react-router", async () => ({
+  ...(await import("./moduleMocks")).reactRouterMock(),
   rootRouteId: routerMock.rootId,
   useRouter: () => ({ invalidate: routerMock.invalidate }),
   useMatch: ({ select }: { select: (state: { id: string }) => unknown }) =>
@@ -46,20 +44,6 @@ vi.mock("@tanstack/react-router", () => ({
       "div",
       { "data-testid": "error-component" },
       error instanceof Error ? error.message : String(error),
-    ),
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
     ),
 }));
 

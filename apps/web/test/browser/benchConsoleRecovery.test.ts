@@ -17,24 +17,10 @@ import { renderApp } from "./renderApp";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
-// Stub the router seam the bench components touch (the benchConsoleInviter pattern).
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+// The bench components touch the router seam.
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 // This suite exercises the CONSOLE build, where the recovery panel mounts.
 vi.mock("@utils/clientConfig", () => ({
@@ -44,10 +30,9 @@ vi.mock("@utils/clientConfig", () => ({
 }));
 
 // The console disables the browser transport; nothing here drives it.
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 const ATTACHMENT_KEY = "psilink-console-last-job";
 

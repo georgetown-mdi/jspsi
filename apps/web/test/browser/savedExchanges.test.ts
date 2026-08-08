@@ -57,23 +57,9 @@ vi.mock("@psi/managedExchangeStore", async (importOriginal) => {
 
 // Assert on hrefs rather than navigation: the router seam is stubbed to a plain
 // anchor, so a rendered Link is an <a href> and useNavigate is a no-op.
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    children,
-    ...rest
-  }: {
-    to?: string;
-    children?: ReactNode;
-    [prop: string]: unknown;
-  }) =>
-    createElement(
-      "a",
-      { ...rest, href: typeof to === "string" ? to : "#" },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 

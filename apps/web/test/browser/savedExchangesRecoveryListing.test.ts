@@ -40,23 +40,9 @@ import type { Root } from "react-dom/client";
 // delete-by-key. Deleting the offending record and reloading recovers the now-readable
 // list to the normal run surface.
 
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    children,
-    ...rest
-  }: {
-    to?: string;
-    children?: ReactNode;
-    [prop: string]: unknown;
-  }) =>
-    createElement(
-      "a",
-      { ...rest, href: typeof to === "string" ? to : "#" },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 

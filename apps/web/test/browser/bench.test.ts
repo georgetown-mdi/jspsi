@@ -28,30 +28,11 @@ import type { PreparedExchange } from "@psilink/core";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
-// Stub the router seam the bench components touch (the lobby's Links). This
-// suite asserts the bench's structure, landmarks, and tokens, not navigation
-// -- the appShell.test.ts pattern. vitest hoists the mock above the imports,
-// so the components pick up the stub.
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    children,
-    ...rest
-  }: {
-    to?: string;
-    children?: ReactNode;
-    [prop: string]: unknown;
-  }) =>
-    // Forward the remaining props (className plus the data-* attributes Mantine
-    // sets from its polymorphic component, e.g. the `inherit` marker) so a
-    // rendered Anchor styled via those attributes is faithful, not stripped.
-    createElement(
-      "a",
-      { ...rest, href: typeof to === "string" ? to : "#" },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+// The bench components touch the router seam (the lobby's Links). This suite
+// asserts the bench's structure, landmarks, and tokens, not navigation.
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 // Swap the mint per-test to drive the create action's failure paths, which a
 // real (validated-before-arming) mint cannot reach deterministically. With
@@ -109,14 +90,11 @@ vi.mock("@psi/csvParseController", async (importOriginal) => {
   };
 });
 
-// Stub the rendezvous module: importing it runs a top-level config load that
-// reads `process` (absent in the browser runner). Its listen function only
-// runs inside the run lifecycle's acquire closure, which the lifecycle stub
-// below never invokes (the exchangeView.test.ts pattern).
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// The rendezvous listen runs only inside the run lifecycle's acquire closure,
+// which the lifecycle stub below never invokes.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 // Stub the run lifecycle so creating an invitation never dials: record each
 // invocation's options so a test can drive the captured onStages/onStage/

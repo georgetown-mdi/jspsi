@@ -25,23 +25,9 @@ import type { Root } from "react-dom/client";
 // store's open here rejects -- not a user-agent guess. The load ordering and its
 // classification are unit-tested; this file proves both renders.
 
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    children,
-    ...rest
-  }: {
-    to?: string;
-    children?: ReactNode;
-    [prop: string]: unknown;
-  }) =>
-    createElement(
-      "a",
-      { ...rest, href: typeof to === "string" ? to : "#" },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 // Fail the store open -- the real failed-open the degrade classifies on. The rest of
 // the store module is left intact (the list never reaches its reads).

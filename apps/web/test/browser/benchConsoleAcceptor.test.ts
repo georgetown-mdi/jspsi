@@ -40,36 +40,20 @@ import type {
 // operator CAN run the exchange. The hosted acceptor journey stays pinned by
 // acceptJourney.test.ts, which runs on the real default profile.
 
-// Stub the router seam the bench and its recovery links touch.
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+// The bench and its recovery links touch the router seam.
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
   isConsoleBuild: () => true,
 }));
 
-// Stub the rendezvous module: importing it runs a top-level config load that reads
-// `process` (absent in the browser runner). The unsupported gate never dials.
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// The unsupported gate never dials.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 // The inviter-perspective terms the accepted invitation carries. The terms render at
 // the review step for transparency even though the appliance cannot run the exchange.

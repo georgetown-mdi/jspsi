@@ -47,35 +47,17 @@ import type {
 // seam mocked). Driving from a higher composition point would only add the
 // router shell this suite already stubs away, not more real handoff.
 
-// Stub the router seam. AcceptorBench's recovery links and lobby use it; the
-// journey never navigates, so a plain anchor and a no-op navigate suffice.
-// (vitest hoists vi.mock above the imports.)
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+// AcceptorBench's recovery links and lobby touch the router seam; the journey
+// never navigates.
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
-// Stub the rendezvous module: importing it runs a top-level config load that
-// reads `process` (absent in the browser runner). Its dial function only runs
-// inside the real lifecycle's acquire closure, which the lifecycle stub below
-// replaces wholesale, so it is never invoked.
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// The rendezvous dial runs only inside the real lifecycle's acquire closure,
+// which the lifecycle stub below replaces wholesale, so it is never invoked.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 // stagesFor reads only the linkage terms off the prepared exchange, so a
 // terms-only stand-in drives the real acceptor stage-tree derivation for the

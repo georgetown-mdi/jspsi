@@ -31,25 +31,12 @@ import type { WebRTCExchangeLocator } from "@psilink/core";
 // The managed exchange detail sections, rendered: the read-only configuration with
 // its re-invite affordance (never an edit control over the terms), the editable
 // local fields, and the self-attested record view (no signed-receipt claim). The
-// Link is stubbed to a plain anchor so the record view's /verify link renders
-// outside a router.
+// stubbed Link is what lets the record view's /verify link render outside a
+// router.
 
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    children,
-    ...rest
-  }: {
-    to?: string;
-    children?: ReactNode;
-    [prop: string]: unknown;
-  }) =>
-    createElement(
-      "a",
-      { ...rest, href: typeof to === "string" ? to : "#" },
-      children,
-    ),
-}));
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 const webrtcLocator: WebRTCExchangeLocator = {
   channel: "webrtc",

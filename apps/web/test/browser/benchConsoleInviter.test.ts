@@ -22,24 +22,10 @@ import type { CapturedDownload } from "./captureDownloads";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
-// Stub the router seam the bench components touch (the appShell.test.ts pattern).
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
+// The bench components touch the router seam.
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 // This suite exercises the CONSOLE build; the hosted-profile behaviors stay pinned
 // by bench.test.ts, which runs on the real default profile.
@@ -49,13 +35,11 @@ vi.mock("@utils/clientConfig", () => ({
   psilinkVersion: () => undefined,
 }));
 
-// Stub the rendezvous module: importing it runs a top-level config load that reads
-// `process` (absent in the browser runner). Nothing here drives the browser
-// transport (it is disabled on the console), so its functions are never called.
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// Nothing here drives the browser transport (it is disabled on the console), so
+// the rendezvous functions are never called.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 
 const CLIENTS_FILE = {
   name: "clients.csv",

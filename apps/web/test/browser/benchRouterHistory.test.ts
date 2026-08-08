@@ -29,13 +29,10 @@ import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import type { RouterHistory } from "@tanstack/react-router";
 
-// Stub the rendezvous module: importing it runs a top-level config load that
-// reads `process` (absent in the browser runner). Nothing in this suite mints
-// an invitation, so no listen ever fires (the bench.test.ts pattern).
-vi.mock("@psi/rendezvous", () => ({
-  dialAsAcceptor: vi.fn(),
-  listenAsInviter: vi.fn(),
-}));
+// Nothing in this suite mints an invitation, so no rendezvous listen ever fires.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
 vi.mock("@psi/exchangeLifecycle", () => ({
   runExchangeLifecycle: () => Promise.resolve(),
 }));

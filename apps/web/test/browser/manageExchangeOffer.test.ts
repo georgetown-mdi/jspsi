@@ -23,22 +23,9 @@ import type { Root } from "react-dom/client";
 // operator is not invested in inputs a deposit could never honor. The probe seam is
 // probeManagedStoreOpen, mocked here to resolve either answer.
 
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    children,
-    ...rest
-  }: {
-    to?: string;
-    children?: ReactNode;
-    [prop: string]: unknown;
-  }) =>
-    createElement(
-      "a",
-      { ...rest, href: typeof to === "string" ? to : "#" },
-      children,
-    ),
-}));
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
 
 // The availability probe is the only store surface the offer touches; resolving it
 // controls the branch under test. Set per test before mount.
