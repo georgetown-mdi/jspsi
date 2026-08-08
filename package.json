@@ -10,6 +10,8 @@
   ],
   "scripts": {
     "build": "npm run build -ws",
+    "dev": "node scripts/dev.mjs",
+    "dev:console": "node scripts/dev.mjs dev:console",
     "lint": "eslint .",
     "format": "prettier --write .",
     "formatcheck": "prettier --list-different .",
