@@ -52,22 +52,32 @@ const WEB_OUTSIDE_SRC = resolve(repoRoot, "apps/web/vite.config.ts");
 
 // The reaches each guarded tree must refuse. The bare package names are live
 // specifiers, not hypotheticals: npm workspaces symlinks apps/cli and apps/web
-// into the root node_modules as `psilink` and `jspsi`.
+// into the root node_modules as `psilink` and `jspsi`. The bare-directory forms
+// sit alongside their subpath siblings because they exercise a different
+// pattern: matching is gitignore-style, where `dir/**` matches only strictly
+// beneath `dir` and never `dir` itself.
 const REFUSED = [
   ["packages/core/src", CORE_SRC, "../../../apps/cli/src/protocol"],
   ["packages/core/src", CORE_SRC, "../../../apps/web/src/psi/exchange"],
+  ["packages/core/src", CORE_SRC, "../../../apps/web"],
   ["packages/core/src", CORE_SRC, "psilink"],
   ["packages/core/src", CORE_SRC, "jspsi"],
   ["packages/core/test", CORE_TEST, "../../../apps/cli/src/protocol"],
   ["packages/core/test", CORE_TEST, "psilink"],
   ["apps/cli/src", CLI_SRC, "../../web/src/psi/exchange"],
+  ["apps/cli/src", CLI_SRC, "../../web"],
   ["apps/cli/src", CLI_SRC, "../../../apps/web/src/psi/exchange"],
+  ["apps/cli/src", CLI_SRC, "../../../apps/web"],
   ["apps/cli/src", CLI_SRC, "jspsi"],
   ["apps/cli/test", CLI_TEST, "../../../web/src/psi/exchange"],
+  ["apps/cli/test", CLI_TEST, "../../../web"],
   ["apps/web/src", WEB_SRC, "../../../cli/src/protocol"],
+  ["apps/web/src", WEB_SRC, "../../../cli"],
   ["apps/web/src", WEB_SRC, "../../../../apps/cli/src/protocol"],
+  ["apps/web/src", WEB_SRC, "../../../../apps/cli"],
   ["apps/web/src", WEB_SRC, "psilink"],
   ["apps/web", WEB_OUTSIDE_SRC, "../cli/src/protocol"],
+  ["apps/web", WEB_OUTSIDE_SRC, "../cli"],
   ["apps/web", WEB_OUTSIDE_SRC, "psilink"],
 ];
 

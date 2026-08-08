@@ -16,8 +16,18 @@
 // Two relative shapes reach another workspace, and each needs its own group.
 // A path that climbs past `apps/` names it (`../../../apps/web/src/x`); the
 // climb between the two sibling apps never names `apps` at all
-// (`../../web/src/x`). ESLint matches these groups gitignore-style, so a `..`
-// is an ordinary path segment and a bare name matches the subtree beneath it.
+// (`../../web/src/x`). ESLint matches these groups gitignore-style: a `..` is
+// an ordinary path segment, and `dir/**` matches only strictly beneath
+// `dir`, so each shape carries the bare directory as its own pattern. The bare
+// form is more than a text shape: apps/web declares a `main`, so `../../web`
+// from apps/cli resolves to the app.
+//
+// The ban reads specifier text, never a resolved path: a climb into a directory
+// literally named `web` under apps/cli (or `cli` under apps/web) is refused even
+// though it stays inside its own app. Neither app has such a directory. If one
+// appears, rename it or scope an eslint override to it -- the local climb and
+// the cross-app climb are the same text, so a pattern that admits one admits
+// the other.
 //
 // Scope: static import and export specifiers, which is every cross-workspace
 // reference this repo writes. A specifier assembled at runtime and handed to a
@@ -42,13 +52,25 @@ export const crossWorkspaceImportBans = {
   core: [{ group: ["**/apps/**", "psilink", "jspsi"], message: CORE_MESSAGE }],
   cli: [
     {
-      group: ["**/apps/web/**", "**/../web/**", "jspsi"],
+      group: [
+        "**/apps/web",
+        "**/apps/web/**",
+        "**/../web",
+        "**/../web/**",
+        "jspsi",
+      ],
       message: CLI_MESSAGE,
     },
   ],
   web: [
     {
-      group: ["**/apps/cli/**", "**/../cli/**", "psilink"],
+      group: [
+        "**/apps/cli",
+        "**/apps/cli/**",
+        "**/../cli",
+        "**/../cli/**",
+        "psilink",
+      ],
       message: WEB_MESSAGE,
     },
   ],
