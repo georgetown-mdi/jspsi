@@ -79,6 +79,81 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      # The scan gate, ahead of every registry step below on purpose: a release
+      # whose image carries a fixable HIGH or CRITICAL OS-layer vulnerability
+      # never reaches Docker Hub at all, rather than being pushed under `latest`
+      # and then withheld from signing. Nothing in this job has authenticated to
+      # the registry yet when it runs.
+      #
+      # The scan needs an image to read, so this builds one single-arch and
+      # loads it -- the same shape image_smoke.yaml uses for its pre-merge scan.
+      # It is not the published artifact: the build-and-push step below builds
+      # again from the same context, reusing this builder's layer cache, and
+      # that build is what is signed and attested. Both resolve the same
+      # digest-pinned base and the same committed lockfile, so the package set
+      # scanned is the package set published; byte-identical images are not
+      # claimed and nothing here rests on that.
+      #
+      # It reads amd64 while the release publishes amd64 and arm64. The base is
+      # one multi-arch index digest and the two architectures resolve the same
+      # system package versions under it, so what this measures on one is what
+      # ships on the other; a vulnerability in an architecture-specific binary
+      # alone is outside it.
+      - name: Build the release image for scanning (amd64, load into local Docker)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          push: false
+          tags: psi-link:release-candidate
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Same scanner, threshold and exception list as the pull-request gate in
+      # image_smoke.yaml, which carries why each input is set the way it is.
+      # This is the ship-gate half: a base image pinned months before the tag can
+      # have acquired a vulnerability since the pull request that set the pin.
+      - name: Scan the release image for OS-layer vulnerabilities
+        id: vulnerability_scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: psi-link:release-candidate
+          scanners: vuln
+          vuln-type: os
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          trivyignores: .github/trivyignore
+          exit-code: "1"
+          format: table
+          output: trivy-release-image.txt
+
+      # What the gate concluded, on the run's summary page rather than only
+      # inside this job's log, so a blocked release says on its own front page
+      # what blocked it. On a release that publishes, the same summary is the
+      # record that the image was scanned before it went out.
+      - name: Record the scan in the run summary
+        if: ${{ !cancelled() && steps.vulnerability_scan.outcome != 'skipped' }}
+        env:
+          SCAN_OUTCOME: ${{ steps.vulnerability_scan.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Release image vulnerability scan"
+            echo
+            echo "Fixable HIGH and CRITICAL vulnerabilities in the image's OS package layer, with the exceptions in \`.github/trivyignore\` applied."
+            echo
+            echo "Gate outcome: **$SCAN_OUTCOME**."
+            echo
+            if [ -s trivy-release-image.txt ]; then
+              echo '```'
+              cat trivy-release-image.txt
+              echo '```'
+            else
+              echo "The scanner left no report."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v6
