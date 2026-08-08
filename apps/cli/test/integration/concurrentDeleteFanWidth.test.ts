@@ -64,12 +64,11 @@ const FAN_WIDTHS = [
 ] as const;
 
 // Entries the in-process backend answers per READDIR round trip in the cases
-// that make it list a full directory. It packs a whole batch into one NAME
-// packet, and a single packet carrying a full MAX_DIRECTORY_ENTRIES listing is
-// never delivered -- driven directly, the largest batch that arrives is 2048 and
-// 4096 is already lost, which is a property of this backend's framing rather
-// than of the adapter or of core. A real server answers a large directory over
-// many round trips, so these cases ask this one to as well.
+// that make it list a full directory: the width the native sshd backend was
+// measured serving, so those listings cross the wire as many narrow replies, the
+// way a real server sends them. The backend delivers a listing of any width at
+// any setting of this, so what the value buys is round-trip realism rather than
+// delivery.
 const SERVER_READDIR_BATCH = 100;
 
 // What has to have stood unanswered at the server at once for the fan to have
