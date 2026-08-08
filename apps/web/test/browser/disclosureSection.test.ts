@@ -5,13 +5,10 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { page } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import { DisclosureSection } from "@components/DisclosureSection";
 
-import { renderApp } from "./renderApp";
-
-import type { Root } from "react-dom/client";
+import { createAppMount } from "./renderApp";
 
 // The shared disclosure idiom both data-prep editors use (the inviter's rail
 // sections and the per-field cleaning cards' sample preview). The bug class this
@@ -26,8 +23,7 @@ const LABEL = "Legal agreement";
 const PANEL_TEXT = "Attached: MOU-2025-0042";
 const COLLAPSED_SUMMARY = "None";
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
+const app = createAppMount();
 let originalMatchMedia: typeof window.matchMedia;
 
 // The panel body is a real ELEMENT, never a bare string: the collapsed-panel poll
@@ -58,31 +54,23 @@ function setReducedMotion(prefersReduced: boolean) {
 }
 
 function render(open: boolean) {
-  root!.render(
-    renderApp(
-      createElement(DisclosureSection, {
-        label: LABEL,
-        open,
-        onToggle: () => undefined,
-        headingOrder: 3,
-        children: PANEL_BODY(),
-      }),
-    ),
+  app.render(
+    createElement(DisclosureSection, {
+      label: LABEL,
+      open,
+      onToggle: () => undefined,
+      headingOrder: 3,
+      children: PANEL_BODY(),
+    }),
   );
 }
 
 beforeEach(() => {
   originalMatchMedia = window.matchMedia;
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
 });
 
 afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  app.unmount();
   window.matchMedia = originalMatchMedia;
 });
 
@@ -141,17 +129,15 @@ describe("DisclosureSection: aria-controls resolves under a reduced-motion prefe
 describe("DisclosureSection: the toggle button nests only phrasing content", () => {
   test("the collapsed toggle button, summary shown, has no flow-content descendants", async () => {
     setReducedMotion(false);
-    root!.render(
-      renderApp(
-        createElement(DisclosureSection, {
-          label: LABEL,
-          open: false,
-          onToggle: () => undefined,
-          headingOrder: 3,
-          summary: COLLAPSED_SUMMARY,
-          children: PANEL_BODY(),
-        }),
-      ),
+    app.render(
+      createElement(DisclosureSection, {
+        label: LABEL,
+        open: false,
+        onToggle: () => undefined,
+        headingOrder: 3,
+        summary: COLLAPSED_SUMMARY,
+        children: PANEL_BODY(),
+      }),
     );
 
     await expect.element(toggle()).toBeInTheDocument();

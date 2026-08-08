@@ -5,30 +5,14 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
 
 import { createElement, useState } from "react";
-import { createRoot } from "react-dom/client";
 
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
-import type { Root } from "react-dom/client";
+const app = createAppMount();
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
-
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
-
-function render(node: ReturnType<typeof createElement>) {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  root.render(renderApp(node));
-}
+afterEach(app.unmount);
 
 /** Throws on render while `broken`, like a tripped StandardizationCards invariant. */
 function Boom({ broken }: { broken: boolean }) {
@@ -64,7 +48,7 @@ describe("CleaningErrorBoundary contains a cleaning-section crash and recovers",
     // test does not spam the run (the error is handled, never window-unhandled).
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      render(createElement(Harness));
+      app.render(createElement(Harness));
 
       // The fallback replaces the crashed cards in place, with an actionable reset.
       await expect
@@ -95,7 +79,7 @@ describe("CleaningErrorBoundary contains a cleaning-section crash and recovers",
       // Mount with valid children, then trip the boundary on an update -- the path a
       // real host takes when prepared data goes bad mid-edit.
       let breakCleaning: ((value: boolean) => void) | undefined;
-      render(
+      app.render(
         createElement(Harness, {
           initialBroken: false,
           onReady: (setBroken) => {

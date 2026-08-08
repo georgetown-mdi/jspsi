@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
-import { createRoot } from "react-dom/client";
 
 import { sanitizeForDisplay } from "@psilink/core";
 
@@ -21,10 +20,9 @@ import {
   hostileTerms,
   hostileVariants,
 } from "@psilink/core/testing";
-import { renderApp } from "./renderApp";
+import { createAppMount } from "./renderApp";
 
 import type { ComponentProps } from "react";
-import type { Root } from "react-dom/client";
 
 import type { LinkageStrategy, LinkageTerms } from "@psilink/core";
 
@@ -103,21 +101,9 @@ const NO_PAYLOAD_SENTENCE =
   "Your partner receives no result from this exchange, so no columns are " +
   "sent to them -- whatever your file contains.";
 
-let container: HTMLElement | undefined;
-let root: Root | undefined;
+const app = createAppMount();
 
-beforeEach(() => {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-});
-
-afterEach(() => {
-  root?.unmount();
-  container?.remove();
-  root = undefined;
-  container = undefined;
-});
+afterEach(app.unmount);
 
 // The single render entry point for every describe block: render InvitationTerms
 // under the app provider config with the given terms and any optional props. Each
@@ -133,20 +119,18 @@ function renderTerms(
     outboundColumns?: Array<string>;
   },
 ) {
-  root!.render(
-    renderApp(
-      createElement(InvitationTerms, {
-        linkageTerms,
-        ...(options?.perspective ? { perspective: options.perspective } : {}),
-        ...(options?.condensed ? { condensed: true } : {}),
-        ...(options?.disclosedPayloadColumns !== undefined
-          ? { disclosedPayloadColumns: options.disclosedPayloadColumns }
-          : {}),
-        ...(options?.outboundColumns !== undefined
-          ? { outboundColumns: options.outboundColumns }
-          : {}),
-      }),
-    ),
+  app.render(
+    createElement(InvitationTerms, {
+      linkageTerms,
+      ...(options?.perspective ? { perspective: options.perspective } : {}),
+      ...(options?.condensed ? { condensed: true } : {}),
+      ...(options?.disclosedPayloadColumns !== undefined
+        ? { disclosedPayloadColumns: options.disclosedPayloadColumns }
+        : {}),
+      ...(options?.outboundColumns !== undefined
+        ? { outboundColumns: options.outboundColumns }
+        : {}),
+    }),
   );
 }
 
@@ -267,10 +251,10 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     // Each key's header one-liner is the honest anchor: shown beside the key name
     // (not buried in the key's own collapsed rule body). The truncated element
     // carries the "(partial)" breadth marker, the exact key carries none.
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "Matches on SSN - first name (partial)",
     );
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "Matches on SSN - last name - date of birth",
     );
     expect(truncatedPanel.textContent).not.toContain("(partial)");
@@ -286,7 +270,7 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     // ... yet the unique fields the keys match on are stated in the always-visible
     // core, so an acceptor sees WHICH data is matched on without expanding (deduped
     // in first-appearance order: ssn, last_name, dob from key 1, then first_name).
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "Matching on SSN, last name, date of birth, first name.",
     );
     // Structurally outside the disclosure: the summary is not inside the matching
@@ -419,11 +403,11 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     // whose content React commits at a deferred priority -- wait for all four
     // disclosures to be present before counting them.
     await expect
-      .poll(() => container!.querySelectorAll("[aria-controls]").length)
+      .poll(() => app.container.querySelectorAll("[aria-controls]").length)
       .toBe(4);
-    const ids = Array.from(container!.querySelectorAll("[aria-controls]")).map(
-      (el) => el.getAttribute("aria-controls"),
-    );
+    const ids = Array.from(
+      app.container.querySelectorAll("[aria-controls]"),
+    ).map((el) => el.getAttribute("aria-controls"));
     // The "Matching strategies" disclosure, its two nested per-key disclosures, and
     // the master "Other details" disclosure.
     expect(ids.length).toBe(4);
@@ -576,9 +560,7 @@ describe("InvitationTerms: a key disclosure stays mounted but hidden under a red
   });
 
   test("every disclosure's aria-controls resolves to a present, hidden panel while collapsed under reduced motion", async () => {
-    root!.render(
-      renderApp(createElement(InvitationTerms, { linkageTerms: terms })),
-    );
+    app.render(createElement(InvitationTerms, { linkageTerms: terms }));
 
     // The always-mounted-wrapper design for every disclosure. The top-level ones
     // are the matching list ("Matching strategies") and the master "Other details";
@@ -627,14 +609,12 @@ describe("InvitationTerms: a key disclosure stays mounted but hidden under a red
     // Under reduced motion Mantine may UNMOUNT the closed panel, so an id placed on
     // the Collapse panel (instead of the outer wrapper) would dangle -- assert the
     // wrapper stays present here, the invariant the other disclosures are held to.
-    root!.render(
-      renderApp(
-        createElement(InvitationTerms, {
-          linkageTerms: terms,
-          perspective: "proposing",
-          condensed: true,
-        }),
-      ),
+    app.render(
+      createElement(InvitationTerms, {
+        linkageTerms: terms,
+        perspective: "proposing",
+        condensed: true,
+      }),
     );
     const fold = toggle("See the full terms");
     await expect.element(fold).toBeInTheDocument();
@@ -679,7 +659,7 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
     // The self-asserted name is marked unverified, in the always-visible core ...
-    expect(container!.textContent).toContain(noteText);
+    expect(app.container.textContent).toContain(noteText);
     // ... not tucked inside the "Other details" disclosure.
     expect((await readyPanel("Other details")).textContent).not.toContain(
       noteText,
@@ -709,7 +689,7 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
     // from <self>".
     render("proposing");
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(noteText);
+    expect(app.container.textContent).not.toContain(noteText);
   });
 
   test("the note is absent from the during-run accepted view, after consent is committed", async () => {
@@ -720,7 +700,7 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
     // decision the note informs is past.
     render("accepted");
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(noteText);
+    expect(app.container.textContent).not.toContain(noteText);
     // The note is absent here, so the identity heading must not carry a dangling
     // aria-describedby pointing at a note that no longer renders.
     expect(
@@ -755,26 +735,28 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     // "shares with you: No".
     renderOutput({ expectsOutput: true, shareWithPartner: false });
     await expect.element(page.getByText("Result sharing")).toBeInTheDocument();
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "You will receive the matched result: No",
     );
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "Your partner (the inviter) will receive the result: Yes",
     );
     // The acceptor's OWN non-receipt is a hard fact -- enforced by this tool, not a
     // matter of trusting the partner -- so its "No" carries the enforced caveat.
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "Enforced: you are sent no result",
     );
     // The partner receives here (Yes): no cooperative caveat, but the partner "Yes"
     // is the accountable disclosure, so it carries the brief governance pointer.
-    expect(container!.textContent).not.toContain("By agreement, not enforced");
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).not.toContain(
+      "By agreement, not enforced",
+    );
+    expect(app.container.textContent).toContain(
       "Once received, its use is governed by your agreement, not this tool.",
     );
     // The partner receives the result here, so the honest-helper membership line
     // does not apply -- it is scoped to the "partner does not receive" case.
-    expect(container!.textContent).not.toContain(
+    expect(app.container.textContent).not.toContain(
       "learns which of its own records are in your data",
     );
   });
@@ -782,23 +764,25 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
   test("an acceptor of a partner-only invitation is told plainly it receives the result", async () => {
     renderOutput({ expectsOutput: false, shareWithPartner: true });
     await expect.element(page.getByText("Result sharing")).toBeInTheDocument();
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "You will receive the matched result: Yes",
     );
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "Your partner (the inviter) will receive the result: No",
     );
     // The PARTNER's non-receipt is cooperative -- it rests on the terms being
     // honored, not a guarantee this side imposes -- so its "No" is marked distinctly
     // from an enforced one, and the acceptor's own "Yes" carries no enforced caveat.
-    expect(container!.textContent).toContain("By agreement, not enforced");
-    expect(container!.textContent).not.toContain("Enforced: you are sent no");
+    expect(app.container.textContent).toContain("By agreement, not enforced");
+    expect(app.container.textContent).not.toContain(
+      "Enforced: you are sent no",
+    );
     // Partner does not receive: the honest-helper membership line appears, DISTINCT
     // from the cooperative caveat above (it is about what an honest partner learns,
     // not about a dishonest one keeping the table), and lands in the "What the
     // exchange produces" tier where result sharing lives -- not merely somewhere in
     // the panel.
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "learns which of its own records are in your data",
     );
     await expect
@@ -812,21 +796,23 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     // does not.
     renderOutput({ expectsOutput: true, shareWithPartner: false }, "proposing");
     await expect.element(page.getByText("Result sharing")).toBeInTheDocument();
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "You will receive the matched result: Yes",
     );
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "Your partner will receive the result: No",
     );
     // The proposer's partner does not receive: a cooperative "No", so it carries the
     // by-agreement caveat and the proposer's own "Yes" carries none.
-    expect(container!.textContent).toContain("By agreement, not enforced");
-    expect(container!.textContent).not.toContain("Enforced: you are sent no");
+    expect(app.container.textContent).toContain("By agreement, not enforced");
+    expect(app.container.textContent).not.toContain(
+      "Enforced: you are sent no",
+    );
     // The honest-helper membership line is viewer-relative like the rest of Result
     // sharing: under "proposing" it reads against the inviter's own data, so the
     // proposer sees that its (non-receiving) partner still learns which of its own
     // records are in the proposer's data.
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "learns which of its own records are in your data",
     );
   });
@@ -838,18 +824,22 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     // since it is the accountable disclosure of your result to them.
     renderOutput({ expectsOutput: true, shareWithPartner: true });
     await expect.element(page.getByText("Result sharing")).toBeInTheDocument();
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "You will receive the matched result: Yes",
     );
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "Your partner (the inviter) will receive the result: Yes",
     );
-    expect(container!.textContent).not.toContain("Enforced: you are sent no");
-    expect(container!.textContent).not.toContain("By agreement, not enforced");
+    expect(app.container.textContent).not.toContain(
+      "Enforced: you are sent no",
+    );
+    expect(app.container.textContent).not.toContain(
+      "By agreement, not enforced",
+    );
     // Exactly one governance pointer -- on the partner's "Yes", not the viewer's own.
     expect(
       (
-        container!.textContent.match(
+        app.container.textContent.match(
           /its use is governed by your agreement/g,
         ) ?? []
       ).length,
@@ -903,7 +893,7 @@ describe("InvitationTerms: always-visible egress and legal-agreement facts, tier
       payload: { send: [], receive: [{ name: "ssn" }] },
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "Your partner requests 1 data column from you.",
     );
   });
@@ -974,9 +964,11 @@ describe("InvitationTerms: always-visible egress and legal-agreement facts, tier
     await expect.element(toggle("Other details")).toBeInTheDocument();
     // Neither the flag lead nor any promoted field renders when there is no
     // agreement -- the whole block is gated on its presence.
-    expect(container!.textContent).not.toContain("attaches a legal agreement");
-    expect(container!.textContent).not.toContain("MOU-2025-0042");
-    expect(container!.textContent).not.toContain("Audit and evaluation");
+    expect(app.container.textContent).not.toContain(
+      "attaches a legal agreement",
+    );
+    expect(app.container.textContent).not.toContain("MOU-2025-0042");
+    expect(app.container.textContent).not.toContain("Audit and evaluation");
   });
 });
 
@@ -1092,7 +1084,7 @@ describe("InvitationTerms: a partner-authored allowed-character constraint is on
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(group(GROUP).query()).toBeNull();
-    expect(container!.textContent).not.toContain(GROUP);
+    expect(app.container.textContent).not.toContain(GROUP);
   });
 
   test("the group caption is a heading, so a screen-reader user can jump to it", async () => {
@@ -1156,7 +1148,7 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
     // The module terms send a single column (risk_score).
     render(terms);
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "You will receive 1 data column from your partner.",
     );
   });
@@ -1169,7 +1161,7 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
       disclosedPayloadColumns: ["ssn", "zip_code", "phone_number"],
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "You will receive 3 data columns from your partner.",
     );
   });
@@ -1246,7 +1238,7 @@ describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference"
     // perspective review, outboundColumns undefined (no file chosen yet).
     render({ perspective: "review" });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(forwardReference);
+    expect(app.container.textContent).toContain(forwardReference);
     // In the always-visible core, not the collapsed detail: it must be legible at
     // the consent point without expanding "Other details". (Its fixed copy naming no
     // count or names is pinned by the exact-sentence match above -- a copy edit that
@@ -1262,8 +1254,8 @@ describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference"
     // also show.
     render({ perspective: "accepted", outboundColumns: ["risk_score"] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(forwardReference);
-    expect(container!.textContent).toContain("risk_score");
+    expect(app.container.textContent).not.toContain(forwardReference);
+    expect(app.container.textContent).toContain("risk_score");
   });
 
   test("gives way even to an empty (chosen-file, nothing-sent) send confirmation", async () => {
@@ -1272,8 +1264,8 @@ describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference"
     // the set IS known (to be empty), the decision no longer pending.
     render({ perspective: "accepted", outboundColumns: [] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(forwardReference);
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).not.toContain(forwardReference);
+    expect(app.container.textContent).toContain(
       "No columns are sent to your partner",
     );
   });
@@ -1285,8 +1277,8 @@ describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference"
     // -- is what suppresses it.
     render({ perspective: "proposing" });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(forwardReference);
-    expect(container!.textContent).toContain("Columns sent to your partner");
+    expect(app.container.textContent).not.toContain(forwardReference);
+    expect(app.container.textContent).toContain("Columns sent to your partner");
   });
 });
 
@@ -1343,7 +1335,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
     // Neither column name reaches the screen at all: "risk_score" is the module
     // terms' inviter-side send, which renders in Details as what the acceptor
     // RECEIVES, so the acceptor's own set is pinned by the name only it carries.
-    expect(container!.textContent).not.toContain("diagnosis");
+    expect(app.container.textContent).not.toContain("diagnosis");
     expect(
       page
         .getByRole("list", { name: "What you will send to your partner" })
@@ -1357,8 +1349,8 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
     // change this answer.
     render(oneSided, { perspective: "review" });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(NO_PAYLOAD_SENTENCE);
-    expect(container!.textContent).not.toContain(forwardReference);
+    expect(app.container.textContent).toContain(NO_PAYLOAD_SENTENCE);
+    expect(app.container.textContent).not.toContain(forwardReference);
   });
 
   test("wins over the empty-set confirmation", async () => {
@@ -1366,8 +1358,8 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
     // that survives the operator changing their input file is the one shown.
     render(oneSided, { perspective: "accepted", outboundColumns: [] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(NO_PAYLOAD_SENTENCE);
-    expect(container!.textContent).not.toContain(emptySendLine);
+    expect(app.container.textContent).toContain(NO_PAYLOAD_SENTENCE);
+    expect(app.container.textContent).not.toContain(emptySendLine);
   });
 
   test("does not fire when the inviting party does receive the result", async () => {
@@ -1378,7 +1370,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
       outboundColumns: ["risk_score", "diagnosis"],
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
+    expect(app.container.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
     await expect
       .element(
         page.getByRole("list", { name: "What you will send to your partner" }),
@@ -1395,7 +1387,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
     // disclosure.
     render(oneSided, { perspective: "proposing" });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
+    expect(app.container.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
     await expect
       .element(page.getByRole("list", { name: "Columns sent to your partner" }))
       .toHaveTextContent("risk_score");
@@ -1433,7 +1425,7 @@ describe("InvitationTerms: the inviter's own send is gated on the accepting part
     expect(disclose.element().textContent).toContain(NO_PAYLOAD_SENTENCE);
     // The declared column itself reaches no part of the screen: under "proposing"
     // the send has no "Other details" entry either, so its name is absent outright.
-    expect(container!.textContent).not.toContain("risk_score");
+    expect(app.container.textContent).not.toContain("risk_score");
     expect(
       page.getByRole("list", { name: "Columns sent to your partner" }).query(),
     ).toBeNull();
@@ -1448,8 +1440,8 @@ describe("InvitationTerms: the inviter's own send is gated on the accepting part
       { perspective: "proposing" },
     );
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(NO_PAYLOAD_SENTENCE);
-    expect(container!.textContent).not.toContain(
+    expect(app.container.textContent).toContain(NO_PAYLOAD_SENTENCE);
+    expect(app.container.textContent).not.toContain(
       "No columns are sent to your partner; your file is used only to find matches.",
     );
   });
@@ -1459,7 +1451,7 @@ describe("InvitationTerms: the inviter's own send is gated on the accepting part
     // ways, so the chips render in full.
     renderTerms(terms, { perspective: "proposing" });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
+    expect(app.container.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
     await expect
       .element(page.getByRole("list", { name: "Columns sent to your partner" }))
       .toHaveTextContent("risk_score");
@@ -1475,7 +1467,7 @@ describe("InvitationTerms: the inviter's own send is gated on the accepting part
       outboundColumns: ["diagnosis"],
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
+    expect(app.container.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
     await expect
       .element(
         page.getByRole("list", { name: "What you will send to your partner" }),
@@ -1510,11 +1502,11 @@ describe("InvitationTerms: the outbound-send caption does not presuppose a non-e
     // the explicit "No columns are sent ..." body.
     render({ perspective: "accepted", outboundColumns: [] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(caption);
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(caption);
+    expect(app.container.textContent).toContain(
       "No columns are sent to your partner",
     );
-    expect(container!.textContent).not.toContain(presupposingCaption);
+    expect(app.container.textContent).not.toContain(presupposingCaption);
   });
 
   test("stays truthful on the pre-file review screen, where the send set is not yet known", async () => {
@@ -1523,8 +1515,8 @@ describe("InvitationTerms: the outbound-send caption does not presuppose a non-e
     // send at the consent decision point.
     render({ perspective: "review" });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(caption);
-    expect(container!.textContent).not.toContain(presupposingCaption);
+    expect(app.container.textContent).toContain(caption);
+    expect(app.container.textContent).not.toContain(presupposingCaption);
   });
 });
 
@@ -1772,7 +1764,7 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
     await expect.element(toggle("Other details")).toBeInTheDocument();
     // On screen without expanding any disclosure -- the acceptor sees the added
     // disclosure before consenting.
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "This exchange uses single-pass linkage.",
     );
     // ... and OUTSIDE the "Other details" panel (structure, not styling).
@@ -1780,13 +1772,13 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
       "This exchange uses single-pass linkage.",
     );
     // Stated viewer-neutrally: the acceptor itself could be the disclosing party.
-    expect(container!.textContent).toContain("so it may be you");
+    expect(app.container.textContent).toContain("so it may be you");
   });
 
   test("cascade (the baseline) surfaces no strategy note", async () => {
     render("cascade");
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain("single-pass linkage");
+    expect(app.container.textContent).not.toContain("single-pass linkage");
   });
 
   test("the note also appears in the inviter's own proposing preview", async () => {
@@ -1797,7 +1789,7 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
     // later narrowed to the acceptor perspectives only.
     render("single-pass", "proposing");
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(
+    expect(app.container.textContent).toContain(
       "This exchange uses single-pass linkage.",
     );
   });
@@ -1834,8 +1826,8 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
     await expect
       .element(group("What the exchange produces"))
       .toBeInTheDocument();
-    expect(container!.textContent).toContain(PSI_C_CAVEAT);
-    expect(container!.textContent).not.toContain(
+    expect(app.container.textContent).toContain(PSI_C_CAVEAT);
+    expect(app.container.textContent).not.toContain(
       "matched records are still revealed",
     );
   });
@@ -1857,7 +1849,7 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
     expect(
       toggle("Matching strategies").element().getAttribute("aria-expanded"),
     ).toBe("false");
-    expect(container!.textContent).toContain(psiCCaveat);
+    expect(app.container.textContent).toContain(psiCCaveat);
 
     // Structurally in the core, not inside either disclosure (accessibility tree,
     // not styling): the caveat is within neither the "Other details" panel nor the
@@ -1938,8 +1930,10 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
     // None of the three caveats renders anywhere on the screen. container includes
     // the collapsed panels' mounted content, so this also covers the detail levels,
     // not just the core.
-    expect(container!.textContent).not.toContain("does not yet apply it");
-    expect(container!.textContent).not.toContain("(proposed; not yet applied)");
+    expect(app.container.textContent).not.toContain("does not yet apply it");
+    expect(app.container.textContent).not.toContain(
+      "(proposed; not yet applied)",
+    );
   });
 });
 
@@ -2063,11 +2057,13 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
   async function openEveryDisclosure() {
     for (let pass = 0; pass < 3; pass += 1)
       for (const collapsed of Array.from(
-        container!.querySelectorAll('[aria-expanded="false"]'),
+        app.container.querySelectorAll('[aria-expanded="false"]'),
       ))
         await userEvent.click(collapsed);
     await expect
-      .poll(() => container!.querySelectorAll('[aria-expanded="false"]').length)
+      .poll(
+        () => app.container.querySelectorAll('[aria-expanded="false"]').length,
+      )
       .toBe(0);
   }
 
@@ -2083,16 +2079,16 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
     props: ComponentProps<typeof InvitationTerms>,
     reachedScreen: Array<string>,
   ) {
-    root!.render(renderApp(createElement(InvitationTerms, props)));
+    app.render(createElement(InvitationTerms, props));
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
     await openEveryDisclosure();
 
     for (const raw of reachedScreen)
       await expect
-        .poll(() => container!.textContent)
+        .poll(() => app.container.textContent)
         .toContain(sanitizeForDisplay(raw));
 
-    const presented = presentedStrings(container!);
+    const presented = presentedStrings(app.container);
     expect(
       presented.filter(
         (entry) =>
