@@ -57,11 +57,14 @@ const SUMMARY_LENGTH = 100;
 
 // The canonical resolve is the whole call: `args` is inside one only when it is
 // the entire argument list, so `resolveWorkflowArgs(args.role)` does not qualify.
+// Nor does a member call -- `obj.resolveWorkflowArgs(args)` names somebody
+// else's function that merely shares the resolver's name.
 function isCanonicalResolve(tokens, index) {
   const before = tokens[index - 2];
   return (
     before?.kind === "ident" &&
     before.text === RESOLVER &&
+    !isPunct(tokens[index - 3], ".") &&
     isPunct(tokens[index - 1], "(") &&
     isPunct(tokens[index + 1], ")")
   );

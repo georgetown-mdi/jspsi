@@ -111,6 +111,17 @@ describe("workflow args resolve check", () => {
     }
   });
 
+  it("flags a member call to a function sharing the resolver's name", () => {
+    for (const code of [
+      "const a = obj.resolveWorkflowArgs(args);",
+      "const a = deps.util.resolveWorkflowArgs(args);",
+    ]) {
+      const violations = resolveViolations("cmd.md", block(code));
+      expect(violations, code).toHaveLength(1);
+      expect(canonicalResolveCount(code), code).toBe(0);
+    }
+  });
+
   it("flags a second read even when the canonical resolve is present", () => {
     const violations = resolveViolations(
       "cmd.md",
