@@ -320,6 +320,15 @@ describe("SFTP session controls: stalled handshake", () => {
     expect(later.write).not.toHaveBeenCalled();
   });
 
+  test("a closed stalled connection leaves the stalled count", () => {
+    const controls = createSftpSessionControls();
+    controls.stallHandshakeOnConnect = true;
+    controls.onConnectionAccepted(stubSocket().socket);
+    expect(controls.stalledConnectionCount()).toBe(1);
+    controls.closeStalledConnections();
+    expect(controls.stalledConnectionCount()).toBe(0);
+  });
+
   test("closing the stalled connections reaches one whose closers are silenced", () => {
     const controls = createSftpSessionControls();
     const { socket, destroy } = stubSocket();

@@ -493,6 +493,10 @@ export function createSftpSessionControls(): SftpSessionControlHub {
         const real = silencedSockets.get(socket);
         if (real) real.destroy();
         else socket.destroy();
+        // Out of the pool without restoreWrites: the socket is gone, and
+        // handing back its real write would let a late server flush hit a
+        // destroyed stream instead of the mute that was absorbing it.
+        mutedSockets.delete(socket);
       }
     },
 
