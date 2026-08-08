@@ -16,7 +16,7 @@ This is the pre-contribution quickstart: repository layout, how to build and tes
 
 ## Repository Structure
 
-PSI-Link is organized as an npm workspaces monorepo.
+PSI-Link is organized as an npm workspaces monorepo. The workspaces and the supporting directories, all of them:
 
 | Path             | Description                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------ |
@@ -24,6 +24,12 @@ PSI-Link is organized as an npm workspaces monorepo.
 | `apps/cli/`      | Node.js CLI (`psilink`), built with Rollup, distributed as a Docker image                  |
 | `apps/web/`      | TanStack Start (React/SSR) web app with built-in PeerJS peer-coordination server           |
 | `docs/`          | Documentation, three tiers: `docs/` overview (conceptual/operational), `docs/spec/` technical, `docs/notes/` design records |
+| `scripts/`       | Repository checks CI runs (doc links, PR checklist, claim and drift guards) with their tests |
+| `support/`       | [Field guides](support/README.md) for the environment around psilink -- Windows, Docker, agency networks -- plus the FIPS measurement harness |
+| `lib/`           | The vendored `@openmined/psi.js` tarball and its checksum                                  |
+| `test_data/`     | Two synthetic CSVs with partial overlap, for practicing a complete exchange                |
+| `design/`        | Interface design records: [`design/web-redesign/`](design/web-redesign/README.md) is the linkage-bench mockup and rationale the web app implements. Not a build input |
+| `infra/`         | [Terraform](infra/aws_eb/README.md) for creating the web app's Elastic Beanstalk environment. A draft, and run by nothing here -- the deployment payload CI does use is `apps/web/deploy/aws_eb/` |
 
 ## Prerequisites
 
