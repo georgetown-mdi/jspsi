@@ -2,14 +2,13 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
 import { chromium } from "playwright";
 
 import {
   getFreePort,
   hasBuild,
-  sleep,
   spawnProdServer,
   stopProdServer,
   waitForRoot,
@@ -110,65 +109,51 @@ describe.skipIf(!hasBuild)(
           // deploy under CI load. `load` only guarantees the bundle fetched, not that
           // hydration ran, so the real fix is to re-apply both inputs until the button
           // reflects them: an enabled button IS the hydration signal. Each action is
-          // short-bounded so one stuck call cannot overrun the loop's own deadline
-          // (its 30s default would), and an action that spends that bound is
-          // retried rather than thrown: an action here costs 46-260ms whether the
-          // container is idle or oversubscribed, so the bound expiring means the
-          // box stalled, which is the very thing the loop is here to ride out.
-          // Only the deadline below is a verdict, and it carries the last action
-          // failure so a real rejection is still named.
+          // short-bounded so one stuck call cannot eat the whole hydration budget
+          // (playwright's 30s default would); a thrown action just fails that
+          // attempt and vi.waitFor retries, because an action here costs 46-260ms
+          // whether the container is idle or oversubscribed, so the bound expiring
+          // means the box stalled, which is the very thing the retry rides out.
           const ACTION_TIMEOUT_MS = 5_000;
           const nameField = page.getByLabel("Your name");
           const fileInput = page.locator('input[type="file"]').first();
           const continueToColumns = page.getByRole("button", {
             name: "Continue to matching & sharing",
           });
-          let lastActionFailure = "none";
-          const attempt = async <T>(
-            action: () => Promise<T>,
-          ): Promise<T | undefined> => {
-            try {
-              return await action();
-            } catch (err) {
-              lastActionFailure =
-                err instanceof Error ? err.message : String(err);
-              return undefined;
-            }
-          };
-          const enableDeadline = Date.now() + HYDRATION_TIMEOUT_MS;
-          for (;;) {
-            await attempt(() =>
-              nameField.fill("Prod Worker Test", {
-                timeout: ACTION_TIMEOUT_MS,
-              }),
+          try {
+            await vi.waitFor(
+              async () => {
+                await nameField.fill("Prod Worker Test", {
+                  timeout: ACTION_TIMEOUT_MS,
+                });
+                await fileInput.setInputFiles(csvPath, {
+                  timeout: ACTION_TIMEOUT_MS,
+                });
+                if (
+                  !(await continueToColumns.isEnabled({
+                    timeout: ACTION_TIMEOUT_MS,
+                  }))
+                ) {
+                  throw new Error("Continue to matching & sharing is disabled");
+                }
+              },
+              { timeout: HYDRATION_TIMEOUT_MS, interval: 200 },
             );
-            await attempt(() =>
-              fileInput.setInputFiles(csvPath, {
-                timeout: ACTION_TIMEOUT_MS,
-              }),
+          } catch (err) {
+            // Distinguish a hydration stall from a real rejection (the accept filter,
+            // the 100 MB cap, or a broken name/file binding) so the failure is
+            // diagnosable rather than a bare "still disabled": report whether the file
+            // registered in the dropzone and the button's disabled attribute.
+            const fileShown =
+              (await page.getByText("large.csv", { exact: false }).count()) > 0;
+            const disabledAttr =
+              await continueToColumns.getAttribute("disabled");
+            throw new Error(
+              `Continue to matching & sharing stayed disabled after ${HYDRATION_TIMEOUT_MS}ms ` +
+                `(file shown in dropzone: ${fileShown}, disabled attr: ${disabledAttr}, ` +
+                `last failure: ${err instanceof Error ? err.message : String(err)}); ` +
+                "the invite interactions may not have hydrated, or the file was rejected",
             );
-            const enabled = await attempt(() =>
-              continueToColumns.isEnabled({ timeout: ACTION_TIMEOUT_MS }),
-            );
-            if (enabled === true) break;
-            if (Date.now() >= enableDeadline) {
-              // Distinguish a hydration stall from a real rejection (the accept filter,
-              // the 100 MB cap, or a broken name/file binding) so the failure is
-              // diagnosable rather than a bare "still disabled": report whether the file
-              // registered in the dropzone and the button's disabled attribute.
-              const fileShown =
-                (await page.getByText("large.csv", { exact: false }).count()) >
-                0;
-              const disabledAttr =
-                await continueToColumns.getAttribute("disabled");
-              throw new Error(
-                `Continue to matching & sharing stayed disabled after ${HYDRATION_TIMEOUT_MS}ms ` +
-                  `(file shown in dropzone: ${fileShown}, disabled attr: ${disabledAttr}, ` +
-                  `last action failure: ${lastActionFailure}); ` +
-                  "the invite interactions may not have hydrated, or the file was rejected",
-              );
-            }
-            await sleep(200);
           }
           await continueToColumns.click();
 
