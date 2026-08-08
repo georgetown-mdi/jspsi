@@ -167,7 +167,7 @@ In `--retain-files` mode the receiver does not delete exchange files after consu
 
 ### Required permissions
 
-The CLI writes `.psilink.key` owner-only (`0600` on Unix, an owner-only ACL on Windows) through an atomic, symlink-hardened, durably-flushed write path, so a crash cannot leave a half-written or world-readable key. On Windows, if the owner-only ACL cannot be applied (for example in a restricted container), no key material is written and an error is raised. The CLI warns on load if an existing key file is over-permissive: on Unix if any group or world permission bit is set, on Windows if a non-owner principal can read it. The warning is a diagnostic at warn level, so a run configured at `--log-level error` or `silent` forgoes it. Correct it before running further exchanges:
+The CLI writes `.psilink.key` owner-only (`0600` on Unix, an owner-only ACL on Windows) through an atomic, symlink-hardened, durably-flushed write path, so a crash cannot leave a half-written or world-readable key. On Windows, if the owner-only ACL cannot be applied (for example in a restricted container), no key material is written and an error is raised. The CLI warns on load if an existing key file is over-permissive: on Unix if any group or world permission bit is set, on Windows if a non-owner principal can read it. The warning is a diagnostic at warn level, so a run configured at `--log-level error` or `silent` forgoes it -- as it forgoes every warn-level notice, including the data-cleaning fan-out warning on privacy degradation. Correct it before running further exchanges:
 
 ```sh
 chmod 0600 .psilink.key
