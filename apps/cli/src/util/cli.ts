@@ -290,15 +290,49 @@ export async function runOrExit(
   }
 }
 
-/** Mapping from log-level name to loglevel numeric constant. */
-export const LOG_LEVELS: Record<string, logLibrary.LogLevelNumbers> = {
-  silent: logLibrary.levels.SILENT,
-  error: logLibrary.levels.ERROR,
-  warn: logLibrary.levels.WARN,
-  info: logLibrary.levels.INFO,
-  debug: logLibrary.levels.DEBUG,
-  trace: logLibrary.levels.TRACE,
-};
+// Mapping from log-level name to loglevel numeric constant. Module-private: a
+// caller holding the table can re-implement the lookup, default, and rejection
+// beside it, so keeping it here makes logLevelFlag the only route from a
+// --log-level value to a level. A Map rather than an object literal because the
+// lookup key is an operator-supplied string: an object literal answers
+// `constructor`, `toString`, and every other Object.prototype member with an
+// inherited function where a level number is expected, which the `=== undefined`
+// rejection below cannot see.
+const LOG_LEVELS = new Map<string, logLibrary.LogLevelNumbers>([
+  ["silent", logLibrary.levels.SILENT],
+  ["error", logLibrary.levels.ERROR],
+  ["warn", logLibrary.levels.WARN],
+  ["info", logLibrary.levels.INFO],
+  ["debug", logLibrary.levels.DEBUG],
+  ["trace", logLibrary.levels.TRACE],
+]);
+
+/**
+ * Read the `--log-level` option from parsed `Arguments` and return the loglevel
+ * numeric constant naming it -- `silent`, `error`, `warn`, `info`, `debug`, or
+ * `trace` -- defaulting to `info` when the flag is absent or empty and matching
+ * case-insensitively. A repeat is rejected by {@link singleValue}; any other name
+ * raises a {@link UsageError} echoing the value the operator supplied, so a typo
+ * is reported rather than silently taken as the default.
+ *
+ * This is the single resolve every `--log-level`-bearing command reads through,
+ * but it deliberately stops at the {@link UsageError}: mapping that to an exit is
+ * the caller's, because the callers do not share one boundary. A command whose
+ * logger does not exist yet wraps the call in {@link parseOrExit} (stderr and
+ * exit 64 on the spot); `parseCommonBootstrapArgs` lets it propagate, since a
+ * parse function that exits the process cannot be composed or tested; and a
+ * command already inside {@link runOrExit} lets it reach that handler. Owning the
+ * boundary here would force the first shape on all three.
+ */
+export function logLevelFlag(argv: Arguments): logLibrary.LogLevelNumbers {
+  const name = (
+    (singleValue(argv, "log-level") as string | undefined) || "info"
+  ).toLowerCase();
+  const level = LOG_LEVELS.get(name);
+  if (level === undefined)
+    throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
+  return level;
+}
 
 /**
  * A redirect of diagnostic output, returned by {@link configureLogFile} (to a
@@ -562,7 +596,7 @@ export interface ConfiguredLogging {
  * (`file-utils`, `cleaning`), which a command's own bootstrap can never precede.
  *
  * `logLevel` and `logFile` are resolved by the caller -- through
- * {@link LOG_LEVELS} inline, or `parseCommonBootstrapArgs` -- so this helper does
+ * {@link logLevelFlag}, or `parseCommonBootstrapArgs` -- so this helper does
  * no argv parsing and neither reads nor validates flags. It composes the two sink
  * builders without changing them: {@link configureLogFile} still throws a
  * {@link UsageError} on an unopenable `--log-file` path, so a caller keeps that

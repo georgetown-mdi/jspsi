@@ -1,7 +1,6 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
 import path from "node:path";
-import logLibrary from "loglevel";
 
 import {
   computeCertificateFingerprint,
@@ -24,7 +23,7 @@ import {
 import {
   configureLogging,
   exitWithError,
-  LOG_LEVELS,
+  logLevelFlag,
   parseOrExit,
   singleValue,
 } from "../util/cli";
@@ -303,19 +302,10 @@ export async function handler(argv: Arguments): Promise<void> {
   // a bad --log-level is reported on stderr and exited 64 here (via the shared
   // parseOrExit boundary, the same one exchange/zeroSetup use) rather than
   // through the logger-based catch below. Both usage errors -- a repeated flag
-  // (singleValue, the same shared accessor and message as every other command)
-  // and an unrecognized value -- are UsageErrors handled in one place; its
-  // log-level resolution stays here rather than going through the shared parser,
-  // which a fingerprint run does not need.
-  const logLevel = parseOrExit((): logLibrary.LogLevelNumbers => {
-    const rawLogLevel = (
-      (singleValue(argv, "log-level") as string | undefined) || "info"
-    ).toLowerCase();
-    const resolved = LOG_LEVELS[rawLogLevel];
-    if (resolved === undefined)
-      throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
-    return resolved;
-  });
+  // and an unrecognized value -- reach that boundary as UsageErrors out of
+  // logLevelFlag; the command reads only the log-level flag through it rather
+  // than the shared bootstrap parser, which a fingerprint run does not need.
+  const logLevel = parseOrExit(() => logLevelFlag(argv));
   // Install the sink, apply the level, and build getLogger("fingerprint") through
   // the shared configureLogging helper (in that order, so the logger inherits the
   // sink): the file sink when --log-file is given, otherwise the default stderr

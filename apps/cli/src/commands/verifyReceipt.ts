@@ -1,6 +1,5 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
-import logLibrary from "loglevel";
 
 import {
   deriveOurIdColumn,
@@ -32,7 +31,7 @@ import { parseSensitiveJson } from "../sensitiveFile";
 import {
   configureLogging,
   exitWithError,
-  LOG_LEVELS,
+  logLevelFlag,
   openInputSource,
   parseOrExit,
   singleValue,
@@ -264,15 +263,7 @@ function localTermsFrom(
 }
 
 export async function handler(argv: Arguments): Promise<void> {
-  const logLevel = parseOrExit((): logLibrary.LogLevelNumbers => {
-    const raw = (
-      (singleValue(argv, "log-level") as string | undefined) || "info"
-    ).toLowerCase();
-    const resolved = LOG_LEVELS[raw];
-    if (resolved === undefined)
-      throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
-    return resolved;
-  });
+  const logLevel = parseOrExit(() => logLevelFlag(argv));
   const { log, close: closeLogging } = parseOrExit(() =>
     configureLogging({
       logLevel,

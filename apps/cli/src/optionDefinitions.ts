@@ -14,7 +14,7 @@ import { DEFAULT_KEY_PATH } from "./keyFile";
 import {
   durationFlagMs,
   durationFlagSeconds,
-  LOG_LEVELS,
+  logLevelFlag,
   MAX_TIMEOUT_SECONDS,
   nonNegativeIntFlag,
   singleValue,
@@ -363,12 +363,7 @@ export interface CommonBootstrapOptions {
 export function parseCommonBootstrapArgs(
   argv: Arguments,
 ): CommonBootstrapOptions {
-  const rawLogLevel = (
-    (singleValue(argv, "log-level") as string | undefined) || "info"
-  ).toLowerCase();
-  const logLevel = LOG_LEVELS[rawLogLevel];
-  if (logLevel === undefined)
-    throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
+  const logLevel = logLevelFlag(argv);
 
   // Each single-value (string/number) option is read through singleValue so a
   // repeated flag is rejected with a clean usage error before its array value

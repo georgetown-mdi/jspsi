@@ -1,5 +1,4 @@
 import type { Argv, Arguments } from "yargs";
-import logLibrary from "loglevel";
 
 import {
   FileSyncConnection,
@@ -19,7 +18,7 @@ import {
   configureLogging,
   durationFlagSeconds,
   exitWithError,
-  LOG_LEVELS,
+  logLevelFlag,
   parseOrExit,
   singleValue,
 } from "../util/cli";
@@ -235,15 +234,7 @@ export async function handler(argv: Arguments): Promise<void> {
   // Resolve and apply the log level before the logger exists (a bad --log-level
   // or a repeated --log-file is a UsageError mapped to stderr + exit 64 here),
   // the same bootstrap boundary as `psilink fingerprint`.
-  const logLevel = parseOrExit((): logLibrary.LogLevelNumbers => {
-    const raw = (
-      (singleValue(argv, "log-level") as string | undefined) || "info"
-    ).toLowerCase();
-    const resolved = LOG_LEVELS[raw];
-    if (resolved === undefined)
-      throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
-    return resolved;
-  });
+  const logLevel = parseOrExit(() => logLevelFlag(argv));
   const { log, close: closeLogging } = parseOrExit(() =>
     configureLogging({
       logLevel,
