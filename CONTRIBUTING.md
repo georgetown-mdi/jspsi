@@ -47,6 +47,15 @@ npm install
 npm run build -w packages/core   # core must be built before the apps
 ```
 
+For work that spans `packages/core` and the web app, run the dev loop from the repository root:
+
+```sh
+npm run dev            # core's build watcher + the web dev server
+npm run dev:console    # the same, with the console deployment profile
+```
+
+The apps consume `@psilink/core` from its built `dist/`, so a core edit made while a bare `npm run dev -w apps/web` is running never reaches the page. The root script brings `dist/` up to date before the server starts and rebuilds it on every later change; either side exiting stops the other.
+
 No additional environment variables are required for local development or the tests. The CLI SFTP integration suite starts its own server; set `PSILINK_SFTP_BACKEND=native` to run it against a native OpenSSH `sshd` instead of the in-process default (see [docs/TESTING.md](docs/TESTING.md), which documents the variable).
 
 ## Building
