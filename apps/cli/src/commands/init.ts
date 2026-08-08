@@ -18,7 +18,7 @@ import type { TemplateDataSpec } from "../configTemplate";
 import {
   assertNoUnknownOptions,
   configureLogging,
-  LOG_LEVELS,
+  logLevelFlag,
   openInputSource,
   promptConfirm,
   runOrExit,
@@ -83,12 +83,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // logger's level at creation) and inside runOrExit, so an unrecognized
       // value is a clean usage error (exit 64) on the same path as everything
       // else.
-      const rawLogLevel = (
-        (singleValue(argv, "log-level") as string | undefined) || "info"
-      ).toLowerCase();
-      const logLevel = LOG_LEVELS[rawLogLevel];
-      if (logLevel === undefined)
-        throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
+      const logLevel = logLevelFlag(argv);
       // Install the sink, apply the level, and build getLogger("init") through the
       // shared configureLogging helper (in that order, so the logger inherits the
       // sink): the file sink when --log-file is given, otherwise the default stderr

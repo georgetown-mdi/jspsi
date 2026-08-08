@@ -16,7 +16,7 @@ import {
 import {
   configureLogging,
   exitWithError,
-  LOG_LEVELS,
+  logLevelFlag,
   parseOrExit,
   singleValue,
 } from "../util/cli";
@@ -99,15 +99,7 @@ async function runDoctor(
   argv: Arguments,
   mode: "probe" | "mount",
 ): Promise<void> {
-  const logLevel = parseOrExit((): logLibrary.LogLevelNumbers => {
-    const raw = (
-      (singleValue(argv, "log-level") as string | undefined) || "info"
-    ).toLowerCase();
-    const resolved = LOG_LEVELS[raw];
-    if (resolved === undefined)
-      throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
-    return resolved;
-  });
+  const logLevel = parseOrExit(() => logLevelFlag(argv));
   const {
     log,
     writePlainLine,
