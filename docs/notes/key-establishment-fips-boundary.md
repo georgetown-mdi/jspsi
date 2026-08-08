@@ -115,6 +115,22 @@ a two-step derivation faithful to the certified service therefore means
 authoring a novel feedback-mode KDF with no anchor anywhere in the repository.
 That is strictly more hand-rolled crypto than the status quo, not less.
 
+On certificate 5021 -- the module the variant image actually carries -- that
+mode tag reaches one row further, and the tension is recorded rather than
+resolved. Its own Table 8, which on that certificate is the Security Function
+Implementations table (p. 20), gives the *HKDF* security function
+`Mode: Feedback`, where 4985's corresponding row carries no mode qualifier at
+all. Three things cut against reading it as a property of the HKDF
+the module performs: 5021's Table 5 row for `KDA HKDF Sp800-56Cr1` carries no
+`KDF Mode` property, SP 800-56C's HKDF is a fixed construction rather than a
+mode-parameterised one, and the cell sits beside KBKDF and `KDA TwoStep` rows
+that are genuinely feedback-mode. None of those three is a reading of what the
+module does, which is the only thing that would settle it -- by driving the
+module, as with the open questions below. The reasoning above does not move
+either way on it, turning as it does on `KDA TwoStep` and on the platform's call
+surface. What the discrepancy does bound is claim text: a sentence naming 5021's
+HKDF row should not also assert counter mode until the module has been driven.
+
 **3. The certificate attests components, not compositions.** It is silent on
 hybrid or concatenated shared secrets: "concatenat" and "pre-shared" do not
 occur anywhere in the security policy, and every occurrence of "hybrid" is the
@@ -132,8 +148,10 @@ HKDF-Extract with the chaining key as salt followed by Expand with an empty
 info string -- the spec says so, and the test suite already anchors it against
 RFC 5869 test case 3. One `deriveBits` call reproduces it bit for bit, checkable
 against the existing known-answer vectors, and it lands the extract-then-expand
-on certificate 4985's approved `KDA HKDF SP800-56Cr2` row instead of on a chain
-of individually approved HMAC calls.
+on an approved HKDF key-derivation row instead of on a chain of individually
+approved HMAC calls -- `KDA HKDF Sp800-56Cr1` (CAVP certificate A4603) on
+certificate 5021, the module the variant image carries, and
+`KDA HKDF SP800-56Cr2` on 4985.
 
 **5. The web application runs the same code and has no FIPS provider at all.**
 Its key exchange runs in the browser, outside any module boundary, whatever the
@@ -151,12 +169,24 @@ abandons a pattern with published analysis for a bespoke equivalent with none.
 
 **May say**, where a validated module is actually present in the environment:
 every cryptographic operation in key establishment is performed by the module,
-using algorithms on certificate 4985's approved list -- the shared-secret
-computation as `KAS-ECC-SSC` per SP 800-56A Rev 3 over P-256, and the
-extract-then-expand as `KDA HKDF SP800-56Cr2`.
+using algorithms on the approved list of certificate 5021, the module the FIPS
+variant image carries -- the shared-secret computation as
+`KAS-ECC-SSC Sp800-56Ar3` over P-256, and the extract-then-expand as
+`KDA HKDF Sp800-56Cr1` (CAVP certificate A4603). The rows and their tested
+parameter ranges are in
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests).
 
 **May not say:**
 
+- That either operation meets the conditions certificate 5021 states outside
+  its approved-algorithm table. That certificate conditions the SP 800-56Ar3
+  section 5.6.2 assurances on using the module "together with an application
+  that implements the TLS protocol", which this handshake is not, and scopes the
+  module's HKDF to "the context of an SP 800-56Ar3 key agreement scheme", which
+  reaches the head of the chain and says nothing about the rest of the schedule.
+  The security functions themselves carry neither condition, which is why the
+  may-say sentence names them and stops. Both are quoted whole in
+  [fips-variant-image.md](fips-variant-image.md).
 - That key establishment used a FIPS-approved algorithm while it ran on X25519.
   It did not, on any certificate; that is what the migration was for.
 - That the key exchange, the key schedule, or the protocol is validated or
@@ -212,6 +242,17 @@ ephemeralUnified`, `KAS Role - initiator, responder`; and, on the derivation
 side, `KDA HKDF SP800-56Cr2`, `KDA OneStep SP800-56Cr2`, and `KDA TwoStep
 SP800-56Cr2` (`KDF Mode - feedback`, `Shared Secret Length: 224-8192 Increment
 8`).
+
+**Certificate 5021 differs on the derivation row, which is why the citations
+above name Cr1.** The module the variant image carries names its row
+`KDA HKDF Sp800-56Cr1` at CAVP certificate `A4603`, with `Shared Secret Length:
+224-2048 Increment 8` -- a narrower window than 4985's 224-8192, and one this
+handshake's 256-bit shared secret and 256-bit derived output sit well inside.
+Section 2.10 of that policy (p. 24) states the split in prose: HKDF is
+"compliant with SP 800-56Cr1", while `KDA OneStep` and `KDA TwoStep` are Cr2.
+Its `KAS-ECC-SSC Sp800-56Ar3` row is the same shape as 4985's. The full rows are
+in
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests).
 
 **Table 8 (Non-Approved, Not Allowed Algorithms)** contains X25519 and X448 as
 its only key-agreement entries, corroborating what
