@@ -64,11 +64,11 @@ const FAN_WIDTHS = [
 ] as const;
 
 // Entries the in-process backend answers per READDIR round trip in the cases
-// that make it list a full directory: the width the native sshd backend was
-// measured serving, so those listings cross the wire as many narrow replies, the
-// way a real server sends them. The backend delivers a listing of any width at
-// any setting of this, so what the value buys is round-trip realism rather than
-// delivery.
+// that make it list a full directory, kept far below the backend's byte budget
+// so those listings cross the wire as many narrow replies rather than one wide
+// one. The backend delivers a listing of any width at any setting of this --
+// wideDirectoryListing.test.ts is what asserts delivery and the round-trip
+// floor -- so what this value buys is round-trip realism rather than delivery.
 const SERVER_READDIR_BATCH = 100;
 
 // What has to have stood unanswered at the server at once for the fan to have
