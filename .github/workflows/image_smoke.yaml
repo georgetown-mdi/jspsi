@@ -134,6 +134,12 @@ jobs:
       # directory mode can hide a path from it, ownership and mode being facts
       # about the image either way.
       #
+      # The walk skips symlinks. Linux has no chmod for a symlink: its own mode
+      # is 0777 and grants nothing, so `-perm`, which tests the lstat mode,
+      # matches every link in the image while saying nothing about rewriting.
+      # Re-pointing a link takes write permission on the directory holding it,
+      # which the walk already reaches through that directory itself.
+      #
       # Scoped to the default image, as the identity step above is: the variant
       # carries no USER and makes no unprivileged claim.
       - name: Measure the container's writable set
@@ -168,7 +174,7 @@ jobs:
             do
               set -- "$@" -o -group "$gid"
             done
-            find /app \( "$@" \) -print
+            find /app ! -type l \( "$@" \) -print
           ')
           if [ -n "$reachable" ]; then
             count=$(printf '%s\n' "$reachable" | wc -l)
