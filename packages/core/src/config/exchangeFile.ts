@@ -136,6 +136,9 @@ export interface ExchangeFileInput {
    * receives. Optional; omit to reconcile lazily.
    */
   expectedPayloadColumns?: string[];
+  /** See {@link ExchangeSpecAssembly.outboundPayloadConsent} -- carried verbatim
+   * through {@link mintExchangeFile} on the same caller's-obligation terms. */
+  outboundPayloadConsent?: OutboundPayloadConsent;
 }
 
 /**

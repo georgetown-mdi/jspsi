@@ -3,6 +3,10 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { parse as parseYaml } from "yaml";
+
+import { disclosedColumnNames, safeParseExchangeSpec } from "@psilink/core";
+
 import {
   HANDOFF_CREDENTIAL_PATH_PLACEHOLDER,
   HANDOFF_PASSPHRASE_PATH_PLACEHOLDER,
@@ -32,6 +36,7 @@ import {
 } from "../utils/jobFixtures";
 
 import type { JobManager as JobManagerType } from "@jobs/jobManager";
+import type { Metadata } from "@psilink/core";
 
 type Handlers = Record<
   string,
@@ -112,6 +117,30 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
       handoff.template.kind === "config" ? handoff.template.yaml : "";
     expect(yaml).toContain("filedrop");
     expect(yaml).toContain(HANDOFF_SHARED_DIRECTORY_PLACEHOLDER);
+  });
+
+  test("an acceptance's template carries the outbound consent record", () => {
+    // The portable template IS the config an operator graduates to cron, so the
+    // acceptance's consent record has to survive into it: without one the
+    // unattended run's pre-connect gate reads "no record" and holds it to nothing.
+    const metadata: Metadata = [
+      { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+      { name: "notes", type: "other", role: "payload", isPayload: true },
+    ];
+    const handoff = buildJobHandoff(
+      validIntent({ side: "acceptor", metadata }),
+      undefined,
+      false,
+    );
+    const yaml =
+      handoff.template.kind === "config" ? handoff.template.yaml : "";
+    const spec = safeParseExchangeSpec(parseYaml(yaml));
+    expect(spec.success).toBe(true);
+    if (!spec.success) return;
+    expect(spec.data.outboundPayloadConsent).toEqual({
+      status: "confirmed",
+      columns: disclosedColumnNames(metadata),
+    });
   });
 
   test("an sftp zero-setup run composes a command with placeholder credential", () => {

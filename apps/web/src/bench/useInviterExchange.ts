@@ -53,6 +53,7 @@ import type { ExchangeRun, ExchangeSeat } from "./exchangeRun";
 import type {
   JobInputSource,
   JobRunStatus,
+  ServerJobExchangeDriverConfig,
   ServerJobExchangeTransport,
 } from "@psi/serverJobExchangeDriver";
 import type { GeneratedInvitation } from "@psi/invitation";
@@ -202,6 +203,59 @@ export function failureFor(
           "try again."
         : "The exchange could not be completed - usually a temporary " +
           "connection problem rather than an issue with your data.",
+  };
+}
+
+/**
+ * Assemble the {@link ServerJobExchangeDriverConfig} for a console server-job
+ * invite -- a file-drop or an SFTP exchange the console appliance runs on this
+ * party's behalf. The `transport` picks the intent arm (the SFTP arm carries no
+ * connection field: the appliance reads the operator-authored connection off
+ * `GET /api/jobs/sftp`, so no host, credential, or fingerprint transits the
+ * browser); everything below the discriminant is channel-independent. The
+ * `linkageTerms` are the very terms embedded in the minted token, reused verbatim
+ * rather than re-derived, so the set the partner adopts and the set this run
+ * executes on cannot diverge.
+ *
+ * This party's authored metadata and standardization ride along when the mint
+ * resolved them, so the appliance's CLI honors the operator's data-prep edits
+ * instead of inferring metadata from the CSV column names. An unresolved field is
+ * forwarded as absent, mirroring how the browser path guards these.
+ *
+ * The stated `side` is the inviter's, which is what makes the composed config
+ * carry NO `outbound_payload_consent`: this party authored its own outbound set at
+ * mint, so the invitation IS the statement of what it sends. The acceptance is the
+ * side whose outbound set is unauthored and therefore recorded (see
+ * `acceptorServerJobConfig`). The received-payload lock-in is likewise the
+ * acceptor's alone, so no `expectedPayloadColumns` is set here.
+ *
+ * Pure and exported so the derivation is the tested boundary, pinned without
+ * running the hook.
+ *
+ * @internal
+ */
+export function inviterServerJobConfig({
+  minted,
+  inputSource,
+  transport,
+}: {
+  minted: Pick<
+    GeneratedInvitation,
+    "linkageTerms" | "sharedSecret" | "metadata" | "standardization"
+  >;
+  inputSource: JobInputSource;
+  transport: ServerJobExchangeTransport;
+}): ServerJobExchangeDriverConfig {
+  return {
+    transport,
+    side: "inviter",
+    linkageTerms: minted.linkageTerms,
+    sharedSecret: minted.sharedSecret,
+    inputSource,
+    ...(minted.metadata !== undefined ? { metadata: minted.metadata } : {}),
+    ...(minted.standardization !== undefined
+      ? { standardization: minted.standardization }
+      : {}),
   };
 }
 
@@ -420,14 +474,7 @@ export function useInviterExchange({
         throw new Error("no input source for the server-job exchange");
       const transport = serverJobTransport();
       return createServerJobExchangeDriver({
-        transport,
-        linkageTerms: minted.linkageTerms,
-        sharedSecret: minted.sharedSecret,
-        inputSource,
-        ...(minted.metadata !== undefined ? { metadata: minted.metadata } : {}),
-        ...(minted.standardization !== undefined
-          ? { standardization: minted.standardization }
-          : {}),
+        ...inviterServerJobConfig({ minted, inputSource, transport }),
         // Persist the created job's id so a reload or hard tab close can re-attach
         // to the appliance's run, and track it for the deliberate-discard paths.
         onJobCreated: (jobId) => {

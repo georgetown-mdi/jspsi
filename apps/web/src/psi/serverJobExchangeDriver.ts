@@ -12,6 +12,7 @@ import type {
   JobCreateIntent,
   JobExchangeIntent,
   JobExchangeOptions,
+  JobExchangeSide,
   JobZeroSetupIntent,
   JobZeroSetupLinkageStrategy,
 } from "@jobs/intent";
@@ -51,6 +52,14 @@ export type JobInputSource =
  * and the channel it rides. */
 export interface ServerJobExchangeDriverConfig {
   transport: ServerJobExchangeTransport;
+  /**
+   * Which side of the partnership this run is. Required, not optional: it decides
+   * whether the composed config carries an `outbound_payload_consent` record (only
+   * an acceptance's outbound set is unauthored, so only an acceptance records
+   * one), and a side omitted into a default would silently leave a later
+   * unattended run of that config unheld to any set. Every caller states it.
+   */
+  side: JobExchangeSide;
   linkageTerms: LinkageTerms;
   sharedSecret: string;
   /** Where the appliance reads this party's input from: inline CSV content, or a
@@ -591,6 +600,7 @@ function errorMessageOf(event: RelayEvent): string {
 function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
   const {
     transport,
+    side,
     linkageTerms,
     sharedSecret,
     inputSource,
@@ -600,6 +610,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     options,
   } = config;
   const shared = {
+    side,
     linkageTerms,
     sharedSecret,
     ...(inputSource.kind === "inline"

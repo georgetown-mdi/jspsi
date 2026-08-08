@@ -332,15 +332,17 @@ by **membership** in both directions but **not by order**, since metadata order
 decides which order columns are transmitted in and not which are. Like the two
 fields above it is gated on `output.share_with_partner`.
 
-Both fresh acceptance surfaces derive the record through one function,
+Every fresh acceptance surface derives the record through one function,
 `deriveOutboundPayloadConsent`: `psilink accept` writes it into the configuration
-it provisions, and the browser's accept composes it into the exchange-file
-document it persists as a [managed exchange](MANAGED_EXCHANGE_RECORD.md), derived
-there from the same `metadata` that document carries -- so the persisted record
-and the persisted metadata cannot state different disclosures. A front end shows
-the set and takes the answer; this assert is the run-boundary backstop behind
-whichever one prepared the exchange, so an unattended run refuses rather than
-transmit a set no party chose.
+it provisions, the browser's accept composes it into the exchange-file document
+it persists as a [managed exchange](MANAGED_EXCHANGE_RECORD.md), and a console
+acceptance composes it into the CLI configuration the appliance runs the job from
+(see [SERVER_JOB_API.md](SERVER_JOB_API.md), "Composed CLI configuration"). The
+two composing surfaces derive it from the same `metadata` the document they write
+carries -- so the persisted record and the persisted metadata cannot state
+different disclosures. A front end shows the set and takes the answer; this
+assert is the run-boundary backstop behind whichever one prepared the exchange,
+so an unattended run refuses rather than transmit a set no party chose.
 
 **Lifecycle across re-acceptance and re-invitation follows one rule:** no
 machine-managed field may lag the operation that rewrites the config's role or
