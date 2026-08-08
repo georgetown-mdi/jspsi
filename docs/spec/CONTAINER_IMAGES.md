@@ -283,6 +283,12 @@ carries, or other-writable; the expected set is empty. The walk runs as uid 0, s
 no directory mode can hide a path from it -- ownership and mode read the same
 whoever asks.
 
+Symlinks are outside that walk. Linux carries no `chmod` for one, so a symlink's
+own mode is always 0777 and an other-writable test matches every link in the
+image while none of them is rewritable through that mode. What re-points a link
+is write permission on the directory holding it, which the walk already reaches
+through the directory itself.
+
 Both halves are scoped to the default image. The variant carries no `USER`,
 makes no unprivileged claim, and would answer the whole measurement vacuously as
 root.
@@ -302,7 +308,7 @@ difference in either direction.
 | Image | Recorded inventory |
 | --- | --- |
 | `Dockerfile` | empty -- no setuid or setgid file |
-| `Dockerfile.fips` | not recorded |
+| `Dockerfile.fips` | `/usr/bin/chage`, `/usr/bin/gpasswd`, `/usr/bin/mount`, `/usr/bin/newgrp`, `/usr/bin/su`, `/usr/bin/umount`, `/usr/bin/write`, `/usr/libexec/utempter/utempter`, `/usr/sbin/pam_timestamp_check`, `/usr/sbin/unix_chkpwd` |
 
 The default image's inventory is empty because the runtime stage takes off the
 one setgid bit its OS install brings in. `samba-client` pulls in `linux-pam`,
@@ -312,18 +318,24 @@ kind. `scripts/dockerfile-freeze.test.mjs` holds that instruction as one of the
 two mode changes it permits outside the writable trees, and the measurement holds
 the outcome, which is the half that also sees the base image's own files.
 
-The variant's inventory is not recorded because no measurement of it exists: the
-image is published nowhere and is built only inside `image_smoke.yaml`, and its
-`samba-client` closure on Amazon Linux 2023 is materially larger than Alpine's --
-`systemd`, `pam`, `cryptsetup-libs`, `device-mapper` and `util-linux` all arrive
-with it. The step is enforced on that leg regardless: it fails while the
-inventory is unrecorded and prints what it measured, so the first run of it
-supplies the list this table is missing rather than leaving the surface
-unmeasured. Recording it means replacing the sentinel in the step's `fips` arm
-with the block the failure prints, and this table row with the same list. The
-step is the last in the job for that reason -- a failing step skips the ones
-after it, and the variant's provider assertions and end-to-end exchange have to
-keep running while the sentinel stands.
+The variant's inventory is ten files, and it strips none of them: eight setuid
+root -- account, mount and PAM helpers -- plus `write` setgid `tty` and
+`utempter` setgid `utmp`. Where the default image has a reason to strip -- it
+declares `USER node`, so a bit left in place would be a boundary rather than a
+formality -- the variant declares no `USER` and runs as root, an account those
+bits elevate nothing for. Its Amazon Linux 2023 base and the `samba-client`
+closure recorded above carry the ten between them; that closure is materially
+larger than Alpine's, bringing `systemd`, `pam`, `cryptsetup-libs`,
+`device-mapper` and `util-linux` with it. Per-file detail behind the row is in
+[the FIPS variant's setuid and setgid files](#the-fips-variants-setuid-and-setgid-files).
+
+An image added to the matrix records its own row the same way rather than
+starting unmeasured: its arm in the step is set to the `@unrecorded` sentinel,
+and the first run fails that leg and prints the block to paste into the arm and
+the list to paste here. The step is the last in the job so that a failure of
+either kind -- a sentinel awaiting its first measurement, or an inventory that
+has drifted -- skips no step that matters more, the variant's provider
+assertions and its end-to-end exchange among them.
 
 ## Measured inventories
 
@@ -381,6 +393,38 @@ whatever the tag resolves to at pull time -- and that pull happens on exactly th
 HTTPS-intercepting networks the probe exists to diagnose. A digest, or a released
 version tag, is what would make a substituted image detectable there; how a
 separately downloaded script would learn either is the open part.
+
+### The FIPS variant's setuid and setgid files
+
+The per-file detail behind the variant's recorded row, as `image_smoke.yaml`
+measured it on the built image at the base digest pinned above (run
+31235317792, `amd64`):
+
+    -rwsr-xr-x 1 root root 74360 Nov 20  2023 /usr/bin/chage
+    -rwsr-xr-x 1 root root 78680 Nov 20  2023 /usr/bin/gpasswd
+    -rwsr-xr-x 1 root root 48760 Jul 10 19:10 /usr/bin/mount
+    -rwsr-xr-x 1 root root 42392 Nov 20  2023 /usr/bin/newgrp
+    -rwsr-xr-x 1 root root 57232 Jul 10 19:10 /usr/bin/su
+    -rwsr-xr-x 1 root root 36400 Jul 10 19:10 /usr/bin/umount
+    -rwxr-sr-x 1 root tty  24064 Jul 10 19:10 /usr/bin/write
+    -rwx--s--x 1 root utmp 16176 Jan 29  2023 /usr/libexec/utempter/utempter
+    -rwsr-xr-x 1 root root 15768 Dec 22  2025 /usr/sbin/pam_timestamp_check
+    -rwsr-xr-x 1 root root 28208 Dec 22  2025 /usr/sbin/unix_chkpwd
+
+Eight are setuid root: the account helpers `chage`, `gpasswd`, `newgrp` and
+`su`, the mount helpers `mount` and `umount`, and the PAM helpers
+`pam_timestamp_check` and `unix_chkpwd`. Two are setgid: `write` to `tty` and
+`utempter` to `utmp`. The measurement reads the built image and does not
+separate what the base rootfs carries from what the package closure adds; no row
+above turns on that split.
+
+Two of these names also appear in the default image's measurement above, both
+carrying a different bit there: `unix_chkpwd` lands setgid `shadow` on Alpine
+and the runtime stage strips it, while here it is setuid root; and
+`pam_timestamp_check`, which Alpine's install leaves with neither bit, is setuid
+root here. The same package name on two distributions is not the same file
+modes, which is why each image's inventory is measured rather than derived from
+the other's.
 
 ### The FIPS reference build's inventory
 

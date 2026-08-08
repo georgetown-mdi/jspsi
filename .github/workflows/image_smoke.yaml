@@ -536,11 +536,10 @@ jobs:
       # traversal under an unprivileged account cannot enter a root-only
       # directory -- it would report an absence it never measured.
       #
-      # Last in the job on purpose. The variant's inventory has never been
-      # measured, so this step fails that leg until a run of it supplies one, and
-      # a failing step skips every step after it: placed any earlier, it would
-      # stop the variant's provider assertions and end-to-end exchange from
-      # running at all while that stands.
+      # Last in the job on purpose: a failing step skips every step after it, and
+      # an inventory that has drifted is worth less than the variant's provider
+      # assertions and its end-to-end exchange, which have to keep running while
+      # the drift is diagnosed.
       - name: Measure the image's setuid and setgid files
         run: |
           set -euo pipefail
@@ -558,21 +557,36 @@ jobs:
             # brings in, and neither stage's base carries another, so nothing is
             # left for this to find.
             default) recorded="" ;;
-            # No measurement of the variant exists to record: it is published
-            # nowhere and is built only here, and its samba-client closure on
-            # Amazon Linux 2023 is materially larger than the Alpine one. The leg
-            # is enforced all the same -- it fails while the inventory is
-            # unrecorded and prints what it measured, so the first run of it
-            # supplies the list rather than leaving the surface unmeasured.
-            # Recording it means replacing this line with the block the failure
-            # prints, and the same list in docs/spec/CONTAINER_IMAGES.md.
-            fips) recorded=@unrecorded ;;
+            # The variant strips nothing and has no reason to: it declares no
+            # USER and runs as root, where neither bit elevates anything. What
+            # its Amazon Linux 2023 base and package closure carry between them
+            # is the list below, and a package that gains or loses a bit reddens
+            # this leg rather than shipping. The list sits at the run block's
+            # own indentation rather than the arm's, which is what leaves the
+            # heredoc terminator in column 1 once YAML has stripped it.
+            fips) recorded=$(cat <<'INVENTORY'
+          /usr/bin/chage
+          /usr/bin/gpasswd
+          /usr/bin/mount
+          /usr/bin/newgrp
+          /usr/bin/su
+          /usr/bin/umount
+          /usr/bin/write
+          /usr/libexec/utempter/utempter
+          /usr/sbin/pam_timestamp_check
+          /usr/sbin/unix_chkpwd
+          INVENTORY
+            ) ;;
             *)
               echo "no setuid/setgid inventory is recorded for the ${{ matrix.variant }} image" >&2
               exit 1
               ;;
           esac
 
+          # How an image added to the matrix bootstraps its own row: set its arm
+          # to the sentinel and the first run of this step fails that leg and
+          # prints the block to paste back, so the surface is enforced from the
+          # start rather than left unmeasured until someone writes a list by hand.
           if [ "$recorded" = "@unrecorded" ]; then
             echo "the ${{ matrix.variant }} image's setuid/setgid inventory is unrecorded; this run measures it as:" >&2
             {
