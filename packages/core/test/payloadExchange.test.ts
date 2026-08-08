@@ -728,8 +728,8 @@ test("assertDisclosureMatchesCommitment: a column now disclosed but not committe
 
 test("assertDisclosureMatchesCommitment: a drift carries the disclosure-refusal type", () => {
   // The distinct type is what lets a caller keeping per-failure bookkeeping tell a
-  // local pre-connection refusal from a transport fault, without giving up the
-  // `instanceof UsageError` classification the CLI's exit 64 rests on.
+  // local refusal raised before anything is sent from a transport fault, without
+  // giving up the `instanceof UsageError` classification the CLI's exit 64 rests on.
   expect(() =>
     assertDisclosureMatchesCommitment(["patient_id"], metaWithId),
   ).toThrow(OutboundDisclosureRefusalError);
@@ -789,11 +789,11 @@ test("assertDisclosureMatchesCommitment: over-delivery's remedy points at narrow
   expect(message).toMatch(/re-establish the exchange|re-invite/);
 });
 
-test("prepareForExchange: rejects a config whose disclosed_payload_columns commitment can no longer be met, before connecting", () => {
+test("prepareForExchange: rejects a config whose disclosed_payload_columns commitment can no longer be met, before anything is sent", () => {
   // No payload.send here (so assertPayloadSendDisclosed is a no-op) -- the drift is
   // caught solely by the persisted disclosed-columns commitment, the second of the
   // two commitment sources. The check fires during preparation, before any
-  // connection or dataset build.
+  // credential, terms, or data are sent, and before the dataset build.
   const metadata: Metadata = [
     {
       name: "first_name",

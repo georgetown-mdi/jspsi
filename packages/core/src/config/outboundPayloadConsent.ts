@@ -36,8 +36,9 @@ import { MAX_NAME_LENGTH, MAX_PAYLOAD_ENTRIES } from "./linkageTerms.js";
  *   set is resolved, shown, and confirmed at the first run that can (see
  *   `assertOutboundPayloadConsented`).
  * - `confirmed` -- the exact column set this party confirmed. A later run whose
- *   resolved set differs, in EITHER direction, is refused before connecting rather
- *   than silently transmitting a different disclosure.
+ *   resolved set differs, in EITHER direction, is refused before any credential,
+ *   terms, or data are sent rather than silently transmitting a different
+ *   disclosure.
  */
 export type OutboundPayloadConsent =
   | {

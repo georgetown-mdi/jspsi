@@ -1844,7 +1844,7 @@ test("runOnlineBootstrap persists the acceptor's own outbound consent into the f
 test("runOnlineBootstrap persists a pending outbound consent into the fresh config", async () => {
   // The unresolvable shape through the online first write: the acceptance could
   // not resolve the set, so `pending` rides the write and the first resolving run
-  // shows and asks before connecting.
+  // shows and asks before anything is sent.
   mockSuccessfulExchange(undefined);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
   const configPath = path.join(dir, "psilink.yaml");

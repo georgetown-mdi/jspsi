@@ -1725,8 +1725,8 @@ test("displayInvitation: the empty and not-yet-known outbound-send cases avoid a
   expect(unknown).toContain(`${OUTBOUND_SEND_LABEL}: not yet known`);
   expect(unknown).toContain(
     "    Determined from your input file when the exchange runs, which shows " +
-      "the columns and asks you to confirm them before it connects; a run with " +
-      "no terminal to ask on refuses instead of sending them.",
+      "the columns and asks you to confirm them before anything is sent; a run " +
+      "with no terminal to ask on refuses instead of sending them.",
   );
   expect(unknown).not.toContain("(none)");
   expect(outboundSendEntries(unknown.split("\n"))).toEqual([]);

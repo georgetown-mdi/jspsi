@@ -291,8 +291,8 @@ test("assertOutboundPayloadConsented: a changed set is refused, naming both dire
 
 test("assertOutboundPayloadConsented: both refusal reasons carry the disclosure-refusal type", () => {
   // The distinct type is what lets a caller keeping per-failure bookkeeping tell a
-  // local pre-connection refusal from a transport fault, without giving up the
-  // `instanceof UsageError` classification the CLI's exit 64 rests on.
+  // local refusal raised before anything is sent from a transport fault, without
+  // giving up the `instanceof UsageError` classification the CLI's exit 64 rests on.
   const consents: Array<OutboundPayloadConsent> = [
     { status: "pending" },
     { status: "confirmed", columns: ["notes"] },

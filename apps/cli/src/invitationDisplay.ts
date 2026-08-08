@@ -86,19 +86,20 @@ function marked(label: string, fact: ConsentFactId): string {
  * It states what actually happens next on THIS path: the acceptance records that
  * the set is unconfirmed, and `psilink exchange` resolves it from the input file it
  * is given (from the config's metadata if one was written, else inferred from the
- * CSV header) and shows it for confirmation before it connects. So the line points
- * ahead to a checkpoint that exists, in the register the web's own forward
- * reference uses -- there the acceptor chooses its file on the same screen and
- * confirms the set before consenting; here the same confirmation is simply deferred
- * to the run that can resolve it. The unattended case is named too, because it is
- * the one where the answer is a refusal rather than a question.
+ * CSV header) and shows it for confirmation before any credential, terms, or data
+ * are sent. So the line points ahead to a checkpoint that exists, in the register
+ * the web's own forward reference uses -- there the acceptor chooses its file on
+ * the same screen and confirms the set before consenting; here the same
+ * confirmation is simply deferred to the run that can resolve it. The unattended
+ * case is named too, because it is the one where the answer is a refusal rather
+ * than a question.
  */
 const OUTBOUND_SEND_FORWARD_REFERENCE = {
   value: "not yet known",
   note:
     "Determined from your input file when the exchange runs, which shows the " +
-    "columns and asks you to confirm them before it connects; a run with no " +
-    "terminal to ask on refuses instead of sending them.",
+    "columns and asks you to confirm them before anything is sent; a run with " +
+    "no terminal to ask on refuses instead of sending them.",
 };
 
 /**

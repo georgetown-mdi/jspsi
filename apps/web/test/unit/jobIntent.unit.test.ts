@@ -501,8 +501,9 @@ describe("a composed acceptance config satisfies the later run's consent gate", 
   /** The verdict a later `psilink exchange` reaches on a composed config: the
    * record the config carries, assessed against the set that run would actually
    * transmit -- the exact reading `confirmOutboundPayloadConsent` performs before
-   * anything connects. `runMetadata` is what the run resolves for itself (the
-   * config's own metadata, or an inferred one where the config carries none). */
+   * any credential, terms, or data are sent. `runMetadata` is what the run
+   * resolves for itself (the config's own metadata, or an inferred one where the
+   * config carries none). */
   function gateVerdictFor(
     overrides: Parameters<typeof validIntent>[0],
     runMetadata: Metadata,

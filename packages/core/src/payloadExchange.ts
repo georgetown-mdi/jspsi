@@ -190,9 +190,9 @@ export function preparePayload(
  * partner declared it will take nothing -- while this party's metadata may be
  * INFERRED from its CSV header, where every unrecognized column defaults to
  * `isPayload: true` with no operator choice involved. Refusing here, from inside
- * `prepareForExchange` and so before the connection, is what keeps those columns
- * off the wire: the partner's {@link reconcileReceivedPayload} aborts only once
- * they have already arrived.
+ * `prepareForExchange` and so before any credential, terms, or data are sent, is
+ * what keeps those columns off the wire: the partner's
+ * {@link reconcileReceivedPayload} aborts only once they have already arrived.
  *
  * Only an ABSENT `payload.send` is the deliberate exception (early return): the
  * guided and default paths author no dictionary while metadata still transmits,
@@ -327,8 +327,8 @@ export function assertPayloadSendDisclosed(
  * publishes it. The partner locked that exact set in as what it will RECEIVE
  * (its `expectedPayloadColumns`) and enforces it at runtime via
  * {@link reconcileReceivedPayload}. This check runs on the COMMITTING party at
- * prepare time, before connecting, so a drift fails fast and locally instead of
- * surfacing later as the partner's mid-exchange abort.
+ * prepare time, before any credential, terms, or data are sent, so a drift fails
+ * fast and locally instead of surfacing later as the partner's mid-exchange abort.
  *
  * Distinct from the two adjacent guards, and complementary to both:
  * - {@link assertPayloadSendDisclosed} compares a present `payload.send`
@@ -363,9 +363,10 @@ export function assertPayloadSendDisclosed(
  * @throws {OutboundDisclosureRefusalError} when a present `committed` set is not
  *   exactly the columns this party's metadata currently discloses. A
  *   {@link UsageError} subclass, so the CLI classifies it as a local configuration
- *   error (exit 64) -- self-attributed and pre-connection -- distinct from
- *   {@link reconcileReceivedPayload}'s partner-attributed protocol abort (exit 69),
- *   and a caller that bookkeeps failures tells this refusal from a transport fault.
+ *   error (exit 64) -- self-attributed, and raised before any credential, terms, or
+ *   data are sent -- distinct from {@link reconcileReceivedPayload}'s
+ *   partner-attributed protocol abort (exit 69), and a caller that bookkeeps
+ *   failures tells this refusal from a transport fault.
  */
 export function assertDisclosureMatchesCommitment(
   committed: string[] | undefined,
@@ -564,9 +565,10 @@ export function assessOutboundPayloadConsent(
  * acceptance reach this; the surface that catches it supplies its own invocation.
  *
  * An {@link OutboundDisclosureRefusalError}, so the CLI's `instanceof UsageError`
- * check classifies it as a local configuration error (exit 64) -- self-attributed
- * and pre-connection -- rather than a transport failure (69), and a caller that
- * bookkeeps failures tells this refusal from a transport fault.
+ * check classifies it as a local configuration error (exit 64) -- self-attributed,
+ * and raised before any credential, terms, or data are sent -- rather than a
+ * transport failure (69), and a caller that bookkeeps failures tells this refusal
+ * from a transport fault.
  */
 export function outboundPayloadConsentRefusal(
   verdict: OutboundPayloadConsentConfirmationRequired,
@@ -584,8 +586,8 @@ export function outboundPayloadConsentRefusal(
         `this exchange was accepted (no input file was named then, or its ` +
         `columns could not satisfy the linkage keys). Run the exchange from an ` +
         `interactive terminal, where the columns are shown and confirmed before ` +
-        `anything connects, or accept the invitation again naming your input ` +
-        `file, which confirms them at that point.`,
+        `any credential, terms, or data are sent; or accept the invitation again ` +
+        `naming your input file, which confirms them at that point.`,
     );
   const changes: string[] = [];
   if (verdict.added.length > 0)
@@ -610,8 +612,15 @@ export function outboundPayloadConsentRefusal(
 }
 
 /**
- * Fail closed, before connecting, on an outbound payload set this party has not
- * confirmed -- the run-boundary backstop behind {@link assessOutboundPayloadConsent}.
+ * Fail closed, before any credential, terms, or data are sent, on an outbound
+ * payload set this party has not confirmed -- the run-boundary backstop behind
+ * {@link assessOutboundPayloadConsent}.
+ *
+ * The boundary this and its two sibling prepare-time guards hold is what has been
+ * SENT, not whether a socket is open: an unpinned SFTP configuration establishes
+ * first-use host-key trust over a credential-free probe ahead of them, so a refusal
+ * here cannot claim that nothing has connected -- only that nothing this party
+ * discloses has left the machine.
  *
  * Enforced from `prepareForExchange`, so every path that prepares an exchange
  * inherits it whether or not its front end ran the confirmation flow. A front end
