@@ -104,6 +104,8 @@ docker run --rm -p 127.0.0.1:3000:3000 \
 
 The one mounted directory holds your input, the exchange's working files, and its results; the console reads your CSV in place. Publishing to `127.0.0.1` keeps the unauthenticated console reachable only from this machine, and works the same on Linux, macOS, and Windows. For SFTP exchanges, or to keep the partner-synced directory separate from your files, see [Server job API](docs/DEPLOYMENT.md#server-job-api).
 
+Mounting `$PWD` means the console writes the working files and results into that directory as uid 1000, the account the container runs as, and `serve` is the one role that cannot instead be run as your own account with `--user`: it keeps container-internal state belonging to that uid. Docker Desktop -- on Mac, Windows, or Linux -- presents the mount to that account, so the command above works as written. Under Docker Engine on Linux the directory keeps its own ownership, so give it to that uid once -- `sudo chown 1000:1000 "$PWD"` -- if your account is not itself uid 1000, and expect what the console leaves behind to belong to uid 1000 rather than to you, so `sudo` may be needed to move or delete it afterwards. See [The user the image runs as](docs/DEPLOYMENT.md#the-user-the-image-runs-as).
+
 # Podman
 
 [Podman](https://podman.io/) can be used as a drop-in replacement for Docker. The only change needed is to replace calls to the `docker` executable with calls to `podman`.

@@ -8,9 +8,11 @@ Two container images are built from this repository: the shipped CLI image
 (`Dockerfile`) and the unpublished FIPS variant (`Dockerfile.fips`). Both
 freeze their npm tree to the committed lockfile, pin their base image by digest,
 and install one reviewed set of OS packages each. This document records what
-each pins, what holds the pin, and what those installs bring into the image.
-Why the npm dependencies themselves are exact-pinned, and the per-stack upgrade
-checklists, are in [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
+each pins, what holds the pin, what those installs bring into the image, and the
+two properties of a built image that are measured by running it rather than by
+reading its instructions. Why the npm dependencies themselves are exact-pinned,
+and the per-stack upgrade checklists, are in
+[DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
 
 ## The Docker image's dependency freeze
 
@@ -255,6 +257,74 @@ base against Alpine's 45, including `systemd`, `dbus`, `pam`,
 `cryptsetup-libs`, `device-mapper` and `util-linux` -- a heavier closure, and
 one that includes an init system.
 
+## The runtime posture measured on each built image
+
+Two properties are settled by running the image `image_smoke.yaml` just built,
+not by reading the Dockerfile that produced it: which trees the container can
+write, and which files carry a setuid or setgid bit. Both are outcomes rather
+than instructions -- each is decided by base-image state and by the file modes an
+OS package arrives with as much as by anything this repository writes -- so a
+static reading of the build cannot reach either, however tightly
+`scripts/dockerfile-freeze.test.mjs` holds the instructions themselves.
+
+### The writable set
+
+The default image's container writes `/work` and
+`/run/psilink/sftp-credentials`, and no path under `/app`. The measurement
+creates a file in each of the two writable directories under the account the
+image runs as and requires the same write under `/app` to be refused; a write is
+what settles it, because a mode that reads as writable over a layer that refuses
+the write is the case a `stat` cannot tell apart.
+
+Refusing the write into `/app` is only half the claim, since a file the account
+can rewrite in place needs no writable directory around it. The other half is a
+walk of `/app` for any path owned by that account, owned by any group the account
+carries, or other-writable; the expected set is empty. The walk runs as uid 0, so
+no directory mode can hide a path from it -- ownership and mode read the same
+whoever asks.
+
+Both halves are scoped to the default image. The variant carries no `USER`,
+makes no unprivileged claim, and would answer the whole measurement vacuously as
+root.
+
+### The setuid and setgid inventory
+
+Measured on both images with
+
+    find / -xdev -type f \( -perm -2000 -o -perm -4000 \) -exec ls -l {} +
+
+run as uid 0, for the same reason the `/app` walk is: a traversal under an
+unprivileged account cannot enter a root-only directory, so an empty result from
+one would report an absence it never measured. The step compares the paths it
+finds against the inventory recorded here for that image and fails on any
+difference in either direction.
+
+| Image | Recorded inventory |
+| --- | --- |
+| `Dockerfile` | empty -- no setuid or setgid file |
+| `Dockerfile.fips` | not recorded |
+
+The default image's inventory is empty because the runtime stage takes off the
+one setgid bit its OS install brings in. `samba-client` pulls in `linux-pam`,
+whose `/usr/sbin/unix_chkpwd` lands setgid `shadow`, and `chmod g-s` in the
+runtime stage removes it; neither stage's base carries another bit of either
+kind. `scripts/dockerfile-freeze.test.mjs` holds that instruction as one of the
+two mode changes it permits outside the writable trees, and the measurement holds
+the outcome, which is the half that also sees the base image's own files.
+
+The variant's inventory is not recorded because no measurement of it exists: the
+image is published nowhere and is built only inside `image_smoke.yaml`, and its
+`samba-client` closure on Amazon Linux 2023 is materially larger than Alpine's --
+`systemd`, `pam`, `cryptsetup-libs`, `device-mapper` and `util-linux` all arrive
+with it. The step is enforced on that leg regardless: it fails while the
+inventory is unrecorded and prints what it measured, so the first run of it
+supplies the list this table is missing rather than leaving the surface
+unmeasured. Recording it means replacing the sentinel in the step's `fips` arm
+with the block the failure prints, and this table row with the same list. The
+step is the last in the job for that reason -- a failing step skips the ones
+after it, and the variant's provider assertions and end-to-end exchange have to
+keep running while the sentinel stands.
+
 ## Measured inventories
 
 > **Non-normative.** What follows measures images that were built, kept as the
@@ -279,7 +349,8 @@ compression and archive libraries (`libarchive`, `xz-libs`, `zstd-libs`,
 `jansson`, `libidn2`, `libunistring`, `acl-libs`, `libcap2`). No `smbd`, `nmbd`
 or `winbindd` is installed, so nothing added listens.
 
-`linux-pam` also gives the image its first setgid binary. Measured with
+`linux-pam` is where the setgid bit the runtime stage strips comes from. Measured
+with
 
     find / -xdev -type f \( -perm -2000 -o -perm -4000 \) -exec ls -l {} +
 
@@ -288,19 +359,13 @@ the install reports exactly `-rwxr-sr-x 1 root shadow /usr/sbin/unix_chkpwd` and
 no setuid file at all -- on the built `arm64` image, and at `x86_64` on the
 pinned base plus that one instruction. It sits beside the PAM helpers `faillock`,
 `mkhomedir_helper`, `pam_namespace_helper`, `pam_timestamp_check` and
-`pwhistory_helper`, none of them setgid. The runtime stage declares `USER node`,
-so the process the setgid bit would elevate is unprivileged and the bit has to be
-read as a boundary rather than as the formality it is for uid 0. What bounds
-exploitability is a single measured property of the image rather than of the
-package -- `/etc/shadow` carries no usable hash (`root` is `*`, every other
-account `!`), so `unix_chkpwd` has nothing to verify against. Whether that
-account already carries group `shadow`, which would make the bit grant it nothing
-in the first place, is not measured here and nothing rests on it;
-`docker run --rm --entrypoint id <image> -Gn node` settles it against a built
-image. Nothing stands behind the one property that does carry the conclusion, so
-re-measure it if a change gives any account in the image a password hash, or if
-the image gains a second setgid or any setuid file; the `find` above settles
-both.
+`pwhistory_helper`, none of them setgid. Because the runtime stage declares
+`USER node`, the process that bit would elevate is unprivileged, so it would have
+to be read as a boundary rather than as the formality it is for uid 0 -- which is
+why the stage removes it instead, leaving nothing to reason about. The enforced
+form of that, and the same `find` run against both built images on every pull
+request, are in
+[the runtime posture measured on each built image](#the-runtime-posture-measured-on-each-built-image).
 
 ### The helper image the setup scripts run the probe in is a mutable tag
 

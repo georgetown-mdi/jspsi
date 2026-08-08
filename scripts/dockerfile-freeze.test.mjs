@@ -479,9 +479,15 @@ const WRITABLE_TREES = ["/work", "/run/psilink"];
 const withinWritableTree = (path) =>
   WRITABLE_TREES.some((tree) => path === tree || path.startsWith(`${tree}/`));
 
-// The one mode change outside those trees, frozen by literal: the entrypoint
-// script has to be executable, and the bit says nothing about who owns it.
-const EXPECTED_MODE_CHANGE_OUTSIDE = "chmod +x /app/docker-entrypoint.sh";
+// The mode changes outside those trees, frozen by literal and in the order the
+// stage runs them. Neither says anything about who owns the path: the entrypoint
+// script has to be executable, and the setgid bit that linux-pam's unix_chkpwd
+// arrives with is taken off, which is what leaves the image with no setuid or
+// setgid file for image_smoke.yaml's inventory step to find.
+const EXPECTED_MODE_CHANGES_OUTSIDE = [
+  "chmod g-s /usr/sbin/unix_chkpwd",
+  "chmod +x /app/docker-entrypoint.sh",
+];
 
 // The verbs that hand a path to an account by a route that parse does not read
 // -- install's -o/-g/-m, setfacl's ACL entry -- plus any of the parsed ones
@@ -599,11 +605,11 @@ describe("the unprivileged account the default image runs as", () => {
     ).toEqual([]);
   });
 
-  it("changes no mode outside those directories but the entrypoint's executable bit", () => {
+  it("changes no mode outside those directories but the two reviewed ones", () => {
     // A mode is the other way the account reaches what it must not write: a
     // group- or world-writable /app needs no chown to be rewritable. Outside the
     // writable trees the whole set of mode changes is held to the reviewed
-    // literal rather than to a reading of what each mode grants.
+    // literals rather than to a reading of what each mode grants.
     expect(
       image.ownershipCommands
         .filter(
@@ -612,7 +618,7 @@ describe("the unprivileged account the default image runs as", () => {
             paths.some((path) => !withinWritableTree(path)),
         )
         .map(({ command }) => command),
-    ).toEqual([EXPECTED_MODE_CHANGE_OUTSIDE]);
+    ).toEqual(EXPECTED_MODE_CHANGES_OUTSIDE);
     expect(
       image.runtimeCopies
         .filter(({ flags }) => flags.some((f) => f.startsWith("--chmod")))

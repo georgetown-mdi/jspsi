@@ -118,6 +118,66 @@ jobs:
             exit 1
           fi
 
+      # What the image hands the account it runs as, measured on the built image
+      # rather than read off the instruction that declares it. The runtime stage
+      # gives that account /work and the console's credential scratch directory
+      # and withholds /app, so the process reads and executes its own code
+      # without being able to rewrite it; dockerfile-freeze.test.mjs holds the
+      # instruction, and only a run reaches what the instruction produced on top
+      # of whatever the base image already did.
+      #
+      # Probed by writing rather than by `test -w`: a mode that reads as writable
+      # over a layer or a mount that refuses the write is the case a stat cannot
+      # tell apart. The /app walk is the other half -- a file the account owns,
+      # or one any group it carries can write, is code it can rewrite in place
+      # without /app itself ever being writable -- and it runs as uid 0 so no
+      # directory mode can hide a path from it, ownership and mode being facts
+      # about the image either way.
+      #
+      # Scoped to the default image, as the identity step above is: the variant
+      # carries no USER and makes no unprivileged claim.
+      - name: Measure the container's writable set
+        if: matrix.fips == 'false'
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh ${{ matrix.tag }} -c '
+            set -eu
+            for tree in /work /run/psilink/sftp-credentials
+            do
+              probe="$tree/.write-probe.$$"
+              if ! touch "$probe"; then
+                echo "$tree is not writable by the account the image runs as" >&2
+                exit 1
+              fi
+              rm -f "$probe"
+              echo "$tree: writable"
+            done
+            if touch "/app/.write-probe.$$" 2>/dev/null; then
+              rm -f "/app/.write-probe.$$"
+              echo "/app is writable by the account the image runs as" >&2
+              exit 1
+            fi
+            echo "/app: not writable"
+          '
+
+          reachable=$(docker run --rm --user 0 --entrypoint sh ${{ matrix.tag }} -c '
+            set -eu
+            echo "the runtime account is uid $(id -u node), in groups $(id -Gn node)" >&2
+            set -- -user "$(id -u node)" -o -perm -0002
+            for gid in $(id -G node)
+            do
+              set -- "$@" -o -group "$gid"
+            done
+            find /app \( "$@" \) -print
+          ')
+          if [ -n "$reachable" ]; then
+            count=$(printf '%s\n' "$reachable" | wc -l)
+            echo "$count paths under /app are owned by, or writable by, the account the image runs as; the first of them:" >&2
+            printf '%s\n' "$reachable" | head -n 40 >&2
+            exit 1
+          fi
+          echo "/app: no path owned by that account or by a group it carries, and none other-writable"
+
       # Role 1: the headless CLI still runs. `--help` is a read-only invocation
       # that exits 0 (no exchange, no key material, no network).
       - name: Smoke the CLI role
@@ -458,3 +518,69 @@ jobs:
               exit 1
             fi
           done
+
+      # Every setuid and setgid file in the built image, compared against the
+      # inventory docs/spec/CONTAINER_IMAGES.md records for it. No reading of a
+      # Dockerfile reaches these: the bits come from base-image state and from an
+      # OS package's own file modes, so the instruction text says nothing about
+      # them either way.
+      #
+      # Run as uid 0 on both legs. The inventory is a property of the image's
+      # filesystem rather than of what the runtime account can see, and a
+      # traversal under an unprivileged account cannot enter a root-only
+      # directory -- it would report an absence it never measured.
+      #
+      # Last in the job on purpose. The variant's inventory has never been
+      # measured, so this step fails that leg until a run of it supplies one, and
+      # a failing step skips every step after it: placed any earlier, it would
+      # stop the variant's provider assertions and end-to-end exchange from
+      # running at all while that stands.
+      - name: Measure the image's setuid and setgid files
+        run: |
+          set -euo pipefail
+          measure() {
+            docker run --rm --user 0 --entrypoint sh ${{ matrix.tag }} -c "$1"
+          }
+          probe='find / -xdev -type f \( -perm -2000 -o -perm -4000 \)'
+
+          echo "$probe -exec ls -l {} +"
+          measure "$probe -exec ls -l {} +"
+          measured=$(measure "$probe" | LC_ALL=C sort)
+
+          case "${{ matrix.variant }}" in
+            # The runtime stage takes off the one setgid bit its OS install
+            # brings in, and neither stage's base carries another, so nothing is
+            # left for this to find.
+            default) recorded="" ;;
+            # No measurement of the variant exists to record: it is published
+            # nowhere and is built only here, and its samba-client closure on
+            # Amazon Linux 2023 is materially larger than the Alpine one. The leg
+            # is enforced all the same -- it fails while the inventory is
+            # unrecorded and prints what it measured, so the first run of it
+            # supplies the list rather than leaving the surface unmeasured.
+            # Recording it means replacing this line with the block the failure
+            # prints, and the same list in docs/spec/CONTAINER_IMAGES.md.
+            fips) recorded=@unrecorded ;;
+            *)
+              echo "no setuid/setgid inventory is recorded for the ${{ matrix.variant }} image" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ "$recorded" = "@unrecorded" ]; then
+            echo "the ${{ matrix.variant }} image's setuid/setgid inventory is unrecorded; this run measures it as:" >&2
+            {
+              echo "            recorded=\$(cat <<'INVENTORY'"
+              printf '%s\n' "$measured"
+              echo "INVENTORY"
+              echo "            )"
+            } >&2
+            exit 1
+          fi
+
+          if [ "$measured" != "$recorded" ]; then
+            echo "the ${{ matrix.variant }} image carries setuid/setgid files the recorded inventory does not name, or is missing one it does" >&2
+            diff <(printf '%s\n' "$recorded") <(printf '%s\n' "$measured") >&2 || true
+            exit 1
+          fi
+          echo "the ${{ matrix.variant }} image's setuid/setgid files are the recorded inventory"
