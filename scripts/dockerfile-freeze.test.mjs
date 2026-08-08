@@ -214,6 +214,22 @@ function analyze(file) {
 // reach and docs/spec/DEPENDENCY_PINS.md records as a limit.
 const EXPECTED_NPMRC_COPY = "COPY .npmrc package.json package-lock.json ./";
 
+// The base each image's stages build from, frozen by literal. A tag resolves to
+// whatever the registry serves that day, so a stage on one is a different
+// runtime on every build. Each is the multi-arch index digest, which is the one
+// a multi-platform build can resolve: a platform-specific manifest digest names
+// one architecture and fails on the other. A builder's base is held as tightly
+// as a runtime stage's, because the npm that resolves the tree the runtime
+// stage ships is the one the builder's base carries -- a property of the digest
+// rather than of anything in this repository, which
+// docs/spec/DEPENDENCY_PINS.md records.
+const DEFAULT_BASE =
+  "node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66";
+// The variant's base rootfs is coupled to the release snapshot its dnf lines
+// pin: the two are the same Amazon Linux release, not merely compatible ones.
+const FIPS_BASE =
+  "amazonlinux:2023@sha256:694092ae18877ed4e3cb9b643759ba95df1f12af12528fefa18f60f79d4c1568";
+
 // Each image's whole OS-package surface, frozen by literal the way the .npmrc
 // COPY above is. The npm tree is copied from the builder and resolves nothing,
 // so these installs are the only dependencies an image build fetches from a
@@ -224,10 +240,15 @@ const EXPECTED_NPMRC_COPY = "COPY .npmrc package.json package-lock.json ./";
 const IMAGES = [
   {
     file: "Dockerfile",
+    // Listed twice because both stages name the base outright rather than the
+    // runtime stage building FROM the builder, so each is a separate place the
+    // pin can move.
+    externalBases: [DEFAULT_BASE, DEFAULT_BASE],
     osInstalls: ["RUN apk add --no-cache samba-client"],
   },
   {
     file: "Dockerfile.fips",
+    externalBases: [FIPS_BASE],
     osInstalls: [
       "RUN dnf -y --releasever=${AL2023_RELEASEVER} install tar gzip xz findutils libatomic && dnf clean all",
       "RUN dnf -y --releasever=${AL2023_RELEASEVER} install samba-client openssl && dnf clean all",
@@ -262,7 +283,7 @@ function dispatchChain(image) {
   return { entrypointArgv, chain, script };
 }
 
-for (const { file, osInstalls, image } of IMAGES) {
+for (const { file, externalBases, osInstalls, image } of IMAGES) {
   describe(`${file} dependency freeze`, () => {
     it("uses ADD nowhere, nor any other instruction class this file does not parse", () => {
       expect(
@@ -288,6 +309,25 @@ for (const { file, osInstalls, image } of IMAGES) {
           .filter(({ inst, rest }) => inst.includes("#") || rest.includes("#"))
           .map(({ inst, rest }) => `${inst} ${rest}`),
       ).toEqual([]);
+    });
+
+    it("builds every stage from the reviewed base digest, or from a stage of its own", () => {
+      // A FROM naming a stage this file declared earlier carries that stage's
+      // base with it; every other one reaches a registry, and is held to the
+      // literal above. Comparing the whole list, in order, is what covers a
+      // stage that drops its digest for the bare tag, one re-pinned onto
+      // another digest, and a stage added or removed -- each of which changes
+      // the list rather than any single element the parse could be asked about.
+      const declaredStages = new Set();
+      const bases = [];
+      for (const { inst, rest } of image.instructions) {
+        if (inst !== "FROM") continue;
+        const tokens = normalize(rest).split(" ");
+        if (!declaredStages.has(tokens[0])) bases.push(tokens[0]);
+        const as = tokens.findIndex((token) => token.toUpperCase() === "AS");
+        if (as !== -1) declaredStages.add(tokens[as + 1]);
+      }
+      expect(bases).toEqual(externalBases);
     });
 
     it("installs only with npm ci, never npm install", () => {
@@ -812,20 +852,13 @@ describe("Dockerfile.fips certificate pins", () => {
   });
 });
 
-// The two pins that decide what the variant's userland and its Node runtime are
-// made of. The build's own checksum step compares the tarball against whatever
-// hash the RUN carries, so it cannot notice a committed hash that has drifted
-// from the value docs/spec/DEPENDENCY_PINS.md records as resolved and reviewed;
-// the base digest has no build-time reader at all. These literals are what holds
-// both.
-describe("Dockerfile.fips base image and Node runtime pins", () => {
+// The pin that decides what the variant's Node runtime is made of. The build's
+// own checksum step compares the tarball against whatever hash the RUN carries,
+// so it cannot notice a committed hash that has drifted from the value
+// docs/spec/DEPENDENCY_PINS.md records as resolved and reviewed. These literals
+// are what holds it.
+describe("Dockerfile.fips Node runtime pins", () => {
   const image = IMAGES.find(({ file }) => file === "Dockerfile.fips").image;
-
-  // The multi-arch index digest, which is the one a multi-platform build can
-  // resolve: a platform-specific manifest digest names one architecture and
-  // fails on the other.
-  const EXPECTED_BASE =
-    "amazonlinux:2023@sha256:694092ae18877ed4e3cb9b643759ba95df1f12af12528fefa18f60f79d4c1568";
 
   // The sha256 of each architecture's official nodejs.org tarball, keyed by the
   // node_arch the `case` selects beside it.
@@ -837,22 +870,6 @@ describe("Dockerfile.fips base image and Node runtime pins", () => {
   const nodeFetch = image.instructions.find(
     ({ inst, rest }) => inst === "RUN" && rest.includes("nodejs.org"),
   );
-
-  it("builds every stage from that base digest or from another stage of its own", () => {
-    // A tag resolves to whatever the registry serves that day, and the base
-    // rootfs is coupled to the release snapshot the dnf lines pin: the two are
-    // the same Amazon Linux release, not merely compatible ones.
-    const declaredStages = new Set();
-    const externalBases = [];
-    for (const { inst, rest } of image.instructions) {
-      if (inst !== "FROM") continue;
-      const tokens = normalize(rest).split(" ");
-      if (!declaredStages.has(tokens[0])) externalBases.push(tokens[0]);
-      const as = tokens.findIndex((token) => token.toUpperCase() === "AS");
-      if (as !== -1) declaredStages.add(tokens[as + 1]);
-    }
-    expect(externalBases).toEqual([EXPECTED_BASE]);
-  });
 
   it("checks the fetched Node tarball against the committed hash for its architecture", () => {
     expect(nodeFetch).toBeDefined();
