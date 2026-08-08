@@ -97,7 +97,18 @@ export interface SftpFaultInjection {
   withholdOn: string | null;
   /** Fail RENAME with the generic-failure status this many times, then succeed. */
   renameFailuresRemaining: number;
-  /** Cap each READDIR to this many entries (realistic batching); 0 means one batch. */
+  /**
+   * Cap each READDIR to at most this many entries (realistic batching); 0 leaves
+   * the width to the backend.
+   *
+   * Whatever this is set to, the backend also keeps every NAME reply inside what
+   * one SFTP packet delivers and resumes the listing from where the previous
+   * batch ended, so a directory too wide for a single packet -- a full
+   * `MAX_DIRECTORY_ENTRIES` listing included -- arrives over as many round trips
+   * as it takes, and no value here can lose a reply. A cap wider than one
+   * packet's worth is therefore an upper bound on a batch rather than a promise
+   * of that many entries per round trip.
+   */
   readdirBatchSize: number;
 }
 

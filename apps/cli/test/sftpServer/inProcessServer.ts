@@ -39,6 +39,24 @@ const RESPONSE_DATA = 103;
 // the remote root from the handle rather than hardcoding `/psi`.
 const REMOTE_ROOT = "/psi";
 
+// The widest SFTP packet the pinned stack carries, measured against the real
+// client rather than read out of it: a NAME reply declaring 262,144 payload
+// bytes arrives, one declaring 262,145 never does, and the server's name() call
+// reports nothing either way -- so an over-wide reply is lost in silence and the
+// client is left reporting no response at all.
+const MAX_DELIVERED_SFTP_PAYLOAD_BYTES = 262_144;
+
+// What a READDIR batch is packed to. Half the wall above, so the per-entry
+// estimate below can be off by a factor of two and the packet still arrives.
+const READDIR_BATCH_BUDGET_BYTES = MAX_DELIVERED_SFTP_PAYLOAD_BYTES / 2;
+
+// A NAME reply's own header (type, request id, entry count), and per entry the
+// length prefixes and attribute block SFTPv3 frames around it. Both are
+// deliberately over-counted: predicting another library's encoder to the byte is
+// what the budget's margin exists to avoid needing.
+const NAME_PACKET_HEADER_BYTES = 16;
+const NAME_ENTRY_FRAMING_BYTES = 64;
+
 // The malformed-packet injection rides one documented ssh2 internal: the public
 // name()/data() server APIs only ever emit well-formed packets, so a malformed
 // reply has to be written through the protocol/stream seam, exactly as a real
@@ -599,12 +617,19 @@ function attachSftpHandlers(
     }
     if (h.pos >= h.names.length) return sftp.status(reqid, STATUS_CODE.EOF);
 
-    // Realistic batching: hand back at most readdirBatchSize names per round-trip
-    // when set, otherwise the whole listing in one batch.
-    const batchSize = inject.readdirBatchSize || h.names.length;
-    const slice = h.names.slice(h.pos, h.pos + batchSize);
-    h.pos += slice.length;
-    const entries = slice.map((name) => {
+    // Realistic batching, bounded by the caller's cap where one is set AND by
+    // what a single NAME packet carries, resuming from the handle's stored
+    // position: a directory wider than one packet is served over as many round
+    // trips as it takes, the way a real server answers one.
+    const cap = inject.readdirBatchSize || h.names.length;
+    const entries: {
+      filename: string;
+      longname: string;
+      attrs: Attributes;
+    }[] = [];
+    let packed = NAME_PACKET_HEADER_BYTES;
+    while (h.pos < h.names.length && entries.length < cap) {
+      const name = h.names[h.pos];
       // Carry the full stat shape attrsFromStat reads -- a `{ size: number }`
       // annotation would narrow mode/atime/mtime away and force every entry to
       // report Date.now() instead of its real timestamps.
@@ -614,12 +639,23 @@ function attachSftpHandlers(
       } catch {
         st = { size: 0 };
       }
-      return {
-        filename: name,
-        longname: `-rw-r--r-- 1 user user ${st.size} Jan 1 00:00 ${name}`,
-        attrs: attrsFromStat(st),
-      };
-    });
+      const longname = `-rw-r--r-- 1 user user ${st.size} Jan 1 00:00 ${name}`;
+      const entryBytes =
+        NAME_ENTRY_FRAMING_BYTES +
+        Buffer.byteLength(name) +
+        Buffer.byteLength(longname);
+      if (packed + entryBytes > READDIR_BATCH_BUDGET_BYTES) {
+        // One entry that overruns the budget on its own cannot be split across
+        // round trips, so refuse the listing where the client can see it rather
+        // than write a packet that never arrives.
+        if (entries.length === 0)
+          return sftp.status(reqid, STATUS_CODE.FAILURE);
+        break;
+      }
+      entries.push({ filename: name, longname, attrs: attrsFromStat(st) });
+      packed += entryBytes;
+      h.pos += 1;
+    }
     sftp.name(reqid, entries);
   });
 
