@@ -20,12 +20,18 @@ import {
 import { promptConfirm } from "./util/cli";
 
 /**
- * The heading the run-time outbound-consent surface leads with. It names when the
- * question is being asked -- before anything connects -- because that is what
- * makes answering it consequential rather than a notice after the fact.
+ * The heading the run-time outbound-consent surface leads with. It names what the
+ * answer still decides -- nothing has been sent yet -- because that is what makes
+ * answering it consequential rather than a notice after the fact.
+ *
+ * It is deliberately a claim about disclosure rather than about connection order:
+ * an unpinned SFTP configuration establishes first-use host-key trust over a
+ * credential-free probe ahead of this question, so a heading promising that nothing
+ * has connected yet would not hold for that configuration. What holds on every
+ * configuration is that no credential, terms, or data precede the answer.
  */
 const OUTBOUND_CONSENT_HEADING =
-  "Before this exchange connects, confirm what it will send:";
+  "Nothing is sent until you confirm what this exchange will send:";
 
 /**
  * The label the column list carries, spelled to match the acceptance display's
@@ -102,9 +108,9 @@ function displayOutboundColumns(
 }
 
 /**
- * Show and confirm the columns this run would send to the partner, before it
- * connects, when the exchange carries an outbound-payload consent record its
- * current set does not satisfy.
+ * Show and confirm the columns this run would send to the partner, before any
+ * credential, terms, or data are sent, when the exchange carries an
+ * outbound-payload consent record its current set does not satisfy.
  *
  * A no-op for every exchange with no consent record -- which is every party that
  * is not an acceptor -- and for one whose resolved set is exactly what was
@@ -115,7 +121,7 @@ function displayOutboundColumns(
  *   asked. A yes records the confirmation in the config -- so later runs are held
  *   to it and ask again if it changes -- and updates `spec` in place, so the
  *   fail-closed backstop in `prepareForExchange` reads the answer just given. A no
- *   refuses; nothing is written and nothing connects.
+ *   refuses; nothing is written and nothing is sent.
  * - NON-INTERACTIVE (a cron run, a piped stdin, a `-` CSV that already claims it):
  *   nothing can answer a prompt, so this refuses with the shared refusal rather
  *   than reading end-of-file and treating that as a decline the operator never
@@ -132,8 +138,8 @@ function displayOutboundColumns(
  * `--log-file` while the question is asked somewhere they are not.
  *
  * @throws {UsageError} when the confirmation is owed and cannot be given, or is
- *   declined (exit 64) -- a local configuration decision, before any connection,
- *   distinct from a transport failure.
+ *   declined (exit 64) -- a local configuration decision taken before any
+ *   credential, terms, or data are sent, distinct from a transport failure.
  */
 export async function confirmOutboundPayloadConsent(params: {
   /**
@@ -181,9 +187,9 @@ export async function confirmOutboundPayloadConsent(params: {
   } catch (err) {
     // A failed record write is a local configuration fault, not a transport
     // failure: classify it as usage (exit 64) like the sibling config writes,
-    // name the path, and keep the cause on the chain. Nothing was sent -- the
-    // refusal precedes the connection -- and the confirmation is re-asked on
-    // the next run rather than assumed.
+    // name the path, and keep the cause on the chain. Nothing was sent -- no
+    // credential, terms, or data precede this refusal -- and the confirmation is
+    // re-asked on the next run rather than assumed.
     throw new UsageError(
       `you confirmed the columns, but the confirmation could not be recorded ` +
         `in ${configPath}, so the exchange did not run and nothing was sent. ` +

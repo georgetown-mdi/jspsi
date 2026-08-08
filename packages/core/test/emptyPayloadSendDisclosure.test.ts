@@ -137,7 +137,7 @@ test("an inviter's empty payload.receive mirrors to a present, empty acceptor pa
   expect(validateCompatibility(inviterTerms, acceptorTerms).errors).toEqual([]);
 });
 
-test("an acceptor declaring it sends nothing is refused before connecting when its metadata discloses columns", () => {
+test("an acceptor declaring it sends nothing is refused before anything is sent when its metadata discloses columns", () => {
   // Inferred, not chosen: neither `diagnosis` nor `notes` is a linkage or PII
   // alias, so both default to transmitted.
   expect(

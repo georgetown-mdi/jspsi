@@ -92,11 +92,12 @@ export const ExchangeSpecSchema = z.object({
   // fresh config, and the offline invite-from-config / re-invite path refreshes it in
   // place (persistDisclosedPayloadColumns) so it can never lag the token the partner
   // locks in. A later recurring `psilink exchange` verifies its current metadata still
-  // discloses exactly this set before connecting (assertDisclosureMatchesCommitment);
-  // a drift would otherwise silently under- or over-deliver and make the partner --
-  // which locked this set in -- abort mid-exchange (reconcileReceivedPayload), a
-  // failure attributed to the partner. The acceptor does not set this: it carries its
-  // commitment as payload.send (checked by assertPayloadSendDisclosed) instead. An empty array is a strict
+  // discloses exactly this set before any credential, terms, or data are sent
+  // (assertDisclosureMatchesCommitment); a drift would otherwise silently under- or
+  // over-deliver and make the partner -- which locked this set in -- abort
+  // mid-exchange (reconcileReceivedPayload), a failure attributed to the partner.
+  // The acceptor does not set this: it carries its commitment as payload.send
+  // (checked by assertPayloadSendDisclosed) instead. An empty array is a strict
   // "disclose nothing" (a later metadata that discloses any column then fails); an
   // absent field reconciles lazily (no prior commitment on record, so no check).
   // Bounded like a payload list; the names are this party's own column names.
@@ -112,10 +113,10 @@ export const ExchangeSpecSchema = z.object({
   // so the set comes from this party's input columns and would otherwise be inferred
   // rather than chosen. Absent means no consent record (an inviter, a zero-setup run,
   // a hand-authored config), which changes nothing; `pending` and `confirmed` are
-  // enforced before connecting by assertOutboundPayloadConsented. Distinct from
-  // disclosedPayloadColumns above, which records a promise made TO THE PARTNER (which
-  // locked it in) rather than a choice made BY this party, and which an acceptance
-  // does not set. See config/outboundPayloadConsent.ts.
+  // enforced by assertOutboundPayloadConsented before any credential, terms, or data
+  // are sent. Distinct from disclosedPayloadColumns above, which records a promise
+  // made TO THE PARTNER (which locked it in) rather than a choice made BY this
+  // party, and which an acceptance does not set. See config/outboundPayloadConsent.ts.
   outboundPayloadConsent: OutboundPayloadConsentSchema.optional(),
 });
 

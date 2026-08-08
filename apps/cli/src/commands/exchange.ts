@@ -676,16 +676,16 @@ export async function prepareDataset(
       exchangeDataSpec.metadata,
     );
 
-  // Show and confirm this party's OWN outbound columns before anything connects,
-  // when the exchange carries a consent record its current set does not satisfy --
-  // an acceptance that could not resolve the set at accept time, or one whose input
-  // file has changed since. The inputs are resolved through the same seam
-  // prepareForExchange resolves them from, so what is confirmed is what the run
-  // would transmit; a confirmation is recorded in the config and folded into
-  // `exchangeDataSpec`, and an unconfirmable or declined set refuses here. Runs
-  // before prepareForExchange only so the confirmation can precede its fail-closed
-  // backstop (assertOutboundPayloadConsented); a party with no consent record --
-  // every non-acceptor -- passes through untouched.
+  // Show and confirm this party's OWN outbound columns before any credential,
+  // terms, or data are sent, when the exchange carries a consent record its current
+  // set does not satisfy -- an acceptance that could not resolve the set at accept
+  // time, or one whose input file has changed since. The inputs are resolved
+  // through the same seam prepareForExchange resolves them from, so what is
+  // confirmed is what the run would transmit; a confirmation is recorded in the
+  // config and folded into `exchangeDataSpec`, and an unconfirmable or declined set
+  // refuses here. Runs before prepareForExchange only so the confirmation can
+  // precede its fail-closed backstop (assertOutboundPayloadConsented); a party with
+  // no consent record -- every non-acceptor -- passes through untouched.
   const resolved = resolveExchangeInputs(exchangeDataSpec, identity, columns);
   await confirmOutboundPayloadConsent({
     spec: exchangeDataSpec,

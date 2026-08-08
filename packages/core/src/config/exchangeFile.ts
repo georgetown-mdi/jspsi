@@ -160,8 +160,9 @@ export interface ExchangeSpecAssembly {
   expectedPayloadColumns?: string[];
   /**
    * This party's consent to its OWN outbound payload set -- the record a later
-   * run is held to before it connects (`assertOutboundPayloadConsented`). Absent
-   * for every party that is not an acceptor, whose own set is authored at mint.
+   * run is held to before any credential, terms, or data are sent
+   * (`assertOutboundPayloadConsented`). Absent for every party that is not an
+   * acceptor, whose own set is authored at mint.
    *
    * Carried verbatim: the assembler neither derives this record nor checks it
    * against the `metadata` assembled beside it. Naming the set the operator was

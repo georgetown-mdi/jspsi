@@ -55,7 +55,7 @@ export class UsageError extends Error {
  * ({@link OutboundDisclosureRefusalError}) are candidates on the same reasoning --
  * each compares this party's own current metadata against its own recorded set, so
  * every name in their messages is local -- but joining is a per-check surfacing
- * decision, not a consequence of being a local pre-connection refusal, so they sit
+ * decision, not a consequence of refusing before anything is sent, so they sit
  * outside until one is taken. The payload-SEND disclosure check
  * (`assertPayloadSendDisclosed`) is deliberately NOT a member -- on the accept side
  * its `payload.send` names are adopted from the partner's invitation, and the check
@@ -73,11 +73,12 @@ export class OperatorConfigError extends UsageError {
 }
 
 /**
- * The family of pre-connection refusals raised when this party can no longer make
- * the outbound disclosure it recorded agreeing to. The two send-side gates raise
- * it from {@link prepareForExchange}, and a non-interactive caller that cannot ask
- * for confirmation raises it through the same refusal builder; every raise
- * compares this party's OWN current metadata against its OWN recorded set:
+ * The family of refusals raised, before any credential, terms, or data are sent,
+ * when this party can no longer make the outbound disclosure it recorded agreeing
+ * to. The two send-side gates raise it from {@link prepareForExchange}, and a
+ * non-interactive caller that cannot ask for confirmation raises it through the
+ * same refusal builder; every raise compares this party's OWN current metadata
+ * against its OWN recorded set:
  *
  * - `assertDisclosureMatchesCommitment` -- the column set this party committed to
  *   send when the exchange was established has drifted from what its metadata now
@@ -85,13 +86,14 @@ export class OperatorConfigError extends UsageError {
  * - `assertOutboundPayloadConsented` -- the set this run would send is not the one
  *   this party confirmed sending (or none was ever confirmed).
  *
- * Neither is a transport fault: both fire before any connection, and a caller that
- * retries the same input refuses identically. That is why it is a distinct type
- * rather than a plain {@link UsageError} -- a caller keeping per-failure
- * bookkeeping branches on it deterministically (the web's managed re-run records
- * it as its own failure kind, whose recovery is re-confirming the disclosure, not
- * retrying the connection) while the CLI's `instanceof UsageError` check still
- * classifies it as a configuration error (exit 64, EX_USAGE).
+ * Neither is a transport fault: both fire before any credential, terms, or data
+ * are sent, and a caller that retries the same input refuses identically. That is
+ * why it is a distinct type rather than a plain {@link UsageError} -- a caller
+ * keeping per-failure bookkeeping branches on it deterministically (the web's
+ * managed re-run records it as its own failure kind, whose recovery is
+ * re-confirming the disclosure, not retrying the connection) while the CLI's
+ * `instanceof UsageError` check still classifies it as a configuration error
+ * (exit 64, EX_USAGE).
  *
  * Deliberately NOT an {@link OperatorConfigError}: that base type is the membership
  * rule for the web's message-rendering "config" alert, and joining it is a
