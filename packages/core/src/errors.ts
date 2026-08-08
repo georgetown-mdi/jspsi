@@ -35,7 +35,8 @@ export class UsageError extends Error {
  * The family of prepare-time configuration faults whose message is composed
  * SOLELY of the local operator's own content -- so it is both actionable to that
  * operator and safe to surface to them verbatim. Raised from
- * {@link prepareForExchange}, before any peer connection, never mid-exchange.
+ * {@link prepareForExchange}, before any credential, terms, or data are sent,
+ * never mid-exchange.
  *
  * This base type is the membership rule for the web's actionable "config" alert,
  * which renders the error's message: the web classifies a prepare-phase failure
