@@ -27,6 +27,16 @@ import {
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+// Bound for the describes below whose cases scan `repoRoot`: they walk the whole
+// working tree, and the parser guard among them also parses and prints every
+// JavaScript-family source in it twice. Alone on an idle container the heaviest
+// runs 3.8s against vitest's 5s default -- and 11.4s with the rest of the suite
+// competing for the same cores, which is the contention that reddened it. Sized
+// at roughly five times that worst measurement, this stays a hang backstop -- a
+// stripper that loops, or a walk that never terminates, still fails here --
+// rather than an assertion about how fast the scan runs.
+const SCAN_TIMEOUT_MS = 60_000;
+
 // Fixture paths under the scanned roots. Nothing here is read from disk: the
 // scanner takes the source as text, so a matcher case is a string in this file
 // rather than an edit to shipped code.
@@ -572,7 +582,7 @@ describe("scanned files", () => {
   });
 });
 
-describe("scanned roots", () => {
+describe("scanned roots", { timeout: SCAN_TIMEOUT_MS }, () => {
   it("covers the entrypoint that runs inside the container", () => {
     // PRIVACY.md's container claim is about what the running image connects
     // to, and this script is the image's ENTRYPOINT; the Dockerfile beside it
@@ -807,7 +817,7 @@ describe("comment stripping", () => {
   });
 });
 
-describe("the repository as it stands", () => {
+describe("the repository as it stands", { timeout: SCAN_TIMEOUT_MS }, () => {
   it("holds no URL literal outside the allowlist", () => {
     const { files, violations } = scanRepo(repoRoot);
     expect(violations).toEqual([]);
