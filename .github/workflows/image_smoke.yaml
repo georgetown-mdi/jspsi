@@ -682,8 +682,10 @@ jobs:
       #
       # A pull request from a fork carries a read-only token, so there this would
       # fail on the permission rather than on anything it found. The gate above
-      # still runs on such a pull request; its findings stay in the job log.
+      # still runs on such a pull request, and the step below is what its
+      # findings reach.
       - name: Upload the image scan to code scanning
+        id: image_scan_upload
         if: >-
           ${{ !cancelled()
           && steps.vulnerability_scan.outcome != 'skipped'
@@ -693,3 +695,15 @@ jobs:
         with:
           sarif_file: trivy-image.sarif
           category: container-image-${{ matrix.variant }}
+
+      # The scan writes its report to a file rather than to stdout, so a run
+      # whose upload did not succeed would fail the gate while showing nothing
+      # it found. This puts the report where such a run can still be read.
+      # Conditioned on the upload's outcome rather than on the fork predicate
+      # above, so any other reason the alerts do not land is covered too.
+      - name: Report the scan findings in the job log
+        if: >-
+          ${{ !cancelled()
+          && steps.vulnerability_scan.outcome != 'skipped'
+          && steps.image_scan_upload.outcome != 'success' }}
+        run: cat trivy-image.sarif
