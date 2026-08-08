@@ -2,6 +2,7 @@
 import pluginRouter from "@tanstack/eslint-plugin-router";
 import { tanstackConfig } from "@tanstack/eslint-config";
 import filledPrimaryContrastScope from "./eslint-rules/filled-primary-contrast-scope.mjs";
+import { crossWorkspaceImportBans } from "../../eslint.boundaries.mjs";
 
 // The sensitive-file YAML-parse ban (shared by the broad block and the rawRows
 // allowlist block, since flat config replaces -- does not merge -- a rule's options,
@@ -64,6 +65,20 @@ export default [
     },
   },
   {
+    // The web app's half of the workspace-boundary ban, covering test and
+    // build-config sources as well as src. It lives here rather than in the
+    // repo-root config because ESLint resolves the nearest config file for a
+    // subtree, so this file -- not eslint.config.mjs -- is what governs
+    // apps/web. The src block below re-carries the same groups.
+    files: ["**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: crossWorkspaceImportBans.web },
+      ],
+    },
+  },
+  {
     // The sensitive-file parsing ban for the web app. The credential-leak-via-
     // parse channel is real in the browser too -- a raw YAML parser echoes a span
     // of source into its error, and an imported config document an operator pastes
@@ -97,6 +112,9 @@ export default [
                 "Do not import yaml's raw parsers in the web app; route parsing through @psilink/core's parseSensitiveYaml / parseSensitiveJson (the shared sensitive-file chokepoint). yaml's `stringify` is allowed.",
             },
           ],
+          // Re-carried from the boundary block above, which this block would
+          // otherwise replace for src/ (flat config replaces a rule's options).
+          patterns: crossWorkspaceImportBans.web,
         },
       ],
     },

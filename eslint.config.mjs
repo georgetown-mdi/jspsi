@@ -1,5 +1,6 @@
 import tseslint from "typescript-eslint";
 import webConfig from "./apps/web/eslint.config.js";
+import { crossWorkspaceImportBans } from "./eslint.boundaries.mjs";
 
 function scopeToDir(dir, configs) {
   return configs.map((config) => {
@@ -134,6 +135,30 @@ export default tseslint.config(
       ],
     },
   },
+  // The workspace-boundary bans for the trees this config governs, covering test
+  // and build-config sources as well as src. The narrower blocks further down
+  // re-carry the same groups alongside their own no-restricted-imports options,
+  // since flat config replaces a rule's options rather than merging them.
+  // apps/web's half lives in apps/web/eslint.config.js, which is the config
+  // ESLint resolves for that subtree (see eslint.boundaries.mjs).
+  {
+    files: ["packages/core/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: crossWorkspaceImportBans.core },
+      ],
+    },
+  },
+  {
+    files: ["apps/cli/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: crossWorkspaceImportBans.cli },
+      ],
+    },
+  },
   {
     // Force all parsing of operator config and credential files (psilink.yaml,
     // .psilink.key, the signing identity) through the single hardened chokepoint.
@@ -183,6 +208,7 @@ export default tseslint.config(
                 "Parse operator/credential files through apps/cli/src/sensitiveFile.ts; do not import yaml's raw parsers directly.",
             },
           ],
+          patterns: crossWorkspaceImportBans.cli,
         },
       ],
     },
@@ -244,6 +270,7 @@ export default tseslint.config(
                 "Parse operator/credential files through packages/core/src/sensitiveFile.ts; do not import yaml's raw parsers directly.",
             },
           ],
+          patterns: crossWorkspaceImportBans.core,
         },
       ],
       // no-restricted-properties (a property-access ban, not a CallExpression
