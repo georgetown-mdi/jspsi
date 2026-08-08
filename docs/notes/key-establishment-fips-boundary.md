@@ -254,8 +254,9 @@ Its `KAS-ECC-SSC Sp800-56Ar3` row is the same shape as 4985's. The full rows are
 in
 [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests).
 
-**Table 8 (Non-Approved, Not Allowed Algorithms)** contains X25519 and X448 as
-its only key-agreement entries, corroborating what
+**Certificate 4985's Table 8 (Non-Approved, Not Allowed Algorithms)** contains
+X25519 and X448 as its only key-agreement entries -- 5021's policy, per the
+paragraph above, has no such rows to read -- corroborating what
 [fips-provider-surface.md](fips-provider-surface.md) already records. `KDA HKDF`
 and `KDA OneStep` are dual-listed there, non-approved only for key lengths below
 112 bits and for SHAKE PRFs respectively; `KDA TwoStep` appears in no
