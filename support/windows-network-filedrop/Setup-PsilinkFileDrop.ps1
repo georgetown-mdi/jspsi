@@ -539,8 +539,10 @@ function Resolve-DropPath {
 function Get-RendezvousFolderName {
     <#  The name of the folder shared with the partner, as the operator knows
         it, for the console to mint into the invitation. Shared with
-        Start-Psilink.ps1, which dot-sources this script: one rule for naming
-        the folder rather than two that drift apart.
+        Start-Psilink.ps1, which dot-sources this script rather than carrying a
+        share rule of its own. It does carry the -Path arm below, for the runs
+        that cannot load this script and are left with a local folder; the suite
+        pins the two to the same answers.
 
         The console cannot work this name out for itself. It sees only the
         container's side of the mount, and the scripts pick that side: the

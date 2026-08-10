@@ -687,6 +687,32 @@ function Wait-ForConsole {
     return $false
 }
 
+function Get-LocalFolderName {
+    <#  The name of a folder on this PC, as the operator knows it: the last
+        segment of its path, and nothing for a drive root, which has no folder
+        name and whose letter means nothing on the partner's machine.
+
+        This is the local arm of Setup-PsilinkFileDrop.ps1's
+        Get-RendezvousFolderName, whose share arm the network branch below
+        reaches through the dot-source instead. It is carried here rather than
+        borrowed because a folder on this PC is usable when that script cannot
+        be loaded at all -- a constrained language mode, or no copy of it beside
+        this one -- and a folder that lost its name there would leave the
+        partner nothing to match. The suite pins the two to the same answers.
+
+        Nothing here is more than a string operation, so it also works in a
+        session whose language mode is constrained. #>
+    param([string] $Path = '')
+
+    $segments = @($Path -split '[\\/]+' | Where-Object { $_ })
+    if ($segments.Count -eq 0) { return '' }
+    $name = $segments[-1].Trim()
+    # A bare drive designator (C:) is what a drive root reduces to, and it names
+    # a drive rather than a folder.
+    if ($name -match '^[A-Za-z]:$') { return '' }
+    return $name
+}
+
 function Get-ConsoleEngineArgs {
     <#  The engine's argument vector for the console.
 
@@ -781,10 +807,11 @@ if (Test-WindowsContainerMode -Engine $script:PsilinkEngine) {
 Show-Ok "Using $script:PsilinkEngine."
 
 # Setup-PsilinkFileDrop.ps1 owns the Explorer-path-to-server-and-share
-# resolution and the rule that names the shared folder, and this script reuses
-# both rather than carrying a second copy. It is loaded with
+# resolution, and the rule that names a folder within a share, and this script
+# reuses both rather than carrying a second copy. It is loaded with
 # -LoadFunctionsOnly, which defines its functions and runs none of its setup
-# flow.
+# flow. Everything it is reached for belongs to the network branch, so a run
+# that cannot load it keeps the whole of the local one.
 $setupScript = Join-Path $PSScriptRoot 'Setup-PsilinkFileDrop.ps1'
 $canResolveNetworkPaths = $false
 if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
@@ -793,15 +820,11 @@ if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
     Show-Note 'scripts may do. A folder on this PC still works; a network folder'
     Show-Note 'needs the Command Prompt setup script, which the same policy does'
     Show-Note "not reach. See $PsilinkTroubleshootingUrl, 'The script will not run'."
-    Show-Note 'Your invitation will not carry the shared folder''s name either --'
-    Show-Note 'tell your partner which folder to use.'
 } elseif (-not (Test-Path -LiteralPath $setupScript)) {
     Show-Alert 'Setup-PsilinkFileDrop.ps1 is not in this folder.'
     Show-Note 'It has to sit beside this script: it is what works out the real'
-    Show-Note 'server behind a mapped drive or a network path, and what names the'
-    Show-Note 'shared folder for your partner. Without it, only a folder on this'
-    Show-Note 'PC can be used, and your invitation will not carry the folder''s'
-    Show-Note 'name -- tell your partner which folder to use.'
+    Show-Note 'server behind a mapped drive or a network path. Without it, only'
+    Show-Note 'a folder on this PC can be used.'
 } else {
     # A dot-source runs the other script's own param() block in this scope. Left
     # alone, that resets every name the two scripts share -- -VolumeName -- to
@@ -924,13 +947,14 @@ Show-Ok "Rendezvous folder: $rendezvousPath"
 $rendezvousMount = $rendezvousPath
 $usingVolume = $false
 # The folder's own name, passed to the console because the container is shown
-# this script's mount points rather than the operator's folder. The rule that
-# reads it is the setup script's, reached through the dot-source above: without
-# that dot-source the console is left with no name, which is the same honest
-# degradation as a folder that has none.
-$rendezvousFolderName = ''
+# this script's mount points rather than the operator's folder. The setup
+# script's rule where it was loaded, and this script's copy of that rule's local
+# arm where it was not: a folder on this PC is usable either way, and it keeps
+# its name either way.
 if ($canResolveNetworkPaths) {
     $rendezvousFolderName = Get-RendezvousFolderName -Path $rendezvousPath
+} else {
+    $rendezvousFolderName = Get-LocalFolderName -Path $rendezvousPath
 }
 
 if ($rendezvousResolved.Kind -eq 'Network') {
