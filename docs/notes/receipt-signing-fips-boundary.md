@@ -19,13 +19,22 @@ measurements and certificate readings underneath the reasoning are in
 [fips-provider-surface.md](fips-provider-surface.md). See
 [docs/notes/README.md](README.md).*
 
-With FIPS 140-3 as the target standard, certificate 4985 carries ECDSA on its
-approved-algorithm list and places Ed25519 in Table 8, Non-Approved and Not
-Allowed. Receipt signing ran Ed25519 in `@noble/curves`, outside any module. The
+With FIPS 140-3 as the target standard, Ed25519 sits outside the boundary on
+both certificates in play here. Certificate 4985 places it in Table 8,
+Non-Approved and Not Allowed, and carries ECDSA on its approved-algorithm list.
+Certificate 5021, the module the FIPS variant image carries, names Ed25519 in no
+table at all and states its non-approved-but-allowed category empty, so there is
+no status the algorithm could hold there -- and the certified module does not
+carry the primitive to begin with
+([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests),
+[fips-variant-image.md](fips-variant-image.md)). ECDSA is on that certificate's
+approved-algorithm table as well, over P-256 and with SHA2-256 among its hashes,
+so both certificates in play approve the algorithm this note migrates to.
+Receipt signing ran Ed25519 in `@noble/curves`, outside any module. The
 fork is the one key establishment faced -- disclose the boundary, or migrate to
-an algorithm the certificate approves -- plus one apparent third option that has
-to be cleared away first, because the provider measurements found Ed25519 present
-in every build tried.
+an algorithm a certificate approves -- plus one apparent third option that has
+to be cleared away first, because the provider measurements found Ed25519
+present in every OpenSSL Project build tried.
 
 ## The decision
 
@@ -107,16 +116,23 @@ and 3.5.7 alike ([fips-provider-surface.md](fips-provider-surface.md), Question
 the inversion is worth naming because the correction is easy to over-read in the
 other direction.
 
-**Presence is not permission.** The measurement establishes that the provider can
-perform the algorithm. It says nothing about whether performing it is approved,
-and under certificate 4985 it is not -- Ed25519 sits in the Non-Approved and Not
-Allowed table, so driving the module to perform it takes the module out of
-approved mode for that operation. Routing signing into the provider therefore
-converts a clean "this operation happens outside the module" into "this module
-was driven out of approved mode", against the approved-mode posture the container
-work is trying to establish for the AEAD. Leaving the operation outside the
-module entirely is strictly better than routing it in, and that holds under the
-disclosure option as much as under the migration.
+**Presence is not permission.** The measurement establishes that the builds it
+was taken on can perform the algorithm. It says nothing about whether performing
+it is approved, and under certificate 4985 it is not -- Ed25519 sits in the
+Non-Approved and Not Allowed table, so driving the module to perform it takes the
+module out of approved mode for that operation. Routing signing into the provider
+therefore converts a clean "this operation happens outside the module" into "this
+module was driven out of approved mode", against the approved-mode posture the
+container work is trying to establish for the AEAD. Leaving the operation outside
+the module entirely is strictly better than routing it in, and that holds under
+the disclosure option as much as under the migration.
+
+Under certificate 5021 the option is not there to take at all. The certified
+Amazon Linux module carries no Ed25519 -- `openssl list` reports it absent while
+the provider is active, measured in the variant image
+([fips-variant-image.md](fips-variant-image.md)) -- so presence is a property of
+the OpenSSL Project builds measured here rather than of the module the image
+ships.
 
 The same reasoning forecloses an obvious-looking shortcut. Node's WebCrypto in
 this runtime does carry Ed25519 -- measured deterministic, 64-byte signatures,
@@ -179,20 +195,45 @@ party could break in a copy without invalidating anything the artifact attests.
 ## What a scoped FIPS claim may and may not say about receipt signing
 
 **May say**, where a validated module is actually present in the environment:
-the signature and verification operations of receipt
-signing are performed by the module, using ECDSA, which is on certificate 4985's
-approved-algorithm list. A claim that additionally names the curve and hash is
-written by reading the certificate's approved-algorithm table for its tested
-parameter set at the time the claim is made, not by inferring them from the
-algorithm name.
+the signature and verification operations of receipt signing are performed by
+the module, using ECDSA over P-256 with SHA2-256. Certificate 5021, the module
+the FIPS variant image embeds, carries the algorithm at those parameters on its
+approved-algorithm table -- `KeyGen`, `KeyVer`, `SigGen` and `SigVer`, all
+FIPS 186-5 -- and carries signature generation and signature verification with
+ECDSA on its approved-services table. The rows, the full curve and hash lists,
+the service's approved indicator, and the CAVP certificate ids are in
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#the-ecdsa-rows-which-no-probe-leg-covers).
+Certificate 4985 approves the algorithm too, so the sentence holds on either
+module; a claim naming the curve and hash re-reads the table of the certificate
+it names for the tested parameter set at the time the claim is made, rather than
+inferring either from the algorithm name.
+
+**Table membership is not the whole answer, and the gap is a service rather than
+an algorithm.** Certificate 5021 also carries `RSA and ECDSA (pre-hashed
+message)` signature generation and verification among its non-approved
+algorithms and services, so a module driven that way is performing a
+non-approved service with an approved algorithm. Which of the two services a
+`crypto.subtle` ECDSA call requests is decided by the indicator the module sets
+rather than by the approved-algorithm table, and nothing in this repository
+reads that indicator back. That is the shape the AEAD's externally supplied IV
+already has on the same certificate
+([fips-variant-image.md](fips-variant-image.md)), and it bounds a claim the same
+way: the security function is available to name, and the service the call lands
+on is not established here.
 
 **May not say:**
 
+- That receipt signing is measured to dispatch into the validated module the
+  variant image embeds. It runs through `crypto.subtle`, the same path the
+  measured operations take, but no leg of the image's entrypoint probe covers
+  ECDSA, and the probe's five legs are what a dispatch claim about that image may
+  name ([fips-variant-image.md](fips-variant-image.md)).
 - That an EdDSA build of receipt signing would be FIPS-approved. It is not on
-  any OpenSSL Project certificate, and under certificate 4985 Ed25519 is
-  Non-Approved and Not Allowed. Two of the forty active certificates do approve
-  EdDSA, and neither yields a verifiable certified module for a freely
-  redistributable image -- see
+  any OpenSSL Project certificate; under certificate 4985 Ed25519 is
+  Non-Approved and Not Allowed, and certificate 5021 names it in no table at all
+  while the module it certifies does not carry the primitive. Two of the forty
+  active certificates do approve EdDSA, and neither yields a verifiable certified
+  module for a freely redistributable image -- see
   [fips-provider-surface.md](fips-provider-surface.md). This is why the algorithm
   moved rather than the disclosure.
 - That the receipt, the certificate format, or the signed-receipt protocol is
@@ -203,10 +244,15 @@ algorithm name.
 - That signing is module-backed wherever the code runs. The browser build of
   `@psilink/core` carries the same signing path, and there is no module beneath
   it at all, whatever the algorithm.
-- That the shipped image runs a validated module. No certificate covers the base
-  image today, and certificate 4985 vendor-affirms no operational environments.
-  That question is tracked in
-  [fips-provider-surface.md](fips-provider-surface.md) and is independent of
+- That the shipped image is validated, or that it runs in a validated module's
+  operational environment. No certificate covers the default image's base, and
+  the variant image runs in none of the six environments certificate 5021 names:
+  every one is bare metal, none is a container or a virtual machine, and the
+  policy states no vendor affirmation reaching past them
+  ([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests)).
+  The flat denial 4985's policy carries belongs to that document and is not
+  5021's to quote. What the variant image may say instead is in
+  [fips-variant-image.md](fips-variant-image.md), and is independent of
   everything decided here.
 - That the receipt is non-repudiable in a stronger sense because the algorithm
   changed. What a receipt proves is bounded by its trust model, not its

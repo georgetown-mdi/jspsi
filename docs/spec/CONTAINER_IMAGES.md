@@ -361,6 +361,38 @@ without security claimed), so there is no status either algorithm could hold
 under this certificate. That is a different statement from the one certificate
 4985 supports, whose Non-Approved, Not Allowed table names both.
 
+### The ECDSA rows, which no probe leg covers
+
+Receipt signing calls `crypto.subtle` ECDSA over P-256 with SHA-256, and the
+entrypoint probe makes no ECDSA call, so the rows below are a table placement
+and never a measured dispatch
+([fips-variant-image.md](../notes/fips-variant-image.md)). They sit on the same
+Table 5 (p. 10):
+
+| Table 5 row | CAVP certificates | Properties | Reference |
+| --- | --- | --- | --- |
+| `ECDSA KeyGen (FIPS186-5)` | A4612, A4618, A4629, A4630, A4631, A4632 | `Curve - P-224, P-256, P-384, P-521`; `Secret Generation Mode - testing candidates` | FIPS 186-5 |
+| `ECDSA KeyVer (FIPS186-5)` | A4612, A4618, A4629, A4630, A4631, A4632 | `Curve - P-224, P-256, P-384, P-521` | FIPS 186-5 |
+| `ECDSA SigGen (FIPS186-5)` | A4612, A4618, A4629, A4630, A4631, A4632 | `Curve - P-224, P-256, P-384, P-521`; `Hash Algorithm - SHA2-224, SHA2-256, SHA2-384, SHA2-512, SHA2-512/224, SHA2-512/256`; `Component - No` | FIPS 186-5 |
+| `ECDSA SigVer (FIPS186-5)` | A4612, A4618, A4629, A4630, A4631, A4632 | `Curve - P-224, P-256, P-384, P-521`; `Hash Algorithm - SHA2-224, SHA2-256, SHA2-384, SHA2-512, SHA2-512/224, SHA2-512/256` | FIPS 186-5 |
+
+A second pair of `SigGen` and `SigVer` rows, at CAVP certificates A4613 and
+A4619, carries the SHA-3 hash algorithms in place of the SHA-2 ones over the
+same four curves.
+
+Table 13 (Approved Services, p. 30) carries the services above those rows:
+signature generation and signature verification with ECDSA, each with the
+approved indicator `OSSL_RH_FIPSINDICATOR_APPROVED`, beside key pair generation
+with ECDSA and public key verification with ECDSA.
+
+**The pre-hashed-message variant is a non-approved service.** Table 7 lists
+`RSA and ECDSA (pre-hashed message)` for signature generation and verification,
+and Table 14 (Non-Approved Services, p. 35) carries the two matching service
+rows. The module therefore separates two signature services over one approved
+algorithm, and which of them a caller reaches is decided by the indicator the
+module sets rather than by Table 5 membership -- the shape the AES-GCM IV
+condition above already has.
+
 ## The runtime posture measured on each built image
 
 Two properties are settled by running the image `image_smoke.yaml` just built,
