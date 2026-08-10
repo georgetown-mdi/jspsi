@@ -30,12 +30,24 @@ bytes; the rules in [Encoding rules](#encoding-rules) restate the parts of
 RFC 8785 that matter here, plus the additional constraints PSI-Link imposes so
 that the input domain is always reproducible.
 
-RFC 8785 reuses two ECMAScript ([ECMA-262](https://tc39.es/ecma262/)) operations
-verbatim: number-to-string conversion (`Number.prototype.toString`, equivalently
-`JSON.stringify` of a number) and JSON string production (`JSON.stringify` of a
-string). Both are fully specified by ECMA-262 and produce identical results in
-Node.js and every browser, which is why the canonical bytes are
-platform-independent.
+One case falls outside that equivalence, and it is stated here rather than left
+to be discovered. RFC 8785 section 3.2.2.2 requires a compliant implementation
+to **terminate with an error** on invalid Unicode data such as a lone surrogate;
+PSI-Link instead escapes it and emits bytes (see [Strings](#strings)). So for a
+value carrying a lone surrogate the two do not agree: an implementation written
+to RFC 8785 alone produces no output where PSI-Link produces a hashable byte
+string. Reproducing PSI-Link's bytes for that input requires this document's
+rule, not the RFC's. For every other value in the domain below, RFC 8785 output
+is PSI-Link output.
+
+RFC 8785 builds both of its primitive serializations on ECMAScript
+([ECMA-262](https://tc39.es/ecma262/)): number-to-string conversion
+(`Number.prototype.toString`, equivalently `JSON.stringify` of a number, cited
+as ECMA-262 section 7.1.12.1) and JSON string production (`JSON.stringify` of a
+string, cited as ECMA-262 section 24.3.2.2 and restated in the RFC, which adds
+the lone-surrogate rule above). Both are fully specified by ECMA-262 and produce
+identical results in Node.js and every browser, which is why the canonical bytes
+are platform-independent.
 
 ## Scope
 
@@ -63,7 +75,7 @@ A value to be canonically encoded is one of:
 
 | Kind | Notes |
 |------|-------|
-| string | any sequence of Unicode scalar values (see [Strings](#strings)) |
+| string | any JavaScript string, including one carrying an unpaired UTF-16 surrogate (see [Strings](#strings)) |
 | number | finite; integers must be **safe** (see [Numbers](#numbers)) |
 | boolean | `true` or `false` |
 | null | the JSON null literal |
@@ -147,11 +159,14 @@ the fold is observable only for a hand-authored or third-party token carrying
 
 ### Numbers
 
-A number MUST be finite. RFC 8785 serializes a number as ECMAScript
-`Number.prototype.toString` would (equivalently, `JSON.stringify` of the
-number): the shortest decimal string that round-trips to the same IEEE-754
-double, with `-0` rendered as `0`, no insignificant trailing zeros, and
-exponential form only outside the range RFC 8785 fixes.
+A number MUST be finite. RFC 8785 section 3.2.2.3 does not restate a number
+algorithm; it mandates ECMA-262 section 7.1.12.1 (with that section's "Note 2"
+enhancement) and gives sample serializations in its Appendix B. That algorithm
+is what ECMAScript `Number.prototype.toString` performs (equivalently,
+`JSON.stringify` of the number): the shortest decimal string that round-trips to
+the same IEEE-754 double, with `-0` rendered as `0` (RFC 8785 Appendix B), no
+insignificant trailing zeros, and exponential form only outside the magnitude
+range that same ECMA-262 section fixes.
 
 PSI-Link adds one constraint to keep the input reproducible: an **integer-valued
 number MUST be a safe integer**, i.e. its absolute value is at most
@@ -186,6 +201,10 @@ string, which is what RFC 8785 requires:
   (U+20AC) is emitted as the three bytes `E2 82 AC`.
 - A lone surrogate (an unpaired UTF-16 surrogate code point) is escaped as
   `\uXXXX` with lowercase hex, per ECMA-262 well-formed JSON stringification.
+  This is the one rule here that departs from RFC 8785, whose section 3.2.2.2
+  requires a compliant implementation to terminate with an error on such data
+  instead; a reproducer must follow this rule rather than the RFC's. The
+  `lone-surrogate` test vector fixes the bytes.
 
 ### Absent versus null
 
