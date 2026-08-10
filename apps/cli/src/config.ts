@@ -21,6 +21,7 @@ import {
   snakeizeKeys,
   StandardizationSchema,
   UsageError,
+  withRetainModeImplications,
 } from "@psilink/core";
 
 import { writeFileOwnerOnly } from "./fileUtils";
@@ -257,7 +258,7 @@ export function applyConnectionOverrides(
       optionsOverrides.retainFiles !== undefined ||
       optionsOverrides.timestampInFilename !== undefined)
   ) {
-    result.options = {
+    result.options = withRetainModeImplications({
       ...result.options,
       ...(optionsOverrides.pollIntervalMs !== undefined && {
         pollIntervalMs: optionsOverrides.pollIntervalMs,
@@ -274,18 +275,7 @@ export function applyConnectionOverrides(
       ...(optionsOverrides.timestampInFilename !== undefined && {
         timestampInFilename: optionsOverrides.timestampInFilename,
       }),
-    };
-
-    // retain_files implies lockless_rendezvous and timestamp_in_filename when
-    // those are not yet set. This lets --retain-files alone suffice at the CLI.
-    // An explicit false is left untouched so the schema refine can surface the
-    // contradiction with a clear error message.
-    if (result.options.retainFiles === true) {
-      if (result.options.locklessRendezvous === undefined)
-        result.options.locklessRendezvous = true;
-      if (result.options.timestampInFilename === undefined)
-        result.options.timestampInFilename = true;
-    }
+    });
 
     optionsModified = true;
   }

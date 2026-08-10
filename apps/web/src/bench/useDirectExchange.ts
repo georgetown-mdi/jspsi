@@ -21,6 +21,10 @@ import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
 import { failureFor } from "./useInviterExchange";
 
 import type {
+  JobExchangeOptions,
+  JobZeroSetupLinkageStrategy,
+} from "@jobs/intent";
+import type {
   JobInputSource,
   JobRunStatus,
 } from "@psi/serverJobExchangeDriver";
@@ -28,7 +32,6 @@ import type { DirectTransport } from "./directExchangeModel";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { ExchangeRun } from "./exchangeRun";
-import type { JobZeroSetupLinkageStrategy } from "@jobs/intent";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
 
@@ -52,6 +55,7 @@ export function useDirectExchange({
   inputSource,
   identity,
   linkageStrategy,
+  options,
 }: {
   /** The agreed transport; maps to the zero-setup intent's channel. */
   channel: DirectTransport;
@@ -65,6 +69,11 @@ export function useDirectExchange({
   identity?: string;
   /** The optional linkage strategy forwarded to the CLI's `--linkage-strategy`. */
   linkageStrategy?: JobZeroSetupLinkageStrategy;
+  /** The agreed-server step's file-handling choices, already resolved through
+   * core's retain-mode implication. They reach the run as CLI flags, a zero-setup
+   * command carrying no configuration document; undefined when the operator
+   * changed nothing. */
+  options?: JobExchangeOptions;
 }): {
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
@@ -155,6 +164,7 @@ export function useDirectExchange({
       inputSource,
       ...(identity !== undefined ? { identity } : {}),
       ...(linkageStrategy !== undefined ? { linkageStrategy } : {}),
+      ...(options !== undefined ? { options } : {}),
       // Persist the created job's id so a reload or hard tab close can re-attach,
       // and track it for the deliberate-discard paths. The strand-recovery record
       // carries a seat only to label the re-attached run's waiting stage; a direct

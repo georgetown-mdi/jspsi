@@ -36,6 +36,11 @@ import { triggerBlobDownload } from "@components/blobDownload";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
 import {
+  CONFIG_EXCHANGE_FILES,
+  EXCHANGE_FILES_DEFAULT,
+  exchangeFilesOptions,
+} from "./exchangeFilesModel";
+import {
   EMPTY_SAVE_FIELDS,
   endpointRequestFor,
   exchangeFileInputFor,
@@ -127,6 +132,7 @@ import type { AlertContent } from "@components/csvIntake";
 import type { BenchCoverageInput } from "@components/useNonEmptyRates";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { DisclosureChoice } from "@psi/metadataEditing";
+import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { SavedExchange } from "./SaveExchangeSection";
@@ -254,6 +260,14 @@ export function InviterBench() {
   // `folderName` is the shared folder's own name, present only where the console has
   // one to show as the folder's name.
   const [rendezvous, setRendezvous] = useState<JobRendezvousConfig>();
+  // The operator's file-handling choices for a console server-job run (retain mode
+  // and the toggles that travel with it). Held here, beside the transport, because
+  // the review step authors them and the run hook consumes them; the disclosure's
+  // own open state rides along so a reset does not spring it open.
+  const [exchangeFiles, setExchangeFiles] = useState<ExchangeFilesDraft>(
+    EXCHANGE_FILES_DEFAULT,
+  );
+  const [exchangeFilesOpen, setExchangeFilesOpen] = useState(false);
   const [demoActive, setDemoActive] = useState(false);
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
 
@@ -336,6 +350,7 @@ export function InviterBench() {
     channel: transport,
     inputSource,
     sftpConfigured,
+    options: exchangeFilesOptions(exchangeFiles, CONFIG_EXCHANGE_FILES),
   });
 
   // The coverage input, unified across builds: the browser's parsed rows on the
@@ -1178,6 +1193,10 @@ export function InviterBench() {
                 sftpConnection={sftpConnection}
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
                 rendezvousConfigured={rendezvousConfigured}
+                exchangeFiles={exchangeFiles}
+                exchangeFilesOpen={exchangeFilesOpen}
+                onExchangeFiles={setExchangeFiles}
+                onExchangeFilesOpen={setExchangeFilesOpen}
                 onLifetime={(seconds) =>
                   applyEditor(editorWithLifetime(editor, seconds))
                 }

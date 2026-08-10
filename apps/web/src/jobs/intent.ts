@@ -13,12 +13,15 @@ import {
   StandardizationSchema,
   deriveOutboundPayloadConsent,
   mintExchangeFile,
+  safeParseFileSyncOptions,
   snakeizeKeys,
 } from "@psilink/core";
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
 import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
+
+import { PEER_ID_SHAPE_MESSAGE, isAdmissiblePeerId } from "@psi/peerIdLabel";
 
 import { isAdmissibleInputName } from "./workInputName";
 
@@ -34,12 +37,19 @@ import type {
 import type { JobSftpServerEntry } from "./sftpServer";
 
 /**
- * The tuning knobs a client may set on a job. Deliberately the numeric/boolean
- * subset of the CLI's file-sync options: every field here is a number, a
- * boolean, or a closed enum, so none can carry a path, host, credential, or
- * command. Path and directory fields of {@link FileSyncOptions} are intentionally
- * NOT surfaced -- the server owns every directory. `peerId` (a free-text field)
- * is omitted for the same reason.
+ * The tuning knobs a client may set on a job. Deliberately the numeric, boolean,
+ * closed-enum, and bounded-label subset of the CLI's file-sync options: none can
+ * carry a path, host, credential, or command. The path and directory fields of
+ * {@link FileSyncOptions} are intentionally NOT surfaced -- the server owns every
+ * directory.
+ *
+ * `peerId` is the one free-text field, and it is bounded here rather than merely
+ * passed through: it becomes a FILENAME PREFIX in the shared rendezvous
+ * directory, so {@link isAdmissiblePeerId} confines it to a single bounded label
+ * -- never a separator, a dot run, or a leading dash. The semantic rules on it --
+ * the `timestampInFilename` dependency and the reserved `temp` value -- are
+ * core's, applied through core's own schema so this boundary restates none of
+ * them.
  */
 export interface JobExchangeOptions {
   pollIntervalMs?: number;
@@ -48,8 +58,33 @@ export interface JobExchangeOptions {
   maxReconnectAttempts?: number;
   timestampInFilename?: boolean;
   locklessRendezvous?: boolean;
+  peerId?: string;
   retainFiles?: boolean;
   unexpectedFiles?: "error" | "warn" | "ignore";
+}
+
+/**
+ * Run the resolved option block through core's own {@link FileSyncOptions}
+ * schema and re-raise its issues on this boundary's parse. Core stays the single
+ * source for every cross-field rule -- `peer_id` requires
+ * `timestamp_in_filename`, `peer_id` may not be the reserved `temp`, and
+ * `retain_files` requires both `timestamp_in_filename` and
+ * `lockless_rendezvous` -- so a contradictory combination is refused with core's
+ * wording at create time instead of failing later, at config composition or at
+ * rendezvous.
+ */
+function checkAgainstCoreFileSyncOptions(
+  options: JobExchangeOptions,
+  ctx: z.RefinementCtx,
+): void {
+  const validation = safeParseFileSyncOptions(options);
+  if (validation.success) return;
+  for (const issue of validation.error.issues)
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: issue.message,
+      path: issue.path,
+    });
 }
 
 const jobExchangeOptionsFields = {
@@ -58,6 +93,10 @@ const jobExchangeOptionsFields = {
   maxReconnectAttempts: z.number().int().min(0).max(604800).optional(),
   timestampInFilename: z.boolean().optional(),
   locklessRendezvous: z.boolean().optional(),
+  peerId: z
+    .string()
+    .refine(isAdmissiblePeerId, { message: PEER_ID_SHAPE_MESSAGE })
+    .optional(),
   retainFiles: z.boolean().optional(),
   unexpectedFiles: z.enum(["error", "warn", "ignore"]).optional(),
 };
@@ -67,7 +106,8 @@ const jobExchangeOptionsSchema: z.ZodType<JobExchangeOptions> = z
     pollIntervalMs: z.number().int().positive().optional(),
     ...jobExchangeOptionsFields,
   })
-  .strict();
+  .strict()
+  .superRefine(checkAgainstCoreFileSyncOptions);
 
 // The sftp variant floors the poll interval at one second: an sftp poll is a
 // directory listing against a REMOTE server the operator authored a connection
@@ -83,7 +123,8 @@ const jobSftpExchangeOptionsSchema: z.ZodType<JobExchangeOptions> = z
       .optional(),
     ...jobExchangeOptionsFields,
   })
-  .strict();
+  .strict()
+  .superRefine(checkAgainstCoreFileSyncOptions);
 
 /**
  * A reference to a file in the operator-mounted work-input directory, the
@@ -854,6 +895,37 @@ export function zeroSetupSftpArgv(
  */
 export function zeroSetupFiledropArgv(rendezvousDir: string): Array<string> {
   return [pathToFileURL(rendezvousDir).href];
+}
+
+/**
+ * Map the intent's file-sync toggles to their CLI flags, the zero-setup argv's
+ * counterpart to the exchange mode's composed `options` block. A zero-setup run
+ * composes no config document, so these flags are the only route the operator's
+ * retain-mode choice has into the child.
+ *
+ * Only an enabled toggle is emitted. Each of the three is `false` by default in
+ * core, and a zero-setup run loads no configuration file for a flag to override,
+ * so an explicitly-off toggle and an unset one select the same behaviour; the
+ * negated forms would add argv tokens that change nothing. `peerId` rides a
+ * single `--peer-id=<value>` token (the `=` form, like every other value-bearing
+ * flag here) and reaches this point only through {@link isAdmissiblePeerId}, so
+ * it is a bare label -- never a path, a separator, or a flag-shaped value.
+ *
+ * `unexpectedFiles` has no CLI flag (it is a configuration-only key), so it
+ * cannot ride a zero-setup argv; the console offers it only on the flow that
+ * composes a config document.
+ */
+export function zeroSetupFileSyncArgv(
+  options: JobExchangeOptions | undefined,
+): Array<string> {
+  if (options === undefined) return [];
+  const argv: Array<string> = [];
+  if (options.retainFiles === true) argv.push("--retain-files");
+  if (options.locklessRendezvous === true) argv.push("--lockless-rendezvous");
+  if (options.timestampInFilename === true)
+    argv.push("--timestamp-in-filename");
+  if (options.peerId !== undefined) argv.push(`--peer-id=${options.peerId}`);
+  return argv;
 }
 
 /**

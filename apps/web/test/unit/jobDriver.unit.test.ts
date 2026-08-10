@@ -179,6 +179,7 @@ describe("spawnZeroSetupJob drives the literal $0 form", () => {
    * invoked with (via the stub's STUB_ARGV_FILE), and resolve once it exits. */
   async function captureArgv(args: {
     connectionArgs: Array<string>;
+    fileSyncArgs?: Array<string>;
     eventStream: boolean;
     identity?: string;
     linkageStrategy?: "cascade" | "single-pass";
@@ -194,6 +195,7 @@ describe("spawnZeroSetupJob drives the literal $0 form", () => {
     spawnZeroSetupJob({
       binaryPath: STUB_CLI_PATH,
       connectionArgs: args.connectionArgs,
+      fileSyncArgs: args.fileSyncArgs ?? [],
       inputPath: path.join(workdir, "input.csv"),
       outputPath: path.join(workdir, "output.csv"),
       recordPath: path.join(workdir, "record.json"),

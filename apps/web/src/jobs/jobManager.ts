@@ -5,6 +5,7 @@ import {
   composeConfigDocument,
   composeKeyFileDocument,
   composeSftpConfigDocument,
+  zeroSetupFileSyncArgv,
   zeroSetupFiledropArgv,
   zeroSetupSftpArgv,
 } from "./intent";
@@ -644,6 +645,7 @@ export class JobManager {
       return spawnZeroSetupJob({
         binaryPath: this.binaryPath,
         connectionArgs: this.zeroSetupConnectionArgs(intent, args.serverEntry),
+        fileSyncArgs: zeroSetupFileSyncArgv(intent.options),
         inputPath: args.inputPath,
         outputPath: args.outputPath,
         recordPath: args.recordPath,

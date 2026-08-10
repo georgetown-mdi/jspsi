@@ -1147,3 +1147,41 @@ export function parseFileSyncOptions(raw: unknown): FileSyncOptions {
 export function safeParseFileSyncOptions(raw: unknown) {
   return safeParseCamelized(FileSyncOptionsSchema, raw);
 }
+
+/**
+ * Resolve retain mode's implications on a {@link FileSyncOptions} block:
+ * `retainFiles: true` turns on `locklessRendezvous` and `timestampInFilename`
+ * when the caller left either unset, so stating retain alone is enough on any
+ * surface that authors these options.
+ *
+ * An EXPLICIT `false` is left untouched rather than overwritten, so the
+ * contradiction reaches {@link FileSyncOptionsSchema}'s refines and surfaces as
+ * their message instead of being silently corrected into a setting nobody asked
+ * for. Callers still validate the result: this resolves defaults, it does not
+ * certify a combination.
+ *
+ * The single home for the implication -- the CLI's `--retain-files` and the
+ * console's authoring surface both call it rather than restating the rule, so
+ * the trio a composed config carries cannot depend on which surface wrote it.
+ * Returns the argument unchanged when retain mode is off or both implications
+ * are already stated.
+ */
+export function withRetainModeImplications<T extends FileSyncOptions>(
+  options: T,
+): T {
+  if (options.retainFiles !== true) return options;
+  if (
+    options.locklessRendezvous !== undefined &&
+    options.timestampInFilename !== undefined
+  )
+    return options;
+  return {
+    ...options,
+    ...(options.locklessRendezvous === undefined
+      ? { locklessRendezvous: true }
+      : {}),
+    ...(options.timestampInFilename === undefined
+      ? { timestampInFilename: true }
+      : {}),
+  };
+}

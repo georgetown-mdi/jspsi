@@ -55,6 +55,7 @@ import type {
   ServerJobExchangeTransport,
 } from "@psi/serverJobExchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
+import type { JobExchangeOptions } from "@jobs/intent";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
 import type { Transport } from "./inviterModel";
@@ -126,16 +127,22 @@ export function acceptorServerJobConfig({
   edits,
   inputSource,
   transport,
+  options,
 }: {
   token: InvitationToken;
   acceptorName: string;
   edits: AcceptorDataEdits;
   inputSource: JobInputSource;
   transport: ServerJobExchangeTransport;
+  /** The confirm-columns step's file-handling choices, already resolved through
+   * core's retain-mode implication. Absent when the operator changed nothing, so
+   * the composed config carries no `options` block at all. */
+  options?: JobExchangeOptions;
 }): ServerJobExchangeDriverConfig {
   return {
     transport,
     side: "acceptor",
+    ...(options !== undefined ? { options } : {}),
     linkageTerms: deriveAcceptedLinkageTerms(token.linkageTerms, acceptorName),
     sharedSecret: token.sharedSecret,
     inputSource,
@@ -180,6 +187,11 @@ export interface AcceptorLaunch {
    * uses the retained `rawRows`/`columns` and never reads it. Mirrors the inviter's
    * `inputSource`. */
   inputSource: AcceptorLaunchSource;
+  /** The confirm-columns step's file-handling choices for a server-job accept,
+   * already resolved through core's retain-mode implication. Fixed into the launch
+   * so the run cannot be retuned under itself; absent when the operator changed
+   * nothing, and unused on the browser (WebRTC) path. */
+  options?: JobExchangeOptions;
 }
 
 /** Resolve an {@link AcceptorLaunchSource} to the driver's {@link JobInputSource}:
@@ -317,6 +329,7 @@ export function useAcceptorExchange({
 
     const { invitation, acceptorName, rawRows, columns, edits, inputSource } =
       current;
+    const { options } = current;
     const { token, endpoint } = invitation;
     // The bench transport this endpoint runs over, threaded to failureFor so a
     // console mounted-file create rejection (a workFile 400) names the file cause
@@ -419,6 +432,7 @@ export function useAcceptorExchange({
           edits,
           inputSource: jobInputSource,
           transport: serverJobTransport,
+          ...(options !== undefined ? { options } : {}),
         }),
         // Persist the created job's id so a reload or hard tab close can re-attach
         // to the appliance's run, and track it for the deliberate-discard paths.

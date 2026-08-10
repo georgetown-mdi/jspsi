@@ -7,7 +7,11 @@ import {
   generateSharedSecret,
   parseConnectionConfig,
   safeParseConnectionConfig,
+  safeParseFileSyncOptions,
+  withRetainModeImplications,
 } from "../src/config/connection";
+
+import type { FileSyncOptions } from "../src/config/connection";
 
 // Minimal valid configs used as bases for individual tests.
 const webrtcBase = {
@@ -1117,6 +1121,36 @@ test("retainFiles is rejected when locklessRendezvous is false", () => {
   if (result.success) return;
   const messages = result.error.issues.map((i) => i.message);
   expect(messages.some((m) => m.includes("lockless_rendezvous"))).toBe(true);
+});
+
+// The one home for retain mode's implication: every authoring surface -- the
+// CLI's --retain-files and the console's file-handling card -- calls this rather
+// than restating the rule, so the trio a config carries cannot depend on which
+// surface wrote it.
+test("withRetainModeImplications turns retain alone into all three", () => {
+  expect(withRetainModeImplications({ retainFiles: true })).toEqual({
+    retainFiles: true,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+  });
+});
+
+test("withRetainModeImplications leaves an explicit false alone", () => {
+  // Left as stated so the schema's own refine reports the contradiction, rather
+  // than being corrected into a setting the caller did not ask for.
+  const resolved = withRetainModeImplications<FileSyncOptions>({
+    retainFiles: true,
+    timestampInFilename: false,
+  });
+  expect(resolved.timestampInFilename).toBe(false);
+  expect(resolved.locklessRendezvous).toBe(true);
+  expect(safeParseFileSyncOptions(resolved).success).toBe(false);
+});
+
+test("withRetainModeImplications implies nothing without retain mode", () => {
+  const stated = { locklessRendezvous: true };
+  expect(withRetainModeImplications(stated)).toBe(stated);
+  expect(withRetainModeImplications({})).toEqual({});
 });
 
 test("parses snake_case peer_id from disk", () => {
