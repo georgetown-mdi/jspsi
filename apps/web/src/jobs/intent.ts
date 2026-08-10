@@ -21,7 +21,7 @@ import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
 import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
 
-import { MAX_PEER_ID_LENGTH, isAdmissiblePeerId } from "@psi/peerIdLabel";
+import { PEER_ID_SHAPE_MESSAGE, isAdmissiblePeerId } from "@psi/peerIdLabel";
 
 import { isAdmissibleInputName } from "./workInputName";
 
@@ -95,12 +95,7 @@ const jobExchangeOptionsFields = {
   locklessRendezvous: z.boolean().optional(),
   peerId: z
     .string()
-    .refine(isAdmissiblePeerId, {
-      message:
-        "peerId must be a single label of letters, digits, spaces, '-', or " +
-        "'_', beginning and ending with a letter or digit, at most " +
-        `${MAX_PEER_ID_LENGTH} characters`,
-    })
+    .refine(isAdmissiblePeerId, { message: PEER_ID_SHAPE_MESSAGE })
     .optional(),
   retainFiles: z.boolean().optional(),
   unexpectedFiles: z.enum(["error", "warn", "ignore"]).optional(),
@@ -913,8 +908,8 @@ export function zeroSetupFiledropArgv(rendezvousDir: string): Array<string> {
  * so an explicitly-off toggle and an unset one select the same behaviour; the
  * negated forms would add argv tokens that change nothing. `peerId` rides a
  * single `--peer-id=<value>` token (the `=` form, like every other value-bearing
- * flag here) and reaches this point only through {@link PEER_ID_PATTERN}, so it
- * is a bare label -- never a path, a separator, or a flag-shaped value.
+ * flag here) and reaches this point only through {@link isAdmissiblePeerId}, so
+ * it is a bare label -- never a path, a separator, or a flag-shaped value.
  *
  * `unexpectedFiles` has no CLI flag (it is a configuration-only key), so it
  * cannot ride a zero-setup argv; the console offers it only on the flow that
