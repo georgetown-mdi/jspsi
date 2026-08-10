@@ -267,6 +267,31 @@ describe("verifyDualSignedRecord", () => {
     expect(report.responder.fingerprintPin).toBe("mismatch");
   });
 
+  test("a certificate outside the canonical domain yields a report, not a rejection", async () => {
+    // The parse schema refuses a certificate whose fields are not encodable, so
+    // this reaches the verifier only from a direct caller handing it a hand-built
+    // record. Every check must still yield a status -- including the fingerprint
+    // pin, which is computed outside the per-party evaluation.
+    const record = await signedRecord();
+    const unencodable = {
+      ...record,
+      responder: {
+        ...record.responder,
+        certificate: { ...record.responder.certificate, identity: undefined },
+      },
+    } as unknown as DualSignedRecord;
+    const report = await verifyDualSignedRecord(unencodable, fullyAnchored);
+    expect(report.outcome).toBe("failed");
+    expect(report.initiator.fingerprintPin).toBe("mismatch");
+    expect(report.responder.fingerprintPin).toBe("mismatch");
+    expect(report.responder.certificateBinding).toBe("failed");
+    expect(report.responder.signature).toBe("failed");
+    expect(report.responder.fingerprint).toBe("");
+    // The evaluable slot is still checked and reported.
+    expect(report.initiator.signature).toBe("verified");
+    expect(report.initiator.fingerprint).toBe(fingerprintA);
+  });
+
   test("a certificate whose self-signature does not verify fails the identity binding", async () => {
     // Replacing only the self-signature leaves the body -- and so the fingerprint
     // and the receipt signature -- intact, which isolates the identity binding:

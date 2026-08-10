@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   buildExchangeRecord,
@@ -29,6 +29,7 @@ import {
   deriveOurIdColumn,
   formatSignedRecordReport,
   formatVerificationReport,
+  handler,
   pinnedFingerprintFromConfig,
   readExchangeRecordFile,
   readSignedRecordFile,
@@ -36,8 +37,17 @@ import {
   readVerificationKeysFile,
   toRetainedResult,
 } from "../../src/commands/verifyReceipt";
+import {
+  argv,
+  captureStdio,
+  snapshotDiagnosticSinkAndLevel,
+} from "../loggingTestSupport";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "verify-receipt-"));
+
+// The handler installs a diagnostic sink and applies --log-level across every
+// logger; both are restored between tests.
+snapshotDiagnosticSinkAndLevel();
 
 const localPayloadSent: CommittedPayload = {
   columns: ["dose"],
@@ -71,6 +81,54 @@ const baseInputs: ExchangeRecordInputs = {
   partnerPayloadReceived: { columns: [], rows: [] },
   createdAt: "2026-01-02T03:04:05.000Z",
 };
+
+const receiptContent: ReceiptContent = {
+  termsHash: "dGVybXNIYXNo",
+  initiatorToResponderPayload: "aTJyUGF5bG9hZA",
+  responderToInitiatorPayload: "cjJpUGF5bG9hZA",
+  binder: "YmluZGVy",
+};
+
+/** A dual-signed record between Party A (initiator) and Party B (responder),
+ * written to `receipt.json` in `dir`. Fixed keys keep the fixture reproducible. */
+async function writeSignedRecord(
+  dir: string,
+  content: ReceiptContent = receiptContent,
+): Promise<string> {
+  const a = await generateSigningIdentity("Party A", {
+    privateKey: {
+      kty: "EC",
+      crv: "P-256",
+      x: "TGM247iz3ncbYTocehc0g0zWnBpPX_7LJAxjvA3bFXQ",
+      y: "9olsXRTKROADd5HCMAMzJZpxuQHlJYV10QfluKxItCQ",
+      d: "ERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzA",
+    },
+  });
+  const b = await generateSigningIdentity("Party B", {
+    privateKey: {
+      kty: "EC",
+      crv: "P-256",
+      x: "UUL0inyAyvR1RKQo_FfScqbGeK1ek__Lo2ZmqZY55R0",
+      y: "0b22-1mBRFZ6Jlfo_zYZ-6oM0qBAwZqyKvkQxwWnV7o",
+      d: "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+    },
+  });
+  const record: DualSignedRecord = {
+    version: SIGNED_RECEIPT_VERSION,
+    content,
+    initiator: {
+      certificate: a.certificate,
+      signature: await signReceiptContent(a, content, "initiator"),
+    },
+    responder: {
+      certificate: b.certificate,
+      signature: await signReceiptContent(b, content, "responder"),
+    },
+  };
+  const path = join(dir, "receipt.json");
+  writeFileSync(path, serializeDualSignedRecord(record));
+  return path;
+}
 
 describe("formatVerificationReport", () => {
   const report = (
@@ -256,49 +314,6 @@ describe("formatSignedRecordReport", () => {
 });
 
 describe("reading a dual-signed record", () => {
-  const receiptContent: ReceiptContent = {
-    termsHash: "dGVybXNIYXNo",
-    initiatorToResponderPayload: "aTJyUGF5bG9hZA",
-    responderToInitiatorPayload: "cjJpUGF5bG9hZA",
-    binder: "YmluZGVy",
-  };
-
-  async function writeSignedRecord(dir: string): Promise<string> {
-    const a = await generateSigningIdentity("Party A", {
-      privateKey: {
-        kty: "EC",
-        crv: "P-256",
-        x: "TGM247iz3ncbYTocehc0g0zWnBpPX_7LJAxjvA3bFXQ",
-        y: "9olsXRTKROADd5HCMAMzJZpxuQHlJYV10QfluKxItCQ",
-        d: "ERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzA",
-      },
-    });
-    const b = await generateSigningIdentity("Party B", {
-      privateKey: {
-        kty: "EC",
-        crv: "P-256",
-        x: "UUL0inyAyvR1RKQo_FfScqbGeK1ek__Lo2ZmqZY55R0",
-        y: "0b22-1mBRFZ6Jlfo_zYZ-6oM0qBAwZqyKvkQxwWnV7o",
-        d: "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
-      },
-    });
-    const record: DualSignedRecord = {
-      version: SIGNED_RECEIPT_VERSION,
-      content: receiptContent,
-      initiator: {
-        certificate: a.certificate,
-        signature: await signReceiptContent(a, receiptContent, "initiator"),
-      },
-      responder: {
-        certificate: b.certificate,
-        signature: await signReceiptContent(b, receiptContent, "responder"),
-      },
-    };
-    const path = join(dir, "receipt.json");
-    writeFileSync(path, serializeDualSignedRecord(record));
-    return path;
-  }
-
   test("reads a dual-signed record back", async () => {
     const path = await writeSignedRecord(tmp());
     expect(readSignedRecordFile(path).version).toBe(SIGNED_RECEIPT_VERSION);
@@ -449,5 +464,157 @@ describe("readExchangeRecordFile / readVerificationKeysFile", () => {
     expect(() => readVerificationKeysFile(keysPath)).toThrow(
       /unrecognized version/,
     );
+  });
+});
+
+describe("handler", () => {
+  // Drive the command as yargs would: process.exit is stubbed so a usage error
+  // does not end the worker, the verdict is read off console.log, and the error
+  // line off the stderr sink the handler's logging installs.
+  async function runVerify(options: Record<string, unknown>): Promise<{
+    stdout: string;
+    stderr: string;
+    exits: unknown[];
+    exitCode: typeof process.exitCode;
+  }> {
+    const { stderrWrites, restore } = captureStdio();
+    const stdoutLines: string[] = [];
+    const logSpy = vi
+      .spyOn(console, "log")
+      .mockImplementation((...args: unknown[]) => {
+        stdoutLines.push(args.map((arg) => String(arg)).join(" "));
+      });
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    try {
+      await handler(argv({ "log-level": "error", ...options }));
+      // Collected before the finally block restores the spies, which clears the
+      // calls they recorded.
+      return {
+        stdout: stdoutLines.join("\n"),
+        stderr: stderrWrites.join(""),
+        exits: exit.mock.calls.map((call) => call[0]),
+        exitCode: process.exitCode,
+      };
+    } finally {
+      process.exitCode = previousExitCode;
+      exit.mockRestore();
+      logSpy.mockRestore();
+      restore();
+    }
+  }
+
+  /** Both artifacts of one exchange -- the record with its keys file beside it,
+   * and the dual-signed record carrying that exchange's agreed-terms hash -- plus
+   * the responder's fingerprint, the pin a verifier holds for its partner. */
+  async function exchangeArtifacts(): Promise<{
+    recordPath: string;
+    signedPath: string;
+    pin: string;
+  }> {
+    const dir = tmp();
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const recordPath = join(dir, "rec.json");
+    writeFileSync(recordPath, serializeExchangeRecord(record));
+    writeFileSync(join(dir, "rec.keys.json"), serializeVerificationKeys(keys));
+    const signedPath = await writeSignedRecord(dir, {
+      ...receiptContent,
+      termsHash: record.termsHash,
+    });
+    const pin = await computeCertificateFingerprint(
+      readSignedRecordFile(signedPath).responder.certificate,
+    );
+    return { recordPath, signedPath, pin };
+  }
+
+  test("a dual-signed record positional refuses --signed-record", async () => {
+    const { signedPath } = await exchangeArtifacts();
+    const { stdout, stderr, exits } = await runVerify({
+      record: signedPath,
+      "signed-record": signedPath,
+    });
+    expect(exits).toEqual([64]);
+    expect(stderr).toContain("already a dual-signed record");
+    expect(stdout).toBe("");
+  });
+
+  const exchangeRecordOnlyOptions: Array<[string, Record<string, unknown>]> = [
+    [
+      "an input and result file",
+      { "input-file": "input.csv", "result-file": "result.csv" },
+    ],
+    ["--keys", { keys: "rec.keys.json" }],
+  ];
+  test.each(exchangeRecordOnlyOptions)(
+    "a dual-signed record positional refuses %s, which apply to the exchange record",
+    async (_label, extra) => {
+      const { signedPath } = await exchangeArtifacts();
+      const { stdout, stderr, exits } = await runVerify({
+        record: signedPath,
+        ...extra,
+      });
+      expect(exits).toEqual([64]);
+      expect(stderr).toContain("which commits to no data");
+      expect(stdout).toBe("");
+    },
+  );
+
+  test("--partner-fingerprint with no dual-signed record named is refused", async () => {
+    const { recordPath, pin } = await exchangeArtifacts();
+    const { stdout, stderr, exits } = await runVerify({
+      record: recordPath,
+      "partner-fingerprint": pin,
+    });
+    expect(exits).toEqual([64]);
+    expect(stderr).toContain("no dual-signed record was named");
+    // The record on its own would have verified and printed a verdict, so an
+    // empty stdout is what shows the pin was refused rather than ignored.
+    expect(stdout).toBe("");
+  });
+
+  test("an exchange-record positional verifies the record alone", async () => {
+    const { recordPath } = await exchangeArtifacts();
+    const { stdout, exits, exitCode } = await runVerify({ record: recordPath });
+    expect(exits).toEqual([]);
+    expect(stdout).toMatch(/^INCOMPLETE/);
+    expect(stdout).toContain("commitment localPayloadSent:");
+    expect(stdout).toContain("partner receipt signatures are not checked here");
+    expect(stdout).not.toContain("SIGNED RECEIPT");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a dual-signed record positional verifies the signatures alone", async () => {
+    const { signedPath, pin } = await exchangeArtifacts();
+    const { stdout, exits, exitCode } = await runVerify({
+      record: signedPath,
+      "partner-fingerprint": pin,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toMatch(/^SIGNED RECEIPT/);
+    expect(stdout).toContain("matches the pinned value");
+    // No exchange record was named, so no commitment is opened or reported.
+    expect(stdout).not.toContain("commitment");
+    expect(exitCode).toBe(0);
+  });
+
+  test("an exchange record with --signed-record verifies both artifacts", async () => {
+    const { recordPath, signedPath, pin } = await exchangeArtifacts();
+    const { stdout, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "signed-record": signedPath,
+      "partner-fingerprint": pin,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain(
+      "partner receipt signatures: checked separately below",
+    );
+    // Naming the exchange record is what supplies the identities and the
+    // agreed-terms hash the signature checks are anchored to, so the signed half
+    // reaches verified rather than incomplete.
+    expect(stdout).toContain("SIGNED RECEIPT VERIFIED");
+    expect(exitCode).toBe(0);
   });
 });

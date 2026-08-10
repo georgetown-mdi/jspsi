@@ -195,6 +195,20 @@ async function verifyParty(
   };
 }
 
+// A certificate whose canonical bytes cannot be produced has no fingerprint to
+// compare, so it matches no pin. Reported as a non-match rather than thrown,
+// keeping the fail-safe contract as verifyParty's binding downgrade does.
+async function matchesPin(
+  party: SignedReceiptParty,
+  pinnedFingerprint: string,
+): Promise<boolean> {
+  try {
+    return await matchesPinnedFingerprint(party.certificate, pinnedFingerprint);
+  } catch {
+    return false;
+  }
+}
+
 async function pinStatuses(
   record: DualSignedRecord,
   pinnedFingerprint: string | undefined,
@@ -202,8 +216,8 @@ async function pinStatuses(
   if (pinnedFingerprint === undefined || pinnedFingerprint.length === 0)
     return ["not-pinned", "not-pinned"];
   const [initiator, responder] = await Promise.all([
-    matchesPinnedFingerprint(record.initiator.certificate, pinnedFingerprint),
-    matchesPinnedFingerprint(record.responder.certificate, pinnedFingerprint),
+    matchesPin(record.initiator, pinnedFingerprint),
+    matchesPin(record.responder, pinnedFingerprint),
   ]);
   // A verifier pins its PARTNER's certificate, so exactly one slot is expected to
   // match and the other is simply unpinned -- not a failure. Neither matching is
