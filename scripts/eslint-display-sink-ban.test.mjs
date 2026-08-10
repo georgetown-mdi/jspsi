@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
@@ -24,9 +25,16 @@ const eslint = new ESLint({
   overrideConfigFile: resolve(repoRoot, "eslint.config.mjs"),
 });
 
-/** Messages the display-sink ban reports for `source` linted as `filePath`. */
+/**
+ * Messages the display-sink ban reports for `source` linted as `filePath`. A
+ * source that does not parse throws rather than reading as zero problems.
+ */
 async function banHits(filePath, source) {
   const [result] = await eslint.lintText(source, { filePath });
+  const fatal = result.messages.filter((message) => message.fatal);
+  if (fatal.length > 0) {
+    throw new Error(`${filePath}: ${fatal.map((m) => m.message).join("; ")}`);
+  }
   return result.messages.filter(
     (message) =>
       message.ruleId === "no-restricted-syntax" &&
@@ -36,6 +44,10 @@ async function banHits(filePath, source) {
 
 const CORE_FILE = resolve(repoRoot, "packages/core/src/banFixture.ts");
 const CLI_FILE = resolve(repoRoot, "apps/cli/src/banFixture.ts");
+
+// Reserved for the canary: a guarded path that exists on disk, parses, and is
+// linted by nothing else here.
+const CORE_FILE_FIRST_PARSE = resolve(repoRoot, "packages/core/src/main.ts");
 
 // Each entry is a statement body appended to a preamble that declares the
 // bindings it uses, so a case reads as the line a contributor would write.
@@ -118,6 +130,20 @@ function fixture(body) {
 }
 
 describe("the display-sink raw-error ban", () => {
+  it("lints the text it is handed, not the file on disk", async () => {
+    expect(
+      existsSync(CORE_FILE_FIRST_PARSE),
+      `${CORE_FILE_FIRST_PARSE} no longer exists`,
+    ).toBe(true);
+    const [result] = await eslint.lintText("this is not typescript !!! (((\n", {
+      filePath: CORE_FILE_FIRST_PARSE,
+    });
+    expect(
+      result.messages.map((message) => message.message).join("; "),
+      `${CORE_FILE_FIRST_PARSE}: the source on disk was linted instead, so a case asserting zero problems proves nothing about the text it handed in`,
+    ).toMatch(/Parsing error/);
+  });
+
   for (const [label, body] of BANNED) {
     it(`rejects ${label}`, async () => {
       expect(await banHits(CORE_FILE, fixture(body))).not.toHaveLength(0);
