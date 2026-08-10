@@ -1452,72 +1452,80 @@ function runAbortParty(keyFilePath: string, name: string): Promise<unknown> {
   ) as unknown as Promise<unknown>;
 }
 
-test("runProtocol suppresses its own abort marker on a PeerAbortError but writes one for a generic transport fault", async () => {
-  const keyFileA = path.join(tmpDir, "a.key");
-  const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
-  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+test(
+  "runProtocol suppresses its own abort marker on a PeerAbortError but writes one for a generic transport fault",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    const keyFileA = path.join(tmpDir, "a.key");
+    const keyFileB = path.join(tmpDir, "b.key");
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+    saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
-  // Exactly one role raises a PeerAbortError (as if it had READ the peer's marker)
-  // and the other a generic transport fault, no matter who arrives first.
-  vi.mocked(runExchange).mockImplementation((async (
-    _conn: unknown,
-    role: unknown,
-  ) => {
-    await awaitBothArmed();
-    if (role === "initiator") throw new PeerAbortError();
-    throw new ConnectionError("simulated transport fault", "transport");
-  }) as never);
+    // Exactly one role raises a PeerAbortError (as if it had READ the peer's marker)
+    // and the other a generic transport fault, no matter who arrives first.
+    vi.mocked(runExchange).mockImplementation((async (
+      _conn: unknown,
+      role: unknown,
+    ) => {
+      await awaitBothArmed();
+      if (role === "initiator") throw new PeerAbortError();
+      throw new ConnectionError("simulated transport fault", "transport");
+    }) as never);
 
-  const [resultA, resultB] = await Promise.allSettled([
-    runAbortParty(keyFileA, "test-a"),
-    runAbortParty(keyFileB, "test-b"),
-  ]);
-  expect(resultA.status).toBe("rejected");
-  expect(resultB.status).toBe("rejected");
-  // Both parties must have reached the armed state and entered runExchange, or
-  // "exactly one marker" could read green for the wrong reason -- a party that
-  // failed the handshake before arming also writes no marker, which would mimic
-  // echo suppression without exercising the gate. Asserting both arrived makes
-  // the count a genuine suppression signal.
-  expect(mockState.runExchangeEntries).toBe(2);
+    const [resultA, resultB] = await Promise.allSettled([
+      runAbortParty(keyFileA, "test-a"),
+      runAbortParty(keyFileB, "test-b"),
+    ]);
+    expect(resultA.status).toBe("rejected");
+    expect(resultB.status).toBe("rejected");
+    // Both parties must have reached the armed state and entered runExchange, or
+    // "exactly one marker" could read green for the wrong reason -- a party that
+    // failed the handshake before arming also writes no marker, which would mimic
+    // echo suppression without exercising the gate. Asserting both arrived makes
+    // the count a genuine suppression signal.
+    expect(mockState.runExchangeEntries).toBe(2);
 
-  // Echo suppressed: the PeerAbort side wrote nothing, so only the generic-fault
-  // side's marker remains. (If the gate dropped `!errIsPeerAbort`, this would be 2.)
-  expect(
-    fs.readdirSync(dropDir).filter((f) => f.endsWith("-abort.json")),
-  ).toHaveLength(1);
-});
+    // Echo suppressed: the PeerAbort side wrote nothing, so only the generic-fault
+    // side's marker remains. (If the gate dropped `!errIsPeerAbort`, this would be 2.)
+    expect(
+      fs.readdirSync(dropDir).filter((f) => f.endsWith("-abort.json")),
+    ).toHaveLength(1);
+  },
+);
 
-test("runProtocol writes an abort marker on each side when both fail with a generic transport fault", async () => {
-  // The control for the suppression test: with no PeerAbortError in play, both
-  // armed parties take the write branch and two distinct markers result. This
-  // proves the harness CAN produce two markers, so the "exactly one" above is a
-  // genuine suppression signal rather than an artifact of only one side writing.
-  const keyFileA = path.join(tmpDir, "a.key");
-  const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
-  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+test(
+  "runProtocol writes an abort marker on each side when both fail with a generic transport fault",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    // The control for the suppression test: with no PeerAbortError in play, both
+    // armed parties take the write branch and two distinct markers result. This
+    // proves the harness CAN produce two markers, so the "exactly one" above is a
+    // genuine suppression signal rather than an artifact of only one side writing.
+    const keyFileA = path.join(tmpDir, "a.key");
+    const keyFileB = path.join(tmpDir, "b.key");
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+    saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
-  vi.mocked(runExchange).mockImplementation((async () => {
-    await awaitBothArmed();
-    throw new ConnectionError("simulated transport fault", "transport");
-  }) as never);
+    vi.mocked(runExchange).mockImplementation((async () => {
+      await awaitBothArmed();
+      throw new ConnectionError("simulated transport fault", "transport");
+    }) as never);
 
-  const results = await Promise.allSettled([
-    runAbortParty(keyFileA, "test-a"),
-    runAbortParty(keyFileB, "test-b"),
-  ]);
-  expect(results.every((r) => r.status === "rejected")).toBe(true);
-  // Both parties reached the armed state and entered runExchange (see the
-  // suppression test): without this, a one-sided handshake failure could leave
-  // fewer markers and still read green.
-  expect(mockState.runExchangeEntries).toBe(2);
+    const results = await Promise.allSettled([
+      runAbortParty(keyFileA, "test-a"),
+      runAbortParty(keyFileB, "test-b"),
+    ]);
+    expect(results.every((r) => r.status === "rejected")).toBe(true);
+    // Both parties reached the armed state and entered runExchange (see the
+    // suppression test): without this, a one-sided handshake failure could leave
+    // fewer markers and still read green.
+    expect(mockState.runExchangeEntries).toBe(2);
 
-  expect(
-    fs.readdirSync(dropDir).filter((f) => f.endsWith("-abort.json")),
-  ).toHaveLength(2);
-});
+    expect(
+      fs.readdirSync(dropDir).filter((f) => f.endsWith("-abort.json")),
+    ).toHaveLength(2);
+  },
+);
 
 // --- Signed-receipt non-signing-partner warn gate via runProtocol ------------
 //
@@ -1592,87 +1600,99 @@ test("a completed signed run does not warn about a non-signing partner", async (
   ).toBe(false);
 });
 
-test("a ReceiptVerificationError does not warn about a non-signing partner", async () => {
-  // A pin-mismatch/verification failure is its own hard security failure,
-  // surfaced on its own path (a distinct error kind/message); the softer
-  // "partner may not be configured to sign" warning must not also fire and
-  // dilute it.
-  const keyFileA = path.join(tmpDir, "a.key");
-  const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
-  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+test(
+  "a ReceiptVerificationError does not warn about a non-signing partner",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    // A pin-mismatch/verification failure is its own hard security failure,
+    // surfaced on its own path (a distinct error kind/message); the softer
+    // "partner may not be configured to sign" warning must not also fire and
+    // dilute it.
+    const keyFileA = path.join(tmpDir, "a.key");
+    const keyFileB = path.join(tmpDir, "b.key");
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+    saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
-  vi.mocked(runExchange).mockImplementation((async () => {
-    await awaitBothArmed();
-    throw new ReceiptVerificationError("simulated receipt pin mismatch");
-  }) as never);
+    vi.mocked(runExchange).mockImplementation((async () => {
+      await awaitBothArmed();
+      throw new ReceiptVerificationError("simulated receipt pin mismatch");
+    }) as never);
 
-  const [resultA, resultB] = await Promise.allSettled([
-    runSigningParty(keyFileA, "test-a", path.join(tmpDir, "receipt-a.json")),
-    runSigningParty(keyFileB, "test-b", path.join(tmpDir, "receipt-b.json")),
-  ]);
-  expect(resultA.status).toBe("rejected");
-  expect(resultB.status).toBe("rejected");
-  expect(mockState.runExchangeEntries).toBe(2);
+    const [resultA, resultB] = await Promise.allSettled([
+      runSigningParty(keyFileA, "test-a", path.join(tmpDir, "receipt-a.json")),
+      runSigningParty(keyFileB, "test-b", path.join(tmpDir, "receipt-b.json")),
+    ]);
+    expect(resultA.status).toBe("rejected");
+    expect(resultB.status).toBe("rejected");
+    expect(mockState.runExchangeEntries).toBe(2);
 
-  expect(
-    mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
-  ).toBe(false);
-});
+    expect(
+      mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+    ).toBe(false);
+  },
+);
 
-test("a ReceiptVerificationError wrapped via cause still suppresses the warn", async () => {
-  // isReceiptVerificationFailure walks the error's cause chain, mirroring the
-  // sibling isHintTagged/errIsPeerAbort predicates in the same catch, so a
-  // future wrap of the security failure cannot downgrade it to the soft warn.
-  const keyFileA = path.join(tmpDir, "a.key");
-  const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
-  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+test(
+  "a ReceiptVerificationError wrapped via cause still suppresses the warn",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    // isReceiptVerificationFailure walks the error's cause chain, mirroring the
+    // sibling isHintTagged/errIsPeerAbort predicates in the same catch, so a
+    // future wrap of the security failure cannot downgrade it to the soft warn.
+    const keyFileA = path.join(tmpDir, "a.key");
+    const keyFileB = path.join(tmpDir, "b.key");
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+    saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
-  vi.mocked(runExchange).mockImplementation((async () => {
-    await awaitBothArmed();
-    const inner = new ReceiptVerificationError(
-      "simulated receipt pin mismatch",
-    );
-    throw new Error(`outer wrap: ${inner.message}`, { cause: inner });
-  }) as never);
+    vi.mocked(runExchange).mockImplementation((async () => {
+      await awaitBothArmed();
+      const inner = new ReceiptVerificationError(
+        "simulated receipt pin mismatch",
+      );
+      throw new Error(`outer wrap: ${inner.message}`, { cause: inner });
+    }) as never);
 
-  const [resultA, resultB] = await Promise.allSettled([
-    runSigningParty(keyFileA, "test-a", path.join(tmpDir, "receipt-a.json")),
-    runSigningParty(keyFileB, "test-b", path.join(tmpDir, "receipt-b.json")),
-  ]);
-  expect(resultA.status).toBe("rejected");
-  expect(resultB.status).toBe("rejected");
-  expect(mockState.runExchangeEntries).toBe(2);
+    const [resultA, resultB] = await Promise.allSettled([
+      runSigningParty(keyFileA, "test-a", path.join(tmpDir, "receipt-a.json")),
+      runSigningParty(keyFileB, "test-b", path.join(tmpDir, "receipt-b.json")),
+    ]);
+    expect(resultA.status).toBe("rejected");
+    expect(resultB.status).toBe("rejected");
+    expect(mockState.runExchangeEntries).toBe(2);
 
-  expect(
-    mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
-  ).toBe(false);
-});
+    expect(
+      mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+    ).toBe(false);
+  },
+);
 
-test("a non-receipt failure with signing configured warns about a non-signing partner", async () => {
-  const keyFileA = path.join(tmpDir, "a.key");
-  const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
-  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+test(
+  "a non-receipt failure with signing configured warns about a non-signing partner",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    const keyFileA = path.join(tmpDir, "a.key");
+    const keyFileB = path.join(tmpDir, "b.key");
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+    saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
-  vi.mocked(runExchange).mockImplementation((async () => {
-    await awaitBothArmed();
-    throw new ConnectionError("simulated transport fault", "transport");
-  }) as never);
+    vi.mocked(runExchange).mockImplementation((async () => {
+      await awaitBothArmed();
+      throw new ConnectionError("simulated transport fault", "transport");
+    }) as never);
 
-  const [resultA, resultB] = await Promise.allSettled([
-    runSigningParty(keyFileA, "test-a", path.join(tmpDir, "receipt-a.json")),
-    runSigningParty(keyFileB, "test-b", path.join(tmpDir, "receipt-b.json")),
-  ]);
-  expect(resultA.status).toBe("rejected");
-  expect(resultB.status).toBe("rejected");
-  expect(mockState.runExchangeEntries).toBe(2);
+    const [resultA, resultB] = await Promise.allSettled([
+      runSigningParty(keyFileA, "test-a", path.join(tmpDir, "receipt-a.json")),
+      runSigningParty(keyFileB, "test-b", path.join(tmpDir, "receipt-b.json")),
+    ]);
+    expect(resultA.status).toBe("rejected");
+    expect(resultB.status).toBe("rejected");
+    expect(mockState.runExchangeEntries).toBe(2);
 
-  expect(
-    mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
-  ).toBe(true);
-});
+    expect(
+      mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+    ).toBe(true);
+  },
+);
 
 // --- Signal and error handler recovery paths ---------------------------------
 //

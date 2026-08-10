@@ -21,6 +21,7 @@ import {
 } from "../src/signingIdentity";
 import {
   assertPrivateKeyMatchesPublic,
+  ECDSA_P256_SIGNATURE_BYTES,
   importPrivateSigningKey,
 } from "../src/signingKeys";
 import { fromBase64Url, toBase64Url } from "../src/utils/crypto";
@@ -61,10 +62,6 @@ async function platformImportsKey(jwk: JsonWebKey): Promise<boolean> {
     return false;
   }
 }
-
-/** The raw `r || s` size for P-256: the two 32-byte field elements
- * `crypto.subtle.sign` emits, with no header of any kind. */
-const RAW_P256_SIGNATURE_BYTES = 64;
 
 /** The DER SEQUENCE encoding of a raw `r || s` signature: the encoding a
  * certificate signature must never carry, built here so a test can measure it
@@ -113,9 +110,9 @@ describe("generateSigningIdentity", () => {
     // than asserting it in prose -- DER wraps the same pair in a SEQUENCE
     // header plus a tag and length per INTEGER, and pads any integer whose top
     // bit is set.
-    expect(signature).toHaveLength(RAW_P256_SIGNATURE_BYTES);
+    expect(signature).toHaveLength(ECDSA_P256_SIGNATURE_BYTES);
     expect(derEncodeSignature(signature).length).toBeGreaterThan(
-      RAW_P256_SIGNATURE_BYTES,
+      ECDSA_P256_SIGNATURE_BYTES,
     );
   });
 
