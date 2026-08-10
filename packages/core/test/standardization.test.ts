@@ -1775,28 +1775,68 @@ describe("buildKeyStrings", () => {
     expect(buildKeyStrings(key, dataset, 0)).toBeNull();
   });
 
-  test("fan-out field produces cross-product with single-value field", () => {
-    const dataset = makeDataset({
+  test("a field carrying several candidates is refused, not crossed", () => {
+    // Matching runs on a single value per record, so the cross-product a fan-out
+    // field would feed cannot be honored: the row is refused where its candidates
+    // are read, whether one field fans out or both.
+    const oneFansOut = makeDataset({
       last_name: ["SMITH", "JONES"],
       date_of_birth: "19900115",
     });
-    expect(buildKeyStrings(key, dataset, 0)).toEqual(
-      new Set(["SMITH19900115", "JONES19900115"]),
-    );
-  });
+    expect(() => buildKeyStrings(key, oneFansOut, 0)).toThrow(UsageError);
+    expect(() => buildKeyStrings(key, oneFansOut, 0)).toThrow(/fan-out/);
 
-  test("cross-product over two fan-out fields", () => {
-    const dataset = makeDataset({
+    const bothFanOut = makeDataset({
       last_name: ["SMITH", "JONES"],
       date_of_birth: ["19900115", "19900116"],
     });
-    expect(buildKeyStrings(key, dataset, 0)).toEqual(
-      new Set([
-        "SMITH19900115",
-        "SMITH19900116",
-        "JONES19900115",
-        "JONES19900116",
-      ]),
+    expect(() => buildKeyStrings(key, bothFanOut, 0)).toThrow(UsageError);
+  });
+
+  test("a fan-out whose candidates collapse to one key string is refused too", () => {
+    // The shape a size test on the ASSEMBLED key misses: the field fans out, then
+    // an element transform filters every candidate but one, so the row emits a
+    // single innocuous-looking key string while having matched on less than the
+    // terms declare. The refusal reads the candidate count before any collapse, so
+    // this is refused exactly as an uncollapsed fan-out is.
+    const dataset = makeDataset({
+      last_name: ["SMITH", "JONES"],
+      date_of_birth: "19750716",
+    });
+    const filteringKey = {
+      name: "LN+DOB",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "null_if", params: { value: "JONES" } }],
+        },
+        { field: "date_of_birth" },
+      ],
+    };
+    expect(() => buildKeyStrings(filteringKey, dataset, 0)).toThrow(UsageError);
+    expect(() => buildKeyStrings(filteringKey, dataset, 0)).toThrow(/fan-out/);
+  });
+
+  test("a field whose fan-out step yields one candidate builds its key", () => {
+    // The sibling of the refusal, and what keeps it from swallowing a legitimate
+    // row: split_on emits a one-element set when its delimiter is absent, which is
+    // one match candidate, so the same filtering transform runs and the key builds.
+    const dataset = makeDataset({
+      last_name: ["SMITH"],
+      date_of_birth: "19750716",
+    });
+    const filteringKey = {
+      name: "LN+DOB",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "null_if", params: { value: "JONES" } }],
+        },
+        { field: "date_of_birth" },
+      ],
+    };
+    expect(buildKeyStrings(filteringKey, dataset, 0)).toEqual(
+      new Set(["SMITH19750716"]),
     );
   });
 

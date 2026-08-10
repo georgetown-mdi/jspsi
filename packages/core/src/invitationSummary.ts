@@ -796,6 +796,14 @@ function parseDateBreadth(
   return dropsComponent ? "partial" : undefined;
 }
 
+/** Whether the element's transform declares a step the exchange refuses to run
+ * a fan-out for -- the rule behind the "not supported" marker, and the reason a
+ * swap leaves that marker on its declaring element. */
+function declaresFanOut(element: LinkageKeyElement): boolean {
+  const functions = new Set((element.transform ?? []).map((s) => s.function));
+  return FAN_OUT_FUNCTION_NAMES.some((name) => functions.has(name));
+}
+
 /**
  * The terse informative marker for a key element's collapsed-header entry.
  *
@@ -863,8 +871,7 @@ function elementBreadthMarker(
   // refuses a declared `split_on` before the exchange runs
   // (assertFanOutImplemented) rather than dropping the records whose values
   // split -- and the glossary line for the step states the refusal.
-  if (FAN_OUT_FUNCTION_NAMES.some((name) => functions.has(name)))
-    return displayText`not supported`;
+  if (declaresFanOut(element)) return displayText`not supported`;
   // An element whose pipeline produces no value for ANY record matches nothing,
   // not more -- the opposite of a broadening, and a narrowing-to-empty the separate
   // dead-key advisory surfaces -- so it earns no marker, whatever rule a later step
@@ -966,9 +973,10 @@ function summarizeKey(
   let swapTransformDonor: [Displayable, Displayable] | undefined;
   // Header-marker re-attribution across a swap: maps each swapped element to the
   // breadth marker its header entry should show INSTEAD of its own (an explicit
-  // `undefined` blanks the marker). Empty for a non-swap or same-label swap, so
-  // the header loop falls back to each element's own marker. Built here because
-  // the swap resolution below supplies the element pairing it needs.
+  // `undefined` blanks the marker). Empty for a non-swap, a same-label swap, or a
+  // pair carrying a refused rule (see below), so the header loop falls back to
+  // each element's own marker. Built here because the swap resolution below
+  // supplies the element pairing it needs.
   const headerMarkerOverride = new Map<
     LinkageKeyElement,
     Displayable | undefined
@@ -1001,9 +1009,18 @@ function summarizeKey(
         // element's header entry shows its partner's marker. This is exact for
         // every configuration (one marker, two equal, two different, transform or
         // fuzzy), since the whole element moves; a same-marker pair swaps to an
-        // identical header, and a no-marker pair to the bare labels.
-        headerMarkerOverride.set(first, elementBreadthMarker(second));
-        headerMarkerOverride.set(second, elementBreadthMarker(first));
+        // identical header, and a no-marker pair to the bare labels. The one
+        // exception is a refused rule: "not supported" names a step the operator
+        // has to find and remove, and the step sits in the element that DECLARES
+        // it, whichever field that element reads on a receiver. Re-attribution
+        // describes what a run does to each field, and a refused key has no run to
+        // describe, so a fan-out anywhere in the pair leaves both markers on their
+        // declaring elements rather than pointing the operator at a field carrying
+        // no such step.
+        if (!declaresFanOut(first) && !declaresFanOut(second)) {
+          headerMarkerOverride.set(first, elementBreadthMarker(second));
+          headerMarkerOverride.set(second, elementBreadthMarker(first));
+        }
         // The expanded detail lists each element's transforms under its DECLARED
         // field, so a re-attributed header marker has no anchor there unless the
         // detail also states the cross-application. Flag it for the renderer: a

@@ -41,8 +41,7 @@ export interface StageDefinition {
  * is surfaced as an authentication failure rather than a retryable transport
  * drop. A `"config"` failure is an {@link OperatorConfigError} raised during the
  * PREPARE phase (inside `acquire`, before any peer connection): a prepare-time
- * fault whose message names only this party's OWN configuration -- today an
- * authored standardization that contradicts the linkage terms. Not a transport
+ * fault whose message names only this party's OWN configuration. Not a transport
  * drop, so retrying as-is fails identically; the message is actionable and safe to
  * surface. It is scoped to that base type, NOT to any prepare-phase `UsageError`:
  * a sibling guard whose message can embed partner-influenced column names (the
@@ -277,11 +276,11 @@ export async function runExchangeLifecycle<
   } catch (error) {
     // acquire is atomic: it has already torn down anything it built, so there is
     // nothing here for the owner to release. On abort, emitError no-ops. This is
-    // the PREPARE phase: acquire runs prepareForExchange, whose local-config faults
-    // (an OperatorConfigError -- today a standardization contradicting its terms)
-    // surface as an actionable "config" alert rather than the generic retryable
-    // "exchange" one; a plain load/transport failure -- and every other
-    // prepare-phase UsageError -- stays "exchange".
+    // the PREPARE phase: acquire runs prepareForExchange, so a prepare-phase
+    // OperatorConfigError -- the type whose message is composed only of this
+    // party's own configuration -- surfaces as an actionable "config" alert rather
+    // than the generic retryable "exchange" one; a plain load/transport failure --
+    // and every other prepare-phase UsageError -- stays "exchange".
     emitError({ category: classifyExchangeFailure(error, "prepare"), error });
     return;
   }

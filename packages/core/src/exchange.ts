@@ -781,10 +781,12 @@ export async function runExchange(
 
   // Refuse a fan-out element transform before the terms go on the wire, so a
   // PreparedExchange built without going through prepareForExchange cannot run a
-  // key whose splitting records would silently drop out of the round. The
-  // standardization half is not re-checkable here (a PreparedExchange retains the
-  // built dataset, not the spec); its pipeline refuses at the point of harm
-  // instead. See assertFanOutImplemented.
+  // key whose splitting records would silently drop out of the round. This reaches
+  // the terms half only: a PreparedExchange retains the built dataset, not the
+  // standardization spec, so a fan-out authored there and assembled outside
+  // prepareForExchange is refused when its first splitting row builds a key --
+  // at the narrowing, but after this party's terms have gone on the wire. See
+  // assertFanOutImplemented.
   assertFanOutImplemented(linkageTerms);
 
   const { psiLibrary } = options;

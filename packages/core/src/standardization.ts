@@ -663,11 +663,13 @@ export const STANDARDIZATION_FUNCTION_NAMES: readonly string[] = [
  * Hand-listed, because whether a factory can return a multi-value `Set` is not
  * derivable from the registry. A fan-out function added to
  * {@link STANDARDIZING_FUNCTIONS} without an entry here is not left to narrow
- * silently: the two places a fan-out reaches the key builder --
- * {@link buildKeyStrings} returning more than one key string for a row, and a
- * fan-out step inside an element transform -- refuse there instead, so the
- * missing entry surfaces as a refusal rather than as the dropped rows this list
- * exists to prevent.
+ * silently: {@link buildKeyStrings} refuses a row carrying more than one candidate
+ * for any element -- tested before a later step or the key-string `Set` can
+ * collapse the candidates back to one -- and an element transform that expands a
+ * value is refused where it expands. Those refusals are the point of harm rather
+ * than a pre-run gate: they fire as keys are built, which is after the terms
+ * exchange, so it is the DECLARED step this list carries that is refused before
+ * anything reaches the wire.
  */
 export const FAN_OUT_FUNCTION_NAMES: readonly string[] = ["split_on"];
 
@@ -1592,9 +1594,15 @@ const KEY_STRING_WARN_THRESHOLD = 20;
  * and a row index.
  *
  * Returns `null` if any element's field value set is empty (the record is
- * excluded from this key round). Otherwise returns one or more strings: more
- * than one arises from fan-out fields producing a cross-product across
- * elements.
+ * excluded from this key round). Otherwise returns the cross-product across the
+ * elements' values, one key string per combination.
+ *
+ * A row whose field carries more than one candidate value is refused rather than
+ * built from: matching runs on a single value per record, so a cross-product over
+ * several candidates cannot be honored (see {@link assertFanOutImplemented}). The
+ * refusal runs before the element transforms and before the deduplicating result
+ * `Set`, either of which can collapse several candidates into one key string and
+ * so hide the fan-out from a test on the assembled key.
  *
  * All returned strings belong to the same original row at `index`; the caller
  * is responsible for preserving that association when adding entries to the PSI
@@ -1623,6 +1631,15 @@ export function buildKeyStrings(
     const field = dataset.getField(element.field);
     const raw = field ? field.get(index) : [];
     if (raw.length === 0) return null;
+    // Multiplicity is the fan-out signature, and it is tested HERE, before any
+    // later step can collapse it: a pipeline with no Set-producing step yields
+    // exactly one candidate, so a longer list is a fan-out whatever survives
+    // downstream. Testing only the assembled key would miss the collapsing shapes
+    // -- an element transform that filters all but one candidate, or two
+    // candidates that transform to the same string, both of which the key-string
+    // Set below reduces to a single innocuous-looking key while the row matched on
+    // less than the terms declare.
+    if (raw.length > 1) throw fanOutReachedKeyBuilderRefusal();
 
     const transformed: string[] = [];
     for (const v of raw) {
@@ -1831,8 +1848,10 @@ function declaredFanOutFunction(
  * multi-value rows drop out of the key round, and a linkage-key element transform
  * feeds {@link buildKeyStrings}, which cannot fan out at all. `standardization` is
  * omitted where the caller no longer holds one (the run boundary reads a prepared
- * exchange, which retains the built dataset rather than the spec); the pipeline's
- * own refusal covers that half there.
+ * exchange, which retains the built dataset rather than the spec); what covers
+ * that half there is {@link buildKeyStrings}'s own refusal, which fires as keys
+ * are built -- at the narrowing, but after this party's terms have gone on the
+ * wire.
  *
  * The two surfaces carry the same message under DIFFERENT error classes, because
  * they differ in whose content the fault is. A `standardization` is only ever this

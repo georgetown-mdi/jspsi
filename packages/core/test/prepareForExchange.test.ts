@@ -2,6 +2,7 @@ import { expect, test, describe } from "vitest";
 
 import {
   prepareForExchange,
+  runExchange,
   assertAlgorithmImplemented,
   assertSigningModeImplemented,
 } from "../src/exchange";
@@ -11,6 +12,9 @@ import {
   UsageError,
 } from "../src/errors";
 
+import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
+
+import type { MessageConnection } from "../src/connection/messageConnection";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
 import type { SigningConfig, SigningMode } from "../src/config/signing";
@@ -386,6 +390,57 @@ describe("prepareForExchange: a fan-out transform is refused", () => {
       columns,
     );
     expect(prepared.rowCount).toBe(1);
+  });
+
+  // The run boundary re-checks the terms half, so a PreparedExchange assembled
+  // without going through prepareForExchange is refused before its terms reach
+  // the partner. Every collaborator the run would touch throws when used, so the
+  // refusal is what the rejection can come from -- a connection frame or a PSI
+  // call would surface as its own error, failing these assertions.
+  const failIfUsed = (what: string) => (): never => {
+    throw new Error(`${what} was used past the fan-out refusal`);
+  };
+  const unusableConnection = (): MessageConnection => ({
+    send: failIfUsed("the connection"),
+    receive: failIfUsed("the connection"),
+    close: failIfUsed("the connection"),
+  });
+  const unusablePsiLibrary = new Proxy({} as PSILibrary, {
+    get: failIfUsed("the PSI library"),
+  });
+
+  test("runExchange refuses a fan-out element transform before it connects", async () => {
+    // Built legitimately -- terms and standardization both free of fan-out -- then
+    // given fan-out TERMS, the way a caller that skipped prepareForExchange could.
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    prepared.linkageTerms = splittingElementTerms;
+
+    const run = runExchange(unusableConnection(), "initiator", prepared, {
+      psiLibrary: unusablePsiLibrary,
+    });
+    await expect(run).rejects.toThrow(UsageError);
+    await expect(run).rejects.toThrow(/split_on/);
+  });
+
+  test("runExchange runs past the guard for terms declaring no fan-out", async () => {
+    // The sibling of the refusal: with the same unusable collaborators, terms free
+    // of fan-out reach the terms exchange, so the failure is the connection's --
+    // proof the refusal above fired on the fan-out rather than on the fixtures.
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    const run = runExchange(unusableConnection(), "initiator", prepared, {
+      psiLibrary: unusablePsiLibrary,
+    });
+    await expect(run).rejects.toThrow(/the connection was used/);
   });
 });
 

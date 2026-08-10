@@ -868,6 +868,9 @@ describe("summarizeInvitation", () => {
     { function: "substring", params: { start: 1, length: 3 } },
   ];
   const soundAlike: LinkageKeyElement["transform"] = [{ function: "phonetic" }];
+  const fanOut: LinkageKeyElement["transform"] = [
+    { function: "split_on", params: { delimiter: "-" } },
+  ];
 
   test("swaps each header marker to its partner's field across a swap", () => {
     // One transform: on the receiver the first element reads the SECOND element's
@@ -944,6 +947,66 @@ describe("summarizeInvitation", () => {
     expect(fuzzyOnly.headerFields).toEqual(["first name", "last name (fuzzy)"]);
     expect(fuzzyOnly.swapTransformInterchange).toBe(false);
     expect(fuzzyOnly.swapTransformDonor).toBeUndefined();
+  });
+
+  test("keeps a refused rule on the element that declares it, across a swap", () => {
+    // "not supported" is not a breadth the receiver applies to a field; it names a
+    // step the operator has to find and remove, and that step sits in the element
+    // that declares it. Re-attributing it would put it on a field carrying no such
+    // step, so the pair keeps its own markers -- the refused key has no run whose
+    // per-field effect the swap could describe. The interchange note still fires:
+    // the terms do interchange the two elements' rules.
+    const lastNameFansOut = swapKey(
+      { transform: soundAlike },
+      { transform: fanOut },
+    );
+    expect(lastNameFansOut.headerFields).toEqual([
+      "first name (sound-alike)",
+      "last name (not supported)",
+    ]);
+    expect(lastNameFansOut.swapTransformInterchange).toBe(true);
+
+    // Symmetric: declared on the first element, shown on the first element.
+    const firstNameFansOut = swapKey(
+      { transform: fanOut },
+      { transform: soundAlike },
+    );
+    expect(firstNameFansOut.headerFields).toEqual([
+      "first name (not supported)",
+      "last name (sound-alike)",
+    ]);
+
+    // The lone declaring element holds it too, with nothing to trade markers with.
+    expect(swapKey({}, { transform: fanOut }).headerFields).toEqual([
+      "first name",
+      "last name (not supported)",
+    ]);
+  });
+
+  test("keeps a refused rule on its own field without a swap", () => {
+    // The plain shape, where no re-attribution runs at all: the marker sits on the
+    // declaring element's field, and the sibling element is unmarked.
+    const key = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          { name: "first_name", type: "first_name" },
+          { name: "last_name", type: "last_name" },
+        ],
+        linkageKeys: [
+          {
+            name: "Name",
+            elements: [
+              { field: "first_name", transform: soundAlike },
+              { field: "last_name", transform: fanOut },
+            ],
+          },
+        ],
+      }),
+    ).linkageKeys[0];
+    expect(key.headerFields).toEqual([
+      "first name (sound-alike)",
+      "last name (not supported)",
+    ]);
   });
 
   test("re-attributes only the swapped pair, leaving a third element's marker put", () => {
