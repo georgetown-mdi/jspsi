@@ -36,7 +36,6 @@ import {
   ACCEPTOR_COLUMNS_LEDGER_FOOTER,
   ACCEPTOR_LEDGER_FOOTER,
   acceptUnsupported,
-  acceptorAdvisoryLocator,
   acceptorConsentName,
   acceptorConsentReady,
   acceptorDoneLedgerFooter,
@@ -99,6 +98,10 @@ import type {
   Standardization,
   StandardizationStep,
 } from "@psilink/core";
+import type {
+  JobRendezvousConfig,
+  ProfiledJobInput,
+} from "@psi/workInputClient";
 import type { AcceptorLaunchSource } from "./useAcceptorExchange";
 import type { AcceptorStep } from "./acceptorModel";
 import type { AlertContent } from "@components/csvIntake";
@@ -108,7 +111,6 @@ import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
-import type { ProfiledJobInput } from "@psi/workInputClient";
 import type { RailStep } from "./inviterModel";
 import type { SftpConnectionInfo } from "@psi/serverJobExchangeDriver";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
@@ -238,10 +240,12 @@ export function AcceptorBench() {
   // the consent gate instead.
   const [consoleSource, setConsoleSource] = useState<ProfiledJobInput>();
   const [columnsState, setColumnsState] = useState<AcceptorColumnsState>();
-  // Whether the appliance has a rendezvous mount, fetched once on a console build.
-  // Undefined before it resolves; a console filedrop accept is runnable only when
-  // `configured` is true (the exchange runs against the mounted directory).
-  const [rendezvousConfigured, setRendezvousConfigured] = useState<boolean>();
+  // The appliance's own rendezvous mount, fetched once on a console build. Undefined
+  // before it resolves; a console filedrop accept is runnable only when `configured`
+  // is true (the exchange runs against the mounted directory), and `folderName` is
+  // this appliance's own name for that directory -- present only where the console
+  // can name it, and the only value this seat may show as the shared folder's name.
+  const [rendezvous, setRendezvous] = useState<JobRendezvousConfig>();
   // The console's effective SFTP connection for an accepted SFTP endpoint, held
   // and updated when the operator authors or clears one. Undefined before the
   // accept SFTP endpoint is known; `connection` is null when none is authored, else
@@ -280,11 +284,11 @@ export function AcceptorBench() {
         // Learn the rendezvous state before revealing the terms so the review step
         // decides a console filedrop accept's runnability with the mount known,
         // rather than flashing "unavailable" while a fetch settles.
-        const rvzConfigured = consoleBuild
-          ? (await fetchJobRendezvous()).configured
-          : false;
+        const rvz = consoleBuild
+          ? await fetchJobRendezvous()
+          : { configured: false };
         if (!controller.signal.aborted) {
-          setRendezvousConfigured(rvzConfigured);
+          setRendezvous(rvz);
           setDecode({ status: "ready", invitation });
         }
       } catch (error) {
@@ -306,7 +310,7 @@ export function AcceptorBench() {
     consoleBuild && decode.status === "ready"
       ? acceptUnsupported(
           decode.invitation.endpoint,
-          rendezvousConfigured === true,
+          rendezvous?.configured === true,
         )
       : undefined;
 
@@ -619,15 +623,18 @@ export function AcceptorBench() {
   const howItRuns = ready
     ? acceptorHowItRunsLabel(decode.invitation.endpoint, consoleBuild)
     : "";
-  // The partner's advisory shared-directory locator, shown read-only at the consent
-  // step for a runnable console file-drop accept so the operator confirms it names the
-  // same synced folder mounted on this appliance. Partner-supplied and sanitized
-  // through summarizeInvitation; never flows to config. Present only once the accept
-  // is runnable (past the unsupported gate), so a doomed accept does not surface it.
-  const advisoryLocator =
-    ready && acceptServerJob && unsupported === undefined
-      ? acceptorAdvisoryLocator(decode.invitation.token)
-      : undefined;
+  // Whether the consent step asks the operator to confirm the shared folder: a
+  // runnable console file-drop accept, past the unsupported gate, so a doomed accept
+  // does not surface it. The invitation's own locator is NOT what it confirms against
+  // -- that value is the folder's name only where the inviting console could name the
+  // folder, and the inviting launcher's mount segment where it could not, and this
+  // seat cannot tell the two apart. It names the directory mounted HERE instead,
+  // which this console does name.
+  const confirmSharedFolder =
+    ready &&
+    acceptServerJob &&
+    unsupported === undefined &&
+    decode.invitation.endpoint.channel === "filedrop";
   const linkageTerms = token?.linkageTerms;
   // The sanitized legal-agreement values the consent step displays beside the
   // attestation; undefined when the invitation attaches none (no fieldset then).
@@ -1198,16 +1205,24 @@ export function AcceptorBench() {
                 )}
               </>
             )}
-            {advisoryLocator !== undefined && (
+            {confirmSharedFolder && (
               <Alert
                 color="blue"
                 icon={<IconAlertCircle aria-hidden />}
                 title="Confirm the shared folder"
                 mt="md"
               >
-                Your partner named this shared folder:{" "}
-                <span className={styles.mono}>{advisoryLocator}</span>. Confirm
-                it is the synced folder mounted on this appliance.
+                {rendezvous?.folderName === undefined ? (
+                  <>This exchange runs through the shared folder mounted on</>
+                ) : (
+                  <>
+                    This exchange runs through{" "}
+                    <span className={styles.mono}>{rendezvous.folderName}</span>
+                    , the shared folder mounted on
+                  </>
+                )}{" "}
+                this appliance. Check with your partner that you are both using
+                the same synced folder.
               </Alert>
             )}
             {acceptAssuranceLine !== undefined && (

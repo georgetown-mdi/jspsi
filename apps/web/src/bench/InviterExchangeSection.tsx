@@ -235,8 +235,8 @@ export function InviterExchangeSection({
                   Your partner accepts from the command line, which reads the
                   invitation code, not the link -- send them the code, with
                   these instructions alongside it. The sheet takes them from
-                  Docker Desktop to accepting and carries no secret, so it can
-                  travel any way that suits them.
+                  nothing to accepting and carries no secret, so it can travel
+                  any way that suits them.
                 </p>
                 <Button variant="default" onClick={onDownloadAcceptKit}>
                   Download instructions for your partner

@@ -521,12 +521,12 @@ export interface InvitationSummary {
   expires?: Displayable;
   /**
    * The partner's advisory shared-directory locator, sanitized for display: the
-   * `path` a single-directory file-drop endpoint carries (its folder name, minted
-   * by the console inviter). Present only for such an endpoint. Advisory only -- the
-   * accepting operator confirms it names the same synced folder mounted on their own
-   * appliance; it never flows to any config. Sanitized for TEXT display only: safe
-   * as a React text child, whose escaping is part of its safety, and never to be
-   * interpolated into an attribute value or raw HTML.
+   * `path` a single-directory file-drop endpoint carries. Present only for such an
+   * endpoint. Advisory only -- it never flows to any config, and it is the folder's
+   * own name only where the inviting console could name the folder, so a surface
+   * that presents it AS the shared folder's name overstates what it is. Sanitized
+   * for TEXT display only: safe as a React text child, whose escaping is part of its
+   * safety, and never to be interpolated into an attribute value or raw HTML.
    */
   connectionPath?: Displayable;
 }

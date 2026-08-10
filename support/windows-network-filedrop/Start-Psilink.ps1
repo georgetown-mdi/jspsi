@@ -687,35 +687,24 @@ function Wait-ForConsole {
     return $false
 }
 
-function Get-RendezvousFolderName {
-    <#  The name of the folder shared with the partner, as the operator knows
-        it, for the console to mint into the invitation.
+function Get-LocalFolderName {
+    <#  The name of a folder on this PC, as the operator knows it: the last
+        segment of its path, and nothing for a drive root, which has no folder
+        name and whose letter means nothing on the partner's machine.
 
-        The console cannot work this out for itself here. It sees only the
-        container's side of the mount, and this script picks that side: every
-        folder an operator chooses is bound at the same /rendezvous, and a
-        single-folder run rendezvouses out of /data. So the last segment of what
-        the container sees names this script's layout, not the operator's
-        folder, and the name has to be passed in beside the mount.
+        This is the local arm of Setup-PsilinkFileDrop.ps1's
+        Get-RendezvousFolderName, whose share arm the network branch below
+        reaches through the dot-source instead. It is carried here rather than
+        borrowed because a folder on this PC is usable when that script cannot
+        be loaded at all -- a constrained language mode, or no copy of it beside
+        this one -- and a folder that lost its name there would leave the
+        partner nothing to match. The suite pins the two to the same answers.
 
-        A network share is not mounted by path at all -- the volume stands for a
-        server and share -- so the name comes from the resolved share: the last
-        segment of the subfolder within it, or the share itself when the folder
-        IS the share root.
+        Nothing here is more than a string operation, so it also works in a
+        session whose language mode is constrained. #>
+    param([string] $Path = '')
 
-        Returns an empty string when there is no folder name to give: a drive
-        root has none, and neither has a path this script could not read a last
-        segment out of. That empty string is passed to the console as it stands,
-        which is what leaves the console with no name for the folder at all;
-        naming the drive letter instead would be a name no partner could match. #>
-    param(
-        [string] $Path = '',
-        [string] $Share = '',
-        [string] $SubPath = ''
-    )
-
-    $source = if ($Share) { if ($SubPath) { $SubPath } else { $Share } } else { $Path }
-    $segments = @($source -split '[\\/]+' | Where-Object { $_ })
+    $segments = @($Path -split '[\\/]+' | Where-Object { $_ })
     if ($segments.Count -eq 0) { return '' }
     $name = $segments[-1].Trim()
     # A bare drive designator (C:) is what a drive root reduces to, and it names
@@ -818,9 +807,11 @@ if (Test-WindowsContainerMode -Engine $script:PsilinkEngine) {
 Show-Ok "Using $script:PsilinkEngine."
 
 # Setup-PsilinkFileDrop.ps1 owns the Explorer-path-to-server-and-share
-# resolution, and this script reuses it rather than carrying a second copy. It
-# is loaded with -LoadFunctionsOnly, which defines its functions and runs none
-# of its setup flow.
+# resolution, and the rule that names a folder within a share, and this script
+# reuses both rather than carrying a second copy. It is loaded with
+# -LoadFunctionsOnly, which defines its functions and runs none of its setup
+# flow. Everything it is reached for belongs to the network branch, so a run
+# that cannot load it keeps the whole of the local one.
 $setupScript = Join-Path $PSScriptRoot 'Setup-PsilinkFileDrop.ps1'
 $canResolveNetworkPaths = $false
 if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
@@ -955,9 +946,16 @@ Show-Ok "Rendezvous folder: $rendezvousPath"
 # ==========================================================================
 $rendezvousMount = $rendezvousPath
 $usingVolume = $false
-# The folder's own name, worked out here and passed to the console, because the
-# container is shown this script's mount points rather than the operator's folder.
-$rendezvousFolderName = Get-RendezvousFolderName -Path $rendezvousPath
+# The folder's own name, passed to the console because the container is shown
+# this script's mount points rather than the operator's folder. The setup
+# script's rule where it was loaded, and this script's copy of that rule's local
+# arm where it was not: a folder on this PC is usable either way, and it keeps
+# its name either way.
+if ($canResolveNetworkPaths) {
+    $rendezvousFolderName = Get-RendezvousFolderName -Path $rendezvousPath
+} else {
+    $rendezvousFolderName = Get-LocalFolderName -Path $rendezvousPath
+}
 
 if ($rendezvousResolved.Kind -eq 'Network') {
     Show-Head 'Part 2: the network folder'

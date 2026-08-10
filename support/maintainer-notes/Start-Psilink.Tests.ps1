@@ -28,6 +28,13 @@ BeforeAll {
     $launcherScript = (Resolve-Path (Join-Path $PSScriptRoot '..\windows-network-filedrop\Start-Psilink.ps1')).Path
     . $launcherScript -LoadFunctionsOnly
 
+    # The shape the launcher itself runs in: it reaches the setup script's path
+    # resolution, and its rule for naming a folder within a share, through this
+    # same dot-source rather than carrying a second copy of either. The two
+    # scripts share no function name, so neither redefines the other's.
+    $setupScriptForLauncher = (Resolve-Path (Join-Path $PSScriptRoot '..\windows-network-filedrop\Setup-PsilinkFileDrop.ps1')).Path
+    . $setupScriptForLauncher -LoadFunctionsOnly
+
     # Its own name rather than the setup suite's Start-PowerShellChild: both
     # files run in one Pester invocation, and two helpers sharing a name would
     # give the pair a load order that neither should acquire.
@@ -484,42 +491,69 @@ Describe 'The console argument vector' {
     }
 }
 
-Describe 'The shared folder name the console is told' {
-    It 'names a folder on this PC by its own last segment' {
-        Get-RendezvousFolderName -Path 'C:\Users\dana\Egnyte\agency-a-agency-b' |
+Describe 'The name the launcher gives a folder on this PC' {
+    It 'names a folder by its own last segment' {
+        Get-LocalFolderName -Path 'C:\Users\dana\Egnyte\agency-a-agency-b' |
             Should -Be 'agency-a-agency-b'
     }
 
     It 'ignores a trailing separator, and reads either one' {
-        Get-RendezvousFolderName -Path 'C:\drops\studyA\' | Should -Be 'studyA'
-        Get-RendezvousFolderName -Path 'C:/drops/studyA' | Should -Be 'studyA'
-    }
-
-    It 'names a share subfolder rather than the mount the volume is bound at' {
-        # The network shape mounts a named volume, so no host path reaches the
-        # container at all: the share is where the name has to come from.
-        Get-RendezvousFolderName -Share 'exchange' -SubPath 'agency-a/agency-b' |
-            Should -Be 'agency-b'
-    }
-
-    It 'names the share itself when the folder is the share root' {
-        Get-RendezvousFolderName -Share 'exchange' | Should -Be 'exchange'
+        Get-LocalFolderName -Path 'C:\drops\studyA\' | Should -Be 'studyA'
+        Get-LocalFolderName -Path 'C:/drops/studyA' | Should -Be 'studyA'
     }
 
     It 'gives no name for a drive root, which has none' {
         # Naming it 'D:' would ask the partner to match a drive letter that means
         # nothing on their machine; the console degrades to no name instead.
-        Get-RendezvousFolderName -Path 'D:\' | Should -BeNullOrEmpty
-        Get-RendezvousFolderName -Path 'D:' | Should -BeNullOrEmpty
+        Get-LocalFolderName -Path 'D:\' | Should -BeNullOrEmpty
+        Get-LocalFolderName -Path 'D:' | Should -BeNullOrEmpty
     }
 
     It 'gives no name for a path it could read no segment out of' {
-        Get-RendezvousFolderName -Path '' | Should -BeNullOrEmpty
-        Get-RendezvousFolderName -Path '\' | Should -BeNullOrEmpty
+        Get-LocalFolderName -Path '' | Should -BeNullOrEmpty
+        Get-LocalFolderName -Path '\' | Should -BeNullOrEmpty
+    }
+
+    It 'answers the same in a constrained language mode' {
+        # The other run that reaches the console without the setup script's
+        # functions: an application-control policy has left the session in
+        # ConstrainedLanguage, and the launcher does not attempt the dot-source
+        # there at all. The mode is set here rather than by a policy this suite
+        # could impose, so what this holds is the half that is the launcher's
+        # own -- that naming a folder is nothing a constrained session refuses.
+        $command = "`$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'; " +
+            ". '$launcherScript' -LoadFunctionsOnly; " +
+            "'NAME:' + (Get-LocalFolderName -Path 'C:\drops\studyA\') + " +
+            "':' + (Get-LocalFolderName -Path 'D:\') + ':END'"
+        $run = Start-LauncherChild -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $command)
+
+        $stdout = ([string] $run.Output).Trim()
+        $stderr = ([string] $run.Errors).Trim()
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) " +
+            "err=$($stderr -replace '\s+', ' ')"
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $stdout | Should -Be 'NAME:studyA::END' -Because $shape
+    }
+
+    It 'answers as the setup script''s rule does, over every shape a path takes' {
+        # The launcher names a local folder itself so that a run which could not
+        # load the setup script still gives the partner a name, and this is what
+        # holds that copy to the rule it copies: both are dot-sourced above, and
+        # an edit to either that the other did not get fails here.
+        foreach ($path in @(
+                'C:\Users\dana\Egnyte\agency-a-agency-b', 'C:\drops\studyA\',
+                'C:/drops/studyA', 'C:\drops\\studyA', 'C:\drops\study A ',
+                'C:\drops', 'C:\', 'D:\', 'D:', '', '\', '/', 'Z:\studyA',
+                '\\server\exchange\agency-a\agency-b', '\\server\exchange',
+                '\\?\C:\drops\x', 'relative\folder')) {
+            $fromLauncher = Get-LocalFolderName -Path $path
+            $fromSetupScript = Get-RendezvousFolderName -Path $path
+            $fromLauncher | Should -Be $fromSetupScript -Because "[$path]"
+        }
     }
 }
 
-Describe 'The network flow, driven against a stub engine' {
+Describe 'The launcher flow, driven against a stub engine' {
     BeforeAll {
         $script:FlowRoot = Join-Path $env:TEMP ('psilink-launcher-flow-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         $script:FlowBin = Join-Path $script:FlowRoot 'bin'
@@ -551,6 +585,21 @@ Describe 'The network flow, driven against a stub engine' {
         if ($stamped -eq $source) { throw 'the launcher no longer carries the digest line this suite stamps' }
         $script:FlowLauncher = Join-Path $script:FlowRoot 'Start-Psilink.ps1'
         [IO.File]::WriteAllText($script:FlowLauncher, $stamped)
+
+        # A second copy with nothing beside it, and a stub log of its own so
+        # that what it called is read back whatever else in this file has run.
+        # The flow's other route past the setup script -- a constrained language
+        # mode -- is an application-control policy this suite cannot impose over
+        # a whole run, and both routes leave the flow on the same branch.
+        $script:AloneRoot = Join-Path $script:FlowRoot 'alone'
+        $script:AloneStub = Join-Path $script:AloneRoot 'stub'
+        $script:AloneData = Join-Path $script:AloneRoot 'agency-a-agency-b'
+        foreach ($directory in @($script:AloneRoot, $script:AloneStub, $script:AloneData)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+        $script:AloneCalls = Join-Path $script:AloneStub 'calls.log'
+        $script:AloneLauncher = Join-Path $script:AloneRoot 'Start-Psilink.ps1'
+        [IO.File]::WriteAllText($script:AloneLauncher, $stamped)
 
         # The credential prompt is the one part of the flow that cannot be
         # driven, which the case below holds as a check: it reads the console
@@ -681,5 +730,51 @@ Describe 'The network flow, driven against a stub engine' {
         # param() block puts in place of what the operator typed.
         $calls | Should -Not -BeLike '*psilink-sync*' -Because $shape
         $output | Should -Not -BeLike '*psilink-sync*' -Because $shape
+    }
+
+    It 'names the folder for the console with no setup script beside it' {
+        # A folder on this PC is what this run still supports, and its name is
+        # part of what supporting it means: the partner is told which folder to
+        # look for by the invitation the console mints, and a run that passed no
+        # name would leave them nothing to match.
+        $originalPath = $env:PATH
+        $originalStubDir = $env:PSILINK_STUB_DIR
+        try {
+            $env:PATH = @($script:FlowBin,
+                (Join-Path $env:SystemRoot 'System32'),
+                $env:SystemRoot,
+                (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0')) -join ';'
+            $env:PSILINK_STUB_DIR = $script:AloneStub
+            $run = Start-LauncherChild -Arguments @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script:AloneLauncher`"",
+                '-DataRoot', "`"$script:AloneData`"",
+                '-Port', $script:FlowPort,
+                '-NoBrowser') `
+                -InputLines @('', '') -TimeoutSeconds 150
+        } finally {
+            $env:PATH = $originalPath
+            if ($null -eq $originalStubDir) {
+                Remove-Item 'env:PSILINK_STUB_DIR' -ErrorAction SilentlyContinue
+            } else {
+                $env:PSILINK_STUB_DIR = $originalStubDir
+            }
+        }
+
+        $calls = ''
+        if (Test-Path -LiteralPath $script:AloneCalls) {
+            $calls = [string] (Get-Content -LiteralPath $script:AloneCalls -Raw)
+        }
+        $output = [string] $run.Output
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$(@($calls -split '\r?\n').Count) tail=" +
+            (($output.Substring([Math]::Max(0, $output.Length - 300))) -replace '\s+', ' ')
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        # The branch this case is here to drive: without it the run resolved
+        # paths after all, and the name it passed came from the other rule.
+        $output | Should -BeLike '*Setup-PsilinkFileDrop.ps1 is not in this folder*' -Because $shape
+        $output | Should -Match 'The console is at' -Because $shape
+
+        $served = @($calls -split '\r?\n' | Where-Object { $_ -like '*serve*' }) -join ' :: '
+        $served | Should -BeLike '*JOB_RENDEZVOUS_NAME=agency-a-agency-b*' -Because $shape
     }
 }

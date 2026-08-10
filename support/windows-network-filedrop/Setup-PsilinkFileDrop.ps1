@@ -536,6 +536,72 @@ function Resolve-DropPath {
     return @{ Kind = 'Unknown'; Reason = "could not interpret '$Raw'" }
 }
 
+function Get-RendezvousFolderName {
+    <#  The name of the folder shared with the partner, as the operator knows
+        it, for the console to mint into the invitation. Shared with
+        Start-Psilink.ps1, which dot-sources this script rather than carrying a
+        share rule of its own. It does carry the -Path arm below, for the runs
+        that cannot load this script and are left with a local folder; the suite
+        pins the two to the same answers.
+
+        The console cannot work this name out for itself. It sees only the
+        container's side of the mount, and the scripts pick that side: the
+        command below binds the share at /sync, and the launcher binds every
+        folder an operator chooses at /rendezvous, or rendezvouses out of /data
+        for a single-folder run. So the last segment of what the container sees
+        names a script's layout, not the operator's folder, and the name has to
+        be passed in beside the mount.
+
+        A network share is not mounted by path at all -- the volume stands for a
+        server and share -- so the name comes from the resolved share: the last
+        segment of the subfolder within it, or the share itself when the folder
+        IS the share root.
+
+        Returns an empty string when there is no folder name to give: a drive
+        root has none, and neither has a path no last segment could be read out
+        of. That empty string is passed to the console as it stands, which is
+        what leaves the console with no name for the folder at all; naming the
+        drive letter instead would be a name no partner could match. #>
+    param(
+        [string] $Path = '',
+        [string] $Share = '',
+        [string] $SubPath = ''
+    )
+
+    $source = if ($Share) { if ($SubPath) { $SubPath } else { $Share } } else { $Path }
+    $segments = @($source -split '[\\/]+' | Where-Object { $_ })
+    if ($segments.Count -eq 0) { return '' }
+    $name = $segments[-1].Trim()
+    # A bare drive designator (C:) is what a drive root reduces to, and it names
+    # a drive rather than a folder.
+    if ($name -match '^[A-Za-z]:$') { return '' }
+    return $name
+}
+
+function Get-ConsoleCommandLines {
+    <#  The browser console's docker command as the closing screen prints it,
+        returned rather than written so that what an operator is told to run can
+        be read back by a test.
+
+        The rendezvous folder's name travels beside the mount whether or not
+        this script could work one out: an empty value is what tells the console
+        it has no name for the folder, while omitting the variable would instead
+        have the console name the folder /sync -- the mount point THIS script
+        picked, and a name no partner could match. #>
+    param(
+        [Parameter(Mandatory = $true)][string] $VolumeName,
+        [string] $RendezvousName = ''
+    )
+
+    return @(
+        "  docker run --rm -p 127.0.0.1:3000:3000 ``",
+        "    --env JOB_DATA_ROOT=/data --env JOB_RENDEZVOUS_DIR=/sync ``",
+        "    --env 'JOB_RENDEZVOUS_NAME=$RendezvousName' ``",
+        "    -v 'C:\path\to\your\work:/data' ``",
+        "    -v '${VolumeName}:/sync' ``",
+        "    vdorie/psi-link:latest serve")
+}
+
 # Everything above defines something; everything below runs the setup. A
 # dot-source that asked for the definitions alone stops here.
 if ($LoadFunctionsOnly) { return }
@@ -1001,16 +1067,13 @@ Write-Info 'See the troubleshooting page, "Synced folders".'
 Write-Host ''
 Write-Host 'There is also a browser console:' -ForegroundColor Cyan
 Write-Host ''
-# The console names the shared folder to the partner, and the mount point in the
-# command below is this script's choice rather than a name anyone would
-# recognise, so the share's own folder name is passed alongside it.
-$shareFolderName = if ($SubPath) { @($SubPath -split '/' | Where-Object { $_ })[-1] } else { $Share }
-Write-Host "  docker run --rm -p 127.0.0.1:3000:3000 ``"
-Write-Host "    --env JOB_DATA_ROOT=/data --env JOB_RENDEZVOUS_DIR=/sync ``"
-Write-Host "    --env 'JOB_RENDEZVOUS_NAME=$shareFolderName' ``"
-Write-Host "    -v 'C:\path\to\your\work:/data' ``"
-Write-Host "    -v '${VolumeName}:/sync' ``"
-Write-Host "    vdorie/psi-link:latest serve"
+# The share's own folder name, worked out under the same rule the launcher
+# names a folder by, and passed to the console because what the container is
+# shown is this script's mount point rather than anything the partner knows.
+$shareFolderName = Get-RendezvousFolderName -Share $Share -SubPath $SubPath
+foreach ($line in (Get-ConsoleCommandLines -VolumeName $VolumeName -RendezvousName $shareFolderName)) {
+    Write-Host $line
+}
 Write-Host ''
 Write-Info 'then open http://127.0.0.1:3000'
 Write-Info ''
