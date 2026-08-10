@@ -86,7 +86,11 @@ export function findFailures(file, absPath, raw) {
   // there), then fenced code, then inline code spans, before scanning for
   // real links -- each stripping preserves line structure so a line number
   // derived from `match.index` below stays correct.
-  const text = stripCodeSpans(stripFences(raw.replace(/<!--[\s\S]*?-->/g, "")));
+  const text = stripCodeSpans(
+    stripFences(
+      raw.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, " ")),
+    ),
+  );
   const linkRe = /\]\(([^)]+)\)/g;
   let match;
   while ((match = linkRe.exec(text)) !== null) {

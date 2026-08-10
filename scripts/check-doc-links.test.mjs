@@ -41,4 +41,11 @@ describe("check-doc-links inline code spans", () => {
     const failures = findFailures(file, absPath, raw);
     expect(failures).toEqual([`${file}:1  dead path -> missing4.md`]);
   });
+
+  it("reports the correct line for a dead link after a multi-line HTML comment", () => {
+    const raw =
+      "<!-- example [link](syntax.md) lives here\nacross\nseveral\nlines -->\nline5\n[broken](missing5.md)\n";
+    const failures = findFailures(file, absPath, raw);
+    expect(failures).toEqual([`${file}:6  dead path -> missing5.md`]);
+  });
 });
