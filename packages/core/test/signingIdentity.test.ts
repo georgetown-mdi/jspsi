@@ -21,6 +21,7 @@ import {
 } from "../src/signingIdentity";
 import {
   assertPrivateKeyMatchesPublic,
+  ECDSA_P256_SIGNATURE_BYTES,
   importPrivateSigningKey,
 } from "../src/signingKeys";
 import { fromBase64Url, toBase64Url } from "../src/utils/crypto";
@@ -62,6 +63,26 @@ async function platformImportsKey(jwk: JsonWebKey): Promise<boolean> {
   }
 }
 
+/** The DER SEQUENCE encoding of a raw `r || s` signature: the encoding a
+ * certificate signature must never carry, built here so a test can measure it
+ * against the raw one. */
+function derEncodeSignature(raw: Uint8Array): Uint8Array {
+  const derInteger = (value: Uint8Array): Array<number> => {
+    let start = 0;
+    while (start < value.length - 1 && value[start] === 0) start++;
+    const body = [...value.subarray(start)];
+    // A leading octet at or above 0x80 would read as a negative INTEGER.
+    if ((body[0] ?? 0) >= 0x80) body.unshift(0);
+    return [0x02, body.length, ...body];
+  };
+  const half = raw.length / 2;
+  const body = [
+    ...derInteger(raw.subarray(0, half)),
+    ...derInteger(raw.subarray(half)),
+  ];
+  return new Uint8Array([0x30, body.length, ...body]);
+}
+
 // --- Generation and round-trip ----------------------------------------------
 
 describe("generateSigningIdentity", () => {
@@ -81,9 +102,18 @@ describe("generateSigningIdentity", () => {
   test("the self-signature is the fixed-length raw r||s, never DER", async () => {
     const id = await freshIdentity();
     const signature = fromBase64Url(id.certificate.signature);
-    expect(signature).toHaveLength(64);
-    // A DER SEQUENCE would open 0x30; the raw encoding is r||s with no header.
-    expect(signature[0]).not.toBe(0x30);
+    // Length is the discriminator, not the leading byte: the first byte of a
+    // raw signature is r's top octet, uniform over the curve order, so a
+    // `signature[0] !== 0x30` check calls a correct signature DER once in 256
+    // generations. The two encodings are told apart by size instead, and the
+    // second assertion measures that separation on this very signature rather
+    // than asserting it in prose -- DER wraps the same pair in a SEQUENCE
+    // header plus a tag and length per INTEGER, and pads any integer whose top
+    // bit is set.
+    expect(signature).toHaveLength(ECDSA_P256_SIGNATURE_BYTES);
+    expect(derEncodeSignature(signature).length).toBeGreaterThan(
+      ECDSA_P256_SIGNATURE_BYTES,
+    );
   });
 
   test("rejects an empty identity", async () => {
