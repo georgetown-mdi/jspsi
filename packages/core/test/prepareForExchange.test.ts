@@ -2,6 +2,7 @@ import { expect, test, describe } from "vitest";
 
 import {
   prepareForExchange,
+  runExchange,
   assertAlgorithmImplemented,
   assertSigningModeImplemented,
 } from "../src/exchange";
@@ -11,6 +12,9 @@ import {
   UsageError,
 } from "../src/errors";
 
+import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
+
+import type { MessageConnection } from "../src/connection/messageConnection";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
 import type { SigningConfig, SigningMode } from "../src/config/signing";
@@ -251,6 +255,192 @@ describe("prepareForExchange: a deduplicating term is refused", () => {
       columns,
     );
     expect(prepared.linkageTerms.deduplicate).toBe(false);
+  });
+});
+
+// --- A fan-out transform fails closed before connecting -----------------------
+
+describe("prepareForExchange: a fan-out transform is refused", () => {
+  // Matching runs on a single value per record, so a record whose value splits
+  // contributes no key at all -- fewer matches than the terms describe. Refuse
+  // before any connection rather than run the narrower matching silently.
+  const splittingStandardization: Standardization = [
+    {
+      output: "first_name",
+      input: "first_name",
+      steps: [{ function: "to_upper_case" }],
+    },
+    {
+      output: "last_name",
+      input: "last_name",
+      steps: [{ function: "split_on", params: { delimiter: "-" } }],
+    },
+  ];
+
+  const splittingElementTerms: LinkageTerms = {
+    ...terms,
+    linkageKeys: [
+      {
+        name: "FN_LN",
+        elements: [
+          { field: "first_name" },
+          {
+            field: "last_name",
+            transform: [{ function: "split_on", params: { delimiter: "-" } }],
+          },
+        ],
+      },
+    ],
+  };
+
+  test("a standardization declaring split_on is refused before connecting", () => {
+    const prepare = () =>
+      prepareForExchange(
+        {
+          linkageTerms: terms,
+          metadata,
+          standardization: splittingStandardization,
+        },
+        "Tester",
+        rawRows,
+        columns,
+      );
+    expect(prepare).toThrow(UsageError);
+    expect(prepare).toThrow(/split_on/);
+  });
+
+  test("a linkage-key element transform declaring split_on is refused", () => {
+    // The second authoring surface: an element transform cannot fan out at all
+    // (it would collapse to one joined value), so it is refused on the same terms.
+    const prepare = () =>
+      prepareForExchange(
+        { linkageTerms: splittingElementTerms, metadata },
+        "Tester",
+        rawRows,
+        columns,
+      );
+    expect(prepare).toThrow(UsageError);
+    expect(prepare).toThrow(/split_on/);
+  });
+
+  test("the standardization-declared refusal is an OperatorConfigError", () => {
+    // A standardization is per-party and local -- no invitation carries one, and
+    // the accept path derives its own from the adopted terms -- so this fault is
+    // provably the operator's own authoring, and both front ends surface it as
+    // the actionable config category rather than a generic exchange failure.
+    let thrown: unknown;
+    try {
+      prepareForExchange(
+        {
+          linkageTerms: terms,
+          metadata,
+          standardization: splittingStandardization,
+        },
+        "Tester",
+        rawRows,
+        columns,
+      );
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(OperatorConfigError);
+  });
+
+  test("the element-transform refusal is not an OperatorConfigError", () => {
+    // An acceptor adopts the element transforms verbatim from the partner's
+    // invitation, so the fault is not provably this operator's own content: the
+    // message stays swallowed by the web's generic alert, like the psi-c and
+    // deduplicate siblings.
+    let thrown: unknown;
+    try {
+      prepareForExchange(
+        { linkageTerms: splittingElementTerms, metadata },
+        "Tester",
+        rawRows,
+        columns,
+      );
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UsageError);
+    expect(thrown).not.toBeInstanceOf(OperatorConfigError);
+  });
+
+  test("a standardization with no fan-out step prepares normally", () => {
+    const prepared = prepareForExchange(
+      {
+        linkageTerms: terms,
+        metadata,
+        standardization: consistentStandardization,
+      },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.rowCount).toBe(1);
+  });
+
+  test("the default (unauthored) standardization prepares normally", () => {
+    // The refusal runs over the RESOLVED standardization, so the terms-only path
+    // -- which reconstructs one from the terms -- must stay unaffected.
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.rowCount).toBe(1);
+  });
+
+  // The run boundary re-checks the terms half, so a PreparedExchange assembled
+  // without going through prepareForExchange is refused before its terms reach
+  // the partner. Every collaborator the run would touch throws when used, so the
+  // refusal is what the rejection can come from -- a connection frame or a PSI
+  // call would surface as its own error, failing these assertions.
+  const failIfUsed = (what: string) => (): never => {
+    throw new Error(`${what} was used past the fan-out refusal`);
+  };
+  const unusableConnection = (): MessageConnection => ({
+    send: failIfUsed("the connection"),
+    receive: failIfUsed("the connection"),
+    close: failIfUsed("the connection"),
+  });
+  const unusablePsiLibrary = new Proxy({} as PSILibrary, {
+    get: failIfUsed("the PSI library"),
+  });
+
+  test("runExchange refuses a fan-out element transform before it connects", async () => {
+    // Built legitimately -- terms and standardization both free of fan-out -- then
+    // given fan-out TERMS, the way a caller that skipped prepareForExchange could.
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    prepared.linkageTerms = splittingElementTerms;
+
+    const run = runExchange(unusableConnection(), "initiator", prepared, {
+      psiLibrary: unusablePsiLibrary,
+    });
+    await expect(run).rejects.toThrow(UsageError);
+    await expect(run).rejects.toThrow(/split_on/);
+  });
+
+  test("runExchange runs past the guard for terms declaring no fan-out", async () => {
+    // The sibling of the refusal: with the same unusable collaborators, terms free
+    // of fan-out reach the terms exchange, so the failure is the connection's --
+    // proof the refusal above fired on the fan-out rather than on the fixtures.
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    const run = runExchange(unusableConnection(), "initiator", prepared, {
+      psiLibrary: unusablePsiLibrary,
+    });
+    await expect(run).rejects.toThrow(/the connection was used/);
   });
 });
 

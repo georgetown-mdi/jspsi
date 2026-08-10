@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { getLogger } from "./utils/logger.js";
-import { StandardizationTermsError } from "./errors.js";
+import {
+  OperatorConfigError,
+  StandardizationTermsError,
+  UsageError,
+} from "./errors.js";
 import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
 import {
   compileLinearRegex,
@@ -41,10 +45,11 @@ const logger = getLogger("cleaning");
  * - `null` -- no valid value; the record is excluded from any linkage key that
  *   references this field.
  * - `Set<string>` -- multiple candidate values produced by a fan-out step such
- *   as `split_on`. Each value generates a separate PSI entry; all entries carry
- *   the original row identifier so that matches resolve back to the source row.
- *   `Set` enforces uniqueness: duplicate values from splitting or subsequent
- *   element-wise steps are automatically deduplicated.
+ *   as `split_on`. `Set` enforces uniqueness: duplicate values from splitting or
+ *   subsequent element-wise steps are automatically deduplicated. Matching each
+ *   candidate independently is not implemented, so a record that reaches the key
+ *   builder with more than one candidate is refused rather than dropped from the
+ *   round; see {@link assertFanOutImplemented}.
  */
 export type FieldValue = string | null | Set<string>;
 
@@ -648,6 +653,70 @@ export const STANDARDIZATION_FUNCTION_NAMES: readonly string[] = [
   "coalesce",
 ];
 
+/**
+ * The standardization functions that expand ONE value into several match
+ * candidates -- the multi-value {@link FieldValue} case. Matching runs on a single
+ * value per record, so an exchange whose transforms declare one of these is
+ * refused rather than run with the narrower matching it would actually deliver;
+ * see {@link assertFanOutImplemented}.
+ *
+ * Hand-listed, because whether a factory can return a multi-value `Set` is not
+ * derivable from the registry. A fan-out function added to
+ * {@link STANDARDIZING_FUNCTIONS} without an entry here is not left to narrow
+ * silently: {@link buildKeyStrings} refuses a row carrying more than one candidate
+ * for any element -- tested before a later step or the key-string `Set` can
+ * collapse the candidates back to one -- and an element transform that expands a
+ * value is refused where it expands. Those refusals are the point of harm rather
+ * than a pre-run gate: they fire as keys are built, which is after the terms
+ * exchange, so it is the DECLARED step this list carries that is refused before
+ * anything reaches the wire.
+ */
+export const FAN_OUT_FUNCTION_NAMES: readonly string[] = ["split_on"];
+
+const quotedFanOutFunctionNames = FAN_OUT_FUNCTION_NAMES.map(
+  (name) => `"${name}"`,
+).join(", ");
+
+// The recovery step both fan-out refusals close on. Named separately only
+// because the two reach it from different openings (a declared step versus a
+// record that actually expanded), not because they differ in what to do.
+const FAN_OUT_RECOVERY =
+  `Remove the ${quotedFanOutFunctionNames} step from the standardization ` +
+  "and from every linkage-key element transform, or wait for fan-out support " +
+  "before running.";
+
+// The message both DECLARED-step refusals carry, raised before the exchange
+// runs. `functionName` is matched against FAN_OUT_FUNCTION_NAMES before it
+// reaches here, so the message carries a fixed literal, never partner free text.
+// The two declaring surfaces share the wording and differ only in error class,
+// because they differ in whose content the fault is -- see
+// assertFanOutImplemented.
+function fanOutDeclaredMessage(functionName: string): string {
+  return (
+    "fan-out matching is not yet implemented, but these transforms declare a " +
+    `"${functionName}" step: it expands one value into several match ` +
+    "candidates, while matching runs on a single value per record. A record " +
+    "whose value actually splits would contribute no key at all rather than " +
+    "one per candidate, matching fewer records than the terms describe, so " +
+    `the exchange is refused before it runs. ${FAN_OUT_RECOVERY}`
+  );
+}
+
+// Refusal for a fan-out that REACHED the key builder -- the point of harm, where
+// the alternative is the silent narrowing itself. Unreachable while
+// assertFanOutImplemented gates every run path, and deliberately a check rather
+// than a comment saying so: it also covers a fan-out function that never made it
+// into FAN_OUT_FUNCTION_NAMES.
+function fanOutReachedKeyBuilderRefusal(): UsageError {
+  return new UsageError(
+    "fan-out matching is not yet implemented, but a transform expanded a " +
+      "record into several match candidates: matching runs on a single value " +
+      "per record, so continuing would drop the record from its linkage key " +
+      "rather than match it on each candidate. The exchange is refused " +
+      `instead. ${FAN_OUT_RECOVERY}`,
+  );
+}
+
 // --- Function descriptors ----------------------------------------------------
 
 /**
@@ -1188,10 +1257,11 @@ function toValueSet(result: FieldValue): string[] {
  * A lazily-evaluated, cached mapping from a raw dataset row index to the set
  * of standardized string values for one linkage field.
  *
- * Each value in the returned set generates a separate PSI entry for that row,
- * while all entries retain the original row index so that matches resolve back
- * to the source record. An empty array indicates that the record has no valid
- * value for this field and is excluded from any linkage key that references it.
+ * An empty array indicates that the record has no valid value for this field and
+ * is excluded from any linkage key that references it. More than one value is a
+ * fan-out, which an exchange refuses rather than matches (see
+ * {@link assertFanOutImplemented}); a consumer that measures the field's own
+ * pipeline, rather than building keys from it, still reads every value.
  */
 export class StandardizedField {
   readonly name: string;
@@ -1468,8 +1538,15 @@ const compiledElementTransforms = new WeakMap<
   CompiledStep[]
 >();
 
-// Element-level transforms must produce a single string (they do not fan out).
-// If a fan-out step appears in an element transform it is collapsed by joining.
+// Element-level transforms must produce a single string. A step that actually
+// expands a value into SEVERAL candidates is refused here rather than collapsed
+// into one joined string: joining matches on a value neither party's data holds,
+// which is not the several-independent-candidates behavior the terms declare. A
+// fan-out step that did not split -- split_on emits a one-element set when its
+// delimiter is absent -- carries a single candidate, so it is unwrapped and flows
+// on, the same size test StandardizedKeyIterable.valueAt applies. See
+// assertFanOutImplemented, which refuses the same step from the declared
+// transforms before any row runs.
 function applyElementTransform(
   value: string,
   steps: TransformStep[] | undefined,
@@ -1482,12 +1559,17 @@ function applyElementTransform(
     compiled = compileSteps(steps);
     compiledElementTransforms.set(steps, compiled);
   }
-  let current: FieldValue = value;
+  let current: string | null = value;
   for (const step of compiled) {
-    current = applyStep(current, step);
-    if (current instanceof Set) current = [...current].join("");
+    const next = applyStep(current, step);
+    if (next instanceof Set) {
+      if (next.size > 1) throw fanOutReachedKeyBuilderRefusal();
+      current = next.values().next().value ?? null;
+    } else {
+      current = next;
+    }
   }
-  return current as string | null;
+  return current;
 }
 
 function swapElements(
@@ -1512,9 +1594,15 @@ const KEY_STRING_WARN_THRESHOLD = 20;
  * and a row index.
  *
  * Returns `null` if any element's field value set is empty (the record is
- * excluded from this key round). Otherwise returns one or more strings: more
- * than one arises from fan-out fields producing a cross-product across
- * elements.
+ * excluded from this key round). Otherwise returns the cross-product across the
+ * elements' values, one key string per combination.
+ *
+ * A row whose field carries more than one candidate value is refused rather than
+ * built from: matching runs on a single value per record, so a cross-product over
+ * several candidates cannot be honored (see {@link assertFanOutImplemented}). The
+ * refusal runs before the element transforms and before the deduplicating result
+ * `Set`, either of which can collapse several candidates into one key string and
+ * so hide the fan-out from a test on the assembled key.
  *
  * All returned strings belong to the same original row at `index`; the caller
  * is responsible for preserving that association when adding entries to the PSI
@@ -1543,6 +1631,15 @@ export function buildKeyStrings(
     const field = dataset.getField(element.field);
     const raw = field ? field.get(index) : [];
     if (raw.length === 0) return null;
+    // Multiplicity is the fan-out signature, and it is tested HERE, before any
+    // later step can collapse it: a pipeline with no Set-producing step yields
+    // exactly one candidate, so a longer list is a fan-out whatever survives
+    // downstream. Testing only the assembled key would miss the collapsing shapes
+    // -- an element transform that filters all but one candidate, or two
+    // candidates that transform to the same string, both of which the key-string
+    // Set below reduces to a single innocuous-looking key while the row matched on
+    // less than the terms declare.
+    if (raw.length > 1) throw fanOutReachedKeyBuilderRefusal();
 
     const transformed: string[] = [];
     for (const v of raw) {
@@ -1586,7 +1683,11 @@ export function buildKeyStrings(
  * Per-row behaviour:
  * - `null` from {@link buildKeyStrings} -> `undefined` (record excluded).
  * - Singleton `Set<string>` -> the one string.
- * - Multi-value `Set<string>` (fan-out not yet in scope) -> `undefined`.
+ * - Multi-value `Set<string>` -> refused: fan-out matching is not implemented,
+ *   and dropping the record from the round instead would narrow matching while
+ *   the terms declare each candidate matches independently. Refused before the
+ *   exchange runs by {@link assertFanOutImplemented}; this is the same refusal at
+ *   the point of harm, for a fan-out that reached the key builder anyway.
  */
 export class StandardizedKeyIterable {
   [index: number]: string | undefined;
@@ -1627,7 +1728,7 @@ export class StandardizedKeyIterable {
       this.isReceiver,
     );
     if (result === null || result.size === 0) return undefined;
-    if (result.size > 1) return undefined;
+    if (result.size > 1) throw fanOutReachedKeyBuilderRefusal();
     return result.values().next().value as string;
   }
 
@@ -1722,6 +1823,74 @@ export function assertStandardizationMatchesTerms(
         "the linkage terms so every transform output names a declared linkage " +
         "field and every step function is known.",
     );
+}
+
+function declaredFanOutFunction(
+  steps: ReadonlyArray<{ function: string }> | undefined,
+): string | undefined {
+  return steps?.find((step) => FAN_OUT_FUNCTION_NAMES.includes(step.function))
+    ?.function;
+}
+
+/**
+ * Refuse transforms that declare a fan-out step the run cannot honor, before any
+ * matching begins.
+ *
+ * Matching runs on a single value per record: a record whose value expands into
+ * several match candidates contributes no key at all, so a fan-out term would
+ * silently match FEWER records while the consent surface states each candidate
+ * matches independently. That is the disclosure-fidelity gap this refusal closes,
+ * the fan-out sibling of `assertAlgorithmImplemented` and
+ * `assertDeduplicateImplemented` in `exchange.ts`.
+ *
+ * Both authoring surfaces a fan-out step can reach are checked, because both
+ * narrow: a standardization transformation feeds {@link StandardizedField}, whose
+ * multi-value rows drop out of the key round, and a linkage-key element transform
+ * feeds {@link buildKeyStrings}, which cannot fan out at all. `standardization` is
+ * omitted where the caller no longer holds one (the run boundary reads a prepared
+ * exchange, which retains the built dataset rather than the spec); what covers
+ * that half there is {@link buildKeyStrings}'s own refusal, which fires as keys
+ * are built -- at the narrowing, but after this party's terms have gone on the
+ * wire.
+ *
+ * The two surfaces carry the same message under DIFFERENT error classes, because
+ * they differ in whose content the fault is. A `standardization` is only ever this
+ * party's own: no invitation carries one (it is per-party and local), and the
+ * accept path derives its own from the adopted terms through
+ * `getDefaultStandardization`, whose steps come from the fixed per-type pipelines
+ * and never include a fan-out function. So that half is an
+ * {@link OperatorConfigError} -- the membership rule for the actionable "config"
+ * category both front ends key off -- like `assertSigningModeImplemented`, and
+ * raised as the base class because no narrower member fits (this is an
+ * unimplemented-feature refusal, not the terms inconsistency
+ * {@link StandardizationTermsError} names). A linkage-key element transform is
+ * adopted verbatim from the partner's invitation on the accept path, so that half
+ * stays a plain {@link UsageError} whose message the web's generic alert swallows,
+ * for the same reason as `assertAlgorithmImplemented`. Either way the message names
+ * only the fan-out functions this module recognizes -- a declared name reaches it
+ * having already matched one -- so no partner free text is interpolated, and the
+ * CLI classifies both as a usage error (exit 64) through the base class.
+ *
+ * When fan-out matching lands, REPLACE this refusal with it and true up the
+ * consent copy in the same change; a splitting record must then contribute one
+ * PSI entry per candidate.
+ */
+export function assertFanOutImplemented(
+  terms: LinkageTerms,
+  standardization?: Standardization,
+): void {
+  for (const transformation of standardization ?? []) {
+    const declared = declaredFanOutFunction(transformation.steps);
+    if (declared !== undefined)
+      throw new OperatorConfigError(fanOutDeclaredMessage(declared));
+  }
+  for (const key of terms.linkageKeys) {
+    for (const element of key.elements) {
+      const declared = declaredFanOutFunction(element.transform);
+      if (declared !== undefined)
+        throw new UsageError(fanOutDeclaredMessage(declared));
+    }
+  }
 }
 
 /**

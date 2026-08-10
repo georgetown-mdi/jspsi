@@ -4,6 +4,7 @@ import { getDefaultLinkageTerms } from "./defaults/linkageTerms.js";
 import { getDefaultStandardization } from "./defaults/standardization.js";
 import {
   buildStandardizedDataset,
+  assertFanOutImplemented,
   assertStandardizationMatchesTerms,
   StandardizedKeyIterable,
 } from "./standardization.js";
@@ -472,6 +473,15 @@ export function prepareForExchange(
       linkageTerms,
     );
 
+  // Fail closed on a transform that fans one value out into several match
+  // candidates before connecting: matching runs on a single value per record, so
+  // a splitting record would contribute no key at all and match less than the
+  // terms describe. Run over the RESOLVED standardization (authored or default,
+  // which declares no fan-out) plus the terms' element transforms, so both
+  // authoring surfaces are covered; the terms half is refused again at the run
+  // boundary. See assertFanOutImplemented.
+  assertFanOutImplemented(linkageTerms, standardization);
+
   // Sanitize the key names for display: on the accept side these come from the
   // partner's invitation (charset-unconstrained), and the operator already
   // reviewed the same escaped form when agreeing to the terms (displayInvitation).
@@ -768,6 +778,16 @@ export async function runExchange(
   // fires before the terms exchange puts anything on the wire. See
   // assertAlgorithmImplemented.
   assertAlgorithmImplemented(linkageTerms.algorithm);
+
+  // Refuse a fan-out element transform before the terms go on the wire, so a
+  // PreparedExchange built without going through prepareForExchange cannot run a
+  // key whose splitting records would silently drop out of the round. This reaches
+  // the terms half only: a PreparedExchange retains the built dataset, not the
+  // standardization spec, so a fan-out authored there and assembled outside
+  // prepareForExchange is refused when its first splitting row builds a key --
+  // at the narrowing, but after this party's terms have gone on the wire. See
+  // assertFanOutImplemented.
+  assertFanOutImplemented(linkageTerms);
 
   const { psiLibrary } = options;
   const onStage = options.onStage ?? (() => {});

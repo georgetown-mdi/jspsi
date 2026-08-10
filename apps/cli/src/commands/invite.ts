@@ -6,6 +6,7 @@ import {
   encodeInvitation,
   assertAlgorithmImplemented,
   assertDeduplicateImplemented,
+  assertFanOutImplemented,
   assertPayloadSendDisclosed,
   assertStandardizationMatchesTerms,
   disclosedColumnNames,
@@ -576,6 +577,15 @@ export async function validateInvite(params: {
     // terms via getDefaultLinkageTerms, which is always deduplicate: false).
     // See assertDeduplicateImplemented.
     assertDeduplicateImplemented(configTerms.deduplicate);
+
+    // Likewise fail closed pre-mint on a transform that fans one value out into
+    // several match candidates: matching runs on a single value per record, so a
+    // splitting record contributes no key at all. Covers this path's terms and,
+    // where the config carries one, its hand-authored standardization -- the two
+    // places only this config-as-source path can declare a fan-out step (the
+    // online and infer paths build terms and standardization from columns, which
+    // declare none). See assertFanOutImplemented.
+    assertFanOutImplemented(configTerms, configSource.standardization);
 
     // Carry the disclosed-columns subset only when the config declares an
     // explicit metadata block: without one the run infers metadata from the

@@ -34,9 +34,10 @@ export class UsageError extends Error {
 /**
  * The family of prepare-time configuration faults whose message is composed
  * SOLELY of the local operator's own content -- so it is both actionable to that
- * operator and safe to surface to them verbatim. Raised from
- * {@link prepareForExchange}, before any credential, terms, or data are sent,
- * never mid-exchange.
+ * operator and safe to surface to them verbatim. Raised from the pre-exchange
+ * boundaries -- {@link prepareForExchange} and the CLI's pre-mint invite
+ * validation -- before any credential, terms, or data are sent, never
+ * mid-exchange.
  *
  * This base type is the membership rule for the web's actionable "config" alert,
  * which renders the error's message: the web classifies a prepare-phase failure
@@ -50,9 +51,12 @@ export class UsageError extends Error {
  * member is in turn responsible for carrying only local content in its message
  * (see {@link StandardizationTermsError} for the basis of its guarantee).
  *
- * Extend it from any check that fails closed on the operator's OWN configuration
- * and whose message names only local content. Today {@link StandardizationTermsError}
- * is the sole member. The two send-side disclosure refusals
+ * Extend it from -- or raise it directly in -- any check that fails closed on
+ * the operator's OWN configuration and whose message names only local content.
+ * {@link StandardizationTermsError} is a member by subclass; a check whose
+ * refusal meets the contract without needing a narrower type (the
+ * standardization arm of `assertFanOutImplemented`) raises the base class
+ * directly. The two send-side disclosure refusals
  * ({@link OutboundDisclosureRefusalError}) are candidates on the same reasoning --
  * each compares this party's own current metadata against its own recorded set, so
  * every name in their messages is local -- but joining is a per-check surfacing

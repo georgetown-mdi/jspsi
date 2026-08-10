@@ -6,7 +6,9 @@ import {
   buildStandardizedDataset,
   buildKeyStrings,
   validateStandardizationAgainstTerms,
+  assertFanOutImplemented,
   assertStandardizationMatchesTerms,
+  FAN_OUT_FUNCTION_NAMES,
   describeTransformCoercions,
   dateFormatComponents,
   unsatisfiedLinkageFields,
@@ -16,7 +18,11 @@ import {
   StandardizedField,
   StandardizedDataset,
 } from "../src/standardization";
-import { StandardizationTermsError } from "../src/errors";
+import {
+  OperatorConfigError,
+  StandardizationTermsError,
+  UsageError,
+} from "../src/errors";
 import * as linearRegex from "../src/utils/linearRegex";
 import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
@@ -1769,28 +1775,68 @@ describe("buildKeyStrings", () => {
     expect(buildKeyStrings(key, dataset, 0)).toBeNull();
   });
 
-  test("fan-out field produces cross-product with single-value field", () => {
-    const dataset = makeDataset({
+  test("a field carrying several candidates is refused, not crossed", () => {
+    // Matching runs on a single value per record, so the cross-product a fan-out
+    // field would feed cannot be honored: the row is refused where its candidates
+    // are read, whether one field fans out or both.
+    const oneFansOut = makeDataset({
       last_name: ["SMITH", "JONES"],
       date_of_birth: "19900115",
     });
-    expect(buildKeyStrings(key, dataset, 0)).toEqual(
-      new Set(["SMITH19900115", "JONES19900115"]),
-    );
-  });
+    expect(() => buildKeyStrings(key, oneFansOut, 0)).toThrow(UsageError);
+    expect(() => buildKeyStrings(key, oneFansOut, 0)).toThrow(/fan-out/);
 
-  test("cross-product over two fan-out fields", () => {
-    const dataset = makeDataset({
+    const bothFanOut = makeDataset({
       last_name: ["SMITH", "JONES"],
       date_of_birth: ["19900115", "19900116"],
     });
-    expect(buildKeyStrings(key, dataset, 0)).toEqual(
-      new Set([
-        "SMITH19900115",
-        "SMITH19900116",
-        "JONES19900115",
-        "JONES19900116",
-      ]),
+    expect(() => buildKeyStrings(key, bothFanOut, 0)).toThrow(UsageError);
+  });
+
+  test("a fan-out whose candidates collapse to one key string is refused too", () => {
+    // The shape a size test on the ASSEMBLED key misses: the field fans out, then
+    // an element transform filters every candidate but one, so the row emits a
+    // single innocuous-looking key string while having matched on less than the
+    // terms declare. The refusal reads the candidate count before any collapse, so
+    // this is refused exactly as an uncollapsed fan-out is.
+    const dataset = makeDataset({
+      last_name: ["SMITH", "JONES"],
+      date_of_birth: "19750716",
+    });
+    const filteringKey = {
+      name: "LN+DOB",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "null_if", params: { value: "JONES" } }],
+        },
+        { field: "date_of_birth" },
+      ],
+    };
+    expect(() => buildKeyStrings(filteringKey, dataset, 0)).toThrow(UsageError);
+    expect(() => buildKeyStrings(filteringKey, dataset, 0)).toThrow(/fan-out/);
+  });
+
+  test("a field whose fan-out step yields one candidate builds its key", () => {
+    // The sibling of the refusal, and what keeps it from swallowing a legitimate
+    // row: split_on emits a one-element set when its delimiter is absent, which is
+    // one match candidate, so the same filtering transform runs and the key builds.
+    const dataset = makeDataset({
+      last_name: ["SMITH"],
+      date_of_birth: "19750716",
+    });
+    const filteringKey = {
+      name: "LN+DOB",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "null_if", params: { value: "JONES" } }],
+        },
+        { field: "date_of_birth" },
+      ],
+    };
+    expect(buildKeyStrings(filteringKey, dataset, 0)).toEqual(
+      new Set(["SMITH19750716"]),
     );
   });
 
@@ -1930,6 +1976,55 @@ describe("buildKeyStrings", () => {
     );
     expect(buildKeyStrings(swapKey, dataset, 0, true)).toEqual(
       new Set(["SMITHJANE"]),
+    );
+  });
+
+  test("an element transform that fans out is refused, not joined", () => {
+    // The element-transform half of the fan-out refusal, at the point of harm:
+    // joining the parts into one string would match on a value neither party's
+    // data holds, which is not the several-independent-candidates behavior the
+    // terms declare. assertFanOutImplemented refuses the same step from the
+    // declared transforms before any row runs; this covers a fan-out that reached
+    // the key builder anyway, so the collapse cannot come back silently.
+    const dataset = makeDataset({
+      last_name: "SMITH-JONES",
+      date_of_birth: "19900115",
+    });
+    const fanningKey = {
+      name: "LN+DOB",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "split_on", params: { delimiter: "-" } }],
+        },
+        { field: "date_of_birth" },
+      ],
+    };
+    expect(() => buildKeyStrings(fanningKey, dataset, 0)).toThrow(UsageError);
+    expect(() => buildKeyStrings(fanningKey, dataset, 0)).toThrow(/fan-out/);
+  });
+
+  test("an element transform whose fan-out step does not split yields its value", () => {
+    // split_on emits a one-element set when its delimiter is absent: that is one
+    // match candidate, not several, so the element yields the unsplit value and
+    // the key builds -- the same size test StandardizedKeyIterable.valueAt
+    // applies to the row it assembles.
+    const dataset = makeDataset({
+      last_name: "SMITH",
+      date_of_birth: "19900115",
+    });
+    const nonSplittingKey = {
+      name: "LN+DOB",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "split_on", params: { delimiter: "-" } }],
+        },
+        { field: "date_of_birth" },
+      ],
+    };
+    expect(buildKeyStrings(nonSplittingKey, dataset, 0)).toEqual(
+      new Set(["SMITH19900115"]),
     );
   });
 
@@ -2095,6 +2190,77 @@ describe("assertStandardizationMatchesTerms", () => {
     expect(() =>
       assertStandardizationMatchesTerms(standardization, minimalTerms),
     ).not.toThrow();
+  });
+});
+
+describe("assertFanOutImplemented", () => {
+  const fanOutStep = { function: "split_on", params: { delimiter: "-" } };
+
+  test("refuses a standardization declaring a fan-out step, naming it", () => {
+    // A standardization is only ever this party's own -- no invitation carries
+    // one, and the derived default declares no fan-out step -- so the refusal is
+    // an OperatorConfigError, which both front ends surface as the actionable
+    // config category.
+    const standardization = [
+      { output: "last_name", input: "LN", steps: [fanOutStep] },
+    ];
+    expect(() =>
+      assertFanOutImplemented(minimalTerms, standardization),
+    ).toThrow(OperatorConfigError);
+    expect(() =>
+      assertFanOutImplemented(minimalTerms, standardization),
+    ).toThrow(/split_on/);
+  });
+
+  test("refuses a linkage-key element transform declaring a fan-out step", () => {
+    // The element transform is adopted verbatim from the partner's invitation on
+    // the accept path, so this half stays a plain UsageError: not provably this
+    // operator's own content, and its message stays swallowed by the generic
+    // alert.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: [
+        {
+          name: "LN+DOB",
+          elements: [
+            { field: "last_name", transform: [fanOutStep] },
+            { field: "date_of_birth" },
+          ],
+        },
+      ],
+    };
+    expect(() => assertFanOutImplemented(terms)).toThrow(UsageError);
+    expect(() => assertFanOutImplemented(terms)).toThrow(/split_on/);
+    expect(() => assertFanOutImplemented(terms)).not.toThrow(
+      OperatorConfigError,
+    );
+  });
+
+  test("covers every function that fans out, not the literal split_on alone", () => {
+    // The refusal reads FAN_OUT_FUNCTION_NAMES, so a fan-out function added there
+    // is refused with no second edit here.
+    for (const name of FAN_OUT_FUNCTION_NAMES) {
+      const standardization = [
+        { output: "last_name", input: "LN", steps: [{ function: name }] },
+      ];
+      expect(() =>
+        assertFanOutImplemented(minimalTerms, standardization),
+      ).toThrow(UsageError);
+    }
+  });
+
+  test("is a no-op on transforms that declare no fan-out step", () => {
+    const standardization = [
+      {
+        output: "last_name",
+        input: "LN",
+        steps: [{ function: "to_upper_case" }],
+      },
+    ];
+    expect(() =>
+      assertFanOutImplemented(minimalTerms, standardization),
+    ).not.toThrow();
+    expect(() => assertFanOutImplemented(minimalTerms)).not.toThrow();
   });
 });
 

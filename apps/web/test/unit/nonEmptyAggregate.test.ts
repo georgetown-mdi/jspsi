@@ -88,11 +88,12 @@ describe("computeFieldCoverage: the silent-empty defense", () => {
     expect(isSilentEmpty(coverage)).toBe(false);
   });
 
-  test("a fan-out (multi-value) row is not produced, matching core's key exclusion", () => {
-    // split_on emits a multi-value Set for a value that splits; core's valueAt excludes
-    // a multi-value row (fan-out not yet in scope), so it yields no matchable key. The
-    // metric must agree -- counting it would be a false all-clear. A value with no
-    // delimiter stays a one-element Set (a single matchable key) and is produced.
+  test("a fan-out (multi-value) row is not produced, matching core's refusal", () => {
+    // split_on emits a multi-value Set for a value that splits; fan-out matching is
+    // not implemented, and core refuses an exchange declaring it rather than
+    // matching such a row, so it yields no matchable key. The metric must agree --
+    // counting it would be a false all-clear. A value with no delimiter stays a
+    // one-element Set (a single matchable key) and is produced.
     const standardization: Standardization = [
       {
         output: "first_name",
