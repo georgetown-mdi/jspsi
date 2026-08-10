@@ -19,10 +19,10 @@ import type { AssociationTable } from "./types.js";
 //
 // This is the UNSIGNED-record path: "verify" here is internal consistency (the
 // agreed-terms hash re-derives, and the commitments open against the holder's
-// re-supplied data), NOT evidence against the partner. Verifying a SIGNED
-// evidence bundle -- checking the partner's receipt signature and certificate --
-// is deferred work that layers on top of this (see the Signed Exchange Receipts
-// epic); the tri-state report here is shaped so that layer can extend it.
+// re-supplied data), NOT evidence against the partner. Evidence against the
+// partner is the separate dual-signed record, whose signature, certificate, and
+// pin checks live in signedReceiptVerification.ts on the same tri-state report
+// shape.
 //
 // The verification keys hold only salts, never a data snapshot, so the caller
 // RE-SUPPLIES the committed data (from the holder's own retained input and
@@ -121,9 +121,9 @@ const MANDATORY: ReadonlySet<CommitmentName> = new Set([
  * Returns a tri-state {@link RecordVerificationReport} that distinguishes a
  * commitment that opened, one whose data was not re-supplied (so could not be
  * opened), and one that failed to open -- so "not checked" is never conflated with
- * "verified". This is the unsigned-record internal-consistency check; a signed
- * evidence bundle's signature and certificate checks are deferred work that layers
- * on top.
+ * "verified". This is the unsigned-record internal-consistency check; the
+ * signature and certificate checks that make a dual-signed record evidence against
+ * the partner belong to `verifyDualSignedRecord`.
  *
  * Fail-safe: every check yields a status, never an exception. A malformed salt or
  * commitment, re-supplied data outside the canonical domain, or terms that do not

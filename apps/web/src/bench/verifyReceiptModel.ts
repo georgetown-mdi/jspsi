@@ -256,8 +256,7 @@ const COMMITMENT_ORDER: ReadonlyArray<CommitmentName> = [
 
 const SIGNATURE_NOTE =
   "Partner receipt signatures are not checked here. This confirms the record is " +
-  "internally consistent, not that your partner signed it (signed evidence " +
-  "bundles are separate, later work).";
+  "internally consistent, not that your partner signed it.";
 
 /**
  * Build the verdict view-model from a {@link RecordVerificationReport} and any

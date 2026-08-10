@@ -18,6 +18,9 @@
 //     implementation) must accept it, so the vector carries interop with an
 //     implementation outside this codebase AND pins the signed-byte layout: a
 //     divergence in either shows up as a signature that stops verifying.
+//   - A whole dual-signed record assembled from the two vectors, every signature
+//     in it (both certificate self-signatures and both receipt signatures) made
+//     by openssl, for the verification consumer to check end to end.
 //
 // This regenerator preserves each vector's hand-authored name, description,
 // identity, private key, session key, role, and content, and recomputes the
@@ -38,10 +41,36 @@ import {
   generateSigningIdentity,
 } from "../../dist/core.esm.js";
 
+const RECORD_VERSION = "psilink-signed-receipt/v2";
 const CONTENT_DOMAIN = "psilink-signed-receipt-content/v2";
+const CERTIFICATE_VERSION = "psilink-signing-cert/v2";
+const CERTIFICATE_SIGNATURE_DOMAIN = "psilink-signing-cert-signature/v1";
+const ALGORITHM = "ecdsa-p256-sha256";
 
 const fromBase64Url = (s) => new Uint8Array(Buffer.from(s, "base64url"));
 const toBase64Url = (bytes) => Buffer.from(bytes).toString("base64url");
+
+/** The certificate body exactly as docs/spec/PROTOCOL.md specifies it. */
+function certificateBody(identity, publicKey) {
+  return {
+    version: CERTIFICATE_VERSION,
+    algorithm: ALGORITHM,
+    identity,
+    publicKey: {
+      kty: publicKey.kty,
+      crv: publicKey.crv,
+      x: publicKey.x,
+      y: publicKey.y,
+    },
+  };
+}
+
+function certificateSignatureBytes(body) {
+  return canonicalBytes({
+    domain: CERTIFICATE_SIGNATURE_DOMAIN,
+    certificate: body,
+  });
+}
 
 /** The signer-bound receipt bytes exactly as docs/spec/EXCHANGE_RECORD.md
  * specifies them. */
@@ -137,6 +166,85 @@ for (const vector of data.vectors) {
   vector.expected = { binder, fingerprint, signature };
 }
 
+// The whole dual-signed record, assembled from the two vectors above: both
+// parties sign ONE shared content (carrying the initiator-role binder, as a live
+// exchange does), and every signature in it -- each certificate's self-signature
+// and each party's receipt signature -- comes from openssl. The verification
+// consumer therefore has a bundle no part of which this codebase signed.
+const [initiatorVector, responderVector] = data.vectors;
+if (
+  initiatorVector.role !== "initiator" ||
+  responderVector.role !== "responder"
+)
+  throw new Error(
+    "the bundle is assembled from an initiator vector followed by a responder " +
+      "vector; reorder data.vectors or update this script",
+  );
+if (initiatorVector.sessionKey !== responderVector.sessionKey)
+  throw new Error(
+    "the bundle's two parties must share one session key, as the two parties " +
+      "of one exchange do",
+  );
+
+const bundleContent = {
+  termsHash: initiatorVector.content.termsHash,
+  initiatorToResponderPayload:
+    initiatorVector.content.initiatorToResponderPayload,
+  responderToInitiatorPayload:
+    initiatorVector.content.responderToInitiatorPayload,
+  // Both parties fold in the INITIATOR-role binder, whatever their own role.
+  binder: await deriveReceiptBinder(
+    fromBase64Url(initiatorVector.sessionKey),
+    "initiator",
+  ),
+};
+
+async function bundleParty(vector, role) {
+  const generated = await generateSigningIdentity(vector.identity, {
+    privateKey: vector.privateKey,
+  });
+  const body = certificateBody(
+    vector.identity,
+    generated.certificate.publicKey,
+  );
+  const certificate = {
+    ...body,
+    signature: signWithOpenssl(
+      vector.privateKey,
+      certificateSignatureBytes(body),
+    ),
+  };
+  const fingerprint = await computeCertificateFingerprint(body);
+  return {
+    fingerprint,
+    party: {
+      certificate,
+      signature: signWithOpenssl(
+        vector.privateKey,
+        receiptSignatureBytes(bundleContent, fingerprint, role),
+      ),
+    },
+  };
+}
+
+const initiatorParty = await bundleParty(initiatorVector, "initiator");
+const responderParty = await bundleParty(responderVector, "responder");
+data.bundle = {
+  description: data.bundle.description,
+  expected: {
+    initiatorFingerprint: initiatorParty.fingerprint,
+    responderFingerprint: responderParty.fingerprint,
+    initiatorIdentity: initiatorVector.identity,
+    responderIdentity: responderVector.identity,
+  },
+  record: {
+    version: RECORD_VERSION,
+    content: bundleContent,
+    initiator: initiatorParty.party,
+    responder: responderParty.party,
+  },
+};
+
 data.externalAnchors = {
   signatureProducer: execFileSync("openssl", ["version"]).toString().trim(),
   note:
@@ -145,8 +253,11 @@ data.externalAnchors = {
     "re-encoded as the fixed-length raw r||s), over signed bytes this " +
     "generator assembles from docs/spec/EXCHANGE_RECORD.md. A suite that " +
     "verifies them is therefore accepting a signature produced outside this " +
-    "codebase, over a byte layout stated independently of signedReceipt.ts.",
+    "codebase, over a byte layout stated independently of signedReceipt.ts. " +
+    "The same holds for every signature in the assembled bundle.",
 };
 
 writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
-console.log(`regenerated ${data.vectors.length} signed-receipt vectors`);
+console.log(
+  `regenerated ${data.vectors.length} signed-receipt vectors and the bundle`,
+);

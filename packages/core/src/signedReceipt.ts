@@ -499,8 +499,9 @@ export function serializeDualSignedRecord(record: DualSignedRecord): string {
 /**
  * Parse and validate a {@link DualSignedRecord} from a raw value (e.g. the result
  * of `JSON.parse`). Rejects an unrecognized `version` rather than migrating it.
- * Shape validation only -- signature and pin verification are the verification
- * item's concern.
+ * Shape validation only -- signature, certificate, and pin verification belong to
+ * `verifyDualSignedRecord` (signedReceiptVerification.ts), which a caller runs on
+ * the parsed record.
  *
  * @throws {z.ZodError} if validation fails.
  */
