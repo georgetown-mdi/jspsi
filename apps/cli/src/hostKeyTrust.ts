@@ -216,7 +216,7 @@ export async function establishHostKeyTrust(
   const trusted = await deps.confirm(`Trust this host key for ${hostDisplay}?`);
   if (!trusted)
     throw hostKeyRefusal(
-      `the presented host key was not trusted; no connection was made and ` +
+      `the presented host key was not trusted; no credential was sent and ` +
         `nothing was written. Obtain and verify the server's fingerprint ` +
         `out-of-band, then retry.`,
       [hostDetail],

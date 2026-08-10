@@ -361,6 +361,39 @@ test("declining the prompt aborts and leaves the connection unpinned", async () 
     expect(conn.server.hostKeyFingerprint).toBeUndefined();
 });
 
+test("declining under the config-writing mode leaves the file byte-identical", async () => {
+  // The refusal tells the operator nothing was written, and write-now is the one
+  // mode that writes at all -- so the claim is measured against the bytes of the
+  // config a confirmation WOULD have been persisted into, not just against the
+  // in-memory connection.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-hkt-declined-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    const before =
+      "connection:\n  channel: sftp\n  server:\n    host: sftp.example.org\n";
+    fs.writeFileSync(configPath, before);
+    const conn = sftpConn();
+    const deps = makeDeps({ confirm: false });
+    process.stdin.isTTY = true;
+    await expect(
+      establishHostKeyTrust(
+        conn,
+        {
+          verbosity: -1,
+          loggerName: "exchange",
+          persistence: { mode: "write-now", configPath },
+        },
+        deps,
+      ),
+    ).rejects.toThrow(/not trusted/);
+    expect(deps.confirmCalls).toBe(1);
+    expect(fs.readFileSync(configPath, "utf8")).toBe(before);
+    expect(fs.readdirSync(dir)).toEqual(["psilink.yaml"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("escapes a control-laden key type in the prompt path (no throw)", async () => {
   // A hostile keyType must not break the flow; sanitizeForDisplay handles it in
   // the warn message. Confirming still pins the (safe, base64) fingerprint.
@@ -504,8 +537,18 @@ const RECOVERY_WITHOUT_CONFIG =
   "Run once from an interactive terminal to review and pin the presented key, " +
   "or pin it out-of-band by setting connection.server.host_key_fingerprint in " +
   "a saved configuration.";
+// This refusal is raised AFTER the probe, which is itself a connection -- so
+// what it can honestly assure the operator of is what that connection
+// disclosed, not that none was opened. The probe hands ssh2 no password,
+// private key, or passphrase (pinned in packages/core/test/
+// fileSyncConnection.test.ts) and refuses at host-key verification, before
+// userauth -- the ssh2 premise recorded in docs/spec/DEPENDENCY_PINS.md, and
+// exercised over a real server by
+// apps/cli/test/integration/sftpConnection.test.ts -- so no credential was
+// sent; and the decline returns ahead of every persist arm, so nothing was
+// written (the check above).
 const DECLINED_SUMMARY =
-  "the presented host key was not trusted; no connection was made and nothing " +
+  "the presented host key was not trusted; no credential was sent and nothing " +
   "was written. Obtain and verify the server's fingerprint out-of-band, then " +
   "retry.";
 

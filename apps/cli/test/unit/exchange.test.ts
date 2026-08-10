@@ -15,6 +15,7 @@ import type { InvitationToken, LinkageTerms } from "@psilink/core";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { runProtocol } from "../../src/protocol";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
+import { confirmOutboundPayloadConsent } from "../../src/outboundPayloadConsent";
 import {
   builder,
   handler,
@@ -74,6 +75,18 @@ vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
 // drives; stub it so that test reaches the runProtocol hand-off without probing
 // sftp.example.org (hostKeyTrust.test.ts covers the real flow).
 vi.mock("../../src/hostKeyTrust", () => ({ establishHostKeyTrust: vi.fn() }));
+
+// The outbound-consent surface is spy-WRAPPED rather than replaced: the ordering
+// test below needs to observe when the handler reaches it, while the
+// prepareDataset tests further down keep running the real gate behind it.
+vi.mock("../../src/outboundPayloadConsent", async (importActual) => {
+  const actual =
+    await importActual<typeof import("../../src/outboundPayloadConsent")>();
+  return {
+    ...actual,
+    confirmOutboundPayloadConsent: vi.fn(actual.confirmOutboundPayloadConsent),
+  };
+});
 
 // 43-char base64url tokens satisfying the sharedSecret format constraint.
 const TOKEN_A = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -1117,6 +1130,102 @@ test("handler: the prepare-time guard completes before runProtocol on an sftp co
     const [guarded] = vi.mocked(prepareForExchange).mock.invocationCallOrder;
     const [ran] = vi.mocked(runProtocol).mock.invocationCallOrder;
     expect(guarded).toBeLessThan(ran);
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+// --- handler: host-key trust precedes the outbound-consent surface ----------
+// The outbound-consent copy (apps/cli/src/outboundPayloadConsent.ts) promises
+// that nothing this party SENDS precedes the question, not that nothing has
+// connected -- because on an unpinned sftp config the credential-free first-use
+// host-key probe runs ahead of it. That step order is the premise the wording
+// rests on, so the two checks below hold it rather than the comment beside the
+// copy: an edit that reordered the flow would otherwise leave the copy
+// describing an order the handler no longer has, and nothing would catch it.
+// Both stub establishHostKeyTrust (as the whole file does), so what they pin is
+// the order of the two STEPS; that the probe -- the connection the wording
+// concedes -- happens inside the first of them is hostKeyTrust.test.ts's.
+
+/** Write the sftp config, key file, and CSV the two ordering checks drive the handler over. */
+function writeSftpExchangeInputs(): string {
+  fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  return input;
+}
+
+test("handler: host-key trust runs before the outbound-consent surface", async () => {
+  const input = writeSftpExchangeInputs();
+
+  const steps: string[] = [];
+  vi.mocked(establishHostKeyTrust).mockClear();
+  vi.mocked(establishHostKeyTrust).mockImplementationOnce(() => {
+    steps.push("host-key trust");
+    return Promise.resolve();
+  });
+  vi.mocked(confirmOutboundPayloadConsent).mockImplementationOnce(() => {
+    steps.push("outbound consent");
+    return Promise.resolve();
+  });
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await handler({
+      _: [],
+      $0: "psilink",
+      input,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+    } as unknown as Arguments);
+    expect(exitSpy).not.toHaveBeenCalled();
+    // Both steps ran, and in this order: an assertion over one call alone would
+    // read a silently skipped step as satisfied.
+    expect(steps).toEqual(["host-key trust", "outbound consent"]);
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: a refused host key stops the run before the outbound-consent surface", async () => {
+  // The ordering above is a call order, which a handler that STARTED host-key
+  // trust without awaiting it would satisfy just as well -- and then a refusal
+  // would surface only after the operator had been asked about columns. So the
+  // refusing case is driven too: the run must end at the refusal, exit 64 (the
+  // classification a declined prompt carries), and never reach the question.
+  const input = writeSftpExchangeInputs();
+
+  vi.mocked(establishHostKeyTrust).mockClear();
+  vi.mocked(establishHostKeyTrust).mockRejectedValueOnce(
+    new UsageError("the presented host key was not trusted"),
+  );
+  vi.mocked(confirmOutboundPayloadConsent).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(vi.mocked(confirmOutboundPayloadConsent)).not.toHaveBeenCalled();
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
   } finally {
     exitSpy.mockRestore();
   }
