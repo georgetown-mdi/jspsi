@@ -17,13 +17,20 @@ provider measurements and certificate readings underneath the reasoning are in
 [fips-provider-surface.md](fips-provider-surface.md). See
 [docs/notes/README.md](README.md).*
 
-With FIPS 140-3 as the target standard, certificate 4985 places X25519 in its
-Non-Approved, Not Allowed table, so no provider choice puts the current key
-exchange inside a module's approved mode. That leaves a fork. Disclose the
-boundary -- cheap and honest, and costing nothing in module terms, because an
-algorithm the module never performs cannot take the module out of approved mode
--- or migrate to a curve the certificate approves, which is the only thing that
-buys key establishment a place *inside* the boundary.
+With FIPS 140-3 as the target standard, no provider choice puts an X25519 key
+exchange inside a module's approved mode. Certificate 5021, the module the FIPS
+variant image carries, names X25519 in no table at all, approved or
+non-approved, and states its non-approved-but-allowed category empty, so there
+is no status the curve could hold there -- and the certified module does not
+carry the primitive to begin with
+([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests),
+[fips-variant-image.md](fips-variant-image.md)). Certificate 4985, the OpenSSL
+Project module read beside it, places X25519 in its Non-Approved, Not Allowed
+table. That leaves a fork. Disclose the boundary -- cheap and honest, and
+costing nothing in module terms, because an algorithm the module never performs
+cannot take the module out of approved mode -- or migrate to a curve a
+certificate approves, which is the only thing that buys key establishment a
+place *inside* the boundary.
 
 The decision is to migrate. Most of the reasoning below is about how far the
 migration should go, because the curve was never the interesting question.
@@ -88,8 +95,9 @@ Two things in that record are superseded:
   material for a FIPS-validated build. The standard approval is real; the
   implication that it buys anything on a module certificate is not. Neither
   X25519 nor Ed25519 appears on the approved-algorithm list of any OpenSSL
-  Project certificate, and under certificate 4985 both are Non-Approved and Not
-  Allowed.
+  Project certificate -- under certificate 4985 both are Non-Approved and Not
+  Allowed -- and neither string occurs anywhere in the security policy of
+  certificate 5021, the module the variant image carries.
 
 Nothing here is normative. The wire format, the mixing order, the labels, and
 the protocol-version tag are specified in
@@ -108,7 +116,7 @@ calls regardless -- while naming a module service that never runs. This is the
 decisive point: the rejected option's central advantage does not survive
 contact with the platform's call surface.
 
-**2. The certificate's `KDA TwoStep` entry is feedback mode only.** Its
+**2. The certified `KDA TwoStep` service is feedback mode only.** Its
 properties on certificate 4985 read `KDF Mode - feedback`, while RFC 5869 HKDF
 -- and WebCrypto, and every derivation in this tree -- is counter mode. Building
 a two-step derivation faithful to the certified service therefore means
@@ -131,12 +139,18 @@ either way on it, turning as it does on `KDA TwoStep` and on the platform's call
 surface. What the discrepancy does bound is claim text: a sentence naming 5021's
 HKDF row should not also assert counter mode until the module has been driven.
 
-**3. The certificate attests components, not compositions.** It is silent on
-hybrid or concatenated shared secrets: "concatenat" and "pre-shared" do not
-occur anywhere in the security policy, and every occurrence of "hybrid" is the
-FIPS 140-3 module-type sense (software, firmware, hybrid). So the schedule
-assembled above the shared secret is an operator-built composition under either
-option. The rejected option would have exchanged one unattested composition for
+**3. A certificate attests components, not compositions.** Certificate 4985 is
+silent on hybrid or concatenated shared secrets: "concatenat" and "pre-shared"
+do not occur anywhere in its security policy, and every occurrence of "hybrid"
+is the FIPS 140-3 module-type sense (software, firmware, hybrid). Certificate
+5021 was not read for that silence, and the conclusion does not turn on it: what
+its policy does state about the schedule's surroundings restricts rather than
+attests -- its HKDF "shall only be used to generate secret keys in the context
+of an SP 800-56Ar3 key agreement scheme", which reaches the head of the chain
+and leaves the rest of the composition exactly as unattested
+([fips-variant-image.md](fips-variant-image.md)). So the schedule assembled
+above the shared secret is an operator-built composition under either option.
+The rejected option would have exchanged one unattested composition for
 another while presenting it under a NIST label -- the same conflation of
 algorithm-standard approval with module-certificate approval that
 [fips-provider-surface.md](fips-provider-surface.md) already catches in the
@@ -211,17 +225,27 @@ validated artifact. Migrating the curve is what lets each operation sit inside a
 boundary; it does not put the composition inside one, and no wording makes it do
 so.
 
-**No sentence may describe the shipped image as running a validated module.** No
-certificate covers the base image today, and certificate 4985 vendor-affirms no
-operational environments at all -- it covers its twelve tested configurations,
-each naming hardware as well as an OS. The environment question is tracked in
-[fips-provider-surface.md](fips-provider-surface.md) and is independent of
-everything decided here.
+**No sentence may call the shipped image validated, or place it in a validated
+module's operational environment.** No certificate covers the default image's
+base, and the variant image, which embeds certificate 5021's module, runs in
+none of the six environments that certificate names: every one is bare metal,
+none is a container or a virtual machine, and the policy states no vendor
+affirmation reaching past them
+([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests)).
+The flat denial 4985's policy carries is that document's sentence and not
+5021's, so it is not available to quote here. What the variant image may say
+instead, and how that turns on the host it runs on, is reasoned about in
+[fips-variant-image.md](fips-variant-image.md); the environment question is
+independent of everything decided here.
 
 ## What the primary sources actually say
 
-Read from the documents themselves: NIST SP 800-56C Rev 2, and the OpenSSL FIPS
-Provider FIPS 140-3 non-proprietary security policy for certificate 4985.
+Read from the documents themselves: NIST SP 800-56C Rev 2, the OpenSSL FIPS
+Provider FIPS 140-3 non-proprietary security policy for certificate 4985, and
+the Amazon Linux 2023 OpenSSL FIPS Provider policy for certificate 5021, the
+module the variant image carries. Two modules, so every row below names the
+certificate it was read from; 5021's rows are recorded in full in
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests).
 
 **SP 800-56C Rev 2, Section 2 (Scope and Purpose, normative)** permits a hybrid
 shared secret of the form `Z || T`, described as "a concatenation consisting of
