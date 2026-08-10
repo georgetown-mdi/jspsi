@@ -16,24 +16,9 @@ import { describe, expect, it } from "vitest";
 // Each case is linted through the real repo config against a path inside a
 // guarded tree, so the scope, the selectors, and the rule wiring are all
 // exercised as CI runs them rather than restated here.
-//
-// Two things silence that lint for reasons that have nothing to do with the ban,
-// and each one satisfies an accepting case's `toHaveLength(0)` the wrong way. A
-// source that never parses reports a fatal message and no rule problems at all,
-// so `banHits` throws on a fatal rather than filtering it away. And
-// typescript-eslint infers a "single run" whenever CI=true -- which every CI
-// runner sets -- in which mode a path's first parse can answer from the file on
-// DISK rather than from the text handed to lintText; first-party source carries
-// no banned shape, so a case answered that way reports zero problems with the ban
-// fully intact. The pin below turns that inference off. The canary is what proves
-// the text supplied is the text linted rather than trusting the pin to do it, and
-// it runs against a path that exists on disk and that no other case here touches,
-// so it stays that path's first parse whatever order the cases run in.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
-
-process.env.TSESTREE_SINGLE_RUN = "false";
 
 const eslint = new ESLint({
   cwd: repoRoot,
