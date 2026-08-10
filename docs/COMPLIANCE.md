@@ -1,7 +1,7 @@
 ---
 title: "PSI-Link Compliance"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-07"
+last_reviewed: "2026-08-10"
 ---
 
 # PSI-Link compliance
@@ -107,7 +107,13 @@ An agency required to use FIPS 140-validated cryptography for the data it links 
 
 #### Constraining the SSH layer is a separate, achievable control
 
-Restricting what an SFTP exchange's SSH transport will negotiate to approved algorithms is independent of everything above and is available today, whatever image is deployed. The settings, what each excludes, what happens when the partner's server offers nothing approved, and the host-key gap no client-side setting can close are in [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md). Constraining negotiation is not a validated-module claim and that page makes none.
+Restricting what an SFTP exchange's SSH transport will negotiate to approved algorithms is independent of everything above and is available today, whatever image is deployed. The settings, what each excludes, what happens when the partner's server offers nothing approved, and the host-key gap no client-side setting can close are in [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md), which carries the offer as measured. Constraining negotiation is not a validated-module claim and that page makes none.
+
+What the client puts on the wire is captured evidence rather than a reading of the configuration: the algorithms it offers at the start of the SSH handshake have been taken off the wire from the variant image on an Amazon Linux 2023 host in FIPS mode, with no algorithm settings applied. Three things follow for a reviewer assessing an SFTP deployment.
+
+- **A FIPS-configured runtime narrows the offer by itself.** The key exchange and the ciphers offered in that configuration are approved algorithms, with nothing set to make them so. The profile's key-exchange list is narrower again.
+- **It does not narrow message authentication, so the settings stay load-bearing.** That same default offer carries a SHA-1 HMAC. Restricting the category to HMAC-SHA-2 is the profile's doing, so a host in FIPS mode is not a substitute for applying the settings -- and on a host not in FIPS mode, the settings are the whole of the control.
+- **The host-key type is beyond the reach of either.** `ssh-rsa`, which signs with SHA-1, stays in the offer on a FIPS-mode host as anywhere else, and no client-side setting removes it. Excluding it is the partner server's to do, agreed out of band as part of deploying the profile.
 
 ### Section 508 and accessibility
 
