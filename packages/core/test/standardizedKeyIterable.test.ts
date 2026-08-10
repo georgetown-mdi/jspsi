@@ -168,12 +168,12 @@ describe("StandardizedKeyIterable — swap (isReceiver)", () => {
 });
 
 describe("StandardizedKeyIterable — a row whose value fans out", () => {
-  // The silent drop this refusal replaces: a row whose value split used to yield
-  // `undefined` -- no PSI entry for the key at all -- so fan-out narrowed matching
-  // while the consent surface said each candidate matches independently. A
-  // declared fan-out is refused before the exchange runs
-  // (assertFanOutImplemented); this pins the same refusal at the point of harm,
-  // reached here through a dataset built directly rather than through prepare.
+  // A row whose value expands into several candidates is refused, never dropped
+  // from the round: dropping it would narrow matching while the consent surface
+  // says each candidate matches independently. A declared fan-out is refused
+  // before the exchange runs (assertFanOutImplemented); this pins the same
+  // refusal at the point of harm, reached here through a dataset built directly
+  // rather than through prepare.
   const splittingRows = [
     { ssn: "559811301", last_name: "SMITH-JONES", date_of_birth: "19750716" },
     { ssn: "322842281", last_name: "IORIO", date_of_birth: "19750817" },

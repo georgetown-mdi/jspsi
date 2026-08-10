@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { getLogger } from "./utils/logger.js";
-import { StandardizationTermsError, UsageError } from "./errors.js";
+import {
+  OperatorConfigError,
+  StandardizationTermsError,
+  UsageError,
+} from "./errors.js";
 import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
 import {
   compileLinearRegex,
@@ -679,18 +683,20 @@ const FAN_OUT_RECOVERY =
   "and from every linkage-key element transform, or wait for fan-out support " +
   "before running.";
 
-// Refusal for a fan-out step DECLARED by the transforms, raised before the
-// exchange runs. `functionName` is matched against FAN_OUT_FUNCTION_NAMES before
-// it reaches here, so the message carries a fixed literal, never partner free
-// text.
-function fanOutDeclaredRefusal(functionName: string): UsageError {
-  return new UsageError(
+// The message both DECLARED-step refusals carry, raised before the exchange
+// runs. `functionName` is matched against FAN_OUT_FUNCTION_NAMES before it
+// reaches here, so the message carries a fixed literal, never partner free text.
+// The two declaring surfaces share the wording and differ only in error class,
+// because they differ in whose content the fault is -- see
+// assertFanOutImplemented.
+function fanOutDeclaredMessage(functionName: string): string {
+  return (
     "fan-out matching is not yet implemented, but these transforms declare a " +
-      `"${functionName}" step: it expands one value into several match ` +
-      "candidates, while matching runs on a single value per record. A record " +
-      "whose value actually splits would contribute no key at all rather than " +
-      "one per candidate, matching fewer records than the terms describe, so " +
-      `the exchange is refused before it runs. ${FAN_OUT_RECOVERY}`,
+    `"${functionName}" step: it expands one value into several match ` +
+    "candidates, while matching runs on a single value per record. A record " +
+    "whose value actually splits would contribute no key at all rather than " +
+    "one per candidate, matching fewer records than the terms describe, so " +
+    `the exchange is refused before it runs. ${FAN_OUT_RECOVERY}`
   );
 }
 
@@ -1530,10 +1536,13 @@ const compiledElementTransforms = new WeakMap<
   CompiledStep[]
 >();
 
-// Element-level transforms must produce a single string. A fan-out step in an
-// element transform is refused here rather than collapsed into one joined string:
-// joining matches on a value neither party's data holds, which is not the
-// several-independent-candidates behavior the terms declare. See
+// Element-level transforms must produce a single string. A step that actually
+// expands a value into SEVERAL candidates is refused here rather than collapsed
+// into one joined string: joining matches on a value neither party's data holds,
+// which is not the several-independent-candidates behavior the terms declare. A
+// fan-out step that did not split -- split_on emits a one-element set when its
+// delimiter is absent -- carries a single candidate, so it is unwrapped and flows
+// on, the same size test StandardizedKeyIterable.valueAt applies. See
 // assertFanOutImplemented, which refuses the same step from the declared
 // transforms before any row runs.
 function applyElementTransform(
@@ -1551,8 +1560,12 @@ function applyElementTransform(
   let current: string | null = value;
   for (const step of compiled) {
     const next = applyStep(current, step);
-    if (next instanceof Set) throw fanOutReachedKeyBuilderRefusal();
-    current = next;
+    if (next instanceof Set) {
+      if (next.size > 1) throw fanOutReachedKeyBuilderRefusal();
+      current = next.values().next().value ?? null;
+    } else {
+      current = next;
+    }
   }
   return current;
 }
@@ -1821,13 +1834,23 @@ function declaredFanOutFunction(
  * exchange, which retains the built dataset rather than the spec); the pipeline's
  * own refusal covers that half there.
  *
- * Plain {@link UsageError}, deliberately NOT an {@link StandardizationTermsError}
- * or other `OperatorConfigError`, for the same reason as
- * `assertAlgorithmImplemented`: an acceptor adopts the linkage terms -- element
- * transforms included -- verbatim from the partner's invitation, so the fault is
- * not provably this operator's own content. The message names only the fan-out
- * functions this module recognizes: a declared name reaches it having already
- * matched one, so no partner free text is interpolated.
+ * The two surfaces carry the same message under DIFFERENT error classes, because
+ * they differ in whose content the fault is. A `standardization` is only ever this
+ * party's own: no invitation carries one (it is per-party and local), and the
+ * accept path derives its own from the adopted terms through
+ * `getDefaultStandardization`, whose steps come from the fixed per-type pipelines
+ * and never include a fan-out function. So that half is an
+ * {@link OperatorConfigError} -- the membership rule for the actionable "config"
+ * category both front ends key off -- like `assertSigningModeImplemented`, and
+ * raised as the base class because no narrower member fits (this is an
+ * unimplemented-feature refusal, not the terms inconsistency
+ * {@link StandardizationTermsError} names). A linkage-key element transform is
+ * adopted verbatim from the partner's invitation on the accept path, so that half
+ * stays a plain {@link UsageError} whose message the web's generic alert swallows,
+ * for the same reason as `assertAlgorithmImplemented`. Either way the message names
+ * only the fan-out functions this module recognizes -- a declared name reaches it
+ * having already matched one -- so no partner free text is interpolated, and the
+ * CLI classifies both as a usage error (exit 64) through the base class.
  *
  * When fan-out matching lands, REPLACE this refusal with it and true up the
  * consent copy in the same change; a splitting record must then contribute one
@@ -1839,12 +1862,14 @@ export function assertFanOutImplemented(
 ): void {
   for (const transformation of standardization ?? []) {
     const declared = declaredFanOutFunction(transformation.steps);
-    if (declared !== undefined) throw fanOutDeclaredRefusal(declared);
+    if (declared !== undefined)
+      throw new OperatorConfigError(fanOutDeclaredMessage(declared));
   }
   for (const key of terms.linkageKeys) {
     for (const element of key.elements) {
       const declared = declaredFanOutFunction(element.transform);
-      if (declared !== undefined) throw fanOutDeclaredRefusal(declared);
+      if (declared !== undefined)
+        throw new UsageError(fanOutDeclaredMessage(declared));
     }
   }
 }

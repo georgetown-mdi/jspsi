@@ -12,6 +12,7 @@ import {
   getDefaultLinkageTerms,
   getLogger,
   inferMetadata,
+  OperatorConfigError,
   StandardizationTermsError,
   UsageError,
 } from "@psilink/core";
@@ -941,6 +942,82 @@ test("validateInvite: offline config-source refuses a deduplicating term before 
       });
     await expect(invite()).rejects.toBeInstanceOf(UsageError);
     await expect(invite()).rejects.toThrow(/deduplicate/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: offline config-source refuses a fan-out standardization before minting", async () => {
+  // The mint-boundary counterpart of the run-side fan-out refusal (matching runs
+  // on a single value per record, so a splitting record contributes no key at
+  // all): a config whose hand-authored standardization declares `split_on` must
+  // be refused BEFORE the token is disclosed, so `invite` never mints an
+  // invitation the config's own `psilink exchange` would then reject (exit 64).
+  // The standardization is otherwise consistent with the terms, so it passes the
+  // earlier consistency gate and reaches this one. An OperatorConfigError: a
+  // standardization is only ever this party's own authoring.
+  const terms = defaultTerms();
+  const { dir, configPath, keyPath } = withConfig(terms, [
+    {
+      output: "last_name",
+      input: "last_name",
+      steps: [{ function: "split_on", params: { delimiter: "-" } }],
+    },
+  ]);
+  try {
+    const invite = () =>
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      });
+    await expect(invite()).rejects.toBeInstanceOf(OperatorConfigError);
+    await expect(invite()).rejects.toThrow(/split_on/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: offline config-source refuses a fan-out element transform before minting", async () => {
+  // The second authoring surface only this config-as-source path can carry: a
+  // linkage key whose element transform declares `split_on`, refused at the same
+  // mint boundary. A plain UsageError, not an OperatorConfigError -- an acceptor
+  // adopts element transforms verbatim from the partner's invitation, so the
+  // fault is not provably the local operator's own content.
+  const base = defaultTerms();
+  const [firstKey, ...restKeys] = base.linkageKeys;
+  const terms: LinkageTerms = {
+    ...base,
+    linkageKeys: [
+      {
+        ...firstKey,
+        elements: firstKey.elements.map((element, i) =>
+          i === 0
+            ? {
+                ...element,
+                transform: [
+                  { function: "split_on", params: { delimiter: "-" } },
+                ],
+              }
+            : element,
+        ),
+      },
+      ...restKeys,
+    ],
+  };
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    const invite = () =>
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      });
+    await expect(invite()).rejects.toBeInstanceOf(UsageError);
+    await expect(invite()).rejects.not.toBeInstanceOf(OperatorConfigError);
+    await expect(invite()).rejects.toThrow(/split_on/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

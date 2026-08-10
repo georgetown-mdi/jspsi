@@ -18,7 +18,11 @@ import {
   StandardizedField,
   StandardizedDataset,
 } from "../src/standardization";
-import { StandardizationTermsError, UsageError } from "../src/errors";
+import {
+  OperatorConfigError,
+  StandardizationTermsError,
+  UsageError,
+} from "../src/errors";
 import * as linearRegex from "../src/utils/linearRegex";
 import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
@@ -1960,6 +1964,30 @@ describe("buildKeyStrings", () => {
     expect(() => buildKeyStrings(fanningKey, dataset, 0)).toThrow(/fan-out/);
   });
 
+  test("an element transform whose fan-out step does not split yields its value", () => {
+    // split_on emits a one-element set when its delimiter is absent: that is one
+    // match candidate, not several, so the element yields the unsplit value and
+    // the key builds -- the same size test StandardizedKeyIterable.valueAt
+    // applies to the row it assembles.
+    const dataset = makeDataset({
+      last_name: "SMITH",
+      date_of_birth: "19900115",
+    });
+    const nonSplittingKey = {
+      name: "LN+DOB",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "split_on", params: { delimiter: "-" } }],
+        },
+        { field: "date_of_birth" },
+      ],
+    };
+    expect(buildKeyStrings(nonSplittingKey, dataset, 0)).toEqual(
+      new Set(["SMITH19900115"]),
+    );
+  });
+
   test("uses the provided row index to look up field values", () => {
     const rows = [
       { last_name: "SMITH", date_of_birth: "19900115" },
@@ -2129,18 +2157,26 @@ describe("assertFanOutImplemented", () => {
   const fanOutStep = { function: "split_on", params: { delimiter: "-" } };
 
   test("refuses a standardization declaring a fan-out step, naming it", () => {
+    // A standardization is only ever this party's own -- no invitation carries
+    // one, and the derived default declares no fan-out step -- so the refusal is
+    // an OperatorConfigError, which both front ends surface as the actionable
+    // config category.
     const standardization = [
       { output: "last_name", input: "LN", steps: [fanOutStep] },
     ];
     expect(() =>
       assertFanOutImplemented(minimalTerms, standardization),
-    ).toThrow(UsageError);
+    ).toThrow(OperatorConfigError);
     expect(() =>
       assertFanOutImplemented(minimalTerms, standardization),
     ).toThrow(/split_on/);
   });
 
   test("refuses a linkage-key element transform declaring a fan-out step", () => {
+    // The element transform is adopted verbatim from the partner's invitation on
+    // the accept path, so this half stays a plain UsageError: not provably this
+    // operator's own content, and its message stays swallowed by the generic
+    // alert.
     const terms: LinkageTerms = {
       ...minimalTerms,
       linkageKeys: [
@@ -2155,6 +2191,9 @@ describe("assertFanOutImplemented", () => {
     };
     expect(() => assertFanOutImplemented(terms)).toThrow(UsageError);
     expect(() => assertFanOutImplemented(terms)).toThrow(/split_on/);
+    expect(() => assertFanOutImplemented(terms)).not.toThrow(
+      OperatorConfigError,
+    );
   });
 
   test("covers every function that fans out, not the literal split_on alone", () => {

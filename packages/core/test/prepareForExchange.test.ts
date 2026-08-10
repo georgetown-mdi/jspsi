@@ -319,7 +319,30 @@ describe("prepareForExchange: a fan-out transform is refused", () => {
     expect(prepare).toThrow(/split_on/);
   });
 
-  test("the refusal is not an OperatorConfigError", () => {
+  test("the standardization-declared refusal is an OperatorConfigError", () => {
+    // A standardization is per-party and local -- no invitation carries one, and
+    // the accept path derives its own from the adopted terms -- so this fault is
+    // provably the operator's own authoring, and both front ends surface it as
+    // the actionable config category rather than a generic exchange failure.
+    let thrown: unknown;
+    try {
+      prepareForExchange(
+        {
+          linkageTerms: terms,
+          metadata,
+          standardization: splittingStandardization,
+        },
+        "Tester",
+        rawRows,
+        columns,
+      );
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(OperatorConfigError);
+  });
+
+  test("the element-transform refusal is not an OperatorConfigError", () => {
     // An acceptor adopts the element transforms verbatim from the partner's
     // invitation, so the fault is not provably this operator's own content: the
     // message stays swallowed by the web's generic alert, like the psi-c and
