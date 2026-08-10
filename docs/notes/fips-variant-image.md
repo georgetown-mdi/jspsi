@@ -247,6 +247,20 @@ absence, the entry separates the two.
   and an existing `host_key_fingerprint` pinned to an Ed25519 key has to be
   re-pinned to another format; the measured run pinned the server's ECDSA
   fingerprint.
+- **SFTP against a server that accepts only the `chacha20-poly1305@openssh.com`
+  cipher.** The measured part is the offer: the default client `SSH_MSG_KEXINIT`
+  from inside this image carries no such cipher, where an ordinary runtime's
+  does
+  ([FIPS_SFTP_PROFILE.md](../FIPS_SFTP_PROFILE.md#the-default-offer-measured-inside-the-image)).
+  A server with nothing else to accept therefore shares no cipher with that
+  offer, and the run ends at negotiation before authentication. The omission is
+  the runtime's rather than psilink's or an operator's -- `ssh2`
+  capability-probes the cipher list it offers, and psilink sets
+  `algorithms.cipher` nowhere
+  ([DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client))
+  -- and whether an operator naming that cipher would put it back in the offer
+  is unmeasured. A FIPS deployment would not name it: it is not an approved
+  algorithm.
 - **MD5.** Never an approved algorithm, refused by the provider, and used
   outside security contexts often enough elsewhere that its absence is worth
   naming. `crypto.createHash("md5")` throws `ERR_OSSL_EVP_UNSUPPORTED`.
