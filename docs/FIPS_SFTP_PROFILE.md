@@ -130,9 +130,30 @@ What that means for the lists above, from the provider measurements recorded in 
 - **`curve25519-sha256` is unavailable under a 3.5.x provider.** X25519 keypair generation fails there, taking every key exchange built on it with it; under a 3.0.x provider X25519 survives. This is one more reason the `kex` list above excludes it: a recommendation that depended on the provider build would fail at negotiation for a reason the operator could not see from the profile.
 - **MD5 is unavailable under a fips-only configuration.** PSI-Link pins and displays a host key by its OpenSSH SHA-256 fingerprint, so the pin above is unaffected -- but tooling that produces an MD5 fingerprint (`ssh-keygen -E md5`, and some server documentation) cannot be used inside such an image to derive the value you pin.
 
-These three rest on the provider's own measured algorithm surface, not on an SSH handshake measured inside a FIPS-configured image: the negotiation behavior described everywhere else on this page is verified against a real SSH server on an ordinary runtime, and no FIPS-configured runtime was available to drive it in. Treat the section above as the reason the profile's values are chosen as they are, and confirm a handshake in your own image before relying on it.
-
 Which certificate and base image the variant pairs with, and what a claim about it may say, are in [fips-variant-image.md](notes/fips-variant-image.md) and [COMPLIANCE.md](COMPLIANCE.md#fips-140).
+
+### The default offer measured inside the image
+
+The three points above rest on the provider's own measured algorithm surface; what such an image puts on the SSH wire is a separate measurement, taken directly. On an Amazon Linux 2023 host with kernel FIPS mode enabled (`/proc/sys/crypto/fips_enabled` reads `1`), the FIPS variant image -- carrying the AL2023 FIPS provider module `3.0.8-d694bfa693b76001` under a fips-only OpenSSL configuration -- was dialed at a listener that answers the SSH version banner, decodes the client's first packet (`SSH_MSG_KEXINIT`), and drops the connection. No key exchange completed and no server key was involved. The dial carried no `algorithms` block, so what it offered is the default, before any setting on this page narrows it:
+
+| Negotiated | Offered by default from inside the FIPS image |
+|---|---|
+| Key exchange | `ecdh-sha2-nistp256`, `ecdh-sha2-nistp384`, `ecdh-sha2-nistp521`, `diffie-hellman-group-exchange-sha256`, `diffie-hellman-group14-sha256`, `diffie-hellman-group15-sha512`, `diffie-hellman-group16-sha512`, `diffie-hellman-group17-sha512`, `diffie-hellman-group18-sha512` |
+| Encryption | `aes128-gcm@openssh.com`, `aes256-gcm@openssh.com`, `aes128-ctr`, `aes192-ctr`, `aes256-ctr` |
+| Message authentication | `hmac-sha2-256-etm@openssh.com`, `hmac-sha2-512-etm@openssh.com`, `hmac-sha1-etm@openssh.com`, `hmac-sha2-256`, `hmac-sha2-512`, `hmac-sha1` |
+| Host-key type | `ecdsa-sha2-nistp256`, `ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp521`, `rsa-sha2-512`, `rsa-sha2-256`, `ssh-rsa` |
+
+The key-exchange field also carried `ext-info-c` and `kex-strict-c-v00@openssh.com`, which signal protocol extensions rather than naming algorithms.
+
+Four names an ordinary runtime offers are absent from it:
+
+- **`curve25519-sha256` and its `@libssh.org` spelling**, from the key exchange. X25519 cannot be performed in that image, and PSI-Link withholds the algorithms built on it ([Distinguishing this from a runtime that cannot perform the algorithm](#distinguishing-this-from-a-runtime-that-cannot-perform-the-algorithm)); excluding them in the `kex` list above costs nothing there.
+- **`chacha20-poly1305@openssh.com`**, from the ciphers.
+- **`ssh-ed25519`**, from the host-key offer, which is otherwise the list described under [Host-key types cannot be constrained](#host-key-types-cannot-be-constrained) -- `ssh-rsa` at the end of it included.
+
+The SHA-1 MACs are not among them. `hmac-sha1-etm@openssh.com` and `hmac-sha1` are offered by default, as is `diffie-hellman-group-exchange-sha256`, so **a FIPS-configured image is not a substitute for the settings above**: run one without them and a partner's server that accepts only `hmac-sha1` still negotiates it on a CTR fallback, and one that accepts only group exchange still negotiates a modulus it chose itself.
+
+The measurement is one image on one host, and it is what the client offers rather than a completed negotiation -- the listener is not an SSH server. The negotiation behavior described everywhere else on this page is verified against a real SSH server on an ordinary runtime. Confirm the offer in your own image when its base image or provider build differs from the one above.
 
 ## What to ask of the partner's server
 
