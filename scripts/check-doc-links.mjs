@@ -8,21 +8,21 @@
 // path or dead anchor fails the build. This is the mechanical forcing function
 // that keeps the two-tier docs (docs/ overview, docs/spec/ technical) from
 // drifting into stale cross-references on a future move or rename. External
-// (http/https/mailto) links are not fetched; fenced code blocks are skipped so
-// a `](` inside a code sample is not mistaken for a link.
+// (http/https/mailto) links are not fetched; fenced code blocks and inline
+// code spans are skipped so a `](` inside a code sample is not mistaken for a
+// link.
 
 import { execSync } from "node:child_process";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { stripFences } from "./lib/markdownFences.mjs";
-
-const root = process.cwd();
+import { stripCodeSpans, stripFences } from "./lib/markdownFences.mjs";
 
 // Tracked + untracked-but-not-gitignored .md files (so newly added docs are
 // checked before they are committed, while node_modules/.worktrees/scratch
 // stay excluded by .gitignore).
-function listMarkdown() {
+function listMarkdown(root) {
   const out = execSync(
     'git ls-files --cached --others --exclude-standard "*.md"',
     {
@@ -75,16 +75,19 @@ function anchorsFor(absPath) {
   return anchors;
 }
 
-const linkRe = /\]\(([^)]+)\)/g;
-const failures = [];
-const mdFiles = listMarkdown();
-
-for (const file of mdFiles) {
-  const abs = resolve(root, file);
-  const raw = readFileSync(abs, "utf8");
-  // Drop HTML comments (example link syntax in PR/issue templates lives there)
-  // then fenced code, before scanning for real links.
-  const text = stripFences(raw.replace(/<!--[\s\S]*?-->/g, ""));
+/**
+ * Scan `raw` (the content of `file`, read from `absPath`) for dead relative
+ * link targets and dead in-file/cross-file anchors. Returns an array of
+ * "file:line  reason" strings, empty when the document is clean.
+ */
+export function findFailures(file, absPath, raw) {
+  const failures = [];
+  // Drop HTML comments (example link syntax in PR/issue templates lives
+  // there), then fenced code, then inline code spans, before scanning for
+  // real links -- each stripping preserves line structure so a line number
+  // derived from `match.index` below stays correct.
+  const text = stripCodeSpans(stripFences(raw.replace(/<!--[\s\S]*?-->/g, "")));
+  const linkRe = /\]\(([^)]+)\)/g;
   let match;
   while ((match = linkRe.exec(text)) !== null) {
     let target = match[1].trim();
@@ -106,8 +109,8 @@ for (const file of mdFiles) {
 
     const targetAbs =
       pathPart === ""
-        ? abs
-        : resolve(dirname(abs), decodeURIComponent(pathPart));
+        ? absPath
+        : resolve(dirname(absPath), decodeURIComponent(pathPart));
 
     if (pathPart !== "" && !existsSync(targetAbs)) {
       failures.push(`${file}:${line}  dead path -> ${pathPart}`);
@@ -124,17 +127,31 @@ for (const file of mdFiles) {
       }
     }
   }
+  return failures;
 }
 
-if (failures.length > 0) {
-  console.error(
-    `Markdown link check failed (${failures.length} dead reference${failures.length === 1 ? "" : "s"}):\n`,
-  );
-  for (const f of failures.sort()) console.error("  " + f);
-  console.error(
-    "\nFix the path/anchor, or update the reference if a doc moved or was renamed.",
-  );
-  process.exit(1);
-}
+// CLI entry: only runs when invoked directly, so the test can import
+// findFailures without the process.exit.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const root = process.cwd();
+  const mdFiles = listMarkdown(root);
+  const failures = [];
+  for (const file of mdFiles) {
+    const abs = resolve(root, file);
+    const raw = readFileSync(abs, "utf8");
+    failures.push(...findFailures(file, abs, raw));
+  }
 
-console.log(`Markdown link check passed (${mdFiles.length} files scanned).`);
+  if (failures.length > 0) {
+    console.error(
+      `Markdown link check failed (${failures.length} dead reference${failures.length === 1 ? "" : "s"}):\n`,
+    );
+    for (const f of failures.sort()) console.error("  " + f);
+    console.error(
+      "\nFix the path/anchor, or update the reference if a doc moved or was renamed.",
+    );
+    process.exit(1);
+  }
+
+  console.log(`Markdown link check passed (${mdFiles.length} files scanned).`);
+}
