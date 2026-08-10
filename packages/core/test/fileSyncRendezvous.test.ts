@@ -2402,6 +2402,19 @@ describe("FileSyncRendezvous bounded hello read", () => {
     joinerRecoveryMs: 60,
   });
 
+  // The budget for a test that drives the read to SUCCEED rather than to
+  // expiry, where the bound is a backstop for a hello that never becomes
+  // readable and no assertion is a duration. The floor is sized well past the
+  // machine's scheduling: under longBudget's 60 ms floor a pair of injected
+  // read failures costs a third of the bound on an idle container and the whole
+  // of it on a loaded one, which settles the outcome by how promptly a 10 ms
+  // timer fires rather than by whether the retry works.
+  const readSucceedsBudget = () => ({
+    timeToLive: new Date(Date.now() + 60_000),
+    pollingFrequency: 10,
+    joinerRecoveryMs: 15_000,
+  });
+
   test("a torn leftover hello fails inside the read bound, not at the peer timeout (lock)", async () => {
     const files = new Map<string, Buffer>();
     // Zero length: the shape a kill between the open and the write leaves under
@@ -2518,8 +2531,8 @@ describe("FileSyncRendezvous bounded hello read", () => {
     const files = new Map<string, Buffer>();
     const flags = { locklessRendezvous: false, retainFiles: false };
     placePeerHello(files, "zzz", flags);
-    const p = makeParty("aaa", { ...flags, ...longBudget() }, files);
-    // Two failed reads at a 10 ms cadence, comfortably inside the bound.
+    const p = makeParty("aaa", { ...flags, ...readSucceedsBudget() }, files);
+    // Two failed reads at a 10 ms cadence, well inside the bound.
     withPartialSyncedHello(p.client, 2);
 
     await p.rdv.run(p.scope);

@@ -1416,12 +1416,20 @@ test("a token_max_age_days policy stamps expires onto both rotated key files", a
 // wins the rendezvous. A barrier in the mock holds both parties past the handshake
 // before either fails, so the first teardown cannot strand the other's handshake.
 
+// The barrier's bound is a hang backstop for a party that never arrives, not a
+// budget for how long the other party's rendezvous may take. The two are started
+// together and meet within milliseconds, but a loaded machine can stretch the
+// second party's rendezvous past a bound sized near that: the party already
+// through then gives up, tears down, and strands the one still arriving, which
+// fails the run for the scheduling rather than for what the test injected.
+const BOTH_ARMED_HANG_BACKSTOP_MS = 15_000;
+
 // Holds the calling party inside the mocked runExchange until BOTH parties have
 // arrived (both are armed and past the handshake), bounded so a lone arrival does
 // not hang. See mockState.runExchangeEntries.
 async function awaitBothArmed(): Promise<void> {
   mockState.runExchangeEntries++;
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + BOTH_ARMED_HANG_BACKSTOP_MS;
   while (mockState.runExchangeEntries < 2 && Date.now() < deadline)
     await new Promise<void>((r) => setTimeout(r, 1));
 }
