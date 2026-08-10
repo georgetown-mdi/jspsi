@@ -103,6 +103,18 @@ async function signedRecord(
   };
 }
 
+/** The same record with a responder certificate whose canonical bytes cannot be
+ * produced, so that slot cannot be evaluated at all. */
+function withUnevaluableResponder(record: DualSignedRecord): DualSignedRecord {
+  return {
+    ...record,
+    responder: {
+      ...record.responder,
+      certificate: { ...record.responder.certificate, identity: undefined },
+    },
+  } as unknown as DualSignedRecord;
+}
+
 // What a party holding its own exchange record supplies: the partner's pin and
 // both parties' identities and agreed-terms hash.
 const fullyAnchored = {
@@ -272,15 +284,10 @@ describe("verifyDualSignedRecord", () => {
     // this reaches the verifier only from a direct caller handing it a hand-built
     // record. Every check must still yield a status -- including the fingerprint
     // pin, which is computed outside the per-party evaluation.
-    const record = await signedRecord();
-    const unencodable = {
-      ...record,
-      responder: {
-        ...record.responder,
-        certificate: { ...record.responder.certificate, identity: undefined },
-      },
-    } as unknown as DualSignedRecord;
-    const report = await verifyDualSignedRecord(unencodable, fullyAnchored);
+    const report = await verifyDualSignedRecord(
+      withUnevaluableResponder(await signedRecord()),
+      fullyAnchored,
+    );
     expect(report.outcome).toBe("failed");
     expect(report.initiator.fingerprintPin).toBe("mismatch");
     expect(report.responder.fingerprintPin).toBe("mismatch");
@@ -290,6 +297,20 @@ describe("verifyDualSignedRecord", () => {
     // The evaluable slot is still checked and reported.
     expect(report.initiator.signature).toBe("verified");
     expect(report.initiator.fingerprint).toBe(fingerprintA);
+  });
+
+  test("an unevaluable certificate does not sink the pin on the other slot", async () => {
+    // The same record as above, with the pin on the slot that CAN be evaluated:
+    // that slot's match stands and the unevaluable one is simply unpinned. The
+    // pin is therefore evaluated per certificate -- collapsing the pair to a
+    // single mismatch whenever either certificate cannot be encoded would still
+    // satisfy the out-of-domain pin above.
+    const report = await verifyDualSignedRecord(
+      withUnevaluableResponder(await signedRecord()),
+      { ...fullyAnchored, pinnedFingerprint: fingerprintA },
+    );
+    expect(report.initiator.fingerprintPin).toBe("verified");
+    expect(report.responder.fingerprintPin).toBe("not-pinned");
   });
 
   test("a certificate whose self-signature does not verify fails the identity binding", async () => {

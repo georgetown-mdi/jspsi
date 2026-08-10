@@ -247,6 +247,26 @@ describe("formatSignedRecordReport", () => {
     expect(exitCode).toBe(0);
   });
 
+  test("a verified record claims only the slot the one pin anchored", () => {
+    // What one pin produces: it matches the responder's certificate, and no
+    // pinned value reaches the initiator's -- which whoever assembled the record
+    // could have minted. The headline must say which slot it anchored and leave
+    // the other one unclaimed, rather than contradict the per-slot line below it.
+    const { lines } = formatSignedRecordReport(report());
+    expect(lines[0]).toBe(
+      "SIGNED RECEIPT VERIFIED: both signatures verify, and the pinned value " +
+        "matches the responder's certificate. No pinned value authenticates " +
+        "the initiator's certificate.",
+    );
+    const out = lines.join("\n");
+    expect(out).toContain(
+      "the initiator's certificate is not authenticated by any pinned value: " +
+        "one pinned value reaches one certificate, so this record shows that " +
+        "the pinned party signed it, not who the other signer is.",
+    );
+    expect(out).toContain("no pinned value supplied for this certificate");
+  });
+
   test("the binder is reported as covered but not recomputed", () => {
     const { lines } = formatSignedRecordReport(report());
     expect(lines.join("\n")).toContain(
@@ -297,19 +317,23 @@ describe("formatSignedRecordReport", () => {
     expect(exitCode).toBe(1);
   });
 
-  test("a certificate identity carrying control bytes is sanitized before display", () => {
-    // The identity is free text chosen by whoever minted the certificate, which
-    // an auditor may be handed by anyone: it must be neutralized at this display
-    // boundary rather than echoed to the terminal raw.
+  test("record-carried text with control bytes is sanitized before display", () => {
+    // The identity and the binder both come out of the record verbatim -- the
+    // identity free text chosen by whoever minted the certificate, the binder a
+    // value only the two parties could derive -- and an auditor may be handed
+    // that record by anyone: both are neutralized at this display boundary
+    // rather than echoed to the terminal raw.
     const esc = String.fromCharCode(0x1b);
     const { lines } = formatSignedRecordReport(
       report({
         initiator: party("initiator", { identity: `A${esc}[31m` }),
+        binder: `YmluZGVy${esc}[2J`,
       }),
     );
     const out = lines.join("\n");
     expect(out).not.toContain(esc);
     expect(out).toContain("initiator: A");
+    expect(out).toContain("per-exchange binder YmluZGVy");
   });
 });
 
@@ -372,18 +396,31 @@ describe("pinnedFingerprintFromConfig", () => {
       tmp(),
       `signing:\n  mode: certificate\n  partner_fingerprint: ${fingerprint}\n`,
     );
-    expect(pinnedFingerprintFromConfig(path)).toBe(fingerprint);
+    expect(pinnedFingerprintFromConfig(path, true)).toBe(fingerprint);
   });
 
-  test("no signing block, no config, and no flag each yield no pin", () => {
+  test("no signing block and no config named each yield no pin", () => {
     const dir = tmp();
     expect(
-      pinnedFingerprintFromConfig(writeConfig(dir, "linkage_terms:\n")),
+      pinnedFingerprintFromConfig(writeConfig(dir, "linkage_terms:\n"), true),
     ).toBeUndefined();
+    expect(pinnedFingerprintFromConfig(undefined, false)).toBeUndefined();
+  });
+
+  test("a config path named on the command line must exist", () => {
+    // Mapping the missing file to "no pin" would verify a typo'd path unpinned
+    // and report the fingerprint trust as merely not established.
+    const path = join(tmp(), "absent.yaml");
+    expect(() => pinnedFingerprintFromConfig(path, true)).toThrow(UsageError);
+    expect(() => pinnedFingerprintFromConfig(path, true)).toThrow(
+      /absent\.yaml does not exist/,
+    );
+  });
+
+  test("a defaulted config path that does not exist yields no pin", () => {
     expect(
-      pinnedFingerprintFromConfig(join(dir, "absent.yaml")),
+      pinnedFingerprintFromConfig(join(tmp(), "absent.yaml"), false),
     ).toBeUndefined();
-    expect(pinnedFingerprintFromConfig(undefined)).toBeUndefined();
   });
 
   test("a malformed pin is a usage error, not a silent mismatch later", () => {
@@ -393,8 +430,8 @@ describe("pinnedFingerprintFromConfig", () => {
       tmp(),
       "signing:\n  mode: certificate\n  partner_fingerprint: too-short\n",
     );
-    expect(() => pinnedFingerprintFromConfig(path)).toThrow(UsageError);
-    expect(() => pinnedFingerprintFromConfig(path)).toThrow(
+    expect(() => pinnedFingerprintFromConfig(path, true)).toThrow(UsageError);
+    expect(() => pinnedFingerprintFromConfig(path, true)).toThrow(
       /not a certificate fingerprint/,
     );
   });
@@ -572,6 +609,20 @@ describe("handler", () => {
     expect(stderr).toContain("no dual-signed record was named");
     // The record on its own would have verified and printed a verdict, so an
     // empty stdout is what shows the pin was refused rather than ignored.
+    expect(stdout).toBe("");
+  });
+
+  test("a --config-file that does not exist is refused, not verified unpinned", async () => {
+    const { signedPath } = await exchangeArtifacts();
+    const { stdout, stderr, exits } = await runVerify({
+      record: signedPath,
+      "config-file": join(tmp(), "typo.yaml"),
+    });
+    expect(exits).toEqual([64]);
+    expect(stderr).toContain("does not exist");
+    // The run would otherwise have printed an INCOMPLETE verdict reporting the
+    // fingerprint trust as not established, which reads as an auditor's run
+    // rather than as a mistyped path.
     expect(stdout).toBe("");
   });
 

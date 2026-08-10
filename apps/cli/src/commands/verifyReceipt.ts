@@ -393,7 +393,8 @@ const SIGNED_TERMS_WORD: Record<TermsHashStatus, string> = {
 function signedPartyLines(party: SignedReceiptPartyReport): string[] {
   return [
     // The identity is free text the certificate's holder chose, so it is escaped
-    // at this display sink; the fingerprint is base64url by schema.
+    // at this display sink; the fingerprint beside it is recomputed by the
+    // verifier rather than carried by the record.
     `  ${party.role}: ${sanitizeForDisplay(party.identity)}`,
     `    certificate fingerprint ${party.fingerprint}: ` +
       FINGERPRINT_PIN_WORD[party.fingerprintPin],
@@ -404,12 +405,31 @@ function signedPartyLines(party: SignedReceiptPartyReport): string[] {
   ];
 }
 
+/** Name the certificates a set of party reports covers, for a sentence about what
+ * the pin did or did not reach. */
+function certificatesPhrase(parties: SignedReceiptPartyReport[]): string {
+  const [first] = parties;
+  if (first === undefined) return "neither party's certificate";
+  if (parties.length === 1) return `the ${first.role}'s certificate`;
+  return "both parties' certificates";
+}
+
 /** Render the dual-signed record's verification report to output lines and an exit
  * code (0 unless a check definitively failed). @internal exported for testing */
 export function formatSignedRecordReport(
   report: DualSignedRecordVerificationReport,
 ): { lines: string[]; exitCode: number } {
   const lines: string[] = [];
+  // A pinned value anchors the one certificate whose fingerprint it matches, and
+  // nothing outside the record vouches for the other slot's, so the verdict states
+  // which slot it reached rather than speaking for both parties.
+  const parties = [report.initiator, report.responder];
+  const anchored = parties.filter(
+    (party) => party.fingerprintPin === "verified",
+  );
+  const unpinned = parties.filter(
+    (party) => party.fingerprintPin === "not-pinned",
+  );
   if (report.outcome === "failed")
     lines.push(
       "SIGNED RECEIPT VERIFICATION FAILED: a check did not match -- the " +
@@ -423,8 +443,14 @@ export function formatSignedRecordReport(
     );
   else
     lines.push(
-      "SIGNED RECEIPT VERIFIED: both parties signed this exchange, and the " +
-        "pinned certificate is the partner's.",
+      "SIGNED RECEIPT VERIFIED: both signatures verify, and the pinned value " +
+        `matches ${certificatesPhrase(anchored)}.` +
+        unpinned
+          .map(
+            (party) =>
+              ` No pinned value authenticates the ${party.role}'s certificate.`,
+          )
+          .join(""),
     );
 
   lines.push(...signedPartyLines(report.initiator));
@@ -436,14 +462,11 @@ export function formatSignedRecordReport(
   // the two parties -- during the live exchange, where each derives it
   // independently -- can tell that a different exchange's binder was substituted.
   lines.push(
-    `  per-exchange binder ${report.binder}: covered by both signatures, not ` +
-      "recomputed (deriving it needs the exchange session key, which only the " +
-      "two parties held).",
+    `  per-exchange binder ${sanitizeForDisplay(report.binder)}: covered by ` +
+      "both signatures, not recomputed (deriving it needs the exchange session " +
+      "key, which only the two parties held).",
   );
-  if (
-    report.initiator.fingerprintPin === "not-pinned" &&
-    report.responder.fingerprintPin === "not-pinned"
-  )
+  if (unpinned.length === parties.length)
     lines.push(
       "  certificate fingerprint trust not established (no pinned value " +
         "supplied): the signatures verify against the certificates carried in " +
@@ -451,6 +474,13 @@ export function formatSignedRecordReport(
         "know. Pass --partner-fingerprint, or --config-file with " +
         "signing.partner_fingerprint set.",
     );
+  else if (anchored.length > 0)
+    for (const party of unpinned)
+      lines.push(
+        `  the ${party.role}'s certificate is not authenticated by any pinned ` +
+          "value: one pinned value reaches one certificate, so this record " +
+          "shows that the pinned party signed it, not who the other signer is.",
+      );
   return { lines, exitCode: report.outcome === "failed" ? 1 : 0 };
 }
 
@@ -471,10 +501,17 @@ function localTermsFrom(
  * this command never uses cannot fail a verification run. A malformed value is a
  * usage error naming the config: a pin that cannot be a fingerprint would
  * otherwise be indistinguishable from a partner whose certificate does not match.
+ *
+ * `explicit` marks a path the operator named on the command line rather than a
+ * default, and a named path that does not exist is a usage error rather than an
+ * absent pin (the distinction `psilink fingerprint` draws for its own config
+ * hints): a typo'd `--config-file` would otherwise verify unpinned and report
+ * trust as merely not established.
  * @internal exported for testing
  */
 export function pinnedFingerprintFromConfig(
   configFile: string | undefined,
+  explicit: boolean,
 ): string | undefined {
   if (configFile === undefined) return undefined;
   const target = expandTilde(configFile);
@@ -482,7 +519,11 @@ export function pinnedFingerprintFromConfig(
   try {
     text = fs.readFileSync(target, "utf8");
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      if (explicit)
+        throw new UsageError(`config file ${configFile} does not exist`);
+      return undefined;
+    }
     throw new UsageError(
       `config file ${configFile} could not be read: ` +
         (err instanceof Error ? err.message : String(err)),
@@ -546,7 +587,10 @@ function resolvePinnedFingerprint(
   flagValue: string | undefined,
   configFile: string | undefined,
 ): string | undefined {
-  if (flagValue === undefined) return pinnedFingerprintFromConfig(configFile);
+  // This command never auto-loads a config, so a path that reaches here was named
+  // on the command line.
+  if (flagValue === undefined)
+    return pinnedFingerprintFromConfig(configFile, configFile !== undefined);
   if (!FINGERPRINT_REGEX.test(flagValue))
     throw new UsageError(
       "--partner-fingerprint must be a certificate fingerprint (an unpadded " +

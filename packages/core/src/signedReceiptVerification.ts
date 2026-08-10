@@ -18,7 +18,13 @@ import type { HandshakeRole } from "./types.js";
 // per party, the certificate the record carries, the receipt signature made under
 // that certificate's key, the fingerprint pin when the verifier holds one, and the
 // identity the certificate authorizes. Read-only -- it never mutates or re-signs
-// the artifact, and it never throws: every check yields a status.
+// the artifact -- and every check yields a status rather than throwing for any
+// record of the shape parseDualSignedRecord produces: the FIELD VALUES inside it
+// may be hostile (an identity the canonical encoder refuses, a malformed
+// signature, a public key that is not a P-256 point) and each still resolves to a
+// status. That contract covers the values, not the shape: a hand-built record
+// missing a structural member (no `content`, a party without a certificate) is a
+// programming error and reaches a TypeError.
 //
 // This is the SIGNED path, evidence against the partner, and is the counterpart of
 // recordVerification.ts, which checks the unsigned self-attested record's internal
@@ -273,9 +279,13 @@ function identityStatuses(
  * two certificates of their own. A run with no pinned value is the third-party
  * auditor's, and is `incomplete`.
  *
- * Fail-safe: every check yields a status, never an exception, so a hostile or
- * malformed record always produces a verdict. An unrecognized record version is
- * rejected earlier, at parse.
+ * Fail-safe over field values: given a record of the shape
+ * `parseDualSignedRecord` produces, every check yields a status rather than an
+ * exception however hostile the certificate and signature values it carries, so
+ * a hostile record always produces a verdict. The shape itself is the caller's:
+ * a hand-built record missing a structural member (no `content`, a party without a
+ * certificate) is a programming error and reaches a TypeError. An unrecognized
+ * record version is rejected earlier, at parse.
  */
 export async function verifyDualSignedRecord(
   record: DualSignedRecord,
