@@ -72,6 +72,15 @@ const SUMMARY_ROOT = "InvitationSummary";
 const CORE_ROOT = repoPath("../");
 
 /**
+ * A bound on the compiler-API walk below sized as a backstop for a derivation
+ * that never returns, not as an assertion about how fast a loaded machine can
+ * build a program: the walk creates a whole `ts.Program` over the summary
+ * source, which costs seconds on an idle container and several times that when
+ * the rest of the suite is competing for the same cores.
+ */
+const TYPE_WALK_HANG_BACKSTOP_MS = 60_000;
+
+/**
  * Type flags carrying no properties of their own, so a position of that type is
  * where a path ends. `VoidLike` covers the `undefined` an optional property's
  * union carries.
@@ -301,31 +310,35 @@ describe("the display-struct brand", () => {
     },
   );
 
-  test("reaches every optional position the summary declares", () => {
-    const declared = declaredSummaryPositions();
-    const reached = new Set<string>();
-    for (const variant of hostileVariants)
-      for (const position of presentPositions(
-        summarizeInvitation(variant.source),
-      ))
-        reached.add(position);
+  test(
+    "reaches every optional position the summary declares",
+    { timeout: TYPE_WALK_HANG_BACKSTOP_MS },
+    () => {
+      const declared = declaredSummaryPositions();
+      const reached = new Set<string>();
+      for (const variant of hostileVariants)
+        for (const position of presentPositions(
+          summarizeInvitation(variant.source),
+        ))
+          reached.add(position);
 
-    // What makes the escaping walk above non-vacuous per position rather than
-    // only in aggregate: an optional position no fixture populates holds nothing
-    // for that walk to inspect, so it is named here instead of passing silently.
-    expect(
-      [...declared.optional]
-        .filter((position) => !reached.has(position))
-        .sort(),
-    ).toEqual([]);
+      // What makes the escaping walk above non-vacuous per position rather than
+      // only in aggregate: an optional position no fixture populates holds nothing
+      // for that walk to inspect, so it is named here instead of passing silently.
+      expect(
+        [...declared.optional]
+          .filter((position) => !reached.has(position))
+          .sort(),
+      ).toEqual([]);
 
-    // And the derivation cannot quietly stop short and shrink what the line above
-    // demands: a position the fixtures reach but the type walk never named means
-    // it failed to descend somewhere a value does.
-    expect(
-      [...reached].filter((position) => !declared.all.has(position)).sort(),
-    ).toEqual([]);
-  });
+      // And the derivation cannot quietly stop short and shrink what the line above
+      // demands: a position the fixtures reach but the type walk never named means
+      // it failed to descend somewhere a value does.
+      expect(
+        [...reached].filter((position) => !declared.all.has(position)).sort(),
+      ).toEqual([]);
+    },
+  );
 
   test("stays a plain string at the renderer, needing no cast or unwrapping", () => {
     const summary = summarizeInvitation(hostileSource);
