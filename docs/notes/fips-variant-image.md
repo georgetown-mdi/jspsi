@@ -395,10 +395,14 @@ the algorithm.
 module's `KDA OneStep`, `KDA TwoStep` and HKDF: "These implementations shall
 only be used to generate secret keys in the context of an SP 800-56Ar3 key
 agreement scheme." psilink's collapsed `deriveBits` sits downstream of a P-256
-ECDH, which is an `ephemeralUnified` scheme under that publication, so the head
-of the chain qualifies. Whether every derivation in the Noise schedule -- which
-also mixes the pre-shared secret -- sits "in the context of" that scheme is the
-composition question
+ECDH -- the shared-secret computation of SP 800-56Ar3 section 5.7.1.2, which
+that publication's section 6.1.2.2 Ephemeral Unified Model scheme is built on
+and which the certificate's row labels `ephemeralUnified` -- so the head of the
+chain qualifies as far as the computation goes. The scheme itself does not
+follow: section 6.1.2.2 also prescribes the key-derivation step this handshake
+replaces with the Noise schedule. Whether every derivation in the Noise
+schedule -- which also mixes the pre-shared secret -- sits "in the context of"
+that scheme is the composition question
 [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) already
 records as unattested, arriving here as a stated restriction rather than an
 inference.

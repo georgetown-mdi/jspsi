@@ -1,7 +1,7 @@
 ---
 title: "PSI-Link Security Design"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-07"
+last_reviewed: "2026-08-10"
 ---
 
 # PSI-Link security
@@ -131,7 +131,7 @@ Recurring exchanges derive their session key from an ephemeral P-256 key exchang
 
 The construction follows the Noise NNpsk0 pattern over P-256 with an added explicit, role-asymmetric key confirmation whose construction is modelled on NIST SP 800-56A Rev. 3 without being conformant to it (see [PROTOCOL.md](spec/PROTOCOL.md#p-256-authenticated-key-exchange) for why); every cryptographic operation is a platform `crypto.subtle` call rather than a third-party library one, and the full Noise framework is never hand-rolled. The wire-level specification is in [PROTOCOL.md](spec/PROTOCOL.md#p-256-authenticated-key-exchange), which also records the migration from the earlier SPAKE2 design. The CLI and the web application run the same handshake, and its version discriminant keeps future interop open: two peers on different discriminants fail closed rather than negotiating, which is how the migration off X25519 was carried.
 
-The pre-shared secret remains the baseline authentication anchor: low setup friction, and no organizational PKI for the bilateral-agency case. A certificate-chain, authority-backed mode is left open by that same version discriminant (see [Pinned self-signed trust model](#pinned-self-signed-trust-model)). Two kinds of approval are easy to conflate here, so the compliance position is stated as a distinction. Approval at the algorithm-standard level (FIPS 186-5, SP 800-186) is worth having in an agency ATO review but is not module-certificate approval. Key establishment has both available to it: P-256 ECDH and HKDF are on the approved-algorithm list of the FIPS 140-3 certificate this project targets, so where a validated module is configured it performs every cryptographic operation in the handshake. What that does and does not license a claim to say -- the schedule composed above those operations is attested by no certificate -- is recorded in [key-establishment-fips-boundary.md](notes/key-establishment-fips-boundary.md). Receipt signing has both available to it on the same terms: ECDSA over P-256 with SHA-256 is on that certificate's approved list and runs through `crypto.subtle`, while the certificate document, the domain separation, the per-signer binding, and the pin-before-signature check remain a composition no certificate attests. What that licenses a claim to say, and the pure-JS alternative weighed against it, are recorded in [receipt-signing-fips-boundary.md](notes/receipt-signing-fips-boundary.md).
+The pre-shared secret remains the baseline authentication anchor: low setup friction, and no organizational PKI for the bilateral-agency case. A certificate-chain, authority-backed mode is left open by that same version discriminant (see [Pinned self-signed trust model](#pinned-self-signed-trust-model)). Two kinds of approval are easy to conflate here, so the compliance position is stated as a distinction. Approval at the algorithm-standard level is worth having in an agency ATO review but is not module-certificate approval: for key establishment the standards are [SP 800-56A Rev. 3](https://doi.org/10.6028/NIST.SP.800-56Ar3) (the shared-secret computation) and [SP 800-186](https://doi.org/10.6028/NIST.SP.800-186) (the curve), and for receipt signing [FIPS 186-5](https://doi.org/10.6028/NIST.FIPS.186-5) (ECDSA), which itself refers its curves to SP 800-186. Key establishment has both kinds available to it: P-256 ECDH and HKDF are on the approved-algorithm list of the FIPS 140-3 certificate this project targets, so where a validated module is configured it performs every cryptographic operation in the handshake. What that does and does not license a claim to say -- the schedule composed above those operations is attested by no certificate -- is recorded in [key-establishment-fips-boundary.md](notes/key-establishment-fips-boundary.md). Receipt signing has both available to it on the same terms: ECDSA over P-256 with SHA-256 is on that certificate's approved list and runs through `crypto.subtle`, while the certificate document, the domain separation, the per-signer binding, and the pin-before-signature check remain a composition no certificate attests. What that licenses a claim to say, and the pure-JS alternative weighed against it, are recorded in [receipt-signing-fips-boundary.md](notes/receipt-signing-fips-boundary.md).
 
 ### Transport-layer authentication
 
@@ -338,7 +338,7 @@ PSI-Link uses the identifying fields only to compute the intersection: it does n
 
 ## Regulatory compliance
 
-The NIST SP 800-53 Rev 5 control mapping and Section 508 accessibility status are documented in [COMPLIANCE.md](COMPLIANCE.md).
+The [NIST SP 800-53 Rev. 5](https://doi.org/10.6028/NIST.SP.800-53r5) control mapping and Section 508 accessibility status are documented in [COMPLIANCE.md](COMPLIANCE.md).
 
 ## See also
 

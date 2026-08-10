@@ -128,10 +128,13 @@ mode tag reaches one row further, and the tension is recorded rather than
 resolved. Its own Table 8, which on that certificate is the Security Function
 Implementations table (p. 20), gives the *HKDF* security function
 `Mode: Feedback`, where 4985's corresponding row carries no mode qualifier at
-all. Three things cut against reading it as a property of the HKDF
-the module performs: 5021's Table 5 row for `KDA HKDF Sp800-56Cr1` carries no
-`KDF Mode` property, SP 800-56C's HKDF is a fixed construction rather than a
-mode-parameterised one, and the cell sits beside KBKDF and `KDA TwoStep` rows
+all. Three things cut against reading it as a property of the HKDF the module
+performs: 5021's Table 5 row for `KDA HKDF Sp800-56Cr1` carries no `KDF Mode`
+property; the construction that row names is RFC 5869's extract-and-expand,
+which is fixed rather than mode-parameterised (SP 800-56C Rev. 2 never uses the
+name HKDF -- it cites RFC 5869 among its references, and the mode selection
+sits in the two-step method's SP 800-108 expansion step, which is what
+`KDA TwoStep` covers); and the cell sits beside KBKDF and `KDA TwoStep` rows
 that are genuinely feedback-mode. None of those three is a reading of what the
 module does, which is the only thing that would settle it -- by driving the
 module, as with the open questions below. The reasoning above does not move
