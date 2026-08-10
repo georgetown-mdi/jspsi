@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
     Pester suite over the path-resolution functions in
-    Setup-PsilinkFileDrop.ps1. Maintainer-facing: it lives outside the guide
-    folder, and an operator following the setup page never receives it.
+    Setup-PsilinkFileDrop.ps1, and over the console command it closes on.
+    Maintainer-facing: it lives outside the guide folder, and an operator
+    following the setup page never receives it.
 
 .DESCRIPTION
     The script under test is dot-sourced with -LoadFunctionsOnly, which defines
@@ -14,8 +15,9 @@
     Two halves:
 
       - Pure: UNC and device-prefix parsing, drive-kind classification, the
-        dialect map, password masking, and that the switch defines the
-        credential and volume sequences the launcher reaches through it. These
+        dialect map, password masking, the rule that names the shared folder
+        and the console command the closing screen prints from it, and that the
+        switch defines the sequences the launcher reaches through it. These
         need no rig and no rights.
       - Rig-backed: a share the runner serves itself over loopback, a drive
         letter mapped to it, and a standalone DFS namespace with a link into
@@ -148,7 +150,8 @@ Describe 'The -LoadFunctionsOnly guard' {
         # below it. A move past the guard leaves the launcher's network branch
         # calling functions that are not there, on a path no test here reaches.
         foreach ($name in 'Resolve-DropPath', 'Read-ShareCredential',
-                          'New-ShareVolume', 'Invoke-Docker', 'Hide-Secret') {
+                          'New-ShareVolume', 'Invoke-Docker', 'Hide-Secret',
+                          'Get-RendezvousFolderName') {
             Get-Command $name -ErrorAction SilentlyContinue |
                 Should -Not -BeNullOrEmpty -Because $name
         }
@@ -312,6 +315,99 @@ Describe 'Drive-kind classification' {
         } else {
             $resolved.Reason | Should -Match "there is no ${letter}: drive"
         }
+    }
+}
+
+Describe 'The shared folder name the console is told' {
+    It 'names a folder on this PC by its own last segment' {
+        Get-RendezvousFolderName -Path 'C:\Users\dana\Egnyte\agency-a-agency-b' |
+            Should -Be 'agency-a-agency-b'
+    }
+
+    It 'ignores a trailing separator, and reads either one' {
+        Get-RendezvousFolderName -Path 'C:\drops\studyA\' | Should -Be 'studyA'
+        Get-RendezvousFolderName -Path 'C:/drops/studyA' | Should -Be 'studyA'
+    }
+
+    It 'names a share subfolder rather than the mount the volume is bound at' {
+        # The network shape mounts a named volume, so no host path reaches the
+        # container at all: the share is where the name has to come from.
+        Get-RendezvousFolderName -Share 'exchange' -SubPath 'agency-a/agency-b' |
+            Should -Be 'agency-b'
+    }
+
+    It 'names the share itself when the folder is the share root' {
+        Get-RendezvousFolderName -Share 'exchange' | Should -Be 'exchange'
+    }
+
+    It 'reads a subfolder the command line supplied with backslashes' {
+        # -SubPath is normalised to forward slashes before the flow reaches the
+        # console command, but the rule is not allowed to depend on that.
+        Get-RendezvousFolderName -Share 'exchange' -SubPath 'agency-a\agency-b' |
+            Should -Be 'agency-b'
+    }
+
+    It 'gives no name for a drive root, which has none' {
+        # Naming it 'D:' would ask the partner to match a drive letter that means
+        # nothing on their machine; the console degrades to no name instead.
+        Get-RendezvousFolderName -Path 'D:\' | Should -BeNullOrEmpty
+        Get-RendezvousFolderName -Path 'D:' | Should -BeNullOrEmpty
+    }
+
+    It 'gives no name for a path it could read no segment out of' {
+        Get-RendezvousFolderName -Path '' | Should -BeNullOrEmpty
+        Get-RendezvousFolderName -Path '\' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'The console command the closing screen prints' {
+    It 'mounts the volume the run created, and the work folder beside it' {
+        $lines = @(Get-ConsoleCommandLines -VolumeName 'psilink-sync' -RendezvousName 'agency-b')
+
+        ($lines -join "`n") | Should -Match "-v 'psilink-sync:/sync'"
+        ($lines -join "`n") | Should -Match "-v 'C:\\path\\to\\your\\work:/data'"
+        ($lines -join "`n") | Should -Match 'JOB_RENDEZVOUS_DIR=/sync'
+    }
+
+    It 'carries the folder name the naming rule reads off the share' {
+        # The whole path the closing screen takes, driven end to end: the share
+        # and subfolder the run resolved reduce to one name, and that is what the
+        # operator is told to pass.
+        $lines = @(Get-ConsoleCommandLines -VolumeName 'psilink-sync' `
+            -RendezvousName (Get-RendezvousFolderName -Share 'exchange' -SubPath 'agency-a/agency-b'))
+
+        ($lines -join "`n") | Should -Match "JOB_RENDEZVOUS_NAME=agency-b'"
+    }
+
+    It 'carries the share itself when the drop folder is the share root' {
+        $lines = @(Get-ConsoleCommandLines -VolumeName 'psilink-sync' `
+            -RendezvousName (Get-RendezvousFolderName -Share 'exchange' -SubPath ''))
+
+        ($lines -join "`n") | Should -Match "JOB_RENDEZVOUS_NAME=exchange'"
+    }
+
+    It 'passes an empty name rather than leaving the variable out' {
+        # An omitted variable has the console name the folder after the mount
+        # point THIS script picked -- sync -- and mint that as the name the
+        # partner is told to look for.
+        $lines = @(Get-ConsoleCommandLines -VolumeName 'psilink-sync')
+
+        ($lines -join "`n") | Should -Match "JOB_RENDEZVOUS_NAME='"
+        # The quote closes immediately: anything else between the = and it is a
+        # name, and the mount point is what an omitted variable would leave.
+        ($lines -join "`n") | Should -Not -Match "JOB_RENDEZVOUS_NAME=[^']"
+    }
+
+    It 'ends every line but the last with the continuation that joins them' {
+        # The command is pasted as printed: a line that lost its continuation
+        # runs as a command of its own, and the rest as arguments to nothing.
+        $lines = @(Get-ConsoleCommandLines -VolumeName 'psilink-sync' -RendezvousName 'agency-b')
+
+        $lines.Count | Should -BeGreaterThan 1
+        foreach ($line in $lines[0..($lines.Count - 2)]) {
+            $line | Should -Match '`$'
+        }
+        $lines[-1] | Should -Not -Match '`$'
     }
 }
 

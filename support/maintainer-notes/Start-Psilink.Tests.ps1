@@ -28,6 +28,13 @@ BeforeAll {
     $launcherScript = (Resolve-Path (Join-Path $PSScriptRoot '..\windows-network-filedrop\Start-Psilink.ps1')).Path
     . $launcherScript -LoadFunctionsOnly
 
+    # The shape the launcher itself runs in: it reaches the setup script's
+    # functions -- the path resolution and the rule that names the shared folder
+    # -- through this same dot-source rather than carrying a second copy. The two
+    # scripts share no function name, so neither redefines the other's.
+    $setupScriptForLauncher = (Resolve-Path (Join-Path $PSScriptRoot '..\windows-network-filedrop\Setup-PsilinkFileDrop.ps1')).Path
+    . $setupScriptForLauncher -LoadFunctionsOnly
+
     # Its own name rather than the setup suite's Start-PowerShellChild: both
     # files run in one Pester invocation, and two helpers sharing a name would
     # give the pair a load order that neither should acquire.
@@ -481,41 +488,6 @@ Describe 'The console argument vector' {
 
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_NAME='
         ($engineArgs -join ' ') | Should -Not -Match 'JOB_RENDEZVOUS_NAME=\S'
-    }
-}
-
-Describe 'The shared folder name the console is told' {
-    It 'names a folder on this PC by its own last segment' {
-        Get-RendezvousFolderName -Path 'C:\Users\dana\Egnyte\agency-a-agency-b' |
-            Should -Be 'agency-a-agency-b'
-    }
-
-    It 'ignores a trailing separator, and reads either one' {
-        Get-RendezvousFolderName -Path 'C:\drops\studyA\' | Should -Be 'studyA'
-        Get-RendezvousFolderName -Path 'C:/drops/studyA' | Should -Be 'studyA'
-    }
-
-    It 'names a share subfolder rather than the mount the volume is bound at' {
-        # The network shape mounts a named volume, so no host path reaches the
-        # container at all: the share is where the name has to come from.
-        Get-RendezvousFolderName -Share 'exchange' -SubPath 'agency-a/agency-b' |
-            Should -Be 'agency-b'
-    }
-
-    It 'names the share itself when the folder is the share root' {
-        Get-RendezvousFolderName -Share 'exchange' | Should -Be 'exchange'
-    }
-
-    It 'gives no name for a drive root, which has none' {
-        # Naming it 'D:' would ask the partner to match a drive letter that means
-        # nothing on their machine; the console degrades to no name instead.
-        Get-RendezvousFolderName -Path 'D:\' | Should -BeNullOrEmpty
-        Get-RendezvousFolderName -Path 'D:' | Should -BeNullOrEmpty
-    }
-
-    It 'gives no name for a path it could read no segment out of' {
-        Get-RendezvousFolderName -Path '' | Should -BeNullOrEmpty
-        Get-RendezvousFolderName -Path '\' | Should -BeNullOrEmpty
     }
 }
 

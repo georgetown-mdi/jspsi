@@ -27,7 +27,7 @@ import type {
 } from "@psilink/core";
 
 // This suite exercises the CONSOLE acceptor seat: the honest unsupported-shape
-// gate, the advisory shared-folder locator, and the server-job run surface (the
+// gate, the shared-folder confirmation, and the server-job run surface (the
 // keep-open callout through a stubbed filedrop accept). For the gate, the dev
 // server has no rendezvous mount configured, so `/api/jobs/rendezvous` reports
 // unavailable: a WebRTC accept is out of scope on the appliance, and a
@@ -183,9 +183,15 @@ describe("console acceptor never renders the recurring-save offer", () => {
   });
 });
 
+// The name THIS appliance's own rendezvous report gives the mounted directory --
+// the only value the console may show as the shared folder's name.
+const APPLIANCE_FOLDER_NAME = "county-exchange";
+
 // The appliance HERE reports a configured rendezvous mount, so a single-directory
-// filedrop accept is runnable and reaches the consent step.
-function stubRendezvousMounted(): void {
+// filedrop accept is runnable and reaches the consent step. `folderName` is reported
+// only when this console can name its own mount, which is the branch the confirm
+// alert turns on.
+function stubRendezvousMounted(folderName?: string): void {
   const realFetch = window.fetch.bind(window);
   const jsonResponse = (body: unknown) =>
     new Response(JSON.stringify(body), {
@@ -198,7 +204,11 @@ function stubRendezvousMounted(): void {
       const url = String(input);
       if (url === "/api/jobs/rendezvous")
         return Promise.resolve(
-          jsonResponse({ configured: true, locator: "rendezvous-folder" }),
+          jsonResponse({
+            configured: true,
+            locator: folderName ?? "rendezvous-folder",
+            ...(folderName === undefined ? {} : { folderName }),
+          }),
         );
       if (url === "/api/jobs/inputs")
         return Promise.resolve(jsonResponse({ configured: true, files: [] }));
@@ -209,9 +219,9 @@ function stubRendezvousMounted(): void {
   );
 }
 
-describe("console acceptor advisory shared-folder locator", () => {
-  test("shows the partner's locator read-only and sanitized at the consent step", async () => {
-    stubRendezvousMounted();
+describe("console acceptor shared-folder confirmation", () => {
+  test("names this appliance's own mounted folder, never the invitation's locator", async () => {
+    stubRendezvousMounted(APPLIANCE_FOLDER_NAME);
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
     app.render(createElement(AcceptorBench));
 
@@ -221,15 +231,39 @@ describe("console acceptor advisory shared-folder locator", () => {
       .getByRole("button", { name: "Continue: consent & your file" })
       .click();
 
-    // The consent step surfaces the partner's advisory shared-folder locator for the
-    // operator to confirm against their own mounted directory -- display-only, and the
-    // partner-supplied path is rendered through the sanitizing summary.
     await expect
       .element(page.getByText("Confirm the shared folder"))
       .toBeInTheDocument();
     await expect
-      .element(page.getByText(FILEDROP_ENDPOINT.path!, { exact: false }))
+      .element(page.getByText(APPLIANCE_FOLDER_NAME, { exact: false }))
       .toBeInTheDocument();
+    // The invitation's locator is the inviting console's folder name only where that
+    // console could name the folder, and its launcher's mount segment where it could
+    // not; this seat cannot tell the two apart, so it renders neither as a name. Held
+    // as a check because a claim about what a surface never shows cannot be a comment.
+    expect(page.getByText(FILEDROP_ENDPOINT.path!).query()).toBeNull();
+  });
+
+  test("asks for the same confirmation where this console cannot name its mount", async () => {
+    stubRendezvousMounted();
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorBench));
+
+    await page
+      .getByRole("button", { name: "Continue: consent & your file" })
+      .click();
+
+    await expect
+      .element(page.getByText("Confirm the shared folder"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("Check with your partner that you are both using", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(page.getByText(FILEDROP_ENDPOINT.path!).query()).toBeNull();
   });
 });
 

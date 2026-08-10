@@ -3,7 +3,6 @@ import { describe, expect, test } from "vitest";
 import {
   ACCEPTOR_SEND_FORWARD_REFERENCE,
   acceptUnsupported,
-  acceptorAdvisoryLocator,
   acceptorConsentName,
   acceptorConsentReady,
   acceptorDoneLedgerFooter,
@@ -623,45 +622,5 @@ describe("acceptorDoneLedgerFooter", () => {
     expect(footer).toContain(
       "The results above are all your partner received about your data.",
     );
-  });
-});
-
-describe("acceptorAdvisoryLocator", () => {
-  test("returns the sanitized shared-folder path for a single-directory filedrop", () => {
-    const locator = acceptorAdvisoryLocator(
-      makeToken({}, { connectionEndpoint: SINGLE_DIR_FILEDROP }),
-    );
-    expect(locator).toBe("/mnt/rendezvous");
-  });
-
-  test("sanitizes an injection-bearing partner path (never raw)", () => {
-    const evilPath = `drops${ESC}[31m${RLO}psilink`;
-    const locator = acceptorAdvisoryLocator(
-      makeToken(
-        {},
-        { connectionEndpoint: { channel: "filedrop", path: evilPath } },
-      ),
-    );
-    expect(locator).toBeDefined();
-    expect(locator).not.toContain(ESC);
-    expect(locator).not.toContain(RLO);
-  });
-
-  test("is undefined for a webrtc, split-directory, or path-less endpoint", () => {
-    expect(
-      acceptorAdvisoryLocator(
-        makeToken({}, { connectionEndpoint: WEBRTC_ENDPOINT }),
-      ),
-    ).toBeUndefined();
-    expect(
-      acceptorAdvisoryLocator(
-        makeToken({}, { connectionEndpoint: SPLIT_FILEDROP }),
-      ),
-    ).toBeUndefined();
-    expect(
-      acceptorAdvisoryLocator(
-        makeToken({}, { connectionEndpoint: { channel: "filedrop" } }),
-      ),
-    ).toBeUndefined();
   });
 });

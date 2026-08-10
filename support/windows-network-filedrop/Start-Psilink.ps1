@@ -687,43 +687,6 @@ function Wait-ForConsole {
     return $false
 }
 
-function Get-RendezvousFolderName {
-    <#  The name of the folder shared with the partner, as the operator knows
-        it, for the console to mint into the invitation.
-
-        The console cannot work this out for itself here. It sees only the
-        container's side of the mount, and this script picks that side: every
-        folder an operator chooses is bound at the same /rendezvous, and a
-        single-folder run rendezvouses out of /data. So the last segment of what
-        the container sees names this script's layout, not the operator's
-        folder, and the name has to be passed in beside the mount.
-
-        A network share is not mounted by path at all -- the volume stands for a
-        server and share -- so the name comes from the resolved share: the last
-        segment of the subfolder within it, or the share itself when the folder
-        IS the share root.
-
-        Returns an empty string when there is no folder name to give: a drive
-        root has none, and neither has a path this script could not read a last
-        segment out of. That empty string is passed to the console as it stands,
-        which is what leaves the console with no name for the folder at all;
-        naming the drive letter instead would be a name no partner could match. #>
-    param(
-        [string] $Path = '',
-        [string] $Share = '',
-        [string] $SubPath = ''
-    )
-
-    $source = if ($Share) { if ($SubPath) { $SubPath } else { $Share } } else { $Path }
-    $segments = @($source -split '[\\/]+' | Where-Object { $_ })
-    if ($segments.Count -eq 0) { return '' }
-    $name = $segments[-1].Trim()
-    # A bare drive designator (C:) is what a drive root reduces to, and it names
-    # a drive rather than a folder.
-    if ($name -match '^[A-Za-z]:$') { return '' }
-    return $name
-}
-
 function Get-ConsoleEngineArgs {
     <#  The engine's argument vector for the console.
 
@@ -818,9 +781,10 @@ if (Test-WindowsContainerMode -Engine $script:PsilinkEngine) {
 Show-Ok "Using $script:PsilinkEngine."
 
 # Setup-PsilinkFileDrop.ps1 owns the Explorer-path-to-server-and-share
-# resolution, and this script reuses it rather than carrying a second copy. It
-# is loaded with -LoadFunctionsOnly, which defines its functions and runs none
-# of its setup flow.
+# resolution and the rule that names the shared folder, and this script reuses
+# both rather than carrying a second copy. It is loaded with
+# -LoadFunctionsOnly, which defines its functions and runs none of its setup
+# flow.
 $setupScript = Join-Path $PSScriptRoot 'Setup-PsilinkFileDrop.ps1'
 $canResolveNetworkPaths = $false
 if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
@@ -829,11 +793,15 @@ if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
     Show-Note 'scripts may do. A folder on this PC still works; a network folder'
     Show-Note 'needs the Command Prompt setup script, which the same policy does'
     Show-Note "not reach. See $PsilinkTroubleshootingUrl, 'The script will not run'."
+    Show-Note 'Your invitation will not carry the shared folder''s name either --'
+    Show-Note 'tell your partner which folder to use.'
 } elseif (-not (Test-Path -LiteralPath $setupScript)) {
     Show-Alert 'Setup-PsilinkFileDrop.ps1 is not in this folder.'
     Show-Note 'It has to sit beside this script: it is what works out the real'
-    Show-Note 'server behind a mapped drive or a network path. Without it, only'
-    Show-Note 'a folder on this PC can be used.'
+    Show-Note 'server behind a mapped drive or a network path, and what names the'
+    Show-Note 'shared folder for your partner. Without it, only a folder on this'
+    Show-Note 'PC can be used, and your invitation will not carry the folder''s'
+    Show-Note 'name -- tell your partner which folder to use.'
 } else {
     # A dot-source runs the other script's own param() block in this scope. Left
     # alone, that resets every name the two scripts share -- -VolumeName -- to
@@ -955,9 +923,15 @@ Show-Ok "Rendezvous folder: $rendezvousPath"
 # ==========================================================================
 $rendezvousMount = $rendezvousPath
 $usingVolume = $false
-# The folder's own name, worked out here and passed to the console, because the
-# container is shown this script's mount points rather than the operator's folder.
-$rendezvousFolderName = Get-RendezvousFolderName -Path $rendezvousPath
+# The folder's own name, passed to the console because the container is shown
+# this script's mount points rather than the operator's folder. The rule that
+# reads it is the setup script's, reached through the dot-source above: without
+# that dot-source the console is left with no name, which is the same honest
+# degradation as a folder that has none.
+$rendezvousFolderName = ''
+if ($canResolveNetworkPaths) {
+    $rendezvousFolderName = Get-RendezvousFolderName -Path $rendezvousPath
+}
 
 if ($rendezvousResolved.Kind -eq 'Network') {
     Show-Head 'Part 2: the network folder'

@@ -254,20 +254,6 @@ export function invitingPartyName(token: InvitationToken): string {
   return sanitizeForDisplay(token.linkageTerms.identity);
 }
 
-/**
- * The partner's advisory shared-directory locator for display, or undefined when the
- * accepted invitation carries no single-directory file-drop path. Routed through
- * {@link summarizeInvitation}, the one partner-string sanitizing boundary the ledger
- * already uses -- the value is partner-supplied and never rendered raw. Advisory
- * only: the accepting operator confirms it names the same synced folder mounted on
- * this appliance, which is server-configured; it never flows to config.
- */
-export function acceptorAdvisoryLocator(
-  token: InvitationToken,
-): string | undefined {
-  return summarizeInvitation(token).connectionPath;
-}
-
 /** The completion trust line under the settled ledger for a browser-run accept: the
  * file never left this browser, and the ledger names all the partner received. */
 export const ACCEPTOR_DONE_LEDGER_FOOTER =
