@@ -469,18 +469,10 @@ export function formatSignedRecordReport(
   if (unpinned.length === parties.length)
     lines.push(
       "  certificate fingerprint trust not established (no pinned value " +
-        "supplied): the signatures verify against the certificates carried in " +
-        "the record, but nothing ties those certificates to the partner you " +
+        "supplied): nothing ties the record's certificates to the partner you " +
         "know. Pass --partner-fingerprint, or --config-file with " +
         "signing.partner_fingerprint set.",
     );
-  else if (anchored.length > 0)
-    for (const party of unpinned)
-      lines.push(
-        `  the ${party.role}'s certificate is not authenticated by any pinned ` +
-          "value: one pinned value reaches one certificate, so this record " +
-          "shows that the pinned party signed it, not who the other signer is.",
-      );
   return { lines, exitCode: report.outcome === "failed" ? 1 : 0 };
 }
 

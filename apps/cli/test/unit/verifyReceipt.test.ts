@@ -259,12 +259,23 @@ describe("formatSignedRecordReport", () => {
         "the initiator's certificate.",
     );
     const out = lines.join("\n");
-    expect(out).toContain(
-      "the initiator's certificate is not authenticated by any pinned value: " +
-        "one pinned value reaches one certificate, so this record shows that " +
-        "the pinned party signed it, not who the other signer is.",
-    );
+    expect(out).not.toContain("shows that the pinned party signed it");
     expect(out).toContain("no pinned value supplied for this certificate");
+  });
+
+  test("a failed outcome carries no note asserting the signatures verified", () => {
+    const failed = report();
+    failed.outcome = "failed";
+    failed.responder.signature = "failed";
+    const anchoredOut = formatSignedRecordReport(failed).lines.join("\n");
+    expect(anchoredOut).not.toContain("signatures verify against");
+    expect(anchoredOut).not.toContain("shows that the pinned party signed it");
+
+    failed.initiator.fingerprintPin = "not-pinned";
+    failed.responder.fingerprintPin = "not-pinned";
+    const unpinnedOut = formatSignedRecordReport(failed).lines.join("\n");
+    expect(unpinnedOut).not.toContain("signatures verify against");
+    expect(unpinnedOut).toContain("trust not established");
   });
 
   test("the binder is reported as covered but not recomputed", () => {
