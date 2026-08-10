@@ -27,9 +27,10 @@ table at all and states its non-approved-but-allowed category empty, so there is
 no status the algorithm could hold there -- and the certified module does not
 carry the primitive to begin with
 ([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests),
-[fips-variant-image.md](fips-variant-image.md)). Where 5021 stands on ECDSA is a
-separate reading, and one this note records as unmade -- see the claim section
-below. Receipt signing ran Ed25519 in `@noble/curves`, outside any module. The
+[fips-variant-image.md](fips-variant-image.md)). ECDSA is on that certificate's
+approved-algorithm table as well, over P-256 and with SHA2-256 among its hashes,
+so both certificates in play approve the algorithm this note migrates to.
+Receipt signing ran Ed25519 in `@noble/curves`, outside any module. The
 fork is the one key establishment faced -- disclose the boundary, or migrate to
 an algorithm a certificate approves -- plus one apparent third option that has
 to be cleared away first, because the provider measurements found Ed25519
@@ -195,20 +196,30 @@ party could break in a copy without invalidating anything the artifact attests.
 
 **May say**, where a validated module is actually present in the environment:
 the signature and verification operations of receipt signing are performed by
-the module, using ECDSA.
+the module, using ECDSA over P-256 with SHA2-256. Certificate 5021, the module
+the FIPS variant image embeds, carries the algorithm at those parameters on its
+approved-algorithm table -- `KeyGen`, `KeyVer`, `SigGen` and `SigVer`, all
+FIPS 186-5 -- and carries signature generation and signature verification with
+ECDSA on its approved-services table. The rows, the full curve and hash lists,
+the service's approved indicator, and the CAVP certificate ids are in
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#the-ecdsa-rows-which-no-probe-leg-covers).
+Certificate 4985 approves the algorithm too, so the sentence holds on either
+module; a claim naming the curve and hash re-reads the table of the certificate
+it names for the tested parameter set at the time the claim is made, rather than
+inferring either from the algorithm name.
 
-**Naming a certificate under that sentence, or naming the curve and hash, needs
-a reading this repository does not carry.** Certificate 5021 is the module the
-FIPS variant image embeds, and the rows read out of its security policy here
-are the five call shapes the image's entrypoint probe makes, which do not
-include ECDSA
-([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests)).
-Whether ECDSA is on that certificate's approved-algorithm table, and at which
-curve and hash, is unverified against 5021. The approved status recorded in this
-tree is certificate 4985's, a different module, and it does not carry over. What
-settles it is reading 5021's own approved-algorithm table for the row and its
-tested parameter set at the time the claim is made, not inferring either from
-the algorithm name.
+**Table membership is not the whole answer, and the gap is a service rather than
+an algorithm.** Certificate 5021 also carries `RSA and ECDSA (pre-hashed
+message)` signature generation and verification among its non-approved
+algorithms and services, so a module driven that way is performing a
+non-approved service with an approved algorithm. Which of the two services a
+`crypto.subtle` ECDSA call requests is decided by the indicator the module sets
+rather than by the approved-algorithm table, and nothing in this repository
+reads that indicator back. That is the shape the AEAD's externally supplied IV
+already has on the same certificate
+([fips-variant-image.md](fips-variant-image.md)), and it bounds a claim the same
+way: the security function is available to name, and the service the call lands
+on is not established here.
 
 **May not say:**
 

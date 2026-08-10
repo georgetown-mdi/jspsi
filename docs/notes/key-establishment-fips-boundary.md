@@ -139,15 +139,21 @@ either way on it, turning as it does on `KDA TwoStep` and on the platform's call
 surface. What the discrepancy does bound is claim text: a sentence naming 5021's
 HKDF row should not also assert counter mode until the module has been driven.
 
-**3. A certificate attests components, not compositions.** Certificate 4985 is
-silent on hybrid or concatenated shared secrets: "concatenat" and "pre-shared"
-do not occur anywhere in its security policy, and every occurrence of "hybrid"
-is the FIPS 140-3 module-type sense (software, firmware, hybrid). Certificate
-5021 was not read for that silence, and the conclusion does not turn on it: what
-its policy does state about the schedule's surroundings restricts rather than
-attests -- its HKDF "shall only be used to generate secret keys in the context
-of an SP 800-56Ar3 key agreement scheme", which reaches the head of the chain
-and leaves the rest of the composition exactly as unattested
+**3. A certificate attests components, not compositions.** Both certificates are
+silent on hybrid or concatenated shared secrets, and both were read for that
+silence. "concatenat" and "pre-shared" occur nowhere in either security policy,
+and every occurrence of "hybrid" is the FIPS 140-3 module-type sense (software,
+firmware, hybrid). On certificate 5021 the search additionally covered
+"composite", "combin", "augment", `Z'` and every occurrence of "shared secret",
+and no statement anywhere composes the shared secret with other secret material;
+the three sections that come nearest -- 2.7.4 (SP 800-56Ar3 assurances), 2.10
+(Key Establishment) and 2.11 (Industry Protocols) -- describe public-key
+validation and per-protocol use contexts and nothing else. The conclusion does
+not turn on that silence either way: what 5021 does state about the schedule's
+surroundings restricts rather than attests -- its HKDF "shall only be used to
+generate secret keys in the context of an SP 800-56Ar3 key agreement scheme",
+which reaches the head of the chain and leaves the rest of the composition
+exactly as unattested
 ([fips-variant-image.md](fips-variant-image.md)). So the schedule assembled
 above the shared secret is an operator-built composition under either option.
 The rejected option would have exchanged one unattested composition for
@@ -279,8 +285,8 @@ in
 [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests).
 
 **Certificate 4985's Table 8 (Non-Approved, Not Allowed Algorithms)** contains
-X25519 and X448 as its only key-agreement entries -- 5021's policy, per the
-paragraph above, has no such rows to read -- corroborating what
+X25519 and X448 as its only key-agreement entries -- the counterpart table on
+5021 is its Table 7, which names neither string -- corroborating what
 [fips-provider-surface.md](fips-provider-surface.md) already records. `KDA HKDF`
 and `KDA OneStep` are dual-listed there, non-approved only for key lengths below
 112 bits and for SHAKE PRFs respectively; `KDA TwoStep` appears in no
