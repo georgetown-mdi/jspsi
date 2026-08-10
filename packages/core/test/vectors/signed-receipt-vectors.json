@@ -60,8 +60,56 @@
       }
     }
   ],
+  "bundle": {
+    "description": "A complete dual-signed record assembled from the two vectors above: both parties sign ONE shared content carrying the initiator-role binder, as a live exchange does. Every signature in it -- each certificate's self-signature and each party's receipt signature -- was produced by the openssl CLI (see externalAnchors), so an implementation that verifies this record is verifying a bundle no part of which it signed. The two fingerprints are the deterministic anchors a verifier pins against.",
+    "expected": {
+      "initiatorFingerprint": "CIVlpmkCengeNsTi8PJNiOD5YyPJa3u8A1y_VdEut98",
+      "responderFingerprint": "5NCJKqlerPYrNUBLOKZpXB7aKEbKjruZIGc6ckSNlN4",
+      "initiatorIdentity": "Party A, Agency A\napartyA@agency-a.gov",
+      "responderIdentity": "Party B, Agency B"
+    },
+    "record": {
+      "version": "psilink-signed-receipt/v2",
+      "content": {
+        "termsHash": "dGVybXNIYXNoVmVjdG9y",
+        "initiatorToResponderPayload": "aTJyUGF5bG9hZERpZ2VzdA",
+        "responderToInitiatorPayload": "cjJpUGF5bG9hZERpZ2VzdA",
+        "binder": "DqMqfqQWT3ezinyelof-x2r-aBMbuAnCpIFjI7cVvOY"
+      },
+      "initiator": {
+        "certificate": {
+          "version": "psilink-signing-cert/v2",
+          "algorithm": "ecdsa-p256-sha256",
+          "identity": "Party A, Agency A\napartyA@agency-a.gov",
+          "publicKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "HxQBRr-xslH4T03b4NTNz9d6_ZhKlSDjV5QCH4MSu54",
+            "y": "7JlaCLH6dwTfPcwLUKlmUmP7dxH5X5-KRJxQluR8iSs"
+          },
+          "signature": "7YNndO5vLjUCUCAe5QHwX7xAt2_21AbzgNTmm8y5NBoI79WyDruZOFtCa5KBFNqdrj3Buk2go1y-DplkhkC_Og"
+        },
+        "signature": "eTrG7kb3XgM1qFGYiLyWK1xRXUMPtm0L-TclKCMNEwl9ApCsxc2rQoZGx2aDwZ8Ja_-Zp_mGiEfuCgq9xpVM2g"
+      },
+      "responder": {
+        "certificate": {
+          "version": "psilink-signing-cert/v2",
+          "algorithm": "ecdsa-p256-sha256",
+          "identity": "Party B, Agency B",
+          "publicKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "QoqCTqfPVq0qZO02i3ExXYDO6EYAfP8dLuosPw-SFTc",
+            "y": "MErlmPmN0Q0fECgRpOLRYcP9i7sZPUslvulQrIOcD50"
+          },
+          "signature": "uzgDMQW6-O7vws0jQPV_77ECbGi-OWw63T64X0xPC4hSU6D8Offs3W21AMnZHOEIS3f8AtQnkoxy8Qowvp250A"
+        },
+        "signature": "7uL6h_PNxXRsyh24FvStpwgveff8eserAskjfoSBNQbZ6-GFOMKBtHoC77g1fTpCWj_6p1wHnWgYeYX0sRpbng"
+      }
+    }
+  },
   "externalAnchors": {
     "signatureProducer": "OpenSSL 3.0.20 7 Apr 2026 (Library: OpenSSL 3.0.20 7 Apr 2026)",
-    "note": "Every checked-in signature was produced by the openssl CLI named above (openssl dgst -sha256 -sign, DER read back through openssl asn1parse and re-encoded as the fixed-length raw r||s), over signed bytes this generator assembles from docs/spec/EXCHANGE_RECORD.md. A suite that verifies them is therefore accepting a signature produced outside this codebase, over a byte layout stated independently of signedReceipt.ts."
+    "note": "Every checked-in signature was produced by the openssl CLI named above (openssl dgst -sha256 -sign, DER read back through openssl asn1parse and re-encoded as the fixed-length raw r||s), over signed bytes this generator assembles from docs/spec/EXCHANGE_RECORD.md. A suite that verifies them is therefore accepting a signature produced outside this codebase, over a byte layout stated independently of signedReceipt.ts. The same holds for every signature in the assembled bundle."
   }
 }

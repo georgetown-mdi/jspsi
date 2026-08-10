@@ -452,13 +452,15 @@ export async function matchesPinnedFingerprint(
   } catch {
     // A malformed pinned value cannot match anything.
     //
-    // TODO(receipt-verification): a malformed pin is currently indistinguishable
-    // from a genuine mismatch -- both end as "fingerprint does not match". The
-    // CLI guards this today (SigningConfigSchema validates partner_fingerprint
-    // against FINGERPRINT_REGEX before it reaches here), so it is unreachable via
-    // config. The first caller that accepts a fingerprint from a NON-config
-    // source must distinguish "your configured pin is malformed" from "the
-    // partner's certificate does not match", or diagnosis will be confusing.
+    // A malformed pin is indistinguishable here from a genuine mismatch -- both
+    // end as "fingerprint does not match" -- so a caller validates the pin
+    // against FINGERPRINT_REGEX before it reaches this comparison and reports a
+    // malformed one as its own error. The exchange path gets that from
+    // SigningConfigSchema; `verify-receipt` validates both its
+    // --partner-fingerprint flag and the config value it reads directly. A caller
+    // that skips it turns "your pin is malformed" into "the partner's
+    // certificate does not match", which is a confusing diagnosis rather than an
+    // unsafe one: this returns false either way.
     return false;
   }
   return bytesEqual(actualBytes, pinnedBytes);
@@ -519,9 +521,10 @@ export interface PresentedCertificateCheck {
  * clear, user-facing message. This is the single entry point a receipt-
  * verification phase calls.
  *
- * Note for that caller: if `pinnedFingerprint` can originate from a non-config
- * source, see the TODO in {@link matchesPinnedFingerprint} -- a malformed pin is
- * currently reported as a generic mismatch and should be distinguished.
+ * Note for that caller: validate `pinnedFingerprint` against `FINGERPRINT_REGEX`
+ * first, whatever its source -- see the note in
+ * {@link matchesPinnedFingerprint}, where a malformed pin is indistinguishable
+ * from a genuine mismatch.
  *
  * @throws {SigningError}
  */

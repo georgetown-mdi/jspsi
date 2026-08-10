@@ -33,7 +33,7 @@ A leading `~` (or `~/`) in a local filesystem path -- whether given on the comma
 - The path inside an `@`-file reference (for example, `@~/secrets/id_rsa`) is expanded wherever a reference is resolved.
 - `psilink exchange` expands `--config-file`, `--key-file`, `--record-file`, the input and output paths, and `signing.identity_file`.
 - The zero-setup form expands `--config-file`, `--key-file`, and `--record-file`; its input and output positionals are taken literally.
-- `psilink init` expands `--config-file`; `psilink fingerprint` expands `--config-file`, `--identity-file`, and `--export-certificate`; `psilink verify-receipt` expands `RECORD`, `--keys`, `--config-file`, and `--partner-terms`.
+- `psilink init` expands `--config-file`; `psilink fingerprint` expands `--config-file`, `--identity-file`, and `--export-certificate`; `psilink verify-receipt` expands `RECORD`, `--keys`, `--signed-record`, `--config-file`, and `--partner-terms`.
 - `psilink invite` and `psilink accept` expand no path argument. A `~/`-relative path given to either is taken literally and creates a directory named `~`, so pass an absolute path.
 
 Note that `~user` (another user's home) is not resolved.
@@ -370,7 +370,12 @@ The identity lives at `~/.psilink/signing-identity.json` by default; `--identity
 psilink verify-receipt RECORD [INPUT_FILE] [RESULT_FILE]
 ```
 
-Read a stored exchange record and report whether it is internally consistent. It is read-only: it never modifies or re-signs the record. `RECORD` is the record file written at the end of an exchange (`psilink-record-<stamp>.json`); its verification keys are read from the record path with a `.keys.json` suffix by default, or from `--keys`. An unrecognized record or keys `version` is rejected with a clear error (exit 64) rather than mis-parsed.
+Read a stored exchange artifact and report what holds up. It is read-only: it never modifies or re-signs an artifact. An exchange produces two, and this command verifies either or both:
+
+- The **exchange record** (`psilink-record-<stamp>.json`), self-attested and unsigned. Verifying it is an internal-consistency check: it says nothing about the partner.
+- The **dual-signed record** (`psilink-receipt-<stamp>.json`), written when the exchange ran with `signing.mode: certificate`. This is the evidence against the partner: both parties' signatures and certificates over the terms and the data that flowed.
+
+`RECORD` may be either file -- the command tells them apart by their format `version`, so an auditor handed only the dual-signed record verifies it directly. To check both artifacts of one exchange in a single run, name the exchange record as `RECORD` and pass the dual-signed record to `--signed-record`; that is also what lets the record's agreed-terms hash and party identities anchor the signature checks. The record's verification keys are read from the record path with a `.keys.json` suffix by default, or from `--keys`. An unrecognized `version` on any of these files is rejected with a clear error (exit 64) rather than mis-parsed.
 
 The record holds no matched data -- only salted commitments to it -- so verification **re-supplies** the committed data from your own retained files: pass the `INPUT_FILE` you contributed and the `RESULT_FILE` you kept, and the command reconstructs the committed data and opens every commitment (the sent payload, the received payload, and the record's pairing). Reproduction is byte-exact only from **unmodified** retained files -- a results file re-sorted or re-exported in a spreadsheet will not reproduce -- and a duplicate value in an identifier column is reported as a note. A genuinely empty received cell is a known limitation: it cannot be told apart from a committed null, so a record with one will not reproduce, reported as a commitment mismatch (never silently mis-opened) rather than a note.
 
@@ -378,7 +383,15 @@ With `--config-file` (your exchange config, for your linkage terms) and `--partn
 
 With neither `INPUT_FILE` nor `RESULT_FILE`, the command still runs -- the third-party-auditor case: it checks the record's structure and version and reports each commitment as not opened (an auditor without your retained data cannot open the commitments, by design), rather than failing.
 
-The verdict distinguishes a commitment that **opened and matches**, one that was **not opened** (its data was not re-supplied), and one that **does not match**, and rolls up to `VERIFIED` (everything checked and passed), `INCOMPLETE` (nothing contradicted, but not everything could be checked), or `VERIFICATION FAILED` (a check did not match). The command exits nonzero (1) only on a definite failure; a failed opening is reported as "the record may have been altered, or a re-supplied input/result/terms does not match this exchange", never asserted as tampering, since the two are indistinguishable. Partner receipt **signatures** are not verified yet -- signed evidence bundles are deferred work -- and the command says so rather than implying it checked them.
+The verdict distinguishes a commitment that **opened and matches**, one that was **not opened** (its data was not re-supplied), and one that **does not match**, and rolls up to `VERIFIED` (everything checked and passed), `INCOMPLETE` (nothing contradicted, but not everything could be checked), or `VERIFICATION FAILED` (a check did not match). The command exits nonzero (1) only on a definite failure; a failed opening is reported as "the record may have been altered, or a re-supplied input/result/terms does not match this exchange", never asserted as tampering, since the two are indistinguishable. When no dual-signed record was supplied, the output says so rather than implying it checked the partner's signatures.
+
+### Verifying the signed record
+
+For a dual-signed record the command reports, per party, four things: the **receipt signature** against the certificate the record carries, the **certificate identity binding** (its self-signature, which is what ties the displayed identity to the signing key), the **certificate fingerprint** against your pinned value, and the **asserted identity** against the identities this exchange was between. The per-exchange **binder** is printed but not recomputed -- deriving it needs the exchange's session key, which only the two parties held -- so a verifier confirms the signers signed a receipt carrying that binder and nothing more. The verdict rolls up on the same three levels, prefixed `SIGNED RECEIPT`, and a failure exits 1.
+
+The pinned fingerprint comes from `--partner-fingerprint`, or from `signing.partner_fingerprint` in the config named by `--config-file`; the flag wins, so an auditor given a fingerprint out-of-band can verify without a config. A value that is not a fingerprint (an unpadded base64url SHA-256 digest, 43 characters) is a usage error, so a mistyped pin is never reported as a partner mismatch. You pin your partner and not yourself, so one certificate matching your pin is the expected result; a pin matching **neither** certificate is a failure -- the record is not your pinned partner's.
+
+Without a pinned value -- the third-party-auditor case -- the command still checks both signatures and both identity bindings and reports `certificate fingerprint trust not established (no pinned value supplied)`, rolling up to `INCOMPLETE` rather than failing. This is the trust model, not a gap: a dual-signed record is self-consistent by construction, so verifying its signatures alone proves only that the holders of the two certificates in it signed the content, which anyone can arrange with two certificates of their own. Ask your partner for their `psilink fingerprint` value over a trusted channel and pass it to verify at full strength.
 
 ## Recovery
 

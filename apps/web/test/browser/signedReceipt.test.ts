@@ -8,9 +8,11 @@ import {
   deriveReceiptBinder,
   generateSigningIdentity,
   parseCertificate,
+  parseDualSignedRecord,
   parseSigningIdentity,
   signReceiptContent,
   verifyCertificateSelfSignature,
+  verifyDualSignedRecord,
   verifyReceiptSignature,
 } from "@psilink/core";
 
@@ -75,9 +77,19 @@ interface CertVector {
   certificate: SigningCertificate;
 }
 
-const receiptVectors = (
-  JSON.parse(receiptVectorsRaw) as { vectors: Array<ReceiptVector> }
-).vectors;
+interface ReceiptBundle {
+  expected: {
+    initiatorFingerprint: string;
+    responderFingerprint: string;
+    initiatorIdentity: string;
+    responderIdentity: string;
+  };
+  record: unknown;
+}
+
+const { vectors: receiptVectors, bundle: receiptBundle } = JSON.parse(
+  receiptVectorsRaw,
+) as { vectors: Array<ReceiptVector>; bundle: ReceiptBundle };
 const certVectors = (
   JSON.parse(certVectorsRaw) as { vectors: Array<CertVector> }
 ).vectors;
@@ -290,4 +302,24 @@ describe("signed receipt in the browser", () => {
       ).toBe(false);
     },
   );
+
+  test("the browser build verifies a whole bundle signed outside it", async () => {
+    // The verification consumer's turn at the same contract: every signature in
+    // this record -- both certificate self-signatures and both receipt
+    // signatures -- was made by openssl, so a browser build whose signed bytes
+    // or certificate body diverged would reject it.
+    const record = parseDualSignedRecord(receiptBundle.record);
+    const report = await verifyDualSignedRecord(record, {
+      pinnedFingerprint: receiptBundle.expected.responderFingerprint,
+      expectedIdentities: [
+        receiptBundle.expected.initiatorIdentity,
+        receiptBundle.expected.responderIdentity,
+      ],
+      expectedTermsHash: record.content.termsHash,
+    });
+    expect(report.outcome).toBe("verified");
+    expect(report.initiator.fingerprint).toBe(
+      receiptBundle.expected.initiatorFingerprint,
+    );
+  });
 });

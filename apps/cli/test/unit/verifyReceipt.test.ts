@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,20 +6,33 @@ import { describe, expect, test } from "vitest";
 
 import {
   buildExchangeRecord,
+  computeCertificateFingerprint,
+  generateSigningIdentity,
+  serializeDualSignedRecord,
   serializeExchangeRecord,
   serializeVerificationKeys,
+  signReceiptContent,
+  SIGNED_RECEIPT_VERSION,
   UsageError,
 } from "@psilink/core";
 import type {
   CommittedPayload,
+  DualSignedRecord,
+  DualSignedRecordVerificationReport,
   ExchangeRecordInputs,
+  ReceiptContent,
   RecordVerificationReport,
+  SignedReceiptPartyReport,
 } from "@psilink/core";
 
 import {
   deriveOurIdColumn,
+  formatSignedRecordReport,
   formatVerificationReport,
+  pinnedFingerprintFromConfig,
   readExchangeRecordFile,
+  readSignedRecordFile,
+  readVerifiableArtifact,
   readVerificationKeysFile,
   toRetainedResult,
 } from "../../src/commands/verifyReceipt";
@@ -81,9 +94,16 @@ describe("formatVerificationReport", () => {
       "agreed-terms hash: re-derives and matches",
     );
     expect(lines.join("\n")).toContain(
-      "partner receipt signatures are not verified",
+      "partner receipt signatures are not checked here",
     );
     expect(exitCode).toBe(0);
+  });
+
+  test("a supplied signed record points at the section that checks signatures", () => {
+    const { lines } = formatVerificationReport(report("verified"), [], true);
+    expect(lines.join("\n")).toContain(
+      "partner receipt signatures: checked separately below",
+    );
   });
 
   test("incomplete is not a failure (exit 0) but is labelled distinctly", () => {
@@ -131,6 +151,237 @@ describe("formatVerificationReport", () => {
     expect(out).not.toContain(esc);
     expect(out).not.toContain(bel);
     expect(out).toContain("note:");
+  });
+});
+
+describe("formatSignedRecordReport", () => {
+  const party = (
+    role: SignedReceiptPartyReport["role"],
+    overrides: Partial<SignedReceiptPartyReport> = {},
+  ): SignedReceiptPartyReport => ({
+    role,
+    identity: `Party ${role === "initiator" ? "A" : "B"}`,
+    fingerprint: "Zm9vZmluZ2VycHJpbnQ",
+    certificateBinding: "verified",
+    signature: "verified",
+    fingerprintPin: role === "responder" ? "verified" : "not-pinned",
+    assertedIdentity: "verified",
+    ...overrides,
+  });
+  const report = (
+    overrides: Partial<DualSignedRecordVerificationReport> = {},
+  ): DualSignedRecordVerificationReport => ({
+    outcome: "verified",
+    initiator: party("initiator"),
+    responder: party("responder"),
+    termsHash: "verified",
+    binder: "YmluZGVy",
+    ...overrides,
+  });
+
+  test("a verified record names both parties and exits 0", () => {
+    const { lines, exitCode } = formatSignedRecordReport(report());
+    const out = lines.join("\n");
+    expect(lines[0]).toMatch(/^SIGNED RECEIPT VERIFIED/);
+    expect(out).toContain("initiator: Party A");
+    expect(out).toContain("responder: Party B");
+    expect(out).toContain("matches the pinned value");
+    expect(exitCode).toBe(0);
+  });
+
+  test("the binder is reported as covered but not recomputed", () => {
+    const { lines } = formatSignedRecordReport(report());
+    expect(lines.join("\n")).toContain(
+      "per-exchange binder YmluZGVy: covered by both signatures, not recomputed",
+    );
+  });
+
+  test("an unpinned run is incomplete and says trust is not established", () => {
+    const { lines, exitCode } = formatSignedRecordReport(
+      report({
+        outcome: "incomplete",
+        initiator: party("initiator", { fingerprintPin: "not-pinned" }),
+        responder: party("responder", { fingerprintPin: "not-pinned" }),
+        termsHash: "not-checked",
+      }),
+    );
+    expect(lines[0]).toMatch(/^SIGNED RECEIPT INCOMPLETE/);
+    expect(lines.join("\n")).toContain(
+      "certificate fingerprint trust not established (no pinned value supplied)",
+    );
+    expect(exitCode).toBe(0);
+  });
+
+  test("each failure class is named distinctly and exits 1", () => {
+    const { lines, exitCode } = formatSignedRecordReport(
+      report({
+        outcome: "failed",
+        initiator: party("initiator", {
+          signature: "failed",
+          certificateBinding: "failed",
+        }),
+        responder: party("responder", {
+          fingerprintPin: "mismatch",
+          assertedIdentity: "mismatch",
+        }),
+        termsHash: "mismatch",
+      }),
+    );
+    const out = lines.join("\n");
+    expect(lines[0]).toMatch(/^SIGNED RECEIPT VERIFICATION FAILED/);
+    expect(out).toContain("receipt signature: DOES NOT VERIFY");
+    expect(out).toContain("SELF-SIGNATURE DOES NOT VERIFY");
+    expect(out).toContain("DOES NOT MATCH the pinned value");
+    expect(out).toContain(
+      "asserted identity: DOES NOT MATCH an identity expected",
+    );
+    expect(out).toContain("agreed-terms hash: DOES NOT MATCH");
+    expect(exitCode).toBe(1);
+  });
+
+  test("a certificate identity carrying control bytes is sanitized before display", () => {
+    // The identity is free text chosen by whoever minted the certificate, which
+    // an auditor may be handed by anyone: it must be neutralized at this display
+    // boundary rather than echoed to the terminal raw.
+    const esc = String.fromCharCode(0x1b);
+    const { lines } = formatSignedRecordReport(
+      report({
+        initiator: party("initiator", { identity: `A${esc}[31m` }),
+      }),
+    );
+    const out = lines.join("\n");
+    expect(out).not.toContain(esc);
+    expect(out).toContain("initiator: A");
+  });
+});
+
+describe("reading a dual-signed record", () => {
+  const receiptContent: ReceiptContent = {
+    termsHash: "dGVybXNIYXNo",
+    initiatorToResponderPayload: "aTJyUGF5bG9hZA",
+    responderToInitiatorPayload: "cjJpUGF5bG9hZA",
+    binder: "YmluZGVy",
+  };
+
+  async function writeSignedRecord(dir: string): Promise<string> {
+    const a = await generateSigningIdentity("Party A", {
+      privateKey: {
+        kty: "EC",
+        crv: "P-256",
+        x: "TGM247iz3ncbYTocehc0g0zWnBpPX_7LJAxjvA3bFXQ",
+        y: "9olsXRTKROADd5HCMAMzJZpxuQHlJYV10QfluKxItCQ",
+        d: "ERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzA",
+      },
+    });
+    const b = await generateSigningIdentity("Party B", {
+      privateKey: {
+        kty: "EC",
+        crv: "P-256",
+        x: "UUL0inyAyvR1RKQo_FfScqbGeK1ek__Lo2ZmqZY55R0",
+        y: "0b22-1mBRFZ6Jlfo_zYZ-6oM0qBAwZqyKvkQxwWnV7o",
+        d: "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+      },
+    });
+    const record: DualSignedRecord = {
+      version: SIGNED_RECEIPT_VERSION,
+      content: receiptContent,
+      initiator: {
+        certificate: a.certificate,
+        signature: await signReceiptContent(a, receiptContent, "initiator"),
+      },
+      responder: {
+        certificate: b.certificate,
+        signature: await signReceiptContent(b, receiptContent, "responder"),
+      },
+    };
+    const path = join(dir, "receipt.json");
+    writeFileSync(path, serializeDualSignedRecord(record));
+    return path;
+  }
+
+  test("reads a dual-signed record back", async () => {
+    const path = await writeSignedRecord(tmp());
+    expect(readSignedRecordFile(path).version).toBe(SIGNED_RECEIPT_VERSION);
+  });
+
+  test("rejects an unrecognized signed-record version with a clear error", async () => {
+    const dir = tmp();
+    const path = await writeSignedRecord(dir);
+    const bumped = {
+      ...JSON.parse(readFileSync(path, "utf8")),
+      version: "psilink-signed-receipt/v9",
+    };
+    const bumpedPath = join(dir, "bumped.json");
+    writeFileSync(bumpedPath, JSON.stringify(bumped, null, 2));
+    expect(() => readSignedRecordFile(bumpedPath)).toThrow(UsageError);
+    expect(() => readSignedRecordFile(bumpedPath)).toThrow(
+      /unrecognized version/,
+    );
+  });
+
+  test("the positional dispatches on the artifact's version", async () => {
+    const dir = tmp();
+    const { record } = await buildExchangeRecord(baseInputs);
+    const recordPath = join(dir, "rec.json");
+    writeFileSync(recordPath, serializeExchangeRecord(record));
+    expect(readVerifiableArtifact(recordPath).kind).toBe("record");
+    expect(readVerifiableArtifact(await writeSignedRecord(dir)).kind).toBe(
+      "signed",
+    );
+  });
+
+  test("a version that is neither artifact is rejected naming both", async () => {
+    const dir = tmp();
+    const path = join(dir, "other.json");
+    writeFileSync(path, JSON.stringify({ version: "something-else/v1" }));
+    expect(() => readVerifiableArtifact(path)).toThrow(UsageError);
+    expect(() => readVerifiableArtifact(path)).toThrow(
+      /recognizes psilink-exchange-record\/v1 .* and psilink-signed-receipt\/v2/,
+    );
+  });
+});
+
+describe("pinnedFingerprintFromConfig", () => {
+  const writeConfig = (dir: string, body: string): string => {
+    const path = join(dir, "psilink.yaml");
+    writeFileSync(path, body);
+    return path;
+  };
+
+  test("reads signing.partner_fingerprint", async () => {
+    const identity = await generateSigningIdentity("Party B");
+    const fingerprint = await computeCertificateFingerprint(
+      identity.certificate,
+    );
+    const path = writeConfig(
+      tmp(),
+      `signing:\n  mode: certificate\n  partner_fingerprint: ${fingerprint}\n`,
+    );
+    expect(pinnedFingerprintFromConfig(path)).toBe(fingerprint);
+  });
+
+  test("no signing block, no config, and no flag each yield no pin", () => {
+    const dir = tmp();
+    expect(
+      pinnedFingerprintFromConfig(writeConfig(dir, "linkage_terms:\n")),
+    ).toBeUndefined();
+    expect(
+      pinnedFingerprintFromConfig(join(dir, "absent.yaml")),
+    ).toBeUndefined();
+    expect(pinnedFingerprintFromConfig(undefined)).toBeUndefined();
+  });
+
+  test("a malformed pin is a usage error, not a silent mismatch later", () => {
+    // A pin that cannot be a fingerprint would otherwise be indistinguishable
+    // from a partner whose certificate does not match.
+    const path = writeConfig(
+      tmp(),
+      "signing:\n  mode: certificate\n  partner_fingerprint: too-short\n",
+    );
+    expect(() => pinnedFingerprintFromConfig(path)).toThrow(UsageError);
+    expect(() => pinnedFingerprintFromConfig(path)).toThrow(
+      /not a certificate fingerprint/,
+    );
   });
 });
 
