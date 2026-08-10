@@ -1025,7 +1025,7 @@ standardization:
         params:
           values: ["000000000", "123456789", "111111111"]
 
-  - output: last_name_variants   # fan-out: one row -> multiple PSI entries
+  - output: last_name_variants   # fan-out: one row -> multiple PSI entries (refused today, see Fan-out below)
     input: LAST_NAME
     steps:
       - function: to_upper_case
@@ -1038,6 +1038,8 @@ standardization:
 Each linkage field may have at most one data standardization transformation. Fields not covered by an explicit transformation are given an identity transformation and connected to a linkage field by matching the field's semantic type against the input column's metadata.
 
 When an exchange configuration authors its own `standardization`, that standardization is treated as authoritative: if it contradicts the linkage terms -- a transformation `output` naming no declared linkage field, or a `steps` entry naming an unknown `function` -- it fails closed (the CLI exits 64) with a message naming the offending output or function, rather than warning and proceeding past the contradiction. A direct `exchange`, and any run that mints no invitation, is refused during data preparation, before any credential, terms, or data are sent -- on an unpinned SFTP configuration the first-use host-key probe is the one connection that precedes it, and it presents no credential (see [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#sftp-host-key-verification)); a config-source `psilink invite` is refused at mint time, before the token is disclosed, so an inconsistent configuration never yields an invitation the same config's later `exchange` would reject. A configuration that authors no `standardization` reconstructs the default per-type cleaning from its metadata and terms, so it is unaffected by this check.
+
+A `split_on` step fails closed at the same points, whether it sits in a `standardization` or in a linkage key's element transform: matching on the several values it produces is not implemented, so the exchange is refused rather than run with the narrower matching it would deliver (see [Fan-out (multi-value fields)](#fan-out-multi-value-fields)).
 
 ### Transformation fields
 
@@ -1070,7 +1072,7 @@ A step may produce `null` to signal that the record has no valid value for this 
 
 ### Fan-out (multi-value fields)
 
-> **Not yet implemented:** the `split_on` function and the fan-out behavior described in this section are not yet fully implemented. They are targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). The description below is the intended design.
+> **Not yet implemented:** matching on the values `split_on` produces is not implemented, and an exchange whose standardization or linkage-key transforms declare `split_on` is refused before it runs -- running it would drop every splitting row from the round instead of matching each value, narrowing the match where this section describes a widening. Fan-out is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). The description below is the intended design.
 
 The `split_on` function produces `set<string>` instead of a single `string`. When a transformation ends with a set, the field carries multiple candidate values. Each value generates a separate PSI entry for the row, but all entries retain the original row identifier so that a match resolves back to the source row.
 
@@ -1128,7 +1130,7 @@ A `parse_date` step whose `input_format` cannot supply a complete date -- for ex
 
 #### Fan-out
 
-> **Not yet implemented:** `split_on` (and fan-out generally) is not yet fully implemented; see [Fan-out (multi-value fields)](#fan-out-multi-value-fields) and [ROADMAP.md](ROADMAP.md).
+> **Not yet implemented:** matching on fan-out values is not implemented, so an exchange declaring `split_on` is refused before it runs; see [Fan-out (multi-value fields)](#fan-out-multi-value-fields) and [ROADMAP.md](ROADMAP.md).
 
 | Function | Description | Parameters |
 |----------|-------------|------------|

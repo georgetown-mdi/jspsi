@@ -2,6 +2,7 @@ import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
   dateFormatComponents,
   describeTransformCoercions,
+  FAN_OUT_FUNCTION_NAMES,
   parseDateInputDropsEveryRecord,
   pipelineAlwaysDrops,
 } from "./standardization.js";
@@ -131,7 +132,9 @@ export const TRANSFORM_FUNCTION_GLOSSARY: Record<string, string> = {
   filter_regex:
     "Drops values that do not match a pattern, removing them from matching.",
   split_on:
-    "Splits the value into several candidates, each able to match independently.",
+    "Splits the value into several candidates. This version of the exchange " +
+    "does not match on them and refuses to run at all while a linkage key or " +
+    "standardization uses this step.",
   coalesce:
     "Substitutes a fallback value for an empty field, which can create matches that would not otherwise occur.",
 };
@@ -794,9 +797,14 @@ function parseDateBreadth(
 }
 
 /**
- * The terse informative marker for a key element's collapsed-header entry, or
- * undefined when the element matches exactly or only canonicalizes its value
- * (case, whitespace, accents, affixes, padding, and a `parse_date` that merely
+ * The terse informative marker for a key element's collapsed-header entry.
+ *
+ * A rule the exchange refuses outright is named as one ("not supported", today
+ * the fan-out family) and outranks every marker below: no matching of any breadth
+ * happens under it, so naming a breadth would describe a run that does not occur.
+ *
+ * The marker is undefined when the element matches exactly or only canonicalizes
+ * its value (case, whitespace, accents, affixes, padding, and a `parse_date` that merely
  * reformats between equivalent layouts -- routine standardization, deliberately
  * not flagged so the recommended setup stays clean). It is also undefined when the
  * element's pipeline matches NOTHING -- a `parse_date` whose input format drops
@@ -813,8 +821,8 @@ function parseDateBreadth(
  * drops a date component its input carries and so matches on only part of the
  * date; "any date" for a `parse_date` whose output carries no date token at all,
  * collapsing every date to one value -- a stronger breadth than the partial drop;
- * "fuzzy" / "sound-alike" / "multiple" / "fallback" for an expansion), and where
- * an arbitrary partner-authored pattern or value list makes the direction
+ * "fuzzy" / "sound-alike" / "fallback" for an expansion), and where an
+ * arbitrary partner-authored pattern or value list makes the direction
  * indeterminate it names the RULE directly ("pattern replacement", "pattern
  * extraction", "pattern filter", "excludes values"). Informative, not a
  * broaden-only warning: `filter_regex` and `null_if` narrow matching but are
@@ -837,9 +845,10 @@ function parseDateBreadth(
  *
  * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
  * header is deliberately terse, so an element carrying more than one rule shows
- * just the first -- the maximal-breadth "any date" collapse ranks first, then the
- * other effect-named rules, then the directly-named ones -- while its
- * complete rule set is carried on {@link InvitationKeySummary.elements} for the
+ * just the first -- the refused "not supported" rule ranks first, then the
+ * maximal-breadth "any date" collapse, then the other effect-named rules, then
+ * the directly-named ones -- while its complete rule set is carried on
+ * {@link InvitationKeySummary.elements} for the
  * renderer's per-key detail. The element stays flagged either way.
  */
 function elementBreadthMarker(
@@ -847,6 +856,15 @@ function elementBreadthMarker(
 ): Displayable | undefined {
   const steps = element.transform ?? [];
   const functions = new Set(steps.map((s) => s.function));
+  // A rule the exchange refuses outright outranks every breadth marker below,
+  // including the maximal-breadth "any date" collapse and the dead-pipeline
+  // suppression: no matching of any breadth happens, so naming a breadth would
+  // describe a run that does not occur. Fan-out is that case today -- core
+  // refuses a declared `split_on` before the exchange runs
+  // (assertFanOutImplemented) rather than dropping the records whose values
+  // split -- and the glossary line for the step states the refusal.
+  if (FAN_OUT_FUNCTION_NAMES.some((name) => functions.has(name)))
+    return displayText`not supported`;
   // An element whose pipeline produces no value for ANY record matches nothing,
   // not more -- the opposite of a broadening, and a narrowing-to-empty the separate
   // dead-key advisory surfaces -- so it earns no marker, whatever rule a later step
@@ -876,7 +894,6 @@ function elementBreadthMarker(
   if (truncatesLiteral) return displayText`partial`;
   if (element.generateFuzzyComparisons !== undefined) return displayText`fuzzy`;
   if (functions.has("phonetic")) return displayText`sound-alike`;
-  if (functions.has("split_on")) return displayText`multiple`;
   if (functions.has("coalesce")) return displayText`fallback`;
   // parse_date is routine date canonicalization UNLESS its output layout narrows
   // matching: an output that keeps a date token but drops a component its input

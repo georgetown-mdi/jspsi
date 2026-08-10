@@ -29,7 +29,7 @@ Work required before the 1.0 release.
 
 - PSI cardinality (PSI-C) for research-grade exchanges that reveal only the count of shared members (partially implemented today)
 - PSI-Sum
-- Splitting standardized fields via fan-out (the `split_on` standardization function), e.g. last names split on `-`. The transform, its authoring surfaces, and the cross-product over the values it produces are implemented; what remains is matching on those values. A row whose value actually splits is dropped from that linkage key's round rather than contributing one PSI entry per value, so fan-out today narrows a match rather than widening it
+- Splitting standardized fields via fan-out (the `split_on` standardization function), e.g. last names split on `-`. The transform, its authoring surfaces, and the cross-product over the values it produces are implemented; what remains is matching on those values. Because a splitting row would contribute no PSI entry at all rather than one per value -- narrowing a match where the consent surface describes a widening -- an exchange whose standardization or linkage-key transforms declare `split_on` is refused before it runs
 - Synchronous protocol execution for the CLI (the web WebRTC path is already synchronous; this eliminates file-based polling latency where the channel allows)
 - Provisioning of supporting services (peer coordination, STUN/TURN, SFTP, WebSocket-to-TCP proxy)
 - Reference configurations and deployment guides for each supporting service; the section pointers in [DEPLOYMENT.md](DEPLOYMENT.md) will be replaced with concrete guidance

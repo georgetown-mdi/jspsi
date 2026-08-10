@@ -6,7 +6,9 @@ import {
   buildStandardizedDataset,
   buildKeyStrings,
   validateStandardizationAgainstTerms,
+  assertFanOutImplemented,
   assertStandardizationMatchesTerms,
+  FAN_OUT_FUNCTION_NAMES,
   describeTransformCoercions,
   dateFormatComponents,
   unsatisfiedLinkageFields,
@@ -16,7 +18,7 @@ import {
   StandardizedField,
   StandardizedDataset,
 } from "../src/standardization";
-import { StandardizationTermsError } from "../src/errors";
+import { StandardizationTermsError, UsageError } from "../src/errors";
 import * as linearRegex from "../src/utils/linearRegex";
 import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
@@ -1933,6 +1935,31 @@ describe("buildKeyStrings", () => {
     );
   });
 
+  test("an element transform that fans out is refused, not joined", () => {
+    // The element-transform half of the fan-out refusal, at the point of harm:
+    // joining the parts into one string would match on a value neither party's
+    // data holds, which is not the several-independent-candidates behavior the
+    // terms declare. assertFanOutImplemented refuses the same step from the
+    // declared transforms before any row runs; this covers a fan-out that reached
+    // the key builder anyway, so the collapse cannot come back silently.
+    const dataset = makeDataset({
+      last_name: "SMITH-JONES",
+      date_of_birth: "19900115",
+    });
+    const fanningKey = {
+      name: "LN+DOB",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "split_on", params: { delimiter: "-" } }],
+        },
+        { field: "date_of_birth" },
+      ],
+    };
+    expect(() => buildKeyStrings(fanningKey, dataset, 0)).toThrow(UsageError);
+    expect(() => buildKeyStrings(fanningKey, dataset, 0)).toThrow(/fan-out/);
+  });
+
   test("uses the provided row index to look up field values", () => {
     const rows = [
       { last_name: "SMITH", date_of_birth: "19900115" },
@@ -2095,6 +2122,66 @@ describe("assertStandardizationMatchesTerms", () => {
     expect(() =>
       assertStandardizationMatchesTerms(standardization, minimalTerms),
     ).not.toThrow();
+  });
+});
+
+describe("assertFanOutImplemented", () => {
+  const fanOutStep = { function: "split_on", params: { delimiter: "-" } };
+
+  test("refuses a standardization declaring a fan-out step, naming it", () => {
+    const standardization = [
+      { output: "last_name", input: "LN", steps: [fanOutStep] },
+    ];
+    expect(() =>
+      assertFanOutImplemented(minimalTerms, standardization),
+    ).toThrow(UsageError);
+    expect(() =>
+      assertFanOutImplemented(minimalTerms, standardization),
+    ).toThrow(/split_on/);
+  });
+
+  test("refuses a linkage-key element transform declaring a fan-out step", () => {
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: [
+        {
+          name: "LN+DOB",
+          elements: [
+            { field: "last_name", transform: [fanOutStep] },
+            { field: "date_of_birth" },
+          ],
+        },
+      ],
+    };
+    expect(() => assertFanOutImplemented(terms)).toThrow(UsageError);
+    expect(() => assertFanOutImplemented(terms)).toThrow(/split_on/);
+  });
+
+  test("covers every function that fans out, not the literal split_on alone", () => {
+    // The refusal reads FAN_OUT_FUNCTION_NAMES, so a fan-out function added there
+    // is refused with no second edit here.
+    for (const name of FAN_OUT_FUNCTION_NAMES) {
+      const standardization = [
+        { output: "last_name", input: "LN", steps: [{ function: name }] },
+      ];
+      expect(() =>
+        assertFanOutImplemented(minimalTerms, standardization),
+      ).toThrow(UsageError);
+    }
+  });
+
+  test("is a no-op on transforms that declare no fan-out step", () => {
+    const standardization = [
+      {
+        output: "last_name",
+        input: "LN",
+        steps: [{ function: "to_upper_case" }],
+      },
+    ];
+    expect(() =>
+      assertFanOutImplemented(minimalTerms, standardization),
+    ).not.toThrow();
+    expect(() => assertFanOutImplemented(minimalTerms)).not.toThrow();
   });
 });
 

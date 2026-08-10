@@ -1385,9 +1385,11 @@ describe("summarizeInvitation", () => {
     expect(headerFor([{ function: "phonetic" }])).toBe(
       "last name (sound-alike)",
     );
+    // Refused outright rather than named for its breadth: core refuses a declared
+    // fan-out before the exchange runs, so no matching of any breadth happens.
     expect(
       headerFor([{ function: "split_on", params: { delimiter: " " } }]),
-    ).toBe("last name (multiple)");
+    ).toBe("last name (not supported)");
     expect(
       headerFor([{ function: "coalesce", params: { default: "X" } }]),
     ).toBe("last name (fallback)");
@@ -1846,8 +1848,10 @@ describe("summarizeInvitation", () => {
       // Effect named where the matching direction is determinable.
       substring: "partial",
       phonetic: "sound-alike",
-      split_on: "multiple",
       coalesce: "fallback",
+      // Refused rather than named for a breadth: the exchange does not run at all
+      // with a declared fan-out step.
+      split_on: "not supported",
       // Rule named directly where a partner pattern or value list makes the
       // direction indeterminate.
       replace_regex: "pattern replacement",

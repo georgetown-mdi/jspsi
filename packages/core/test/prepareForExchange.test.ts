@@ -254,6 +254,118 @@ describe("prepareForExchange: a deduplicating term is refused", () => {
   });
 });
 
+// --- A fan-out transform fails closed before connecting -----------------------
+
+describe("prepareForExchange: a fan-out transform is refused", () => {
+  // Matching runs on a single value per record, so a record whose value splits
+  // contributes no key at all -- fewer matches than the terms describe. Refuse
+  // before any connection rather than run the narrower matching silently.
+  const splittingStandardization: Standardization = [
+    {
+      output: "first_name",
+      input: "first_name",
+      steps: [{ function: "to_upper_case" }],
+    },
+    {
+      output: "last_name",
+      input: "last_name",
+      steps: [{ function: "split_on", params: { delimiter: "-" } }],
+    },
+  ];
+
+  const splittingElementTerms: LinkageTerms = {
+    ...terms,
+    linkageKeys: [
+      {
+        name: "FN_LN",
+        elements: [
+          { field: "first_name" },
+          {
+            field: "last_name",
+            transform: [{ function: "split_on", params: { delimiter: "-" } }],
+          },
+        ],
+      },
+    ],
+  };
+
+  test("a standardization declaring split_on is refused before connecting", () => {
+    const prepare = () =>
+      prepareForExchange(
+        {
+          linkageTerms: terms,
+          metadata,
+          standardization: splittingStandardization,
+        },
+        "Tester",
+        rawRows,
+        columns,
+      );
+    expect(prepare).toThrow(UsageError);
+    expect(prepare).toThrow(/split_on/);
+  });
+
+  test("a linkage-key element transform declaring split_on is refused", () => {
+    // The second authoring surface: an element transform cannot fan out at all
+    // (it would collapse to one joined value), so it is refused on the same terms.
+    const prepare = () =>
+      prepareForExchange(
+        { linkageTerms: splittingElementTerms, metadata },
+        "Tester",
+        rawRows,
+        columns,
+      );
+    expect(prepare).toThrow(UsageError);
+    expect(prepare).toThrow(/split_on/);
+  });
+
+  test("the refusal is not an OperatorConfigError", () => {
+    // An acceptor adopts the element transforms verbatim from the partner's
+    // invitation, so the fault is not provably this operator's own content: the
+    // message stays swallowed by the web's generic alert, like the psi-c and
+    // deduplicate siblings.
+    let thrown: unknown;
+    try {
+      prepareForExchange(
+        { linkageTerms: splittingElementTerms, metadata },
+        "Tester",
+        rawRows,
+        columns,
+      );
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UsageError);
+    expect(thrown).not.toBeInstanceOf(OperatorConfigError);
+  });
+
+  test("a standardization with no fan-out step prepares normally", () => {
+    const prepared = prepareForExchange(
+      {
+        linkageTerms: terms,
+        metadata,
+        standardization: consistentStandardization,
+      },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.rowCount).toBe(1);
+  });
+
+  test("the default (unauthored) standardization prepares normally", () => {
+    // The refusal runs over the RESOLVED standardization, so the terms-only path
+    // -- which reconstructs one from the terms -- must stay unaffected.
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.rowCount).toBe(1);
+  });
+});
+
 // --- An unimplemented signing mode fails closed before connecting -------------
 
 describe("prepareForExchange: an unimplemented signing mode is refused", () => {

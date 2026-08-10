@@ -2,8 +2,11 @@ import { expect, test, describe } from "vitest";
 
 import {
   buildStandardizedDataset,
+  StandardizedDataset,
+  StandardizedField,
   StandardizedKeyIterable,
 } from "../src/standardization";
+import { UsageError } from "../src/errors";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
 
@@ -161,6 +164,50 @@ describe("StandardizedKeyIterable — swap (isReceiver)", () => {
     );
     expect(receiver.at(0)).toBe("JAMESHEARD19750716");
     expect(receiver.at(1)).toBe("ALBERTIORIO19750817");
+  });
+});
+
+describe("StandardizedKeyIterable — a row whose value fans out", () => {
+  // The silent drop this refusal replaces: a row whose value split used to yield
+  // `undefined` -- no PSI entry for the key at all -- so fan-out narrowed matching
+  // while the consent surface said each candidate matches independently. A
+  // declared fan-out is refused before the exchange runs
+  // (assertFanOutImplemented); this pins the same refusal at the point of harm,
+  // reached here through a dataset built directly rather than through prepare.
+  const splittingRows = [
+    { ssn: "559811301", last_name: "SMITH-JONES", date_of_birth: "19750716" },
+    { ssn: "322842281", last_name: "IORIO", date_of_birth: "19750817" },
+  ];
+  const splitDataset = new StandardizedDataset([
+    new StandardizedField("ssn", "ssn", [], splittingRows),
+    new StandardizedField(
+      "lastName",
+      "last_name",
+      [{ function: "split_on", params: { delimiter: "-" } }],
+      splittingRows,
+    ),
+    new StandardizedField("dateOfBirth", "date_of_birth", [], splittingRows),
+  ]);
+  const key = terms.linkageKeys[0];
+  const iter = new StandardizedKeyIterable(
+    key,
+    splitDataset,
+    splittingRows.length,
+  );
+
+  test("refuses the row rather than dropping it from the round", () => {
+    expect(() => iter.at(0)).toThrow(UsageError);
+    expect(() => iter.at(0)).toThrow(/fan-out/);
+  });
+
+  test("iteration refuses too, so no round can run past the row", () => {
+    expect(() => [...iter]).toThrow(UsageError);
+  });
+
+  test("a row whose value does not split still yields its key", () => {
+    // split_on emits a one-element set when the delimiter does not match, which
+    // is a single matchable key and must stay unaffected by the refusal.
+    expect(iter.at(1)).toBe("322842281IORIO19750817");
   });
 });
 
