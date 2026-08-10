@@ -66,6 +66,8 @@ export function AcceptorColumnsStep({
   verdict,
   connectionSection,
   connectionBlocked = false,
+  exchangeFilesSection,
+  exchangeFilesBlocked = false,
   onMetadataChange,
   onRemap,
   onReset,
@@ -92,6 +94,14 @@ export function AcceptorColumnsStep({
    * with no connection authored yet). ORs into the column-verdict gate so "Start
    * the exchange" cannot mint a run with nowhere to connect. */
   connectionBlocked?: boolean;
+  /** The console's file-handling card for a run the appliance conducts (retain
+   * mode and the toggles that travel with it). Absent on a browser accept, which
+   * has no shared directory to tune. */
+  exchangeFilesSection?: ReactNode;
+  /** Whether the file-handling choices are a combination core refuses. ORs into
+   * the launch gate exactly as {@link connectionBlocked} does, so an unusable
+   * combination is a form problem here rather than a job that fails later. */
+  exchangeFilesBlocked?: boolean;
   onMetadataChange: (next: Metadata) => void;
   /** Bind a missing field type to a chosen column, forcing role linkage. */
   onRemap: (type: SemanticType, columnName: string) => void;
@@ -139,11 +149,18 @@ export function AcceptorColumnsStep({
     editorState.standardization,
   );
   const launchDisabled =
-    acceptorLaunchDisabled(verdict, editorState) || connectionBlocked;
-  // Ties the disabled launch button to the connection-blocked reason line so a
+    acceptorLaunchDisabled(verdict, editorState) ||
+    connectionBlocked ||
+    exchangeFilesBlocked;
+  // Ties the disabled launch button to the blocked-reason line so a
   // keyboard/screen-reader user at the button hears why it is disabled and what to
   // do -- the reason renders at mount, so its own live region never announces it.
   const launchBlockedReasonId = useId();
+  const launchBlockedReason = connectionBlocked
+    ? "Set up the SFTP connection above before you can start."
+    : exchangeFilesBlocked
+      ? "Resolve the file-handling settings above before you can start."
+      : undefined;
 
   const remap = (type: LinkageField["type"], columnName: string) => {
     // Move focus to the verdict before the chosen Select unmounts (it does as soon
@@ -348,6 +365,12 @@ export function AcceptorColumnsStep({
             {connectionSection}
           </Paper>
         )}
+
+        {exchangeFilesSection !== undefined && (
+          <Paper withBorder p="md">
+            {exchangeFilesSection}
+          </Paper>
+        )}
       </Stack>
 
       <div className={styles.workFoot}>
@@ -355,7 +378,9 @@ export function AcceptorColumnsStep({
           onClick={onLaunch}
           disabled={launchDisabled}
           aria-describedby={
-            connectionBlocked ? launchBlockedReasonId : undefined
+            launchBlockedReason !== undefined
+              ? launchBlockedReasonId
+              : undefined
           }
         >
           Start the exchange
@@ -363,13 +388,13 @@ export function AcceptorColumnsStep({
         <Button variant="subtle" onClick={onReset}>
           Reset to defaults
         </Button>
-        {connectionBlocked && (
+        {launchBlockedReason !== undefined && (
           <p
             id={launchBlockedReasonId}
             className={`${styles.small} ${styles.sub}`}
             role="status"
           >
-            Set up the SFTP connection above before you can start.
+            {launchBlockedReason}
           </p>
         )}
       </div>

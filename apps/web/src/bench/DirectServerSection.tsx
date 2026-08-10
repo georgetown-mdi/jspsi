@@ -1,10 +1,16 @@
 import { Alert, Button, Group, Radio, Stack, Text } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
+import {
+  ZERO_SETUP_EXCHANGE_FILES,
+  exchangeFilesProblems,
+} from "./exchangeFilesModel";
+import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
 import styles from "./bench.module.css";
 
 import type { DirectTransport } from "./directExchangeModel";
+import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
@@ -27,6 +33,10 @@ export function DirectServerSection({
   onTransport,
   sftpConnection,
   rendezvous,
+  exchangeFiles,
+  exchangeFilesOpen,
+  onExchangeFiles,
+  onExchangeFilesOpen,
   onAuthorConnection,
   onClearConnection,
   onContinue,
@@ -38,6 +48,12 @@ export function DirectServerSection({
   sftpConnection: SftpConnectionProjection | null;
   /** The appliance's rendezvous mount, or undefined before it resolves. */
   rendezvous: JobRendezvousConfig | undefined;
+  /** The operator's file-handling choices, authored here because both parties
+   * settle them out of band alongside the server itself. */
+  exchangeFiles: ExchangeFilesDraft;
+  exchangeFilesOpen: boolean;
+  onExchangeFiles: (draft: ExchangeFilesDraft) => void;
+  onExchangeFilesOpen: (open: boolean) => void;
   onAuthorConnection: (connection: SftpConnectionProjection) => void;
   onClearConnection: () => void;
   onContinue: () => void;
@@ -45,7 +61,13 @@ export function DirectServerSection({
 }) {
   const rendezvousConfigured = rendezvous?.configured === true;
   const sftpReady = sftpConnection != null;
-  const canContinue = transport === "sftp" ? sftpReady : rendezvousConfigured;
+  const transportReady =
+    transport === "sftp" ? sftpReady : rendezvousConfigured;
+  // A combination core refuses is a form problem here, on the step that authors
+  // it, rather than a run that fails at rendezvous.
+  const exchangeFilesBlocked =
+    exchangeFilesProblems(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES).length > 0;
+  const canContinue = transportReady && !exchangeFilesBlocked;
 
   return (
     <Stack gap="lg">
@@ -114,6 +136,14 @@ export function DirectServerSection({
           rendezvous directory and restart the appliance.
         </Alert>
       )}
+
+      <ExchangeFilesCard
+        draft={exchangeFiles}
+        capabilities={ZERO_SETUP_EXCHANGE_FILES}
+        open={exchangeFilesOpen}
+        onToggleOpen={onExchangeFilesOpen}
+        onChange={onExchangeFiles}
+      />
 
       <Group>
         <Button onClick={onContinue} disabled={!canContinue}>

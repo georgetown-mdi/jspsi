@@ -54,6 +54,12 @@ import {
 } from "./acceptorModel";
 import { APPLIANCE_FILE_ASSURANCE, FILE_ASSURANCE_LINE } from "./fileAssurance";
 import {
+  CONFIG_EXCHANGE_FILES,
+  EXCHANGE_FILES_DEFAULT,
+  exchangeFilesOptions,
+  exchangeFilesProblems,
+} from "./exchangeFilesModel";
+import {
   acceptorCleaningAttention,
   acceptorColumnsEditorState,
   acceptorInitialColumnsState,
@@ -69,6 +75,7 @@ import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
 import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
 import { AcceptorSftpConnectionCard } from "./AcceptorSftpConnectionCard";
 import { BenchShell } from "./BenchShell";
+import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { Ledger } from "./Ledger";
 import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { Problems } from "./Problems";
@@ -104,6 +111,7 @@ import type { AcceptorStep } from "./acceptorModel";
 import type { AlertContent } from "@components/csvIntake";
 import type { BenchCoverageInput } from "@components/useNonEmptyRates";
 import type { ColumnSamples } from "@psi/columnSamples";
+import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
 import type { ManageOfferChoices } from "./manageOfferModel";
@@ -207,6 +215,13 @@ export function AcceptorBench() {
   // The consent gate's two inputs; the file is held as an unparsed handle until
   // "Accept and continue" fires and passes the gate.
   const [consented, setConsented] = useState(false);
+  // The operator's file-handling choices for an accept the appliance conducts.
+  // Authored on the confirm-columns step, beside the connection, and consumed by
+  // the launch; the disclosure's open state rides alongside.
+  const [exchangeFiles, setExchangeFiles] = useState<ExchangeFilesDraft>(
+    EXCHANGE_FILES_DEFAULT,
+  );
+  const [exchangeFilesOpen, setExchangeFilesOpen] = useState(false);
   const [acceptorName, setAcceptorName] = useState("");
   // The name recorded in the exchange record, committed through the consent gate
   // at "Accept and continue" and fixed thereafter -- the run adopts the terms
@@ -679,6 +694,10 @@ export function AcceptorBench() {
           ? { kind: "inline", file: acceptedFile }
           : undefined;
     if (inputSource === undefined) return undefined;
+    // The file-handling choices as they stood at launch, fixed into the launch
+    // alongside the edits so a later edit to the card cannot retune a run already
+    // going.
+    const options = exchangeFilesOptions(exchangeFiles, CONFIG_EXCHANGE_FILES);
     return {
       invitation: decode.invitation,
       acceptorName: committedName,
@@ -686,6 +705,7 @@ export function AcceptorBench() {
       columns: acquired.columns,
       edits: launched.edits,
       inputSource,
+      ...(options !== undefined ? { options } : {}),
     };
     // `launched` is the launch key: it is set once, from the same render that
     // fixes the acquired CSV, its input source, the committed name, and the ready
@@ -1306,6 +1326,22 @@ export function AcceptorBench() {
                 ) : undefined
               }
               connectionBlocked={sftpConnectionMissing}
+              exchangeFilesSection={
+                acceptServerJob ? (
+                  <ExchangeFilesCard
+                    draft={exchangeFiles}
+                    capabilities={CONFIG_EXCHANGE_FILES}
+                    open={exchangeFilesOpen}
+                    onToggleOpen={setExchangeFilesOpen}
+                    onChange={setExchangeFiles}
+                  />
+                ) : undefined
+              }
+              exchangeFilesBlocked={
+                acceptServerJob &&
+                exchangeFilesProblems(exchangeFiles, CONFIG_EXCHANGE_FILES)
+                  .length > 0
+              }
               onMetadataChange={changeMetadata}
               onRemap={remapColumn}
               onReset={resetColumns}

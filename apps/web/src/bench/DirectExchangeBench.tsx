@@ -12,6 +12,11 @@ import { fetchSftpConnection } from "@psi/serverJobExchangeDriver";
 import { isConsoleBuild } from "@utils/clientConfig";
 
 import { DIRECT_STEP_LABELS, DIRECT_STEP_ORDER } from "./directExchangeModel";
+import {
+  EXCHANGE_FILES_DEFAULT,
+  ZERO_SETUP_EXCHANGE_FILES,
+  exchangeFilesOptions,
+} from "./exchangeFilesModel";
 import { BenchPage } from "./BenchPage";
 import { BenchShell } from "./BenchShell";
 import { DirectConfirmSection } from "./DirectConfirmSection";
@@ -33,6 +38,7 @@ import type {
   ProfiledJobInput,
 } from "@psi/workInputClient";
 import type { AlertContent } from "@components/csvIntake";
+import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { RailStep } from "./inviterModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
@@ -64,6 +70,13 @@ export function DirectExchangeBench() {
   const [rendezvous, setRendezvous] = useState<JobRendezvousConfig>();
   const [identity, setIdentity] = useState("");
   const [affirmed, setAffirmed] = useState(false);
+  // The operator's file-handling choices for this run, authored beside the agreed
+  // server (both parties settle these out of band, exactly as they settle the
+  // server). The disclosure's open state rides alongside.
+  const [exchangeFiles, setExchangeFiles] = useState<ExchangeFilesDraft>(
+    EXCHANGE_FILES_DEFAULT,
+  );
+  const [exchangeFilesOpen, setExchangeFilesOpen] = useState(false);
 
   // Fetch the appliance's authored SFTP connection once on a console build; one
   // fetch per bench serves the session. The helper resolves to a null connection on
@@ -121,6 +134,7 @@ export function DirectExchangeBench() {
     channel: transport,
     inputSource,
     ...(identity.trim().length > 0 ? { identity: identity.trim() } : {}),
+    options: exchangeFilesOptions(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES),
   });
 
   // Move focus to the incoming section's h1 on a step change (skip mount), so a
@@ -262,6 +276,10 @@ export function DirectExchangeBench() {
             onTransport={chooseTransport}
             sftpConnection={sftpConnection}
             rendezvous={rendezvous}
+            exchangeFiles={exchangeFiles}
+            exchangeFilesOpen={exchangeFilesOpen}
+            onExchangeFiles={setExchangeFiles}
+            onExchangeFilesOpen={setExchangeFilesOpen}
             onAuthorConnection={authorSftpConnection}
             onClearConnection={clearSftpConnection}
             onContinue={() => goTo("confirm")}

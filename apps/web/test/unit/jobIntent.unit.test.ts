@@ -25,6 +25,7 @@ import {
   jobCreateIntentSchema,
   jobExchangeIntentSchema,
   jobZeroSetupIntentSchema,
+  zeroSetupFileSyncArgv,
   zeroSetupFiledropArgv,
   zeroSetupSftpArgv,
 } from "@jobs/intent";
@@ -597,7 +598,9 @@ describe("jobExchangeIntentSchema rejects injection-shaped intents", () => {
   test("rejects an unknown key inside options", () => {
     const intent = {
       ...validIntent(),
-      options: { peerId: "temp", pollIntervalMs: 1000 },
+      // A path-valued file-sync option core carries but this boundary never
+      // surfaces: the server owns every directory.
+      options: { outboundPath: "/srv/out", pollIntervalMs: 1000 },
     };
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
@@ -707,6 +710,160 @@ describe("the sftp intent arm", () => {
         validIntent({ options: { pollIntervalMs: 999 } }),
       ).success,
     ).toBe(true);
+  });
+});
+
+// peer_id is the one free-text option: it becomes a filename prefix in a
+// server-owned directory, so its shape is bounded here, while every rule ABOUT it
+// (the timestamp dependency, the reserved value) stays core's and is enforced by
+// running core's own schema over the block.
+describe("the options peer_id and its cross-field rules", () => {
+  const withPeerId = (peerId: string) =>
+    validIntent({ options: { peerId, timestampInFilename: true } });
+
+  test("accepts a plain label", () => {
+    expect(
+      jobExchangeIntentSchema.safeParse(withPeerId("clinic-a")).success,
+    ).toBe(true);
+    expect(
+      jobExchangeIntentSchema.safeParse(withPeerId("Site 2_b")).success,
+    ).toBe(true);
+  });
+
+  test.each([
+    ["a path separator", "../etc/passwd"],
+    ["a bare separator", "a/b"],
+    ["a leading dash", "-save"],
+    ["a trailing space", "site "],
+    ["an empty label", ""],
+    ["a newline", "site\nother"],
+    ["a Windows-reserved character", 'site"x'],
+    ["a NUL byte", `site${String.fromCharCode(0)}`],
+    ["an over-long label", "a".repeat(65)],
+  ])("rejects %s", (_label, peerId) => {
+    expect(jobExchangeIntentSchema.safeParse(withPeerId(peerId)).success).toBe(
+      false,
+    );
+  });
+
+  test("rejects the reserved peer_id in core's own words", () => {
+    const parsed = jobExchangeIntentSchema.safeParse(withPeerId("temp"));
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(
+      parsed.error.issues.some((i) => i.message.includes("reserved")),
+    ).toBe(true);
+  });
+
+  test("rejects a peer_id without timestamped filenames", () => {
+    const intent = validIntent({ options: { peerId: "clinic-a" } });
+    const parsed = jobExchangeIntentSchema.safeParse(intent);
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(
+      parsed.error.issues.some((i) =>
+        i.message.includes("peer_id requires timestamp_in_filename"),
+      ),
+    ).toBe(true);
+  });
+
+  test("rejects retain mode contradicted by an explicit toggle", () => {
+    const parsed = jobExchangeIntentSchema.safeParse(
+      validIntent({
+        options: {
+          retainFiles: true,
+          locklessRendezvous: true,
+          timestampInFilename: false,
+        },
+      }),
+    );
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(
+      parsed.error.issues.some((i) =>
+        i.message.includes("retain_files requires timestamp_in_filename"),
+      ),
+    ).toBe(true);
+  });
+
+  test("accepts the retain trio, and carries it into the composed config", () => {
+    const options = {
+      retainFiles: true,
+      locklessRendezvous: true,
+      timestampInFilename: true,
+      peerId: "clinic-a",
+    };
+    expect(
+      jobExchangeIntentSchema.safeParse(validIntent({ options })).success,
+    ).toBe(true);
+    const doc = parseYaml(
+      composeConfigDocument(validIntent({ options }), "/srv/jobs/x/exchange"),
+    ) as { connection: { options?: Record<string, unknown> } };
+    expect(doc.connection.options?.retain_files).toBe(true);
+    expect(doc.connection.options?.lockless_rendezvous).toBe(true);
+    expect(doc.connection.options?.timestamp_in_filename).toBe(true);
+    expect(doc.connection.options?.peer_id).toBe("clinic-a");
+  });
+
+  test("the same rules hold on the zero-setup arm", () => {
+    expect(
+      jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupIntent({ options: { peerId: "clinic-a" } }),
+      ).success,
+    ).toBe(false);
+    expect(
+      jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupIntent({
+          options: { peerId: "clinic-a", timestampInFilename: true },
+        }),
+      ).success,
+    ).toBe(true);
+  });
+});
+
+describe("zeroSetupFileSyncArgv", () => {
+  test("emits nothing when no option was set", () => {
+    expect(zeroSetupFileSyncArgv(undefined)).toEqual([]);
+    expect(zeroSetupFileSyncArgv({})).toEqual([]);
+  });
+
+  test("emits the retain trio and the party name", () => {
+    expect(
+      zeroSetupFileSyncArgv({
+        retainFiles: true,
+        locklessRendezvous: true,
+        timestampInFilename: true,
+        peerId: "clinic-a",
+      }),
+    ).toEqual([
+      "--retain-files",
+      "--lockless-rendezvous",
+      "--timestamp-in-filename",
+      "--peer-id=clinic-a",
+    ]);
+  });
+
+  test("emits nothing for an explicitly-off toggle", () => {
+    expect(
+      zeroSetupFileSyncArgv({
+        retainFiles: false,
+        locklessRendezvous: false,
+        timestampInFilename: false,
+      }),
+    ).toEqual([]);
+  });
+
+  test("carries the party name as a single =value token", () => {
+    const argv = zeroSetupFileSyncArgv({
+      timestampInFilename: true,
+      peerId: "clinic-a",
+    });
+    expect(argv).toContain("--peer-id=clinic-a");
+    expect(argv).not.toContain("--peer-id");
+  });
+
+  test("emits no flag for unexpected_files, which has none", () => {
+    expect(zeroSetupFileSyncArgv({ unexpectedFiles: "warn" })).toEqual([]);
   });
 });
 

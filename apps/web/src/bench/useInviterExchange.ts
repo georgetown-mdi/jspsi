@@ -57,6 +57,7 @@ import type {
   ServerJobExchangeTransport,
 } from "@psi/serverJobExchangeDriver";
 import type { GeneratedInvitation } from "@psi/invitation";
+import type { JobExchangeOptions } from "@jobs/intent";
 import type { RunOutputs } from "./runOutputs";
 import type { Transport } from "./inviterModel";
 
@@ -238,6 +239,7 @@ export function inviterServerJobConfig({
   minted,
   inputSource,
   transport,
+  options,
 }: {
   minted: Pick<
     GeneratedInvitation,
@@ -245,6 +247,10 @@ export function inviterServerJobConfig({
   >;
   inputSource: JobInputSource;
   transport: ServerJobExchangeTransport;
+  /** The review step's file-handling choices, already resolved through core's
+   * retain-mode implication. Absent when the operator changed nothing, so the
+   * composed config carries no `options` block at all. */
+  options?: JobExchangeOptions;
 }): ServerJobExchangeDriverConfig {
   return {
     transport,
@@ -256,6 +262,7 @@ export function inviterServerJobConfig({
     ...(minted.standardization !== undefined
       ? { standardization: minted.standardization }
       : {}),
+    ...(options !== undefined ? { options } : {}),
   };
 }
 
@@ -279,6 +286,7 @@ export function useInviterExchange({
   channel,
   inputSource,
   sftpConfigured,
+  options,
 }: {
   invitation: GeneratedInvitation | undefined;
   inviterName: string;
@@ -295,6 +303,10 @@ export function useInviterExchange({
    * input, threaded from the owner's fetch so this hook and the owner route
    * identically. */
   sftpConfigured: boolean;
+  /** The review step's file-handling choices for a server-job run. Undefined when
+   * the operator changed nothing; unused on the browser path, which conducts the
+   * exchange over WebRTC and has no shared directory to tune. */
+  options?: JobExchangeOptions;
 }): {
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
@@ -474,7 +486,12 @@ export function useInviterExchange({
         throw new Error("no input source for the server-job exchange");
       const transport = serverJobTransport();
       return createServerJobExchangeDriver({
-        ...inviterServerJobConfig({ minted, inputSource, transport }),
+        ...inviterServerJobConfig({
+          minted,
+          inputSource,
+          transport,
+          ...(options !== undefined ? { options } : {}),
+        }),
         // Persist the created job's id so a reload or hard tab close can re-attach
         // to the appliance's run, and track it for the deliberate-discard paths.
         onJobCreated: (jobId) => {

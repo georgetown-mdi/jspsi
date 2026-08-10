@@ -4,6 +4,10 @@ import { isConsoleBuild } from "@utils/clientConfig";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import {
+  CONFIG_EXCHANGE_FILES,
+  exchangeFilesProblems,
+} from "./exchangeFilesModel";
+import {
   LIFETIME_CHOICES,
   RESULTS_DIRECTION_LABELS,
   answersRows,
@@ -11,6 +15,7 @@ import {
   expiryLabel,
   transportChooserCopy,
 } from "./inviterModel";
+import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
 import styles from "./bench.module.css";
 
@@ -21,6 +26,7 @@ import type {
   SpineTarget,
   Transport,
 } from "./inviterModel";
+import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { OutputDirection } from "@psi/advancedInvite";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
@@ -53,6 +59,10 @@ export function ReviewCreateSection({
   sftpConnection,
   sftpSaveFilePreferred,
   rendezvousConfigured,
+  exchangeFiles,
+  exchangeFilesOpen,
+  onExchangeFiles,
+  onExchangeFilesOpen,
   onLifetime,
   onDirection,
   onTransport,
@@ -79,6 +89,14 @@ export function ReviewCreateSection({
    * set). The filedrop card runs here when true and renders disabled with a config
    * hint when false. Off a console build it is unused (filedrop saves a file). */
   rendezvousConfigured: boolean;
+  /** The operator's file-handling choices for a run the appliance conducts. Only
+   * the console's file-sync transports carry them, so the card renders there. */
+  exchangeFiles: ExchangeFilesDraft;
+  /** Whether the file-handling disclosure is expanded (held by the host so a
+   * re-render of this step does not collapse it). */
+  exchangeFilesOpen: boolean;
+  onExchangeFiles: (draft: ExchangeFilesDraft) => void;
+  onExchangeFilesOpen: (open: boolean) => void;
   onLifetime: (seconds: number) => void;
   onDirection: (direction: OutputDirection) => void;
   onTransport: (transport: Transport) => void;
@@ -129,15 +147,35 @@ export function ReviewCreateSection({
   // set up: block the seal and say so, rather than minting a code with no
   // rendezvous.
   const connectionIncomplete = transport === "sftp" && sftpAuthoringRequired;
-  const canCreate = problems.length === 0 && !minting && !connectionIncomplete;
+  // The appliance conducts a console file-sync run, so its file-handling card is
+  // offered there and nowhere else: a browser exchange has no shared directory,
+  // and a save-a-file transport hands the settings to the operator's own command
+  // line, where the flags already live.
+  const exchangeFilesOffered =
+    consoleBuild &&
+    transport !== "browser" &&
+    available.options.find((option) => option.transport === transport)
+      ?.runMode === "server-job";
+  // A combination core refuses is a form problem here, before the invitation is
+  // sealed, rather than a job that fails at composition or at rendezvous.
+  const exchangeFilesBlocked =
+    exchangeFilesOffered &&
+    exchangeFilesProblems(exchangeFiles, CONFIG_EXCHANGE_FILES).length > 0;
+  const canCreate =
+    problems.length === 0 &&
+    !minting &&
+    !connectionIncomplete &&
+    !exchangeFilesBlocked;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
   const readiness = useDeferredAnnouncement(
     connectionIncomplete
       ? "Set up the SFTP connection above before you can create."
-      : problems.length === 0
-        ? "Ready to create the invitation."
-        : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
+      : exchangeFilesBlocked
+        ? "Resolve the file-handling settings above before you can create."
+        : problems.length === 0
+          ? "Ready to create the invitation."
+          : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
   );
   return (
     <>
@@ -235,6 +273,15 @@ export function ReviewCreateSection({
         </div>
         <p className={`${styles.small} ${styles.sub}`}>{capabilityNote}</p>
       </fieldset>
+      {exchangeFilesOffered && (
+        <ExchangeFilesCard
+          draft={exchangeFiles}
+          capabilities={CONFIG_EXCHANGE_FILES}
+          open={exchangeFilesOpen}
+          onToggleOpen={onExchangeFilesOpen}
+          onChange={onExchangeFiles}
+        />
+      )}
       <h2>Exchange proposal</h2>
       <p className={`${styles.small} ${styles.sub}`}>
         Check every term before you create the invitation. Creating it seals the
@@ -299,9 +346,11 @@ export function ReviewCreateSection({
         >
           {connectionIncomplete
             ? "Set up the SFTP connection above to continue."
-            : problems.length === 0
-              ? "Ready to create."
-              : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
+            : exchangeFilesBlocked
+              ? "Resolve the file-handling settings above to continue."
+              : problems.length === 0
+                ? "Ready to create."
+                : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
         </p>
       </div>
     </>

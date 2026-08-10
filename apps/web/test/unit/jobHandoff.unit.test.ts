@@ -176,6 +176,65 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     expect(argv.slice(-2)).toEqual(["input.csv", "results.csv"]);
   });
 
+  // The hand-off is what the operator graduates to cron with, so a run that kept
+  // its files has to graduate to a command (or a config) that keeps them too:
+  // otherwise the scheduled run silently loses the transcript the prototype had,
+  // and -- since the trio is bilateral -- stalls against a partner still retaining.
+  test("an exchange template carries the file-sync toggles verbatim", () => {
+    const handoff = buildJobHandoff(
+      validIntent({
+        options: {
+          retainFiles: true,
+          locklessRendezvous: true,
+          timestampInFilename: true,
+          peerId: "clinic-a",
+          unexpectedFiles: "warn",
+        },
+      }),
+      undefined,
+      false,
+    );
+    const yaml =
+      handoff.template.kind === "config" ? handoff.template.yaml : "";
+    const doc = parseYaml(yaml) as {
+      connection: { options?: Record<string, unknown> };
+    };
+    expect(doc.connection.options).toEqual({
+      retain_files: true,
+      lockless_rendezvous: true,
+      timestamp_in_filename: true,
+      peer_id: "clinic-a",
+      unexpected_files: "warn",
+      server_connect_timeout_ms: 30000,
+    });
+  });
+
+  test("a zero-setup template carries the file-sync toggles as flags", () => {
+    const handoff = buildJobHandoff(
+      validZeroSetupIntent({
+        options: {
+          retainFiles: true,
+          locklessRendezvous: true,
+          timestampInFilename: true,
+          peerId: "clinic-a",
+        },
+      }),
+      undefined,
+      false,
+    );
+    const argv =
+      handoff.template.kind === "command" ? handoff.template.argv : [];
+    expect(argv).toContain("--retain-files");
+    expect(argv).toContain("--lockless-rendezvous");
+    expect(argv).toContain("--timestamp-in-filename");
+    expect(argv).toContain("--peer-id=clinic-a");
+    // The flags sit between the connection locator and the trailing positionals,
+    // so the command reads (and parses) as the CLI's own form.
+    expect(argv[0]).toBe("psilink");
+    expect(argv[1]).toBe(HANDOFF_SHARED_DIRECTORY_URL_PLACEHOLDER);
+    expect(argv.slice(-2)).toEqual(["input.csv", "results.csv"]);
+  });
+
   test("credentialPasted is carried for an sftp run but forced false for filedrop", () => {
     expect(
       buildJobHandoff(validSftpIntent(), testSftpServerEntry(), true)
