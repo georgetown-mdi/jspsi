@@ -1532,6 +1532,13 @@ function signingPersistFixture(receiptFile: string): SigningPersist {
   };
 }
 
+// The peer wait here is a hang backstop for a party that never gets joined, not
+// a timing assertion: the tests below start both parties together and inject
+// whatever failure they want through runExchange. A bound near the milliseconds
+// a rendezvous actually takes buys nothing and makes the outcome turn on how
+// promptly a loaded machine schedules the two parties against each other.
+const PEER_WAIT_HANG_BACKSTOP_MS = 15_000;
+
 function runSigningParty(
   keyFilePath: string,
   name: string,
@@ -1541,7 +1548,10 @@ function runSigningParty(
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1, peerTimeoutMs: 200 },
+      options: {
+        pollIntervalMs: 1,
+        peerTimeoutMs: PEER_WAIT_HANG_BACKSTOP_MS,
+      },
     },
     { sharedSecret: TOKEN_A, keyFilePath },
     minimalPrepared,
