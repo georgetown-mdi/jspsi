@@ -148,7 +148,10 @@ function compressPoint(
   return compressed;
 }
 
-/** The SEC1 hybrid encoding (0x06/0x07 || X || Y) of an uncompressed point. */
+/**
+ * The IEEE Std 1363-2000 hybrid encoding (0x06/0x07 || X || Y) of an
+ * uncompressed point. SEC1 does not define this form; platforms decode it.
+ */
 function hybridPoint(point: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
   const hybrid = Uint8Array.from(point);
   hybrid[0] = point[64] & 1 ? 0x07 : 0x06;

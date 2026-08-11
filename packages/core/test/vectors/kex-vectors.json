@@ -4,7 +4,7 @@
     "pattern": "Noise NNpsk0 over P-256",
     "protocolName": "psilink-kex-v2:NNpsk0_P256_SHA256",
     "hash": "SHA-256",
-    "dh": "P-256 ECDH (SP 800-56A Rev 3 ephemeralUnified; curve per FIPS 186-5 / SP 800-186)",
+    "dh": "P-256 ECDH: the shared-secret computation of SP 800-56A Rev 3 section 5.7.1.2, over the curve parameters of SP 800-186 section 3.2.1.3. ephemeralUnified is the label CMVP certificate 5021's KAS-ECC-SSC row carries for the section 6.1.2.2 scheme built on that computation, not that publication's name for the computation itself.",
     "pointEncoding": "SEC1 uncompressed, 0x04 || X || Y, 65 bytes. Pinned: a share in any other encoding of the same point (compressed 0x02/0x03 || X, hybrid 0x06/0x07 || X || Y) is rejected rather than decoded.",
     "sharedSecret": "The 32-byte X coordinate of the shared point (SP 800-56A Rev 3 Z), which is what crypto.subtle deriveBits returns for ECDH over P-256.",
     "kdf": "HKDF-SHA-256",
@@ -147,7 +147,7 @@
       "publicKeyXHex": "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
       "publicKeyYHex": "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
       "sharedSecretHex": "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
-      "note": "generatorXHex/generatorYHex are the P-256 base point published in FIPS 186-5 / SP 800-186; privateKeyHex with publicKeyXHex/publicKeyYHex is RFC 6979 section A.2.5's P-256 key pair. ECDH(privateKey, generator) and ECDH(1, publicKey) both equal sharedSecretHex, which is publicKeyXHex, because the ECDH shared secret over this curve is the X coordinate of the shared point."
+      "note": "generatorXHex/generatorYHex are the P-256 base point published in SP 800-186 section 3.2.1.3; privateKeyHex with publicKeyXHex/publicKeyYHex is RFC 6979 section A.2.5's P-256 key pair. ECDH(privateKey, generator) and ECDH(1, publicKey) both equal sharedSecretHex, which is publicKeyXHex, because the ECDH shared secret over this curve is the X coordinate of the shared point."
     },
     "rfc5869TestCase3": {
       "hash": "SHA-256",

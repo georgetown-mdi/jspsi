@@ -5,11 +5,12 @@ title: "Credential and Result File Storage"
 # Credential and result file storage
 
 This document specifies how PSI-Link writes its owner-only credential and result
-files: the POSIX exclusive-create and atomic-rename discipline, the `fsync`
-durability and cross-write crash-ordering guarantee, the macOS `F_FULLFSYNC` and
-NFSv4-ACL caveats, the writable-and-readable-parent pre-flight, and the Windows
-ACL-narrowing and load-check internals. It is the implementation-level
-complement to the **Key file security** overview in
+files: the POSIX exclusive-create, exact-mode, and atomic-rename discipline, the
+platform-dependent `fsync` durability and cross-write crash-ordering guarantee
+laid over it, the macOS `F_FULLFSYNC` and NFSv4-ACL caveats, the
+writable-and-readable-parent pre-flight, and the Windows ACL-narrowing and
+load-check internals. It is the implementation-level complement to the
+**Key file security** overview in
 [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#key-file-security), which says what
 these files protect and carries the operator-facing required permissions,
 warnings, and remediation commands; this document covers how each write is
@@ -34,15 +35,41 @@ before any content is written, then atomically renamed into place, mirroring the
 Windows create-then-restrict discipline below: a symlink planted at the temp
 path cannot redirect the write to another file.
 
-The write is also durable across a power loss: the temp file's data is `fsync`'d
-before the rename and the parent directory is `fsync`'d after it, so a crash
-cannot surface the rename while losing the file's contents. Because each write
-flushes its own directory entry before returning, two sequential writes are
-crash-ordered -- if the second's rename is durable, the first's is too. This is
-the guarantee the self-attested exchange record relies on (it writes the private
-verification-keys file before the summary record, so a crash between the two
-preserves the salts; see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)), and the one
-that keeps a freshly rotated token from being lost.
+Each of those three properties is POSIX.1-2017 (IEEE Std 1003.1-2017) behavior,
+and portable as such. `open()` makes the existence check and the creation atomic
+against another thread opening the same name with `O_CREAT | O_EXCL`, and fails
+with `[EEXIST]` when the path names a symlink whatever its contents;
+`O_NOFOLLOW` refuses a symlinked final component with `[ELOOP]` on any open, so
+the refusal does not rest on the exclusive create alone. `fchmod()` on the open
+descriptor sets the exact mode, where the mode passed to `open()` is masked by
+the process file-mode creation mask. `rename()` keeps the destination name
+resolving throughout to either the file it named before the call or the one
+being renamed onto it, so no window exposes a partially written or wrongly
+permissioned file at the destination path.
+
+Durability across a power loss is a separate property, and it is the platform's
+rather than POSIX's. The temp file's data is `fsync`'d before the rename and the
+parent directory is `fsync`'d after it, so on Linux -- the CLI's production
+target (the Docker image) -- a crash cannot surface the rename while losing the
+file's contents. Because each write flushes its own directory entry before
+returning, two sequential writes are crash-ordered there: if the second's rename
+is durable, the first's is too. That is the guarantee the self-attested exchange
+record relies on (it writes the private verification-keys file before the
+summary record, so a crash between the two preserves the salts; see
+[EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)), and the one that keeps a freshly
+rotated token from being lost.
+
+Neither half of it is POSIX-grounded. `fsync()` belongs to the File
+Synchronization option, the nature of the transfer it requests is
+implementation-defined, and its RATIONALE states that a null implementation is
+explicitly intended to be permitted; in the middle ground between the extremes
+it describes, `fsync()` "might or might not actually cause data to be written
+where it is safe from a power failure". What an `fsync()` on a directory
+descriptor commits is not specified at all, so the directory-entry flush the
+cross-write ordering depends on rests entirely on the platform. The macOS and
+Windows sections below scope what holds away from Linux: on macOS the ordering
+survives process death but not necessarily a true power loss, and on Windows the
+directory flush is unreachable.
 
 ## macOS durability
 
@@ -97,11 +124,11 @@ reopens the ACL-narrowed file to write the content and `FlushFileBuffers` it
 through a handle before the rename -- but the parent-directory flush is not
 reachable: Node's `fs` exposes no way to open a directory handle and
 `FlushFileBuffers` it (the directory `fsync` the Unix path performs). So the
-cross-write crash-ordering guarantee above is POSIX-only and NTFS metadata
-journaling governs the durability of the directory entry here. The operation is
-recoverable in any case -- a lost rotated token or exchange record is re-produced
-by re-running -- so the residual Windows gap is a durability one, not a
-confidentiality one.
+cross-write crash-ordering guarantee above is confined to the Unix write path,
+and NTFS metadata journaling governs the durability of the directory entry here.
+The operation is recoverable in any case -- a lost rotated token or exchange
+record is re-produced by re-running -- so the residual Windows gap is a
+durability one, not a confidentiality one.
 
 On load, the CLI first attempts to use PowerShell's `Get-Acl` with SID
 translation, which checks both inherited and explicit ACEs in a
