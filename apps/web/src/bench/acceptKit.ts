@@ -20,8 +20,9 @@
  * from the inviter's machine or container can reach the sheet by construction.
  *
  * What the exchange's own settings contribute is therefore a SELECTOR and never
- * a value: {@link AcceptKitInput.retainFiles} picks between fixed paragraphs and
- * a fixed command flag, exactly as the channel discriminant already picks between
+ * a value: {@link AcceptKitInput.retainFiles} and
+ * {@link AcceptKitInput.locklessRendezvous} pick between fixed paragraphs and
+ * fixed command flags, exactly as the channel discriminant already picks between
  * fixed bodies. Rendering an option block would make a third value representable
  * and void the property above, so a future setting the partner must be told about
  * is disclosed the same way.
@@ -47,9 +48,9 @@ export type AcceptKitEndpoint =
 
 /**
  * The minted exchange the sheet describes, as the mint fixed it: where the two
- * parties meet, and whether the exchange runs in retain mode. Held together so a
- * caller composing the sheet cannot pair one exchange's locator with another's
- * settings.
+ * parties meet, and which bilateral file-handling settings the run carries. Held
+ * together so a caller composing the sheet cannot pair one exchange's locator
+ * with another's settings.
  */
 export interface AcceptKitExchange {
   /** The rendezvous locator minted into the invitation. */
@@ -62,7 +63,25 @@ export interface AcceptKitExchange {
    * it selects fixed text and contributes no value of its own.
    */
   retainFiles: boolean;
+  /**
+   * Whether the run resolved the lockless rendezvous on -- the setting as the
+   * run carries it, with retain mode's implication of it already folded in.
+   * Bilateral and non-negotiated like retain mode, and unlike it, it leaves
+   * nothing behind: the partner's half of the agreement is the whole of what
+   * the sheet has to state, and it too selects fixed text and contributes no
+   * value of its own.
+   */
+  locklessRendezvous: boolean;
 }
+
+/**
+ * The bilateral settings alone, as every composing helper below takes them: one
+ * argument rather than a run of booleans a caller could transpose.
+ */
+type BilateralSettings = Pick<
+  AcceptKitExchange,
+  "retainFiles" | "locklessRendezvous"
+>;
 
 /** The inputs the sheet is built from. */
 export interface AcceptKitInput extends AcceptKitExchange {
@@ -208,15 +227,91 @@ function acceptCommand(version: string | undefined): string {
 }
 
 /**
- * What the partner's `exchange` command carries when the inviter runs retain
- * mode: the single flag whose implications the CLI resolves for them
- * (`withRetainModeImplications` gives it the timestamped filenames and lockless
- * rendezvous it requires), so the sheet states the operator-visible choice
- * rather than re-deriving the trio here and risking drift from the CLI. A fixed
- * string chosen by a boolean, so nothing new is representable on the sheet.
+ * What the partner's `exchange` command carries beyond the run itself: the one
+ * flag standing for the bilateral settings their side must match.
+ *
+ * Retain mode travels as the single flag whose implications the CLI resolves
+ * for them (`withRetainModeImplications` gives it the timestamped filenames and
+ * lockless rendezvous it requires), so the sheet states the operator-visible
+ * choice rather than re-deriving the trio here and risking drift from the CLI.
+ * That is also why the lockless rendezvous travels only where retain mode is
+ * not already carrying it: naming it alongside `--retain-files` would state a
+ * rule the CLI does not enforce. Fixed strings chosen by booleans, so nothing
+ * new is representable on the sheet.
  */
-function retainFlag(retainFiles: boolean): string {
-  return retainFiles ? " --retain-files" : "";
+function bilateralFlag(settings: BilateralSettings): string {
+  return chooseBilateral(
+    settings,
+    " --retain-files",
+    " --lockless-rendezvous",
+    "",
+  );
+}
+
+// The one rule for which bilateral agreement the sheet names: retain mode
+// already implies the lockless rendezvous, so its text wins; otherwise the
+// lockless setting speaks only where it is on.
+function chooseBilateral<T>(
+  { retainFiles, locklessRendezvous }: BilateralSettings,
+  forRetain: T,
+  forLockless: T,
+  forNeither: T,
+): T {
+  if (retainFiles) return forRetain;
+  return locklessRendezvous ? forLockless : forNeither;
+}
+
+/**
+ * The flag explained where the reader meets it, so a partner who edits the
+ * command down keeps the half of the agreement their side has to run. Indented
+ * to the step both bodies print the command in.
+ */
+function bilateralFlagLines(settings: BilateralSettings): Array<string> {
+  return chooseBilateral(
+    settings,
+    [
+      "   --retain-files is your half of the agreement above. Leave it on the",
+      "   command: without it the two of you stop with an error when you",
+      "   meet.",
+      "",
+    ],
+    [
+      "   --lockless-rendezvous is your half of a setting your partner turned",
+      "   on: the two sides meet with an acknowledgement instead of a lock",
+      "   file. It is an agreement, not a negotiation -- leave it on the",
+      "   command, or the two of you stop with an error when you meet.",
+      "",
+    ],
+    [],
+  );
+}
+
+/**
+ * The same agreement, named as the console control that sets it, for the
+ * filedrop launcher route: that route hands the partner to the console's accept
+ * flow and never runs the commands below, so naming the control is what keeps it
+ * from rendezvousing into a mismatch.
+ */
+function consoleControlLines(settings: BilateralSettings): Array<string> {
+  return chooseBilateral(
+    settings,
+    [
+      'Before you start the exchange there, open "How files are handled" in',
+      'that accept flow and turn on "Keep every exchange file". That is the',
+      "same agreement the section above describes, set on the console rather",
+      "than on the command line; without it the two of you stop with an",
+      "error when you meet.",
+      "",
+    ],
+    [
+      'Before you start the exchange there, open "How files are handled" in',
+      'that accept flow and set "Lockless rendezvous" to On. Your partner',
+      "turned that setting on, and it is an agreement, not a negotiation:",
+      "without it the two of you stop with an error when you meet.",
+      "",
+    ],
+    [],
+  );
 }
 
 /**
@@ -285,7 +380,7 @@ function printable(value: string): string {
  * invitation's own consent display owns that disclosure. */
 function opening(
   endpoint: AcceptKitEndpoint,
-  retainFiles: boolean,
+  { retainFiles }: BilateralSettings,
 ): Array<string> {
   const channelLines =
     endpoint.channel === "filedrop"
@@ -406,7 +501,7 @@ function repointStepOpening(named: boolean): Array<string> {
 function filedropBody(
   version: string | undefined,
   named: boolean,
-  retainFiles: boolean,
+  settings: BilateralSettings,
 ): Array<string> {
   return [
     ...heading("STEP 1 -- WHICH KIND OF FOLDER IS YOURS?"),
@@ -446,19 +541,7 @@ function filedropBody(
     "Paste the invitation into the console's accept flow there, and you are",
     "done -- the rest of this sheet is for situation B.",
     "",
-    // The launcher route never runs the commands below, so the retain setting
-    // the exchange needs is set in the console instead; naming the control it
-    // is set with is what keeps this route from rendezvousing into a mismatch.
-    ...(retainFiles
-      ? [
-          'Before you start the exchange there, open "How files are handled" in',
-          'that accept flow and turn on "Keep every exchange file". That is the',
-          "same agreement the section above describes, set on the console rather",
-          "than on the command line; without it the two of you stop with an",
-          "error when you meet.",
-          "",
-        ]
-      : []),
+    ...consoleControlLines(settings),
     "(On macOS or Linux a network share is not situation A: mount it the way",
     'you usually do -- Finder\'s "Connect to Server", or your file manager --',
     "and once it shows as a folder, it is situation B below.)",
@@ -507,21 +590,14 @@ function filedropBody(
     "",
     `     docker run --rm -v "$PWD":${WORK_MOUNT} ` +
       `-v "/path/to/your/shared/folder":${SYNC_MOUNT} ` +
-      `${imageReference(version)} exchange${retainFlag(retainFiles)} ` +
+      `${imageReference(version)} exchange${bilateralFlag(settings)} ` +
       `your-file.csv results.csv`,
     "",
     "   Replace your-file.csv with your CSV file's name. The matched result",
     "   is written to results.csv beside your input. You and your partner",
     "   each run your own half; whichever runs first waits for the other.",
     "",
-    ...(retainFiles
-      ? [
-          "   --retain-files is your half of the agreement above. Leave it on the",
-          "   command: without it the two of you stop with an error when you",
-          "   meet.",
-          "",
-        ]
-      : []),
+    ...bilateralFlagLines(settings),
   ];
 }
 
@@ -530,7 +606,7 @@ function filedropBody(
  * fill-in and a reader follows the sheet top to bottom. */
 function sftpBody(
   version: string | undefined,
-  retainFiles: boolean,
+  settings: BilateralSettings,
 ): Array<string> {
   return [
     ...heading("THE THREE STEPS"),
@@ -588,7 +664,7 @@ function sftpBody(
     "",
     `     docker run --rm -it -v "$PWD":${WORK_MOUNT} ` +
       `-v "/your/secrets":/run/secrets:ro ` +
-      `${imageReference(version)} exchange${retainFlag(retainFiles)} ` +
+      `${imageReference(version)} exchange${bilateralFlag(settings)} ` +
       `your-file.csv results.csv`,
     "",
     '   Replace "/your/secrets" with the folder that holds your credential',
@@ -597,14 +673,7 @@ function sftpBody(
     "   partner each run your own half; whichever runs first waits for the",
     "   other.",
     "",
-    ...(retainFiles
-      ? [
-          "   --retain-files is your half of the agreement above. Leave it on the",
-          "   command: without it the two of you stop with an error when you",
-          "   meet.",
-          "",
-        ]
-      : []),
+    ...bilateralFlagLines(settings),
     "   The first run shows the server's SSH host-key fingerprint and asks",
     "   you to confirm it. Check it against the value the server's",
     "   administrator published; later runs verify it silently.",
@@ -643,15 +712,15 @@ function closing(version: string | undefined): Array<string> {
  */
 export function buildAcceptKit({
   endpoint,
-  retainFiles,
   version: buildVersion,
+  ...settings
 }: AcceptKitInput): string {
   const version = releaseVersion(buildVersion);
   const lines = [
-    ...opening(endpoint, retainFiles),
+    ...opening(endpoint, settings),
     ...(endpoint.channel === "filedrop"
-      ? filedropBody(version, endpoint.path !== undefined, retainFiles)
-      : sftpBody(version, retainFiles)),
+      ? filedropBody(version, endpoint.path !== undefined, settings)
+      : sftpBody(version, settings)),
     ...closing(version),
   ];
   return `${lines.join("\n")}\n`;
