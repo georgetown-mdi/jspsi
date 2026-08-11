@@ -15,8 +15,13 @@ const HOOK = fileURLToPath(
   new URL("./block-worktree-deletions.mjs", import.meta.url),
 );
 
+// The harness names an isolated agent's worktree after its agent id, and the
+// hook reads ownership from that id rather than from the directory the session
+// happens to be sitting in, so a payload's agent id and its own tree's basename
+// are the same fact stated twice.
+const AGENT_ID = "own";
 const ROOT = "/repo/.claude/worktrees";
-const OWN = `${ROOT}/agent-own`;
+const OWN = `${ROOT}/agent-${AGENT_ID}`;
 const SIBLING = `${ROOT}/agent-other`;
 
 // A real tree on disk for the cases whose verdict depends on what is actually
@@ -47,7 +52,9 @@ function makeRepoWithWorktree() {
   const tree = join(dir, ".claude", "worktrees", "agent-live");
   git("worktree", "add", "-q", "--detach", tree, "HEAD");
   writeFileSync(join(tree, "uncommitted.txt"), "exists nowhere else\n");
-  return { dir, tree };
+  const own = join(dir, ".claude", "worktrees", `agent-${AGENT_ID}`);
+  git("worktree", "add", "-q", "--detach", own, "HEAD");
+  return { dir, tree, own, precious: join(tree, "uncommitted.txt") };
 }
 
 // Run the hook as a real subprocess with a synthesized PreToolUse payload on
@@ -67,11 +74,10 @@ function runHook(payload, projectDir) {
   return { status, stderr };
 }
 
-function verdict(command, { cwd = OWN, projectDir } = {}) {
-  return runHook(
-    { tool_name: "Bash", tool_input: { command }, cwd },
-    projectDir,
-  );
+function verdict(command, { cwd = OWN, projectDir, agentId = AGENT_ID } = {}) {
+  const payload = { tool_name: "Bash", tool_input: { command }, cwd };
+  if (agentId !== null) payload.agent_id = agentId;
+  return runHook(payload, projectDir);
 }
 
 function expectBlocked(commands, options) {
@@ -192,11 +198,116 @@ describe("block-worktree-deletions hook", () => {
   });
 
   it("refuses a `git clean` reaching into a tree this session does not own", () => {
-    expectBlocked([`git -C ${SIBLING} clean -ffdx`]);
+    expectBlocked([
+      `git -C ${SIBLING} clean -ffdx`,
+      `git -C ${SIBLING} clean -fd`,
+      `git -C ${SIBLING} clean -f`,
+      `git -C ${SIBLING} clean --force`,
+      `cd ${SIBLING} && git clean -fd`,
+      `git -C ${SIBLING} -C . clean -ffdx`,
+      `git -C ${ROOT} -C agent-other clean -fd`,
+      `git --work-tree=${SIBLING} clean -fd`,
+      `git --work-tree ${SIBLING} --git-dir ${SIBLING}/.git clean -ffdx`,
+      `GIT_WORK_TREE=${SIBLING} git clean -fd`,
+    ]);
+    // A clean with no force deletes nothing (git refuses it outright) and a dry
+    // run reports rather than deletes, so neither is a deletion to refuse.
+    expectAllowed([
+      `git -C ${SIBLING} clean -d`,
+      `git -C ${SIBLING} clean -fdn`,
+      `git -C ${SIBLING} clean --dry-run -fdx`,
+    ]);
     expectAllowed(["git clean -fdx", "git clean -ffx", "git clean -ffd"], {
       cwd: LIVE_TREE,
       projectDir: PROJECT,
+      agentId: "live",
     });
+  });
+
+  it("owns the tree its agent id names, not the one its cwd drifted into", () => {
+    // The everyday non-adversarial shape: a session that cd'ed into a sibling
+    // tree earlier in the run, whose cwd persists into every later Bash call.
+    expectBlocked(["rm -rf packages/core/src", "rm -rf *", "rm -rf ./dist"], {
+      cwd: SIBLING,
+    });
+    expectAllowed(["rm -rf packages/core/src", "rm -rf node_modules"], {
+      cwd: OWN,
+    });
+    expect(verdict("rm -rf src", { cwd: SIBLING }).stderr).toContain(
+      `owns only '${OWN}'`,
+    );
+  });
+
+  it("owns nothing when the event names no agent", () => {
+    expectBlocked(["rm -rf node_modules", `rm -rf ${SIBLING}/dist`], {
+      cwd: OWN,
+      agentId: null,
+    });
+    expect(
+      verdict("rm -rf node_modules", { cwd: OWN, agentId: null }).stderr,
+    ).toContain("owns no agent worktree");
+  });
+
+  it("allows the plain `git worktree remove` that retires a finished tree", () => {
+    const { dir, tree } = makeRepoWithWorktree();
+    const options = { cwd: dir, projectDir: dir };
+    expectAllowed(
+      [
+        `git worktree remove ${tree}`,
+        `cd ${dir} && git worktree remove .claude/worktrees/agent-live`,
+        `git -C ${dir} worktree remove .claude/worktrees/agent-live`,
+      ],
+      options,
+    );
+    // What makes the plain form safe to allow is git's own refusal, so that is
+    // driven here rather than assumed: it will not take a tree holding work.
+    const { status, stderr } = spawnSync("git", ["worktree", "remove", tree], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(status).not.toBe(0);
+    expect(stderr).toContain("use --force");
+    expect(existsSync(tree)).toBe(true);
+    expectBlocked(
+      [
+        `git worktree remove --force ${tree}`,
+        `git --work-tree=${join(dir, ".claude", "worktrees")} worktree remove --force agent-live`,
+        `GIT_WORK_TREE=${join(dir, ".claude", "worktrees")} git worktree remove -f agent-live`,
+      ],
+      options,
+    );
+  });
+
+  // Which directory a git option redirects to is git's behavior, not this hook's
+  // reading of it, so every spelling below is put to a real repo holding a live
+  // sibling worktree with uncommitted work in it: the hook must refuse exactly
+  // the spellings that destroy that work, and leave the rest alone. A failure
+  // means git's behavior moved and the hook's reading of it has to move too.
+  it("blocks exactly the git redirects that reach a real sibling tree", () => {
+    for (const spelling of [
+      "git -C SIBLING clean -f",
+      "git -C SIBLING clean -fd",
+      "git -C SIBLING -C . clean -ffdx",
+      "git --work-tree=SIBLING clean -fd",
+      "git --work-tree SIBLING --git-dir SIBLING/.git clean -ffdx",
+      "GIT_WORK_TREE=SIBLING git clean -fd",
+      "git -C SIBLING clean -fdn",
+      "git -c core.worktree=SIBLING clean -fd",
+      "git --git-dir=SIBLING/.git clean -fd",
+      "git -C ROOT worktree remove --force agent-live",
+      "git --work-tree=ROOT worktree remove --force agent-live",
+      "GIT_WORK_TREE=ROOT git worktree remove -f agent-live",
+      "git -C ROOT worktree remove agent-live",
+    ]) {
+      const { dir, tree, own, precious } = makeRepoWithWorktree();
+      const command = spelling
+        .replaceAll("SIBLING", tree)
+        .replaceAll("ROOT", join(dir, ".claude", "worktrees"));
+      const blocked =
+        verdict(command, { cwd: own, projectDir: dir }).status === 2;
+      spawnSync("bash", ["-c", command], { cwd: own });
+      expect(existsSync(precious), command).toBe(!blocked);
+    }
   });
 
   // Which `git clean` spelling takes a worktree with it is git's behavior, not
@@ -242,6 +353,17 @@ describe("block-worktree-deletions hook", () => {
       cwd: PROJECT,
       projectDir: PROJECT,
     });
+  });
+
+  // A `.claude` taken whole holds the worktree root one level down, not two, and
+  // nothing else names that root when the session is outside the project and
+  // CLAUDE_PROJECT_DIR is unset.
+  it("counts the worktrees under a `.claude` directory taken whole", () => {
+    const { status, stderr } = verdict(`rm -rf ${join(PROJECT, ".claude")}`, {
+      cwd: "/repo",
+    });
+    expect(status).toBe(2);
+    expect(stderr).toContain(join(PROJECT, ".claude", "worktrees"));
   });
 
   it("guards every tree from a session that owns none of them", () => {

@@ -14,17 +14,39 @@
 //     live under
 //   - a path that CONTAINS live worktrees, the `rm -rf /workspace` shape, which
 //     names no worktree at all
+//   - a `git clean` carrying a force that runs INSIDE a worktree this session
+//     does not own, and one carrying a doubled force plus -d in a directory that
+//     merely holds worktrees
+//   - `git worktree remove --force`, which takes a tree git's own refusal would
+//     have held on to
+//
+// WHICH TREE A SESSION OWNS is read from the agent id the event carries, not from
+// the directory the session is sitting in. The harness gives an isolated agent a
+// worktree named after that id (`.claude/worktrees/agent-<agent_id>`, recorded as
+// `worktreePath` in the harness's own subagent metadata), while a session's Bash
+// cwd persists across calls and `cd` is unguarded -- so ownership taken from cwd
+// hands a session that once cd'ed into a sibling tree that tree's trust for the
+// rest of the run, and an everyday `cd <sibling> && rm -rf src` walks past this
+// hook. A session the event gives no agent id owns NOTHING, and every tree is
+// guarded from it: that is the right answer for the orchestrator session working
+// in the primary tree. cwd still resolves relative paths; it no longer confers
+// trust. When the id names no tree the session recognises, the refusal says so
+// rather than leaving a fail-closed refusal unexplained.
 //
 // What it deliberately allows:
 //   - anything strictly inside this session's own tree (`rm -rf node_modules`,
 //     `rm dist/bundle.js`) -- ordinary work on a tree the session owns
 //   - `git worktree remove` without --force: git's own refusal on a tree with
 //     uncommitted work is the guard, so only the --force spelling that defeats
-//     that refusal is blocked
-//   - `git clean -fdx`, which real git answers with "Skipping repository" for a
-//     nested worktree; only a doubled force plus -d removes one, and that is the
-//     spelling this hook reads. The test beside this file drives real git against
-//     a real linked worktree for every spelling rather than modelling the rule
+//     that refusal is blocked. That plain spelling is how a finished tree is
+//     retired, so it stays open to every session, owner or not
+//   - `git clean -fdx` in a directory that merely HOLDS worktrees, which real git
+//     answers with "Skipping repository" for each nested one; only a doubled
+//     force plus -d takes them. Reaching INTO a tree is the other case and needs
+//     no doubling -- a single -f deletes that tree's untracked files, -fd its
+//     untracked directories. The test beside this file drives real git against a
+//     real linked worktree for every spelling rather than modelling the rule
+//   - any `git clean` dry run (-n, --dry-run), which deletes nothing
 //
 // The commands read as deletions are rm, rmdir, unlink, shred, mv, find with a
 // deleting action, and those same commands reached through xargs in a pipeline,
@@ -58,6 +80,14 @@
 //   - A `cd` MOVES THE DIRECTORY paths resolve against only when it stands as
 //     its own command, and a symlink pointing into a worktree is not resolved
 //     (removing the link does not follow it anyway).
+//   - A GIT DIRECTORY REDIRECT IS READ ONLY IN THE LITERAL FORMS MEASURED HERE:
+//     `-C` (composed left to right against the one before it, as real git
+//     composes it), `--work-tree`, and a leading `GIT_WORK_TREE=` assignment.
+//     Those three move the directory a git subcommand works in -- the one
+//     `clean` walks, and the one a relative `worktree remove` operand resolves
+//     against -- while `--git-dir`, `GIT_DIR` and `-c core.worktree=` do not,
+//     each put to real git in the test beside this file. A redirect spelling
+//     outside that measured set would pass unread.
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude. Any
 // unexpected failure here falls through to exit 0 (fail open) so a bug in this
@@ -68,6 +98,7 @@ import { basename, resolve } from "node:path";
 
 const CLAUDE_DIR = ".claude";
 const WORKTREES_DIR = "worktrees";
+const AGENT_TREE_PREFIX = "agent-";
 
 const DELETING_COMMANDS = new Set(["rm", "rmdir", "unlink", "shred", "mv"]);
 
@@ -131,14 +162,17 @@ const INSPECTED_COMMANDS = new Set([
 ]);
 
 // Peel leading environment assignments and prefix words off a stage, returning
-// the command it invokes and that command's arguments; null when the stage
-// invokes nothing.
+// the command it invokes, that command's arguments, and the assignments it runs
+// under; null when the stage invokes nothing.
 function invocation(tokens) {
   let index = 0;
   let sawPrefixWord = false;
+  const environment = new Map();
   while (index < tokens.length) {
     const token = tokens[index];
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) {
+    const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(token);
+    if (assignment !== null) {
+      environment.set(assignment[1], assignment[2]);
       index++;
       continue;
     }
@@ -170,7 +204,7 @@ function invocation(tokens) {
   }
   const word = tokens[index];
   if (word === undefined) return null;
-  return { name: basename(word), args: tokens.slice(index + 1) };
+  return { name: basename(word), args: tokens.slice(index + 1), environment };
 }
 
 // The `.claude/worktrees` root a path lies under and the single worktree inside
@@ -211,28 +245,55 @@ function describeTrees(count) {
   return `${count} live worktree${count === 1 ? "" : "s"}`;
 }
 
-// Worktree roots this session knows to be live: the one it is working in, and
-// the project's own, which is how a session outside any worktree still knows
-// what a deletion above it would take.
-function liveRoots(sessionRoot) {
+// Worktree roots this session knows about: the one it is working in, and the
+// project's own, which is how a session outside any worktree still knows what a
+// deletion above it would take.
+function worktreeRoots(sessionRoot) {
   const roots = new Set();
   if (sessionRoot !== null) roots.add(sessionRoot);
   const projectDir = process.env.CLAUDE_PROJECT_DIR;
   if (projectDir) roots.add(resolve(projectDir, CLAUDE_DIR, WORKTREES_DIR));
-  return [...roots].filter((root) => treeCount(root) > 0);
+  return [...roots];
+}
+
+// The worktrees this session owns: the tree named after its agent id, under each
+// root it knows about. An event with no agent id yields none, so a session that
+// is not an isolated agent owns nothing and every tree is guarded from it.
+function ownedTrees(agentId, roots) {
+  if (typeof agentId !== "string" || agentId === "") return [];
+  return roots.map((root) => `${root}/${AGENT_TREE_PREFIX}${agentId}`);
+}
+
+function owns(path, ownTrees) {
+  return ownTrees.some((tree) => isInside(path, tree));
+}
+
+// Why a refusal stands even though the session may be sitting in the tree it
+// names: ownership comes from the agent id, so this says which tree that id
+// bought, and a fail-closed refusal is diagnosable from the message alone.
+function ownershipNote(ownTrees) {
+  return ownTrees.length === 0
+    ? " -- this session owns no agent worktree"
+    : ` -- this session owns only '${ownTrees[0]}'`;
 }
 
 // The live worktree roots that deleting `target` would carry off with it.
 function rootsUnder(target, knownRoots) {
   const candidates = new Set(knownRoots);
   candidates.add(resolve(target, CLAUDE_DIR, WORKTREES_DIR));
+  // A target that IS a `.claude` directory holds the root one level down, not
+  // two: `resolve` alone would build a `.claude/.claude/worktrees` that exists
+  // nowhere and the trees under it would go uncounted.
+  if (basename(target) === CLAUDE_DIR) {
+    candidates.add(resolve(target, WORKTREES_DIR));
+  }
   return [...candidates].filter(
     (root) => root.startsWith(childPrefix(target)) && treeCount(root) > 0,
   );
 }
 
 // Why deleting `target` is refused, or null when it may proceed.
-function deletionVerdict(target, ownTree, knownRoots) {
+function deletionVerdict(target, ownTrees, knownRoots) {
   const context = worktreeContext(target);
   if (context === null) {
     const [root] = rootsUnder(target, knownRoots);
@@ -244,12 +305,12 @@ function deletionVerdict(target, ownTree, knownRoots) {
     return `'${target}' is the root every agent worktree lives under`;
   }
   if (target === context.tree) {
-    return target === ownTree
+    return owns(target, ownTrees)
       ? `'${target}' is this session's own worktree, taken whole`
-      : `'${target}' is another session's worktree, taken whole`;
+      : `'${target}' is another session's worktree, taken whole${ownershipNote(ownTrees)}`;
   }
-  if (ownTree !== null && isInside(target, ownTree)) return null;
-  return `'${target}' is inside '${context.tree}', an agent worktree this session does not own`;
+  if (owns(target, ownTrees)) return null;
+  return `'${target}' is inside '${context.tree}', an agent worktree this session does not own${ownershipNote(ownTrees)}`;
 }
 
 // Tokens that are argument syntax rather than operands, so they are never
@@ -286,20 +347,32 @@ const VALUE_GLOBALS = new Set([
   "--config-env",
 ]);
 
-// Read a git invocation as the directory it runs in, its subcommand, and that
-// subcommand's arguments.
+// Read a git invocation as the directory redirects it carries, its subcommand,
+// and that subcommand's arguments. Repeated `-C` is kept in order rather than
+// overwritten: real git applies each one from where the last one left it, so
+// `-C a -C b` lands in `a/b` and a second `-C .` stays where the first went.
 function gitInvocation(args) {
-  let chdir = null;
+  const chdirs = [];
+  let workTree = null;
   let index = 0;
   while (index < args.length && args[index].startsWith("-")) {
     const token = args[index];
     const equals = token.indexOf("=");
     const option = equals >= 0 ? token.slice(0, equals) : token;
     const attached = equals >= 0 ? token.slice(equals + 1) : null;
-    if (option === "-C") chdir = attached ?? args[index + 1];
+    const value = attached ?? args[index + 1];
+    if (value !== undefined) {
+      if (option === "-C") chdirs.push(value);
+      else if (option === "--work-tree") workTree = value;
+    }
     index += VALUE_GLOBALS.has(option) && attached === null ? 2 : 1;
   }
-  return { chdir, subcommand: args[index], args: args.slice(index + 1) };
+  return {
+    chdirs,
+    workTree,
+    subcommand: args[index],
+    args: args.slice(index + 1),
+  };
 }
 
 // How many times a force is asked for, counting a repeated short flag (`-ff`)
@@ -313,30 +386,50 @@ function forceCount(args) {
   return count;
 }
 
-// `git clean` removes a nested repository -- which is what a worktree is -- only
-// with a doubled force and -d; real git reports "Would skip repository" for
-// every lesser spelling.
-function gitCleanVerdict(args, directory, ownTree, knownRoots) {
+// A dry run reports and deletes nothing, so no spelling of it is a deletion.
+function isDryRun(args) {
+  return args.some((arg) => arg === "--dry-run" || /^-[a-mo-z]*n/.test(arg));
+}
+
+// The two `git clean` cases, which real git answers differently. Reaching INTO a
+// worktree is an ordinary clean of that tree, so one force takes its untracked
+// files and -d its untracked directories. A directory that merely HOLDS
+// worktrees loses them only to a doubled force with -d, because git skips a
+// nested repository for every lesser spelling.
+function gitCleanVerdict(args, directory, ownTrees, knownRoots) {
+  if (forceCount(args) === 0 || isDryRun(args)) return null;
+  const context = worktreeContext(directory);
+  if (context !== null) {
+    if (owns(directory, ownTrees)) return null;
+    return `'git clean' with a force runs in '${directory}', inside an agent worktree this session does not own${ownershipNote(ownTrees)}`;
+  }
   const cleansDirectories = args.some(
     (arg) => arg === "--directories" || /^-[a-ce-z]*d/.test(arg),
   );
   if (forceCount(args) < 2 || !cleansDirectories) return null;
-  const context = worktreeContext(directory);
-  if (context !== null) {
-    if (ownTree !== null && isInside(directory, ownTree)) return null;
-    return `'git clean' with a doubled force and -d runs in '${directory}', inside an agent worktree this session does not own`;
-  }
   const [root] = rootsUnder(directory, knownRoots);
   return root === undefined
     ? null
     : `'git clean' with a doubled force and -d in '${directory}' removes nested repositories, including the ${describeTrees(treeCount(root))} under '${root}'`;
 }
 
-function gitVerdict(args, cwd, ownTree, knownRoots) {
+// The directory a git invocation ends up working in: each `-C` applied from
+// where the one before it landed, then a work-tree redirect resolved from there,
+// with `--work-tree` winning over its environment spelling when both are given.
+// Real git moves both the directory `clean` walks and the one a relative
+// `worktree remove` operand resolves against, so this is what a git path is
+// resolved from -- measured against real git rather than modelled.
+function gitDirectory(git, cwd, environment) {
+  const chdir = git.chdirs.reduce((dir, next) => resolve(dir, next), cwd);
+  const workTree = git.workTree ?? environment.get("GIT_WORK_TREE") ?? null;
+  return workTree === null ? chdir : resolve(chdir, workTree);
+}
+
+function gitVerdict(args, cwd, ownTrees, knownRoots, environment) {
   const git = gitInvocation(args);
-  const directory = resolve(cwd, git.chdir ?? ".");
+  const directory = gitDirectory(git, cwd, environment);
   if (git.subcommand === "clean") {
-    return gitCleanVerdict(git.args, directory, ownTree, knownRoots);
+    return gitCleanVerdict(git.args, directory, ownTrees, knownRoots);
   }
   if (git.subcommand !== "worktree" || git.args[0] !== "remove") return null;
   const removeArgs = git.args.slice(1);
@@ -370,8 +463,8 @@ function main() {
 
   const sessionCwd = typeof event.cwd === "string" ? event.cwd : process.cwd();
   const session = worktreeContext(sessionCwd);
-  const ownTree = session?.tree ?? null;
-  const knownRoots = liveRoots(session?.root ?? null);
+  const knownRoots = worktreeRoots(session?.root ?? null);
+  const ownTrees = ownedTrees(event.agent_id, knownRoots);
 
   let cwd = sessionCwd;
   for (const pipeline of splitPipelines(command)) {
@@ -380,7 +473,13 @@ function main() {
       .filter((entry) => entry !== null);
     for (const entry of commands) {
       if (entry.name !== "git") continue;
-      const reason = gitVerdict(entry.args, cwd, ownTree, knownRoots);
+      const reason = gitVerdict(
+        entry.args,
+        cwd,
+        ownTrees,
+        knownRoots,
+        entry.environment,
+      );
       if (reason) block(reason);
     }
     // Once any stage of a pipeline deletes, every operand in it is a candidate
@@ -391,7 +490,7 @@ function main() {
         if (!isPathOperand(token)) continue;
         const reason = deletionVerdict(
           resolve(cwd, token),
-          ownTree,
+          ownTrees,
           knownRoots,
         );
         if (reason) block(reason);
