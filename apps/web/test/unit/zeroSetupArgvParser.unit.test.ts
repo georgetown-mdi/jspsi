@@ -12,9 +12,11 @@ import {
 import { resolveCliBinaryPath, spawnZeroSetupJob } from "@jobs/cliDriver";
 import { zeroSetupFileSyncArgv } from "@jobs/intent";
 
-import { STUB_CLI_PATH, tempDataRoot } from "../utils/jobFixtures";
-
-import type { JobTerminalState } from "@jobs/cliDriver";
+import {
+  awaitJobTerminalState,
+  captureZeroSetupArgv,
+  tempDataRoot,
+} from "../utils/jobFixtures";
 
 // The console's file-handling card and the CLI's own parser, met at the one place
 // they touch: the zero-setup argv. The tokens under test are produced by the card's
@@ -46,6 +48,10 @@ const EXIT_USAGE = 64;
  * exist is deliberate: every case here fails at the input file, before the CLI opens
  * a transport, so no case can reach a network or a rendezvous. */
 const RENDEZVOUS_URL = "file:///srv/jobs/abc/rendezvous";
+
+/** The wait for a spawned child's terminal state here: generous next to the stub's
+ * near-instant exit, because the same bound covers the real CLI's cold start. */
+const CHILD_EXIT_TIMEOUT_MS = 60_000;
 
 /** The newest mtime under `dir`, so a dist built before the last source edit is
  * rebuilt rather than silently parsed as though it were current. */
@@ -91,7 +97,8 @@ afterEach(() => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function workdir(label: string): string {
+/** A scratch directory for one spawn, removed after the test. */
+function scratchDir(label: string): string {
   const dir = tempDataRoot(label);
   fs.mkdirSync(dir, { recursive: true });
   dirs.push(dir);
@@ -113,53 +120,21 @@ function retainModeFileSyncArgs(): Array<string> {
   );
 }
 
-/** Await a spawned job's terminal state. */
-async function terminalOf(
-  spawn: (onTerminal: (state: JobTerminalState) => void) => void,
-): Promise<JobTerminalState> {
-  const terminalRef: { current: JobTerminalState | null } = { current: null };
-  spawn((state) => {
-    terminalRef.current = state;
-  });
-  const deadline = Date.now() + 60_000;
-  while (terminalRef.current === null) {
-    if (Date.now() > deadline) throw new Error("the child did not exit");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  return terminalRef.current;
-}
-
 /**
- * Spawn a zero-setup job through the production driver, capturing the exact argv it
- * invoked the child with (the stub's STUB_ARGV_FILE) once the child has exited.
+ * Capture the argv the driver spawns a filedrop zero-setup run with, in a fresh
+ * scratch directory the parse step below then runs the real CLI in.
  */
-async function captureZeroSetupArgv(
+async function captureFiledropArgv(
   fileSyncArgs: Array<string>,
 ): Promise<{ argv: Array<string>; dir: string }> {
-  const dir = workdir("zs-argv");
-  const argvFile = path.join(dir, "argv.json");
-  await terminalOf((onTerminal) =>
-    spawnZeroSetupJob({
-      binaryPath: STUB_CLI_PATH,
-      connectionArgs: [RENDEZVOUS_URL],
-      fileSyncArgs,
-      inputPath: path.join(dir, "input.csv"),
-      outputPath: path.join(dir, "output.csv"),
-      recordPath: path.join(dir, "record.json"),
-      workdir: dir,
-      eventStream: true,
-      extraEnv: { STUB_ARGV_FILE: argvFile, STUB_EXIT_CODE: "0" },
-      handlers: {
-        onEvent: () => undefined,
-        onDegraded: () => undefined,
-        onTerminal,
-      },
-    }),
-  );
-  // argv[0] is node, argv[1] the CLI entry; the driven arguments follow.
-  const argv = (
-    JSON.parse(fs.readFileSync(argvFile, "utf8")) as Array<string>
-  ).slice(2);
+  const dir = scratchDir("zs-argv");
+  const argv = await captureZeroSetupArgv({
+    workdir: dir,
+    connectionArgs: [RENDEZVOUS_URL],
+    fileSyncArgs,
+    eventStream: true,
+    timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+  });
   return { argv, dir };
 }
 
@@ -182,7 +157,7 @@ describe("the console's zero-setup argv is accepted by the CLI's own parser", ()
     // The card's model resolves retain mode's implications, so the emitted set is
     // the trio plus the party name -- the argv the appliance really builds.
     expect(fileSyncArgs.length).toBe(4);
-    const { argv, dir } = await captureZeroSetupArgv(fileSyncArgs);
+    const { argv, dir } = await captureFiledropArgv(fileSyncArgs);
 
     // Where the driver put them: after the connection positional and ahead of the
     // record flag and the trailing input/output positionals.
@@ -203,7 +178,7 @@ describe("the console's zero-setup argv is accepted by the CLI's own parser", ()
 
   test("a token the parser does not know is refused, so the check above discriminates", async () => {
     const fileSyncArgs = retainModeFileSyncArgs();
-    const { argv, dir } = await captureZeroSetupArgv(fileSyncArgs);
+    const { argv, dir } = await captureFiledropArgv(fileSyncArgs);
     const mistyped = argv.map((token) =>
       token === "--retain-files" ? "--retain-file" : token,
     );
@@ -219,7 +194,7 @@ describe("the console's zero-setup argv is accepted by the CLI's own parser", ()
     // `unexpected_files` only where a configuration document carries it, and a
     // zero-setup run composes none. Were it emitted anyway, the run would not
     // silently drop the operator's choice -- the CLI would refuse the command.
-    const { argv, dir } = await captureZeroSetupArgv([
+    const { argv, dir } = await captureFiledropArgv([
       ...retainModeFileSyncArgs(),
       "--unexpected-files=warn",
     ]);
@@ -229,23 +204,25 @@ describe("the console's zero-setup argv is accepted by the CLI's own parser", ()
   });
 
   test("the production driver's own spawn of the built CLI parses", async () => {
-    const dir = workdir("zs-real");
-    const terminal = await terminalOf((onTerminal) =>
-      spawnZeroSetupJob({
-        binaryPath: CLI_ENTRY,
-        connectionArgs: [RENDEZVOUS_URL],
-        fileSyncArgs: retainModeFileSyncArgs(),
-        inputPath: path.join(dir, "input.csv"),
-        outputPath: path.join(dir, "output.csv"),
-        recordPath: path.join(dir, "record.json"),
-        workdir: dir,
-        eventStream: true,
-        handlers: {
-          onEvent: () => undefined,
-          onDegraded: () => undefined,
-          onTerminal,
-        },
-      }),
+    const dir = scratchDir("zs-real");
+    const terminal = await awaitJobTerminalState(
+      (onTerminal) =>
+        spawnZeroSetupJob({
+          binaryPath: CLI_ENTRY,
+          connectionArgs: [RENDEZVOUS_URL],
+          fileSyncArgs: retainModeFileSyncArgs(),
+          inputPath: path.join(dir, "input.csv"),
+          outputPath: path.join(dir, "output.csv"),
+          recordPath: path.join(dir, "record.json"),
+          workdir: dir,
+          eventStream: true,
+          handlers: {
+            onEvent: () => undefined,
+            onDegraded: () => undefined,
+            onTerminal,
+          },
+        }),
+      CHILD_EXIT_TIMEOUT_MS,
     );
     // No stub in the middle: the driver assembled the argv and the built CLI
     // parsed it. A rejected token would have exited usage instead.

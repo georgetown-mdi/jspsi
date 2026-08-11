@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
@@ -7,13 +6,14 @@ import {
   JOB_CLI_BINARY_ENV,
   classifyExit,
   resolveCliBinaryPath,
-  spawnZeroSetupJob,
   validateAndSanitizeEvent,
 } from "@jobs/cliDriver";
 
-import { STUB_CLI_PATH, tempDataRoot } from "../utils/jobFixtures";
-
-import type { JobTerminalState } from "@jobs/cliDriver";
+import {
+  STUB_CLI_PATH,
+  captureZeroSetupArgv,
+  tempDataRoot,
+} from "../utils/jobFixtures";
 
 describe("classifyExit maps CLI exit codes to terminal states", () => {
   test("0 -> succeeded", () => {
@@ -175,58 +175,17 @@ describe("spawnZeroSetupJob drives the literal $0 form", () => {
       fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  /** Spawn the stub through spawnZeroSetupJob, capturing the exact argv it was
-   * invoked with (via the stub's STUB_ARGV_FILE), and resolve once it exits. */
-  async function captureArgv(args: {
-    connectionArgs: Array<string>;
-    fileSyncArgs?: Array<string>;
-    eventStream: boolean;
-    identity?: string;
-    linkageStrategy?: "cascade" | "single-pass";
-  }): Promise<Array<string>> {
-    const workdir = tempDataRoot("zs-driver");
-    fs.mkdirSync(workdir, { recursive: true });
-    dirs.push(workdir);
-    const argvFile = path.join(workdir, "argv.json");
-    // A wrapper object, not a bare local: the terminal is set from the driver's
-    // callback, which TypeScript's control-flow analysis would otherwise narrow a
-    // local `null` past, making the poll condition read as always-true.
-    const terminalRef: { current: JobTerminalState | null } = { current: null };
-    spawnZeroSetupJob({
-      binaryPath: STUB_CLI_PATH,
-      connectionArgs: args.connectionArgs,
-      fileSyncArgs: args.fileSyncArgs ?? [],
-      inputPath: path.join(workdir, "input.csv"),
-      outputPath: path.join(workdir, "output.csv"),
-      recordPath: path.join(workdir, "record.json"),
-      workdir,
-      eventStream: args.eventStream,
-      ...(args.identity !== undefined ? { identity: args.identity } : {}),
-      ...(args.linkageStrategy !== undefined
-        ? { linkageStrategy: args.linkageStrategy }
-        : {}),
-      extraEnv: { STUB_ARGV_FILE: argvFile, STUB_EXIT_CODE: "0" },
-      handlers: {
-        onEvent: () => undefined,
-        onDegraded: () => undefined,
-        onTerminal: (state) => {
-          terminalRef.current = state;
-        },
-      },
-    });
-    const deadline = Date.now() + 5000;
-    while (terminalRef.current === null) {
-      if (Date.now() > deadline) throw new Error("stub did not exit");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    // argv[0] is node, argv[1] the CLI entry; the driven arguments follow.
-    return (
-      JSON.parse(fs.readFileSync(argvFile, "utf8")) as Array<string>
-    ).slice(2);
+  /** A scratch directory for one spawn, removed after the test. */
+  function scratchDir(label: string): string {
+    const dir = tempDataRoot(label);
+    fs.mkdirSync(dir, { recursive: true });
+    dirs.push(dir);
+    return dir;
   }
 
   test("sftp: URL first positional, --server-* flags, record, input, output", async () => {
-    const argv = await captureArgv({
+    const argv = await captureZeroSetupArgv({
+      workdir: scratchDir("zs-driver"),
       connectionArgs: [
         "sftp://sftp.example.org:2222/exchange",
         "--server-username=linkage",
@@ -246,7 +205,8 @@ describe("spawnZeroSetupJob drives the literal $0 form", () => {
   });
 
   test("never a subcommand token, --config-file, --key-file, or --save", async () => {
-    const argv = await captureArgv({
+    const argv = await captureZeroSetupArgv({
+      workdir: scratchDir("zs-driver"),
       connectionArgs: ["file:///srv/jobs/abc/rendezvous"],
       eventStream: false,
     });
@@ -260,7 +220,8 @@ describe("spawnZeroSetupJob drives the literal $0 form", () => {
   });
 
   test("forwards --identity and --linkage-strategy as single =value tokens", async () => {
-    const argv = await captureArgv({
+    const argv = await captureZeroSetupArgv({
+      workdir: scratchDir("zs-driver"),
       connectionArgs: ["file:///srv/jobs/abc/rendezvous"],
       eventStream: false,
       identity: "county-health",
@@ -277,7 +238,8 @@ describe("spawnZeroSetupJob drives the literal $0 form", () => {
     // Defense in depth over the schema's leading-dash refusal: even a `-`-leading
     // identity reaching the driver is one `--identity=<value>` token, so yargs
     // parses it verbatim and no standalone `--save` (or any lone flag) appears.
-    const argv = await captureArgv({
+    const argv = await captureZeroSetupArgv({
+      workdir: scratchDir("zs-driver"),
       connectionArgs: ["file:///srv/jobs/abc/rendezvous"],
       eventStream: false,
       identity: "--save",
