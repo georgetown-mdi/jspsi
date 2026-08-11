@@ -110,6 +110,7 @@ export default tseslint.config(
       "**/node_modules/**",
       "apps/web/eslint.config.js",
       "scratch/**",
+      "research/**",
       ".claude/worktrees/**",
       "**/.rollup.cache/**",
       // A checked-in Workflow script is a script BODY the harness runs with

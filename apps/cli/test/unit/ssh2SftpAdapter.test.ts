@@ -2826,8 +2826,8 @@ describe("session recovery", () => {
     // drop fails terminally and no re-dial is even attempted. Terminal (a
     // UsageError) so the caller maps it to a non-zero exit, never a silent resolve
     // or hang. The message describes THIS case rather than the exhausted-budget one:
-    // "re-dialed the maximum 0 times" would misdescribe an exchange that never
-    // reconnected at all.
+    // an allowance of zero lost sessions is not an allowance this exchange spent,
+    // so quoting one would misdescribe an exchange that never reconnected at all.
     const wrapper = sessionWrapper();
     const { client, connect, state } = droppable(wrapper);
     const adapter = new SSH2SFTPClientAdapter();
@@ -2843,7 +2843,7 @@ describe("session recovery", () => {
       "max_reconnect_attempts=0 permits no mid-exchange reconnection",
     );
     expect((err as Error).message).toContain("this first drop is terminal");
-    expect((err as Error).message).not.toContain("re-dialed the maximum");
+    expect((err as Error).message).not.toContain("0 lost sessions");
     // Both remedies are still named by their operator-reachable names.
     expect((err as Error).message).toContain("--connection-per-poll");
     // No re-dial: the budget permits none, so only the initial connect ran.
@@ -2851,6 +2851,129 @@ describe("session recovery", () => {
     // The session was still lost, and the budget bounds sessions lost rather than
     // re-dials made, so the drop the budget refused is counted like any other.
     expect(adapter.midExchangeReconnectCount).toBe(1);
+  });
+
+  // A client that dials once and refuses every dial after it, so a drop's recovery
+  // is stranded. That is what leaves an arm at the cumulative budget's check with
+  // the session still gone, which is the only state the check refuses in: an arm
+  // arriving over a session a re-dial restored finds it live and re-issues on it
+  // without reaching the check at all.
+  function undialableAfterFirst() {
+    const wrapper = sessionWrapper();
+    const state = { live: true };
+    let dials = 0;
+    const connect = vi.fn().mockImplementation(async () => {
+      dials += 1;
+      if (dials > 1) throw new Error("connection refused");
+      state.live = true;
+    });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: releasableClient(),
+      end: vi.fn().mockResolvedValue(true),
+      realPath: vi.fn().mockResolvedValue("/"),
+    };
+    return { client, connect, state };
+  }
+
+  test("refuses a sibling arm at the cap boundary, on the unit their shared drop spent", async () => {
+    // The cap boundary reached by a FAN rather than a serial run. One drop tears
+    // two operations; the arm that reaches the transition first charges the loss
+    // and takes the last unit, and when its re-dial fails the sibling behind it
+    // arrives with no session to re-issue on and reads the budget its own loss
+    // just filled. The refusal is fail-closed: the sibling raises the terminal
+    // error rather than being given a dial the budget cannot pay for, so the whole
+    // fan buys exactly the one re-dial their single lost session paid for. The
+    // reading and what it costs an operator are in docs/spec/CHANNEL_SECURITY.md,
+    // "What the accounting counts"; the case below is its serial counterpart.
+    vi.useFakeTimers();
+    const { client, connect, state } = undialableAfterFirst();
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    try {
+      // A budget of one puts the boundary at the first drop: charging it leaves
+      // nothing for the sibling.
+      await adapter.connect({ host: "h", maxReconnectAttempts: 1 });
+      state.live = false;
+
+      // Both arms are torn by the one drop and enter recovery over it; the
+      // transition queue admits them one at a time.
+      const arms = Promise.all([
+        adapter.list("/remote/a").catch((e: unknown) => e),
+        adapter.list("/remote/b").catch((e: unknown) => e),
+      ]);
+      // Past the 1 s dialing-retry delay of BOTH arms, so an arm the budget let
+      // dial would settle inside this window too and be read as an outcome rather
+      // than as a test that ran out of time.
+      await vi.advanceTimersByTimeAsync(5_000);
+      const outcomes = await arms;
+
+      const refused = outcomes.filter((o) => o instanceof UsageError);
+      expect(refused).toHaveLength(1);
+      expect((refused[0] as Error).message).toContain(
+        "the mid-exchange reconnection budget is exhausted",
+      );
+      // The arm that charged fails with its dial, not with the budget: it spent
+      // the unit and got the re-dial the unit bought.
+      const charging = outcomes.filter((o) => !(o instanceof UsageError));
+      expect(charging).toHaveLength(1);
+      expect((charging[0] as Error).message).toContain("connection refused");
+      // One session lost is one unit, however many arms it tore: the sibling's
+      // refusal charges nothing of its own.
+      expect(adapter.midExchangeReconnectCount).toBe(1);
+      // The initial dial plus the charging arm's two attempts. The refused
+      // sibling adds none: no dial is issued past the budget.
+      expect(connect).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("reaches that boundary serially on the same loss and with the same dials", async () => {
+    // The serial counterpart of the fan above, and what says the sibling's
+    // refusal costs the operator nothing: with the last unit charged and its
+    // re-dial failed, the NEXT operation raises the same terminal error over that
+    // same charged loss and dials nothing further. Both shapes therefore end the
+    // exchange on the loss the budget's last unit paid for, having spent the same
+    // dials; what the fan changes is only which operation hears it.
+    vi.useFakeTimers();
+    const { client, connect, state } = undialableAfterFirst();
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    try {
+      await adapter.connect({ host: "h", maxReconnectAttempts: 1 });
+      state.live = false;
+
+      const charging = adapter.list("/remote/a").catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const chargingError = await charging;
+      expect(chargingError).not.toBeInstanceOf(UsageError);
+      expect((chargingError as Error).message).toContain("connection refused");
+      expect(adapter.midExchangeReconnectCount).toBe(1);
+      const dialsSpent = connect.mock.calls.length;
+      expect(dialsSpent).toBe(3);
+
+      const next = adapter.list("/remote/b").catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const nextError = await next;
+      expect(nextError).toBeInstanceOf(UsageError);
+      expect((nextError as Error).message).toContain(
+        "the mid-exchange reconnection budget is exhausted",
+      );
+      // The same lost session, charged once and no more, and no dial past the
+      // budget: the operation that hears the refusal buys nothing either.
+      expect(adapter.midExchangeReconnectCount).toBe(1);
+      expect(connect).toHaveBeenCalledTimes(dialsSpent);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("fails immediately on a host-key mismatch during the recovery re-dial", async () => {
