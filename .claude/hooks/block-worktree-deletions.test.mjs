@@ -389,6 +389,10 @@ describe("block-worktree-deletions hook", () => {
   // must refuse exactly the spellings that destroy that work. `own` is the tree
   // this session owns; `dir` (the repo root) merely holds the trees. A failure
   // means git's behavior moved and the hook's reading of it has to move too.
+  // Every spelling here is version-stable -- its live-git outcome is identical on
+  // git <= 2.44 and >= 2.45 -- so it is safe to tie the expectation to that
+  // outcome. The one holder spelling whose outcome flips at that boundary is
+  // asserted separately in the test that follows.
   it("blocks exactly the force abbreviations and requireForce config git deletes a sibling with", () => {
     for (const { spelling, from } of [
       { spelling: "git -C SIBLING clean --f", from: "own" },
@@ -408,9 +412,6 @@ describe("block-worktree-deletions hook", () => {
         from: "own",
       },
       { spelling: "export GIT_WORK_TREE=SIBLING; git clean -fd", from: "own" },
-      // A doubled force -- one flag on top of the config that lifts git's
-      // baseline requirement -- clears the nested tree from the holder.
-      { spelling: "git -c clean.requireForce=false clean -df", from: "dir" },
       // Not enough force, a dry run, a last-winning true, and a bare -c are all
       // left alone: real git deletes nothing, so neither must the hook.
       { spelling: "git -c clean.requireForce=false clean -d", from: "dir" },
@@ -435,6 +436,26 @@ describe("block-worktree-deletions hook", () => {
       spawnSync("bash", ["-c", command], { cwd });
       expect(existsSync(precious), command).toBe(!blocked);
     }
+  });
+
+  // One holder `git clean` spelling is version-dependent, so it cannot join the
+  // live-git differential above: `clean.requireForce=false` plus a single real -f
+  // reaches git's nested-repo removal threshold on git <= 2.44 (where a disabled
+  // requireForce feeds the same force counter a real -f does) and is skipped on
+  // git >= 2.45 (which stopped feeding it). That boundary was settled by driving
+  // real git across it, not by reading git. Tying the expectation to live git's
+  // effect therefore holds on one side of the boundary and fails on the other, so
+  // this asserts the guard's own contract instead: it BLOCKS the shape either
+  // way -- the conservative choice, since a false block is recoverable while a
+  // false allow destroys uncommitted work, and the block is accurate for the git
+  // this container runs (<= 2.44). git is never invoked here, which is what makes
+  // the assertion version-robust by construction.
+  it("conservatively blocks the version-dependent requireForce holder clean", () => {
+    const { dir } = makeRepoWithWorktree();
+    expectBlocked(["git -c clean.requireForce=false clean -df"], {
+      cwd: dir,
+      projectDir: dir,
+    });
   });
 
   it("refuses a deletion aimed above the worktree root", () => {

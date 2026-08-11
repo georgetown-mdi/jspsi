@@ -458,9 +458,13 @@ function isDryRun(args) {
 function gitCleanVerdict(args, directory, ownTrees, knownRoots, forceDisabled) {
   if (isDryRun(args)) return null;
   // A disabled `clean.requireForce` satisfies git's baseline force requirement,
-  // so it counts as one force: a single flag on top of it then reaches the
-  // doubled force that clears a nested repository, as real git does (measured in
-  // the test beside this file).
+  // so this counts it as one force: a single real -f on top of it reaches the
+  // doubled force that removes a nested repository on git <= 2.44, where a
+  // disabled requireForce feeds the same force counter a real -f does. git >= 2.45
+  // stopped feeding that counter from the config, so there this shape only skips
+  // the nested tree and the guard, which blocks it either way, conservatively
+  // over-refuses it rather than model the git version. That boundary was settled
+  // by driving real git across it (the 2.44/2.45 versions), not by reading git.
   const force = forceCount(args) + (forceDisabled ? 1 : 0);
   if (force === 0) return null;
   const context = worktreeContext(directory);
@@ -475,7 +479,7 @@ function gitCleanVerdict(args, directory, ownTrees, knownRoots, forceDisabled) {
   const [root] = rootsUnder(directory, knownRoots);
   return root === undefined
     ? null
-    : `'git clean' with a doubled force and -d in '${directory}' removes nested repositories, including the ${describeTrees(treeCount(root))} under '${root}'`;
+    : `'git clean' with a doubled force and -d in '${directory}' can remove nested repositories, including the ${describeTrees(treeCount(root))} under '${root}'`;
 }
 
 // The directory a git invocation ends up working in: each `-C` applied from
