@@ -75,14 +75,16 @@ export function normalizeFiledropPath(rawPath: string): string {
 // per-operation read bounds raise, so a hang surfaces identically wherever it is
 // caught. See docs/spec/CHANNEL_SECURITY.md.
 //
-// `operation` is interpolated raw, like every other fragment composed into an
-// error: the target it names is a transport path, and on a get/delete of a peer
-// message file that path embeds the partner-chosen filename, so its
-// control/ANSI/Unicode bytes are neutralized by sanitizeErrorForDisplay where
-// the message is shown. It is redacted here because it leads the message, ahead
-// of the budget, the diagnosis and the next step TransportOperationStalledError
-// appends; a caller composing first-party text BETWEEN two fragments redacts
-// each of them itself, since this composite pass cannot (see
+// `operation` takes a labelled cause link of its own rather than riding the
+// summary: the target it names is a transport path, which on a get/delete of a
+// peer message file embeds the partner-chosen filename, and a rename names two
+// paths at once -- more than a whole display budget of bytes somebody else
+// chose, which on a shared link would spend the budget the diagnosis and the
+// recovery step need. It is interpolated raw, like every other fragment composed
+// into an error, so its control/ANSI/Unicode bytes are neutralized by
+// sanitizeErrorForDisplay where the message is shown; it is redacted here
+// because a caller composing first-party text BETWEEN two fragments redacts each
+// of them itself, since this composite pass cannot (see
 // redactPrivateKeyMaterial). This is the core-side whole-exchange-budget twin of
 // the CLI adapter's per-operation transportOperationStalledError.
 const transportBudgetExceededError = (
@@ -90,9 +92,12 @@ const transportBudgetExceededError = (
   budgetMs: number,
 ): TransportOperationStalledError =>
   new TransportOperationStalledError(
-    `transport ${redactPrivateKeyMaterial(operation)} exceeded the ${budgetMs} ms ` +
-      `peer-inactivity budget; the peer or server has not responded within the ` +
-      `budget, so the exchange is failing rather than waiting on it further`,
+    `a transport operation exceeded the ${budgetMs} ms peer-inactivity ` +
+      `budget; the peer or server has not responded within the budget, so the ` +
+      `exchange is failing rather than waiting on it further`,
+    {
+      details: [`stalled operation: ${redactPrivateKeyMaterial(operation)}`],
+    },
   );
 
 // Folds a host-key refusal's ordered detail fragments into a cause chain that

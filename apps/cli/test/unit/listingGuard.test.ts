@@ -3,6 +3,7 @@ import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   DirectoryListingBoundsError,
   DISPLAY_TRUNCATION_MARKER,
+  MAX_ERROR_CAUSE_DEPTH,
   sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -13,6 +14,35 @@ import {
   directoryTooLargeError,
   filenameTooLongError,
 } from "../../src/connection/listingGuard";
+
+// The renderer's own cause-link separator, read back out of a two-link render
+// rather than restated here, so splitting a rendered chain into its links cannot
+// drift from the framing the renderer emits.
+const CAUSE_SEPARATOR = sanitizeErrorForDisplay(
+  new Error("a", { cause: new Error("b") }),
+).slice(1, -1);
+
+const linksOf = (rendered: string): string[] => rendered.split(CAUSE_SEPARATOR);
+
+// The widest a single link renders: the per-link cap plus the marker the
+// sanitizer appends when it truncates. Each fragment somebody else chose sits on
+// a link of its own, so this is the whole of what any one of them can spend, and
+// the renderer's depth bound is what bounds their sum.
+const MAX_RENDERED_LINK_LENGTH =
+  DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length;
+
+const expectEveryLinkBounded = (rendered: string): void => {
+  const links = linksOf(rendered);
+  expect(links.length).toBeLessThanOrEqual(MAX_ERROR_CAUSE_DEPTH);
+  for (const link of links)
+    expect(link.length).toBeLessThanOrEqual(MAX_RENDERED_LINK_LENGTH);
+};
+
+// The class-uniform next step, read off a minimal construction of the class
+// rather than restated here, so an edit to the sentence cannot leave a stale
+// copy passing.
+const RECOVERY_STEP = (new DirectoryListingBoundsError("x").cause as Error)
+  .message;
 
 describe("listing bound constants", () => {
   test("the entry cap leaves wide headroom over a legitimate exchange", () => {
@@ -39,8 +69,11 @@ describe("directoryTooLargeError", () => {
 
   test("names the directory and the cap", () => {
     const err = directoryTooLargeError("/drop", 8192);
-    expect(err.message).toContain("/drop");
+    // The cap is a number and rides the summary; the directory is a fragment
+    // somebody else chose and reaches the operator on a labelled link of its
+    // own, so the whole rendered chain is where it is read.
     expect(err.message).toContain("8192");
+    expect(linksOf(sanitizeErrorForDisplay(err))).toContain("directory: /drop");
   });
 
   // dirPath can be seeded from a partner invitation endpoint on an offline-accept
@@ -81,14 +114,16 @@ describe("filenameTooLongError", () => {
   test("truncates the offending name so the error cannot relay an attacker-sized string", () => {
     const hostile = "a".repeat(5000);
     const err = filenameTooLongError("/drop", hostile, 255);
-    // The full name is not echoed; only a short prefix plus an ellipsis.
-    expect(err.message).not.toContain(hostile);
-    expect(err.message).toContain("a".repeat(64));
-    expect(err.message).toContain("...");
-    // The message itself stays small (the truncated preview plus the fixed
-    // class-appended recovery step) regardless of the input name length -- well
-    // under the 5000-character hostile input, so it cannot relay it whole.
-    expect(err.message.length).toBeLessThan(500);
+    const rendered = sanitizeErrorForDisplay(err);
+    // The full name is not echoed; only a short prefix plus an ellipsis, on the
+    // labelled link the name is composed onto.
+    expect(rendered).not.toContain(hostile);
+    expect(linksOf(rendered)).toContain(
+      `entry name: ${"a".repeat(64)}${DISPLAY_TRUNCATION_MARKER}`,
+    );
+    // The whole error stays small regardless of the input name length, so it
+    // cannot relay the 5000-character hostile input whole.
+    expectEveryLinkBounded(rendered);
   });
 
   test("escapes control/ANSI characters so a hostile name cannot spoof the terminal", () => {
@@ -104,17 +139,16 @@ describe("filenameTooLongError", () => {
 
   test("stays bounded even when the name is all non-ASCII (escapes expand each char)", () => {
     // Each astral emoji escapes to a 9-char \u{...} (up to 10 for a 6-hex-digit
-    // code point), so the message's own preview slice is what keeps the name out
-    // of memory whole, and the display boundary's per-link cap is what keeps the
+    // code point), so the composed preview slice is what keeps the name out of
+    // memory whole, and the display boundary's per-link cap is what keeps the
     // rendered form small. Both are asserted, because either alone would let the
     // other regress unnoticed.
     const hostile = "\u{1f600}".repeat(5000);
     const err = filenameTooLongError("/drop", hostile, 255);
-    expect(err.message).not.toContain(hostile);
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).not.toContain(hostile);
     expect(err.message.length).toBeLessThan(500);
-    expect(sanitizeErrorForDisplay(err).length).toBeLessThanOrEqual(
-      DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
-    );
+    expectEveryLinkBounded(rendered);
   });
 
   test("keeps the truncation marker when the name preview carries a PEM BEGIN marker", () => {
@@ -124,11 +158,13 @@ describe("filenameTooLongError", () => {
     // silently present the truncated name as whole.
     const hostile = "-----BEGIN RSA PRIVATE KEY-----" + "A".repeat(300);
     const err = filenameTooLongError("/drop", hostile, 255);
-    expect(err.message).toContain(DISPLAY_TRUNCATION_MARKER);
-    expect(err.message).not.toContain("AAAA");
-    // The refusal and the class-appended next step still reach the operator.
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(rendered).not.toContain("AAAA");
+    // The refusal and the class-uniform next step still reach the operator, each
+    // on a link the planted marker cannot reach.
     expect(err.message).toContain("refusing to process it");
-    expect(sanitizeErrorForDisplay(err)).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(linksOf(rendered)).toContain(RECOVERY_STEP);
   });
 
   // The directory path is escaped through the same helper as in
@@ -146,15 +182,14 @@ describe("filenameTooLongError", () => {
   // The dirPath is interpolated raw and is the one fragment here with no bound of
   // its own, so what an operator actually sees is bounded by the display
   // boundary's per-link cap. Pin the bound where it exists, not on the raw
-  // message: even with BOTH the path and the name attacker-sized, the rendered
-  // refusal stays one capped link.
+  // message: even with BOTH the path and the name attacker-sized, each spends
+  // only the budget of the link it sits alone on.
   test("stays bounded when both the directory path and filename are attacker-sized", () => {
     const hostilePath = "/" + "d".repeat(5000);
     const hostileName = "n".repeat(5000);
     const err = filenameTooLongError(hostilePath, hostileName, 255);
-    expect(err.message).not.toContain(hostileName);
-    expect(sanitizeErrorForDisplay(err).length).toBeLessThanOrEqual(
-      DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
-    );
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).not.toContain(hostileName);
+    expectEveryLinkBounded(rendered);
   });
 });

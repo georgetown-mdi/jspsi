@@ -13,41 +13,49 @@ import {
   markPeerWaitTimeout,
 } from "../src/errors";
 
+// The recovery step each of the three classes chains behind its summary: the
+// first cause link, read off the error itself rather than restated here.
+const recoveryStepOf = (err: Error): string =>
+  (err.cause as Error | undefined)?.message ?? "";
+
 // These assertions guard the operator-facing-error audit: the terminal
 // transport/directory UsageError family carries a recovery-hint tag and a
 // concrete operator next step so the CLI's hint-walker suppresses its generic
 // "retry without re-inviting" advisory (which would contradict a terminal
-// refusal). They pin the tag and a stable fragment of the appended step, not a
-// brittle full-string match, and confirm the exit-64 classification (instanceof
-// UsageError) the appended prose must not disturb.
+// refusal). The step rides a cause link of its own, so each pins the tag, the
+// call site's own message left whole on `.message`, and a stable fragment of the
+// step on the link behind it, not a brittle full-string match -- plus the
+// exit-64 classification (instanceof UsageError) neither may disturb. The
+// budget the step's own link buys it is measured in
+// test/transportRefusalBudget.test.ts.
 describe("terminal transport/directory error taxonomy", () => {
-  test("FrameSizeExceededError tags the recovery hint and appends a next step", () => {
+  test("FrameSizeExceededError tags the recovery hint and puts a next step on its own link", () => {
     const err = new FrameSizeExceededError("inbound frame exceeds the cap");
     expect(err).toBeInstanceOf(UsageError);
     expect(err.name).toBe("FrameSizeExceededError");
     expect(err.psilinkRecoveryHintEmitted).toBe(true);
-    expect(err.message).toMatch(/^inbound frame exceeds the cap\. /);
-    expect(err.message).toContain("contact your partner");
+    expect(err.message).toBe("inbound frame exceeds the cap");
+    expect(recoveryStepOf(err)).toContain("contact your partner");
   });
 
-  test("DirectoryListingBoundsError tags the recovery hint and appends a next step", () => {
+  test("DirectoryListingBoundsError tags the recovery hint and puts a next step on its own link", () => {
     const err = new DirectoryListingBoundsError(
       "directory has too many entries",
     );
     expect(err).toBeInstanceOf(UsageError);
     expect(err.name).toBe("DirectoryListingBoundsError");
     expect(err.psilinkRecoveryHintEmitted).toBe(true);
-    expect(err.message).toMatch(/^directory has too many entries\. /);
-    expect(err.message).toContain("dedicated to a single exchange");
+    expect(err.message).toBe("directory has too many entries");
+    expect(recoveryStepOf(err)).toContain("dedicated to a single exchange");
   });
 
-  test("TransportOperationStalledError tags the recovery hint and appends a next step", () => {
+  test("TransportOperationStalledError tags the recovery hint and puts a next step on its own link", () => {
     const err = new TransportOperationStalledError("SFTP read stalled");
     expect(err).toBeInstanceOf(UsageError);
     expect(err.name).toBe("TransportOperationStalledError");
     expect(err.psilinkRecoveryHintEmitted).toBe(true);
-    expect(err.message).toMatch(/^SFTP read stalled\. /);
-    expect(err.message).toContain("then retry");
+    expect(err.message).toBe("SFTP read stalled");
+    expect(recoveryStepOf(err)).toContain("then retry");
   });
 });
 

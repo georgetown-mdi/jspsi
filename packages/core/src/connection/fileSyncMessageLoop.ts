@@ -906,16 +906,23 @@ export class FileSyncMessageLoop {
         // one.
         const frameCap = this.inboundFrameCap ?? MAX_FRAME_SIZE_BYTES;
         if (declaredSize > frameCap || messageFile.size > frameCap) {
-          // Name, peer id and path are partner-controlled and stand ahead of
-          // the cap this reports and the next step FrameSizeExceededError
-          // appends (see redactPrivateKeyMaterial).
+          // The name and peer id are the writing peer's bytes and the path is
+          // the configured rendezvous directory's, so each chooser takes a
+          // labelled link of its own: on a shared link either would spend the
+          // budget the cap this reports and the next step
+          // FrameSizeExceededError carries need. Each fragment is redacted where
+          // it is interpolated (see redactPrivateKeyMaterial).
           throw new FrameSizeExceededError(
-            `message file ${redactPrivateKeyMaterial(messageFile.name)} from ` +
-              `${redactPrivateKeyMaterial(peerId)} in ` +
-              `${redactPrivateKeyMaterial(path)} ` +
-              `declares ${declaredSize} byte(s) (on disk: ${messageFile.size}), ` +
-              `exceeding the maximum inbound frame size of ` +
-              `${frameCap} bytes; refusing to read it into memory`,
+            `an inbound message file declares ${declaredSize} byte(s) ` +
+              `(on disk: ${messageFile.size}), exceeding the maximum inbound ` +
+              `frame size of ${frameCap} bytes; refusing to read it into memory`,
+            {
+              details: [
+                `message file: ${redactPrivateKeyMaterial(messageFile.name)} ` +
+                  `from peer ${redactPrivateKeyMaterial(peerId)}`,
+                `rendezvous directory: ${redactPrivateKeyMaterial(path)}`,
+              ],
+            },
           );
         }
 

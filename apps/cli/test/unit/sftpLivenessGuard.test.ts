@@ -15,6 +15,16 @@ import {
   withSlowOperationWarning,
 } from "../../src/connection/sftpLivenessGuard";
 
+// The renderer's own cause-link separator, read back out of a two-link render
+// rather than restated here, so splitting a rendered chain into its links cannot
+// drift from the framing the renderer emits.
+const CAUSE_SEPARATOR = sanitizeErrorForDisplay(
+  new Error("a", { cause: new Error("b") }),
+).slice(1, -1);
+
+const linksOf = (err: unknown): string[] =>
+  sanitizeErrorForDisplay(err).split(CAUSE_SEPARATOR);
+
 // The slow-operation warning is observability, NOT a security control: it tells a
 // watching operator that an operation is taking a while, and must stay entirely
 // outside the terminal-error paths so it can never alter a result. These tests pin
@@ -268,7 +278,11 @@ describe("transportOperationStalledError", () => {
       "/drop/peer-7-42.json",
       "received no data",
     );
-    expect(err.message).toContain("/drop/peer-7-42.json");
+    // The path is a fragment somebody else chose and reaches the operator on a
+    // labelled link of its own, so the rendered chain is where it is read.
+    expect(sanitizeErrorForDisplay(err)).toContain(
+      "stalled file read path: /drop/peer-7-42.json",
+    );
   });
 
   test("escapes control/ANSI characters in the path", () => {
@@ -287,7 +301,11 @@ describe("transportOperationStalledError", () => {
       "/drop/ok.json\nFAKE: clear",
       "no progress",
     );
-    expect(sanitizeErrorForDisplay(err)).not.toContain("\n");
+    // Read per link, not over the joined chain: the renderer's own cause
+    // separator carries the one newline it emits, so the joined form would fail
+    // on framing this test is not about. The same removal the CLI integration
+    // console sentinel makes before it inspects a captured line.
+    for (const link of linksOf(err)) expect(link).not.toContain("\n");
     expect(sanitizeErrorForDisplay(err)).toContain("\\x0a");
   });
 
