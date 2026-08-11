@@ -476,7 +476,11 @@ sufficient on its own:
   section 8.2.1 specifies it, and TLS 1.3 derives its nonce from the record
   sequence number for the same reason: a per-key counter does not repeat, where
   a randomly generated IV repeats with a probability that grows with the number
-  of invocations under the key.
+  of invocations under the key. The shipped IV is a conformant instance of that
+  construction, read against the section's requirements in
+  [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#iv-construction-and-sp-800-38d-conformance),
+  so the route rejected here trades a conformant construction for an approved
+  service rather than closing a conformance gap.
 
 ## What it costs
 
