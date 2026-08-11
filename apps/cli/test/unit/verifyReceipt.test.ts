@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, test, vi } from "vitest";
+import YAML from "yaml";
 
 import {
   buildExchangeRecord,
@@ -328,6 +329,21 @@ describe("formatSignedRecordReport", () => {
     expect(exitCode).toBe(1);
   });
 
+  test("a verified verdict with no anchored certificate is refused, not phrased", () => {
+    // The verifier reaches `verified` only once some certificate matched the pin,
+    // so the headline's "matches ..." clause always has a slot to name. Were that
+    // to stop holding, the sentence would claim a match that did not happen: the
+    // report fails loudly here instead of overstating the evidence.
+    expect(() =>
+      formatSignedRecordReport(
+        report({
+          initiator: party("initiator", { fingerprintPin: "not-pinned" }),
+          responder: party("responder", { fingerprintPin: "not-pinned" }),
+        }),
+      ),
+    ).toThrow(/no pin-anchored certificate/);
+  });
+
   test("record-carried text with control bytes is sanitized before display", () => {
     // The identity and the binder both come out of the record verbatim -- the
     // identity free text chosen by whoever minted the certificate, the binder a
@@ -578,6 +594,14 @@ describe("handler", () => {
     return { recordPath, signedPath, pin };
   }
 
+  /** A YAML document in its own directory, for the files --config-file and
+   * --partner-terms name. */
+  const writeYaml = (body: string, name = "psilink.yaml"): string => {
+    const path = join(tmp(), name);
+    writeFileSync(path, body);
+    return path;
+  };
+
   test("a dual-signed record positional refuses --signed-record", async () => {
     const { signedPath } = await exchangeArtifacts();
     const { stdout, stderr, exits } = await runVerify({
@@ -635,6 +659,103 @@ describe("handler", () => {
     // fingerprint trust as not established, which reads as an auditor's run
     // rather than as a mistyped path.
     expect(stdout).toBe("");
+  });
+
+  test("a --config-file that does not exist is refused on a record-only run", async () => {
+    // Nothing reads the config's pin on this run -- no dual-signed record was
+    // named -- so the terms half is what has to catch the typo; mapping it to "no
+    // terms supplied" would report the agreed-terms hash as merely not checked.
+    const { recordPath } = await exchangeArtifacts();
+    const { stdout, stderr, exits } = await runVerify({
+      record: recordPath,
+      "config-file": join(tmp(), "typo.yaml"),
+    });
+    expect(exits).toEqual([64]);
+    expect(stderr).toContain("does not exist");
+    expect(stdout).toBe("");
+  });
+
+  test("a --partner-terms path that does not exist is refused", async () => {
+    const { recordPath } = await exchangeArtifacts();
+    const { stdout, stderr, exits } = await runVerify({
+      record: recordPath,
+      "partner-terms": join(tmp(), "typo.yaml"),
+    });
+    expect(exits).toEqual([64]);
+    expect(stderr).toContain("partner-terms file");
+    expect(stderr).toContain("does not exist");
+    expect(stdout).toBe("");
+  });
+
+  test("a --partner-terms file defining no linkage_terms is refused", async () => {
+    const { recordPath } = await exchangeArtifacts();
+    const { stdout, stderr, exits } = await runVerify({
+      record: recordPath,
+      "partner-terms": writeYaml(
+        "connection:\n  channel: filedrop\n  path: /x\n",
+      ),
+    });
+    expect(exits).toEqual([64]);
+    expect(stderr).toContain("defines no linkage_terms");
+    // The file has one purpose, so the message names what was wanted there
+    // rather than reporting it as an unusable invitation source.
+    expect(stderr).not.toContain("invitation");
+    expect(stdout).toBe("");
+  });
+
+  test("a --config-file carrying only the pin is accepted for it", async () => {
+    // The signed verdict directs the operator to "--config-file with
+    // signing.partner_fingerprint set", so a config carrying exactly that must
+    // verify; refusing it for the linkage_terms this run does not need would
+    // contradict the command's own guidance.
+    const { recordPath, signedPath, pin } = await exchangeArtifacts();
+    const { stdout, stderr, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "signed-record": signedPath,
+      "config-file": writeYaml(
+        `signing:\n  mode: certificate\n  partner_fingerprint: ${pin}\n`,
+      ),
+    });
+    expect(exits).toEqual([]);
+    expect(stderr).not.toContain("invitation");
+    expect(stdout).toContain("SIGNED RECEIPT VERIFIED");
+    expect(stdout).toContain("matches the pinned value");
+    expect(exitCode).toBe(0);
+  });
+
+  test("both parties' terms re-derive the agreed-terms hash", async () => {
+    const { recordPath } = await exchangeArtifacts();
+    const { stdout, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "config-file": writeYaml(
+        YAML.stringify({ linkage_terms: baseInputs.localTerms }),
+      ),
+      "partner-terms": writeYaml(
+        YAML.stringify({ linkage_terms: baseInputs.partnerTerms }),
+        "partner.yaml",
+      ),
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("agreed-terms hash: re-derives and matches");
+    expect(stdout).not.toContain("note:");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a --config-file defining no linkage_terms says so in the verdict", async () => {
+    // The terms half of that config supplied nothing, and the agreed-terms line
+    // otherwise reads as though no config had been named at all.
+    const { recordPath } = await exchangeArtifacts();
+    const configPath = writeYaml("signing:\n  mode: certificate\n");
+    const { stdout, exits } = await runVerify({
+      record: recordPath,
+      "config-file": configPath,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain(
+      `note: config file ${configPath} defines no linkage_terms, so it ` +
+        "supplied no terms for the agreed-terms hash check",
+    );
+    expect(stdout).toContain("agreed-terms hash: not checked");
   });
 
   test("an exchange-record positional verifies the record alone", async () => {

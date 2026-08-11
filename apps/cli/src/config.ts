@@ -1073,29 +1073,38 @@ export interface ConfigLinkageSource {
 }
 
 /**
- * Read the linkage-terms source from a pre-existing config file, for `invite`'s
- * config-as-source path. Returns `undefined` when no file exists at `configPath`
- * (the caller then falls back to inferring terms from an input file).
- *
- * Only the `linkage_terms` and `standardization` blocks are parsed and
- * validated: a config present at the target path is the authoritative source of
- * the invitation's linkage terms, but `invite` never uses the connection (the
- * config persists for a later `psilink exchange` to read and validate), so a
- * still-placeholder or otherwise unfinished connection block must not block
- * generating an invitation.
- *
- * A file that exists but cannot be read, is not valid YAML, carries no valid
- * `linkage_terms`, or carries an invalid `standardization` is a {@link UsageError}
- * rather than a silent fall-through to input inference: a config present at the
- * path is treated as intentional, so a broken one is surfaced for the user to
- * fix. Mirrors {@link saveConfig}'s snake_case-on-disk convention -- the
- * top-level keys are read as either `linkage_terms`/`standardization` (the
- * written form) or their camelCase spellings, and `safeParseLinkageTerms`
- * camelizes the nested keys.
+ * What reading a config file yielded for a caller that wants its linkage terms:
+ * no file at the path, a file that defines no `linkage_terms` block, or the
+ * loaded source. The two absences are separate outcomes because what each one
+ * means belongs to the caller -- `invite` treats a config defining no terms as a
+ * broken invitation source, while `verify-receipt` reads the same file for its
+ * `signing.partner_fingerprint` and proceeds without terms.
  */
-export function loadConfigLinkageSource(
+export type ConfigLinkageSourceResult =
+  | { status: "no-config-file" }
+  | { status: "no-linkage-terms" }
+  | { status: "loaded"; source: ConfigLinkageSource };
+
+/**
+ * Read the linkage-terms source from a config file, reporting a missing file and
+ * a config that defines no `linkage_terms` as distinct outcomes instead of one
+ * absence and one throw, so each caller attributes them in its own terms.
+ *
+ * Only the `linkage_terms`, `standardization`, and `metadata` blocks are parsed
+ * and validated. The connection block is deliberately not among them, so a
+ * still-placeholder or otherwise unfinished one does not fail the read.
+ *
+ * Every other defect -- a file that exists but cannot be read, YAML that is not
+ * a mapping, an invalid `linkage_terms`, `standardization`, or `metadata` block
+ * -- is a {@link UsageError}: a config present at the path is treated as
+ * intentional, so a broken one is surfaced for the user to fix. Mirrors
+ * {@link saveConfig}'s snake_case-on-disk convention -- the top-level keys are
+ * read as either `linkage_terms`/`standardization` (the written form) or their
+ * camelCase spellings, and `safeParseLinkageTerms` camelizes the nested keys.
+ */
+export function readConfigLinkageSource(
   configPath: string,
-): ConfigLinkageSource | undefined {
+): ConfigLinkageSourceResult {
   // Read, then parse through the sensitive-file chokepoint. A read failure
   // carries only a path and errno (ENOENT means no config, not an error here); a
   // YAML parse can echo source bytes (an inline credential), so it routes through
@@ -1104,7 +1113,8 @@ export function loadConfigLinkageSource(
   try {
     source = fs.readFileSync(configPath, "utf8");
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if ((err as NodeJS.ErrnoException).code === "ENOENT")
+      return { status: "no-config-file" };
     throw new UsageError(
       `config file ${configPath} could not be read: ` +
         (err instanceof Error ? err.message : String(err)),
@@ -1123,12 +1133,7 @@ export function loadConfigLinkageSource(
     );
   const obj = raw as Record<string, unknown>;
   const rawTerms = obj["linkage_terms"] ?? obj["linkageTerms"];
-  if (rawTerms === undefined)
-    throw new UsageError(
-      `config file ${configPath} has no linkage_terms and cannot be used as ` +
-        "the source for an invitation; supply an input file or a configuration " +
-        "that defines linkage terms",
-    );
+  if (rawTerms === undefined) return { status: "no-linkage-terms" };
 
   const result = safeParseLinkageTerms(rawTerms);
   if (!result.success)
@@ -1209,5 +1214,35 @@ export function loadConfigLinkageSource(
     metadata = metaResult.data;
   }
 
-  return { linkageTerms: result.data, standardization, metadata };
+  return {
+    status: "loaded",
+    source: { linkageTerms: result.data, standardization, metadata },
+  };
+}
+
+/**
+ * The linkage-terms source for `invite`'s config-as-source path: the config named
+ * at `configPath`, or `undefined` when no file exists there (the caller then falls
+ * back to inferring terms from an input file).
+ *
+ * A config present at the path is the authoritative source of the invitation's
+ * linkage terms, so one that defines none cannot serve as that source and is a
+ * {@link UsageError} rather than a silent fall-through to input inference.
+ * `invite` never uses the connection block (the config persists for a later
+ * `psilink exchange` to read and validate), so an unfinished one must not block
+ * generating an invitation -- {@link readConfigLinkageSource}, which carries the
+ * rest of the reading contract, leaves it unread.
+ */
+export function loadConfigLinkageSource(
+  configPath: string,
+): ConfigLinkageSource | undefined {
+  const result = readConfigLinkageSource(configPath);
+  if (result.status === "no-config-file") return undefined;
+  if (result.status === "no-linkage-terms")
+    throw new UsageError(
+      `config file ${configPath} has no linkage_terms and cannot be used as ` +
+        "the source for an invitation; supply an input file or a configuration " +
+        "that defines linkage terms",
+    );
+  return result.source;
 }
