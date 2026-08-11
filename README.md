@@ -100,6 +100,10 @@ docker run --rm -p 127.0.0.1:3000:3000 \
   --env JOB_DATA_ROOT=/work -v "$PWD":/work \
   vdorie/psi-link:latest serve
 ```
+   Docker application's terminal on Windows:
+```sh
+docker run --rm -p 127.0.0.1:3000:3000 --env JOB_DATA_ROOT=/work -v "${PWD}:/work" vdorie/psi-link:latest serve
+```
 3. Visit [http://127.0.0.1:3000](http://127.0.0.1:3000) on that machine; press Ctrl-C when done.
 
 The one mounted directory holds your input, the exchange's working files, and its results; the console reads your CSV in place. Publishing to `127.0.0.1` keeps the unauthenticated console reachable only from this machine, and works the same on Linux, macOS, and Windows. For SFTP exchanges, or to keep the partner-synced directory separate from your files, see [Server job API](docs/DEPLOYMENT.md#server-job-api).
