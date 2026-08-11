@@ -115,6 +115,8 @@ This covers the npm tree only. The image's OS package layer is gated separately,
 
 The unscoped `npm audit` additionally reports development-tree findings, which are triaged separately rather than at release time; how the last one was resolved, and what holds it resolved, is recorded in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-brace-expansion-advisory-is-fixed-by-a-root-override).
 
+A Dependabot alert in the repository's Security tab is evaluated against `main`, which routinely lags `staging` by dozens of commits, so an alert can still read as open against `main` after `staging` already carries the fix -- check `staging`'s lockfile before triaging a default-branch alert. That check narrows the triage rather than closing it: a package `staging` has not yet patched still gets a full triage.
+
 ### 5. Run the full test suite
 
 Run what CI gates, rather than a copy of it that drifts: `.github/workflows/static_checks.yaml` is the source of truth for the static checks (typecheck, format, lint, the link and claim checks, and the script suite), `.github/workflows/eb_build_and_test.yaml` for the browser integration suite, and `.github/workflows/cli_build_and_test.yaml` -- the CLI's pull-request gate -- for the CLI's unit and SFTP integration suites, whose integration half also runs in `release.yaml` as the ship gate before publish. Everything they run must pass on the release branch before it merges.
