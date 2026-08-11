@@ -239,12 +239,26 @@ function acceptCommand(version: string | undefined): string {
  * rule the CLI does not enforce. Fixed strings chosen by booleans, so nothing
  * new is representable on the sheet.
  */
-function bilateralFlag({
-  retainFiles,
-  locklessRendezvous,
-}: BilateralSettings): string {
-  if (retainFiles) return " --retain-files";
-  return locklessRendezvous ? " --lockless-rendezvous" : "";
+function bilateralFlag(settings: BilateralSettings): string {
+  return chooseBilateral(
+    settings,
+    " --retain-files",
+    " --lockless-rendezvous",
+    "",
+  );
+}
+
+// The one rule for which bilateral agreement the sheet names: retain mode
+// already implies the lockless rendezvous, so its text wins; otherwise the
+// lockless setting speaks only where it is on.
+function chooseBilateral<T>(
+  { retainFiles, locklessRendezvous }: BilateralSettings,
+  forRetain: T,
+  forLockless: T,
+  forNeither: T,
+): T {
+  if (retainFiles) return forRetain;
+  return locklessRendezvous ? forLockless : forNeither;
 }
 
 /**
@@ -253,21 +267,23 @@ function bilateralFlag({
  * to the step both bodies print the command in.
  */
 function bilateralFlagLines(settings: BilateralSettings): Array<string> {
-  if (settings.retainFiles)
-    return [
+  return chooseBilateral(
+    settings,
+    [
       "   --retain-files is your half of the agreement above. Leave it on the",
       "   command: without it the two of you stop with an error when you",
       "   meet.",
       "",
-    ];
-  if (!settings.locklessRendezvous) return [];
-  return [
-    "   --lockless-rendezvous is your half of a setting your partner turned",
-    "   on: the two sides meet with an acknowledgement instead of a lock",
-    "   file. It is an agreement, not a negotiation -- leave it on the",
-    "   command, or the two of you stop with an error when you meet.",
-    "",
-  ];
+    ],
+    [
+      "   --lockless-rendezvous is your half of a setting your partner turned",
+      "   on: the two sides meet with an acknowledgement instead of a lock",
+      "   file. It is an agreement, not a negotiation -- leave it on the",
+      "   command, or the two of you stop with an error when you meet.",
+      "",
+    ],
+    [],
+  );
 }
 
 /**
@@ -277,23 +293,25 @@ function bilateralFlagLines(settings: BilateralSettings): Array<string> {
  * from rendezvousing into a mismatch.
  */
 function consoleControlLines(settings: BilateralSettings): Array<string> {
-  if (settings.retainFiles)
-    return [
+  return chooseBilateral(
+    settings,
+    [
       'Before you start the exchange there, open "How files are handled" in',
       'that accept flow and turn on "Keep every exchange file". That is the',
       "same agreement the section above describes, set on the console rather",
       "than on the command line; without it the two of you stop with an",
       "error when you meet.",
       "",
-    ];
-  if (!settings.locklessRendezvous) return [];
-  return [
-    'Before you start the exchange there, open "How files are handled" in',
-    'that accept flow and set "Lockless rendezvous" to On. Your partner',
-    "turned that setting on, and it is an agreement, not a negotiation:",
-    "without it the two of you stop with an error when you meet.",
-    "",
-  ];
+    ],
+    [
+      'Before you start the exchange there, open "How files are handled" in',
+      'that accept flow and set "Lockless rendezvous" to On. Your partner',
+      "turned that setting on, and it is an agreement, not a negotiation:",
+      "without it the two of you stop with an error when you meet.",
+      "",
+    ],
+    [],
+  );
 }
 
 /**
