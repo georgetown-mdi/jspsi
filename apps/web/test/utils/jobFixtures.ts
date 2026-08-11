@@ -1,8 +1,11 @@
 import { fileURLToPath } from "node:url";
+import fs from "node:fs";
 import path from "node:path";
 
 import { getDefaultLinkageTerms } from "@psilink/core";
 import { parse as parseYaml } from "yaml";
+
+import { spawnZeroSetupJob } from "@jobs/cliDriver";
 
 import type {
   JobFiledropExchangeIntent,
@@ -12,6 +15,7 @@ import type {
   JobZeroSetupSftpIntent,
 } from "@jobs/intent";
 import type { JobSftpServerEntry } from "@jobs/sftpServer";
+import type { JobTerminalState } from "@jobs/cliDriver";
 import type { LinkageTerms } from "@psilink/core";
 
 /** The stub CLI the driver tests point JOB_CLI_BINARY at. */
@@ -151,4 +155,85 @@ export function composedServer(composed: string): Record<string, unknown> {
   if (server === undefined)
     throw new Error("composed psilink.yaml has no connection.server");
   return server;
+}
+
+/** How long {@link awaitJobTerminalState} waits for a spawned child to exit. The
+ * stub exits in milliseconds; a caller driving the real built CLI, whose startup
+ * dominates, passes a longer bound. */
+const CHILD_EXIT_TIMEOUT_MS = 5_000;
+
+/**
+ * Await the terminal state of a job spawned through a `cliDriver` entry point.
+ *
+ * `spawn` is handed the driver's `onTerminal` callback and is expected to start
+ * the child synchronously; the promise resolves once the driver reconciles the
+ * exit. Past `timeoutMs` the wait fails rather than hanging the suite.
+ */
+export async function awaitJobTerminalState(
+  spawn: (onTerminal: (state: JobTerminalState) => void) => void,
+  timeoutMs: number = CHILD_EXIT_TIMEOUT_MS,
+): Promise<JobTerminalState> {
+  // A wrapper object, not a bare local: the terminal is set from the driver's
+  // callback, which TypeScript's control-flow analysis would otherwise narrow a
+  // local `null` past, making the poll condition read as always-true.
+  const terminalRef: { current: JobTerminalState | null } = { current: null };
+  spawn((state) => {
+    terminalRef.current = state;
+  });
+  const deadline = Date.now() + timeoutMs;
+  while (terminalRef.current === null) {
+    if (Date.now() > deadline) throw new Error("the child did not exit");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return terminalRef.current;
+}
+
+/**
+ * Spawn the stub CLI through {@link spawnZeroSetupJob} and return the exact argv
+ * the driver invoked it with, read back from the stub's `STUB_ARGV_FILE` once the
+ * child has exited -- so a test asserts the driven argv rather than a
+ * hand-written one.
+ *
+ * `workdir` is the caller's scratch directory: the child's cwd, the home of the
+ * input/output/record paths and of the argv file, and the caller's to remove.
+ */
+export async function captureZeroSetupArgv(args: {
+  workdir: string;
+  connectionArgs: Array<string>;
+  fileSyncArgs?: Array<string>;
+  eventStream: boolean;
+  identity?: string;
+  linkageStrategy?: "cascade" | "single-pass";
+  timeoutMs?: number;
+}): Promise<Array<string>> {
+  const { workdir } = args;
+  const argvFile = path.join(workdir, "argv.json");
+  await awaitJobTerminalState(
+    (onTerminal) =>
+      spawnZeroSetupJob({
+        binaryPath: STUB_CLI_PATH,
+        connectionArgs: args.connectionArgs,
+        fileSyncArgs: args.fileSyncArgs ?? [],
+        inputPath: path.join(workdir, "input.csv"),
+        outputPath: path.join(workdir, "output.csv"),
+        recordPath: path.join(workdir, "record.json"),
+        workdir,
+        eventStream: args.eventStream,
+        ...(args.identity !== undefined ? { identity: args.identity } : {}),
+        ...(args.linkageStrategy !== undefined
+          ? { linkageStrategy: args.linkageStrategy }
+          : {}),
+        extraEnv: { STUB_ARGV_FILE: argvFile, STUB_EXIT_CODE: "0" },
+        handlers: {
+          onEvent: () => undefined,
+          onDegraded: () => undefined,
+          onTerminal,
+        },
+      }),
+    args.timeoutMs,
+  );
+  // argv[0] is node, argv[1] the CLI entry; the driven arguments follow.
+  return (JSON.parse(fs.readFileSync(argvFile, "utf8")) as Array<string>).slice(
+    2,
+  );
 }

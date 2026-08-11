@@ -12,6 +12,7 @@ import "@mantine/core/styles.css";
 import { decodeInvitation } from "@psilink/core";
 
 import { InviterBench } from "@bench/InviterBench";
+import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
 import styles from "@bench/bench.module.css";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
@@ -270,6 +271,21 @@ async function reachReviewCreate() {
     .toHaveTextContent("Review & create");
 }
 
+/** Open the file-handling card on Review & create. Its accessible name carries the
+ * collapsed summary, so match on the label rather than the whole name. */
+async function openExchangeFiles() {
+  await page.getByRole("button", { name: /How files are handled/ }).click();
+}
+
+/** Turn retain mode on the way an operator does: the file-handling card on
+ * Review & create, before the invitation is minted. */
+async function turnRetainModeOn() {
+  await openExchangeFiles();
+  const retain = page.getByLabelText("Keep every exchange file");
+  await retain.click();
+  await expect.element(retain).toBeChecked();
+}
+
 describe("console inviter file picker states", () => {
   test("an empty listing shows the no-usable-files state", async () => {
     stubJobApi({ listing: { configured: true, files: [] } });
@@ -442,6 +458,100 @@ describe("console inviter transports and sample data", () => {
         ),
       )
       .toBeDisabled();
+  });
+});
+
+describe("console inviter file-handling gate", () => {
+  const RUN_HERE_SFTP = {
+    configured: true,
+    host: "dr.example.gov",
+    port: 2222,
+    path: "/drops/psilink",
+  };
+
+  test("offers the whole card, including what only a composed config carries", async () => {
+    stubJobApi({ sftp: RUN_HERE_SFTP });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await openExchangeFiles();
+
+    // The invitation flow composes a psilink.yaml, so every control reaches the
+    // run as a configuration key -- the foreign-file policy included.
+    await expect
+      .element(page.getByLabelText("If an unrecognised file appears"))
+      .toBeInTheDocument();
+  });
+
+  test("states the bilateral agreement as soon as retain mode goes on", async () => {
+    stubJobApi({ sftp: RUN_HERE_SFTP });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await openExchangeFiles();
+    expect(app.container.textContent).not.toContain(
+      RETAIN_MODE_BILATERAL_NOTICE,
+    );
+
+    await page.getByLabelText("Keep every exchange file").click();
+    await expect
+      .element(page.getByText("Both sides must set this"))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(RETAIN_MODE_BILATERAL_NOTICE);
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeEnabled();
+  });
+
+  test("an inadmissible draft blocks the mint and says why", async () => {
+    stubJobApi({ sftp: RUN_HERE_SFTP });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await turnRetainModeOn();
+
+    // Retain mode requires timestamped filenames; stating them off is a
+    // combination core refuses, caught before the terms are sealed.
+    await userEvent.selectOptions(
+      page.getByLabelText("Timestamped filenames"),
+      "off",
+    );
+    await expect
+      .element(
+        page.getByText("retain_files requires timestamp_in_filename", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeDisabled();
+    // Shown beside the action, and voiced for a screen reader at the button.
+    await expect
+      .element(
+        page.getByText("Resolve the file-handling settings above to continue."),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          "Resolve the file-handling settings above before you can create.",
+        ),
+      )
+      .toBeInTheDocument();
+    // The terms are unsealed: the step still stands, with no invitation minted.
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+
+    // Restoring the implied toggle clears the problem and the gate together.
+    await userEvent.selectOptions(
+      page.getByLabelText("Timestamped filenames"),
+      "auto",
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeEnabled();
+    await expect
+      .element(page.getByText("Ready to create."))
+      .toBeInTheDocument();
   });
 });
 
@@ -1111,15 +1221,6 @@ describe("console inviter partner accept kit", () => {
     return downloads.captured.find((item) =>
       item.fileName.startsWith(SHEET_PREFIX),
     ) as CapturedDownload;
-  }
-
-  /** Turn retain mode on the way an operator does: the file-handling card on
-   * Review & create, before the invitation is minted. */
-  async function turnRetainModeOn() {
-    await page.getByRole("button", { name: /How files are handled/ }).click();
-    const retain = page.getByLabelText("Keep every exchange file");
-    await retain.click();
-    await expect.element(retain).toBeChecked();
   }
 
   test("an sftp share step writes a sheet carrying the locator, no secret, no token", async () => {
