@@ -1963,7 +1963,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
       const files = new Map<string, Buffer>();
       const flags = { locklessRendezvous: false, retainFiles: false };
       placePeerHello(files, "zzz", flags);
-      const party = makeParty("aaa", flags, files);
+      const party = makeParty("aaa", { ...flags, ...sweepBudget() }, files);
       const boundaries: SessionBoundary[] = [];
       const ops = installSessionBoundaries(
         party.client,
@@ -2013,7 +2013,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
       placePeerHello(files, "zzz", flags);
       // The peer hello is absent at entry, so the dispatch takes the
       // hello-exchange path and this party races the createExclusive lock.
-      const party = makeParty("aaa", flags, files, {
+      const party = makeParty("aaa", { ...flags, ...sweepBudget() }, files, {
         hideAtEntry: [helloName("zzz")],
       });
       const boundaries: SessionBoundary[] = [];
@@ -2064,7 +2064,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
     // The peer's ack is withheld from the first three listings, so the barrier
     // polls several times -- each poll behind its own session boundary -- after
     // this party has already written its own ack.
-    const party = makeParty("aaa", flags, files, {
+    const party = makeParty("aaa", { ...flags, ...sweepBudget() }, files, {
       listScript: (entries, call) =>
         call < 3 ? entries.filter((e) => e.name !== peerAck) : entries,
     });
