@@ -12,10 +12,11 @@ name: Static Checks
 # exclude test/ so test code never reaches the emitted dist). It resolves
 # @psilink/core from the built package, so packages/core is built first.
 #
-# The job's `name:` is its required-status-check identity on main and staging, so
-# it stays `Typecheck, Lint, Format` even as steps accumulate past those three:
-# renaming it leaves a required check pending forever on every pull request until
-# branch protection is edited to match.
+# The job's `name:` is its required-status-check identity on main and staging,
+# which is why it stays `Typecheck, Lint, Format` even as steps accumulate past
+# those three. The Merge gate identities step below holds that identity against
+# the branch rules whenever the run has a token that can read them, and states a
+# skip when it does not.
 
 on:
   pull_request:
@@ -110,6 +111,18 @@ jobs:
       # workflow alone. A composite pin no workflow mirrors fails closed.
       - name: Action pin drift
         run: npm run check:action-pin-drift
+      # Encodes the two ways a merge gate goes quietly missing as checks: a job
+      # renamed out from under the required-status-check context that names it,
+      # and a path filter added to a gating workflow, each of which leaves a
+      # required check pending forever rather than red. Reading the branch rules
+      # needs a token, so the run's own token is handed to it; the context half
+      # states a skip -- a run annotation, not a silent pass -- when that token
+      # cannot read them, while the path-filter half needs no API and always
+      # runs.
+      - name: Merge gate identities
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run check:merge-gate-identities
       # The github-actions Dependabot block ignores within-major updates for
       # several orgs, which is only sound over pins that float within their
       # major. This reads that ignore list out of the config and fails on any
