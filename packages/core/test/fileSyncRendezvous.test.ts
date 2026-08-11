@@ -1861,6 +1861,30 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
     ops: number;
   }
 
+  // The peer budget the lockless sweep below owns instead of baseOptions'
+  // shared 2 s. Every assertion in that sweep is about what the directory
+  // holds, never how long a step took, so this is a backstop for a peer ack
+  // that never arrives -- and, through entryHelloAckWindowMs capping its window
+  // at the remaining budget, it is also what the entry-present peer hello gets
+  // to answer in. The shared 2 s is a thousand times an idle position and
+  // inside one descheduling stall on a starved one: at nice 19 against 40
+  // nice-0 CPU hogs on a ten-core container the sweep aborts partway with
+  // "synchronization has timed out", settling the outcome by the scheduler
+  // rather than by the boundary that position placed. Both bounds here were
+  // verified green under that same regime, so a later tightening has one to
+  // measure against.
+  //
+  // The sweep's own timeout is this backstop plus one more of it: the sweep
+  // spends every position's wall clock in a single test -- 20 ms idle, seven to
+  // ten seconds under that regime, already past vitest's 5 s default -- and a
+  // position that burns the whole rendezvous bound must still surface that
+  // bound's diagnosable error rather than a generic timeout.
+  const SWEEP_RENDEZVOUS_HANG_BACKSTOP_MS = 30_000;
+
+  const sweepBudget = () => ({
+    timeToLive: new Date(Date.now() + SWEEP_RENDEZVOUS_HANG_BACKSTOP_MS),
+  });
+
   // Drives one rendezvous with the boundary predicate installed, sweeping the
   // whole run once per boundary position: `baseline` measures the boundary-free op
   // count, then each position is replayed on a fresh directory.
@@ -1879,52 +1903,58 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
     }
   };
 
-  test("a lockless rendezvous commits identically at every op-boundary position", async () => {
-    const start = async (
-      isBoundary: BoundaryPredicate,
-    ): Promise<BoundaryRun> => {
-      const files = new Map<string, Buffer>();
-      const flags = { locklessRendezvous: true, retainFiles: false };
-      placePeerHello(files, "zzz", flags);
-      placePeerAckOf(files, "zzz", "aaa");
-      const party = makeParty("aaa", flags, files, {
-        hideAtEntry: [ackMarkerName("zzz", helloStem("aaa"))],
+  test(
+    "a lockless rendezvous commits identically at every op-boundary position",
+    { timeout: SWEEP_RENDEZVOUS_HANG_BACKSTOP_MS * 2 },
+    async () => {
+      const start = async (
+        isBoundary: BoundaryPredicate,
+      ): Promise<BoundaryRun> => {
+        const files = new Map<string, Buffer>();
+        const flags = { locklessRendezvous: true, retainFiles: false };
+        placePeerHello(files, "zzz", flags);
+        placePeerAckOf(files, "zzz", "aaa");
+        const party = makeParty("aaa", { ...flags, ...sweepBudget() }, files, {
+          hideAtEntry: [ackMarkerName("zzz", helloStem("aaa"))],
+        });
+        const boundaries: SessionBoundary[] = [];
+        const ops = installSessionBoundaries(
+          party.client,
+          files,
+          isBoundary,
+          boundaries,
+        );
+        await party.rdv.run(party.scope);
+        return { party, boundaries, ops: ops() };
+      };
+
+      // The ack's temp-then-rename gap: the sweep must reach a boundary sitting
+      // inside it, or it proves nothing about the publish it exists to protect.
+      let sawAckPublishGap = false;
+      const ownAck = ackMarkerName("aaa", helloStem("zzz"));
+      await sweepBoundaries(start, (run) => {
+        expect(run.party.state.role).toBe("starter");
+        expect(run.party.state.handshakeRole).toBe("responder");
+        expect(run.party.state.peerId).toBe("zzz");
+
+        const atBoundary = run.boundaries[0].contents.map(
+          (entry) => entry.name,
+        );
+        if (atBoundary.some((n) => n.endsWith(".tmp"))) {
+          // A fresh session opening in the gap finds the in-flight temp and no
+          // ack: the final name never exists half-written for the peer to match.
+          expect(atBoundary).not.toContain(ownAck);
+          sawAckPublishGap = true;
+        }
+
+        const names = namesIn(run.party.files);
+        expect(names.filter((n) => n === helloName("aaa"))).toHaveLength(1);
+        expect(names.filter((n) => n === ownAck)).toHaveLength(1);
+        expect(names.filter((n) => n.endsWith(".tmp"))).toHaveLength(0);
       });
-      const boundaries: SessionBoundary[] = [];
-      const ops = installSessionBoundaries(
-        party.client,
-        files,
-        isBoundary,
-        boundaries,
-      );
-      await party.rdv.run(party.scope);
-      return { party, boundaries, ops: ops() };
-    };
-
-    // The ack's temp-then-rename gap: the sweep must reach a boundary sitting
-    // inside it, or it proves nothing about the publish it exists to protect.
-    let sawAckPublishGap = false;
-    const ownAck = ackMarkerName("aaa", helloStem("zzz"));
-    await sweepBoundaries(start, (run) => {
-      expect(run.party.state.role).toBe("starter");
-      expect(run.party.state.handshakeRole).toBe("responder");
-      expect(run.party.state.peerId).toBe("zzz");
-
-      const atBoundary = run.boundaries[0].contents.map((entry) => entry.name);
-      if (atBoundary.some((n) => n.endsWith(".tmp"))) {
-        // A fresh session opening in the gap finds the in-flight temp and no
-        // ack: the final name never exists half-written for the peer to match.
-        expect(atBoundary).not.toContain(ownAck);
-        sawAckPublishGap = true;
-      }
-
-      const names = namesIn(run.party.files);
-      expect(names.filter((n) => n === helloName("aaa"))).toHaveLength(1);
-      expect(names.filter((n) => n === ownAck)).toHaveLength(1);
-      expect(names.filter((n) => n.endsWith(".tmp"))).toHaveLength(0);
-    });
-    expect(sawAckPublishGap).toBe(true);
-  });
+      expect(sawAckPublishGap).toBe(true);
+    },
+  );
 
   test("the lock-joiner's joining sentinel is never missing at an op-boundary position", async () => {
     const start = async (
