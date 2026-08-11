@@ -75,6 +75,28 @@ const TEMP_FILENAME = `temp-${PEER_ID}.tmp`;
 // message name.
 const ACK_FILENAME = `${PEER_ID}-${MESSAGE_FILENAME.replace(/\.json$/, "")}-ack.json`;
 
+// The widest name a listed entry can carry through the shipped path: the bound
+// the CLI's directory-listing guard enforces on every entry it enumerates
+// (MAX_FILENAME_LENGTH, apps/cli/src/connection/listingGuard.ts). It is
+// restated rather than imported because packages/core does not depend on
+// apps/cli, and it is the tightest bound there is -- core bounds no filename of
+// its own, and the SFTP protocol imposes none either, so a name reaching the
+// frame gate is bounded only by whichever adapter listed it.
+const MAX_LISTED_FILENAME_LENGTH = 255;
+// A peer message file at exactly that width, still selected by the loop's
+// message grammar: the peer prefix the scan keys on and the byte-count terminal
+// segment it parses, padded between them.
+const WIDEST_MESSAGE_FILENAME = (() => {
+  const prefix = `${PEER_ID}-`;
+  const suffix = `-${OVER_CAP_BYTES}.json`;
+  const padding = MAX_LISTED_FILENAME_LENGTH - prefix.length - suffix.length;
+  return `${prefix}${"w".repeat(padding)}${suffix}`;
+})();
+// The rendezvous directory an operator nests one run deeper than the example
+// above: the width at which the two paths a rename names no longer fit one link
+// between them.
+const NESTED_RENDEZVOUS_PATH = `${RENDEZVOUS_PATH}/2026-08-11-monthly-linkage-run`;
+
 // A transport that answers nothing, so every await is ended by the connection's
 // own peer-inactivity budget rather than by an error the transport chose.
 const withholdingClient = (): FileTransportClient => ({
@@ -120,10 +142,8 @@ const rejection = async (op: Promise<unknown>): Promise<unknown> =>
 // A rendezvous directory holding one peer message file whose NAME declares more
 // bytes than the frame cap. The declared count is what the read gate refuses on,
 // so no over-cap body is ever allocated to drive this.
-function overCapMessageClient(): FileTransportClient {
-  const listing: FileInfo[] = [
-    { name: MESSAGE_FILENAME, modifyTime: 0, size: OVER_CAP_BYTES },
-  ];
+function overCapMessageClient(name: string): FileTransportClient {
+  const listing: FileInfo[] = [{ name, modifyTime: 0, size: OVER_CAP_BYTES }];
   return {
     connect: async () => {},
     end: async () => {},
@@ -138,6 +158,30 @@ function overCapMessageClient(): FileTransportClient {
     createExclusive: async () => {},
     exists: async () => false,
   };
+}
+
+// The frame gate through a real poll cycle: the poller lists a directory
+// holding one over-cap peer message and refuses it, and the refusal it emits is
+// what this returns.
+async function frameGateRefusal(messageName: string): Promise<unknown> {
+  const conn = new FileSyncConnection(overCapMessageClient(messageName), {
+    verbose: -1,
+    pollingFrequency: 5,
+    timeToLive: new Date(Date.now() + 60_000),
+  });
+  await conn.open({
+    channel: "filedrop",
+    path: RENDEZVOUS_PATH,
+    options: { peerTimeoutMs: 2_000 },
+  } satisfies FileDropConnectionConfig);
+  conn.peerId = PEER_ID;
+  const errored = new Promise<unknown>((resolve) => conn.on("error", resolve));
+  conn.start();
+  try {
+    return await errored;
+  } finally {
+    conn.stop();
+  }
 }
 
 // Every core site that raises one of the three bounded-transport refusals and
@@ -187,8 +231,10 @@ const CORE_SITES: Array<{
     },
   },
   {
-    // The widest label the budget composes: two whole transport paths, more
-    // than a display budget of them before any fixed copy is counted.
+    // The one bounded operation naming two transport paths, more than a display
+    // budget of them before any fixed copy is counted, so each takes a link of
+    // its own. The width at which one link could not carry both is driven
+    // below.
     name: "whole-exchange transport budget, rename",
     recoveryStep: STALLED_RECOVERY_STEP,
     raise: async () => {
@@ -204,28 +250,7 @@ const CORE_SITES: Array<{
   {
     name: "file-sync frame-size gate",
     recoveryStep: FRAME_SIZE_RECOVERY_STEP,
-    raise: async () => {
-      const conn = new FileSyncConnection(overCapMessageClient(), {
-        verbose: -1,
-        pollingFrequency: 5,
-        timeToLive: new Date(Date.now() + 60_000),
-      });
-      await conn.open({
-        channel: "filedrop",
-        path: RENDEZVOUS_PATH,
-        options: { peerTimeoutMs: 2_000 },
-      } satisfies FileDropConnectionConfig);
-      conn.peerId = PEER_ID;
-      const errored = new Promise<unknown>((resolve) =>
-        conn.on("error", resolve),
-      );
-      conn.start();
-      try {
-        return await errored;
-      } finally {
-        conn.stop();
-      }
-    },
+    raise: () => frameGateRefusal(MESSAGE_FILENAME),
   },
 ];
 
@@ -249,6 +274,61 @@ for (const site of CORE_SITES) {
     expect(linksOf(rendered).length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
   });
 }
+
+// The two core sites naming more than one chooser, driven at the widest values
+// the shipped path admits rather than at the ordinary sizes above. One chooser
+// per link is what the ordinary sizes cannot pin: two of them share a link
+// undetected until the first fills the budget, and then the cap deletes the
+// second outright and the first can forge the label that would have introduced
+// it. Each delivery below is a width at which one link could not carry both, so
+// a site that folded its two choosers back together fails here.
+
+test("the writing peer keeps a link of its own at the widest message filename a listing admits", async () => {
+  expect(WIDEST_MESSAGE_FILENAME).toHaveLength(MAX_LISTED_FILENAME_LENGTH);
+  expect(WIDEST_MESSAGE_FILENAME.length + PEER_ID.length).toBeGreaterThan(
+    DEFAULT_MAX_DISPLAY_LENGTH,
+  );
+
+  const rendered = sanitizeErrorForDisplay(
+    await frameGateRefusal(WIDEST_MESSAGE_FILENAME),
+  );
+  const links = linksOf(rendered);
+
+  // The peer id whole, on its own labelled link, at a filename that fills the
+  // budget of the link ahead of it.
+  expect(links).toContain(`writing peer: ${PEER_ID}`);
+  expect(links).toContain(`rendezvous directory: ${RENDEZVOUS_PATH}`);
+  expect(links).toContain(FRAME_SIZE_RECOVERY_STEP);
+  // What the wide name spends is the budget of the link it sits alone on, and
+  // nothing else: exactly one link truncates, and it is the name's own.
+  const [truncated] = truncatedLinks(rendered);
+  expect(truncatedLinks(rendered)).toHaveLength(1);
+  expect(truncated.slice(0, "message file: ".length)).toBe("message file: ");
+  expect(links.length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
+});
+
+test("both rename paths keep links of their own at a nested rendezvous directory", async () => {
+  const fromPath = `${NESTED_RENDEZVOUS_PATH}/${TEMP_FILENAME}`;
+  const toPath = `${NESTED_RENDEZVOUS_PATH}/${MESSAGE_FILENAME}`;
+  expect(fromPath.length + toPath.length).toBeGreaterThan(
+    DEFAULT_MAX_DISPLAY_LENGTH,
+  );
+
+  const bound = await boundTransportOf(withholdingClient());
+  const rendered = sanitizeErrorForDisplay(
+    await rejection(bound.rename(fromPath, toPath)),
+  );
+  const links = linksOf(rendered);
+
+  // Both paths whole, each on its own labelled link: the destination is what a
+  // shared link deletes at this width, and the label introducing it is what the
+  // source could otherwise forge.
+  expect(links).toContain(`rename source: ${fromPath}`);
+  expect(links).toContain(`rename destination: ${toPath}`);
+  expect(links).toContain(STALLED_RECOVERY_STEP);
+  expect(truncatedLinks(rendered)).toEqual([]);
+  expect(links.length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
+});
 
 // The site-agnostic half of the property, so a site added later is covered
 // without being remembered here. Whatever a call site composes -- however wide,

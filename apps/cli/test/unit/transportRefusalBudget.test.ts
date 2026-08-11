@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   DirectoryListingBoundsError,
+  DISPLAY_TRUNCATION_MARKER,
   FrameSizeExceededError,
   MAX_ERROR_CAUSE_DEPTH,
   sanitizeErrorForDisplay,
@@ -244,6 +245,61 @@ for (const [label, raise, recoveryStep] of FLOODED_SITES) {
     for (const link of truncatedLinks(rendered))
       expect(link).not.toBe(recoveryStep);
     expect(truncatedLinks(rendered).length).toBeGreaterThan(0);
+    expect(linksOf(rendered).length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
+  });
+}
+
+// A link carries ONE chooser, which is what the per-fragment table above cannot
+// measure: the listing guard is the one CLI site naming two of them -- the
+// server's entry name and the operator's directory -- so each delivery below
+// fills one chooser's budget and asserts the OTHER's link arrives whole. Two
+// choosers folded onto one link would truncate away the second and leave the
+// first free to forge the label that introduced it.
+const DIRECTORY_LINK = `directory: ${RENDEZVOUS_PATH}`;
+const REFUSED_WIDTH_NAME = "n".repeat(MAX_FILENAME_LENGTH + 1);
+// The entry-name link the guard composes for it: the leading slice it relays,
+// carrying the marker the slicing itself earns.
+const REFUSED_WIDTH_NAME_LINK = `entry name: ${REFUSED_WIDTH_NAME.slice(0, 64)}${DISPLAY_TRUNCATION_MARKER}`;
+
+const TWO_CHOOSER_DELIVERIES: Array<[string, () => Error, string]> = [
+  [
+    "an entry name at the narrowest width the guard refuses",
+    () =>
+      filenameTooLongError(
+        RENDEZVOUS_PATH,
+        REFUSED_WIDTH_NAME,
+        MAX_FILENAME_LENGTH,
+      ),
+    DIRECTORY_LINK,
+  ],
+  [
+    "an entry name flooded past every budget",
+    () =>
+      filenameTooLongError(
+        RENDEZVOUS_PATH,
+        "n".repeat(100_000),
+        MAX_FILENAME_LENGTH,
+      ),
+    DIRECTORY_LINK,
+  ],
+  [
+    "a directory flooded past every budget",
+    () =>
+      filenameTooLongError(
+        "/rv/" + "p".repeat(100_000),
+        REFUSED_WIDTH_NAME,
+        MAX_FILENAME_LENGTH,
+      ),
+    REFUSED_WIDTH_NAME_LINK,
+  ],
+];
+
+for (const [label, raise, wholeLink] of TWO_CHOOSER_DELIVERIES) {
+  test(`the other chooser arrives on a whole link of its own with ${label}`, () => {
+    const rendered = sanitizeErrorForDisplay(raise());
+
+    expect(linksOf(rendered)).toContain(wholeLink);
+    expect(linksOf(rendered)).toContain(LISTING_RECOVERY_STEP);
     expect(linksOf(rendered).length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
   });
 }
