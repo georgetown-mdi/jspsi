@@ -21,18 +21,43 @@
 //   - `git worktree remove` without --force: git's own refusal on a tree with
 //     uncommitted work is the guard, so only the --force spelling that defeats
 //     that refusal is blocked
-//   - `git clean -fdx`, which real git shows SKIPS a nested worktree ("Would skip
-//     repository"); only a doubled force plus -d removes one, and that is the
-//     spelling this hook reads
+//   - `git clean -fdx`, which real git answers with "Skipping repository" for a
+//     nested worktree; only a doubled force plus -d removes one, and that is the
+//     spelling this hook reads. The test beside this file drives real git against
+//     a real linked worktree for every spelling rather than modelling the rule
 //
 // The commands read as deletions are rm, rmdir, unlink, shred, mv, find with a
 // deleting action, and those same commands reached through xargs in a pipeline,
-// plus the two git spellings above. Deliberate limits, each costing a rephrase
-// rather than a capability: targets that only exist at runtime (read from a file,
-// computed in a script, or run inside `bash -c "..."`) are not read, a `cd` moves
-// the directory paths resolve against only when it stands as its own command, and
-// a symlink pointing into a worktree is not resolved (removing the link does not
-// follow it anyway).
+// plus the two git spellings above.
+//
+// STATED LIMITS. This hook reads a plain command line and nothing more, so each
+// of the following reaches a worktree past it. They are recorded rather than
+// closed: closing them means a shell-syntax-aware parser, a larger and more
+// fragile thing than the accident this guards against warrants. What this hook
+// binds is the accident -- a session deleting a tree it can see by path -- and
+// not a determined bypass; a command it allows is not thereby endorsed.
+//   - COMPOSITION IS NOT UNWRAPPED. Stages are split on &&, ||, ;, a newline
+//     and the pipe, and nothing else: a subshell, a brace group, or a command
+//     substitution keeps its brackets inside the stage that carries it, so
+//     `(cd ../agent-other && rm -rf .)` reads as a `(cd` and an `rm` whose
+//     target is `.)`, neither of which names a worktree. A single `&` is not a
+//     separator either, so a deletion standing after one reads as an argument of
+//     the command in front of it. Nor is a command inside `bash -c "..."` read,
+//     or one behind an alias or a shell function.
+//   - THE COMMAND WORD IS MATCHED LITERALLY, by basename after quotes are
+//     stripped. A quoted spelling (`r"m"`) is caught by that stripping; an
+//     escaped one (`\rm`, `r\m`) names the same program to the shell and a
+//     different one to this hook.
+//   - ONLY sudo, command, env, nice AND time ARE PEELED as prefix words, along
+//     with their flags and the values those flags take (`sudo -u NAME`,
+//     `nice -n 10`). Another wrapper -- `timeout 5 rm ...`, `nohup`, `setsid` --
+//     stands where the command word belongs and the stage reads as the wrapper.
+//   - TARGETS THAT ONLY EXIST AT RUNTIME are not seen: a path read from a file,
+//     built up in a variable, or produced by a glob whose literal prefix names
+//     no worktree.
+//   - A `cd` MOVES THE DIRECTORY paths resolve against only when it stands as
+//     its own command, and a symlink pointing into a worktree is not resolved
+//     (removing the link does not follow it anyway).
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude. Any
 // unexpected failure here falls through to exit 0 (fail open) so a bug in this
@@ -59,7 +84,9 @@ function block(reason) {
       "behind it. Leave another session's tree alone, and retire a finished tree with " +
       "`git worktree remove <path>` (no --force), which refuses while the tree still has " +
       "uncommitted work. If the path is not a registered worktree at all, say so to the " +
-      "maintainer rather than deleting it some other way.\n",
+      "maintainer rather than deleting it some other way. This hook reads a plain command " +
+      "line and nothing more -- the limits listed in its header are real, so rephrasing " +
+      "around this refusal defeats it and destroys the tree anyway.\n",
   );
   process.exit(2);
 }
@@ -92,6 +119,17 @@ const COMMAND_PREFIX_WORDS = new Set([
   "time",
 ]);
 
+// The command words this hook reads. A prefix word's flag may take a value
+// (`sudo -u NAME`) that would otherwise stand where the command word belongs; a
+// word in this set is read as the command rather than as such a value.
+const INSPECTED_COMMANDS = new Set([
+  ...DELETING_COMMANDS,
+  "find",
+  "xargs",
+  "git",
+  "cd",
+]);
+
 // Peel leading environment assignments and prefix words off a stage, returning
 // the command it invokes and that command's arguments; null when the stage
 // invokes nothing.
@@ -113,6 +151,19 @@ function invocation(tokens) {
     // a flag means this stage is not a command invocation at all.
     if (sawPrefixWord && token.startsWith("-")) {
       index++;
+      // That flag may take a value (`sudo -u NAME`, `nice -n 10`), which is not
+      // the command word. A word this hook reads is taken for the command; any
+      // other word is taken for the value, except the last word on the stage,
+      // which has nothing after it to be the value for.
+      const next = tokens[index];
+      if (
+        next !== undefined &&
+        index + 1 < tokens.length &&
+        !next.startsWith("-") &&
+        !INSPECTED_COMMANDS.has(basename(next))
+      ) {
+        index++;
+      }
       continue;
     }
     break;
@@ -137,8 +188,15 @@ function worktreeContext(path) {
   return null;
 }
 
+// The prefix a path carries when it lies strictly under `directory`, which is
+// just "/" at the filesystem root -- appending a separator there builds "//",
+// which nothing starts with, and `rm -rf /` would match no worktree at all.
+function childPrefix(directory) {
+  return directory === "/" ? "/" : `${directory}/`;
+}
+
 function isInside(path, directory) {
-  return path === directory || path.startsWith(`${directory}/`);
+  return path === directory || path.startsWith(childPrefix(directory));
 }
 
 function treeCount(root) {
@@ -169,7 +227,7 @@ function rootsUnder(target, knownRoots) {
   const candidates = new Set(knownRoots);
   candidates.add(resolve(target, CLAUDE_DIR, WORKTREES_DIR));
   return [...candidates].filter(
-    (root) => root.startsWith(`${target}/`) && treeCount(root) > 0,
+    (root) => root.startsWith(childPrefix(target)) && treeCount(root) > 0,
   );
 }
 
