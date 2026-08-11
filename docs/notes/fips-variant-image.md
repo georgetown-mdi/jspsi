@@ -366,25 +366,38 @@ All five call shapes are on certificate 5021's approved-algorithm table, at the
 parameters psilink uses; the rows and the CAVP certificate ids are in
 [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests).
 Table membership is not the whole answer for three of them, because the policy
-states a condition on each somewhere other than that table. None of the three is
-settled by a measurement, and none is settled here. They are recorded because a
-claim written from Table 5 alone would not carry them.
+states a condition on each somewhere other than that table. No measurement
+settles any of the three: each is read off the policy's own text against what
+the code does, and each carries a recorded posture below. They are recorded
+because a claim written from Table 5 alone would not carry them.
 
-**AES-GCM with an externally supplied IV is a non-approved service.** Table 7
-(Non-Approved, Not Allowed Algorithms) lists `AES GCM (external IV)` for
-authenticated encryption, and section 2.7.1 (p. 22) says how the module tells
-the two services apart: it "provides a non-approved AES GCM encryption service
-which accepts arbitrary external IVs from the operator", requested "by invoking
-the `EVP_EncryptInit_ex2` API function with a non-NULL iv value", and "the API
-will set a non-approved service indicator". WebCrypto exposes no internal-IV
-mode -- `AesGcmParams.iv` is a required member -- so every `crypto.subtle`
-AES-GCM call supplies an IV by construction, on any platform, and psilink's is a
-deterministic sequence-number counter rather than a random value. Which of the
-two services the AEAD lands on is therefore not decided by table membership. It
-is decided by the indicator the module sets, which means driving the module and
-reading it back. The approved routes the policy names are the internal-IV
-service (Scenario 2 of FIPS 140-3 IG C.H) and the TLS 1.2 and TLS 1.3 scenarios;
-psilink is on none of them as written.
+**AES-GCM with an externally supplied IV is a non-approved service, and the
+application AEAD requests that service.** Table 7 (Non-Approved, Not Allowed
+Algorithms) lists `AES GCM (external IV)` for authenticated encryption, and
+section 2.7.1 (p. 22) says how the module tells the two services apart: it
+"provides a non-approved AES GCM encryption service which accepts arbitrary
+external IVs from the operator", requested "by invoking the
+`EVP_EncryptInit_ex2` API function with a non-NULL iv value", and "the API will
+set a non-approved service indicator". WebCrypto exposes no internal-IV mode --
+`AesGcmParams.iv` is a required member -- so every `crypto.subtle` AES-GCM call
+supplies an IV by construction, on any platform. psilink's is a deterministic
+12-byte value carrying the sender's sequence number, built in application code
+in `packages/core/src/connection/encryptedMessageConnection.ts` and carried in
+the envelope so the receiver reconstructs the same bytes
+([CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#application-layer-aead)).
+There is no shape of the call under which the IV originates anywhere else.
+
+So the policy's own text decides it, with no measurement outstanding: the AEAD
+is not an approved service under this certificate, whatever its algorithm row
+says. The approved routes the policy names are the internal-IV service
+(Scenario 2 of FIPS 140-3 IG C.H) and the TLS 1.2 and TLS 1.3 scenarios, and
+psilink is on none of them as written. What the conclusion bounds is the wording
+rather than the dispatch: the operation still runs inside the validated module's
+code, which is what the probe's AES-GCM leg measures and what a claim may name,
+so "the module performs the AEAD" and "the AEAD is an approved service" are two
+sentences with different answers and only the first is available. No
+approved-service indicator is read anywhere in this repository, and no claim
+here rests on one.
 
 **The SP 800-56Ar3 assurances are conditioned on a TLS application.** Section
 2.7.4 (p. 23) opens: "To comply with the assurances found in Section 5.6.2 of SP
@@ -398,7 +411,10 @@ public key is validated inside the module either way. So the
 `KAS-ECC-SSC Sp800-56Ar3` security function is available to name; the section
 5.6.2 assurances are not, on this certificate's own terms. Whether
 that sentence bounds the algorithm's approved status or only the assurance claim
-under IG D.F is a policy reading this note cannot settle, which is why the claim
+under IG D.F is a policy reading this note cannot settle, and the posture taken
+is the narrow one rather than a deferral of the question: name the security
+function, claim none of the section 5.6.2 assurances, and write no sentence
+whose truth turns on which way that reading falls. That is why the claim
 language in
 [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) names
 the security function and stops there. Certificate 4985 states no equivalent, so
@@ -420,6 +436,47 @@ that scheme is the composition question
 [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) already
 records as unattested, arriving here as a stated restriction rather than an
 inference.
+
+The posture follows the restriction rather than the algorithm row.
+`KDA HKDF Sp800-56Cr1` is named for the extract-then-expand the module performs
+on a shared secret it computed itself; no derivation in the schedule is claimed
+to satisfy the section 2.10 restriction, and the schedule above the shared
+secret is disclosed as an application composition of approved operations rather
+than as an approved derivation. That is the bound the may-say sentence in
+[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) is
+already written to.
+
+#### Why no probe reads the AES-GCM indicator
+
+A probe leg could make the product-shaped external-IV call inside the image and
+read the provider's approved-service indicator back. None is built, and the
+absence is a decision rather than a gap. The certificate's security policy is
+the governing document, it answers the question in its own text, and a leg that
+agreed with it would corroborate a conclusion rather than settle one. A leg
+earns its cost when there is a positive approved-service claim to verify -- a
+design that reached an approved AES-GCM route would need one, because the claim
+would then rest on the module's behaviour instead of on the policy's text.
+
+Generating the IV inside the module is the only route the policy offers to that
+approved service, and it was assessed and rejected. Any one of these is
+sufficient on its own:
+
+- **No call surface reaches it.** Neither WebCrypto nor `node:crypto` exposes an
+  internal-IV AES-GCM mode, so requesting one means native code in the
+  production encrypt path.
+- **It would cover the send path of one deployment.** Decryption takes the IV
+  off the wire whatever produced it, so only encryption could reach an
+  internal-IV service -- and only in the containerized CLI, since the browser
+  runs the same code with no module beneath it at all.
+- **The IV is load-bearing in the protocol.** The sequence number it carries is
+  the channel's replay and reorder guard, so taking a module-generated IV
+  instead is a breaking wire-format change rather than a parameter swap
+  ([CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#inbound-integrity-replay-and-ordering-checks)).
+- **The deterministic construction is the security-preferred one.** SP 800-38D
+  section 8.2.1 specifies it, and TLS 1.3 derives its nonce from the record
+  sequence number for the same reason: a per-key counter does not repeat, where
+  a randomly generated IV repeats with a probability that grows with the number
+  of invocations under the key.
 
 ## What it costs
 
@@ -495,11 +552,6 @@ reading -- Docker Hub is not reachable from the development container and no
   algorithm tables.** The certificate page corroborates the standard revision,
   the security level, the status and the sunset date, and renders none of those
   three sections (above), so they rest on the security policy alone.
-- **Which AES-GCM service the AEAD requests under the certified module.** The
-  policy makes an externally supplied IV a non-approved service and says the
-  module sets a non-approved indicator for it (above); every `crypto.subtle`
-  AES-GCM call supplies an IV by construction. Reading that indicator back from
-  the module is what settles it, and no probe leg does today.
 - **Whether `openssl-libs` 3.5.x loading the certified 3.0.8 module is inside
   the validation.** It is measured to load, self-test and serve, and AWS's own
   packaging permits the pairing -- the certified package declares
