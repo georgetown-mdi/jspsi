@@ -120,7 +120,10 @@ export function builder(cmd: Argv): Argv {
         "explicitly. Both parties must use the same value",
       "retain-files":
         "keep all exchange files as a permanent transcript instead of " +
-        "deleting them after consumption; intended for sync-mediated " +
+        "deleting them after consumption. They persist in the shared " +
+        "directory -- a directory on the remote SFTP host, or the shared " +
+        "folder both parties reach -- along with the plaintext rendezvous " +
+        "metadata that accompanies them. Intended for sync-mediated " +
         "transports that do not propagate deletions and for audit use cases. " +
         "Requires --timestamp-in-filename. Both parties must set this flag " +
         "identically -- a mismatch is detected at rendezvous and fails fast on " +

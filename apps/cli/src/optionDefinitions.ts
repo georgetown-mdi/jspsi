@@ -281,7 +281,10 @@ export function addCommonBootstrapOptions(
       describe:
         describe["retain-files"] ??
         "keep all exchange files as a permanent transcript instead of " +
-          "deleting them after consumption. Requires --timestamp-in-filename. " +
+          "deleting them after consumption. They persist in the shared " +
+          "directory -- a directory on the remote SFTP host, or the shared " +
+          "folder both parties reach -- along with the plaintext rendezvous " +
+          "metadata that accompanies them. Requires --timestamp-in-filename. " +
           "Both parties must set this flag identically",
     })
     .option("connection-per-poll", {
