@@ -113,6 +113,7 @@ import { useInviterExchange } from "./useInviterExchange";
 import { useStepHistory } from "./useStepHistory";
 import { useUnloadGuard } from "./useUnloadGuard";
 
+import type { AcceptKitEndpoint, AcceptKitExchange } from "./acceptKit";
 import type { AcquiredCsv, InviterEditor, RailStep } from "./inviterModel";
 import type { CliTransport, SaveExchangeFields } from "./saveExchangeModel";
 import type {
@@ -127,7 +128,6 @@ import type {
   JobRendezvousConfig,
   ProfiledJobInput,
 } from "@psi/workInputClient";
-import type { AcceptKitEndpoint } from "./acceptKit";
 import type { AlertContent } from "@components/csvIntake";
 import type { BenchCoverageInput } from "@components/useNonEmptyRates";
 import type { ColumnSamples } from "@psi/columnSamples";
@@ -228,14 +228,17 @@ export function InviterBench() {
   const [reading, setReading] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [invitation, setInvitation] = useState<GeneratedInvitation>();
-  // The rendezvous locator minted into the current invitation, held so the
-  // partner's accept kit prints back exactly the locator the token carries.
-  // Set only where an invitation is minted for a partner who accepts from the
-  // command line (a console sftp/filedrop run); undefined otherwise, which is
-  // what withholds the kit from a WebRTC exchange and from the hosted build
-  // (whose CLI transports route to the save surface and mint nothing here).
-  const [acceptKitEndpoint, setAcceptKitEndpoint] =
-    useState<AcceptKitEndpoint>();
+  // The current invitation as the mint fixed it for the partner's accept kit:
+  // the rendezvous locator minted into the token, so the sheet prints back
+  // exactly what the token carries, and the retain-mode choice the run carries,
+  // so the sheet cannot describe a file-handling regime the authoring controls
+  // moved to after the mint. Set only where an invitation is minted for a
+  // partner who accepts from the command line (a console sftp/filedrop run);
+  // undefined otherwise, which is what withholds the kit from a WebRTC exchange
+  // and from the hosted build (whose CLI transports route to the save surface
+  // and mint nothing here).
+  const [acceptKitExchange, setAcceptKitExchange] =
+    useState<AcceptKitExchange>();
   const [minting, setMinting] = useState(false);
   const [createAlert, setCreateAlert] = useState<AlertContent>();
   const [expertMode, setExpertMode] = useState(false);
@@ -427,7 +430,7 @@ export function InviterBench() {
       current === undefined ? current : unsealEditor(current),
     );
     setInvitation(undefined);
-    setAcceptKitEndpoint(undefined);
+    setAcceptKitExchange(undefined);
     setSavedExchange(undefined);
     setManageStatus("idle");
     goTo("review");
@@ -753,7 +756,7 @@ export function InviterBench() {
     setDemoActive(false);
     setSavedExchange(undefined);
     setInvitation(undefined);
-    setAcceptKitEndpoint(undefined);
+    setAcceptKitExchange(undefined);
     setManageStatus("idle");
     goTo("file");
   }
@@ -863,7 +866,14 @@ export function InviterBench() {
       });
       setEditor(sealEditor(editor));
       setInvitation(minted);
-      setAcceptKitEndpoint(kitEndpoint);
+      // The retain choice is captured beside the locator, from the same draft
+      // the run's own options are resolved from, so the sheet states the
+      // bilateral setting the run actually carries.
+      setAcceptKitExchange(
+        kitEndpoint === undefined
+          ? undefined
+          : { endpoint: kitEndpoint, retainFiles: exchangeFiles.retainFiles },
+      );
       setManageStatus("idle");
       goTo("share");
     } catch (error) {
@@ -976,18 +986,16 @@ export function InviterBench() {
   }
 
   // Write the partner's accept kit to disk through the same blob download the
-  // exchange-file save uses. The sheet is composed from the minted locator and
+  // exchange-file save uses. The sheet is composed from the minted exchange and
   // this build's own release version alone: it carries no secret, no invitation
   // token (the partner pastes their own copy over the sheet's placeholder), and
-  // nothing else from this machine.
+  // nothing else from this machine. The retain-mode flag selects fixed text and
+  // a fixed command flag rather than reaching the sheet as a value.
   function downloadAcceptKit() {
-    if (acceptKitEndpoint === undefined) return;
+    if (acceptKitExchange === undefined) return;
     triggerBlobDownload(
       acceptKitFileName(new Date()),
-      buildAcceptKit({
-        endpoint: acceptKitEndpoint,
-        version: psilinkVersion(),
-      }),
+      buildAcceptKit({ ...acceptKitExchange, version: psilinkVersion() }),
       "text/plain",
     );
   }
@@ -1330,7 +1338,7 @@ export function InviterBench() {
               warnings={warnings}
               partnerAcceptsByCli={isCliTransport(transport)}
               onDownloadAcceptKit={
-                acceptKitEndpoint === undefined ? undefined : downloadAcceptKit
+                acceptKitExchange === undefined ? undefined : downloadAcceptKit
               }
               serverJob={chosenRunMode === "server-job"}
               jobId={jobId}
