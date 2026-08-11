@@ -1,8 +1,16 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+
+import {
+  allowanceFor,
+  declarationOf,
+  descendants,
+  describeSite,
+  isFunctionLike,
+  parseAdapter,
+  requestIssuingSites,
+  unwrap,
+} from "./lib/sftpAdapterSites.mjs";
 
 // Every server round trip the SFTP adapter issues must pass through its
 // tracked() bracket, which is where the heartbeat's in-flight state is kept: an
@@ -13,10 +21,9 @@ import { describe, expect, it } from "vitest";
 // What this check is NOT. The outstanding-operation count -- the idle-boundary
 // release's precondition -- is opened one layer up, by runOperation, and spans an
 // operation from issue to final settlement; every tracked() bracket in the
-// adapter is one ATTEMPT inside such a span. That nesting is a property of the
-// private *Once layer being reached only through runOperation, which this
-// analysis does not verify: it checks bracket coverage and nothing about the span
-// above it.
+// adapter is one ATTEMPT inside such a span. This analysis checks bracket
+// coverage and nothing about the span above it: the inclusion check over that
+// span is the sibling file, scripts/sftp-operation-spans.test.mjs.
 //
 // docs/spec/CHANNEL_SECURITY.md states which round trips are excluded, and prose
 // asserting a code fact rots silently: the exclusion set has been wrong before
@@ -27,13 +34,13 @@ import { describe, expect, it } from "vitest";
 // its reason; an allowance that no longer matches a call site fails too, so the list
 // cannot rot into a record of what used to be true.
 //
-// The adapter is parsed with the TypeScript compiler API rather than matched by
-// regex: coverage here is a promise flowing through wrapper calls, callbacks and
-// executors, which no pattern over text can follow.
+// What counts as a request-issuing call site, and the reach of that decision, is
+// scripts/lib/sftpAdapterSites.mjs -- shared with the span check so the two
+// cannot come to cover different sets.
 //
-// Limits, stated rather than implied. The analysis is syntactic and is not a
-// proof in either direction; what follows is where it can be wrong, and which
-// way.
+// Limits, stated rather than implied. The coverage propagation below is
+// syntactic and is not a proof in either direction; what follows is where it can
+// be wrong, and which way.
 //
 // It can call a site bracketed that is not. Inside a covered promise's executor,
 // a call is marked bracketed when one of its argument functions MENTIONS a
@@ -45,62 +52,17 @@ import { describe, expect, it } from "vitest";
 // opendir/readdir callback chain and createExclusiveOnce's open ->
 // code-4-exists -> close handshake, which a reachability test would reclassify.
 //
-// It can miss a site altogether, because being a site is itself decided
-// syntactically: a call that decision does not reach is never examined at all,
-// so it is never reported. A site is a call whose callee is written
-// as a property access, `receiver.member(...)` with optional chaining included;
-// whose member is not one of the session-lifecycle and EventEmitter names listed
-// below; and whose receiver is `this.client`, or an identifier bearing a name
-// bound anywhere in this file to the raw SFTPWrapper (destructured off the
-// internals cast or off a local resolving to a receiver, or declared as a
-// parameter of the wrapper's type), or an identifier declared in an enclosing
-// block -- plainly or by destructuring -- whose initializer leads through a
-// chain of such declarations back to either.
-//
-// That is the whole reach, and the reach is the claim: a callee or a receiver
-// written some other way is not decided here. No enumeration of those other
-// forms is kept, deliberately. A list of what an analysis cannot see is a second
-// claim about the analysis that nothing checks, and a wrong entry in it reads as
-// a guarantee -- take the rules above as exhaustive instead, and anything they
-// do not name as unseen.
-//
-// Where the reach errs it errs toward over-reporting: the wrapper name match is
-// file-wide rather than scoped, so an unrelated binding that happens to share a
-// wrapper's name is reported as a site too. That direction costs a spurious
-// failure to be answered, never a miss.
-//
 // Failing CLOSED is a property of the coverage propagation and not of the site
-// rules above. A site the propagation cannot reach is reported unbracketed, so a
+// rules. A site the propagation cannot reach is reported unbracketed, so a
 // new promise-plumbing idiom shows up as a failure to be answered (by extending
 // the rules here, or by bracketing the site) rather than passing unseen; a call
-// the site rules do not reach has no such backstop and simply passes. An
-// allowance matches by enclosing method and callee name, so a SECOND unbracketed
-// call to the same method in the same method is admitted by the same reason --
-// that is the class the reason names, not an unexamined site.
+// the site rules do not reach has no such backstop and simply passes.
 
-const ADAPTER = "apps/cli/src/connection/ssh2SftpAdapter.ts";
 const SELF = "scripts/sftp-tracked-round-trips.test.mjs";
-
-// Members of the ssh2-sftp-client / raw SFTPWrapper surface that are not server
-// round trips: session lifecycle and the EventEmitter surface. Everything else
-// reached on those objects counts as request-issuing, so a method this file has
-// never seen is treated as a round trip rather than ignored.
-const NON_REQUEST_MEMBERS = new Set([
-  "connect",
-  "end",
-  "on",
-  "once",
-  "off",
-  "addListener",
-  "removeListener",
-  "emit",
-  "destroy",
-]);
 
 // The round trips deliberately issued outside the bracket, matched by the method
 // they are issued from and the callee they issue. Each reason states why the
-// bracket must not cover it, and each is outside the outstanding-operation span
-// as well.
+// bracket must not cover it.
 const ALLOWED_OUTSIDE_THE_BRACKET = [
   {
     enclosingMethod: "sendKeepalive",
@@ -137,71 +99,6 @@ const ALLOWED_OUTSIDE_THE_BRACKET = [
   },
 ];
 
-const here = dirname(fileURLToPath(import.meta.url));
-const root = resolve(here, "..");
-
-/** Parse a TypeScript source file with parent pointers, for ancestor walks. */
-export function parseSource(fileName, text) {
-  return ts.createSourceFile(
-    fileName,
-    text,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-}
-
-/** Every descendant of `node`, in source order. */
-function descendants(node) {
-  const found = [];
-  const visit = (child) => {
-    found.push(child);
-    ts.forEachChild(child, visit);
-  };
-  ts.forEachChild(node, visit);
-  return found;
-}
-
-/** Strip the wrappers that carry a value through unchanged. */
-function unwrap(node) {
-  let current = node;
-  for (;;) {
-    if (
-      current &&
-      (ts.isParenthesizedExpression(current) ||
-        ts.isAsExpression(current) ||
-        ts.isSatisfiesExpression(current) ||
-        ts.isNonNullExpression(current) ||
-        ts.isAwaitExpression(current) ||
-        ts.isTypeAssertionExpression(current))
-    ) {
-      current = current.expression;
-      continue;
-    }
-    return current;
-  }
-}
-
-function isFunctionLike(node) {
-  return node && (ts.isArrowFunction(node) || ts.isFunctionExpression(node));
-}
-
-/** The nearest enclosing named method or function declaration, for reporting. */
-function enclosingMethodName(node) {
-  for (let current = node.parent; current; current = current.parent) {
-    if (
-      (ts.isMethodDeclaration(current) ||
-        ts.isFunctionDeclaration(current) ||
-        ts.isGetAccessorDeclaration(current) ||
-        ts.isSetAccessorDeclaration(current)) &&
-      current.name
-    )
-      return current.name.getText();
-    if (ts.isConstructorDeclaration(current)) return "constructor";
-  }
-  return "<top level>";
-}
-
 /** Return statements belonging to `fn` itself, not to a nested function. */
 function ownReturnStatements(fn) {
   const returns = [];
@@ -220,131 +117,6 @@ function identifierNamesIn(node) {
   for (const child of descendants(node))
     if (ts.isIdentifier(child)) names.add(child.text);
   return names;
-}
-
-/**
- * The variable declaration binding `name` in the nearest enclosing scope of
- * `from`, or undefined. A scope here is any ancestor carrying statements, which
- * is enough for this file's `const` plumbing.
- */
-function declarationOf(name, from) {
-  for (let current = from.parent; current; current = current.parent) {
-    const statements = ts.isSourceFile(current)
-      ? current.statements
-      : ts.isBlock(current)
-        ? current.statements
-        : undefined;
-    if (!statements) continue;
-    for (const statement of statements) {
-      if (!ts.isVariableStatement(statement)) continue;
-      for (const declaration of statement.declarationList.declarations) {
-        if (ts.isIdentifier(declaration.name) && declaration.name.text === name)
-          return declaration;
-        if (ts.isObjectBindingPattern(declaration.name)) {
-          for (const element of declaration.name.elements)
-            if (ts.isIdentifier(element.name) && element.name.text === name)
-              return declaration;
-        }
-      }
-    }
-  }
-  return undefined;
-}
-
-/** The `this.client` property: the client every high-level operation runs on. */
-function isTheClient(node) {
-  const target = unwrap(node);
-  return (
-    !!target &&
-    ts.isPropertyAccessExpression(target) &&
-    target.expression.kind === ts.SyntaxKind.ThisKeyword &&
-    target.name.text === "client"
-  );
-}
-
-/**
- * Whether `identifier` is bound to something requests are issued on: a raw
- * SFTPWrapper binding, `this.client`, or a local initialized from either,
- * followed through a chain of such locals (`const client = this.client`). Only
- * a wrapper name and a declaration initializer are followed; the header states
- * that reach.
- */
-function bindsARequestReceiver(identifier, wrappers = new Set()) {
-  const seen = new Set();
-  for (let current = identifier; ;) {
-    if (wrappers.has(current.text)) return true;
-    const declaration = declarationOf(current.text, current);
-    if (!declaration || !declaration.initializer || seen.has(declaration))
-      return false;
-    seen.add(declaration);
-    const initializer = unwrap(declaration.initializer);
-    if (isTheClient(initializer)) return true;
-    if (!ts.isIdentifier(initializer)) return false;
-    current = initializer;
-  }
-}
-
-/**
- * Identifiers bound to the raw ssh2 SFTPWrapper: the `const { sftp } = ...`
- * idiom over the internals cast or over a local holding it, and a parameter
- * declared as the wrapper's type. Calls on these are server round trips exactly
- * as calls on the high-level client are.
- */
-export function wrapperBindings(sourceFile) {
-  const names = new Set();
-  for (const node of descendants(sourceFile)) {
-    if (
-      ts.isVariableDeclaration(node) &&
-      node.initializer &&
-      ts.isObjectBindingPattern(node.name) &&
-      (node.initializer.getText().includes("Ssh2SftpClientInternals") ||
-        (ts.isIdentifier(unwrap(node.initializer)) &&
-          bindsARequestReceiver(unwrap(node.initializer))))
-    ) {
-      for (const element of node.name.elements)
-        if (ts.isIdentifier(element.name)) names.add(element.name.text);
-    }
-    if (
-      ts.isParameter(node) &&
-      node.type &&
-      node.type.getText().includes('Ssh2SftpClientInternals["sftp"]') &&
-      ts.isIdentifier(node.name)
-    )
-      names.add(node.name.text);
-  }
-  return names;
-}
-
-/**
- * The call expressions the site rules reach: a property-access call on
- * `this.client`, on a raw SFTPWrapper binding, or on a local aliasing either,
- * whose member is not session lifecycle or EventEmitter plumbing. A callee
- * written any other way is not a site; see the header.
- */
-export function requestIssuingSites(sourceFile) {
-  const wrappers = wrapperBindings(sourceFile);
-  const sites = [];
-  for (const node of descendants(sourceFile)) {
-    if (!ts.isCallExpression(node)) continue;
-    const callee = unwrap(node.expression);
-    if (!ts.isPropertyAccessExpression(callee)) continue;
-    const receiver = unwrap(callee.expression);
-    const onClient = isTheClient(receiver);
-    const onWrapper =
-      ts.isIdentifier(receiver) && bindsARequestReceiver(receiver, wrappers);
-    if (!onClient && !onWrapper) continue;
-    const member = callee.name.text;
-    if (NON_REQUEST_MEMBERS.has(member)) continue;
-    const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
-    sites.push({
-      node,
-      callee: `${onClient ? "this.client" : receiver.text}.${member}`,
-      member,
-      line: line + 1,
-      enclosingMethod: enclosingMethodName(node),
-    });
-  }
-  return sites;
 }
 
 /**
@@ -478,21 +250,10 @@ export function trackedCoverage(sourceFile) {
   return { covered, seeds };
 }
 
-const sourceFile = parseSource(
-  ADAPTER,
-  readFileSync(resolve(root, ADAPTER), "utf8"),
-);
+const sourceFile = parseAdapter();
 const sites = requestIssuingSites(sourceFile);
 const { covered, seeds } = trackedCoverage(sourceFile);
 const outsideTheBracket = sites.filter((site) => !covered.has(site.node));
-const allowanceFor = (site) =>
-  ALLOWED_OUTSIDE_THE_BRACKET.find(
-    (allowance) =>
-      allowance.enclosingMethod === site.enclosingMethod &&
-      allowance.callee === site.member,
-  );
-const describeSite = (site) =>
-  `${ADAPTER}:${site.line} ${site.callee}() in ${site.enclosingMethod}()`;
 
 describe("SFTP adapter round trips are bracketed by tracked()", () => {
   it("finds the adapter's request sites and its tracked() brackets", () => {
@@ -505,7 +266,9 @@ describe("SFTP adapter round trips are bracketed by tracked()", () => {
 
   it("brackets every request-issuing call site, save the named exceptions", () => {
     const unexplained = outsideTheBracket
-      .filter((site) => allowanceFor(site) === undefined)
+      .filter(
+        (site) => allowanceFor(ALLOWED_OUTSIDE_THE_BRACKET, site) === undefined,
+      )
       .map(describeSite);
     expect(
       unexplained,
@@ -524,7 +287,10 @@ describe("SFTP adapter round trips are bracketed by tracked()", () => {
   it("keeps no allowance that has stopped matching a call site", () => {
     const stale = ALLOWED_OUTSIDE_THE_BRACKET.filter(
       (allowance) =>
-        !outsideTheBracket.some((site) => allowanceFor(site) === allowance),
+        !outsideTheBracket.some(
+          (site) =>
+            allowanceFor(ALLOWED_OUTSIDE_THE_BRACKET, site) === allowance,
+        ),
     ).map(
       (allowance) =>
         `${allowance.enclosingMethod}() -> ${allowance.callee}(), allowed ` +
@@ -551,30 +317,5 @@ describe("SFTP adapter round trips are bracketed by tracked()", () => {
     );
     expect(fallback).toBeDefined();
     expect(covered.has(fallback.node)).toBe(true);
-  });
-
-  it("finds a round trip issued on a local aliasing the client or the wrapper", () => {
-    // The adapter issues every round trip on `this.client` or on a `{ sftp }`
-    // destructured from the internals cast, so nothing above exercises the alias
-    // rule and a regression in it would fail no assertion here. Pinned against a
-    // source of its own instead: without the rule these two sites are simply not
-    // seen, and an uncounted round trip written this way passes the check.
-    const aliasing = parseSource(
-      "aliasing.ts",
-      `class A {
-         private issue(path: string) {
-           const client = this.client;
-           const relayed = client;
-           void relayed.stat(path);
-           const internals = this.client as unknown as Ssh2SftpClientInternals;
-           const { sftp } = internals;
-           sftp.readdir(path, () => {});
-         }
-       }`,
-    );
-    expect(requestIssuingSites(aliasing).map((site) => site.callee)).toEqual([
-      "relayed.stat",
-      "sftp.readdir",
-    ]);
   });
 });

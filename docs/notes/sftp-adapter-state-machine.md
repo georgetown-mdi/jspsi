@@ -231,9 +231,12 @@ directions in which issued-and-unsettled departs from on-the-wire, are in
 Three round trips the adapter issues sit outside the operation classification
 entirely -- the heartbeat's keepalive, a listing's post-settle handle close, and
 the cleanup drain's re-issue -- and that exclusion set is a check rather than a
-claim: `scripts/sftp-tracked-round-trips.test.mjs` parses the adapter and fails
-on any request-issuing site outside the per-attempt bracket that is not one of
-the three.
+claim: `scripts/sftp-tracked-round-trips.test.mjs` and
+`scripts/sftp-operation-spans.test.mjs` parse the adapter and fail on any
+request-issuing site the per-attempt bracket, or the operation span above it,
+does not cover and their allowances do not name. What each analysis decides, and
+where it stops, is in
+[CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#the-outstanding-operation-hold-on-an-idle-boundary).
 
 ## The ledger
 
