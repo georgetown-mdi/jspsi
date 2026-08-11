@@ -100,7 +100,7 @@ docker run --rm -p 127.0.0.1:3000:3000 \
   --env JOB_DATA_ROOT=/work -v "$PWD":/work \
   vdorie/psi-link:latest serve
 ```
-   Docker application's terminal on Windows:
+   Docker application's console on Windows:
 ```sh
 docker run --rm -p 127.0.0.1:3000:3000 --env JOB_DATA_ROOT=/work -v "${PWD}:/work" vdorie/psi-link:latest serve
 ```
