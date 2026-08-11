@@ -10,6 +10,7 @@ import {
   exchangeFilesProblems,
 } from "@bench/exchangeFilesModel";
 import { composeConfigDocument, zeroSetupFileSyncArgv } from "@jobs/intent";
+import { PEER_ID_SHAPE_MESSAGE } from "@psi/peerIdLabel";
 
 import { validIntent } from "../utils/jobFixtures";
 
@@ -151,13 +152,12 @@ describe("an inadmissible combination is a form problem, not a failed job", () =
   test.each([
     ["a path separator", "../etc/passwd"],
     ["a leading dash", "-save"],
+    ["an accented letter", "clinique-café"],
     ["an over-long label", "a".repeat(65)],
   ])("a party name with %s is refused by shape", (_label, peerId) => {
-    const problems = exchangeFilesProblems(
-      draft({ peerId, timestampInFilename: "on" }),
-    );
-    expect(problems.length).toBe(1);
-    expect(problems[0]).toContain("single label");
+    expect(
+      exchangeFilesProblems(draft({ peerId, timestampInFilename: "on" })),
+    ).toEqual([PEER_ID_SHAPE_MESSAGE]);
   });
 
   test("an admissible combination reports nothing", () => {

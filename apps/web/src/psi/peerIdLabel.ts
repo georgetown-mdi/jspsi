@@ -17,8 +17,8 @@ export const MAX_PEER_ID_LENGTH = 64;
 
 /**
  * The shape a `peer_id` may take when it is authored in the console: a single
- * label that starts and ends with a letter or digit and otherwise admits only
- * letters, digits, spaces, `-`, and `_`.
+ * label that starts and ends with an ASCII letter or digit and otherwise admits
+ * only ASCII letters, digits, spaces, `-`, and `_`.
  *
  * Core permits any non-empty string -- a CLI operator types their own config, and
  * core's filename-safety note is advisory there -- but a value that arrives over
@@ -36,7 +36,11 @@ export function isAdmissiblePeerId(value: string): boolean {
 
 /** The message both the console guard and the intent schema report for a
  * `peer_id` that fails {@link isAdmissiblePeerId}, so the two surfaces say the
- * same thing about the same value. */
+ * same thing about the same value. It names the ASCII bound
+ * {@link PEER_ID_PATTERN} enforces, so an operator who typed an accented or
+ * non-Latin name reads why it was refused rather than a description of what
+ * they typed. */
 export const PEER_ID_SHAPE_MESSAGE =
-  "The party name must be a single label of letters, digits, spaces, '-', or " +
-  "'_', beginning and ending with a letter or digit.";
+  "The party name must be a single label of ASCII letters (A-Z, a-z), digits, " +
+  "spaces, '-', or '_', beginning and ending with a letter or digit. Write an " +
+  "accented or non-Latin name in ASCII instead.";
