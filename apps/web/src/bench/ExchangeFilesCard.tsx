@@ -106,9 +106,12 @@ export function ExchangeFilesCard({
           label="Keep every exchange file"
           description={
             "Leave the exchange's files in place as a permanent transcript " +
-            "instead of deleting each one once it has been read. Also switches " +
-            "on timestamped filenames and the lockless rendezvous, which it " +
-            "requires."
+            "instead of deleting each one once it has been read. They stay " +
+            "where the exchange runs: in the remote directory on the SFTP " +
+            "server, which you may not administer, or in the shared folder, " +
+            "which your partner keeps a synced copy of. Nothing clears them " +
+            "afterwards. Also switches on timestamped filenames and the " +
+            "lockless rendezvous, which it requires."
           }
         />
 
