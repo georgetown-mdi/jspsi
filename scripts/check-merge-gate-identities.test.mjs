@@ -94,6 +94,18 @@ describe("job check names", () => {
   it("reads no jobs from a source declaring none", () => {
     expect(jobCheckNames("on:\n  pull_request:\n")).toEqual([]);
   });
+
+  it("marks a nameless matrix job unmatchable rather than exposing its id", () => {
+    expect(
+      jobCheckNames(`jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20]
+`),
+    ).toEqual([{ name: "build", templated: true }]);
+  });
 });
 
 describe("workflow job index", () => {
@@ -283,6 +295,21 @@ describe("rule 2: a gating workflow filters nothing", () => {
         "on:\n  pull_request:\n    paths: ['apps/**']\n    paths-ignore: ['docs/**']\n",
       ),
     ).toEqual({ declared: true, filters: ["paths", "paths-ignore"] });
+  });
+
+  it("reads the scalar and array trigger shorthands as declared, no filters", () => {
+    expect(pullRequestTrigger("on: pull_request\n")).toEqual({
+      declared: true,
+      filters: [],
+    });
+    expect(pullRequestTrigger("on: [push, pull_request]\n")).toEqual({
+      declared: true,
+      filters: [],
+    });
+    expect(pullRequestTrigger("on: [push]\n")).toEqual({
+      declared: false,
+      filters: [],
+    });
   });
 
   it("does not read a path filter on another event as a violation", () => {

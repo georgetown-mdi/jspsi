@@ -77,15 +77,19 @@ const API_ROOT = "https://api.github.com";
 
 /**
  * The check-run name of every job a workflow source declares, with whether the
- * name carries an expression rather than literal text. A job with no `name:`
- * runs under its job id, so the id stands in.
+ * name is one a required context can literally match. A job with no `name:`
+ * runs under its job id, so the id stands in -- unless the job carries a
+ * matrix, whose nameless check runs render as "<id> (<matrix values>)" and
+ * never the bare id.
  */
 export function jobCheckNames(source) {
   const jobs = parse(source)?.jobs;
   if (jobs === null || typeof jobs !== "object") return [];
   return Object.entries(jobs).map(([id, job]) => {
-    const name = typeof job?.name === "string" ? job.name : id;
-    return { name, templated: name.includes("${{") };
+    const named = typeof job?.name === "string";
+    const name = named ? job.name : id;
+    const namelessMatrix = !named && job?.strategy?.matrix !== undefined;
+    return { name, templated: name.includes("${{") || namelessMatrix };
   });
 }
 
@@ -101,7 +105,7 @@ function workflowFiles(root) {
 /**
  * Every job name the workflow tree declares: `literal` is the set a context can
  * be matched against, `templated` the `{file, name}` pairs carrying an
- * expression, which no context can match here.
+ * expression or a nameless matrix expansion, which no context can match here.
  */
 export function workflowJobIndex(root) {
   const literal = new Set();
@@ -223,7 +227,7 @@ export function branchRequiredContexts(branch, rules) {
 export function mergeContexts(contexts) {
   const merged = new Map();
   for (const { branch, context, integrationId } of contexts) {
-    const key = `${integrationId} ${context}`;
+    const key = `${integrationId}\0${context}`;
     const seen = merged.get(key);
     if (seen) seen.branches.push(branch);
     else merged.set(key, { context, integrationId, branches: [branch] });
@@ -285,7 +289,13 @@ export function contextViolations(merged, index) {
  * the boolean a YAML 1.1 parser would produce.
  */
 export function pullRequestTrigger(source) {
-  const pullRequest = parse(source)?.on?.pull_request;
+  const on = parse(source)?.on;
+  // The `on: pull_request` scalar and `on: [push, pull_request]` array
+  // shorthands declare the trigger with no filter surface at all.
+  if (on === "pull_request") return { declared: true, filters: [] };
+  if (Array.isArray(on))
+    return { declared: on.includes("pull_request"), filters: [] };
+  const pullRequest = on?.pull_request;
   if (pullRequest === undefined) return { declared: false, filters: [] };
   if (pullRequest === null || typeof pullRequest !== "object") {
     return { declared: true, filters: [] };
