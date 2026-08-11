@@ -7,7 +7,11 @@ import {
 } from "./nativeSshdServer";
 
 export * from "./types";
-export { startInProcessSftpServer } from "./inProcessServer";
+export {
+  MAX_DELIVERED_SFTP_PAYLOAD_BYTES,
+  READDIR_BATCH_BUDGET_BYTES,
+  startInProcessSftpServer,
+} from "./inProcessServer";
 export {
   NATIVE_PROFILES,
   type NativeProfile,

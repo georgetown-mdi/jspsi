@@ -67,7 +67,10 @@ hands each test its connection details, per-party credentials, and rendezvous
 paths. The in-process backend adds two surfaces a real `sshd` cannot offer:
 
 - Fault injection -- a malformed NAME or DATA packet, a request accepted and
-  never answered, transient RENAME failures, capped READDIR batches.
+  never answered, transient RENAME failures, capped READDIR batches, and a NAME
+  reply of a chosen width (the hook the pinned stack's reply wall is measured
+  through; see
+  [docs/spec/DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client)).
 - `sessionControls.ts`, the session-lifecycle hub -- lifetime, op-count, and
   idle caps that drop a live session, one-shot drops armed on the Nth further
   operation or on a wall clock, a withheld-close mode that consumes the client's

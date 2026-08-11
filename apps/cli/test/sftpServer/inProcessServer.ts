@@ -39,16 +39,29 @@ const RESPONSE_DATA = 103;
 // the remote root from the handle rather than hardcoding `/psi`.
 const REMOTE_ROOT = "/psi";
 
-// The widest SFTP packet the pinned stack carries, measured against the real
-// client rather than read out of it: a NAME reply declaring 262,144 payload
-// bytes arrives, one declaring 262,145 never does, and the server's name() call
-// reports nothing either way -- so an over-wide reply is lost in silence and the
-// client is left reporting no response at all.
-const MAX_DELIVERED_SFTP_PAYLOAD_BYTES = 262_144;
+/**
+ * The widest SFTP packet the pinned stack carries, measured against the real
+ * client rather than read out of it: a NAME reply declaring this many payload
+ * bytes is delivered whole, and one declaring a byte more is refused by the
+ * client as a fatal protocol error that takes the SFTP session down with it. The
+ * server that wrote it is told nothing either way, so a backend that wrote one
+ * would lose the session it was serving without ever seeing why.
+ *
+ * Both sides of the wall are driven in
+ * `test/integration/sftpStackPremises.test.ts`, so a bump that moves it fails
+ * there rather than as broken batching in whichever suite ran first.
+ *
+ * @internal
+ */
+export const MAX_DELIVERED_SFTP_PAYLOAD_BYTES = 262_144;
 
-// What a READDIR batch is packed to. Half the wall above, so the per-entry
-// estimate below can be off by a factor of two and the packet still arrives.
-const READDIR_BATCH_BUDGET_BYTES = MAX_DELIVERED_SFTP_PAYLOAD_BYTES / 2;
+/**
+ * What a READDIR batch is packed to. Half the wall above, so the per-entry
+ * estimate below can be off by a factor of two and the packet still arrives.
+ *
+ * @internal
+ */
+export const READDIR_BATCH_BUDGET_BYTES = MAX_DELIVERED_SFTP_PAYLOAD_BYTES / 2;
 
 // A NAME reply's own header (type, request id, entry count), and per entry the
 // length prefixes and attribute block SFTPv3 frames around it. Both are
@@ -56,6 +69,22 @@ const READDIR_BATCH_BUDGET_BYTES = MAX_DELIVERED_SFTP_PAYLOAD_BYTES / 2;
 // what the budget's margin exists to avoid needing.
 const NAME_PACKET_HEADER_BYTES = 16;
 const NAME_ENTRY_FRAMING_BYTES = 64;
+
+// What one entry costs the batch it is packed into.
+function nameEntryBytes(filename: string, longname: string): number {
+  return (
+    NAME_ENTRY_FRAMING_BYTES +
+    Buffer.byteLength(filename) +
+    Buffer.byteLength(longname)
+  );
+}
+
+// The one predicate every NAME reply this backend writes is packed against:
+// whether a batch already holding `packedBytes` can take an entry of
+// `entryBytes` and still arrive.
+function nameBatchAdmits(packedBytes: number, entryBytes: number): boolean {
+  return packedBytes + entryBytes <= READDIR_BATCH_BUDGET_BYTES;
+}
 
 // The malformed-packet injection rides one documented ssh2 internal: the public
 // name()/data() server APIs only ever emit well-formed packets, so a malformed
@@ -172,10 +201,35 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
   );
   const hostKey = makeKeyPair();
 
+  // Held behind the accessor below so an over-wide synthetic name is refused
+  // where the test arms it, in that test's own stack.
+  let oversizeName: string | null = null;
+
   const inject: SftpFaultInjection = {
     malformedNameOnNextReaddir: false,
     malformedDataOnNextRead: false,
-    oversizeNameOnNextReaddir: null,
+    get oversizeNameOnNextReaddir(): string | null {
+      return oversizeName;
+    },
+    set oversizeNameOnNextReaddir(filename: string | null) {
+      if (
+        filename !== null &&
+        !nameBatchAdmits(
+          NAME_PACKET_HEADER_BYTES,
+          nameEntryBytes(filename, filename),
+        )
+      )
+        throw new Error(
+          `oversizeNameOnNextReaddir: a ${Buffer.byteLength(filename)}-byte filename ` +
+            `overruns the ${READDIR_BATCH_BUDGET_BYTES}-byte NAME batch budget, so the ` +
+            `reply carrying it would approach the ${MAX_DELIVERED_SFTP_PAYLOAD_BYTES}-byte ` +
+            `wall the pinned ssh2 stack refuses a reply at, taking the session down ` +
+            `instead of exercising anything.`,
+        );
+      oversizeName = filename;
+    },
+    nameReplyFilenameBytesOnNextReaddir: null,
+    lastNameReplyPayloadBytes: undefined,
     withholdOn: null,
     renameFailuresRemaining: 0,
     readdirBatchSize: 0,
@@ -493,6 +547,29 @@ function attachSftpHandlers(
     raw._protocol.channelData(raw.outgoing.id, packet);
   };
 
+  // The payload length ssh2 declared for the reply `write` produces, read off the
+  // leading bytes it hands the protocol: the encoder's own number, which is what
+  // a case measuring what the stack still delivers needs and what no estimate
+  // here could supply. Undefined when the write reached the protocol with fewer
+  // bytes than a length prefix.
+  const declaredPayloadBytesOf = (write: () => void): number | undefined => {
+    const raw = sftp as unknown as RawChannelSftp;
+    const protocol = raw._protocol;
+    const original = protocol.channelData;
+    let declared: number | undefined;
+    protocol.channelData = (id: unknown, data: Buffer): void => {
+      if (declared === undefined && data.length >= 4)
+        declared = data.readUInt32BE(0);
+      original.call(protocol, id, data);
+    };
+    try {
+      write();
+    } finally {
+      protocol.channelData = original;
+    }
+    return declared;
+  };
+
   sftp.on("REALPATH", (reqid: number, p: string) => {
     if (inject.withholdOn === "REALPATH") return;
     // Echo the requested path back as its own canonical form. This leaks nothing
@@ -615,6 +692,25 @@ function attachSftpHandlers(
         { filename, longname: filename, attrs: attrsFromStat({ size: 0 }) },
       ]);
     }
+    if (inject.nameReplyFilenameBytesOnNextReaddir !== null) {
+      // One entry of the width the case asked for, then EOF on the next READDIR.
+      // Written through ssh2's own encoder rather than framed here, because what
+      // the case is measuring is the reply the stack itself puts on the wire --
+      // and the width ssh2 declared for it is recorded rather than predicted.
+      const filenameBytes = inject.nameReplyFilenameBytesOnNextReaddir;
+      inject.nameReplyFilenameBytesOnNextReaddir = null;
+      h.pos = h.names.length;
+      inject.lastNameReplyPayloadBytes = declaredPayloadBytesOf(() =>
+        sftp.name(reqid, [
+          {
+            filename: "x".repeat(filenameBytes),
+            longname: "",
+            attrs: attrsFromStat({ size: 0 }),
+          },
+        ]),
+      );
+      return;
+    }
     if (h.pos >= h.names.length) return sftp.status(reqid, STATUS_CODE.EOF);
 
     // Realistic batching, bounded by the caller's cap where one is set AND by
@@ -640,14 +736,11 @@ function attachSftpHandlers(
         st = { size: 0 };
       }
       const longname = `-rw-r--r-- 1 user user ${st.size} Jan 1 00:00 ${name}`;
-      const entryBytes =
-        NAME_ENTRY_FRAMING_BYTES +
-        Buffer.byteLength(name) +
-        Buffer.byteLength(longname);
-      if (packed + entryBytes > READDIR_BATCH_BUDGET_BYTES) {
+      const entryBytes = nameEntryBytes(name, longname);
+      if (!nameBatchAdmits(packed, entryBytes)) {
         // One entry that overruns the budget on its own cannot be split across
         // round trips, so refuse the listing where the client can see it rather
-        // than write a packet that never arrives.
+        // than write a reply wide enough to take the session down.
         if (entries.length === 0)
           return sftp.status(reqid, STATUS_CODE.FAILURE);
         break;
