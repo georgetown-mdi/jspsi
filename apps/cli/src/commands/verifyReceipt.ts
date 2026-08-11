@@ -37,7 +37,7 @@ import type {
   VerificationKeys,
 } from "@psilink/core";
 
-import { loadConfigLinkageSource } from "../config";
+import { readConfigLinkageSource } from "../config";
 import { expandTilde } from "../fileUtils";
 import { keysPathFor } from "../recordFile";
 import { parseSensitiveJson, parseSensitiveYaml } from "../sensitiveFile";
@@ -409,7 +409,15 @@ function signedPartyLines(party: SignedReceiptPartyReport): string[] {
  * the pin did or did not reach. */
 function certificatesPhrase(parties: SignedReceiptPartyReport[]): string {
   const [first] = parties;
-  if (first === undefined) return "neither party's certificate";
+  // The set is the pin-anchored parties of a VERIFIED verdict, and the verifier
+  // withholds that verdict until some certificate matched the pin. An empty set
+  // would leave the sentence claiming a match that did not happen -- evidence
+  // overstated -- so it is refused rather than phrased.
+  if (first === undefined)
+    throw new Error(
+      "a verified dual-signed record has no pin-anchored certificate: the " +
+        "verdict would claim a pinned value matched when none did",
+    );
   if (parties.length === 1) return `the ${first.role}'s certificate`;
   return "both parties' certificates";
 }
@@ -478,11 +486,64 @@ export function formatSignedRecordReport(
 
 // --- Handler -----------------------------------------------------------------
 
-function localTermsFrom(
-  configFile: string | undefined,
+/** What `--config-file` supplied for the agreed-terms hash check: this party's
+ * linkage terms, or the note to report when the config defines none. */
+interface ConfigFileTerms {
+  terms?: LinkageTerms;
+  note?: string;
+}
+
+/**
+ * This party's linkage terms, from the config named by `--config-file`.
+ *
+ * That config is also where `signing.partner_fingerprint` is read from -- the
+ * signed-record verdict directs the operator to a config carrying exactly that
+ * field -- so one defining no `linkage_terms` is accepted for the pin, and its
+ * absent terms are reported as a note rather than refused.
+ *
+ * A path that does not exist is a usage error: this command never auto-loads a
+ * config, so a path that reaches here was named on the command line, and mapping
+ * a typo to "no terms supplied" would leave the agreed-terms hash reported as
+ * merely not checked (the distinction {@link pinnedFingerprintFromConfig} draws
+ * for the same file's pin).
+ */
+function configFileTerms(configFile: string | undefined): ConfigFileTerms {
+  if (configFile === undefined) return {};
+  const source = readConfigLinkageSource(expandTilde(configFile));
+  if (source.status === "no-config-file")
+    throw new UsageError(`config file ${configFile} does not exist`);
+  if (source.status === "no-linkage-terms")
+    return {
+      note:
+        `config file ${configFile} defines no linkage_terms, so it supplied ` +
+        "no terms for the agreed-terms hash check",
+    };
+  return { terms: source.source.linkageTerms };
+}
+
+/**
+ * The partner's linkage terms, from the file named by `--partner-terms`. That
+ * file has the one purpose, so unlike `--config-file` a file defining no
+ * `linkage_terms` is refused rather than noted, and a path that does not exist is
+ * refused as well: either would otherwise leave the agreed-terms hash reported as
+ * not checked, which is what a run with no partner terms at all looks like.
+ */
+function partnerTermsFrom(
+  partnerTermsFile: string | undefined,
 ): LinkageTerms | undefined {
-  if (configFile === undefined) return undefined;
-  return loadConfigLinkageSource(expandTilde(configFile))?.linkageTerms;
+  if (partnerTermsFile === undefined) return undefined;
+  const source = readConfigLinkageSource(expandTilde(partnerTermsFile));
+  if (source.status === "no-config-file")
+    throw new UsageError(
+      `partner-terms file ${partnerTermsFile} does not exist`,
+    );
+  if (source.status === "no-linkage-terms")
+    throw new UsageError(
+      `partner-terms file ${partnerTermsFile} defines no linkage_terms; pass ` +
+        "the partner's exported linkage terms, or a configuration file that " +
+        "defines them",
+    );
+  return source.source.linkageTerms;
 }
 
 /**
@@ -640,8 +701,9 @@ export async function handler(argv: Arguments): Promise<void> {
         );
     }
 
-    const localTerms = localTermsFrom(configFile);
-    const partnerTerms = localTermsFrom(partnerTermsFile);
+    const configTerms = configFileTerms(configFile);
+    const localTerms = configTerms.terms;
+    const partnerTerms = partnerTermsFrom(partnerTermsFile);
     const signedRecord =
       artifact.kind === "signed"
         ? artifact.signed
@@ -718,6 +780,11 @@ export async function handler(argv: Arguments): Promise<void> {
       lines.push(...rendered.lines);
       exitCode = Math.max(exitCode, rendered.exitCode);
     }
+
+    // The note names a path the operator supplied, so it is escaped at this
+    // display sink as the record report's notes are.
+    if (configTerms.note !== undefined)
+      lines.push(`  note: ${sanitizeForDisplay(configTerms.note)}`);
 
     // The verdict is the command's result, so it goes to stdout; the log level
     // still governs any diagnostics the readers above emit.

@@ -22,6 +22,7 @@ import {
   persistExpectedPayloadColumns,
   persistHostKeyFingerprint,
   persistOutboundPayloadConsent,
+  readConfigLinkageSource,
   saveConfig,
 } from "../../src/config";
 import type {
@@ -1880,6 +1881,51 @@ test("loadConfigLinkageSource rejects a config with no linkage_terms", () => {
   );
   expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
   expect(() => loadConfigLinkageSource(configPath)).toThrow("no linkage_terms");
+});
+
+// The two absences loadConfigLinkageSource folds into one `undefined` and one
+// invitation-specific refusal stay apart here, so a caller reading the same file
+// for another purpose (verify-receipt reads it for signing.partner_fingerprint)
+// attributes each in its own terms rather than reporting a broken invitation
+// source.
+test("readConfigLinkageSource tells a missing file from a config with no terms", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configPath, "signing:\n  mode: certificate\n");
+  expect(readConfigLinkageSource(path.join(dir, "absent.yaml"))).toEqual({
+    status: "no-config-file",
+  });
+  expect(readConfigLinkageSource(configPath)).toEqual({
+    status: "no-linkage-terms",
+  });
+});
+
+test("readConfigLinkageSource returns the source a config defines", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = getDefaultLinkageTerms("Agency A");
+  saveConfig(configPath, {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkageTerms: terms,
+  });
+  const result = readConfigLinkageSource(configPath);
+  expect(result).toEqual({
+    status: "loaded",
+    source: {
+      linkageTerms: terms,
+      standardization: undefined,
+      metadata: undefined,
+    },
+  });
+});
+
+// A defect in one of the blocks it does parse is still a refusal, not a status:
+// only the two absences are outcomes the caller decides.
+test("readConfigLinkageSource still refuses invalid linkage_terms", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configPath, "linkage_terms:\n  identity: Agency A\n");
+  expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
+  expect(() => readConfigLinkageSource(configPath)).toThrow(
+    "invalid linkage_terms",
+  );
 });
 
 test("loadConfigLinkageSource rejects invalid linkage_terms", () => {
