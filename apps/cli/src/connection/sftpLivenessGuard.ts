@@ -63,14 +63,16 @@ export const SFTP_STALL_DEADLINE_MS = 60_000;
  * `detail` states how it stalled, so the one error type carries an
  * operation-specific message.
  *
- * `path` is interpolated raw and escaped where the error is rendered:
- * read/write/delete operation paths carry a peer-supplied filename, so a hostile
- * server's control/ANSI or deceptive-Unicode characters are neutralized at the
- * display boundary rather than here, where escaping them would leave the sink to
- * escape them a second time. Both `path` and `detail` are additionally redacted
- * here, ahead of the refusal and the next step
- * {@link TransportOperationStalledError} appends; redaction is not escaping and
- * so does not double (see {@link redactPrivateKeyMaterial}).
+ * `path` takes a labelled cause link of its own rather than leading the summary:
+ * read/write/delete operation paths carry a peer-supplied filename of no bounded
+ * length, and on a shared link those bytes spend the budget the refusal and the
+ * next step {@link TransportOperationStalledError} carries need. It is
+ * interpolated raw and escaped where the error is rendered, so a hostile server's
+ * control/ANSI or deceptive-Unicode characters are neutralized at the display
+ * boundary rather than here, where escaping them would leave the sink to escape
+ * them a second time. Both `path` and `detail` are additionally redacted here;
+ * redaction is not escaping and so does not double (see
+ * {@link redactPrivateKeyMaterial}).
  */
 export function transportOperationStalledError(
   operation: string,
@@ -78,9 +80,11 @@ export function transportOperationStalledError(
   detail: string,
 ): TransportOperationStalledError {
   return new TransportOperationStalledError(
-    `SFTP ${operation} of ${redactPrivateKeyMaterial(path)} stalled: ` +
-      `${redactPrivateKeyMaterial(detail)}; ` +
+    `SFTP ${operation} stalled: ${redactPrivateKeyMaterial(detail)}; ` +
       `refusing to wait on the server further`,
+    {
+      details: [`stalled ${operation} path: ${redactPrivateKeyMaterial(path)}`],
+    },
   );
 }
 

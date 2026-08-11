@@ -35,11 +35,12 @@ import {
  * Pass `observedBytes` when the exact size is known up front (LocalFSClient's
  * fstat); omit it on the streaming path, where only "crossed the cap" is known.
  *
- * `path` is interpolated raw and escaped where the error is rendered: on a
- * `get()` it carries the peer-supplied filename, whose control/ANSI or
- * deceptive-Unicode characters the display boundary neutralizes. It is redacted
- * here because it leads the message, ahead of the cap, the refusal and the next
- * step {@link FrameSizeExceededError} appends (see
+ * `path` takes a labelled cause link of its own rather than leading the summary:
+ * on a `get()` it carries the peer-supplied filename under no bounded length, and
+ * on a shared link those bytes spend the budget the cap, the refusal and the next
+ * step {@link FrameSizeExceededError} carries need. It is interpolated raw and
+ * escaped where the error is rendered, so its control/ANSI or deceptive-Unicode
+ * characters are neutralized at the display boundary, and redacted here (see
  * {@link redactPrivateKeyMaterial}).
  */
 export function frameSizeExceededError(
@@ -53,8 +54,8 @@ export function frameSizeExceededError(
       : `is ${observedBytes} bytes, exceeding the maximum frame size of ` +
         `${maxBytes} bytes`;
   return new FrameSizeExceededError(
-    `inbound file ${redactPrivateKeyMaterial(path)} ${detail}; ` +
-      `refusing to read it into memory`,
+    `an inbound file ${detail}; refusing to read it into memory`,
+    { details: [`inbound file: ${redactPrivateKeyMaterial(path)}`] },
   );
 }
 

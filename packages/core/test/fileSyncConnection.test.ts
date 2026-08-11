@@ -2716,15 +2716,17 @@ test("send() fails within the peer budget when the server withholds the rename c
   );
 });
 
-// The rename builder is the one bounded operation composing first-party text
-// BETWEEN two transport paths, which is the shape per-fragment redaction exists
-// for: redacting the composed label instead would let a marker in the source
-// path consume the " to " and the destination along with it. Driven through the
-// bound transport directly because every rename the exchange itself issues today
-// has a self-generated temp source -- a property of the current callers, not of
-// this builder, and precisely what a future caller must not be able to break
-// silently. Short paths keep the whole label inside one link, so the display cap
-// is not what ends it.
+// The rename builder is the one bounded operation naming TWO transport paths,
+// so each takes a labelled link of its own -- the shape a marker in the source
+// cannot reach past. The fail-closed dangling redaction consumes the rest of the
+// fragment it is applied to, and that fragment ends at the source path, so the
+// destination and the first-party label introducing it are composed on the link
+// behind it rather than behind the marker. Driven through the bound transport
+// directly because every rename the exchange itself issues today has a
+// self-generated temp source -- a property of the current callers, not of this
+// builder, and precisely what a future caller must not be able to break
+// silently. Short paths keep each label inside one link, so the display cap is
+// not what ends it.
 test("a private-key-shaped rename source does not take the destination with it", async () => {
   const { client } = makeMockClient();
   const conn = await makeConnectedConn(client, {
@@ -2744,9 +2746,10 @@ test("a private-key-shaped rename source does not take the destination with it",
     );
   const rendered = sanitizeErrorForDisplay(err);
 
-  expect(rendered).toContain("[redacted private key]");
-  // The first-party join and the destination, both composed BEHIND the marker.
-  expect(rendered).toContain(" to /rv/dest.json");
+  expect(rendered).toContain("rename source: /rv/[redacted private key]");
+  // The destination and the first-party label introducing it, both composed on
+  // the link behind the marker.
+  expect(rendered).toContain("rename destination: /rv/dest.json");
   expect(rendered).toContain("peer-inactivity budget");
 });
 

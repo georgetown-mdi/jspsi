@@ -83,20 +83,21 @@ export const MAX_FILENAME_LENGTH = 255;
  * Construct the typed, terminal error for a directory whose entry count exceeds
  * {@link MAX_DIRECTORY_ENTRIES}. `dirPath` is the rendezvous path (operator-
  * configured, but it can be seeded from a charset-unconstrained partner invitation
- * endpoint on an offline-accept config), so it is interpolated raw and escaped
- * where the error is rendered, like every other fragment in this module. It is
- * redacted here because it leads the message, ahead of the bound, the refusal
- * and the next step {@link DirectoryListingBoundsError} appends (see
- * {@link redactPrivateKeyMaterial}).
+ * endpoint on an offline-accept config, and bounded in neither length nor
+ * format), so it takes a labelled cause link of its own rather than leading the
+ * summary, where it would spend the budget the bound, the refusal and the next
+ * step {@link DirectoryListingBoundsError} carries need. It is interpolated raw
+ * and escaped where the error is rendered, like every other fragment in this
+ * module, and redacted here (see {@link redactPrivateKeyMaterial}).
  */
 export function directoryTooLargeError(
   dirPath: string,
   max: number,
 ): DirectoryListingBoundsError {
   return new DirectoryListingBoundsError(
-    `directory ${redactPrivateKeyMaterial(dirPath)} contains more than ${max} ` +
-      `entries; refusing to enumerate it to avoid an unbounded memory ` +
-      `allocation`,
+    `the rendezvous directory contains more than ${max} entries; refusing to ` +
+      `enumerate it to avoid an unbounded memory allocation`,
+    { details: [`directory: ${redactPrivateKeyMaterial(dirPath)}`] },
   );
 }
 
@@ -109,6 +110,11 @@ export function directoryTooLargeError(
  * raw -- escaping is the display boundary's job, and it renders a split surrogate
  * pair as a visible escape rather than mojibake. The true length is reported
  * separately: it is a number, not partner text.
+ *
+ * The server chose the name and the operator (or, on an offline-accept config,
+ * the partner's endpoint) chose the directory, so each takes a labelled cause
+ * link of its own: on one shared link either chooser's bytes would delete the
+ * other's disclosure, and both would delete the refusal and the next step.
  */
 export function filenameTooLongError(
   dirPath: string,
@@ -124,9 +130,15 @@ export function filenameTooLongError(
     name.slice(0, 64),
   )}${DISPLAY_TRUNCATION_MARKER}`;
   return new DirectoryListingBoundsError(
-    `directory ${redactPrivateKeyMaterial(dirPath)} contains an entry whose ` +
-      `filename is ${name.length} characters, exceeding the maximum of ` +
-      `${max} (${shown}); refusing to process it`,
+    `the rendezvous directory contains an entry whose filename is ` +
+      `${name.length} characters, exceeding the maximum of ${max}; refusing ` +
+      `to process it`,
+    {
+      details: [
+        `directory: ${redactPrivateKeyMaterial(dirPath)}`,
+        `entry name: ${shown}`,
+      ],
+    },
   );
 }
 

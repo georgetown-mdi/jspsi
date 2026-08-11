@@ -13,6 +13,16 @@ import {
   frameSizeExceededError,
 } from "../../src/connection/frameSizeGuard";
 
+// The renderer's own cause-link separator, read back out of a two-link render
+// rather than restated here, so splitting a rendered chain into its links cannot
+// drift from the framing the renderer emits.
+const CAUSE_SEPARATOR = sanitizeErrorForDisplay(
+  new Error("a", { cause: new Error("b") }),
+).slice(1, -1);
+
+const linksOf = (err: unknown): string[] =>
+  sanitizeErrorForDisplay(err).split(CAUSE_SEPARATOR);
+
 describe("frameSizeExceededError", () => {
   test("is a typed, terminal (UsageError) error", () => {
     const err = frameSizeExceededError("/p/x.bin", 100);
@@ -24,9 +34,11 @@ describe("frameSizeExceededError", () => {
 
   test("includes the observed size when it is known up front (fstat path)", () => {
     const err = frameSizeExceededError("/p/x.bin", 100, 250);
-    expect(err.message).toContain("/p/x.bin");
     expect(err.message).toContain("is 250 bytes");
     expect(err.message).toContain("100 bytes");
+    // The path is a fragment somebody else chose and reaches the operator on a
+    // labelled link of its own, so the rendered chain is where it is read.
+    expect(sanitizeErrorForDisplay(err)).toContain("inbound file: /p/x.bin");
   });
 
   test("omits the observed size on the streaming path", () => {
@@ -42,7 +54,9 @@ describe("frameSizeExceededError", () => {
   // sanitizeForDisplay categories.
   test("an ordinary path passes through unchanged", () => {
     const err = frameSizeExceededError("/drop/peer-7-42.json", 100, 250);
-    expect(err.message).toContain("/drop/peer-7-42.json");
+    expect(sanitizeErrorForDisplay(err)).toContain(
+      "inbound file: /drop/peer-7-42.json",
+    );
   });
 
   test("escapes control/ANSI characters in the path", () => {
@@ -53,7 +67,11 @@ describe("frameSizeExceededError", () => {
 
   test("escapes a newline so the path cannot spoof a log line", () => {
     const err = frameSizeExceededError("/drop/ok.json\nFAKE: clear", 100);
-    expect(sanitizeErrorForDisplay(err)).not.toContain("\n");
+    // Read per link, not over the joined chain: the renderer's own cause
+    // separator carries the one newline it emits, so the joined form would fail
+    // on framing this test is not about. The same removal the CLI integration
+    // console sentinel makes before it inspects a captured line.
+    for (const link of linksOf(err)) expect(link).not.toContain("\n");
     expect(sanitizeErrorForDisplay(err)).toContain("\\x0a");
   });
 

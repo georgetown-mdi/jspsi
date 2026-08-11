@@ -32,6 +32,59 @@ export class UsageError extends Error {
 }
 
 /**
+ * Options a bounded-transport refusal takes beyond its summary message.
+ *
+ * @see {@link FrameSizeExceededError}
+ * @see {@link DirectoryListingBoundsError}
+ * @see {@link TransportOperationStalledError}
+ */
+export interface TransportRefusalOptions {
+  /**
+   * Ordered detail fragments, each rendered as a capped cause link of its own:
+   * one per party that chose the bytes in it, carrying its own first-party label
+   * so no bare value renders unexplained. A path, a filename, or any other value
+   * a partner, a server, or an unbounded config chose belongs here rather than in
+   * the summary -- the display boundary caps each link independently, so a
+   * fragment on a link of its own can only ever spend its own budget.
+   */
+  details?: readonly string[];
+}
+
+// Folds ordered detail fragments into a cause chain, each fragment a capped
+// link of its own: the display boundary caps every link separately, so a value
+// one party chose can only ever spend the budget of the link it sits alone on.
+// The fragments go AHEAD of `tail` -- an existing cause to preserve, like the
+// transport error a connect rejected with -- so the renderer's depth bound
+// reaches every labeled detail before an opaque terminal cause.
+export function chainDetailCauses(
+  details: readonly [string, ...string[]],
+): Error;
+export function chainDetailCauses(
+  details: readonly string[],
+  tail: unknown,
+): unknown;
+export function chainDetailCauses(
+  details: readonly string[],
+  tail?: unknown,
+): unknown {
+  return details.reduceRight<unknown>(
+    (cause, detail) =>
+      new Error(detail, cause === undefined ? undefined : { cause }),
+    tail,
+  );
+}
+
+// A refusal's class-uniform recovery step ahead of its ordered detail
+// fragments: the step FIRST so the renderer's depth bound reaches it before any
+// detail and before whatever the caller chains behind them.
+function refusalCauseChain(
+  recoveryStep: string,
+  details: readonly string[],
+): Error {
+  return chainDetailCauses([recoveryStep, ...details]);
+}
+
+/**
  * The family of prepare-time configuration faults whose message is composed
  * SOLELY of the local operator's own content -- so it is both actionable to that
  * operator and safe to surface to them verbatim. Raised from the pre-exchange
@@ -192,26 +245,32 @@ export class BilateralModeMismatchError extends UsageError {
  * directory listing -- evading the pre-`get()` check -- still surfaces the same
  * terminal, typed failure once the read itself crosses the cap.
  *
- * Every instance carries `psilinkRecoveryHintEmitted` and the constructor
- * appends a uniform operator next step to the call-site message. The next step
- * is class-uniform (this fault always means a peer- or admin-supplied frame
- * crossed the cap), so it lives here rather than being repeated at each throw
- * site, which supply only the specific fault detail. The tag makes the CLI's
- * hint-walker suppress its generic "retry without re-inviting" advisory: this is
- * a terminal refusal, so re-reading the same over-cap frame cannot help, and the
- * generic "retry" would contradict the specific guidance. Call-site messages
- * must not end with terminal punctuation or carry their own next step, or the
- * appended step would read as a second sentence fragment or duplicate.
+ * Every instance carries `psilinkRecoveryHintEmitted` and the constructor puts a
+ * uniform operator next step on a cause link of its own. The next step is
+ * class-uniform (this fault always means a peer- or admin-supplied frame crossed
+ * the cap), so it lives here rather than being repeated at each throw site,
+ * which supply only the specific fault detail. Its own link is what gives it its
+ * own display budget: on the summary it would share one capped link with the
+ * call site's prose and the path that prose names, and the cap would delete it.
+ * The tag makes the CLI's hint-walker suppress its generic "retry without re-inviting"
+ * advisory: this is a terminal refusal, so re-reading the same over-cap frame
+ * cannot help, and the generic "retry" would contradict the specific guidance.
+ * Call-site messages must not end with terminal punctuation, and pass every
+ * value somebody else chose as a `details` fragment rather than composing it
+ * into the summary.
  */
 export class FrameSizeExceededError extends UsageError {
   readonly psilinkRecoveryHintEmitted = true;
 
-  constructor(message: string) {
-    super(
-      `${message}. Confirm the rendezvous directory is dedicated to a single ` +
-        `exchange and contact your partner, who may be sending a malformed or ` +
-        `oversized frame.`,
-    );
+  constructor(message: string, options?: TransportRefusalOptions) {
+    super(message, {
+      cause: refusalCauseChain(
+        `Confirm the rendezvous directory is dedicated to a single exchange ` +
+          `and contact your partner, who may be sending a malformed or ` +
+          `oversized frame.`,
+        options?.details ?? [],
+      ),
+    });
     this.name = "FrameSizeExceededError";
   }
 }
@@ -246,22 +305,26 @@ export class FrameSizeExceededError extends UsageError {
  * here: unlike the frame-size cap, no `packages/core` code pre-checks a listing
  * size, so the constants belong where they are enforced.
  *
- * Carries `psilinkRecoveryHintEmitted` and appends a uniform operator next step
- * in the constructor, on the same reasoning as {@link FrameSizeExceededError}: a
+ * Carries `psilinkRecoveryHintEmitted` and puts a uniform operator next step on
+ * its own cause link, on the same reasoning as {@link FrameSizeExceededError}: a
  * listing that breaches its bound is terminal, so the CLI's generic "retry"
  * advisory is suppressed and replaced with the specific "the directory is shared
- * or contaminated" guidance. Call-site messages supply the specific bound detail
- * and must not end with terminal punctuation or carry their own next step.
+ * or contaminated" guidance. Call-site messages supply the specific bound detail,
+ * must not end with terminal punctuation, and pass the directory path and the
+ * offending entry name as `details` fragments.
  */
 export class DirectoryListingBoundsError extends UsageError {
   readonly psilinkRecoveryHintEmitted = true;
 
-  constructor(message: string) {
-    super(
-      `${message}. Confirm the rendezvous directory is dedicated to a single ` +
-        `exchange between exactly two parties and is not shared or ` +
-        `contaminated; clear any foreign entries or use a fresh directory.`,
-    );
+  constructor(message: string, options?: TransportRefusalOptions) {
+    super(message, {
+      cause: refusalCauseChain(
+        `Confirm the rendezvous directory is dedicated to a single exchange ` +
+          `between exactly two parties and is not shared or contaminated; ` +
+          `clear any foreign entries or use a fresh directory.`,
+        options?.details ?? [],
+      ),
+    });
     this.name = "DirectoryListingBoundsError";
   }
 }
@@ -304,23 +367,27 @@ export class DirectoryListingBoundsError extends UsageError {
  * `packages/core` code drives these reads, so the constants belong where they
  * are enforced.
  *
- * Carries `psilinkRecoveryHintEmitted` and appends a uniform operator next step
- * in the constructor, on the same reasoning as {@link FrameSizeExceededError}:
+ * Carries `psilinkRecoveryHintEmitted` and puts a uniform operator next step on
+ * its own cause link, on the same reasoning as {@link FrameSizeExceededError}:
  * the operation is failed rather than retried into the same hang, so the CLI's
  * generic advisory is suppressed and replaced with the specific "check the
  * endpoint and the peer, then retry" guidance -- the one terminal-transport
  * fault where re-running the command can succeed once the server recovers.
- * Call-site messages supply the specific stalled-operation detail and must not
- * end with terminal punctuation or carry their own next step.
+ * Call-site messages supply the specific stalled-operation detail, must not end
+ * with terminal punctuation, and pass the path the operation named as a
+ * `details` fragment.
  */
 export class TransportOperationStalledError extends UsageError {
   readonly psilinkRecoveryHintEmitted = true;
 
-  constructor(message: string) {
-    super(
-      `${message}. Verify the transport endpoint is reachable and the peer is ` +
-        `still running, then retry.`,
-    );
+  constructor(message: string, options?: TransportRefusalOptions) {
+    super(message, {
+      cause: refusalCauseChain(
+        `Verify the transport endpoint is reachable and the peer is still ` +
+          `running, then retry.`,
+        options?.details ?? [],
+      ),
+    });
     this.name = "TransportOperationStalledError";
   }
 }

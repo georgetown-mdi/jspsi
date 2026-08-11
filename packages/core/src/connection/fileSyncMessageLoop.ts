@@ -906,16 +906,27 @@ export class FileSyncMessageLoop {
         // one.
         const frameCap = this.inboundFrameCap ?? MAX_FRAME_SIZE_BYTES;
         if (declaredSize > frameCap || messageFile.size > frameCap) {
-          // Name, peer id and path are partner-controlled and stand ahead of
-          // the cap this reports and the next step FrameSizeExceededError
-          // appends (see redactPrivateKeyMaterial).
+          // The name and the peer id are the writing peer's bytes (neither
+          // bounded here, and the id is adopted from a `<peerId>-hello.json`
+          // name) and the path is the configured rendezvous directory's, so
+          // every chooser takes a labelled link of its own, one value per link:
+          // sharing a link lets the first value spend the whole budget -- the
+          // cap this reports, the next step FrameSizeExceededError carries, or
+          // the second value, which the cap would delete outright -- and lets it
+          // forge the first-party text that would have introduced the value
+          // behind it. Each fragment is redacted where it is interpolated (see
+          // redactPrivateKeyMaterial).
           throw new FrameSizeExceededError(
-            `message file ${redactPrivateKeyMaterial(messageFile.name)} from ` +
-              `${redactPrivateKeyMaterial(peerId)} in ` +
-              `${redactPrivateKeyMaterial(path)} ` +
-              `declares ${declaredSize} byte(s) (on disk: ${messageFile.size}), ` +
-              `exceeding the maximum inbound frame size of ` +
-              `${frameCap} bytes; refusing to read it into memory`,
+            `an inbound message file declares ${declaredSize} byte(s) ` +
+              `(on disk: ${messageFile.size}), exceeding the maximum inbound ` +
+              `frame size of ${frameCap} bytes; refusing to read it into memory`,
+            {
+              details: [
+                `message file: ${redactPrivateKeyMaterial(messageFile.name)}`,
+                `writing peer: ${redactPrivateKeyMaterial(peerId)}`,
+                `rendezvous directory: ${redactPrivateKeyMaterial(path)}`,
+              ],
+            },
           );
         }
 

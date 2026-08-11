@@ -21,6 +21,7 @@ import {
   UsageError,
   ConnectionClosedError,
   TransportOperationStalledError,
+  chainDetailCauses,
 } from "../errors";
 import { cancellableDelay } from "./fileSyncConstants";
 import { ackMarkerName } from "./fileSyncNames";
@@ -75,41 +76,36 @@ export function normalizeFiledropPath(rawPath: string): string {
 // per-operation read bounds raise, so a hang surfaces identically wherever it is
 // caught. See docs/spec/CHANNEL_SECURITY.md.
 //
-// `operation` is interpolated raw, like every other fragment composed into an
-// error: the target it names is a transport path, and on a get/delete of a peer
-// message file that path embeds the partner-chosen filename, so its
-// control/ANSI/Unicode bytes are neutralized by sanitizeErrorForDisplay where
-// the message is shown. It is redacted here because it leads the message, ahead
-// of the budget, the diagnosis and the next step TransportOperationStalledError
-// appends; a caller composing first-party text BETWEEN two fragments redacts
-// each of them itself, since this composite pass cannot (see
-// redactPrivateKeyMaterial). This is the core-side whole-exchange-budget twin of
-// the CLI adapter's per-operation transportOperationStalledError.
+// `operation` takes a labelled cause link of its own rather than riding the
+// summary: the target it names is a transport path, which on a get/delete of a
+// peer message file embeds the partner-chosen filename -- more than a whole
+// display budget of bytes somebody else chose, which on a shared link would
+// spend the budget the diagnosis and the recovery step need. An operation
+// naming more than one path passes each of them as a `targets` link of its own
+// instead of composing first-party text between two of them: on one link the
+// cap deletes the second path outright and the first can forge the text that
+// would have introduced it. Every link ends at one chooser's value, so this
+// builder redacts each of them here rather than leaving it to its callers (see
+// redactPrivateKeyMaterial); the values themselves are interpolated raw, like
+// every other fragment composed into an error, so their control/ANSI/Unicode
+// bytes are neutralized by sanitizeErrorForDisplay where the message is shown.
+// This is the core-side whole-exchange-budget twin of the CLI adapter's
+// per-operation transportOperationStalledError.
 const transportBudgetExceededError = (
   operation: string,
   budgetMs: number,
+  targets: readonly string[] = [],
 ): TransportOperationStalledError =>
   new TransportOperationStalledError(
-    `transport ${redactPrivateKeyMaterial(operation)} exceeded the ${budgetMs} ms ` +
-      `peer-inactivity budget; the peer or server has not responded within the ` +
-      `budget, so the exchange is failing rather than waiting on it further`,
-  );
-
-// Folds a host-key refusal's ordered detail fragments into a cause chain that
-// ends at the transport error the connect rejected with. Each fragment becomes
-// its own link, which is what gives it its own display budget: the display
-// boundary caps every link separately, so a fragment a server or a partner
-// chose can only ever consume the budget of the link it sits alone on.
-//
-// The fragments go AHEAD of the transport error, so the depth bound the renderer
-// walks can never drop a detail in favour of ssh2's opaque "Host denied".
-const chainRefusalDetails = (
-  details: string[],
-  transportError: unknown,
-): unknown =>
-  details.reduceRight<unknown>(
-    (cause, detail) => new Error(detail, { cause }),
-    transportError,
+    `a transport operation exceeded the ${budgetMs} ms peer-inactivity ` +
+      `budget; the peer or server has not responded within the budget, so the ` +
+      `exchange is failing rather than waiting on it further`,
+    {
+      details: [
+        `stalled operation: ${redactPrivateKeyMaterial(operation)}`,
+        ...targets.map((target) => redactPrivateKeyMaterial(target)),
+      ],
+    },
   );
 
 // Races a transport operation against the peer-inactivity budget so a server that
@@ -886,10 +882,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   private boundTransport(raw: FileTransportClient): FileTransportClient {
     const budgetMs = (): number =>
       this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
-    const bound = <T>(op: Promise<T>, operation: string): Promise<T> => {
+    const bound = <T>(
+      op: Promise<T>,
+      operation: string,
+      targets?: readonly string[],
+    ): Promise<T> => {
       const ms = budgetMs();
       return withTransportBudget(op, ms, () =>
-        transportBudgetExceededError(operation, ms),
+        transportBudgetExceededError(operation, ms, targets),
       );
     };
     return {
@@ -920,15 +920,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       put: (src, dest, options) =>
         bound(raw.put(src, dest, options), `file write to ${dest}`),
       delete: (path) => bound(raw.delete(path), `delete of ${path}`),
-      // The one builder composing first-party text BETWEEN two paths, so each is
-      // redacted here rather than left to the composite below, which would let a
-      // marker in `fromPath` consume the ` to ` and the destination.
+      // The one operation naming two paths, so neither rides the operation
+      // label: each takes a labelled link of its own, where the cap it spends is
+      // its own and the label introducing the other path is first-party text the
+      // first path cannot reach.
       rename: (fromPath, toPath) =>
-        bound(
-          raw.rename(fromPath, toPath),
-          `rename of ${redactPrivateKeyMaterial(fromPath)} to ` +
-            `${redactPrivateKeyMaterial(toPath)}`,
-        ),
+        bound(raw.rename(fromPath, toPath), "rename", [
+          `rename source: ${fromPath}`,
+          `rename destination: ${toPath}`,
+        ]),
       createExclusive: (path) =>
         bound(raw.createExclusive(path), `exclusive create of ${path}`),
       exists: (path) => bound(raw.exists(path), `existence check of ${path}`),
@@ -1142,7 +1142,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           throw new ConnectionError(
             `SFTP host-key verification failed: ${refusal.summary}`,
             "security",
-            { cause: chainRefusalDetails(refusal.details, err) },
+            { cause: chainDetailCauses(refusal.details, err) },
           );
         }
         throw err;
