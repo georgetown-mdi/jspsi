@@ -337,6 +337,10 @@ export function InviterBench() {
   // for a saved exchange. A `server-job` run mode runs live too -- the console
   // appliance carries it out -- so it drives the hook exactly as `browser` does.
   const runsLive = chosenRunMode !== "save-file";
+  // The tuning options the run carries, resolved from the authored draft in one
+  // place: the run and the partner's accept kit read the same block, so the
+  // sheet cannot describe a file-handling regime the run does not have.
+  const runOptions = exchangeFilesOptions(exchangeFiles, CONFIG_EXCHANGE_FILES);
   const {
     run,
     outputs,
@@ -353,7 +357,7 @@ export function InviterBench() {
     channel: transport,
     inputSource,
     sftpConfigured,
-    options: exchangeFilesOptions(exchangeFiles, CONFIG_EXCHANGE_FILES),
+    options: runOptions,
   });
 
   // The coverage input, unified across builds: the browser's parsed rows on the
@@ -866,13 +870,18 @@ export function InviterBench() {
       });
       setEditor(sealEditor(editor));
       setInvitation(minted);
-      // The retain choice is captured beside the locator, from the same draft
-      // the run's own options are resolved from, so the sheet states the
-      // bilateral setting the run actually carries.
+      // The bilateral file-handling choices are captured beside the locator,
+      // taken from the options block the run itself carries rather than from
+      // the raw toggles, so the sheet states the settings as the run resolved
+      // them -- retain mode's implication of the lockless rendezvous included.
       setAcceptKitExchange(
         kitEndpoint === undefined
           ? undefined
-          : { endpoint: kitEndpoint, retainFiles: exchangeFiles.retainFiles },
+          : {
+              endpoint: kitEndpoint,
+              retainFiles: runOptions?.retainFiles === true,
+              locklessRendezvous: runOptions?.locklessRendezvous === true,
+            },
       );
       setManageStatus("idle");
       goTo("share");

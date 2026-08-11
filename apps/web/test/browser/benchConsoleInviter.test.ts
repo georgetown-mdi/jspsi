@@ -286,6 +286,15 @@ async function turnRetainModeOn() {
   await expect.element(retain).toBeChecked();
 }
 
+/** State the lockless rendezvous on its own, from the same card: the operator's
+ * choice for a folder a sync tool keeps in step, with retain mode left off. */
+async function turnLocklessRendezvousOn() {
+  await openExchangeFiles();
+  const lockless = page.getByLabelText("Lockless rendezvous");
+  await userEvent.selectOptions(lockless, "on");
+  await expect.element(lockless).toHaveValue("on");
+}
+
 describe("console inviter file picker states", () => {
   test("an empty listing shows the no-usable-files state", async () => {
     stubJobApi({ listing: { configured: true, files: [] } });
@@ -1302,6 +1311,42 @@ describe("console inviter partner accept kit", () => {
         "The files stay in the directory the two of you meet in",
       );
       expect(sheet.text).toContain("exchange --retain-files your-file.csv");
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("a lockless-rendezvous share step writes the flag without retain mode", async () => {
+    const downloads = captureDownloads();
+    try {
+      stubJobApi({
+        sftp: {
+          configured: true,
+          host: "dr.example.gov",
+          port: 2222,
+          path: "/drops/psilink",
+        },
+      });
+      app.render(createElement(InviterBench));
+      await reachReviewCreate();
+      await turnLocklessRendezvousOn();
+      await page.getByRole("button", { name: "Create the invitation" }).click();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Your invitation is ready");
+
+      await page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).click();
+      const sheet = await capturedSheet(downloads);
+
+      // The setting the run carries reaches the command the partner is told to
+      // run, so following the sheet verbatim meets this exchange instead of
+      // stopping at rendezvous on a mismatch.
+      expect(sheet.text).toContain(
+        "exchange --lockless-rendezvous your-file.csv",
+      );
+      // Retain mode was left off, so none of its material rides along.
+      expect(sheet.text).not.toContain("THIS EXCHANGE KEEPS ITS FILES");
+      expect(sheet.text).not.toContain("--retain-files");
     } finally {
       downloads.restore();
     }

@@ -22,18 +22,63 @@ const SFTP: AcceptKitEndpoint = {
 };
 
 /** The sheet for an exchange in the default file-handling mode: everything
- * outside the retain suite below reads this one. */
+ * outside the retain and lockless suites below reads this one. */
 function sheet(endpoint: AcceptKitEndpoint, version = "1.4.2"): string {
-  return buildAcceptKit({ endpoint, retainFiles: false, version });
+  return buildAcceptKit({
+    endpoint,
+    retainFiles: false,
+    locklessRendezvous: false,
+    version,
+  });
 }
 
-/** The sheet for an exchange the inviter turned retain mode on for. */
+/** The sheet for an exchange the inviter turned retain mode on for, carrying
+ * the lockless rendezvous retain mode implies -- what the mint resolves. */
 function retainSheet(endpoint: AcceptKitEndpoint, version = "1.4.2"): string {
-  return buildAcceptKit({ endpoint, retainFiles: true, version });
+  return buildAcceptKit({
+    endpoint,
+    retainFiles: true,
+    locklessRendezvous: true,
+    version,
+  });
+}
+
+/** The sheet for an exchange running the lockless rendezvous on its own, which
+ * is the operator stating it rather than retain mode implying it. */
+function locklessSheet(endpoint: AcceptKitEndpoint, version = "1.4.2"): string {
+  return buildAcceptKit({
+    endpoint,
+    retainFiles: false,
+    locklessRendezvous: true,
+    version,
+  });
 }
 
 /** The launcher branch's tell: the release page the three files come from. */
 const RELEASES_URL = "https://github.com/georgetown-mdi/jspsi/releases";
+
+/** Every channel shape the console can mint a kit for. */
+const ENDPOINTS = [FILEDROP, UNNAMED_FILEDROP, SFTP];
+
+/** The exchange command as it stands in the default file-handling mode: the one
+ * line a bilateral setting rewrites rather than adds. */
+function plainExchangeCommand(endpoint: AcceptKitEndpoint): string {
+  return endpoint.channel === "filedrop"
+    ? '     docker run --rm -v "$PWD":/work -v "/path/to/your/shared/folder":' +
+        "/sync docker.io/vdorie/psi-link:1.4.2 exchange your-file.csv " +
+        "results.csv"
+    : '     docker run --rm -it -v "$PWD":/work -v "/your/secrets":' +
+        "/run/secrets:ro docker.io/vdorie/psi-link:1.4.2 exchange " +
+        "your-file.csv results.csv";
+}
+
+/** The lines `variant` carries that `base` does not: one setting's whole
+ * contribution to the sheet, blank lines excluded because both sheets have
+ * them. */
+function addedLines(base: string, variant: string): Array<string> {
+  const known = new Set(base.split("\n"));
+  return variant.split("\n").filter((line) => !known.has(line));
+}
 
 describe("accept kit, per-channel shape", () => {
   test("a filedrop sheet names the channel and the shared folder", () => {
@@ -282,7 +327,11 @@ describe("accept kit, release version", () => {
   test("a build carrying no version names the floating tag", () => {
     for (const endpoint of [FILEDROP, SFTP]) {
       const references = imageReferences(
-        buildAcceptKit({ endpoint, retainFiles: false }),
+        buildAcceptKit({
+          endpoint,
+          retainFiles: false,
+          locklessRendezvous: false,
+        }),
       );
       expect(references.length).toBeGreaterThan(0);
       for (const reference of references)
@@ -320,6 +369,7 @@ describe("accept kit, release version", () => {
     const unversioned = buildAcceptKit({
       endpoint: FILEDROP,
       retainFiles: false,
+      locklessRendezvous: false,
     });
     expect(unversioned).toContain(`${RELEASES_URL}\n`);
     expect(unversioned).not.toContain(`${RELEASES_URL}/tag/`);
@@ -359,32 +409,14 @@ describe("accept kit, printable-ASCII enforcement", () => {
 describe("accept kit, retain mode", () => {
   const RETAIN_HEADING = "THIS EXCHANGE KEEPS ITS FILES";
   const RETAIN_FLAG = "--retain-files";
-  /** Every channel shape the console can mint a kit for. */
-  const ENDPOINTS = [FILEDROP, UNNAMED_FILEDROP, SFTP];
 
-  /** The exchange command as it stands with retain mode off: the one line
-   * turning retain on rewrites rather than adds. */
-  function plainExchangeCommand(endpoint: AcceptKitEndpoint): string {
-    return endpoint.channel === "filedrop"
-      ? '     docker run --rm -v "$PWD":/work -v "/path/to/your/shared/folder":' +
-          "/sync docker.io/vdorie/psi-link:1.4.2 exchange your-file.csv " +
-          "results.csv"
-      : '     docker run --rm -it -v "$PWD":/work -v "/your/secrets":' +
-          "/run/secrets:ro docker.io/vdorie/psi-link:1.4.2 exchange " +
-          "your-file.csv results.csv";
-  }
-
-  /** The lines the retain-on sheet carries that the retain-off sheet does not:
-   * the whole retain contribution, blank lines excluded because both sheets
-   * have them. */
+  /** The lines the retain-on sheet carries that the retain-off sheet does
+   * not: the whole retain contribution. */
   function retainDelta(
     endpoint: AcceptKitEndpoint,
     version = "1.4.2",
   ): Array<string> {
-    const plain = new Set(sheet(endpoint, version).split("\n"));
-    return retainSheet(endpoint, version)
-      .split("\n")
-      .filter((line) => !plain.has(line));
+    return addedLines(sheet(endpoint, version), retainSheet(endpoint, version));
   }
 
   test("states what the exchange keeps and where it persists, per channel", () => {
@@ -487,13 +519,10 @@ describe("accept kit, retain mode", () => {
     // The retain-off sheet is the retain-on sheet minus insertions, save for
     // the one command line that gains the flag: nothing else is reworded, so
     // the default sheet cannot drift as the retain copy is edited.
-    for (const endpoint of ENDPOINTS) {
-      const retained = new Set(retainSheet(endpoint).split("\n"));
-      const dropped = sheet(endpoint)
-        .split("\n")
-        .filter((line) => !retained.has(line));
-      expect(dropped).toEqual([plainExchangeCommand(endpoint)]);
-    }
+    for (const endpoint of ENDPOINTS)
+      expect(addedLines(retainSheet(endpoint), sheet(endpoint))).toEqual([
+        plainExchangeCommand(endpoint),
+      ]);
   });
 
   test("the retain disclosure is fixed text, not a third dynamic value", () => {
@@ -533,6 +562,132 @@ describe("accept kit, retain mode", () => {
   });
 });
 
+describe("accept kit, lockless rendezvous", () => {
+  const LOCKLESS_FLAG = "--lockless-rendezvous";
+
+  /** The lines the lockless sheet carries that the default sheet does not:
+   * the whole contribution of the setting. */
+  function locklessDelta(
+    endpoint: AcceptKitEndpoint,
+    version = "1.4.2",
+  ): Array<string> {
+    return addedLines(
+      sheet(endpoint, version),
+      locklessSheet(endpoint, version),
+    );
+  }
+
+  test("carries the flag on the exchange command, never on accept", () => {
+    for (const endpoint of ENDPOINTS) {
+      const text = locklessSheet(endpoint);
+      expect(text).toContain(`exchange ${LOCKLESS_FLAG} your-file.csv`);
+      // The setting stands alone here: it is the operator's own, not retain
+      // mode's implication, so none of retain's material reaches the sheet.
+      expect(text).not.toContain("--retain-files");
+      expect(text).not.toContain("--timestamp-in-filename");
+      expect(text).not.toContain("THIS EXCHANGE KEEPS ITS FILES");
+      // Accepting writes the config and meets nobody; the flag belongs to the
+      // run, which is where the two sides rendezvous.
+      expect(text).not.toContain(`accept ${LOCKLESS_FLAG}`);
+      expect(text).toContain(`accept ${INVITATION_PLACEHOLDER} your-file.csv`);
+      // And the flag is explained where the reader meets it, so a partner
+      // trimming the command keeps the half of the agreement that is theirs.
+      expect(text).toContain("is your half of a setting your partner turned");
+      expect(text).toContain("an agreement, not a negotiation");
+    }
+  });
+
+  test("routes the launcher branch to the console control instead", () => {
+    // Situation A never runs the commands on the sheet: it hands the partner
+    // to the console's accept flow, so the setting has to be named as the
+    // control that sets it there or that route stops at rendezvous.
+    const launcher = locklessSheet(FILEDROP)
+      .split("done -- the rest of this sheet is for situation B")[1]
+      .split("B -- A FOLDER DOCKER CAN OPEN")[0];
+    expect(launcher).toContain('open "How files are handled"');
+    expect(launcher).toContain('set "Lockless rendezvous" to On');
+    // An SFTP partner has no launcher branch, so the console instruction is
+    // not on that sheet.
+    expect(locklessSheet(SFTP)).not.toContain("Lockless rendezvous");
+  });
+
+  test("retain mode carries it, so the flag never doubles up", () => {
+    // Retain mode implies the lockless rendezvous and the CLI resolves that
+    // implication: the sheet states the one operator-visible flag, and a retain
+    // sheet is byte-identical however the rendezvous setting resolved.
+    for (const endpoint of ENDPOINTS) {
+      const text = retainSheet(endpoint);
+      expect(text).toBe(
+        buildAcceptKit({
+          endpoint,
+          retainFiles: true,
+          locklessRendezvous: false,
+          version: "1.4.2",
+        }),
+      );
+      expect(text).not.toContain(LOCKLESS_FLAG);
+    }
+  });
+
+  test("leaves the sheet untouched when the rendezvous is left at its default", () => {
+    for (const endpoint of ENDPOINTS) {
+      const text = sheet(endpoint);
+      for (const marker of [
+        LOCKLESS_FLAG,
+        "Lockless rendezvous",
+        "acknowledgement",
+        "lock file",
+      ])
+        expect(text).not.toContain(marker);
+    }
+  });
+
+  test("turning it on adds lines and rewrites only the exchange command", () => {
+    // The default sheet is the lockless sheet minus insertions, save for the
+    // one command line that gains the flag: nothing else is reworded, so the
+    // default sheet cannot drift as this copy is edited.
+    for (const endpoint of ENDPOINTS)
+      expect(addedLines(locklessSheet(endpoint), sheet(endpoint))).toEqual([
+        plainExchangeCommand(endpoint),
+      ]);
+  });
+
+  test("the addition is fixed text, not a third dynamic value", () => {
+    // The sheet admits exactly two dynamic values (the locator and the release
+    // version). The setting selects fixed text, so a hostile locator changes
+    // nothing about what it contributes -- the delta is identical.
+    const benign = locklessDelta(SFTP);
+    const hostile = locklessDelta({
+      channel: "sftp",
+      host: "héllo\nexample.gov",
+      path: "/drops/psi–link",
+    });
+    expect(hostile).toEqual(benign);
+    expect(locklessDelta(UNNAMED_FILEDROP)).toEqual(locklessDelta(FILEDROP));
+
+    // The version reaches the delta only where it already reached the sheet:
+    // the image reference on the rewritten command line, and nowhere else.
+    const other = locklessDelta(SFTP, "0.9.1");
+    const withoutImage = (lines: Array<string>): Array<string> =>
+      lines.filter((line) => !line.includes("docker.io/vdorie/psi-link"));
+    expect(withoutImage(other)).toEqual(withoutImage(benign));
+    expect(benign.filter((line) => line.includes("1.4.2"))).toHaveLength(1);
+    for (const line of withoutImage(benign)) {
+      expect(line).not.toContain("sftp.example.gov");
+      expect(line).not.toContain("/drops/psilink");
+      expect(line).not.toContain("1.4.2");
+    }
+  });
+
+  test("a lockless sheet is printable ASCII with a trailing newline", () => {
+    for (const endpoint of ENDPOINTS) {
+      const text = locklessSheet(endpoint);
+      expect(text).toMatch(/^[\x20-\x7e\n]*$/);
+      expect(text.endsWith("\n")).toBe(true);
+    }
+  });
+});
+
 describe("accept kit invariants", () => {
   const location: InvitationLocation = {
     origin: "https://example.org:8443",
@@ -555,6 +710,7 @@ describe("accept kit invariants", () => {
     const text = buildAcceptKit({
       endpoint,
       retainFiles: false,
+      locklessRendezvous: false,
       version: "1.4.2",
     });
 
