@@ -12,7 +12,7 @@
 //
 // It also re-checks the external anchors the "handshake core" corresponds to:
 // the P-256 scalar multiplication and ECDH (RFC 6979 section A.2.5's key pair
-// over the FIPS 186-5 / SP 800-186 base point) and RFC 5869 test case 3 (the
+// over the SP 800-186 section 3.2.1.3 base point) and RFC 5869 test case 3 (the
 // Noise-style chaining HKDF).
 //
 // The handshake carries a per-party request-encryption flag, bound into the
@@ -110,10 +110,12 @@ function computeKexKeys(psk, eInitPub, eRespPub, dh, iReq, rReq) {
 // --- External anchors --------------------------------------------------------
 
 // P-256 scalar multiplication and ECDH, anchored entirely on published values.
-// The base point G is the one published for P-256 in FIPS 186-5 / SP 800-186;
-// the private key d and its public point U are RFC 6979 section A.2.5's P-256
-// key pair. The ECDH shared secret over this curve is the X coordinate of the
-// shared point, so both agreements below land on the published Ux:
+// The base point G is the one published for P-256 in SP 800-186 section
+// 3.2.1.3 (FIPS 186-5 publishes no curve parameters of its own; it refers the
+// recommended curves there); the private key d and its public point U are RFC
+// 6979 section A.2.5's P-256 key pair. The ECDH shared secret over this curve
+// is the X coordinate of the shared point, so both agreements below land on the
+// published Ux:
 //
 //   ECDH(d, G) = X(d*G) = Ux    the scalar multiplication that turns a private
 //                               key into a public one
@@ -251,7 +253,12 @@ const vector = {
     pattern: "Noise NNpsk0 over P-256",
     protocolName: PROTOCOL_NAME,
     hash: "SHA-256",
-    dh: "P-256 ECDH (SP 800-56A Rev 3 ephemeralUnified; curve per FIPS 186-5 / SP 800-186)",
+    dh:
+      "P-256 ECDH: the shared-secret computation of SP 800-56A Rev 3 section " +
+      "5.7.1.2, over the curve parameters of SP 800-186 section 3.2.1.3. " +
+      "ephemeralUnified is the label CMVP certificate 5021's KAS-ECC-SSC row " +
+      "carries for the section 6.1.2.2 scheme built on that computation, not " +
+      "that publication's name for the computation itself.",
     pointEncoding:
       "SEC1 uncompressed, 0x04 || X || Y, 65 bytes. Pinned: a share in any " +
       "other encoding of the same point (compressed 0x02/0x03 || X, hybrid " +
@@ -300,7 +307,7 @@ const vector = {
       sharedSecretHex: P256_ANCHOR.publicKeyXHex,
       note:
         "generatorXHex/generatorYHex are the P-256 base point published in " +
-        "FIPS 186-5 / SP 800-186; privateKeyHex with publicKeyXHex/" +
+        "SP 800-186 section 3.2.1.3; privateKeyHex with publicKeyXHex/" +
         "publicKeyYHex is RFC 6979 section A.2.5's P-256 key pair. " +
         "ECDH(privateKey, generator) and ECDH(1, publicKey) both equal " +
         "sharedSecretHex, which is publicKeyXHex, because the ECDH shared " +
