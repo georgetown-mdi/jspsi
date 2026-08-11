@@ -2008,20 +2008,24 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // A UsageError so every op path treats it as terminal -- the poll loop stops on a
   // UsageError, and the consume-delete retry rethrows one rather than swallowing it
   // as a transient hiccup -- and so the CLI maps it to a non-zero exit. The message
-  // names the partner-server drop, states the exhausted budget, and gives the two
-  // remedies by their operator-reachable names (the flag and the config field); it
-  // carries no partner-controlled text. A budget of zero gets its own opening
-  // clause: it permits no reconnection at all, so "re-dialed the maximum 0 times"
-  // would misdescribe an exchange whose very first drop is terminal.
+  // names the partner-server drop, states the exhausted budget in the unit the
+  // budget spends -- sessions LOST, which is what makes it true of a run whose
+  // losses include a re-dial that failed or a drop the spent budget refused, and
+  // not only of a run of N landed re-dials -- and gives the two remedies by their
+  // operator-reachable names (the flag and the config field); it carries no
+  // partner-controlled text. A budget of zero gets its own opening clause: there is
+  // no allowance to describe as spent, so it names the first drop terminal instead.
   private midExchangeReconnectBudgetExhaustedError(): UsageError {
     const max = this.operativeMaxReconnectAttempts();
     const budgetClause =
       max === 0
         ? `max_reconnect_attempts=0 permits no mid-exchange reconnection, so ` +
           `this first drop is terminal and the exchange cannot continue`
-        : `has already been transparently re-dialed the maximum ${max} times ` +
-          `allowed by max_reconnect_attempts=${max}, so the mid-exchange ` +
-          `reconnection budget is exhausted and the exchange cannot continue`;
+        : `the mid-exchange reconnection budget is exhausted: ` +
+          `max_reconnect_attempts=${max} allows ${max} lost ` +
+          `${max === 1 ? "session" : "sessions"} over the whole exchange, and ` +
+          `every session lost spends one whether its re-dial succeeded, failed, ` +
+          `or was refused, so the exchange cannot continue`;
     return new UsageError(
       `The SFTP session dropped mid-exchange and ${budgetClause}. The partner's ` +
         `SFTP server is dropping the held session -- typically a server-enforced ` +

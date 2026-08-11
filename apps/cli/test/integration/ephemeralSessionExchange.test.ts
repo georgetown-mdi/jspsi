@@ -482,11 +482,12 @@ inProcessOnly(
 
       expect(rejection).toBeInstanceOf(UsageError);
       expect((rejection as Error).message).toContain(
-        `re-dialed the maximum ${DEFAULT_MAX_RECONNECT_ATTEMPTS} times ` +
-          `allowed by max_reconnect_attempts=${DEFAULT_MAX_RECONNECT_ATTEMPTS}`,
+        "the mid-exchange reconnection budget is exhausted",
       );
       expect((rejection as Error).message).toContain(
-        "the mid-exchange reconnection budget is exhausted",
+        `max_reconnect_attempts=${DEFAULT_MAX_RECONNECT_ATTEMPTS} allows ` +
+          `${DEFAULT_MAX_RECONNECT_ATTEMPTS} lost sessions over the whole ` +
+          `exchange`,
       );
       // What ended the exchange was the budget rather than a rendezvous the server
       // never cut: every re-dial the budget permits was spent first, and the drop
