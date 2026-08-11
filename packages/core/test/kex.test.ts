@@ -121,7 +121,10 @@ function compressPoint(
   return concatBytes(Uint8Array.of(yIsOdd ? 0x03 : 0x02), point.slice(1, 33));
 }
 
-/** The SEC1 hybrid encoding (0x06/0x07 || X || Y) of an uncompressed point. */
+/**
+ * The IEEE Std 1363-2000 hybrid encoding (0x06/0x07 || X || Y) of an
+ * uncompressed point. SEC1 does not define this form; platforms decode it.
+ */
 function hybridPoint(point: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
   const out = Uint8Array.from(point);
   out[0] = (point[64] as number) & 1 ? 0x07 : 0x06;
@@ -144,7 +147,11 @@ function offCurvePoint(
   return out;
 }
 
-/** The point at infinity in the uncompressed shape: 0x04 || 0 || 0. */
+/**
+ * The all-zero uncompressed string a peer might send for the identity,
+ * 0x04 || 0 || 0, which SEC1 reads as the off-curve point (0, 0) rather than as
+ * the point at infinity.
+ */
 function identityPoint(): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(65);
   out[0] = 0x04;
@@ -361,9 +368,10 @@ describe("crypto.subtle.importKey peer-share validation", () => {
     expect(await importAccepts(offCurvePoint(publicKey))).toBe(false);
   });
 
-  test("rejects the point at infinity in both of its shapes", async () => {
+  test("rejects both byte strings a peer might send for the identity", async () => {
     expect(await importAccepts(identityPoint())).toBe(false);
-    // SEC1 also encodes the point at infinity as a single 0x00 octet.
+    // The single 0x00 octet is SEC1's only encoding of the point at infinity;
+    // the all-zero uncompressed string above is the off-curve point (0, 0).
     expect(await importAccepts(Uint8Array.of(0x00))).toBe(false);
     // The all-zero 32-byte share an X25519 peer would send.
     expect(await importAccepts(new Uint8Array(32))).toBe(false);
@@ -393,7 +401,7 @@ describe("crypto.subtle.importKey peer-share validation", () => {
   test("ACCEPTS the compressed and hybrid encodings of a valid point, which is why the encoding is pinned above importKey", async () => {
     // The load-bearing measurement behind the canonical-encoding check in
     // kex.ts: importKey is not the layer that pins the encoding. On this
-    // platform it admits several SEC1 encodings of one point and re-exports
+    // platform it admits several encodings of one point and re-exports
     // each as the same uncompressed point, so a share re-encoded in transit
     // would decode to the same key while carrying different bytes into the
     // transcript. The browser suite makes the same measurement in Chromium and
@@ -708,7 +716,7 @@ describe("a peer share that is not a canonically-encoded valid point is rejected
     await initiatorRejectsMsg2Share(offCurvePoint(publicKey));
   });
 
-  test("the point at infinity", async () => {
+  test("the all-zero uncompressed string sent for the identity", async () => {
     await initiatorRejectsMsg2Share(identityPoint());
   });
 

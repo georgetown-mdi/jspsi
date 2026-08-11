@@ -36,12 +36,14 @@ const PSK_LEN = 32;
 
 // Wire encoding of an ephemeral public key: the SEC1 uncompressed point
 // `0x04 || X || Y`, 65 bytes over P-256. This encoding is PINNED, not merely
-// preferred, and pinning it is this module's job rather than importKey's. A
-// curve point has several valid SEC1 encodings, and crypto.subtle.importKey
-// accepts more than the uncompressed one -- driven against both platforms, Node
-// admits the 33-byte compressed forms (0x02/0x03 || X) AND the 65-byte hybrid
-// form (0x07 || X || Y), while Chromium admits the compressed forms and refuses
-// hybrid. Each re-exports what it admits as the same uncompressed point.
+// preferred, and pinning it is this module's job rather than importKey's. SEC1
+// gives a point other than the identity exactly two encodings, uncompressed and
+// compressed, and IEEE Std 1363-2000 (Annex E.2.3.2) admits a third, the hybrid
+// form; crypto.subtle.importKey accepts more than the uncompressed one --
+// driven against both platforms, Node admits the 33-byte compressed forms
+// (0x02/0x03 || X) AND the 65-byte hybrid form (0x07 || X || Y), while Chromium
+// admits the compressed forms and refuses hybrid. Each re-exports what it
+// admits as the same uncompressed point.
 //
 // Two consequences, either one sufficient. The wire bytes -- not the decoded
 // point -- are what MixHash and MixKey fold into the transcript, so admitting a
@@ -445,8 +447,11 @@ async function generateEphemeral(): Promise<{
 //     platform (see the PUBLIC_KEY_LEN comment), while the transcript folds in
 //     the wire bytes.
 //  2. Point validity: importKey itself. Driven against both platforms, it
-//     rejects a point not on the curve, the point at infinity in either of its
-//     encodings, and a coordinate at or above the field prime. P-256 has
+//     rejects a point not on the curve, a coordinate at or above the field
+//     prime, and both byte strings a peer might send for the identity: SEC1's
+//     single 0x00 octet, which is the only encoding it gives the point at
+//     infinity, and the all-zero uncompressed string, which SEC1 reads as the
+//     off-curve point (0, 0) rather than as the identity. P-256 has
 //     cofactor 1, so there is no small-order subgroup for a low-order share to
 //     land in and the identity is the whole of the degenerate case. kex.test.ts
 //     and the browser suite assert each of these rejections against the real
