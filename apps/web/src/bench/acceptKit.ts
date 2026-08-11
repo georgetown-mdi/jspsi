@@ -18,6 +18,13 @@
  * is interpolated only in the release shape {@link RELEASE_VERSION} admits.
  * Everything else is fixed text, so no secret, no invitation token, and no path
  * from the inviter's machine or container can reach the sheet by construction.
+ *
+ * What the exchange's own settings contribute is therefore a SELECTOR and never
+ * a value: {@link AcceptKitInput.retainFiles} picks between fixed paragraphs and
+ * a fixed command flag, exactly as the channel discriminant already picks between
+ * fixed bodies. Rendering an option block would make a third value representable
+ * and void the property above, so a future setting the partner must be told about
+ * is disclosed the same way.
  */
 
 /**
@@ -38,10 +45,27 @@ export type AcceptKitEndpoint =
   | { channel: "sftp"; host: string; port?: number; path?: string }
   | { channel: "filedrop"; path?: string };
 
-/** The inputs the sheet is built from. */
-export interface AcceptKitInput {
+/**
+ * The minted exchange the sheet describes, as the mint fixed it: where the two
+ * parties meet, and whether the exchange runs in retain mode. Held together so a
+ * caller composing the sheet cannot pair one exchange's locator with another's
+ * settings.
+ */
+export interface AcceptKitExchange {
   /** The rendezvous locator minted into the invitation. */
   endpoint: AcceptKitEndpoint;
+  /**
+   * Whether the inviter turned retain mode on. Retain mode is bilateral and
+   * non-negotiated, so the partner's own run must carry it or the two sides stop
+   * at rendezvous, and it leaves every protocol file in place afterwards. Both
+   * halves are the partner's to know, which is why the sheet takes this at all;
+   * it selects fixed text and contributes no value of its own.
+   */
+  retainFiles: boolean;
+}
+
+/** The inputs the sheet is built from. */
+export interface AcceptKitInput extends AcceptKitExchange {
   /** The release version this build carries, which decides both the image tag
    * the sheet's commands name and the release page it links; see
    * {@link releaseVersion}. Absent, or in any shape but a release version, the
@@ -183,6 +207,72 @@ function acceptCommand(version: string | undefined): string {
   );
 }
 
+/**
+ * What the partner's `exchange` command carries when the inviter runs retain
+ * mode: the single flag whose implications the CLI resolves for them
+ * (`withRetainModeImplications` gives it the timestamped filenames and lockless
+ * rendezvous it requires), so the sheet states the operator-visible choice
+ * rather than re-deriving the trio here and risking drift from the CLI. A fixed
+ * string chosen by a boolean, so nothing new is representable on the sheet.
+ */
+function retainFlag(retainFiles: boolean): string {
+  return retainFiles ? " --retain-files" : "";
+}
+
+/**
+ * What retain mode leaves behind, and what the partner must do about it. Retain
+ * mode is bilateral and non-negotiated, so a partner told only how to accept
+ * would meet a mismatch at rendezvous; and it leaves every protocol file in the
+ * rendezvous location as a permanent transcript, which is the partner's to know
+ * before they join rather than after. Fixed paragraphs per channel, selected by
+ * the boolean.
+ *
+ * The message bodies stay ciphertext in the transcript (see
+ * `docs/spec/CHANNEL_SECURITY.md`), but the control files the two sides meet
+ * through do not: the hello bodies are plaintext and the filenames carry each
+ * party's name, timestamps, sequence numbers, and byte counts, so the disclosure
+ * names what an eventual reader of that location learns rather than leaving the
+ * partner to infer it from "keeps every file".
+ */
+function retainLines(endpoint: AcceptKitEndpoint): Array<string> {
+  const persistence =
+    endpoint.channel === "filedrop"
+      ? [
+          "The files stay in the shared folder the two of you meet in -- your",
+          "copy of it and your partner's alike. Nothing removes them when the",
+          "exchange ends, so both of you must start from an empty shared folder,",
+          "and clearing it afterwards is a decision the two of you make",
+          "deliberately.",
+        ]
+      : [
+          "The files stay in the directory the two of you meet in, on the SFTP",
+          "server named above. Nothing removes them when the exchange ends, so",
+          "both of you must start from an empty directory, and clearing it",
+          "afterwards is a decision the two of you make deliberately.",
+        ];
+  return [
+    ...heading("THIS EXCHANGE KEEPS ITS FILES"),
+    "Your partner has turned on retain mode, so this exchange keeps every",
+    "file it writes as a permanent transcript instead of deleting each one",
+    "once it has been read.",
+    "",
+    ...persistence,
+    "",
+    "The records the two of you exchange are encrypted, and stay encrypted",
+    "in what is left behind. The small files the two sides meet through are",
+    "not: they are plaintext and they persist alongside the rest, so anyone",
+    "who can read that location afterwards can see that an exchange",
+    "happened, when, how many messages each side sent and how large they",
+    "were, the name each side ran under, and the settings each side",
+    "announced. Nothing there is your CSV file or the matched result.",
+    "",
+    "Retain mode is an agreement, not a negotiation: your side must run it",
+    "too, or the two of you stop with an error when you meet. The commands",
+    "below already carry it.",
+    "",
+  ];
+}
+
 /** Interpolated operator-authored text, held to the sheet's printable-ASCII
  * contract: any byte outside printable ASCII renders as '?', so the stated
  * invariant is enforced here rather than assumed of the console's inputs. */
@@ -193,7 +283,10 @@ function printable(value: string): string {
 /** The shared opening: what this is, what the partner needs, and where the
  * terms actually live. The channel is named; the terms are not restated -- the
  * invitation's own consent display owns that disclosure. */
-function opening(endpoint: AcceptKitEndpoint): Array<string> {
+function opening(
+  endpoint: AcceptKitEndpoint,
+  retainFiles: boolean,
+): Array<string> {
   const channelLines =
     endpoint.channel === "filedrop"
       ? [
@@ -281,6 +374,7 @@ function opening(endpoint: AcceptKitEndpoint): Array<string> {
     ...heading("WHERE YOU WILL MEET"),
     ...rendezvousLines(endpoint),
     "",
+    ...(retainFiles ? retainLines(endpoint) : []),
   ];
 }
 
@@ -312,6 +406,7 @@ function repointStepOpening(named: boolean): Array<string> {
 function filedropBody(
   version: string | undefined,
   named: boolean,
+  retainFiles: boolean,
 ): Array<string> {
   return [
     ...heading("STEP 1 -- WHICH KIND OF FOLDER IS YOURS?"),
@@ -351,6 +446,19 @@ function filedropBody(
     "Paste the invitation into the console's accept flow there, and you are",
     "done -- the rest of this sheet is for situation B.",
     "",
+    // The launcher route never runs the commands below, so the retain setting
+    // the exchange needs is set in the console instead; naming the control it
+    // is set with is what keeps this route from rendezvousing into a mismatch.
+    ...(retainFiles
+      ? [
+          'Before you start the exchange there, open "How files are handled" in',
+          'that accept flow and turn on "Keep every exchange file". That is the',
+          "same agreement the section above describes, set on the console rather",
+          "than on the command line; without it the two of you stop with an",
+          "error when you meet.",
+          "",
+        ]
+      : []),
     "(On macOS or Linux a network share is not situation A: mount it the way",
     'you usually do -- Finder\'s "Connect to Server", or your file manager --',
     "and once it shows as a folder, it is situation B below.)",
@@ -399,19 +507,31 @@ function filedropBody(
     "",
     `     docker run --rm -v "$PWD":${WORK_MOUNT} ` +
       `-v "/path/to/your/shared/folder":${SYNC_MOUNT} ` +
-      `${imageReference(version)} exchange your-file.csv results.csv`,
+      `${imageReference(version)} exchange${retainFlag(retainFiles)} ` +
+      `your-file.csv results.csv`,
     "",
     "   Replace your-file.csv with your CSV file's name. The matched result",
     "   is written to results.csv beside your input. You and your partner",
     "   each run your own half; whichever runs first waits for the other.",
     "",
+    ...(retainFiles
+      ? [
+          "   --retain-files is your half of the agreement above. Leave it on the",
+          "   command: without it the two of you stop with an error when you",
+          "   meet.",
+          "",
+        ]
+      : []),
   ];
 }
 
 /** The SFTP body: accept, fill in the credentials acceptance leaves open, then
  * run -- in that order, because the exchange command only works after the
  * fill-in and a reader follows the sheet top to bottom. */
-function sftpBody(version: string | undefined): Array<string> {
+function sftpBody(
+  version: string | undefined,
+  retainFiles: boolean,
+): Array<string> {
   return [
     ...heading("THE THREE STEPS"),
     "The commands run from the folder that holds your CSV file.",
@@ -468,7 +588,8 @@ function sftpBody(version: string | undefined): Array<string> {
     "",
     `     docker run --rm -it -v "$PWD":${WORK_MOUNT} ` +
       `-v "/your/secrets":/run/secrets:ro ` +
-      `${imageReference(version)} exchange your-file.csv results.csv`,
+      `${imageReference(version)} exchange${retainFlag(retainFiles)} ` +
+      `your-file.csv results.csv`,
     "",
     '   Replace "/your/secrets" with the folder that holds your credential',
     "   file, and your-file.csv with your CSV file's name. The matched",
@@ -476,6 +597,14 @@ function sftpBody(version: string | undefined): Array<string> {
     "   partner each run your own half; whichever runs first waits for the",
     "   other.",
     "",
+    ...(retainFiles
+      ? [
+          "   --retain-files is your half of the agreement above. Leave it on the",
+          "   command: without it the two of you stop with an error when you",
+          "   meet.",
+          "",
+        ]
+      : []),
     "   The first run shows the server's SSH host-key fingerprint and asks",
     "   you to confirm it. Check it against the value the server's",
     "   administrator published; later runs verify it silently.",
@@ -514,14 +643,15 @@ function closing(version: string | undefined): Array<string> {
  */
 export function buildAcceptKit({
   endpoint,
+  retainFiles,
   version: buildVersion,
 }: AcceptKitInput): string {
   const version = releaseVersion(buildVersion);
   const lines = [
-    ...opening(endpoint),
+    ...opening(endpoint, retainFiles),
     ...(endpoint.channel === "filedrop"
-      ? filedropBody(version, endpoint.path !== undefined)
-      : sftpBody(version)),
+      ? filedropBody(version, endpoint.path !== undefined, retainFiles)
+      : sftpBody(version, retainFiles)),
     ...closing(version),
   ];
   return `${lines.join("\n")}\n`;

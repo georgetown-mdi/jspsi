@@ -13,6 +13,7 @@ import type { AcceptKitEndpoint } from "@bench/acceptKit";
 import type { InvitationLocation } from "@psi/invitation";
 
 const FILEDROP: AcceptKitEndpoint = { channel: "filedrop", path: "psilink" };
+const UNNAMED_FILEDROP: AcceptKitEndpoint = { channel: "filedrop" };
 const SFTP: AcceptKitEndpoint = {
   channel: "sftp",
   host: "sftp.example.gov",
@@ -20,8 +21,15 @@ const SFTP: AcceptKitEndpoint = {
   path: "/drops/psilink",
 };
 
+/** The sheet for an exchange in the default file-handling mode: everything
+ * outside the retain suite below reads this one. */
 function sheet(endpoint: AcceptKitEndpoint, version = "1.4.2"): string {
-  return buildAcceptKit({ endpoint, version });
+  return buildAcceptKit({ endpoint, retainFiles: false, version });
+}
+
+/** The sheet for an exchange the inviter turned retain mode on for. */
+function retainSheet(endpoint: AcceptKitEndpoint, version = "1.4.2"): string {
+  return buildAcceptKit({ endpoint, retainFiles: true, version });
 }
 
 /** The launcher branch's tell: the release page the three files come from. */
@@ -273,7 +281,9 @@ describe("accept kit, release version", () => {
 
   test("a build carrying no version names the floating tag", () => {
     for (const endpoint of [FILEDROP, SFTP]) {
-      const references = imageReferences(buildAcceptKit({ endpoint }));
+      const references = imageReferences(
+        buildAcceptKit({ endpoint, retainFiles: false }),
+      );
       expect(references.length).toBeGreaterThan(0);
       for (const reference of references)
         expect(reference).toBe("docker.io/vdorie/psi-link:latest");
@@ -307,7 +317,10 @@ describe("accept kit, release version", () => {
     // release when it carries a version, so the launchers they download match
     // the image the sheet names, and the index otherwise.
     expect(sheet(FILEDROP, "0.9.1")).toContain(`${RELEASES_URL}/tag/v0.9.1\n`);
-    const unversioned = buildAcceptKit({ endpoint: FILEDROP });
+    const unversioned = buildAcceptKit({
+      endpoint: FILEDROP,
+      retainFiles: false,
+    });
     expect(unversioned).toContain(`${RELEASES_URL}\n`);
     expect(unversioned).not.toContain(`${RELEASES_URL}/tag/`);
     expect(sheet(FILEDROP, "X.Y.Z")).not.toContain(`${RELEASES_URL}/tag/`);
@@ -343,6 +356,183 @@ describe("accept kit, printable-ASCII enforcement", () => {
   });
 });
 
+describe("accept kit, retain mode", () => {
+  const RETAIN_HEADING = "THIS EXCHANGE KEEPS ITS FILES";
+  const RETAIN_FLAG = "--retain-files";
+  /** Every channel shape the console can mint a kit for. */
+  const ENDPOINTS = [FILEDROP, UNNAMED_FILEDROP, SFTP];
+
+  /** The exchange command as it stands with retain mode off: the one line
+   * turning retain on rewrites rather than adds. */
+  function plainExchangeCommand(endpoint: AcceptKitEndpoint): string {
+    return endpoint.channel === "filedrop"
+      ? '     docker run --rm -v "$PWD":/work -v "/path/to/your/shared/folder":' +
+          "/sync docker.io/vdorie/psi-link:1.4.2 exchange your-file.csv " +
+          "results.csv"
+      : '     docker run --rm -it -v "$PWD":/work -v "/your/secrets":' +
+          "/run/secrets:ro docker.io/vdorie/psi-link:1.4.2 exchange " +
+          "your-file.csv results.csv";
+  }
+
+  /** The lines the retain-on sheet carries that the retain-off sheet does not:
+   * the whole retain contribution, blank lines excluded because both sheets
+   * have them. */
+  function retainDelta(
+    endpoint: AcceptKitEndpoint,
+    version = "1.4.2",
+  ): Array<string> {
+    const plain = new Set(sheet(endpoint, version).split("\n"));
+    return retainSheet(endpoint, version)
+      .split("\n")
+      .filter((line) => !plain.has(line));
+  }
+
+  test("states what the exchange keeps and where it persists, per channel", () => {
+    const sftpText = retainSheet(SFTP);
+    expect(sftpText).toContain(RETAIN_HEADING);
+    expect(sftpText).toContain("permanent transcript");
+    // Where, in that channel's own terms -- the directory on the server the
+    // locator above already named, not a second copy of the locator.
+    expect(sftpText).toContain(
+      "The files stay in the directory the two of you meet in, on the SFTP",
+    );
+    expect(sftpText).toContain("server named above");
+    expect(sftpText).toContain("start from an empty directory");
+
+    for (const endpoint of [FILEDROP, UNNAMED_FILEDROP]) {
+      const text = retainSheet(endpoint);
+      expect(text).toContain(RETAIN_HEADING);
+      expect(text).toContain("permanent transcript");
+      expect(text).toContain(
+        "The files stay in the shared folder the two of you meet in",
+      );
+      expect(text).toContain("start from an empty shared folder");
+      // The SFTP wording never crosses over.
+      expect(text).not.toContain("on the SFTP");
+    }
+  });
+
+  test("discloses that the rendezvous files persist in plaintext", () => {
+    // The message bodies are ciphertext, but the control files the two sides
+    // meet through are not, and retain mode leaves them in place: a partner
+    // told only "keeps every file" would not know what an eventual reader of
+    // that location learns.
+    for (const endpoint of ENDPOINTS) {
+      const text = retainSheet(endpoint);
+      expect(text).toContain("they are plaintext and they persist");
+      expect(text).toContain("that an exchange");
+      expect(text).toContain("the name each side ran under");
+      expect(text).toContain("the settings each side\nannounced");
+      // And the reassurance that bounds it, so the disclosure is not read as
+      // the input file being left behind.
+      expect(text).toContain("Nothing there is your CSV file");
+    }
+  });
+
+  test("says the agreement is bilateral and non-negotiated", () => {
+    for (const endpoint of ENDPOINTS) {
+      const text = retainSheet(endpoint);
+      expect(text).toContain("an agreement, not a negotiation");
+      expect(text).toContain("your side must run it");
+    }
+  });
+
+  test("carries the flag on the exchange command, never on accept", () => {
+    for (const endpoint of ENDPOINTS) {
+      const text = retainSheet(endpoint);
+      // One flag, not three: the CLI resolves what retain mode implies, so the
+      // sheet cannot drift from it by re-deriving the trio.
+      expect(text).toContain(`exchange ${RETAIN_FLAG} your-file.csv`);
+      expect(text).not.toContain("--timestamp-in-filename");
+      expect(text).not.toContain("--lockless-rendezvous");
+      // Accepting writes the config and needs nothing from retain mode; the
+      // flag belongs to the run.
+      expect(text).not.toContain(`accept ${RETAIN_FLAG}`);
+      expect(text).toContain(`accept ${INVITATION_PLACEHOLDER} your-file.csv`);
+      // And the command is explained where the reader meets it.
+      expect(text).toContain("is your half of the agreement above");
+    }
+  });
+
+  test("routes the launcher branch to the console control instead", () => {
+    // Situation A never runs the commands on the sheet: it hands the partner
+    // to the console's accept flow, so the same agreement has to be named
+    // there or that route rendezvouses into a mismatch.
+    const text = retainSheet(FILEDROP);
+    const launcher = text
+      .split("done -- the rest of this sheet is for situation B")[1]
+      .split("B -- A FOLDER DOCKER CAN OPEN")[0];
+    expect(launcher).toContain('open "How files are handled"');
+    expect(launcher).toContain('turn on "Keep every exchange file"');
+    // An SFTP partner has no launcher branch, so the console instruction is
+    // not on that sheet.
+    expect(retainSheet(SFTP)).not.toContain("Keep every exchange file");
+  });
+
+  test("leaves the sheet untouched when retain mode is off", () => {
+    for (const endpoint of ENDPOINTS) {
+      const text = sheet(endpoint);
+      for (const marker of [
+        RETAIN_HEADING,
+        RETAIN_FLAG,
+        "retain mode",
+        "Keep every exchange file",
+        "permanent transcript",
+      ])
+        expect(text).not.toContain(marker);
+    }
+  });
+
+  test("turning retain on adds lines and rewrites only the exchange command", () => {
+    // The retain-off sheet is the retain-on sheet minus insertions, save for
+    // the one command line that gains the flag: nothing else is reworded, so
+    // the default sheet cannot drift as the retain copy is edited.
+    for (const endpoint of ENDPOINTS) {
+      const retained = new Set(retainSheet(endpoint).split("\n"));
+      const dropped = sheet(endpoint)
+        .split("\n")
+        .filter((line) => !retained.has(line));
+      expect(dropped).toEqual([plainExchangeCommand(endpoint)]);
+    }
+  });
+
+  test("the retain disclosure is fixed text, not a third dynamic value", () => {
+    // The sheet admits exactly two dynamic values (the locator and the release
+    // version). Retain mode selects fixed paragraphs, so a hostile locator
+    // changes nothing about what it contributes -- the delta is identical.
+    const benign = retainDelta(SFTP);
+    const hostile = retainDelta({
+      channel: "sftp",
+      host: "héllo\nexample.gov",
+      path: "/drops/psi–link",
+    });
+    expect(hostile).toEqual(benign);
+    expect(retainDelta(UNNAMED_FILEDROP)).toEqual(retainDelta(FILEDROP));
+
+    // The version reaches the delta only where it already reached the sheet:
+    // the image reference on the rewritten command line, and nowhere else.
+    const other = retainDelta(SFTP, "0.9.1");
+    const withoutImage = (lines: Array<string>): Array<string> =>
+      lines.filter((line) => !line.includes("docker.io/vdorie/psi-link"));
+    expect(withoutImage(other)).toEqual(withoutImage(benign));
+    expect(benign.filter((line) => line.includes("1.4.2"))).toHaveLength(1);
+    // And nothing the delta adds carries either dynamic value.
+    for (const line of withoutImage(benign)) {
+      expect(line).not.toContain("sftp.example.gov");
+      expect(line).not.toContain("/drops/psilink");
+      expect(line).not.toContain("1.4.2");
+    }
+  });
+
+  test("a retain sheet is printable ASCII with a trailing newline", () => {
+    for (const endpoint of ENDPOINTS) {
+      const text = retainSheet(endpoint);
+      expect(text).toMatch(/^[\x20-\x7e\n]*$/);
+      expect(text.endsWith("\n")).toBe(true);
+    }
+  });
+});
+
 describe("accept kit invariants", () => {
   const location: InvitationLocation = {
     origin: "https://example.org:8443",
@@ -362,7 +552,11 @@ describe("accept kit invariants", () => {
       location,
       connectionEndpoint: endpoint,
     });
-    const text = buildAcceptKit({ endpoint, version: "1.4.2" });
+    const text = buildAcceptKit({
+      endpoint,
+      retainFiles: false,
+      version: "1.4.2",
+    });
 
     expect(text).toContain(INVITATION_PLACEHOLDER);
     expect(text).not.toContain(minted.sharedSecret);

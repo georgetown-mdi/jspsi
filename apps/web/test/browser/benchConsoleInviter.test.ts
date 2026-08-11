@@ -1113,6 +1113,15 @@ describe("console inviter partner accept kit", () => {
     ) as CapturedDownload;
   }
 
+  /** Turn retain mode on the way an operator does: the file-handling card on
+   * Review & create, before the invitation is minted. */
+  async function turnRetainModeOn() {
+    await page.getByRole("button", { name: /How files are handled/ }).click();
+    const retain = page.getByLabelText("Keep every exchange file");
+    await retain.click();
+    await expect.element(retain).toBeChecked();
+  }
+
   test("an sftp share step writes a sheet carrying the locator, no secret, no token", async () => {
     const downloads = captureDownloads();
     try {
@@ -1143,6 +1152,10 @@ describe("console inviter partner accept kit", () => {
       expect(sheet.text).toContain("Directory:      /drops/psilink");
       expect(sheet.text).toContain("REPLACE_WITH_SSH_USERNAME");
 
+      // Retain mode was left off, so nothing of it reaches the sheet.
+      expect(sheet.text).not.toContain("THIS EXCHANGE KEEPS ITS FILES");
+      expect(sheet.text).not.toContain("--retain-files");
+
       // What it must never carry: the minted secret or the token itself. The
       // partner pastes their own copy over the placeholder.
       await page.getByRole("button", { name: "Show full code" }).click();
@@ -1153,6 +1166,41 @@ describe("console inviter partner accept kit", () => {
       expect(sheet.text).toContain("PASTE_YOUR_INVITATION");
       expect(sheet.text).not.toContain(encoded);
       expect(sheet.text).not.toContain(token.sharedSecret);
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("a retain-mode share step writes the transcript disclosure and the flag", async () => {
+    const downloads = captureDownloads();
+    try {
+      stubJobApi({
+        sftp: {
+          configured: true,
+          host: "dr.example.gov",
+          port: 2222,
+          path: "/drops/psilink",
+        },
+      });
+      app.render(createElement(InviterBench));
+      await reachReviewCreate();
+      await turnRetainModeOn();
+      await page.getByRole("button", { name: "Create the invitation" }).click();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Your invitation is ready");
+
+      await page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).click();
+      const sheet = await capturedSheet(downloads);
+
+      // The choice the operator made before the mint reaches the sheet the
+      // partner reads: what the exchange leaves behind and where it stays,
+      // and the partner's half of the bilateral agreement on their command.
+      expect(sheet.text).toContain("THIS EXCHANGE KEEPS ITS FILES");
+      expect(sheet.text).toContain(
+        "The files stay in the directory the two of you meet in",
+      );
+      expect(sheet.text).toContain("exchange --retain-files your-file.csv");
     } finally {
       downloads.restore();
     }
