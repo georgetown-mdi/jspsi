@@ -11,6 +11,7 @@ import "@mantine/core/styles.css";
 
 import { BenchLobby } from "@bench/BenchLobby";
 import { DirectExchangeBench } from "@bench/DirectExchangeBench";
+import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -700,6 +701,105 @@ describe("direct exchange transport step", () => {
       )
       .toBeInTheDocument();
     expect(page.getByText("rendezvous", { exact: true }).query()).toBeNull();
+  });
+});
+
+describe("direct exchange file-handling gate", () => {
+  /** Reach the agreed-server step (SFTP is configured, so it is selected) and open
+   * the file-handling card the way an operator does. */
+  async function openExchangeFiles() {
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 1, name: "The agreed server" }),
+      )
+      .toBeInTheDocument();
+    // The disclosure's accessible name carries its collapsed summary, so match on
+    // the label rather than the whole name.
+    await page.getByRole("button", { name: /How files are handled/ }).click();
+  }
+
+  test("withholds the control a zero-setup command line cannot carry", async () => {
+    stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeBench));
+    await openExchangeFiles();
+
+    // The direct flow composes no configuration document, and `unexpected_files`
+    // has no CLI flag, so the card offers every control that rides the command
+    // line and not the one that does not.
+    await expect
+      .element(page.getByLabelText("Timestamped filenames"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByLabelText("Lockless rendezvous"))
+      .toBeInTheDocument();
+    expect(
+      page.getByLabelText("If an unrecognised file appears").query(),
+    ).toBeNull();
+  });
+
+  test("states the bilateral agreement as soon as retain mode goes on", async () => {
+    stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeBench));
+    await openExchangeFiles();
+    expect(app.container.textContent).not.toContain(
+      RETAIN_MODE_BILATERAL_NOTICE,
+    );
+
+    await page.getByLabelText("Keep every exchange file").click();
+
+    // Stated while the operator can still act on it -- by telling their partner --
+    // rather than after the two sides fail to meet.
+    await expect
+      .element(page.getByText("Both sides must set this"))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(RETAIN_MODE_BILATERAL_NOTICE);
+    // Retain mode alone is admissible: the notice is not a blocked state.
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue to confirm and run" }),
+      )
+      .toBeEnabled();
+  });
+
+  test("an inadmissible draft blocks Continue, in core's own words", async () => {
+    stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeBench));
+    await openExchangeFiles();
+
+    // A party name needs timestamped filenames, which core requires and the card
+    // reports before the run rather than after a failed job.
+    await userEvent.fill(page.getByLabelText("Name for this side"), "clinic-a");
+    await expect
+      .element(page.getByText("These settings cannot be used together"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("peer_id requires timestamp_in_filename", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue to confirm and run" }),
+      )
+      .toBeDisabled();
+
+    // Satisfying core's dependency clears the problem and the gate together.
+    await userEvent.selectOptions(
+      page.getByLabelText("Timestamped filenames"),
+      "on",
+    );
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue to confirm and run" }),
+      )
+      .toBeEnabled();
+    expect(
+      page.getByText("These settings cannot be used together").query(),
+    ).toBeNull();
   });
 });
 

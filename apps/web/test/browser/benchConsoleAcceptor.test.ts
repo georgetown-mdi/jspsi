@@ -16,6 +16,7 @@ import {
   acceptUnsupported,
 } from "@bench/acceptorModel";
 import { AcceptorBench } from "@bench/AcceptorBench";
+import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
 import { SERVER_JOB_KEEP_OPEN_BODY } from "@bench/BenchRunSurface";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
@@ -403,9 +404,9 @@ function stubServerJobAccept(options: AcceptStubOptions = {}): {
 }
 
 // From an already-mounted acceptor bench with a rendezvous mount: consent to the
-// terms, pick and confirm the mounted file, then start the exchange from the
-// confirm-columns step -- whose "Start the exchange" fires the appliance job create.
-async function reachAcceptStart() {
+// terms, then pick and confirm the mounted file, landing on the confirm-columns
+// step that holds the launch action.
+async function reachAcceptColumns() {
   await page
     .getByRole("button", { name: "Continue: consent & your file" })
     .click();
@@ -417,8 +418,99 @@ async function reachAcceptStart() {
   await expect
     .element(page.getByRole("heading", { name: "Confirm your columns" }))
     .toBeInTheDocument();
+}
+
+// The same walk, through the launch: "Start the exchange" fires the appliance job
+// create.
+async function reachAcceptStart() {
+  await reachAcceptColumns();
   await page.getByRole("button", { name: "Start the exchange" }).click();
 }
+
+describe("console acceptor file-handling gate", () => {
+  /** Reach the confirm-columns step of a runnable console accept and open the
+   * file-handling card the appliance run carries. */
+  async function openExchangeFiles() {
+    await reachAcceptColumns();
+    // The disclosure's accessible name carries its collapsed summary, so match on
+    // the label rather than the whole name.
+    await page.getByRole("button", { name: /How files are handled/ }).click();
+  }
+
+  test("offers the whole card, including what only a composed config carries", async () => {
+    stubServerJobAccept();
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorBench));
+    await openExchangeFiles();
+
+    // An accept the appliance conducts composes a configuration document, so the
+    // foreign-file policy -- a configuration-only key -- is offered here.
+    await expect
+      .element(page.getByLabelText("If an unrecognised file appears"))
+      .toBeInTheDocument();
+  });
+
+  test("states the bilateral agreement as soon as retain mode goes on", async () => {
+    stubServerJobAccept();
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorBench));
+    await openExchangeFiles();
+    expect(app.container.textContent).not.toContain(
+      RETAIN_MODE_BILATERAL_NOTICE,
+    );
+
+    await page.getByLabelText("Keep every exchange file").click();
+    await expect
+      .element(page.getByText("Both sides must set this"))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(RETAIN_MODE_BILATERAL_NOTICE);
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeEnabled();
+  });
+
+  test("an inadmissible draft blocks the launch and says why", async () => {
+    stubServerJobAccept();
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorBench));
+    await openExchangeFiles();
+
+    // Retain mode requires the lockless rendezvous; turning that off is a
+    // combination core refuses, reported in core's words before the run.
+    await page.getByLabelText("Keep every exchange file").click();
+    await userEvent.selectOptions(
+      page.getByLabelText("Lockless rendezvous"),
+      "off",
+    );
+    await expect
+      .element(
+        page.getByText("retain_files requires lockless_rendezvous", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeDisabled();
+    // The disabled button's reason is spoken, not only shown.
+    await expect
+      .element(
+        page.getByText(
+          "Resolve the file-handling settings above before you can start.",
+        ),
+      )
+      .toBeInTheDocument();
+
+    // Restoring the implied toggle clears the problem and the gate together.
+    await userEvent.selectOptions(
+      page.getByLabelText("Lockless rendezvous"),
+      "auto",
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeEnabled();
+  });
+});
 
 describe("console acceptor server-job keep-open callout", () => {
   test("holds the callout while the appliance runs the accept, then clears it once the run settles", async () => {
