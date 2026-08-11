@@ -390,8 +390,10 @@ with ECDSA and public key verification with ECDSA.
 and Table 14 (Non-Approved Services, p. 35) carries the two matching service
 rows. The module therefore separates two signature services over one approved
 algorithm, and which of them a caller reaches is decided by the indicator the
-module sets rather than by Table 5 membership -- the shape the AES-GCM IV
-condition above already has.
+module sets rather than by Table 5 membership. The AES-GCM condition above
+separates two services the same way, and there the call surface settles which
+one is reached: every `crypto.subtle` AES-GCM call supplies an external IV
+([fips-variant-image.md](../notes/fips-variant-image.md)).
 
 ## The runtime posture measured on each built image
 

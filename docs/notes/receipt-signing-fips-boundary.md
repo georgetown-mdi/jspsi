@@ -215,11 +215,14 @@ algorithms and services, so a module driven that way is performing a
 non-approved service with an approved algorithm. Which of the two services a
 `crypto.subtle` ECDSA call requests is decided by the indicator the module sets
 rather than by the approved-algorithm table, and nothing in this repository
-reads that indicator back. That is the shape the AEAD's externally supplied IV
-already has on the same certificate
-([fips-variant-image.md](fips-variant-image.md)), and it bounds a claim the same
-way: the security function is available to name, and the service the call lands
-on is not established here.
+reads that indicator back. The AEAD's externally supplied IV has that shape on
+the same certificate, with the difference that decides it
+([fips-variant-image.md](fips-variant-image.md)): WebCrypto supplies an external
+IV on every AES-GCM call, so the policy's own text settles which service the
+AEAD requests, while a `crypto.subtle` ECDSA call passes the message and the
+hash algorithm together and nothing in that shape settles which of the two
+signature services the module performs. So the security function is available to
+name, and the service the call lands on is not established here.
 
 **May not say:**
 
