@@ -1,7 +1,7 @@
 ---
 title: "PSI-Link Compliance"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-10"
+last_reviewed: "2026-08-11"
 ---
 
 # PSI-Link compliance
@@ -58,11 +58,11 @@ PSI-Link is software, not a service offering, and is not in scope for FedRAMP or
 
 A FIPS 140 question about PSI-Link is answered wrongly in both directions when three different statements are collapsed into one:
 
-- an algorithm is **specified and approved by a NIST publication** -- [FIPS 186-5](https://doi.org/10.6028/NIST.FIPS.186-5), [FIPS 197](https://doi.org/10.6028/NIST.FIPS.197-upd1), [SP 800-38D](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf), [SP 800-56A Rev. 3](https://doi.org/10.6028/NIST.SP.800-56Ar3), [SP 800-56C Rev. 2](https://doi.org/10.6028/NIST.SP.800-56Cr2), and [SP 800-186](https://doi.org/10.6028/NIST.SP.800-186) for the curve the elliptic-curve algorithms run over;
+- an algorithm is **specified and approved by a NIST publication** -- [FIPS 186-5](https://doi.org/10.6028/NIST.FIPS.186-5), [FIPS 197](https://doi.org/10.6028/NIST.FIPS.197-upd1), [SP 800-38D](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf), [SP 800-56A Rev. 3](https://doi.org/10.6028/NIST.SP.800-56Ar3), [SP 800-56C Rev. 2](https://doi.org/10.6028/NIST.SP.800-56Cr2), and [SP 800-186](https://doi.org/10.6028/NIST.SP.800-186) for the curve the elliptic-curve algorithms run over -- section 10 of FIPS 140-3 is what gives "approved" that meaning, admitting a security function specified in a FIPS, adopted in one, or listed in NIST SP 800-140C, with SP 800-140D playing that role for sensitive security parameter establishment methods;
 - a **module certificate** approves that algorithm, so a module performing it stays in its approved mode;
 - the **operational environment** the module runs in is one that certificate covers, which is the host plus the runtime plus the image together rather than the image alone.
 
-PSI-Link's answer differs across the three, so this section states the scoped claim the project is prepared to defend, the condition that claim rests on, the places an unqualified claim fails, and the argument an authorizing official is being asked to accept. The target standard is FIPS 140-3.
+PSI-Link's answer differs across the three, so this section states the scoped claim the project is prepared to defend, the condition that claim rests on, the places an unqualified claim fails, and the argument an authorizing official is being asked to accept. The target standard is [FIPS 140-3](https://doi.org/10.6028/NIST.FIPS.140-3), which is a short adopting document rather than a body of requirements: its sections 2 and 3 take ISO/IEC 19790:2012(E) as the technical requirements and ISO/IEC 24759:2017(E) as the test requirements, with the SP 800-140 series modifying those documents' annexes and test sections. Neither ISO standard is published free of charge, so the security requirements a reader would want to check this section against are not open documents; what is cited from FIPS 140-3 itself above is its section 10.
 
 #### The scoped claim
 
@@ -91,7 +91,7 @@ A second container image does. It builds on Amazon Linux 2023 and embeds the CMV
 Two conditions sit above it even once it is:
 
 - **The environment is the operator's to supply.** The image does not enable FIPS mode and cannot; a claim needs a host in FIPS mode, and the certificate covers tested operational environments rather than a distribution. What the arrangement supports at each host tier, and what stops working inside the image, are in [fips-variant-image.md](notes/fips-variant-image.md).
-- **Embedding a validated module is not being one.** A product that embeds another vendor's validated module may say it uses one; it may not call itself validated. CMVP additionally permits such a product to call itself FIPS 140-3 "compliant". This project declines that word: it is not a term NIST or CMVP defines, and it invites a reading the rest of this section is written to prevent.
+- **Embedding a validated module is not being one.** A product that embeds another vendor's validated module may say it uses one; it may not call itself validated. That is entry P-17 of the [CMVP FAQ](https://csrc.nist.gov/Projects/cryptographic-module-validation-program/faqs) (retrieved 2026-08-10; the FAQ is a web page, with no PDF edition), quoted whole in [fips-variant-image.md](notes/fips-variant-image.md). Entry P-18 additionally permits such a product to call itself FIPS 140-3 "compliant" -- a word that entry defines as the vendor's own belief that its implementation meets the requirements, with no CMVP validation behind it. This project declines it: it invites exactly the reading the rest of this section is written to prevent.
 
 So the present tense is: the algorithms the scoped claim names are on the certificate's approved-algorithm list, three of them under conditions this use does not meet, the dispatch of five of them into a validated module is measured, and nothing PSI-Link publishes today runs a validated module in an environment a certificate covers. Every statement above about a validated module performing an operation is conditional on deploying the variant image on a host that meets those conditions.
 

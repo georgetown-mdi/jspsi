@@ -112,8 +112,12 @@ lifting the shared object out of a package is what it forbids.
 
 ## What may and may not be said about it
 
-The authority is the CMVP FAQ, P-17, quoted whole because its second paragraph
-is the part usually dropped:
+The authority is entry P-17 of the
+[CMVP FAQ](https://csrc.nist.gov/Projects/cryptographic-module-validation-program/faqs),
+retrieved 2026-08-10 -- a web page, with no PDF edition to cite a page of. Its
+answer is quoted whole, closing note included, because the second paragraph is
+the part usually dropped and the third points at where the requirement itself
+lives:
 
 > A cryptographic module that has already been issued a FIPS 140-2 or FIPS 140-3
 > validation certificate may be incorporated or embedded into another product.
@@ -122,24 +126,35 @@ is the part usually dropped:
 > validated cryptographic module. A product which uses an embedded validated
 > cryptographic module cannot claim itself to be validated; only that it
 > utilizes an embedded validated cryptographic module. In such case, vendors may
-> use the phrase "FIPS 140-[2 or 3] Inside".
+> use the phrase "FIPS 140-[2 or 3] Inside" (see Use of FIPS 140-3 or FIPS 140-2
+> Logo and Phrases webpage).
 >
 > There is no assurance that a product is correctly utilizing an embedded
 > validated cryptographic module -- this is outside the scope of the FIPS 140-2
 > or FIPS 140-3 validation.
+>
+> Note, this FAQ is related to but different from guidance specified in: IG 1.A
+> Binding and Embedding Cryptographic Modules.
 
 So the image **may** say that it embeds and uses a validated cryptographic
 module, and may use "FIPS 140-3 Inside". It **may not** call itself validated.
+The FAQ is guidance on what may be said; what an embedding has to satisfy is
+IG 1.A, which the closing note points at and which this section does not stand
+in for.
 
-P-18 additionally permits a vendor to call its product FIPS 140-3 "compliant".
-**This project does not use that word.** GitLab, the most careful documentation
-found in the field, bans it internally on the grounds that "FIPS compliant" and
-"FIPS compliance" "are not official terms defined by NIST or CMVP and therefore
-should not be used because it leaves room for ambiguity or subjective
-interpretations". Adopting the stricter of the two rules costs nothing and keeps
-the wording safe under both. The construction with both authority and precedent
-is Red Hat's: name what the artifact does, condition it on the deployment, and
-attach the sanctioned short form if a short form is wanted.
+P-18 additionally permits a vendor to call its product FIPS 140-3 "compliant",
+and gives the word a meaning: that the vendor believes its implementation meets
+the FIPS 140-3 requirements, the product not having gone through CMVP
+validation. **This project does not use that word.** GitLab, the most careful
+documentation found in the field, bans it internally on the grounds that "FIPS
+compliant" and "FIPS compliance" "are not official terms defined by NIST or
+CMVP and therefore should not be used because it leaves room for ambiguity or
+subjective interpretations" -- a position P-18's own definition of the quoted
+form softens, though not the ambiguity argument behind it. Adopting the stricter
+of the two rules costs nothing and keeps the wording safe under both. The
+construction with both authority and precedent is Red Hat's: name what the
+artifact does, condition it on the deployment, and attach the sanctioned short
+form if a short form is wanted.
 
 **Certificate 5021 is a FIPS 140-3 validation**, which is the project's target
 standard ([fips-provider-surface.md](fips-provider-surface.md)), so wording that
@@ -354,7 +369,7 @@ held by review.
 
 The ECDH leg is the whole handshake chain rather than the agreement alone: an
 ephemeral keygen, a raw export of the share that goes on the wire, a raw import
-of the peer's, and then `deriveBits`. `kex.ts` pins the 65-byte SEC1
+of the peer's, and then `deriveBits`. `kex.ts` pins the 65-byte SEC 1 Ver. 2.0
 uncompressed encoding and folds the wire bytes into the transcript, so a
 provider that agreed a key while exporting or admitting a different encoding of
 the same point would break the handshake as completely as one that refused the
