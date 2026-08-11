@@ -7,6 +7,8 @@ import type { SFTPWrapper } from "ssh2";
 import { createRawSftpClient } from "../rawSftpClient";
 import {
   type InProcessSftpServer,
+  MAX_DELIVERED_SFTP_PAYLOAD_BYTES,
+  READDIR_BATCH_BUDGET_BYTES,
   selectedBackend,
   startInProcessSftpServer,
 } from "../sftpServer";
@@ -46,6 +48,15 @@ const DISABLED_DESTROY_WAIT_MS = 1_000;
 // 0-2 ms for the fresh one answering the identical call.
 const STALE_WRAPPER_SILENCE_MS = 1_500;
 const FRESH_WRAPPER_ANSWER_CEILING_MS = 1_000;
+// A NAME reply at the widths below crosses loopback in single-digit
+// milliseconds; the ceiling is orders above that. A reply the client refuses
+// settles just as fast, so the longer window is spent only where the premise has
+// moved and the reply went nowhere at all.
+const NAME_REPLY_ANSWER_CEILING_MS = 1_000;
+const NAME_REPLY_SILENCE_MS = 1_500;
+// Wide enough that the fixed framing measured against it is a small part of the
+// reply, narrow enough to be nowhere near any bound.
+const CALIBRATION_FILENAME_BYTES = 1_024;
 const TEST_TIMEOUT_MS = 60_000;
 
 const delay = (ms: number): Promise<void> =>
@@ -170,6 +181,101 @@ async function realpathOutcome(
     await delay(10);
   }
   return "no callback";
+}
+
+// The wrapper beneath a connected raw client together with a directory handle
+// open on the served root: what a case needs to issue one READDIR of its own and
+// read what the server's reply to it did.
+interface ServedRoot {
+  wrapper: SFTPWrapper;
+  handle: Buffer;
+  /**
+   * Fatal SFTP errors the client raised on this session, in arrival order. The
+   * listener also keeps one from reaching an EventEmitter with nothing attached
+   * and taking the worker down with it.
+   */
+  fatals: Error[];
+}
+
+async function openServedRoot(
+  srv: InProcessSftpServer,
+  client: Ssh2SftpClient,
+): Promise<ServedRoot> {
+  const wrapper = internalsOf(client).sftp;
+  if (wrapper === undefined)
+    throw new Error("the connected client exposed no SFTPWrapper");
+  const fatals: Error[] = [];
+  wrapper.on("error", (err: Error) => fatals.push(err));
+  const handle = await new Promise<Buffer>((resolve, reject) => {
+    wrapper.opendir(srv.handle.remoteRoot, (err, opened) => {
+      if (err) reject(err);
+      else resolve(opened);
+    });
+  });
+  return { wrapper, handle, fatals };
+}
+
+interface NameReplyOutcome {
+  /** What the READDIR that drew the reply did. */
+  outcome: "delivered" | "errored" | "no reply";
+  /** Payload length the server declared for the reply; -1 if it wrote none. */
+  declaredPayloadBytes: number;
+  /** Filename bytes the entry that arrived carried; -1 when none did. */
+  deliveredFilenameBytes: number;
+}
+
+// Arm the server to answer one READDIR with a single-entry NAME reply of the
+// given filename width, issue that READDIR, and report what the client made of
+// it inside the bound -- alongside the payload width the server's own encoder
+// declared for it, so the case reads a measured width rather than an intended
+// one. Session-fatal errors land in the ServedRoot rather than settling the
+// request: what the REQUEST did and what the SESSION did are separate readings.
+async function nameReplyOutcome(
+  srv: InProcessSftpServer,
+  root: ServedRoot,
+  filenameBytes: number,
+  withinMs: number,
+): Promise<NameReplyOutcome> {
+  let settled: "delivered" | "errored" | undefined;
+  let deliveredFilenameBytes = -1;
+  srv.inject.lastNameReplyPayloadBytes = undefined;
+  srv.inject.nameReplyFilenameBytesOnNextReaddir = filenameBytes;
+  root.wrapper.readdir(root.handle, (err, list) => {
+    if (settled !== undefined) return;
+    settled = err ? "errored" : "delivered";
+    if (!err)
+      deliveredFilenameBytes = Buffer.byteLength(list[0]?.filename ?? "");
+  });
+  const deadline = Date.now() + withinMs;
+  while (settled === undefined && Date.now() < deadline) await delay(10);
+  return {
+    outcome: settled ?? "no reply",
+    declaredPayloadBytes: srv.inject.lastNameReplyPayloadBytes ?? -1,
+    deliveredFilenameBytes,
+  };
+}
+
+// ssh2 frames a single-entry NAME reply with a fixed overhead around the
+// filename. Measured off a narrow reply rather than predicted, so a case can
+// place a reply at a width the stack itself decides is that width.
+async function nameReplyOverheadBytes(
+  srv: InProcessSftpServer,
+  root: ServedRoot,
+): Promise<number> {
+  const probe = await nameReplyOutcome(
+    srv,
+    root,
+    CALIBRATION_FILENAME_BYTES,
+    NAME_REPLY_ANSWER_CEILING_MS,
+  );
+  expect({
+    outcome: probe.outcome,
+    filenameBytes: probe.deliveredFilenameBytes,
+  }).toEqual({
+    outcome: "delivered",
+    filenameBytes: CALIBRATION_FILENAME_BYTES,
+  });
+  return probe.declaredPayloadBytes - CALIBRATION_FILENAME_BYTES;
 }
 
 // The comparable shape of a dial rejection: what a caller could match on to tell
@@ -380,6 +486,116 @@ inProcessOnly(
         superseded: "no callback",
         fresh: "answered",
       });
+    } finally {
+      await client.end().catch(() => {});
+      await srv.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  `the pinned stack carries a NAME reply of ${READDIR_BATCH_BUDGET_BYTES} payload bytes`,
+  async () => {
+    const srv = await startInProcessSftpServer();
+    const client = createRawSftpClient();
+    try {
+      await client.connect(dialOptions(srv));
+      const root = await openServedRoot(srv, client);
+      const overhead = await nameReplyOverheadBytes(srv, root);
+
+      const reply = await nameReplyOutcome(
+        srv,
+        root,
+        READDIR_BATCH_BUDGET_BYTES - overhead,
+        NAME_REPLY_ANSWER_CEILING_MS,
+      );
+
+      // The width the test backend packs every listing batch to, and the reason
+      // a directory wider than one packet is served over several round trips at
+      // all. This is the premise a suite driving a wide listing rests on, where
+      // a stack that stopped carrying this width reads as that suite's own
+      // batching having broken. The whole reply is accounted for -- the entry
+      // arrives with every byte the server put in it -- so a truncated delivery
+      // is not read as a delivery.
+      expect({
+        outcome: reply.outcome,
+        declaredPayloadBytes: reply.declaredPayloadBytes,
+        deliveredFilenameBytes: reply.deliveredFilenameBytes,
+      }).toEqual({
+        outcome: "delivered",
+        declaredPayloadBytes: READDIR_BATCH_BUDGET_BYTES,
+        deliveredFilenameBytes: READDIR_BATCH_BUDGET_BYTES - overhead,
+      });
+      expect(root.fatals).toEqual([]);
+    } finally {
+      await client.end().catch(() => {});
+      await srv.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  `the pinned stack's NAME reply wall stands at ${MAX_DELIVERED_SFTP_PAYLOAD_BYTES} payload bytes`,
+  async () => {
+    const srv = await startInProcessSftpServer();
+    const client = createRawSftpClient();
+    try {
+      await client.connect(dialOptions(srv));
+      const root = await openServedRoot(srv, client);
+      const overhead = await nameReplyOverheadBytes(srv, root);
+
+      const atWall = await nameReplyOutcome(
+        srv,
+        root,
+        MAX_DELIVERED_SFTP_PAYLOAD_BYTES - overhead,
+        NAME_REPLY_ANSWER_CEILING_MS,
+      );
+      const pastWall = await nameReplyOutcome(
+        srv,
+        root,
+        MAX_DELIVERED_SFTP_PAYLOAD_BYTES + 1 - overhead,
+        NAME_REPLY_SILENCE_MS,
+      );
+
+      // Where the wall the batch budget is derived from stands, driven from both
+      // sides at the byte: the server writes each reply through its own encoder,
+      // and the width it declared for each is what the widths below are read
+      // from. One byte past the wall the reply is refused at the client, not
+      // carried and not narrowed, and the server that wrote it is told nothing.
+      // The budget is half of this, which is the margin that absorbs a wall that
+      // moves a little; one that moved below the budget fails the case above as
+      // well, and the two together say whether the batching still has room.
+      expect({
+        atWall: {
+          outcome: atWall.outcome,
+          declaredPayloadBytes: atWall.declaredPayloadBytes,
+          deliveredFilenameBytes: atWall.deliveredFilenameBytes,
+        },
+        pastWall: {
+          outcome: pastWall.outcome,
+          declaredPayloadBytes: pastWall.declaredPayloadBytes,
+        },
+      }).toEqual({
+        atWall: {
+          outcome: "delivered",
+          declaredPayloadBytes: MAX_DELIVERED_SFTP_PAYLOAD_BYTES,
+          deliveredFilenameBytes: MAX_DELIVERED_SFTP_PAYLOAD_BYTES - overhead,
+        },
+        pastWall: {
+          outcome: "errored",
+          declaredPayloadBytes: MAX_DELIVERED_SFTP_PAYLOAD_BYTES + 1,
+        },
+      });
+      // The refusal is fatal to the SFTP session rather than local to the
+      // request, and the client names the width it is holding to -- so the wall
+      // the backend budgets against is the client's own number, not one this
+      // suite inferred from where delivery stopped.
+      expect(root.fatals).toHaveLength(1);
+      expect(root.fatals[0].message).toContain(
+        String(MAX_DELIVERED_SFTP_PAYLOAD_BYTES),
+      );
     } finally {
       await client.end().catch(() => {});
       await srv.stop();

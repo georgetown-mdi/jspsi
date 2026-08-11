@@ -91,8 +91,32 @@ export interface SftpFaultInjection {
    * Answer the next READDIR with a well-formed NAME batch carrying this single
    * over-length filename, then EOF, so the directory-listing length bound is
    * exercised against real wire bytes. Null leaves READDIR normal.
+   *
+   * Assigning a filename the backend's NAME batch budget cannot carry THROWS at
+   * the assignment, naming the budget and the wall behind it: a reply that wide
+   * is refused by the client as a fatal protocol error and the SFTP session goes
+   * with it, so the case would read a torn session rather than the bound it
+   * armed. Put a reply at or past the wall on the wire deliberately through
+   * {@link nameReplyFilenameBytesOnNextReaddir}.
    */
   oversizeNameOnNextReaddir: string | null;
+  /**
+   * Answer the next READDIR with a NAME batch of one entry whose filename is
+   * this many bytes and whose longname is empty, then EOF, so a case can put a
+   * reply of a chosen width on the wire and read whether the pinned stack still
+   * carries it. The reply goes through the server's public `name()` API, so it is
+   * encoded and framed by the stack itself, and the width it produced is reported
+   * in {@link lastNameReplyPayloadBytes}. Null leaves READDIR normal.
+   */
+  nameReplyFilenameBytesOnNextReaddir: number | null;
+  /**
+   * The payload length the stack declared for the last
+   * {@link nameReplyFilenameBytesOnNextReaddir} reply -- read off the bytes ssh2
+   * handed the protocol, so a case measuring what width still arrives states the
+   * encoder's own number instead of an estimate of it. Undefined until such a
+   * reply has been written.
+   */
+  lastNameReplyPayloadBytes: number | undefined;
   /** Accept a request of this opcode but never answer it (withheld response). */
   withholdOn: string | null;
   /** Fail RENAME with the generic-failure status this many times, then succeed. */

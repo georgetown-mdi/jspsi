@@ -107,6 +107,7 @@ describe("malformed in-flight SFTP reply", () => {
     srv.inject.malformedNameOnNextReaddir = false;
     srv.inject.malformedDataOnNextRead = false;
     srv.inject.oversizeNameOnNextReaddir = null;
+    srv.inject.nameReplyFilenameBytesOnNextReaddir = null;
     srv.inject.withholdOn = null;
     srv.inject.renameFailuresRemaining = 0;
     srv.inject.readdirBatchSize = 0;

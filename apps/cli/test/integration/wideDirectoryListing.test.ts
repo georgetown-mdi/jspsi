@@ -9,7 +9,11 @@ import {
   MAX_FILENAME_LENGTH,
 } from "../../src/connection/listingGuard";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import {
+  READDIR_BATCH_BUDGET_BYTES,
+  selectedBackend,
+  startInProcessSftpServer,
+} from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 
 // A directory filled to the enforced listing bound is the widest one the adapter
@@ -156,6 +160,34 @@ for (const batchCap of BATCH_CAPS)
     },
     TEST_TIMEOUT_MS,
   );
+
+inProcessOnly(
+  "a synthetic name too wide to deliver is refused where it is armed",
+  async () => {
+    const srv = await startInProcessSftpServer();
+    try {
+      // The one-entry NAME reply the oversize-name injection writes is packed
+      // against the same budget as a real listing batch. A name that overruns it
+      // would ride a reply the client refuses fatally, tearing down the session
+      // the case was driving, so it is refused in that case's own stack instead.
+      expect(() => {
+        srv.inject.oversizeNameOnNextReaddir = "x".repeat(
+          READDIR_BATCH_BUDGET_BYTES,
+        );
+      }).toThrow(/NAME batch budget/);
+      expect(srv.inject.oversizeNameOnNextReaddir).toBeNull();
+
+      // The width this suite's own uses sit at is nowhere near the budget, and
+      // is taken unchanged.
+      const overLengthName = "x".repeat(MAX_FILENAME_LENGTH + 1);
+      srv.inject.oversizeNameOnNextReaddir = overLengthName;
+      expect(srv.inject.oversizeNameOnNextReaddir).toBe(overLengthName);
+    } finally {
+      await srv.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
 
 inProcessOnly(
   `a full listing of ${MAX_FILENAME_LENGTH}-character names arrives whole`,
