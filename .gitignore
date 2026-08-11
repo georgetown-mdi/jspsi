@@ -17,6 +17,7 @@ __screenshots__
 *.swp
 terraform.tfvars
 scratch
+research
 *.csv
 # Transient cold-review output (light-review / assess-review); never committed.
 review_findings.md
