@@ -219,11 +219,21 @@ is not "absent in a tidy way" -- it is rejected. Producers express "no value" by
 Binary data embedded in a receipt or record -- salts, signatures, certificate
 fingerprints, certificate blobs -- is carried as a **base64url string without
 padding** (the URL- and filename-safe alphabet of
-[RFC 4648](https://www.rfc-editor.org/rfc/rfc4648#section-5), `A-Z a-z 0-9 - _`,
-with no trailing `=`). The producer encodes the bytes to that string before the
-value enters the object; the canonical encoder then treats it as an ordinary
-string. There is exactly one byte-to-string encoding for binary data, so the
-canonical form is reproducible.
+[RFC 4648](https://www.rfc-editor.org/rfc/rfc4648#section-5) section 5,
+`A-Z a-z 0-9 - _`, with no trailing `=`). That section fixes the alphabet and
+nothing else here: dropping the padding is section 3.2's allowance, which
+requires the pad characters "unless the specification referring to this document
+explicitly states otherwise", and this document is that specification, so
+stated. The producer encodes the bytes to that string before the value enters
+the object; the canonical encoder then treats it as an ordinary string.
+
+There is exactly one byte-to-string encoding for binary data, so the canonical
+form is reproducible -- but that follows from RFC 4648 section 3.5 rather than
+from the alphabet: a canonical encoding is guaranteed only where the encoder
+sets the bits padding the final character to zero, which conforming encoders
+MUST do. These strings are hashed as strings, so a producer that left those bits
+set would carry the same bytes into a different canonical encoding. A reproducer
+must encode as that section requires.
 
 ### Final byte string
 
@@ -314,4 +324,6 @@ lands against it, are in
 - [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md) - the exchange specification whose
   linkage terms are embedded, canonically encoded, in a receipt
 - [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) - JSON Canonicalization Scheme
-- [RFC 4648 section 5](https://www.rfc-editor.org/rfc/rfc4648#section-5) - base64url
+- [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648#section-5) - base64url: the
+  alphabet in section 5, the unpadded form in section 3.2, the zero pad bits a
+  canonical encoding rests on in section 3.5

@@ -153,9 +153,12 @@ credits Ed25519 with three properties. Each was measured against WebCrypto ECDSA
 on the runtime this project targets rather than reasoned from documentation.
 
 **Single canonical encoding is not surrendered.** WebCrypto ECDSA emits a fixed
-64-byte raw `r || s` (IEEE P1363), never a DER structure -- the first signature
-byte is not `0x30`. The encoding latitude that makes ECDSA signatures a
-canonicalization hazard elsewhere does not arise through this call surface. The
+64-byte raw `r || s` -- the fixed-width concatenation of IEEE Std 1363-2000's
+informative Annex E.3.1, specified in
+[PROTOCOL.md](../spec/PROTOCOL.md#signing-identity-and-certificate-pinning) --
+never a DER structure, the first signature byte not being `0x30`. The encoding
+latitude that makes ECDSA signatures a canonicalization hazard elsewhere does
+not arise through this call surface. The
 signature is also the same 64 bytes as Ed25519, so the receipt format's
 base64url field bound is unaffected and the signature field does not change
 size. The certificate body does grow: a P-256 public key carries both `x` and
