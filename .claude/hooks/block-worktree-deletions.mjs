@@ -14,9 +14,11 @@
 //     live under
 //   - a path that CONTAINS live worktrees, the `rm -rf /workspace` shape, which
 //     names no worktree at all
-//   - a `git clean` carrying a force that runs INSIDE a worktree this session
-//     does not own, and one carrying a doubled force plus -d in a directory that
-//     merely holds worktrees
+//   - a `git clean` that would delete INSIDE a worktree this session does not
+//     own -- its force coming from a flag or from a `-c clean.requireForce=false`
+//     that lifts git's own requirement -- and one whose force (a flag and that
+//     config counted together) reaches a doubled `-ff` plus -d in a directory
+//     that merely holds worktrees
 //   - `git worktree remove --force`, which takes a tree git's own refusal would
 //     have held on to
 //
@@ -67,9 +69,10 @@
 //     the command in front of it. Nor is a command inside `bash -c "..."` read,
 //     or one behind an alias or a shell function.
 //   - THE COMMAND WORD IS MATCHED LITERALLY, by basename after quotes are
-//     stripped. A quoted spelling (`r"m"`) is caught by that stripping; an
-//     escaped one (`\rm`, `r\m`) names the same program to the shell and a
-//     different one to this hook.
+//     stripped -- from the whole command line before the deletion pre-filter and
+//     from each token before the match -- so a quoted spelling (`r"m"`, `m"v"`)
+//     is caught, while an escaped one (`\rm`, `r\m`) names the same program to
+//     the shell and a different one to this hook.
 //   - ONLY sudo, command, env, nice AND time ARE PEELED as prefix words, along
 //     with their flags and the values those flags take (`sudo -u NAME`,
 //     `nice -n 10`). Another wrapper -- `timeout 5 rm ...`, `nohup`, `setsid` --
@@ -80,14 +83,27 @@
 //   - A `cd` MOVES THE DIRECTORY paths resolve against only when it stands as
 //     its own command, and a symlink pointing into a worktree is not resolved
 //     (removing the link does not follow it anyway).
+//   - RELATIVE-OPERAND DRIFT DETECTION DEPENDS ON THE HARNESS SUPPLYING THE
+//     SHELL'S CURRENT DIRECTORY in the event's cwd. A relative deletion aimed at
+//     a tree the session cd'ed into earlier is caught only when that drifted cwd
+//     is what the event reports; whether the harness reports the drifted shell
+//     cwd or a stale session cwd was not driven at this ref (the test supplies
+//     cwd rather than observing what the harness sends). An absolute operand is
+//     unaffected.
 //   - A GIT DIRECTORY REDIRECT IS READ ONLY IN THE LITERAL FORMS MEASURED HERE:
 //     `-C` (composed left to right against the one before it, as real git
-//     composes it), `--work-tree`, and a leading `GIT_WORK_TREE=` assignment.
-//     Those three move the directory a git subcommand works in -- the one
-//     `clean` walks, and the one a relative `worktree remove` operand resolves
-//     against -- while `--git-dir`, `GIT_DIR` and `-c core.worktree=` do not,
-//     each put to real git in the test beside this file. A redirect spelling
-//     outside that measured set would pass unread.
+//     composes it), `--work-tree`, and `GIT_WORK_TREE` set either as a leading
+//     assignment or by an `export` stage before the git command. Those move the
+//     directory a git subcommand works in -- the one `clean` walks, and the one a
+//     relative `worktree remove` operand resolves against -- while `--git-dir`,
+//     `GIT_DIR` and `-c core.worktree=` do not, each put to real git in the test
+//     beside this file. A redirect spelling outside that measured set would pass
+//     unread.
+//   - clean.requireForce IS READ ONLY AS A `-c clean.requireForce=<off>` on the
+//     command line, `<off>` one of git's boolean-false spellings (false, no, off,
+//     0, empty), the last such `-c` winning as real git resolves it. A
+//     `--config-env` naming an environment variable, or a `GIT_CONFIG_*` pair,
+//     sets the same key from a value this hook cannot see, so neither is read.
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude. Any
 // unexpected failure here falls through to exit 0 (fail open) so a bug in this
@@ -102,10 +118,16 @@ const AGENT_TREE_PREFIX = "agent-";
 
 const DELETING_COMMANDS = new Set(["rm", "rmdir", "unlink", "shred", "mv"]);
 
-// Cheap pre-filter: a command that names none of these cannot be any form this
-// hook reads, and skipping it keeps the filesystem probes below off every
-// unrelated Bash call.
+// Cheap pre-filter: a command that names none of these -- tested with quotes
+// stripped the same blunt way the tokenizer strips them, so a quoted command
+// word (`r"m"`) is not hidden from the gate -- cannot be any form this hook
+// reads, and skipping it keeps the filesystem probes below off every unrelated
+// Bash call.
 const DELETION_MENTION = /\b(rm|rmdir|unlink|shred|mv|find|xargs|git)\b/;
+
+function mentionsDeletion(command) {
+  return DELETION_MENTION.test(command.replace(/['"]/g, ""));
+}
 
 function block(reason) {
   process.stderr.write(
@@ -354,6 +376,7 @@ const VALUE_GLOBALS = new Set([
 function gitInvocation(args) {
   const chdirs = [];
   let workTree = null;
+  const configSettings = [];
   let index = 0;
   while (index < args.length && args[index].startsWith("-")) {
     const token = args[index];
@@ -364,23 +387,59 @@ function gitInvocation(args) {
     if (value !== undefined) {
       if (option === "-C") chdirs.push(value);
       else if (option === "--work-tree") workTree = value;
+      else if (option === "-c") configSettings.push(value);
     }
     index += VALUE_GLOBALS.has(option) && attached === null ? 2 : 1;
   }
   return {
     chdirs,
     workTree,
+    configSettings,
     subcommand: args[index],
     args: args.slice(index + 1),
   };
 }
 
-// How many times a force is asked for, counting a repeated short flag (`-ff`)
-// and a repeated long one alike.
+// `git clean` refuses to delete without a force UNLESS `clean.requireForce` is
+// configured off, so a `-c` that disables it satisfies the force condition on
+// its own. The key is compared case-folded (git folds config key names) and the
+// value against git's boolean-false spellings, both measured against real git in
+// the test beside this file; the last `-c` setting of the key wins, as real git
+// resolves it. A `--config-env` spelling or a `GIT_CONFIG_*` environment pair
+// names a value this hook cannot see and is not read.
+const REQUIRE_FORCE_KEY = "clean.requireforce";
+const FORCE_DISABLING_VALUES = new Set(["false", "no", "off", "0", ""]);
+
+function requireForceDisabled(configSettings) {
+  let disabled = false;
+  for (const setting of configSettings) {
+    const equals = setting.indexOf("=");
+    const key = (
+      equals >= 0 ? setting.slice(0, equals) : setting
+    ).toLowerCase();
+    if (key !== REQUIRE_FORCE_KEY) continue;
+    // A bare `-c clean.requireForce` (no value) sets the boolean true.
+    const value =
+      equals >= 0 ? setting.slice(equals + 1).toLowerCase() : "true";
+    disabled = FORCE_DISABLING_VALUES.has(value);
+  }
+  return disabled;
+}
+
+// Any unambiguous abbreviation of `--force`. git accepts a long option shortened
+// to any unique prefix, and `f` is the only long option beginning with it for
+// both `git clean` and `git worktree remove`, so `--f`, `--fo`, `--for`,
+// `--forc` and `--force` all mean force (measured against real git in the test
+// beside this file); `--f=` and `--forcex` do not, so the match is anchored and
+// carries no `=`.
+const FORCE_ABBREVIATION = /^--f(?:o(?:r(?:c(?:e)?)?)?)?$/;
+
+// How many times a force is asked for, counting a repeated short flag (`-ff`), a
+// repeated long one, and every unambiguous abbreviation git honours.
 function forceCount(args) {
   let count = 0;
   for (const arg of args) {
-    if (arg === "--force") count++;
+    if (FORCE_ABBREVIATION.test(arg)) count++;
     else if (/^-[a-eg-z]*f/.test(arg)) count += (arg.match(/f/g) || []).length;
   }
   return count;
@@ -396,17 +455,23 @@ function isDryRun(args) {
 // files and -d its untracked directories. A directory that merely HOLDS
 // worktrees loses them only to a doubled force with -d, because git skips a
 // nested repository for every lesser spelling.
-function gitCleanVerdict(args, directory, ownTrees, knownRoots) {
-  if (forceCount(args) === 0 || isDryRun(args)) return null;
+function gitCleanVerdict(args, directory, ownTrees, knownRoots, forceDisabled) {
+  if (isDryRun(args)) return null;
+  // A disabled `clean.requireForce` satisfies git's baseline force requirement,
+  // so it counts as one force: a single flag on top of it then reaches the
+  // doubled force that clears a nested repository, as real git does (measured in
+  // the test beside this file).
+  const force = forceCount(args) + (forceDisabled ? 1 : 0);
+  if (force === 0) return null;
   const context = worktreeContext(directory);
   if (context !== null) {
     if (owns(directory, ownTrees)) return null;
-    return `'git clean' with a force runs in '${directory}', inside an agent worktree this session does not own${ownershipNote(ownTrees)}`;
+    return `'git clean' would delete inside '${directory}', an agent worktree this session does not own${ownershipNote(ownTrees)}`;
   }
   const cleansDirectories = args.some(
     (arg) => arg === "--directories" || /^-[a-ce-z]*d/.test(arg),
   );
-  if (forceCount(args) < 2 || !cleansDirectories) return null;
+  if (force < 2 || !cleansDirectories) return null;
   const [root] = rootsUnder(directory, knownRoots);
   return root === undefined
     ? null
@@ -429,7 +494,13 @@ function gitVerdict(args, cwd, ownTrees, knownRoots, environment) {
   const git = gitInvocation(args);
   const directory = gitDirectory(git, cwd, environment);
   if (git.subcommand === "clean") {
-    return gitCleanVerdict(git.args, directory, ownTrees, knownRoots);
+    return gitCleanVerdict(
+      git.args,
+      directory,
+      ownTrees,
+      knownRoots,
+      requireForceDisabled(git.configSettings),
+    );
   }
   if (git.subcommand !== "worktree" || git.args[0] !== "remove") return null;
   const removeArgs = git.args.slice(1);
@@ -449,6 +520,20 @@ function chdirTarget(command) {
   return command.args.find(isPathOperand) ?? null;
 }
 
+// The variables an `export VAR=val ...` stage sets for the commands that follow
+// it, the way a `VAR=val cmd` prefix sets one for a single command -- the same
+// GIT_WORK_TREE redirect, reached through git's environment rather than its flags
+// (measured against real git in the test beside this file). A bare `VAR=val`
+// standing as its own stage is a shell variable git never sees, so only the
+// exported form is read.
+function exportedAssignments(command) {
+  if (command.name !== "export") return [];
+  return command.args.flatMap((arg) => {
+    const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(arg);
+    return assignment === null ? [] : [[assignment[1], assignment[2]]];
+  });
+}
+
 function main() {
   let event;
   try {
@@ -459,7 +544,7 @@ function main() {
   if (event.tool_name !== "Bash") process.exit(0);
   const command = event?.tool_input?.command;
   if (typeof command !== "string") process.exit(0);
-  if (!DELETION_MENTION.test(command)) process.exit(0);
+  if (!mentionsDeletion(command)) process.exit(0);
 
   const sessionCwd = typeof event.cwd === "string" ? event.cwd : process.cwd();
   const session = worktreeContext(sessionCwd);
@@ -467,6 +552,7 @@ function main() {
   const ownTrees = ownedTrees(event.agent_id, knownRoots);
 
   let cwd = sessionCwd;
+  const exported = new Map();
   for (const pipeline of splitPipelines(command)) {
     const commands = splitStages(pipeline)
       .map((stage) => invocation(tokenize(stage)))
@@ -478,7 +564,7 @@ function main() {
         cwd,
         ownTrees,
         knownRoots,
-        entry.environment,
+        new Map([...exported, ...entry.environment]),
       );
       if (reason) block(reason);
     }
@@ -494,6 +580,11 @@ function main() {
           knownRoots,
         );
         if (reason) block(reason);
+      }
+    }
+    if (commands.length === 1) {
+      for (const [name, value] of exportedAssignments(commands[0])) {
+        exported.set(name, value);
       }
     }
     const moved = commands.length === 1 ? chdirTarget(commands[0]) : null;

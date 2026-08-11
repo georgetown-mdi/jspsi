@@ -189,11 +189,40 @@ describe("block-worktree-deletions hook", () => {
     expectBlocked([
       `git worktree remove --force ${SIBLING}`,
       `git worktree remove -f ${OWN}`,
+      // Every unambiguous abbreviation of --force git accepts on remove.
+      `git worktree remove --f ${SIBLING}`,
+      `git worktree remove --fo ${OWN}`,
+      `git worktree remove --forc ${SIBLING}`,
     ]);
     expectAllowed([
       `git worktree remove ${SIBLING}`,
       "git worktree remove --force /tmp/detached-rebase",
       "git worktree prune",
+    ]);
+  });
+
+  it("reads a GIT_WORK_TREE redirect an export stage sets, not a bare one", () => {
+    expectBlocked([
+      `export GIT_WORK_TREE=${SIBLING}; git clean -fd`,
+      `export GIT_WORK_TREE=${SIBLING} && git clean -fd`,
+      `export GIT_WORK_TREE=${ROOT}; git worktree remove -f agent-other`,
+    ]);
+    // A bare `GIT_WORK_TREE=` standing as its own stage is a shell variable git
+    // never sees, and a leading assignment overrides an earlier export the way
+    // real git resolves it, so both leave the cleaned directory the owned cwd.
+    expectAllowed([
+      `GIT_WORK_TREE=${SIBLING}; git clean -fd`,
+      `export GIT_WORK_TREE=${SIBLING}; GIT_WORK_TREE=${OWN} git clean -fd`,
+    ]);
+  });
+
+  it("catches a quoted command word its deletion pre-filter would skip", () => {
+    // The pre-filter strips quotes the same way the tokenizer does, so a quote
+    // buried in the command word no longer hides the deletion from the gate.
+    expectBlocked([
+      `r"m" -rf ${SIBLING}`,
+      `m"v" ${SIBLING} /tmp/parked`,
+      `"rm" -rf ${SIBLING}`,
     ]);
   });
 
@@ -203,6 +232,20 @@ describe("block-worktree-deletions hook", () => {
       `git -C ${SIBLING} clean -fd`,
       `git -C ${SIBLING} clean -f`,
       `git -C ${SIBLING} clean --force`,
+      // Any unambiguous abbreviation of --force git accepts is still a force.
+      `git -C ${SIBLING} clean --forc`,
+      `git -C ${SIBLING} clean --fo`,
+      `git -C ${SIBLING} clean --f`,
+      // A -c that turns clean.requireForce off removes git's own force
+      // requirement, so the reach-in deletes with no flag at all.
+      `git -C ${SIBLING} -c clean.requireForce=false clean -d`,
+      `git -C ${SIBLING} -c clean.requireForce=no clean`,
+      `git -C ${SIBLING} -c clean.requireForce=off clean -d`,
+      `git -C ${SIBLING} -c clean.requireForce=0 clean -d`,
+      `git -C ${SIBLING} -c clean.requireForce= clean -d`,
+      `git -C ${SIBLING} -c clean.requireForce=FALSE clean -d`,
+      `git -C ${SIBLING} -c CLEAN.REQUIREFORCE=false clean -d`,
+      `git -C ${SIBLING} -c clean.requireForce=true -c clean.requireForce=false clean -d`,
       `cd ${SIBLING} && git clean -fd`,
       `git -C ${SIBLING} -C . clean -ffdx`,
       `git -C ${ROOT} -C agent-other clean -fd`,
@@ -216,6 +259,13 @@ describe("block-worktree-deletions hook", () => {
       `git -C ${SIBLING} clean -d`,
       `git -C ${SIBLING} clean -fdn`,
       `git -C ${SIBLING} clean --dry-run -fdx`,
+      // requireForce left on (its default, a bare key, or a last-winning true)
+      // and a config that is not requireForce leave git's refusal in place.
+      `git -C ${SIBLING} -c clean.requireForce=true clean -d`,
+      `git -C ${SIBLING} -c clean.requireForce clean -d`,
+      `git -C ${SIBLING} -c clean.requireForce=false -c clean.requireForce=true clean -d`,
+      `git -C ${SIBLING} -c clean.requireForce=false clean -dn`,
+      `git -C ${SIBLING} -c user.name=x clean -d`,
     ]);
     expectAllowed(["git clean -fdx", "git clean -ffx", "git clean -ffd"], {
       cwd: LIVE_TREE,
@@ -330,6 +380,60 @@ describe("block-worktree-deletions hook", () => {
           .status === 2;
       execFileSync("git", ["clean", ...spelling.split(" ")], { cwd: dir });
       expect(existsSync(tree), `git clean ${spelling}`).toBe(!blocked);
+    }
+  });
+
+  // How much force a spelling asks for -- a --force abbreviation, or a -c that
+  // turns clean.requireForce off -- is git's behavior, so each spelling is put to
+  // a real repo holding a live sibling worktree with uncommitted work. The hook
+  // must refuse exactly the spellings that destroy that work. `own` is the tree
+  // this session owns; `dir` (the repo root) merely holds the trees. A failure
+  // means git's behavior moved and the hook's reading of it has to move too.
+  it("blocks exactly the force abbreviations and requireForce config git deletes a sibling with", () => {
+    for (const { spelling, from } of [
+      { spelling: "git -C SIBLING clean --f", from: "own" },
+      { spelling: "git -C SIBLING clean --fo", from: "own" },
+      { spelling: "git -C SIBLING clean --forc", from: "own" },
+      { spelling: "git worktree remove --fo SIBLING", from: "own" },
+      {
+        spelling: "git -C ROOT worktree remove --forc agent-live",
+        from: "own",
+      },
+      {
+        spelling: "git -C SIBLING -c clean.requireForce=false clean -d",
+        from: "own",
+      },
+      {
+        spelling: "git -C SIBLING -c clean.requireForce=no clean",
+        from: "own",
+      },
+      { spelling: "export GIT_WORK_TREE=SIBLING; git clean -fd", from: "own" },
+      // A doubled force -- one flag on top of the config that lifts git's
+      // baseline requirement -- clears the nested tree from the holder.
+      { spelling: "git -c clean.requireForce=false clean -df", from: "dir" },
+      // Not enough force, a dry run, a last-winning true, and a bare -c are all
+      // left alone: real git deletes nothing, so neither must the hook.
+      { spelling: "git -c clean.requireForce=false clean -d", from: "dir" },
+      {
+        spelling: "git -C SIBLING -c clean.requireForce=false clean -dn",
+        from: "own",
+      },
+      {
+        spelling:
+          "git -C SIBLING -c clean.requireForce=false -c clean.requireForce=true clean -d",
+        from: "own",
+      },
+      { spelling: "git -C SIBLING -c user.name=x clean -d", from: "own" },
+      { spelling: "GIT_WORK_TREE=SIBLING; git clean -fd", from: "own" },
+    ]) {
+      const { dir, tree, own, precious } = makeRepoWithWorktree();
+      const cwd = from === "own" ? own : dir;
+      const command = spelling
+        .replaceAll("SIBLING", tree)
+        .replaceAll("ROOT", join(dir, ".claude", "worktrees"));
+      const blocked = verdict(command, { cwd, projectDir: dir }).status === 2;
+      spawnSync("bash", ["-c", command], { cwd });
+      expect(existsSync(precious), command).toBe(!blocked);
     }
   });
 
