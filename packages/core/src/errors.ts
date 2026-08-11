@@ -50,17 +50,38 @@ export interface TransportRefusalOptions {
   details?: readonly string[];
 }
 
-// Folds a refusal's class-uniform recovery step and its ordered detail fragments
-// into a cause chain, the step FIRST so the renderer's depth bound reaches it
-// before any detail and before whatever the caller chains behind them.
+// Folds ordered detail fragments into a cause chain, each fragment a capped
+// link of its own: the display boundary caps every link separately, so a value
+// one party chose can only ever spend the budget of the link it sits alone on.
+// The fragments go AHEAD of `tail` -- an existing cause to preserve, like the
+// transport error a connect rejected with -- so the renderer's depth bound
+// reaches every labeled detail before an opaque terminal cause.
+export function chainDetailCauses(
+  details: readonly [string, ...string[]],
+): Error;
+export function chainDetailCauses(
+  details: readonly string[],
+  tail: unknown,
+): unknown;
+export function chainDetailCauses(
+  details: readonly string[],
+  tail?: unknown,
+): unknown {
+  return details.reduceRight<unknown>(
+    (cause, detail) =>
+      new Error(detail, cause === undefined ? undefined : { cause }),
+    tail,
+  );
+}
+
+// A refusal's class-uniform recovery step ahead of its ordered detail
+// fragments: the step FIRST so the renderer's depth bound reaches it before any
+// detail and before whatever the caller chains behind them.
 function refusalCauseChain(
   recoveryStep: string,
   details: readonly string[],
 ): Error {
-  let cause: Error | undefined;
-  for (let index = details.length - 1; index >= 0; index -= 1)
-    cause = new Error(details[index], cause && { cause });
-  return new Error(recoveryStep, cause && { cause });
+  return chainDetailCauses([recoveryStep, ...details]);
 }
 
 /**
