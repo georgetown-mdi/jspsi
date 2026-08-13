@@ -127,8 +127,10 @@ export function unavailableKexPrimitives(): readonly KexPrimitive[] {
  * wrapper, so the message is what there is to match on -- the same shape as the
  * `Host denied` match in {@link SSH2SFTPClientAdapter}).
  *
- * Matching it only ADDS a diagnostic, so a version that reworded it degrades to
- * today's bare message rather than to a wrong one.
+ * A version that reworded it degrades to ssh2's own bare message, and to a dial
+ * that spends its whole reconnect budget on a negotiation that cannot succeed --
+ * the behaviour of a match that never fires, never a wrong diagnostic or a dial
+ * ended for the wrong reason.
  */
 const KEX_NEGOTIATION_FAILURE_FRAGMENT = "no matching key exchange algorithm";
 
@@ -300,6 +302,34 @@ function emptiedOperatorListError(
 }
 
 /**
+ * Whether `error` is a key-exchange negotiation failure raised on a process that
+ * cannot perform one of `unavailable` -- the permanently incompatible case, on
+ * which no re-dial and no elapsed time changes anything.
+ *
+ * The capability verdict is what conditions this, and it carries the whole
+ * weight: the message fragment is not psilink's to trust, ssh2 rendering a
+ * server's `SSH_MSG_DISCONNECT` description into the same message, and a
+ * disconnect preceding host-key verification, so a server or an on-path attacker
+ * writes the fragment verbatim. The verdict is this process's own reading of its
+ * own crypto provider, taken before the dial, so on a host that can perform
+ * everything ssh2 offers a written fragment decides nothing at all; on a host
+ * that cannot, the party writing it could already deny the exchange outright,
+ * and what it gains is the dial failing sooner than the reconnect budget.
+ *
+ * @internal
+ */
+export function isUnperformableKexNegotiationFailure(
+  error: unknown,
+  unavailable: readonly KexPrimitive[],
+): boolean {
+  return (
+    unavailable.length > 0 &&
+    error instanceof Error &&
+    error.message.includes(KEX_NEGOTIATION_FAILURE_FRAGMENT)
+  );
+}
+
+/**
  * Given a dial rejection, return it as it stands, or -- when it is a
  * key-exchange negotiation failure on a process missing a primitive -- an error
  * that names the platform capability behind it, holding the original as its
@@ -317,12 +347,7 @@ export function explainKexNegotiationFailure(
   error: unknown,
   unavailable: readonly KexPrimitive[],
 ): unknown {
-  if (unavailable.length === 0) return error;
-  if (
-    !(error instanceof Error) ||
-    !error.message.includes(KEX_NEGOTIATION_FAILURE_FRAGMENT)
-  )
-    return error;
+  if (!isUnperformableKexNegotiationFailure(error, unavailable)) return error;
   const names = primitiveNames(unavailable);
   return new Error(
     `the SFTP server accepts no key exchange this host can perform: its ` +
