@@ -17,24 +17,23 @@ import {
   SCANNED_FILES,
   SCANNED_ROOTS,
   allowlistEntryFor,
-  commentSyntaxFor,
   fileViolations,
+  isJavaScriptFamily,
   isScannedFile,
   scanRepo,
-  stripComments,
   urlLiterals,
 } from "./check-egress-claims.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // Bound for the describes below whose cases scan `repoRoot`: they walk the whole
-// working tree, and the parser guard among them also parses and prints every
-// JavaScript-family source in it twice. Alone on an idle container the heaviest
-// runs 3.8s against vitest's 5s default -- and 11.4s with the rest of the suite
-// competing for the same cores, which is the contention that reddened it. Sized
-// at roughly five times that worst measurement, this stays a hang backstop -- a
-// stripper that loops, or a walk that never terminates, still fails here --
-// rather than an assertion about how fast the scan runs.
+// working tree, and the parser guard among them parses every JavaScript-family
+// source in it a second time. Alone on an idle container the heaviest runs 3.8s
+// against vitest's 5s default -- and 11.4s with the rest of the suite competing
+// for the same cores, which is the contention that reddened it. Sized at roughly
+// five times that worst measurement, this stays a hang backstop -- an extractor
+// that loops, or a walk that never terminates, still fails here -- rather than
+// an assertion about how fast the scan runs.
 const SCAN_TIMEOUT_MS = 60_000;
 
 // Fixture paths under the scanned roots. Nothing here is read from disk: the
@@ -44,6 +43,29 @@ const FIXTURE = "apps/web/src/fixture.ts";
 
 const urlsIn = (source, path = FIXTURE) =>
   urlLiterals(source, path).map((hit) => hit.url);
+
+// What the TypeScript parser makes of a source text: the cooked value of every
+// string and no-substitution template literal in it, and whether it parses at
+// all. The check reads literals from a parse, so the parser is the oracle for
+// what a case's source actually holds rather than what it looks like it holds.
+const parseOf = (source, scriptKind = ts.ScriptKind.TS) => {
+  const parsed = ts.createSourceFile(
+    "fixture",
+    source,
+    ts.ScriptTarget.Latest,
+    false,
+    scriptKind,
+  );
+  const literals = [];
+  const visit = (node) => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      literals.push(node.text);
+    }
+    node.forEachChild(visit);
+  };
+  visit(parsed);
+  return { literals, parseErrors: parsed.parseDiagnostics.length };
+};
 
 const LITERAL = 'const u = "https://evil.example/x";\n';
 
@@ -105,7 +127,44 @@ describe("URL literal matcher", () => {
   it("reports the line the literal sits on", () => {
     const source = 'const a = 1;\n\nconst b = "https://evil.example/x";\n';
     expect(urlLiterals(source, FIXTURE)).toEqual([
-      { url: "https://evil.example/x", authority: "evil.example", line: 3 },
+      { url: "https://evil.example/x", host: "evil.example", line: 3 },
+    ]);
+  });
+
+  it("reports the line a literal several nodes into a file sits on", () => {
+    // Positions come from the parse rather than from a scan of the text, so a
+    // literal reached after comments, JSX prose, and a multi-line template
+    // still has to name the line it is written on.
+    const source =
+      "// https://commented.example/a\n" +
+      "const banner = `first\n" +
+      "  second`;\n" +
+      "export const A = () => (\n" +
+      "  <p>\n" +
+      "    files under data/* are read\n" +
+      "  </p>\n" +
+      ");\n" +
+      'const u = "https://evil.example/x";\n';
+    expect(urlLiterals(source, "apps/web/src/f.tsx")).toEqual([
+      { url: "https://evil.example/x", host: "evil.example", line: 9 },
+    ]);
+  });
+
+  it("names a rewritten literal's own line, not the line inside it", () => {
+    // The limit candidateOf carries: a literal the parser rewrote -- one
+    // holding any escape -- spells no offsets of its own, so a URL further
+    // into the same multi-line template is reported at the line that literal
+    // begins on. The hit and its host are unaffected, and a literal the file
+    // spells verbatim still reports the line the URL sits on.
+    const escaped =
+      "const banner = `cost: \\$5\n" +
+      "  a second line\n" +
+      "  https://evil.example/x`;\n";
+    expect(urlLiterals(escaped, FIXTURE)).toEqual([
+      { url: "https://evil.example/x", host: "evil.example", line: 1 },
+    ]);
+    expect(urlLiterals(escaped.replace("\\$5", "$5"), FIXTURE)).toEqual([
+      { url: "https://evil.example/x", host: "evil.example", line: 3 },
     ]);
   });
 
@@ -161,8 +220,8 @@ describe("URL literal matcher", () => {
     ]);
     expect(
       urlLiterals('const u = "stun:/relay.evil.example:3478";\n', FIXTURE)[0]
-        .authority,
-    ).toBe("relay.evil.example:3478");
+        .host,
+    ).toBe("relay.evil.example");
   });
 
   it("does not trip on a stun/turn scheme with slashes and no host", () => {
@@ -191,7 +250,7 @@ describe("URL literal matcher", () => {
     ).toEqual([
       {
         url: "https://${tenant}.evil.example/report",
-        authority: "${tenant}.evil.example",
+        host: ".evil.example",
         line: 1,
       },
     ]);
@@ -202,7 +261,7 @@ describe("URL literal matcher", () => {
 
   it("still flags a literal host carrying an interpolated path", () => {
     const source = "await fetch(`https://evil.example/${path}`);\n";
-    expect(urlLiterals(source, FIXTURE).map((hit) => hit.authority)).toEqual([
+    expect(urlLiterals(source, FIXTURE).map((hit) => hit.host)).toEqual([
       "evil.example",
     ]);
   });
@@ -220,6 +279,70 @@ describe("URL literal matcher", () => {
     expect(urlsIn('await fetch("https://evil.example:8443/x");\n')).toEqual([
       "https://evil.example:8443/x",
     ]);
+  });
+
+  it("drops the port only where an interpolation ate the host", () => {
+    // The port rule exists for the authority a template interpolates away.
+    // Where nothing was interpolated there is no such authority to rescue, so
+    // an authority of nothing but a port is host-shaped text the parser
+    // rejects, and is reported rather than skipped.
+    expect(() => new URL("https://:8443/x")).toThrow();
+    expect(urlsIn('await fetch("https://:8443/x");\n')).toEqual([
+      "https://:8443/x",
+    ]);
+    expect(urlsIn("await fetch(`https://${host}:8443/x`);\n")).toEqual([]);
+  });
+
+  it("reads a literal as the value it evaluates to", () => {
+    // The regex-escaped spelling: `\/` is an escape the language removes, so
+    // the string a regular expression is built from holds a plain URL. The
+    // parser is what says so, and the check reads the same cooked value.
+    const source = 'const p = new RegExp("https:\\/\\/evil.example/x");\n';
+    expect(parseOf(source).literals).toEqual(["https://evil.example/x"]);
+    expect(urlsIn(source)).toEqual(["https://evil.example/x"]);
+  });
+
+  it("reads `${` as literal text where the parser says nothing interpolates", () => {
+    // The node kind decides, not the characters: in a single-quoted string and
+    // in a JSX attribute value the braces are text, and `new URL()` resolves
+    // the authority they spell to a non-empty host.
+    expect(new URL("https://${host}/x").hostname).toBe("${host}");
+    for (const [source, path] of [
+      ["const u = 'https://${host}/x';\n", FIXTURE],
+      [
+        'export const A = <img src="https://${host}/x" />;\n',
+        "apps/web/src/f.tsx",
+      ],
+    ]) {
+      expect([path, urlsIn(source, path)]).toEqual([
+        path,
+        ["https://${host}/x"],
+      ]);
+      expect([path, urlLiterals(source, path)[0].host]).toEqual([
+        path,
+        "${host}",
+      ]);
+    }
+    // The same text where the parser does call it an interpolation.
+    expect(urlsIn("const u = `https://${host}/x`;\n")).toEqual([]);
+  });
+
+  it("cannot read a literal past the node holding it", () => {
+    // An unbalanced `${` inside a URL literal is where a scan of the file's
+    // characters loses its footing and runs to the end of the file, carrying
+    // every following line into the failure message. A literal ends where its
+    // node does, so the message names that literal and nothing after it.
+    const source =
+      'const u = "https://evil.example/${";\n' +
+      'const v = "a second line";\n' +
+      'const w = "https://other.example/y";\n';
+    expect(urlsIn(source)).toEqual([
+      "https://evil.example/${",
+      "https://other.example/y",
+    ]);
+    const [message] = fileViolations(FIXTURE, source);
+    expect(message).toContain("`https://evil.example/${`");
+    expect(message).not.toContain("a second line");
   });
 
   it("does not trip on an authority written entirely of dots", () => {
@@ -273,9 +396,11 @@ describe("URL literal matcher", () => {
   });
 
   it("reports host-shaped text that `new URL()` rejects", () => {
-    // The loud direction, stated in the header: the matcher judges an
-    // authority without parsing it, so a literal nothing could dereference can
-    // still fail the build, and the author rewrites or allowlists it.
+    // The loud direction, stated in the header: the parser is the host oracle
+    // for the authorities it accepts, and the ones it refuses are their own
+    // reported class rather than a silence, so a literal nothing could
+    // dereference can still fail the build. The author rewrites or allowlists
+    // it. A hit reports no host for these, because no parser resolved one.
     for (const literal of [
       "https://%zz/",
       "https://[not-ipv6]/",
@@ -286,6 +411,9 @@ describe("URL literal matcher", () => {
     ]) {
       expect(() => new URL(literal)).toThrow();
       expect(urlsIn(`fetch("${literal}");\n`)).toEqual([literal]);
+      expect(urlLiterals(`fetch("${literal}");\n`, FIXTURE)[0].host).toBe(
+        undefined,
+      );
     }
   });
 
@@ -325,7 +453,7 @@ describe("URL literal matcher", () => {
     // shape suggests.
     expect(new URL("https:///path").host).toBe("path");
     expect(urlLiterals('const u = "https:///path";\n', FIXTURE)).toEqual([
-      { url: "https:///path", authority: "path", line: 1 },
+      { url: "https:///path", host: "path", line: 1 },
     ]);
   });
 
@@ -496,9 +624,10 @@ describe("scanned files", () => {
   });
 
   it("reports a URL in a text format whose comment syntax is not modeled", () => {
-    // Running the JavaScript stripper over these would read a `//` or `/*` in
-    // ordinary content as a comment opener, blank the rest of the line, and
-    // report the file clean. They are scanned raw for that reason.
+    // No parser is run for these, and guessing at their comment syntax is what
+    // would report a file clean: a `//` or `/*` in ordinary content read as a
+    // comment opener takes the rest of the line, and the URL in it, out of the
+    // scan. They are scanned raw for that reason.
     const cases = [
       [
         "apps/web/public/index.html",
@@ -532,8 +661,7 @@ describe("scanned files", () => {
       ],
     ];
     for (const [path, source, expected] of cases) {
-      expect(commentSyntaxFor(path)).toBe("none");
-      expect([path, stripComments(source, path)]).toEqual([path, source]);
+      expect(isJavaScriptFamily(path)).toBe(false);
       expect([path, urlsIn(source, path)]).toEqual([path, [expected]]);
       expect(fileViolations(path, source)).toHaveLength(1);
     }
@@ -541,16 +669,15 @@ describe("scanned files", () => {
 
   it("scans a stylesheet raw, its block comments included", () => {
     // A URL inside a CSS comment is reported: the loud direction, which an
-    // author resolves with an allowlist entry. A stripper written from CSS
+    // author resolves with an allowlist entry. A reader written from CSS
     // comment rules rather than the whole grammar fails the other way -- a
-    // backslash line continuation inside a string is enough to make one blank
-    // real declarations, and the literals in them, to end of file.
+    // backslash line continuation inside a string is enough to make one take
+    // real declarations, and the literals in them, out of the scan.
     const path = "apps/web/src/bench/tokens.css";
     const source =
       "/* see https://commented.example/x */\n" +
       "a { background: url(https://evil.example/y) }\n";
-    expect(commentSyntaxFor(path)).toBe("none");
-    expect(stripComments(source, path)).toBe(source);
+    expect(isJavaScriptFamily(path)).toBe(false);
     expect(urlsIn(source, path)).toEqual([
       "https://commented.example/x",
       "https://evil.example/y",
@@ -558,7 +685,7 @@ describe("scanned files", () => {
     expect(fileViolations(path, source)).toHaveLength(2);
   });
 
-  it("strips both comment forms from every JavaScript-family extension", () => {
+  it("reads no URL out of a comment in any JavaScript-family extension", () => {
     for (const ext of [
       ".cjs",
       ".cts",
@@ -570,7 +697,7 @@ describe("scanned files", () => {
       ".tsx",
     ]) {
       const path = `apps/web/src/fixture${ext}`;
-      expect(commentSyntaxFor(path)).toBe("javascript");
+      expect(isJavaScriptFamily(path)).toBe(true);
       expect(
         urlsIn(
           "// https://a.example/x\n/* https://b.example/y */\n" +
@@ -689,21 +816,21 @@ describe("scanned roots", { timeout: SCAN_TIMEOUT_MS }, () => {
   });
 });
 
-describe("comment stripping", () => {
-  it("drops a URL in a line comment", () => {
+describe("literal extraction", () => {
+  it("reads no URL from a line comment", () => {
     expect(
       urlsIn("// A page the operator visits at http://attacker.example\n"),
     ).toEqual([]);
   });
 
-  it("drops a URL in a block comment, including a backticked one", () => {
+  it("reads no URL from a block comment, including a backticked one", () => {
     const source =
       "/** Deep-link origin, e.g. `https://example.org:3000` (no trailing slash). */\n" +
       "/* TURN server URI (`turn:host` or `turns:host`). */\n";
     expect(urlsIn(source)).toEqual([]);
   });
 
-  it("keeps a URL inside a string, whose `//` is not a comment start", () => {
+  it("reads a URL inside a string, whose `//` is not a comment start", () => {
     expect(urlsIn('const u = "https://evil.example/a";\n')).toEqual([
       "https://evil.example/a",
     ]);
@@ -715,16 +842,62 @@ describe("comment stripping", () => {
     ]);
   });
 
-  it("keeps an unquoted URL, which a naive stripper eats as a comment", () => {
+  it("reads an unquoted URL in the formats that write one", () => {
+    // A format no parser is run for has no literals to read, so its whole text
+    // is the candidate and a URL sitting in no quotes at all is still read.
     expect(
-      urlsIn("@font-face { src: url(https://fonts.example/i.woff2); }\n"),
+      urlsIn(
+        "@font-face { src: url(https://fonts.example/i.woff2); }\n",
+        "apps/web/src/bench/tokens.css",
+      ),
     ).toEqual(["https://fonts.example/i.woff2"]);
-    expect(urlsIn("Sitemap: https://evil.example/sitemap.xml\n")).toEqual([
-      "https://evil.example/sitemap.xml",
+    expect(
+      urlsIn(
+        "Sitemap: https://evil.example/sitemap.xml\n",
+        "apps/web/public/robots.txt",
+      ),
+    ).toEqual(["https://evil.example/sitemap.xml"]);
+  });
+
+  it("ends a raw-scanned URL at a brace that closes an expansion", () => {
+    // The formats scanned raw write `${...}` as syntax of their own, and no
+    // parser is run to say so: the `}` closing a shell default value ends the
+    // URL rather than landing in the host the check reports, while one closing
+    // a span opened inside the URL stays part of it.
+    for (const [path, source, expected] of [
+      [
+        "docker-entrypoint.sh",
+        ': "${SFTP_ENDPOINT:-https://backup.example.com}"\n',
+        { url: "https://backup.example.com", host: "backup.example.com" },
+      ],
+      [
+        "docker-entrypoint-fips.sh",
+        'exec curl "${ENDPOINT:-https://backup.example.com}/ping" "$@"\n',
+        { url: "https://backup.example.com", host: "backup.example.com" },
+      ],
+      [
+        "Dockerfile.fips",
+        'RUN curl -fsSLO "https://nodejs.org/dist/${NODE_VERSION}/node.tar.xz"\n',
+        {
+          url: "https://nodejs.org/dist/${NODE_VERSION}/node.tar.xz",
+          host: "nodejs.org",
+        },
+      ],
+    ]) {
+      expect([path, isJavaScriptFamily(path)]).toEqual([path, false]);
+      expect([path, urlLiterals(source, path)]).toEqual([
+        path,
+        [{ ...expected, line: 1 }],
+      ]);
+    }
+    // The parsed family reads the same characters the parser's way, where a
+    // brace closes an interpolation the parser marked or spells literal text.
+    expect(urlsIn("const u = 'https://${host}/x';\n")).toEqual([
+      "https://${host}/x",
     ]);
   });
 
-  it("keeps a URL inside a quoted CSS data URI", () => {
+  it("reads a URL inside a quoted CSS data URI", () => {
     const path = "apps/web/src/bench/tokens.css";
     const source =
       "  --bench-check: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\"/>');\n";
@@ -732,24 +905,24 @@ describe("comment stripping", () => {
     expect(fileViolations(path, source)).toEqual([]);
   });
 
-  it("keeps a URL whose own path carries a comment opener", () => {
+  it("reads a URL whose own path carries a comment opener", () => {
     expect(urlsIn('const u = "https://evil.example/a/*b*/c";\n')).toEqual([
       "https://evil.example/a/*b*/c",
     ]);
   });
 
-  it("does not let an escaped slash in a regex blank the rest of the line", () => {
+  it("does not lose a literal to a regular expression written before it", () => {
     const source =
       'const s = btoa(b).replace(/\\//g, "_"); const u = "https://evil.example/d";\n';
     expect(urlsIn(source)).toEqual(["https://evil.example/d"]);
   });
 
-  it("keeps a comment opener that is JSX text rather than code", () => {
+  it("reads a comment opener that is JSX text rather than code", () => {
     // JSX text is not code, so a `/*` or `//` in ordinary UI prose about a
-    // glob or a path opens no comment. A stripper that reads one as a comment
-    // blanks the source after it and reports the file clean -- the silent
+    // glob or a path opens no comment. A reader that takes one for a comment
+    // loses the source after it and reports the file clean -- the silent
     // direction. The trailing comment on each line is the other half: it still
-    // has to come off, or the case would pass on a stripper that gave up.
+    // has to go unread, or the case would pass on a reader that gave up.
     for (const path of [
       "apps/web/src/f.tsx",
       "apps/web/src/f.jsx",
@@ -774,7 +947,7 @@ describe("comment stripping", () => {
     }
   });
 
-  it("keeps a URL that JSX text itself carries", () => {
+  it("reads a URL that JSX text itself carries", () => {
     expect(
       urlsIn(
         "export const A = () => <p>See https://evil.example/x for more</p>;\n",
@@ -783,37 +956,45 @@ describe("comment stripping", () => {
     ).toEqual(["https://evil.example/x"]);
   });
 
-  it("leaves a file the parser cannot read unstripped", () => {
-    // Nothing is deleted on a broken parse, which locates comments no better
-    // than guesswork would: the commented URL surfaces as a false positive the
-    // author resolves, rather than a blanked line nobody sees.
+  it("scans a file the parser cannot read raw, comments included", () => {
+    // A broken parse yields no literal to extract at all, which would report
+    // the file clean -- the one direction this check cannot afford. Such a
+    // file is scanned raw instead, so its commented URL surfaces as a false
+    // positive the author resolves. The parser decides both halves of that
+    // premise here rather than a reading of it.
     const source = "const a = ;\nfunction (\n// https://evil.example/x\n";
-    expect(stripComments(source, FIXTURE)).toBe(source);
+    expect(parseOf(source).parseErrors).toBeGreaterThan(0);
+    expect(parseOf(source).literals).toEqual([]);
     expect(urlsIn(source)).toEqual(["https://evil.example/x"]);
   });
 
-  it("keeps template text that follows an interpolation", () => {
-    const source = "const u = `${base} // not a comment`;\n";
-    expect(stripComments(source, FIXTURE)).toBe(source);
+  it("reads template text that follows an interpolation", () => {
+    expect(urlsIn("const u = `${base} https://evil.example/x`;\n")).toEqual([
+      "https://evil.example/x",
+    ]);
   });
 
-  it("strips a comment inside a template interpolation, braces and all", () => {
-    // Without the interpolation's own brace depth, the `}` closing `{ x: 1 }`
-    // reads as the end of the interpolation, and the block comment after it
-    // reads as template text -- so its URL would survive as a false positive.
+  it("reads a template written in type position", () => {
+    // A template type is written from the same spans a template expression is,
+    // and is read the same way: the literal parts name a host or they do not.
+    expect(
+      urlsIn(
+        "type Endpoint = `https://${string}.evil.example`;\n" +
+          "type Fixed = `https://plain.example/x`;\n" +
+          "type Whole = `https://${string}`;\n",
+      ),
+    ).toEqual(["https://${string}.evil.example", "https://plain.example/x"]);
+  });
+
+  it("reads no URL from a comment inside a template interpolation", () => {
+    // The interpolated span is the parser's own, braces and all: a reader that
+    // took the `}` closing `{ x: 1 }` for the end of the interpolation would
+    // read the block comment after it as template text and report its URL.
     expect(
       urlsIn(
         "const u = `${describe({ x: 1 }) /* see https://evil.example */}`;\n",
       ),
     ).toEqual([]);
-  });
-
-  it("preserves length and line breaks so line numbers survive", () => {
-    const source = "a\n// comment\nb\n/* block\n   comment */\nc\n";
-    const stripped = stripComments(source, FIXTURE);
-    expect(stripped).toHaveLength(source.length);
-    expect(stripped.split("\n")).toHaveLength(source.split("\n").length);
-    expect(stripped.split("\n")[2]).toBe("b");
   });
 });
 
@@ -824,70 +1005,59 @@ describe("the repository as it stands", { timeout: SCAN_TIMEOUT_MS }, () => {
     expect(files.length).toBeGreaterThan(100);
   });
 
-  it("strips comments and nothing else from every scanned source file", () => {
-    // The stripper's fail-open direction: code blanked by a mis-read is code the
-    // scan never sees, so a URL literal in it would pass unnoticed. Parsing each
-    // file before and after stripping and printing both back with comments
-    // suppressed is what catches that -- the two programs must be identical.
-    const printer = ts.createPrinter({ removeComments: true });
+  it("parses every scanned JavaScript-family file without a syntax error", () => {
+    // Literals come out of the parse for this family, and a file the parser
+    // rejects yields none: it is scanned raw instead, which over-reports rather
+    // than reporting a file clean it could read nothing out of. Holding the
+    // whole family parseable keeps that fallback for the file an author breaks,
+    // rather than a state the shipped tree sits in unnoticed.
     const scriptKind = (file) => {
       if (file.endsWith(".tsx")) return ts.ScriptKind.TSX;
       if (file.endsWith(".jsx")) return ts.ScriptKind.JSX;
       return /\.[cm]?js$/.test(file) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
     };
-    const canonical = (text, file) => {
-      const parsed = ts.createSourceFile(
+    const parseErrors = (text, file) =>
+      ts.createSourceFile(
         file,
         text,
         ts.ScriptTarget.Latest,
         false,
         scriptKind(file),
-      );
-      return {
-        printed: printer.printFile(parsed),
-        parseErrors: parsed.parseDiagnostics.length,
-      };
-    };
+      ).parseDiagnostics.length;
 
     // `parseDiagnostics` is off the public SourceFile type, so probe it: a
     // TypeScript upgrade that renames it must redden here rather than report
     // every file error-free.
     expect(
-      canonical("const a = ;\nfunction (\n", "probe.ts").parseErrors,
+      parseErrors("const a = ;\nfunction (\n", "probe.ts"),
     ).toBeGreaterThan(0);
-    expect(canonical("const a = 1;\n", "probe.ts").parseErrors).toBe(0);
+    expect(parseErrors("const a = 1;\n", "probe.ts")).toBe(0);
 
-    const sources = scanRepo(repoRoot).files.filter(
-      (file) => commentSyntaxFor(file) === "javascript",
-    );
+    const sources = scanRepo(repoRoot).files.filter(isJavaScriptFamily);
     expect(sources.length).toBeGreaterThan(100);
-
-    const damaged = sources.filter((file) => {
-      const source = readFileSync(resolve(repoRoot, file), "utf8");
-      const stripped = stripComments(source, file);
-      if (stripped.length !== source.length) return true;
-      const before = canonical(source, file);
-      const after = canonical(stripped, file);
-      return (
-        before.parseErrors !== after.parseErrors ||
-        before.printed !== after.printed
-      );
-    });
-    expect(damaged).toEqual([]);
+    const unparsed = sources.filter(
+      (file) =>
+        parseErrors(readFileSync(resolve(repoRoot, file), "utf8"), file) !== 0,
+    );
+    expect(unparsed).toEqual([]);
   });
 
-  it("deletes nothing from a scanned file whose syntax is unmodeled", () => {
-    // The parser guard above reaches the JavaScript family only. For every
-    // other scanned file the property that stands in for it is that stripping
-    // changes nothing at all.
+  it("keeps every allowlist entry admitting a literal the scan finds", () => {
+    // The allowlist is written against the reported literal, so a change in how
+    // one is extracted can leave an entry admitting nothing. An entry that no
+    // longer matches anything is either stale or covering a literal whose shape
+    // moved, and both are edits to make here rather than to discover on the
+    // next unrelated failure.
     const { files } = scanRepo(repoRoot);
-    const unmodeled = files.filter((file) => commentSyntaxFor(file) === "none");
-    expect(unmodeled.length).toBeGreaterThan(0);
-    const changed = unmodeled.filter((file) => {
+    const admitted = new Set();
+    for (const file of files) {
       const source = readFileSync(resolve(repoRoot, file), "utf8");
-      return stripComments(source, file) !== source;
-    });
-    expect(changed).toEqual([]);
+      for (const { url } of urlLiterals(source, file)) {
+        const entry = allowlistEntryFor(url);
+        if (entry !== undefined) admitted.add(entry.url);
+      }
+    }
+    expect([...admitted].sort()).toEqual(ALLOWLIST.map((e) => e.url).sort());
   });
 
   it("reports only allowlisted hits from the stylesheets it scans", () => {
@@ -900,7 +1070,7 @@ describe("the repository as it stands", { timeout: SCAN_TIMEOUT_MS }, () => {
     const hits = [];
     for (const file of stylesheets) {
       const source = readFileSync(resolve(repoRoot, file), "utf8");
-      expect([file, stripComments(source, file)]).toEqual([file, source]);
+      expect([file, isJavaScriptFamily(file)]).toEqual([file, false]);
       expect([file, fileViolations(file, source)]).toEqual([file, []]);
       hits.push(...urlLiterals(source, file).map(({ url }) => url));
     }

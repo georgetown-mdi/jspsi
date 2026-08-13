@@ -40,49 +40,57 @@
 //   - A text file in an encoding other than UTF-8. Every scanned file is
 //     decoded as UTF-8, so a UTF-16 one reads as its characters separated by
 //     NULs, matches nothing, and is still counted among the files scanned.
-//   - A URL literal inside a JavaScript or TypeScript comment. Comment text is
-//     blanked before the matcher reads the file, so a `@see` link in a JSDoc
-//     block and a trailing `// https://cdn.example/a.js` alike go unreported.
-//     This is the one step that deletes text, and a decision rather than a
-//     limit of reach: a comment issues no request, and a documentation link
-//     would otherwise have to be allowlisted. It reaches the JavaScript and
-//     TypeScript family alone; every other text format is scanned raw, for the
-//     reason set out below.
+//   - A URL literal inside a JavaScript or TypeScript comment. A comment holds
+//     no literal node, so a `@see` link in a JSDoc block and a trailing
+//     `// https://cdn.example/a.js` alike go unreported. This is a decision
+//     rather than a limit of reach: a comment issues no request, and a
+//     documentation link would otherwise have to be allowlisted. It reaches the
+//     JavaScript and TypeScript family alone; every other text format is
+//     scanned raw, for the reason set out below.
 //   - A URL spelled so as to evade the matcher: split across concatenated
-//     string fragments, escaped inside a regular expression (`https:\/\/`),
-//     percent- or entity-encoded in the scheme or the colon after it
-//     (`%68ttps://`, `&#104;ttps://`, `https%3A//`, `https&#58;//`; an encoded
-//     host is still reported, since the scheme is what the matcher reads), or
-//     glued to a letter, digit, or underscore (`xhttps://host`,
-//     `_https://host`), none of which the scheme rule admits before the
-//     scheme; any other character, or the start of the text, still matches
-//     (`.https://host` and `-https://host` are reported). The check is a guard
-//     against egress added inadvertently, not against an author who wants to
-//     hide it.
+//     string fragments, written into a regular-expression literal, whose node
+//     the extraction does not read, percent- or entity-encoded in the scheme or
+//     the colon after it (`%68ttps://`, `&#104;ttps://`, `https%3A//`,
+//     `https&#58;//`; an encoded host is still reported, since the scheme is
+//     what the matcher reads), or glued to a letter, digit, or underscore
+//     (`xhttps://host`, `_https://host`), none of which the scheme rule admits
+//     before the scheme; any other character, or the start of the text, still
+//     matches (`.https://host` and `-https://host` are reported). An escape the
+//     language itself removes is not among these: a literal is read as its
+//     cooked value, so the regex-escaped spelling written into a string
+//     (`"https:\/\/host"`) is reported as the `https://host` it evaluates to.
+//     The check is a guard against egress added inadvertently, not against an
+//     author who wants to hide it.
 //   - Schemes outside http, https, stun, stuns, turn, and turns: a `wss://`,
 //     `ws://`, `ftp://` or `file://` literal names a host and is not reported.
 //     Nor is a protocol-relative `//host` reference, which carries no scheme to
 //     match.
 //   - An authority naming no host of its own: empty, a scheme followed by
 //     nothing but slashes, which is what a protocol comparison
-//     (`location.protocol === "https:"`) is; wholly interpolated
-//     (`http://${host}`, `http://${host}:8443`), as the helpers over an inbound
-//     Host header write it; nothing but a numeric port (`https://:8443/x`),
-//     which the port rule leaves empty and `new URL()` rejects outright; or
-//     written entirely of dots, which `new URL()` does resolve to the host
-//     `...` but is how elided placeholder text writes a URL (`https://...#...`
-//     in the invitation field). Those four are skipped knowingly; why none of
-//     them can be tightened is at `urlLiterals` and `namesLiteralHost`. An
-//     interpolation with a literal host beside it names a host and is reported
-//     (`https://${tenant}.evil.example`).
+//     (`location.protocol === "https:"`) is; wholly interpolated inside a
+//     template (`http://${host}`, `http://${host}:8443`), as the helpers over
+//     an inbound Host header write it; or written entirely of dots, which
+//     `new URL()` does resolve to the host `...` but is how elided placeholder
+//     text writes a URL (`https://...#...` in the invitation field). Those are
+//     skipped knowingly; why none of them can be tightened is at urlsIn and
+//     resolvedHost. An interpolation with a literal host beside it names a host
+//     and is reported (`https://${tenant}.evil.example`), and so does the same
+//     text written where the parser says nothing interpolates: in a string or a
+//     JSX attribute value, `https://${host}` names the host `${host}`. The node
+//     the parser reports is what decides, not the characters.
 //
 // The opposite direction is loud and left that way: an authority spelling out
 // host-shaped text is reported even where `new URL()` rejects it outright
 // (`https://%zz/`, `https://[not-ipv6]/`, `https://[2001:db8::1`,
-// `https://a:b/`, `https://ex^ample/`, `https://exa|mple/`). The matcher judges
-// an authority without parsing it, so a literal nothing could dereference can
-// still fail the build; the author resolves that by rewriting the literal or
-// allowlisting it with a reason.
+// `https://a:b/`, `https://ex^ample/`, `https://exa|mple/`), and so is an
+// authority of nothing but a port outside a template (`https://:8443/x`).
+// `new URL()` is the host oracle for the authorities it accepts, and a literal
+// nothing could dereference can still fail the build; the author resolves that
+// by rewriting the literal or allowlisting it with a reason.
+//
+// These limits are published rather than internal: PRIVACY.md summarizes them
+// for agency reviewers and docs/SECURITY_DESIGN.md ("Egress hardening and its
+// limits") enumerates them, so narrowing one here moves all three.
 //
 // License and notice files (LICENSE, LICENCE, NOTICE, COPYING) are not
 // scanned: license text is not executable, and the attribution URL in a
@@ -95,14 +103,17 @@
 // ignored by default. A new binary format that trips the check is fixed by
 // adding its extension here, a one-line edit a reviewer sees.
 //
-// Comment syntax, by contrast, is recognized by extension and only for the
-// family a real parser reads here: JavaScript and TypeScript, whose comments
-// the TypeScript parser locates. Every other text format -- CSS, HTML, SVG,
-// Markdown, shell -- is scanned raw. Stripping is the one step that can delete
-// text before the matcher sees it, and a lexer written from a language's
-// comment rules rather than its whole grammar gets that wrong silently, which
-// reports a file clean; raw leaves a URL written inside an unmodeled comment
-// visible, as the false positive an author resolves with an allowlist entry.
+// Where a literal begins and ends is the language's own question, so the
+// JavaScript and TypeScript family is read from the string, template, and
+// JSX-text nodes of a TypeScript parse: a URL cannot run past the literal
+// holding it, and whether a `${` interpolates is what the parser says rather
+// than what the characters look like. That reaches the one family a parser is
+// run for here. Every other text format -- CSS, HTML, SVG, Markdown, shell --
+// is scanned raw, and so is a file of this family whose parse reports a syntax
+// error: such a parse yields no literal nodes at all, and reporting a file
+// clean because nothing could be extracted from it is the one direction this
+// check cannot afford. A raw scan reads comment text too, so those files
+// over-report rather than under-report.
 //
 // SCANNED_ROOTS is source that ships or runs, not all TypeScript. Beside the
 // app and library trees and the web app's static assets it carries
@@ -259,21 +270,27 @@ const NOTICE_BASENAMES = new Set([
   "COPYING",
 ]);
 
-// Where a URL literal ends in source: whitespace, the quote forms, and the
-// punctuation that brackets one in TypeScript, JSX, and CSS. `{` is left out so
-// a leading `${` interpolation stays visible to the authority rules, `[` and `]`
-// so an IPv6 host literal is not truncated to nothing.
-const TERMINATOR_CHARS = "\\s\"'`<>(),;}\\\\";
-const URL_TERMINATOR = new RegExp(`[${TERMINATOR_CHARS}]`);
+// Where a URL ends inside the text carrying it: whitespace, the quote forms,
+// and the punctuation that brackets one in TypeScript, JSX, and CSS. Braces are
+// left out and read at endOfUrl instead, where whether a `}` closes syntax or
+// spells text is a question about the candidate rather than the character. `[`
+// and `]` are left out so an IPv6 host literal is not truncated to nothing.
+const URL_TERMINATOR = /[\s"'`<>(),;\\]/;
+
 const URL_SCHEME = new RegExp(
   `(?<![A-Za-z0-9_])(?<scheme>https?|stuns?|turns?):`,
   "gi",
 );
 
-// A `${...}` span whose text names whatever the expression evaluates to rather
-// than a host. Removing the spans is what leaves the literal part of an
-// authority for the host rule to judge.
-const INTERPOLATION_SPAN = /\$\{[^}]*\}/g;
+// An authority that survives interpolation as nothing but a port. A numeric
+// port is literal text a fully interpolated authority leaves behind
+// (`${host}:8443`), and `new URL()` rejects a non-numeric one, so nothing a
+// host could hide in is dropped with it.
+const TRAILING_PORT = /:\d*$/;
+
+// The parser resolves the elided placeholder text of the invitation field
+// (`https://...#...`) to a host of nothing but dots, which names no server.
+const DOTS_ONLY = /^\.+$/;
 
 /** Whether `path` is scanned at all (a text file that is not license text). */
 export function isScannedFile(path) {
@@ -296,32 +313,98 @@ const SCRIPT_KIND_BY_EXTENSION = new Map([
   [".tsx", ts.ScriptKind.TSX],
 ]);
 
-/** Comment syntax recognized for `path`: "javascript" or "none". */
-export function commentSyntaxFor(path) {
-  return SCRIPT_KIND_BY_EXTENSION.has(extname(path).toLowerCase())
-    ? "javascript"
-    : "none";
+/** Whether `path` is read by the TypeScript parser rather than scanned raw. */
+export function isJavaScriptFamily(path) {
+  return SCRIPT_KIND_BY_EXTENSION.has(extname(path).toLowerCase());
 }
 
-/** `text` with every character but a line break spaced out, so positions hold. */
-function blankOut(text) {
-  return text.replace(/[^\n\r]/g, " ");
+/** The 1-based line the character at `position` of `source` sits on. */
+function lineOf(source, position) {
+  let line = 1;
+  for (let index = 0; index < position; index += 1) {
+    if (source[index] === "\n") line += 1;
+  }
+  return line;
 }
 
 /**
- * The comment ranges TypeScript reads in `source`, or undefined if the parser
- * cannot read the file at all.
+ * One candidate: the text a matcher reads, assembled from the segments that
+ * wrote it. A segment is either literal text or, in a template, the `${...}`
+ * span between two literal ones, and each records where its text starts in the
+ * file. A segment whose text the file spells verbatim maps its own offsets
+ * straight back; one the parser rewrote (a literal carrying an escape) reports
+ * the position it begins at.
  *
- * Which spans are comments is a question for the parser rather than a lexer of
- * our own: JSX text is not code, so the `/*` in `<p>files under data/* are
- * read</p>` opens nothing, and a hand-rolled scanner that thinks otherwise
- * blanks the source after it -- silently, which is the one failure direction
- * this check cannot afford. Every comment sits in the trivia between a node's
- * full start and its first real character, so taking the comment ranges in that
- * span for every node reaches all of them and nothing else: leading ranges for
- * the comments after a line break, trailing ranges for those on the same line.
+ * A `raw` candidate is the whole text of a file no parser was run for, which
+ * is what decides how a brace in it is read (endOfUrl).
  */
-function commentRanges(source, path) {
+function candidateOf(source, segments, raw = false) {
+  let text = "";
+  const placed = [];
+  for (const segment of segments) {
+    placed.push({
+      ...segment,
+      at: text.length,
+      verbatim: source.startsWith(segment.text, segment.sourceStart),
+    });
+    text += segment.text;
+  }
+  return { text, segments: placed, raw };
+}
+
+/** The segment `offset` falls in. */
+function segmentAt(candidate, offset) {
+  return candidate.segments.findLast((segment) => segment.at <= offset);
+}
+
+/** Whether `offset` is interpolated text rather than text the literal spells. */
+function isInterpolated(candidate, offset) {
+  return segmentAt(candidate, offset).interpolation === true;
+}
+
+/** Where in the file the character at `offset` of the candidate sits. */
+function positionOf(candidate, offset) {
+  const segment = segmentAt(candidate, offset);
+  return segment.verbatim
+    ? segment.sourceStart + (offset - segment.at)
+    : segment.sourceStart;
+}
+
+/**
+ * A template as one candidate, its literal spans carrying the source text of
+ * each `${...}` between them. Both template expressions and template literal
+ * types are written this way, and the spans are read the same for either.
+ *
+ * The head token ends just past the `${` it opens, and each following literal
+ * token starts at the `}` that closes it, which is what bounds the span.
+ */
+function templateCandidate(source, parsed, node) {
+  const segments = [
+    { text: node.head.text, sourceStart: node.head.getStart(parsed) + 1 },
+  ];
+  let opened = node.head.end;
+  for (const span of node.templateSpans) {
+    const closing = span.literal.getStart(parsed);
+    segments.push({
+      text: source.slice(opened - "${".length, closing + "}".length),
+      sourceStart: opened - "${".length,
+      interpolation: true,
+    });
+    segments.push({
+      text: span.literal.text,
+      sourceStart: closing + "}".length,
+    });
+    opened = span.literal.end;
+  }
+  return candidateOf(source, segments);
+}
+
+/**
+ * The literals a TypeScript parse of `source` holds, or undefined when the
+ * parser reports a syntax error: a broken parse yields no literal nodes, so the
+ * caller scans such a file raw rather than reading nothing out of it.
+ */
+function parsedLiterals(source, path) {
   const parsed = ts.createSourceFile(
     basename(path),
     source,
@@ -330,145 +413,167 @@ function commentRanges(source, path) {
     SCRIPT_KIND_BY_EXTENSION.get(extname(path).toLowerCase()),
   );
   // `parseDiagnostics` is off the public SourceFile type. A TypeScript upgrade
-  // that renames it therefore reads as "cannot parse", which leaves comments
-  // in place as false positives, rather than as "parsed clean".
+  // that renames it therefore reads as "cannot parse", which scans the file raw
+  // and over-reports, rather than as "parsed clean".
   if (parsed.parseDiagnostics?.length !== 0) return undefined;
 
-  const byPosition = new Map();
+  const literals = [];
   const visit = (node) => {
-    const trivia = node.getFullStart();
-    const nodeStart = node.getStart(parsed);
-    if (nodeStart > trivia) {
-      for (const range of [
-        ...(ts.getTrailingCommentRanges(source, trivia) ?? []),
-        ...(ts.getLeadingCommentRanges(source, trivia) ?? []),
-      ]) {
-        if (range.end <= nodeStart) byPosition.set(range.pos, range);
-      }
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      literals.push(
+        candidateOf(source, [
+          { text: node.text, sourceStart: node.getStart(parsed) + 1 },
+        ]),
+      );
+    } else if (ts.isJsxText(node)) {
+      literals.push(
+        candidateOf(source, [{ text: node.text, sourceStart: node.pos }]),
+      );
+    } else if (
+      ts.isTemplateExpression(node) ||
+      ts.isTemplateLiteralTypeNode(node)
+    ) {
+      literals.push(templateCandidate(source, parsed, node));
     }
-    for (const child of node.getChildren(parsed)) visit(child);
+    node.forEachChild(visit);
   };
   visit(parsed);
-  return [...byPosition.values()].sort((a, b) => a.pos - b.pos);
+  return literals;
 }
 
 /**
- * Blank out the comments `path`'s recognized syntax defines, preserving every
- * other character position so line numbers survive. A path whose extension
- * names no recognized syntax is returned unchanged, so no text is deleted from
- * a format whose comments cannot be located; so is a JavaScript-family file the
- * TypeScript parser rejects, since a broken parse locates them no better than
- * guesswork does.
- */
-export function stripComments(source, path) {
-  if (commentSyntaxFor(path) === "none") return source;
-
-  const ranges = commentRanges(source, path);
-  if (ranges === undefined) return source;
-  let out = "";
-  let cursor = 0;
-  for (const { pos, end } of ranges) {
-    if (pos < cursor) continue;
-    out += source.slice(cursor, pos) + blankOut(source.slice(pos, end));
-    cursor = end;
-  }
-  return out + source.slice(cursor);
-}
-
-/**
- * The URL literal's text starting at `start`, ending at the first terminator.
+ * Where the URL beginning at `start` ends: the first terminator the candidate's
+ * own reading of the text admits.
  *
- * `}` is one of those terminators, and it is also what closes an interpolation
- * inside an authority -- where the text after it, a literal host suffix
- * included, is still part of the URL. So terminators end the literal only at
- * interpolation depth zero. Inner braces raise the depth as well: stopping at
- * the first `}` of `${format({ a: 1 })}` would drop back into the URL one brace
- * early and lose everything the interpolation was prefixed to.
+ * A parsed candidate carries the parser's word on which spans interpolate, so a
+ * terminator inside one of them belongs to the expression rather than to the
+ * URL, and a brace is never a terminator at all: in a template it opens or
+ * closes a span whose text belongs to the authority the literal writes, and in
+ * a string or a JSX attribute value the parser says those characters are text.
+ *
+ * A raw candidate has no such word, and the formats scanned raw write braces as
+ * syntax of their own: shell and Dockerfile parameter expansion. There a `${`
+ * opens a span its matching `}` closes, both part of the URL
+ * (`https://nodejs.org/dist/${NODE_VERSION}/x`), while a `}` that opened
+ * nothing ends it -- the one closing `${SFTP_ENDPOINT:-https://host}`, which
+ * lands in the reported host if the URL swallows it.
  */
-function readUrlBody(text, start) {
-  let i = start;
+function endOfUrl(candidate, start) {
   let depth = 0;
-  while (i < text.length) {
-    const c = text[i];
-    if (c === "$" && text[i + 1] === "{") {
-      depth += 1;
-      i += 2;
-      continue;
+  for (let offset = start; offset < candidate.text.length; offset += 1) {
+    const char = candidate.text[offset];
+    if (candidate.raw) {
+      if (char === "$" && candidate.text[offset + 1] === "{") {
+        depth += 1;
+        offset += 1;
+        continue;
+      }
+      if (char === "}") {
+        if (depth === 0) return offset;
+        depth -= 1;
+        continue;
+      }
     }
-    if (c === "}") {
-      if (depth === 0) break;
-      depth -= 1;
-    } else if (depth > 0) {
-      if (c === "{") depth += 1;
-    } else if (URL_TERMINATOR.test(c)) {
-      break;
+    if (URL_TERMINATOR.test(char) && !isInterpolated(candidate, offset)) {
+      return offset;
     }
-    i += 1;
   }
-  return text.slice(start, i);
+  return candidate.text.length;
 }
 
 /**
- * Whether `authority` still spells out a host of its own, once interpolations
- * and a trailing port are removed. The port has to come off with them: a
- * numeric one is literal text that survives an authority naming no host
- * (`${host}:8443`), and `new URL()` rejects a non-numeric there, so nothing a
- * host could hide in is being dropped.
+ * The host `new URL()` resolves `authority` to, or undefined where it rejects
+ * it outright. The parser is the oracle for both directions, and it is handed
+ * an authority position rather than the literal as written: `stun:` and `turn:`
+ * URIs carry no `//` (RFC 7064, RFC 7065), and the slash count of a web URL
+ * carries nothing either, since `new URL()` resolves `https:host/x` through
+ * `https:////host/x` alike and `fetch` dereferences them alike too.
  *
- * What remains names a host unless it is empty or written entirely of dots.
- * Anything else is reported, whatever alphabet it is in: an internationalized
- * host is a host (`new URL()` resolves `https://пример.рф/` to
- * `xn--e1afmkfd.xn--p1ai`, which resolves and serves), and so is a bracketed
- * `[::]`, so neither may turn on an ASCII test.
+ * What that buys over judging the characters: an internationalized host is a
+ * host, whatever alphabet it is written in (`https://пример.рф/` resolves to
+ * `xn--e1afmkfd.xn--p1ai`, which resolves and serves), a bracketed `[::]` is
+ * one, and a port is separated from the host by the same rules the runtime
+ * applies rather than by a rule of our own.
  */
-function namesLiteralHost(authority) {
-  const literal = authority
-    .replace(INTERPOLATION_SPAN, "")
-    .replace(/:\d*$/, "");
-  return literal !== "" && !/^\.+$/.test(literal);
+function resolvedHost(authority) {
+  try {
+    return new URL(`https://${authority}`).hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
- * Absolute URL literals in `source` as `{url, authority, line}`, after comment
- * stripping. The authority is whatever follows the scheme colon and any run of
- * slashes, none of which the matcher can read anything into: `new URL()`
- * resolves `https:host/x`, `https:/host/x`, `https:///host/x` and
- * `https:////host/x` alike to that host, and `fetch` dereferences them alike
- * too. Two shapes are excluded here rather than allowlisted, because neither
- * names a host:
+ * The absolute URL literals `candidate` holds, as `{url, host, line}`, where
+ * `host` is what the URL parser resolved and undefined where it rejected the
+ * authority as unparseable -- reported all the same, and loudly.
+ *
+ * Two shapes are excluded here rather than allowlisted, because neither names a
+ * host:
  *
  *   - An empty authority -- a scheme followed by nothing but slashes, which is
  *     what a protocol comparison (`location.protocol === "https:"`) is, and
  *     what makes the check usable at all for the other schemes: `stun:` and
  *     `turn:` are also object-property syntax in a Zod schema, the head of a
  *     `/^turns?:/` anchor, and the tail of prose like "must begin with turn:".
- *   - An authority spelling out no host of its own: fully interpolated, as the
- *     `URL`-parsing helpers over an inbound `Host` header write it
- *     (`http://${host}`, `http://${host}:8443`), or written entirely of dots,
- *     as the elided `https://...#...` of placeholder text is. An interpolation
- *     with a literal host beside it (`https://${tenant}.evil.example`) names
- *     one and is reported.
+ *   - An authority a template interpolates away, as the `URL`-parsing helpers
+ *     over an inbound `Host` header write it (`http://${host}`,
+ *     `http://${host}:8443`). Only text the parser calls an interpolation is
+ *     removed, so the same characters inside a string or a JSX attribute value
+ *     stay the literal host they are.
  */
-export function urlLiterals(source, path) {
+function urlsIn(source, candidate) {
   const found = [];
-  const text = stripComments(source, path);
-  let lineStart = 0;
-  let line = 1;
-  for (const match of text.matchAll(URL_SCHEME)) {
-    const { scheme } = match.groups;
-    const rest = readUrlBody(text, match.index + match[0].length);
-    const authority = rest.replace(/^\/+/, "").split(/[/?#]/, 1)[0];
-    if (!namesLiteralHost(authority)) continue;
+  for (const match of candidate.text.matchAll(URL_SCHEME)) {
+    // A scheme inside an interpolation belongs to the expression, whose own
+    // literals are candidates in their own right.
+    if (isInterpolated(candidate, match.index)) continue;
 
-    while (lineStart < match.index) {
-      const nextBreak = text.indexOf("\n", lineStart);
-      if (nextBreak === -1 || nextBreak >= match.index) break;
-      lineStart = nextBreak + 1;
-      line += 1;
+    const start = match.index + match[0].length;
+    const end = endOfUrl(candidate, start);
+    const body = candidate.text.slice(start, end);
+    const authorityStart = start + /^\/*/.exec(body)[0].length;
+    let authority = "";
+    for (let offset = authorityStart; offset < end; offset += 1) {
+      if (!isInterpolated(candidate, offset)) {
+        authority += candidate.text[offset];
+      }
     }
-    found.push({ url: `${scheme}:${rest}`, authority, line });
+    if (authority === "") continue;
+    // What an interpolation left behind can still be a whole authority's worth
+    // of punctuation, which is why the port comes off before the parser sees it.
+    const interpolated = authority.length !== end - authorityStart;
+    if (
+      interpolated &&
+      authority.split(/[/?#]/, 1)[0].replace(TRAILING_PORT, "") === ""
+    ) {
+      continue;
+    }
+
+    const host = resolvedHost(authority);
+    if (host !== undefined && DOTS_ONLY.test(host)) continue;
+    found.push({
+      url: `${match.groups.scheme}:${body}`,
+      host,
+      line: lineOf(source, positionOf(candidate, match.index)),
+    });
   }
   return found;
+}
+
+/**
+ * Absolute URL literals in `source` as `{url, host, line}`, read from the
+ * parser's literal nodes for a JavaScript-family file and from the raw text for
+ * every other format.
+ */
+export function urlLiterals(source, path) {
+  const parsed = isJavaScriptFamily(path)
+    ? parsedLiterals(source, path)
+    : undefined;
+  const candidates = parsed ?? [
+    candidateOf(source, [{ text: source, sourceStart: 0 }], /* raw */ true),
+  ];
+  return candidates.flatMap((candidate) => urlsIn(source, candidate));
 }
 
 /** The allowlist entry admitting `url`, or undefined if none does. */

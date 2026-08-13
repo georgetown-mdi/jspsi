@@ -1,7 +1,7 @@
 ---
 title: "PSI-Link Security Design"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-11"
+last_reviewed: "2026-08-13"
 ---
 
 # PSI-Link security
@@ -287,6 +287,8 @@ Against an injected in-origin script the property is not mechanically enforceabl
 
 The no-egress claims [PRIVACY.md](../PRIVACY.md) publishes to agency reviewers -- no third-party content delivery, no analytics, no update ping, and no request to a host other than the supporting services it names -- carry one mechanical backstop against first-party drift: `npm run check:egress-claims` fails the build when the shipped source trees gain a URL literal naming a host outside a reviewed allowlist. Each allowlist entry records why the literal it admits does not contradict the document: either that it names no host anything contacts (an XML namespace identifier, a documentation link the operator clicks, a dummy base handed to a parser), or that the host is one the supporting-services table already discloses, as the two default public STUN servers are.
 
+What counts as a literal, and what counts as a host, are answered by the tools that own those questions rather than by rules of the check's own: a JavaScript or TypeScript file is read from the string, template, and JSX-text nodes of a real parse, and an authority names a host when `new URL()` resolves one from it. Every other text format, and any file of that family whose parse fails, is scanned raw, which over-reports rather than reporting a file clean it could read nothing out of.
+
 Its reach is narrower than the claim it guards, and deliberately so. It does not see:
 
 - a scheme outside `http`, `https`, `stun`, `stuns`, `turn`, and `turns`, so a `wss://` beacon or a protocol-relative `//host` reference is not matched;
@@ -294,7 +296,7 @@ Its reach is narrower than the claim it guards, and deliberately so. It does not
 - egress introduced by build configuration, which sits at a workspace root outside the scanned trees even though what it emits ships;
 - a URL literal in a file the repository ignores, which the scan's listing excludes along with build output -- a narrow gap, not because a working tree holds no ignored file (an install and a core build leave `node_modules` and the workspace `dist` trees behind, in CI as much as locally) but because none of them sit under a scanned tree;
 - egress originating inside a dependency, which is the dependency review's ground;
-- a URL an author took the trouble to split, encode, or otherwise spell around the matcher.
+- a URL an author took the trouble to split across fragments, to encode past the scheme, or to write into a regular-expression literal; an escape the language itself removes is not one of these, since a literal is read as the value it evaluates to.
 
 The check's own header carries the full list, including the authority shapes it knowingly skips and the invalid ones it reports anyway. Like the `connect-src` allowlist above, it narrows a surface rather than closing it.
 

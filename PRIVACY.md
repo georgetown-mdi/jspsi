@@ -1,7 +1,7 @@
 ---
 title: "Privacy Statement"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-07-24"
+last_reviewed: "2026-08-13"
 ---
 
 # Privacy statement
@@ -19,7 +19,7 @@ This is not a privacy notice for your agency's own data subjects, and it is not 
 - **The project collects, transmits, and retains no personal data on its own behalf**, in either deployment. There are no accounts, no registration, no license check, no update ping, no usage analytics, and no telemetry.
 - **What the two parties disclose to each other is governed by their data sharing agreement**, not by this project. PSI-Link enforces the protocol; the agreement decides what may be exchanged under it.
 
-The statements in this document about what PSI-Link connects to have a mechanical backstop: a repository check (`npm run check:egress-claims`) fails the build when the shipped source trees gain a URL literal naming a host under one of the schemes it reads -- `http`, `https`, and the STUN and TURN schemes -- outside a reviewed allowlist. A content delivery network, analytics snippet, or update ping added in that form is caught before it can falsify this document. The check is a backstop rather than a proof of no egress, and it is narrower than the claims it guards: a literal under another scheme (a `wss://` beacon), one added to build configuration outside the scanned trees, a host assembled at runtime, and a connection made inside a dependency are all outside its reach. Its limits are in [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md#egress-hardening-and-its-limits).
+The statements in this document about what PSI-Link connects to have a mechanical backstop: a repository check (`npm run check:egress-claims`) fails the build when the shipped source trees gain a URL literal naming a host under one of the schemes it reads -- `http`, `https`, and the STUN and TURN schemes -- outside a reviewed allowlist. A content delivery network, analytics snippet, or update ping added in that form is caught before it can falsify this document. The check is a backstop rather than a proof of no egress, and it is narrower than the claims it guards: a literal under another scheme (a `wss://` beacon), one added to build configuration outside the scanned trees, a host assembled at runtime, a URL an author spelled around the check by splitting or encoding it, and a connection made inside a dependency are all outside its reach. Its limits are in [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md#egress-hardening-and-its-limits).
 
 ## Two deployments
 
