@@ -165,9 +165,7 @@ export function AcceptorColumnsStep({
   // Ties the disabled launch button to the blocked-reason line so a
   // keyboard/screen-reader user at the button hears why it is disabled and what to
   // do. The column-conflict reason leads the chain: it is the one the operator
-  // resolves on this screen, at the marks directly above. A reason already present
-  // when the line mounts is not a transition its own polite region announces; one
-  // raised by a later edit is, which is what a reader working the grid needs.
+  // resolves on this screen, at the marks directly above.
   const launchBlockedReasonId = useId();
   const launchBlockedReason =
     unacceptedColumns.length > 0
