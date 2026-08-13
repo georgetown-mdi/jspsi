@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { sanitizeForDisplay } from "@psilink/core";
+
 import { JOB_DATA_ROOT_ENV } from "./gate";
 import { browseSegment } from "./workInputName";
 
@@ -164,15 +166,55 @@ function containsOrEqual(parent: string, child: string): boolean {
 }
 
 /**
+ * How many entries a not-empty warning names before it counts the rest. A retain-mode
+ * transcript holds a file per message, so naming every entry would bury the recovery
+ * the warning exists to deliver. Each named entry is separately escaped and
+ * length-capped, so the listing stays bounded however the partner names its files.
+ *
+ * @internal exported for testing
+ */
+export const MAX_NAMED_RENDEZVOUS_ENTRIES = 10;
+
+/**
+ * The entries of a non-empty rendezvous directory as one bounded display string.
+ * Sorted, because readdir order is the filesystem's and not a promise, so the same
+ * directory reads the same way twice.
+ *
+ * Entry names are partner-chosen -- the partner syncs its own files into this
+ * directory -- so each is escaped here, at the composition point that is this
+ * warning's display sink: the job event stream carries the message to the console
+ * verbatim.
+ */
+function describeRendezvousEntries(entries: Array<string>): string {
+  const named = entries
+    .slice(0, MAX_NAMED_RENDEZVOUS_ENTRIES)
+    .map((entry) => sanitizeForDisplay(entry))
+    .join(", ");
+  const remaining = entries.length - MAX_NAMED_RENDEZVOUS_ENTRIES;
+  return remaining > 0 ? `${named} and ${remaining} more` : named;
+}
+
+/**
  * The preflight warnings for a filedrop job's rendezvous directory, surfaced through
  * the job's warning channel at start. Defensive, never fatal: a synced mount may
  * populate lazily and the CLI child is the runtime backstop for a truly-broken path,
- * so a missing, non-directory, or non-writable mount only warns. An overlap with the
- * input directory or the data root also warns -- a partner with sync write access to
- * an overlapping mount could reach the operator's `.psilink.key`, input, or results
- * -- but the operator's own directory layout is theirs to choose, so it is not
- * refused. This does not create the directory, canonicalize it, reject a symlinked
- * mount, or enforce a mode.
+ * so a missing, non-directory, non-writable, or unlistable mount only warns. An
+ * overlap with the input directory or the data root also warns -- a partner with sync
+ * write access to an overlapping mount could reach the operator's `.psilink.key`,
+ * input, or results -- but the operator's own directory layout is theirs to choose, so
+ * it is not refused.
+ *
+ * A directory that is not empty warns for a different reason: the console rendezvouses
+ * every filedrop job out of the one mount, so a completed retain-mode run leaves its
+ * whole transcript where the next run's entry guard refuses it, with no crash anywhere
+ * in the story. The warning names what is there and leaves the launch to the operator,
+ * whose own input and results sit in that listing too and are not what the guard
+ * objects to. It deliberately does not sort protocol files from foreign ones: that
+ * grammar is the exchange's, and predicting the guard's verdict here would be a second
+ * implementation of it.
+ *
+ * This does not create the directory, canonicalize it, reject a symlinked mount, or
+ * enforce a mode.
  */
 export function rendezvousStartupWarnings(
   rendezvousDir: string,
@@ -201,6 +243,24 @@ export function rendezvousStartupWarnings(
             "the exchange writes its half of the rendezvous there",
         );
       }
+      let entries: Array<string> | undefined;
+      try {
+        entries = fs.readdirSync(rendezvousDir).sort();
+      } catch {
+        warnings.push(
+          `the rendezvous directory ${rendezvousDir} cannot be listed, so ` +
+            "whether an earlier exchange left files there is unknown until " +
+            "the exchange runs",
+        );
+      }
+      if (entries !== undefined && entries.length > 0)
+        warnings.push(
+          `the rendezvous directory ${rendezvousDir} is not empty; an ` +
+            "exchange refuses to start when an earlier exchange's files are " +
+            "still there, so delete those on the host before launching -- " +
+            "your own input and results are not among them. It holds " +
+            describeRendezvousEntries(entries),
+        );
     }
   }
 
