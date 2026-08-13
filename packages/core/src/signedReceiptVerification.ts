@@ -82,8 +82,14 @@ export type ReceiptSignatureStatus = "verified" | "failed";
  *   content, and the expected identities), all of which whoever assembled the
  *   record can satisfy with a certificate it minted.
  *
- * Each anchoring value reaches at most one certificate, so a single pinned value
- * -- or two equal ones -- can never anchor both slots.
+ * Each pinned value reaches at most one certificate, so a single pinned value
+ * -- or two equal ones, whatever their spelling -- can never anchor both slots.
+ * The dedup runs across pinned values only: a pinned value and the verifier's
+ * own identity carrying the same digest can anchor a slot each on a record
+ * whose two slots repeat one certificate. That record verifies only under the
+ * verifier's own signing key at both slots, so it is not assemblable by an
+ * adversary; the residual is a misdescribed verdict in a self-pinned
+ * configuration, recorded here rather than closed.
  */
 export type CertificateAnchorStatus =
   "partner-pin" | "local-identity" | "unanchored";
@@ -340,7 +346,8 @@ async function assignAnchors(
   // so their match patterns deduplicate the values without depending on how they
   // were written. Without that, one fingerprint supplied twice would claim both
   // slots of a record whose two slots carry a single certificate, and a record
-  // anyone can assemble from one certificate would reach `verified`.
+  // only that certificate's key holder can assemble -- both receipt signatures
+  // must verify under it -- would read as two independent anchors.
   const claimedPatterns = new Set<string>();
   for (const matches of pinMatches) {
     const pattern = matches.join(",");
