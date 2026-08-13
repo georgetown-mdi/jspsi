@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  assertPayloadSendDisclosed,
+  deriveAcceptedLinkageTerms,
+} from "@psilink/core";
+
+import {
   acceptorCleaningAttention,
   acceptorColumnsEditorState,
   acceptorColumnsTheInvitationWillNotAccept,
@@ -18,7 +23,7 @@ import {
   setColumnTypeForMatching,
 } from "@psi/metadataEditing";
 
-import type { CSVRow, LinkageTerms } from "@psilink/core";
+import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
 import type { AcceptorColumnsState } from "@bench/acceptorColumnsModel";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
@@ -315,6 +320,20 @@ describe("columns the invitation will not accept", () => {
     return { ...nameTerms, ...over };
   }
 
+  /** Whether core itself refuses to run this pair, driven through the real
+   * functions rather than a second model of them: the invitation mirrored onto
+   * this party by {@link deriveAcceptedLinkageTerms}, checked by the
+   * {@link assertPayloadSendDisclosed} call `prepareForExchange` makes. */
+  function coreRefuses(terms: LinkageTerms, metadata: Metadata): boolean {
+    const accepted = deriveAcceptedLinkageTerms(terms, "Sam Alvarez");
+    try {
+      assertPayloadSendDisclosed(accepted.payload, metadata, accepted.output);
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
   test("names the disclosed columns when the invitation accepts none and the inviting party receives the result", () => {
     const terms = invitation({ payload: { receive: [] } });
     const { editorState } = editorFor(columns, terms);
@@ -422,6 +441,48 @@ describe("columns the invitation will not accept", () => {
     expect(acceptorLaunchDisabled(verdict, edited.editorState, terms)).toBe(
       false,
     );
+  });
+
+  test("fires exactly when core's own enforcement refuses the pair", () => {
+    // The web predicate states in this package a condition core enforces in its
+    // own, so a change to core's gate would leave the notice quietly wrong -- the
+    // operator told the exchange can start, and refused at launch. Every case
+    // above, driven through core's real mirror and real assertion: the notice and
+    // the refusal agree, or this fails.
+    const cases: Array<Partial<LinkageTerms>> = [
+      { payload: { receive: [] } },
+      {
+        output: { expectsOutput: false, shareWithPartner: true },
+        payload: { receive: [] },
+      },
+      {},
+      { payload: { send: [{ name: "risk_score" }] } },
+      { payload: { receive: [{ name: "notes" }] } },
+    ];
+    for (const over of cases) {
+      const terms = invitation(over);
+      const { editorState } = editorFor(columns, terms);
+      expect(
+        acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata)
+          .length > 0,
+      ).toBe(coreRefuses(terms, editorState.metadata));
+    }
+  });
+
+  test("leaves a disagreeing non-empty declaration to core, by design", () => {
+    // The equivalence above is scoped to the declaration this notice reads -- the
+    // empty one. A non-empty declaration that disagrees with the marks is a
+    // different comparison, with a named set and different remedies, and core
+    // still refuses it: the notice is silent here by design, and this is what says
+    // so rather than the equivalence test quietly excluding the case.
+    const terms = invitation({
+      payload: { receive: [{ name: "risk_score" }] },
+    });
+    const { editorState } = editorFor(columns, terms);
+    expect(
+      acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
+    ).toEqual([]);
+    expect(coreRefuses(terms, editorState.metadata)).toBe(true);
   });
 });
 
