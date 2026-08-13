@@ -123,12 +123,37 @@ function compressPoint(
 
 /**
  * The IEEE Std 1363-2000 hybrid encoding (0x06/0x07 || X || Y) of an
- * uncompressed point. SEC1 does not define this form; platforms decode it.
+ * uncompressed point. SEC1 does not define this form; platforms decode it. The
+ * prefix's low bit restates Y's parity, so the form admits a self-contradicting
+ * string as well: `"matching"` takes the prefix the standard pairs with this
+ * point's Y, `"contradicting"` the other one, over identical coordinates.
  */
-function hybridPoint(point: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+function hybridPoint(
+  point: Uint8Array<ArrayBuffer>,
+  prefixParity: "matching" | "contradicting",
+): Uint8Array<ArrayBuffer> {
+  const yIsOdd = ((point[64] as number) & 1) === 1;
+  const prefixIsOdd = prefixParity === "matching" ? yIsOdd : !yIsOdd;
   const out = Uint8Array.from(point);
-  out[0] = (point[64] as number) & 1 ? 0x07 : 0x06;
+  out[0] = prefixIsOdd ? 0x07 : 0x06;
   return out;
+}
+
+/**
+ * A fresh ephemeral public key whose Y coordinate has the requested parity, so
+ * a case can drive each hybrid prefix in both roles -- as the prefix Y is
+ * paired with and as the one contradicting it -- rather than whichever role a
+ * random key happens to assign them.
+ */
+async function generateEphemeralWithYParity(
+  parity: "even" | "odd",
+): Promise<Uint8Array<ArrayBuffer>> {
+  for (let attempt = 0; attempt < 64; attempt++) {
+    const { publicKey } = await generateEphemeral();
+    const yIsOdd = ((publicKey[64] as number) & 1) === 1;
+    if (yIsOdd === (parity === "odd")) return publicKey;
+  }
+  throw new Error(`no P-256 key with ${parity} Y in 64 attempts`);
 }
 
 /** The bare 64-byte X || Y, with the SEC1 encoding prefix octet stripped. */
@@ -398,7 +423,7 @@ describe("crypto.subtle.importKey peer-share validation", () => {
     expect(await importAccepts(outOfRangeY)).toBe(false);
   });
 
-  test("ACCEPTS the compressed and hybrid encodings of a valid point, which is why the encoding is pinned above importKey", async () => {
+  test("ACCEPTS the compressed and parity-matching hybrid encodings of a valid point, which is why the encoding is pinned above importKey", async () => {
     // The load-bearing measurement behind the canonical-encoding check in
     // kex.ts: importKey is not the layer that pins the encoding. On this
     // platform it admits several encodings of one point and re-exports
@@ -409,7 +434,7 @@ describe("crypto.subtle.importKey peer-share validation", () => {
     // the pin cannot be delegated.
     const { publicKey } = await generateEphemeral();
     const compressed = compressPoint(publicKey);
-    const hybrid = hybridPoint(publicKey);
+    const hybrid = hybridPoint(publicKey, "matching");
     expect(compressed.length).toBe(33);
     expect(hybrid.length).toBe(65);
     expect(await importAccepts(compressed)).toBe(true);
@@ -428,6 +453,27 @@ describe("crypto.subtle.importKey peer-share validation", () => {
         ),
       );
       expect(toHex(reExported)).toBe(toHex(publicKey));
+    }
+  });
+
+  test("admits a hybrid encoding only while its prefix agrees with Y's parity", async () => {
+    // The qualifier on the acceptance above, measured rather than predicted:
+    // both prefixes are driven over both parities of Y, so each of 0x06 and
+    // 0x07 is offered once as the prefix the standard pairs with the point and
+    // once as the prefix contradicting it. The two 65-byte strings in each pair
+    // differ in that octet alone, so an admitted one and a refused one isolate
+    // the parity restatement as the whole of what is checked -- neither prefix
+    // is admitted or refused on its own account. The spec's "parity-correct"
+    // qualifier and the kex.ts encoding comment rest on this case.
+    for (const parity of ["even", "odd"] as const) {
+      const publicKey = await generateEphemeralWithYParity(parity);
+      const matching = hybridPoint(publicKey, "matching");
+      const contradicting = hybridPoint(publicKey, "contradicting");
+      expect(matching[0]).toBe(parity === "odd" ? 0x07 : 0x06);
+      expect(contradicting[0]).toBe(parity === "odd" ? 0x06 : 0x07);
+      expect(toHex(matching.slice(1))).toBe(toHex(contradicting.slice(1)));
+      expect(await importAccepts(matching)).toBe(true);
+      expect(await importAccepts(contradicting)).toBe(false);
     }
   });
 
@@ -726,11 +772,15 @@ describe("a peer share that is not a canonically-encoded valid point is rejected
     await initiatorRejectsMsg2Share(compressPoint(publicKey));
   });
 
-  test("the hybrid encoding of an otherwise valid point", async () => {
+  test("either hybrid encoding of an otherwise valid point", async () => {
     // The pinned length with a different prefix: this one is rejected on the
-    // prefix check rather than the length check.
+    // prefix check rather than the length check. Both prefixes are driven
+    // because only one of them survives importKey (measured above), and the
+    // wire verdict must not inherit that split -- the prefix check refuses each
+    // without either reaching the platform.
     const { publicKey } = await generateEphemeral();
-    await initiatorRejectsMsg2Share(hybridPoint(publicKey));
+    await initiatorRejectsMsg2Share(hybridPoint(publicKey, "matching"));
+    await initiatorRejectsMsg2Share(hybridPoint(publicKey, "contradicting"));
   });
 
   test("a 32-byte share, the shape a superseded X25519 peer sends", async () => {
@@ -751,7 +801,8 @@ describe("a peer share that is not a canonically-encoded valid point is rejected
       offCurvePoint(publicKey),
       identityPoint(),
       compressPoint(publicKey),
-      hybridPoint(publicKey),
+      hybridPoint(publicKey, "matching"),
+      hybridPoint(publicKey, "contradicting"),
       prefixlessPoint(publicKey),
       new Uint8Array(32).fill(0x01),
     ]) {

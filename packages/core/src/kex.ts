@@ -41,9 +41,11 @@ const PSK_LEN = 32;
 // compressed, and IEEE Std 1363-2000 (Annex E.2.3.2) admits a third, the hybrid
 // form; crypto.subtle.importKey accepts more than the uncompressed one --
 // driven against both platforms, Node admits the 33-byte compressed forms
-// (0x02/0x03 || X) AND the 65-byte hybrid form (0x07 || X || Y), while Chromium
-// admits the compressed forms and refuses hybrid. Each re-exports what it
-// admits as the same uncompressed point.
+// (0x02/0x03 || X) AND the 65-byte hybrid form (0x06/0x07 || X || Y) whose
+// prefix parity agrees with Y, refusing the hybrid string whose prefix
+// contradicts it, while Chromium refuses hybrid under either prefix and admits
+// the compressed forms. Each re-exports what it admits as the same
+// uncompressed point.
 //
 // Two consequences, either one sufficient. The wire bytes -- not the decoded
 // point -- are what MixHash and MixKey fold into the transcript, so admitting a
