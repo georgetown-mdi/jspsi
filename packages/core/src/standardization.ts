@@ -33,6 +33,9 @@ import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
 import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
+import { isCalendarDateValid } from "./utils/calendarDate.js";
+import { expandFuzzyComparisons } from "./fuzzyComparisons.js";
+import { APPLIED_SETTINGS } from "./appliedSettings.js";
 
 const logger = getLogger("cleaning");
 
@@ -221,24 +224,6 @@ interface ParsedDateFormat {
   source: string;
   /** Capture-group order, parallel to the regex's groups. */
   order: DateFormatToken[];
-}
-
-// The ISO-string Date constructor rolls an out-of-range day/month over (e.g.
-// Feb 29 in a non-leap year becomes Mar 1) instead of returning an Invalid
-// Date, so isNaN alone would accept it; round-trip the parsed UTC components
-// back against the input to catch rollover.
-function isCalendarDateValid(
-  year: string,
-  month: string,
-  day: string,
-): boolean {
-  const date = new Date(`${year}-${month}-${day}T00:00:00Z`);
-  return (
-    !isNaN(date.getTime()) &&
-    date.getUTCFullYear() === Number(year) &&
-    date.getUTCMonth() + 1 === Number(month) &&
-    date.getUTCDate() === Number(day)
-  );
 }
 
 /**
@@ -1590,6 +1575,39 @@ function swapElements(
 const KEY_STRING_WARN_THRESHOLD = 20;
 
 /**
+ * The hard cap on the key strings ONE row may contribute to a single key round.
+ *
+ * {@link KEY_STRING_WARN_THRESHOLD} is advisory -- it tells an operator the
+ * fan-out is wide enough to weaken the privacy of a dual-party-output exchange
+ * but lets the run proceed. This cap is the resource bound underneath it: the
+ * cross-product multiplies each element's candidate count, and the decision to
+ * expand an element comes from the partner-authored linkage terms while the
+ * values expanded are local rows, so the product is not something the local
+ * operator alone controls. Set well above any honest fuzzy key (three fuzzy
+ * elements over canonical dates produce a few hundred candidates). The cap
+ * bounds the COUNT of key strings, not their bytes: a fuzzy element's value is
+ * bounded by MAX_FUZZY_EXPANSION_INPUT_LENGTH, but a non-fuzzy element in the
+ * same key carries its full local cell, which the product replicates, so the
+ * per-row byte total scales with the operator's own longest cell times this
+ * cap. The recorded limit lives in docs/spec/CHANNEL_SECURITY.md.
+ */
+const MAX_KEY_STRINGS_PER_ROW = 1024;
+
+// The value is local row data and the key name is partner-authored free text, so
+// neither is interpolated; the count is a derived integer and names no value.
+function keyStringFanOutCapRefusal(projected: number): UsageError {
+  return new UsageError(
+    `a linkage key expands one row into ${projected} key strings, above the ` +
+      `${MAX_KEY_STRINGS_PER_ROW} this exchange builds per row. Fuzzy ` +
+      "comparisons multiply across a key's elements, so a key declaring " +
+      "several of them over long values fans out far enough to exhaust " +
+      "memory. The exchange is refused instead. Declare fuzzy comparisons on " +
+      "fewer of the key's elements, or shorten the expanded fields with an " +
+      "element transform.",
+  );
+}
+
+/**
  * Build all key strings for one linkage key round given a standardized dataset
  * and a row index.
  *
@@ -1611,8 +1629,15 @@ const KEY_STRING_WARN_THRESHOLD = 20;
  * `isReceiver` controls whether the key's `swap` directive is applied. The
  * receiver builds keys with the named elements swapped; the sender does not.
  *
- * Note: `generateFuzzyComparisons` on individual elements is not yet applied
- * here; that expansion is handled separately by the PSI preparation layer.
+ * An element declaring `generateFuzzyComparisons` contributes its whole
+ * candidate set to the cross-product rather than a single value, so a fuzzy
+ * element multiplies the row's key strings by its candidate count. The expansion
+ * runs on the element's TRANSFORMED value (see the note at the expansion site),
+ * every candidate flows through the same final NFC pass, and the assembled count
+ * is what both the {@link KEY_STRING_WARN_THRESHOLD} warning and the
+ * {@link MAX_KEY_STRINGS_PER_ROW} cap measure. It is gated on
+ * `APPLIED_SETTINGS.fuzzyComparisons`: while that is false a fuzzy element builds
+ * the same single key string as an element without one.
  */
 export function buildKeyStrings(
   key: LinkageKey,
@@ -1647,8 +1672,46 @@ export function buildKeyStrings(
       if (t !== null) transformed.push(t);
     }
     if (transformed.length === 0) return null;
-    elementValues.push(transformed);
+
+    // Fuzzy expansion runs AFTER the element transform, on the value that would
+    // otherwise have been hashed. The transform is what puts a value in the
+    // canonical space the partner's own value occupies, and a candidate can only
+    // ever match there: `adjacent_years` needs the year at a known offset, which
+    // only a parse_date transform guarantees, and expanding first would then feed
+    // each candidate back through a pipeline free to collapse several to one
+    // string or filter one to null -- shrinking the declared candidate set
+    // silently. Expanding last also leaves applyElementTransform's
+    // single-value-in, single-value-out contract, and its fan-out refusal,
+    // untouched.
+    //
+    // Gated on APPLIED_SETTINGS.fuzzyComparisons, the single source of truth both
+    // consent surfaces annotate this term from. The PSI round downstream consumes
+    // ONE value per record: StandardizedKeyIterable refuses a multi-candidate row
+    // outright, so expanding ahead of that round would convert the no-op the
+    // consent copy describes into an aborted exchange. Flipping the flag belongs
+    // with the round that consumes a candidate set.
+    const fuzzy = element.generateFuzzyComparisons;
+    elementValues.push(
+      fuzzy === undefined || !APPLIED_SETTINGS.fuzzyComparisons
+        ? transformed
+        : transformed.flatMap((value) => expandFuzzyComparisons(value, fuzzy)),
+    );
   }
+
+  // Bound the fan-out BEFORE materializing it: the cross-product multiplies each
+  // element's candidate count, so a handful of fuzzy elements over long values
+  // multiplies into a per-row set large enough to exhaust memory as it is built.
+  // The count is a product of array lengths, so it is known without allocating
+  // the product itself. Only the fuzzy path can reach the cap -- a row carrying
+  // more than one candidate for an element is already refused above, so without
+  // fuzzy expansion every element contributes exactly one value and the product
+  // is 1.
+  const projectedKeyStrings = elementValues.reduce(
+    (count, values) => count * values.length,
+    1,
+  );
+  if (projectedKeyStrings > MAX_KEY_STRINGS_PER_ROW)
+    throw keyStringFanOutCapRefusal(projectedKeyStrings);
 
   // Final NFC pass on the assembled key. Each part is already NFC, but this is
   // the one chokepoint every PSI key string flows through, so it also covers the
