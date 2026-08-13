@@ -881,7 +881,7 @@ The receipt signing mode. `none` signs no receipt (only the unsigned self-attest
 *Type:* string (path)  
 *Required:* no
 
-Path to this party's signing identity file (the P-256 private key plus its self-signed certificate). Defaults to `~/.psilink/signing-identity.json` -- a per-user location, because one identity is reused across every exchange and partner. A leading `~` (or `~/`) is expanded to the home directory, so the value below works verbatim. The file is created lazily and owner-read-only by `psilink fingerprint` and is loaded thereafter; regenerate it deliberately with `psilink fingerprint --force` (which invalidates any fingerprint a partner has pinned).
+Path to this party's signing identity file (the P-256 private key plus its self-signed certificate). Defaults to `~/.psilink/signing-identity.json` -- a per-user location, because one identity is reused across every exchange and partner. A leading `~` (or `~/`) is expanded to the home directory, so the value below works verbatim. The file is created lazily and owner-read-only by `psilink fingerprint` and is loaded thereafter; regenerate it deliberately with `psilink fingerprint --force` (which invalidates any fingerprint a partner has pinned). [`psilink verify-receipt`](CLI.md#a-verified-verdict-needs-both-certificates-anchored) reads the same field to anchor this party's own certificate in a stored dual-signed receipt.
 
 ### `signing.partner_fingerprint`
 

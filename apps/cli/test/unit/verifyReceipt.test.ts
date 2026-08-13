@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, test, vi } from "vitest";
+import type { Argv } from "yargs";
 import YAML from "yaml";
 
 import {
@@ -11,6 +12,7 @@ import {
   generateSigningIdentity,
   serializeDualSignedRecord,
   serializeExchangeRecord,
+  serializeSigningIdentity,
   serializeVerificationKeys,
   signReceiptContent,
   SIGNED_RECEIPT_VERSION,
@@ -27,6 +29,7 @@ import type {
 } from "@psilink/core";
 
 import {
+  builder,
   deriveOurIdColumn,
   formatSignedRecordReport,
   formatVerificationReport,
@@ -91,7 +94,9 @@ const receiptContent: ReceiptContent = {
 };
 
 /** A dual-signed record between Party A (initiator) and Party B (responder),
- * written to `receipt.json` in `dir`. Fixed keys keep the fixture reproducible. */
+ * written to `receipt.json` in `dir`, alongside Party A's signing identity file
+ * (`identity.json`) -- what the initiator holds to anchor its own slot. Fixed
+ * keys keep the fixture reproducible. */
 async function writeSignedRecord(
   dir: string,
   content: ReceiptContent = receiptContent,
@@ -128,6 +133,7 @@ async function writeSignedRecord(
   };
   const path = join(dir, "receipt.json");
   writeFileSync(path, serializeDualSignedRecord(record));
+  writeFileSync(join(dir, "identity.json"), serializeSigningIdentity(a));
   return path;
 }
 
@@ -223,7 +229,7 @@ describe("formatSignedRecordReport", () => {
     fingerprint: "Zm9vZmluZ2VycHJpbnQ",
     certificateBinding: "verified",
     signature: "verified",
-    fingerprintPin: role === "responder" ? "verified" : "not-pinned",
+    certificateAnchor: role === "responder" ? "partner-pin" : "local-identity",
     assertedIdentity: "verified",
     ...overrides,
   });
@@ -233,6 +239,8 @@ describe("formatSignedRecordReport", () => {
     outcome: "verified",
     initiator: party("initiator"),
     responder: party("responder"),
+    pinnedFingerprints: "matched",
+    localIdentity: "matched",
     termsHash: "verified",
     binder: "YmluZGVy",
     ...overrides,
@@ -244,24 +252,53 @@ describe("formatSignedRecordReport", () => {
     expect(lines[0]).toMatch(/^SIGNED RECEIPT VERIFIED/);
     expect(out).toContain("initiator: Party A");
     expect(out).toContain("responder: Party B");
-    expect(out).toContain("matches the pinned value");
+    expect(out).toContain("matches a fingerprint you pinned out-of-band");
     expect(exitCode).toBe(0);
   });
 
-  test("a verified record claims only the slot the one pin anchored", () => {
-    // What one pin produces: it matches the responder's certificate, and no
-    // pinned value reaches the initiator's -- which whoever assembled the record
-    // could have minted. The headline must say which slot it anchored and leave
-    // the other one unclaimed, rather than contradict the per-slot line below it.
+  test("a verified record states what anchored each certificate", () => {
+    // A verified verdict speaks for both slots, so it says what tied each of
+    // them to a party known outside the record rather than naming one and
+    // leaving the reader to weigh the other.
     const { lines } = formatSignedRecordReport(report());
     expect(lines[0]).toBe(
-      "SIGNED RECEIPT VERIFIED: both signatures verify, and the pinned value " +
-        "matches the responder's certificate. No pinned value authenticates " +
-        "the initiator's certificate.",
+      "SIGNED RECEIPT VERIFIED: both signatures verify, and both certificates " +
+        "are anchored outside the record -- the initiator's by your own " +
+        "signing identity, and the responder's by a fingerprint you pinned " +
+        "out-of-band.",
     );
     const out = lines.join("\n");
-    expect(out).not.toContain("shows that the pinned party signed it");
-    expect(out).toContain("no pinned value supplied for this certificate");
+    expect(out).toContain("is your own signing identity's certificate");
+    expect(out).not.toContain("not anchored");
+  });
+
+  test("one anchored certificate is graded incomplete and names the unanchored slot", () => {
+    // The slot nothing outside the record reaches is the one a reader must weigh,
+    // so the verdict names it in the headline and says what would anchor it.
+    const { lines, exitCode } = formatSignedRecordReport(
+      report({
+        outcome: "incomplete",
+        initiator: party("initiator", { certificateAnchor: "unanchored" }),
+        localIdentity: "not-supplied",
+      }),
+    );
+    expect(lines[0]).toBe(
+      "SIGNED RECEIPT INCOMPLETE: nothing contradicted the dual-signed record, " +
+        "but not everything could be checked (see below). Nothing outside the " +
+        "record anchors the initiator's certificate.",
+    );
+    const out = lines.join("\n");
+    expect(out).toContain(
+      "not anchored (no pinned value matches it, and it is not your own " +
+        "certificate)",
+    );
+    expect(out).toContain(
+      "the initiator's certificate is anchored by nothing outside this record, " +
+        "which is what holds the verdict short of VERIFIED",
+    );
+    expect(out).toContain("--identity-file");
+    // Short of verified is not a failure: the exit code stays 0.
+    expect(exitCode).toBe(0);
   });
 
   test("a failed outcome carries no note asserting the signatures verified", () => {
@@ -272,11 +309,73 @@ describe("formatSignedRecordReport", () => {
     expect(anchoredOut).not.toContain("signatures verify against");
     expect(anchoredOut).not.toContain("shows that the pinned party signed it");
 
-    failed.initiator.fingerprintPin = "not-pinned";
-    failed.responder.fingerprintPin = "not-pinned";
-    const unpinnedOut = formatSignedRecordReport(failed).lines.join("\n");
-    expect(unpinnedOut).not.toContain("signatures verify against");
-    expect(unpinnedOut).toContain("trust not established");
+    failed.initiator.certificateAnchor = "unanchored";
+    failed.responder.certificateAnchor = "unanchored";
+    failed.pinnedFingerprints = "not-supplied";
+    failed.localIdentity = "not-supplied";
+    const unanchoredOut = formatSignedRecordReport(failed).lines.join("\n");
+    expect(unanchoredOut).not.toContain("signatures verify against");
+    expect(unanchoredOut).toContain("trust not established");
+  });
+
+  test("a pinned value reaching neither certificate is named as the failure", () => {
+    const { lines, exitCode } = formatSignedRecordReport(
+      report({
+        outcome: "failed",
+        initiator: party("initiator", { certificateAnchor: "unanchored" }),
+        responder: party("responder", { certificateAnchor: "unanchored" }),
+        pinnedFingerprints: "unmatched",
+        localIdentity: "not-supplied",
+      }),
+    );
+    expect(lines.join("\n")).toContain(
+      "a pinned fingerprint matches NEITHER certificate in this record: this " +
+        "is not the record of the party you pinned.",
+    );
+    // A pinned value that reached nothing is not the same as none supplied, and
+    // the line answering it is not followed by advice to supply one.
+    expect(lines.join("\n")).not.toContain("trust not established");
+    expect(exitCode).toBe(1);
+  });
+
+  test("a named signing identity reaching neither certificate is named as the failure", () => {
+    const { lines } = formatSignedRecordReport(
+      report({
+        outcome: "failed",
+        initiator: party("initiator", { certificateAnchor: "unanchored" }),
+        localIdentity: "unmatched",
+      }),
+      {
+        localTerms: true,
+        partnerTerms: true,
+        localIdentity: "named",
+      },
+    );
+    expect(lines.join("\n")).toContain(
+      "the signing identity you named is neither certificate in this record",
+    );
+  });
+
+  test("a signing identity found rather than named is a note, not a failure line", () => {
+    const { lines, exitCode } = formatSignedRecordReport(
+      report({
+        outcome: "incomplete",
+        initiator: party("initiator", { certificateAnchor: "unanchored" }),
+        localIdentity: "unmatched",
+      }),
+      {
+        localTerms: true,
+        partnerTerms: true,
+        localIdentity: "resolved",
+      },
+    );
+    const out = lines.join("\n");
+    expect(out).toContain(
+      "note: your own signing identity is neither certificate here, so it " +
+        "anchors nothing",
+    );
+    expect(out).not.toContain("neither certificate in this record:");
+    expect(exitCode).toBe(0);
   });
 
   test("the binder is reported as covered but not recomputed", () => {
@@ -286,12 +385,14 @@ describe("formatSignedRecordReport", () => {
     );
   });
 
-  test("an unpinned run is incomplete and says trust is not established", () => {
+  test("a run anchoring neither certificate is incomplete and says trust is not established", () => {
     const { lines, exitCode } = formatSignedRecordReport(
       report({
         outcome: "incomplete",
-        initiator: party("initiator", { fingerprintPin: "not-pinned" }),
-        responder: party("responder", { fingerprintPin: "not-pinned" }),
+        initiator: party("initiator", { certificateAnchor: "unanchored" }),
+        responder: party("responder", { certificateAnchor: "unanchored" }),
+        pinnedFingerprints: "not-supplied",
+        localIdentity: "not-supplied",
         termsHash: "not-checked",
       }),
     );
@@ -311,9 +412,10 @@ describe("formatSignedRecordReport", () => {
           certificateBinding: "failed",
         }),
         responder: party("responder", {
-          fingerprintPin: "mismatch",
+          certificateAnchor: "unanchored",
           assertedIdentity: "mismatch",
         }),
+        pinnedFingerprints: "unmatched",
         termsHash: "mismatch",
       }),
     );
@@ -321,7 +423,7 @@ describe("formatSignedRecordReport", () => {
     expect(lines[0]).toMatch(/^SIGNED RECEIPT VERIFICATION FAILED/);
     expect(out).toContain("receipt signature: DOES NOT VERIFY");
     expect(out).toContain("SELF-SIGNATURE DOES NOT VERIFY");
-    expect(out).toContain("DOES NOT MATCH the pinned value");
+    expect(out).toContain("matches NEITHER certificate in this record");
     expect(out).toContain(
       "asserted identity: DOES NOT MATCH an identity expected",
     );
@@ -329,19 +431,45 @@ describe("formatSignedRecordReport", () => {
     expect(exitCode).toBe(1);
   });
 
-  test("a verified verdict with no anchored certificate is refused, not phrased", () => {
-    // The verifier reaches `verified` only once some certificate matched the pin,
-    // so the headline's "matches ..." clause always has a slot to name. Were that
-    // to stop holding, the sentence would claim a match that did not happen: the
-    // report fails loudly here instead of overstating the evidence.
+  test("a verified verdict over an unanchored certificate is refused, not phrased", () => {
+    // The verifier reaches `verified` only once both certificates are anchored,
+    // so the headline's "anchored by ..." clause always has a source to name for
+    // each slot. Were that to stop holding, the sentence would claim an anchor
+    // that does not exist: the report fails loudly here instead of overstating
+    // the evidence.
     expect(() =>
       formatSignedRecordReport(
         report({
-          initiator: party("initiator", { fingerprintPin: "not-pinned" }),
-          responder: party("responder", { fingerprintPin: "not-pinned" }),
+          initiator: party("initiator", { certificateAnchor: "unanchored" }),
         }),
       ),
-    ).toThrow(/no pin-anchored certificate/);
+    ).toThrow(/leaves the initiator's certificate unanchored/);
+  });
+
+  test("a not-checked line names an input still missing, not one already passed", () => {
+    // A config was named and defines no linkage_terms, so directing the operator
+    // at --config-file would send them back to the file they already passed.
+    const { lines } = formatSignedRecordReport(
+      report({ outcome: "incomplete", termsHash: "not-checked" }),
+      {
+        configFile: "/tmp/psilink.yaml",
+        localTerms: false,
+        partnerTerms: true,
+      },
+    );
+    const out = lines.join("\n");
+    expect(out).toContain(
+      "agreed-terms hash: not checked (pass the exchange record, or a " +
+        "--config-file that defines linkage_terms)",
+    );
+    expect(out).not.toContain("or --config-file and");
+    // The note explaining that config sits with the line it explains.
+    const termsAt = lines.findIndex((line) =>
+      line.includes("agreed-terms hash:"),
+    );
+    expect(lines[termsAt + 1]).toContain(
+      "defines no linkage_terms, so it supplied no terms for this check",
+    );
   });
 
   test("record-carried text with control bytes is sanitized before display", () => {
@@ -361,6 +489,38 @@ describe("formatSignedRecordReport", () => {
     expect(out).not.toContain(esc);
     expect(out).toContain("initiator: A");
     expect(out).toContain("per-exchange binder YmluZGVy");
+  });
+});
+
+describe("builder", () => {
+  // The builder only chains, so a recorder standing in for yargs collects each
+  // option's help text without the parser.
+  function optionDescriptions(): Record<string, string> {
+    const described: Record<string, string> = {};
+    const recorder = {
+      usage: () => recorder,
+      positional: () => recorder,
+      option: (name: string, config: { describe: string }) => {
+        described[name] = config.describe;
+        return recorder;
+      },
+    };
+    builder(recorder as unknown as Argv);
+    return described;
+  }
+
+  test("the anchoring options' help states what a verified verdict takes", () => {
+    // The spec rule is that a verified verdict means both certificates were
+    // anchored; help that promised less would send an operator looking for the
+    // verdict their one pin cannot reach.
+    const described = optionDescriptions();
+    expect(described["partner-fingerprint"]).toContain(
+      "a verified verdict needs both certificates anchored",
+    );
+    expect(described["partner-fingerprint"]).toContain("Repeat it");
+    expect(described["identity-file"]).toContain(
+      "anchors your own slot in the signed record",
+    );
   });
 });
 
@@ -573,11 +733,15 @@ describe("handler", () => {
 
   /** Both artifacts of one exchange -- the record with its keys file beside it,
    * and the dual-signed record carrying that exchange's agreed-terms hash -- plus
-   * the responder's fingerprint, the pin a verifier holds for its partner. */
+   * the responder's fingerprint (the pin a verifier holds for its partner), the
+   * initiator's (what an auditor holding both would pin), and the path to the
+   * initiator's own signing identity, which anchors its own slot. */
   async function exchangeArtifacts(): Promise<{
     recordPath: string;
     signedPath: string;
+    identityPath: string;
     pin: string;
+    ownFingerprint: string;
   }> {
     const dir = tmp();
     const { record, keys } = await buildExchangeRecord(baseInputs);
@@ -588,10 +752,18 @@ describe("handler", () => {
       ...receiptContent,
       termsHash: record.termsHash,
     });
-    const pin = await computeCertificateFingerprint(
-      readSignedRecordFile(signedPath).responder.certificate,
-    );
-    return { recordPath, signedPath, pin };
+    const signed = readSignedRecordFile(signedPath);
+    const [pin, ownFingerprint] = await Promise.all([
+      computeCertificateFingerprint(signed.responder.certificate),
+      computeCertificateFingerprint(signed.initiator.certificate),
+    ]);
+    return {
+      recordPath,
+      signedPath,
+      identityPath: join(dir, "identity.json"),
+      pin,
+      ownFingerprint,
+    };
   }
 
   /** A YAML document in its own directory, for the files --config-file and
@@ -708,18 +880,23 @@ describe("handler", () => {
     // signing.partner_fingerprint set", so a config carrying exactly that must
     // verify; refusing it for the linkage_terms this run does not need would
     // contradict the command's own guidance.
-    const { recordPath, signedPath, pin } = await exchangeArtifacts();
+    const { recordPath, signedPath, identityPath, pin } =
+      await exchangeArtifacts();
     const { stdout, stderr, exits, exitCode } = await runVerify({
       record: recordPath,
       "signed-record": signedPath,
       "config-file": writeYaml(
-        `signing:\n  mode: certificate\n  partner_fingerprint: ${pin}\n`,
+        `signing:\n  mode: certificate\n  partner_fingerprint: ${pin}\n` +
+          `  identity_file: ${identityPath}\n`,
       ),
     });
     expect(exits).toEqual([]);
     expect(stderr).not.toContain("invitation");
     expect(stdout).toContain("SIGNED RECEIPT VERIFIED");
-    expect(stdout).toContain("matches the pinned value");
+    expect(stdout).toContain("matches a fingerprint you pinned out-of-band");
+    // The same config names this party's signing identity, so its own slot is
+    // anchored without a second value on the command line.
+    expect(stdout).toContain("is your own signing identity's certificate");
     expect(exitCode).toBe(0);
   });
 
@@ -741,7 +918,7 @@ describe("handler", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("a --config-file defining no linkage_terms says so in the verdict", async () => {
+  test("a --config-file defining no linkage_terms says so beside the line it explains", async () => {
     // The terms half of that config supplied nothing, and the agreed-terms line
     // otherwise reads as though no config had been named at all.
     const { recordPath } = await exchangeArtifacts();
@@ -751,11 +928,20 @@ describe("handler", () => {
       "config-file": configPath,
     });
     expect(exits).toEqual([]);
-    expect(stdout).toContain(
-      `note: config file ${configPath} defines no linkage_terms, so it ` +
-        "supplied no terms for the agreed-terms hash check",
+    const lines = stdout.split("\n");
+    const termsAt = lines.findIndex((line) =>
+      line.includes("agreed-terms hash: not checked"),
     );
-    expect(stdout).toContain("agreed-terms hash: not checked");
+    expect(termsAt).toBeGreaterThan(-1);
+    expect(lines[termsAt + 1]).toBe(
+      `  note: config file ${configPath} defines no linkage_terms, so it ` +
+        "supplied no terms for this check",
+    );
+    // The remediation names what is missing rather than the config already
+    // passed on this command line.
+    expect(lines[termsAt]).toContain(
+      "pass a --config-file that defines linkage_terms and --partner-terms",
+    );
   });
 
   test("an exchange-record positional verifies the record alone", async () => {
@@ -770,25 +956,28 @@ describe("handler", () => {
   });
 
   test("a dual-signed record positional verifies the signatures alone", async () => {
-    const { signedPath, pin } = await exchangeArtifacts();
+    const { signedPath, identityPath, pin } = await exchangeArtifacts();
     const { stdout, exits, exitCode } = await runVerify({
       record: signedPath,
       "partner-fingerprint": pin,
+      "identity-file": identityPath,
     });
     expect(exits).toEqual([]);
     expect(stdout).toMatch(/^SIGNED RECEIPT/);
-    expect(stdout).toContain("matches the pinned value");
+    expect(stdout).toContain("matches a fingerprint you pinned out-of-band");
     // No exchange record was named, so no commitment is opened or reported.
     expect(stdout).not.toContain("commitment");
     expect(exitCode).toBe(0);
   });
 
   test("an exchange record with --signed-record verifies both artifacts", async () => {
-    const { recordPath, signedPath, pin } = await exchangeArtifacts();
+    const { recordPath, signedPath, identityPath, pin } =
+      await exchangeArtifacts();
     const { stdout, exits, exitCode } = await runVerify({
       record: recordPath,
       "signed-record": signedPath,
       "partner-fingerprint": pin,
+      "identity-file": identityPath,
     });
     expect(exits).toEqual([]);
     expect(stdout).toContain(
@@ -799,5 +988,103 @@ describe("handler", () => {
     // reaches verified rather than incomplete.
     expect(stdout).toContain("SIGNED RECEIPT VERIFIED");
     expect(exitCode).toBe(0);
+  });
+
+  test("the partner's pin alone leaves this party's own slot unanchored", async () => {
+    // The pin is evidence about the partner and reaches only the partner's
+    // certificate; without something anchoring this party's own slot the verdict
+    // is graded, not verified, and names the slot it could not reach.
+    const { recordPath, signedPath, pin } = await exchangeArtifacts();
+    const { stdout, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "signed-record": signedPath,
+      "partner-fingerprint": pin,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
+    expect(stdout).toContain(
+      "Nothing outside the record anchors the initiator's certificate.",
+    );
+    expect(stdout).not.toContain("SIGNED RECEIPT VERIFIED");
+    // Short of verified, not contradicted: the run still exits 0.
+    expect(exitCode).toBe(0);
+  });
+
+  test("a verifier that was party to neither exchange pins both signers", async () => {
+    const { signedPath, pin, ownFingerprint } = await exchangeArtifacts();
+    const { stdout, exits, exitCode } = await runVerify({
+      record: signedPath,
+      "partner-fingerprint": [pin, ownFingerprint],
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
+    // No exchange record and no terms, so the identities and the agreed-terms
+    // hash stay unchecked; what both pins settle is the anchoring.
+    expect(stdout).not.toContain("Nothing outside the record anchors");
+    expect(stdout).not.toContain("trust not established");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a third pinned value is refused rather than quietly dropped", async () => {
+    const { signedPath, pin, ownFingerprint } = await exchangeArtifacts();
+    const { stderr, exits } = await runVerify({
+      record: signedPath,
+      "partner-fingerprint": [pin, ownFingerprint, pin],
+    });
+    expect(exits).toEqual([64]);
+    expect(stderr).toContain("may be given at most twice");
+  });
+
+  test("a --identity-file that is not one of the certificates fails the run", async () => {
+    // Naming it asserts this is a receipt this party signed, so a value matching
+    // neither certificate contradicts the run.
+    const { signedPath, pin } = await exchangeArtifacts();
+    const outsiderPath = join(tmp(), "outsider.json");
+    writeFileSync(
+      outsiderPath,
+      serializeSigningIdentity(
+        await generateSigningIdentity("Party C", {
+          privateKey: {
+            kty: "EC",
+            crv: "P-256",
+            x: "HxQBRr-xslH4T03b4NTNz9d6_ZhKlSDjV5QCH4MSu54",
+            y: "7JlaCLH6dwTfPcwLUKlmUmP7dxH5X5-KRJxQluR8iSs",
+            d: "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+          },
+        }),
+      ),
+    );
+    const { stdout, exits, exitCode } = await runVerify({
+      record: signedPath,
+      "partner-fingerprint": pin,
+      "identity-file": outsiderPath,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("SIGNED RECEIPT VERIFICATION FAILED");
+    expect(stdout).toContain(
+      "the signing identity you named is neither certificate in this record",
+    );
+    expect(exitCode).toBe(1);
+  });
+
+  test("a --identity-file that does not exist is refused, not verified unanchored", async () => {
+    const { signedPath, pin } = await exchangeArtifacts();
+    const { stderr, exits } = await runVerify({
+      record: signedPath,
+      "partner-fingerprint": pin,
+      "identity-file": join(tmp(), "absent.json"),
+    });
+    expect(exits).toEqual([64]);
+    expect(stderr).toContain("does not exist");
+  });
+
+  test("--identity-file with no dual-signed record named is refused", async () => {
+    const { recordPath, identityPath } = await exchangeArtifacts();
+    const { stderr, exits } = await runVerify({
+      record: recordPath,
+      "identity-file": identityPath,
+    });
+    expect(exits).toEqual([64]);
+    expect(stderr).toContain("no dual-signed record was named");
   });
 });
