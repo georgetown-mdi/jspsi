@@ -49,6 +49,23 @@ import {
 
 const tmp = () => mkdtempSync(join(tmpdir(), "verify-receipt-"));
 
+// Hermetic: the handler's default identity path must never reach the real
+// ~/.psilink of the machine running the suite -- a signing identity there
+// would anchor a slot these tests assert unanchored.
+const missingIdentityDir = join(
+  tmpdir(),
+  `verify-receipt-no-identity-${process.pid}`,
+);
+vi.mock("../../src/signingIdentityFile", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/signingIdentityFile")>();
+  return {
+    ...actual,
+    defaultSigningIdentityPath: () =>
+      join(missingIdentityDir, "signing-identity.json"),
+  };
+});
+
 // The handler installs a diagnostic sink and applies --log-level across every
 // logger; both are restored between tests.
 snapshotDiagnosticSinkAndLevel();
@@ -897,6 +914,27 @@ describe("handler", () => {
     // The same config names this party's signing identity, so its own slot is
     // anchored without a second value on the command line.
     expect(stdout).toContain("is your own signing identity's certificate");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a configured identity file that does not exist warns instead of vanishing", async () => {
+    // signing.identity_file was written by the operator, so a typo'd path must
+    // not read as "no identity configured"; the named-file arm is a usage error
+    // and this configured arm degrades with a diagnostic.
+    const { recordPath, signedPath, pin } = await exchangeArtifacts();
+    const missing = join(tmp(), "no-such-identity.json");
+    const { stdout, stderr, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "signed-record": signedPath,
+      "log-level": "warn",
+      "config-file": writeYaml(
+        `signing:\n  mode: certificate\n  partner_fingerprint: ${pin}\n` +
+          `  identity_file: ${missing}\n`,
+      ),
+    });
+    expect(exits).toEqual([]);
+    expect(stderr).toContain("does not exist, so it anchors no certificate");
+    expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
     expect(exitCode).toBe(0);
   });
 

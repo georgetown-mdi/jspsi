@@ -924,9 +924,16 @@ async function resolveLocalIdentity(
     );
     return undefined;
   }
-  return resolved === undefined
-    ? undefined
-    : await fingerprintOf(resolved, "resolved");
+  if (resolved === undefined) {
+    if (configured !== undefined)
+      log.warn(
+        `the signing identity at ${target}, named by the configuration's ` +
+          `signing.identity_file, does not exist, so it anchors no ` +
+          `certificate in this record`,
+      );
+    return undefined;
+  }
+  return await fingerprintOf(resolved, "resolved");
 }
 
 export async function handler(argv: Arguments): Promise<void> {

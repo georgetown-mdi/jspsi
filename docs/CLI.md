@@ -33,7 +33,7 @@ A leading `~` (or `~/`) in a local filesystem path -- whether given on the comma
 - The path inside an `@`-file reference (for example, `@~/secrets/id_rsa`) is expanded wherever a reference is resolved.
 - `psilink exchange` expands `--config-file`, `--key-file`, `--record-file`, the input and output paths, and `signing.identity_file`.
 - The zero-setup form expands `--config-file`, `--key-file`, and `--record-file`; its input and output positionals are taken literally.
-- `psilink init` expands `--config-file`; `psilink fingerprint` expands `--config-file`, `--identity-file`, and `--export-certificate`; `psilink verify-receipt` expands `RECORD`, `--keys`, `--signed-record`, `--config-file`, and `--partner-terms`.
+- `psilink init` expands `--config-file`; `psilink fingerprint` expands `--config-file`, `--identity-file`, and `--export-certificate`; `psilink verify-receipt` expands `RECORD`, `--keys`, `--signed-record`, `--config-file`, `--partner-terms`, `--identity-file`, and `signing.identity_file`.
 - `psilink invite` and `psilink accept` expand no path argument. A `~/`-relative path given to either is taken literally and creates a directory named `~`, so pass an absolute path.
 
 Note that `~user` (another user's home) is not resolved.
