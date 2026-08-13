@@ -314,10 +314,28 @@ describe("columns the invitation will not accept", () => {
   // clear, leaving this comparison as the only thing that can close the launch.
   const columns = ["first_name", "last_name", "notes"];
 
-  /** The invitation's own perspective, which the columns step holds, with the
-   * inviting party's payload declaration and output entitlement set per case. */
-  function invitation(over: Partial<LinkageTerms>): LinkageTerms {
-    return { ...nameTerms, ...over };
+  /** Every invitation shape this describe drives, named once. The equivalence
+   * test below reads this table rather than a copy of it, so a shape added here
+   * is checked against core's own enforcement without a second edit. */
+  const shapes = {
+    acceptsNothingAndTakesTheResult: { payload: { receive: [] } },
+    acceptsNothingAndTakesNoResult: {
+      output: { expectsOutput: false, shareWithPartner: true },
+      payload: { receive: [] },
+    },
+    declaresNoPayloadAtAll: {},
+    declaresOnlyWhatItSends: { payload: { send: [{ name: "risk_score" }] } },
+    acceptsTheDisclosedColumn: { payload: { receive: [{ name: "notes" }] } },
+    acceptsOnlyAColumnNotDisclosed: {
+      payload: { receive: [{ name: "risk_score" }] },
+    },
+  } satisfies Record<string, Partial<LinkageTerms>>;
+
+  /** The invitation's own perspective, which the columns step holds, carrying the
+   * named shape's payload declaration and output entitlement. Taking a name rather
+   * than a literal keeps {@link shapes} the only place a shape is written. */
+  function invitation(shape: keyof typeof shapes): LinkageTerms {
+    return { ...nameTerms, ...shapes[shape] };
   }
 
   /** Whether core itself refuses to run this pair, driven through the real
@@ -335,7 +353,7 @@ describe("columns the invitation will not accept", () => {
   }
 
   test("names the disclosed columns when the invitation accepts none and the inviting party receives the result", () => {
-    const terms = invitation({ payload: { receive: [] } });
+    const terms = invitation("acceptsNothingAndTakesTheResult");
     const { editorState } = editorFor(columns, terms);
     expect(acceptorDisclosedColumns(editorState.metadata)).toEqual(["notes"]);
     expect(
@@ -352,10 +370,7 @@ describe("columns the invitation will not accept", () => {
     // Nothing is transmitted to a party that receives no result, so the run does
     // not refuse this pair -- and the panel beside the grid already states that no
     // column leaves whatever these marks say.
-    const terms = invitation({
-      output: { expectsOutput: false, shareWithPartner: true },
-      payload: { receive: [] },
-    });
+    const terms = invitation("acceptsNothingAndTakesNoResult");
     const { editorState } = editorFor(columns, terms);
     expect(acceptorDisclosedColumns(editorState.metadata)).toEqual(["notes"]);
     expect(
@@ -371,8 +386,8 @@ describe("columns the invitation will not accept", () => {
     // whether the invitation carries no payload block, or one naming only what it
     // sends.
     for (const terms of [
-      invitation({}),
-      invitation({ payload: { send: [{ name: "risk_score" }] } }),
+      invitation("declaresNoPayloadAtAll"),
+      invitation("declaresOnlyWhatItSends"),
     ]) {
       const { editorState } = editorFor(columns, terms);
       expect(acceptorDisclosedColumns(editorState.metadata)).toEqual(["notes"]);
@@ -385,7 +400,7 @@ describe("columns the invitation will not accept", () => {
   });
 
   test("says nothing about a non-empty declaration, which is a different comparison", () => {
-    const terms = invitation({ payload: { receive: [{ name: "notes" }] } });
+    const terms = invitation("acceptsTheDisclosedColumn");
     const { editorState } = editorFor(columns, terms);
     expect(
       acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
@@ -393,7 +408,7 @@ describe("columns the invitation will not accept", () => {
   });
 
   test("clears as the operator re-marks every disclosed column, re-enabling launch", () => {
-    const terms = invitation({ payload: { receive: [] } });
+    const terms = invitation("acceptsNothingAndTakesTheResult");
     // A matched column additionally marked sent, so the edit that clears the
     // conflict is exercised on both routes off that mark: back to matching for a
     // linkage column, and ignored for the unrecognized one, which cannot match.
@@ -443,28 +458,24 @@ describe("columns the invitation will not accept", () => {
     );
   });
 
+  // The shape the equivalence deliberately excludes, named so that excluding it is
+  // an act rather than an omission; the test after the equivalence owns it.
+  const scopeLimitShape = "acceptsOnlyAColumnNotDisclosed";
+
   test("fires exactly when core's own enforcement refuses the pair", () => {
     // The web predicate states in this package a condition core enforces in its
     // own, so a change to core's gate would leave the notice quietly wrong -- the
-    // operator told the exchange can start, and refused at launch. Every case
-    // above, driven through core's real mirror and real assertion: the notice and
-    // the refusal agree, or this fails.
-    const cases: Array<Partial<LinkageTerms>> = [
-      { payload: { receive: [] } },
-      {
-        output: { expectsOutput: false, shareWithPartner: true },
-        payload: { receive: [] },
-      },
-      {},
-      { payload: { send: [{ name: "risk_score" }] } },
-      { payload: { receive: [{ name: "notes" }] } },
-    ];
-    for (const over of cases) {
-      const terms = invitation(over);
+    // operator told the exchange can start, and refused at launch. Every shape this
+    // describe drives, through core's real mirror and real assertion: the notice
+    // and the refusal agree, or this fails.
+    for (const shape of Object.keys(shapes) as Array<keyof typeof shapes>) {
+      if (shape === scopeLimitShape) continue;
+      const terms = invitation(shape);
       const { editorState } = editorFor(columns, terms);
       expect(
         acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata)
           .length > 0,
+        shape,
       ).toBe(coreRefuses(terms, editorState.metadata));
     }
   });
@@ -475,9 +486,7 @@ describe("columns the invitation will not accept", () => {
     // different comparison, with a named set and different remedies, and core
     // still refuses it: the notice is silent here by design, and this is what says
     // so rather than the equivalence test quietly excluding the case.
-    const terms = invitation({
-      payload: { receive: [{ name: "risk_score" }] },
-    });
+    const terms = invitation(scopeLimitShape);
     const { editorState } = editorFor(columns, terms);
     expect(
       acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
