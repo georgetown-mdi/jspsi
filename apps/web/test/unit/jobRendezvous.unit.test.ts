@@ -230,7 +230,12 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const dataRoot = tempDir("data");
     const rendezvous = subDir(dataRoot, "rendezvous");
     const warnings = overlapWarnings(
-      rendezvousStartupWarnings(rendezvous, undefined, dataRoot),
+      rendezvousStartupWarnings(
+        rendezvous,
+        undefined,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      ),
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("the job data root");
@@ -240,7 +245,12 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const rendezvous = tempDir("rendezvous");
     const dataRoot = subDir(rendezvous, "data");
     const warnings = overlapWarnings(
-      rendezvousStartupWarnings(rendezvous, undefined, dataRoot),
+      rendezvousStartupWarnings(
+        rendezvous,
+        undefined,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      ),
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("the job data root");
@@ -250,7 +260,12 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const shared = tempDir("shared");
     const dataRoot = tempDir("data");
     const warnings = overlapWarnings(
-      rendezvousStartupWarnings(shared, shared, dataRoot),
+      rendezvousStartupWarnings(
+        shared,
+        shared,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      ),
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("the work-input directory");
@@ -261,7 +276,12 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const rendezvous = subDir(jobInput, "rendezvous");
     const dataRoot = tempDir("data");
     const warnings = overlapWarnings(
-      rendezvousStartupWarnings(rendezvous, jobInput, dataRoot),
+      rendezvousStartupWarnings(
+        rendezvous,
+        jobInput,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      ),
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("the work-input directory");
@@ -272,7 +292,12 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const dataRoot = subDir(rendezvous, "data");
     const jobInput = subDir(rendezvous, "input");
     const warnings = overlapWarnings(
-      rendezvousStartupWarnings(rendezvous, jobInput, dataRoot),
+      rendezvousStartupWarnings(
+        rendezvous,
+        jobInput,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      ),
     );
     expect(warnings).toHaveLength(2);
     expect(
@@ -287,9 +312,14 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const rendezvous = tempDir("rendezvous");
     const jobInput = tempDir("input");
     const dataRoot = tempDir("data");
-    expect(rendezvousStartupWarnings(rendezvous, jobInput, dataRoot)).toEqual(
-      [],
-    );
+    expect(
+      rendezvousStartupWarnings(
+        rendezvous,
+        jobInput,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -298,12 +328,14 @@ describe("rendezvousStartupWarnings overlap branch", () => {
  * warnings about what the directory holds. */
 function contentWarnings(entries: Array<string>): Array<string> {
   const rendezvous = tempDir("rendezvous");
+  const dataRoot = tempDir("data");
   for (const entry of entries)
     fs.writeFileSync(path.join(rendezvous, entry), "");
   return rendezvousStartupWarnings(
     rendezvous,
     tempDir("input"),
-    tempDir("data"),
+    dataRoot,
+    path.join(dataRoot, "current-job"),
   ).filter(
     (warning) =>
       warning.includes("is not empty") || warning.includes("cannot be listed"),
@@ -338,7 +370,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     expect(warnings[0]).toContain("delete those on the host before launching");
     // The operator's own files share this mount in the single-folder layout, and
     // the exchange tolerates them; the recovery must not read as "empty it".
-    expect(warnings[0]).toContain("your own input and results are not among");
+    expect(warnings[0]).toContain("is not what the guard objects to");
   });
 
   test("files the exchange has no claim on are reported the same way", () => {
@@ -352,14 +384,46 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
 
   test("a subdirectory makes the mount non-empty as a loose file does", () => {
     const rendezvous = tempDir("rendezvous");
+    const dataRoot = tempDir("data");
     fs.mkdirSync(path.join(rendezvous, "prior-job"));
     const warnings = rendezvousStartupWarnings(
       rendezvous,
       tempDir("input"),
-      tempDir("data"),
+      dataRoot,
+      path.join(dataRoot, "current-job"),
     ).filter((warning) => warning.includes("is not empty"));
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("prior-job");
+  });
+
+  test("the job's own just-created workdir does not make the mount non-empty", () => {
+    // Single-folder layout: the rendezvous directory IS the data root, and
+    // createJob has already made this job's workdir inside it by the time the
+    // preflight runs; a pristine mount must stay the silent case.
+    const shared = tempDir("shared");
+    const workdir = subDir(shared, "0f6e2c1a-current");
+    const warnings = rendezvousStartupWarnings(
+      shared,
+      undefined,
+      shared,
+      workdir,
+    ).filter((warning) => warning.includes("is not empty"));
+    expect(warnings).toEqual([]);
+  });
+
+  test("leftovers beside the job's own workdir are reported without naming it", () => {
+    const shared = tempDir("shared");
+    const workdir = subDir(shared, "0f6e2c1a-current");
+    fs.writeFileSync(path.join(shared, "console-hello.json"), "");
+    const warnings = rendezvousStartupWarnings(
+      shared,
+      undefined,
+      shared,
+      workdir,
+    ).filter((warning) => warning.includes("is not empty"));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("console-hello.json");
+    expect(warnings[0]).not.toContain("0f6e2c1a-current");
   });
 
   test("names are listed in a stable order whatever readdir returns", () => {
@@ -411,10 +475,12 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     fs.writeFileSync(path.join(rendezvous, "console-hello.json"), "");
     fs.chmodSync(rendezvous, 0o300);
     try {
+      const dataRoot = tempDir("data");
       const warnings = rendezvousStartupWarnings(
         rendezvous,
         tempDir("input"),
-        tempDir("data"),
+        dataRoot,
+        path.join(dataRoot, "current-job"),
       );
       expect(
         warnings.some((warning) => warning.includes("cannot be listed")),

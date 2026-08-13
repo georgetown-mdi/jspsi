@@ -207,8 +207,11 @@ function describeRendezvousEntries(entries: Array<string>): string {
  * A directory that is not empty warns for a different reason: the console rendezvouses
  * every filedrop job out of the one mount, so a completed retain-mode run leaves its
  * whole transcript where the next run's entry guard refuses it, with no crash anywhere
- * in the story. The warning names what is there and leaves the launch to the operator,
- * whose own input and results sit in that listing too and are not what the guard
+ * in the story. The listing leaves out one entry: the workdir this launch itself just
+ * created, which in the single-folder layout (rendezvous directory equal to the data
+ * root) always sits inside the mount by the time this preflight runs. The warning
+ * names what remains and leaves the launch to the operator, whose own input and
+ * results may sit in that listing too and are not what the guard
  * objects to. It deliberately does not sort protocol files from foreign ones: that
  * grammar is the exchange's, and predicting the guard's verdict here would be a second
  * implementation of it.
@@ -220,6 +223,7 @@ export function rendezvousStartupWarnings(
   rendezvousDir: string,
   jobInputDir: string | undefined,
   dataRoot: string,
+  jobWorkdir: string,
 ): Array<string> {
   const warnings: Array<string> = [];
   let stat: fs.Stats | undefined;
@@ -245,7 +249,13 @@ export function rendezvousStartupWarnings(
       }
       let entries: Array<string> | undefined;
       try {
-        entries = fs.readdirSync(rendezvousDir).sort();
+        entries = fs
+          .readdirSync(rendezvousDir)
+          .filter(
+            (entry) =>
+              path.resolve(rendezvousDir, entry) !== path.resolve(jobWorkdir),
+          )
+          .sort();
       } catch {
         warnings.push(
           `the rendezvous directory ${rendezvousDir} cannot be listed, so ` +
@@ -257,8 +267,9 @@ export function rendezvousStartupWarnings(
         warnings.push(
           `the rendezvous directory ${rendezvousDir} is not empty; an ` +
             "exchange refuses to start when an earlier exchange's files are " +
-            "still there, so delete those on the host before launching -- " +
-            "your own input and results are not among them. It holds " +
+            "still there, so delete those on the host before launching. " +
+            "Anything else here -- your own input or results, when they " +
+            "share this folder -- is not what the guard objects to. It holds " +
             describeRendezvousEntries(entries),
         );
     }
