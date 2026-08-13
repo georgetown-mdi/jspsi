@@ -1584,8 +1584,12 @@ const KEY_STRING_WARN_THRESHOLD = 20;
  * expand an element comes from the partner-authored linkage terms while the
  * values expanded are local rows, so the product is not something the local
  * operator alone controls. Set well above any honest fuzzy key (three fuzzy
- * elements over canonical dates produce a few hundred candidates) and far below
- * a per-row set that could exhaust memory.
+ * elements over canonical dates produce a few hundred candidates). The cap
+ * bounds the COUNT of key strings, not their bytes: a fuzzy element's value is
+ * bounded by MAX_FUZZY_EXPANSION_INPUT_LENGTH, but a non-fuzzy element in the
+ * same key carries its full local cell, which the product replicates, so the
+ * per-row byte total scales with the operator's own longest cell times this
+ * cap. The recorded limit lives in docs/spec/CHANNEL_SECURITY.md.
  */
 const MAX_KEY_STRINGS_PER_ROW = 1024;
 
