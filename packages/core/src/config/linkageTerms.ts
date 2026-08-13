@@ -497,7 +497,11 @@ const LinkageFieldSchema: z.ZodType<LinkageField> = z.discriminatedUnion(
 
 // --- Linkage key elements ----------------------------------------------------
 
-type GenerateFuzzyComparisons =
+/**
+ * The candidate-set expansion a linkage-key element may declare. Applied by
+ * `expandFuzzyComparisons`, which defines what each member emits.
+ */
+export type GenerateFuzzyComparisons =
   "transpositions" | "edit_distances" | "adjacent_years";
 
 const GenerateFuzzyComparisonsSchema: z.ZodType<GenerateFuzzyComparisons> =

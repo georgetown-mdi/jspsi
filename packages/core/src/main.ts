@@ -86,6 +86,7 @@ export * from "./config/outboundPayloadConsent";
 export * from "./config/signing";
 export * from "./signingIdentity";
 export * from "./standardization";
+export * from "./fuzzyComparisons";
 // The one display model both acceptance surfaces render the inviter's proposed
 // terms from -- the web consent screen and the CLI accept prompt -- so the
 // judgment of what an acceptor is consenting to, and the escaping of every
