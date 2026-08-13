@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { DEFAULT_MAX_DISPLAY_LENGTH, sanitizeForDisplay } from "@psilink/core";
 
 import { JOB_DATA_ROOT_ENV } from "./gate";
 import { browseSegment } from "./workInputName";
@@ -168,30 +168,98 @@ function containsOrEqual(parent: string, child: string): boolean {
 /**
  * How many entries a not-empty warning names before it counts the rest. A retain-mode
  * transcript holds a file per message, so naming every entry would bury the recovery
- * the warning exists to deliver. Each named entry is separately escaped and
- * length-capped, so the listing stays bounded however the partner names its files.
+ * the warning exists to deliver.
  *
  * @internal exported for testing
  */
 export const MAX_NAMED_RENDEZVOUS_ENTRIES = 10;
 
 /**
- * The entries of a non-empty rendezvous directory as one bounded display string.
- * Sorted, because readdir order is the filesystem's and not a promise, so the same
- * directory reads the same way twice.
+ * What a fragment costs in the RENDERED warning, which is not its own length: a
+ * warning message is composed raw here and escaped once where it is shown, which
+ * expands a code point outside printable ASCII to as many as ten characters and
+ * doubles a literal backslash. Arithmetic on raw lengths under-counts.
+ *
+ * Measuring is not escaping: what the composition keeps is the raw fragment, so the
+ * console's display sink stays the one and only altitude that escapes it.
+ */
+function renderedDisplayCost(fragment: string): number {
+  return sanitizeForDisplay(fragment, { maxLength: Infinity }).length;
+}
+
+/** The suffix that absorbs the entries a listing does not name. */
+function andMoreSuffix(count: number): string {
+  return ` and ${count} more`;
+}
+
+/**
+ * The lead of a non-empty rendezvous directory's warning: what is wrong, what an
+ * exchange does about it, the step that clears it, and the files the operator must
+ * NOT be read as being told to delete.
+ *
+ * The sink escapes and CAPS what it renders, so the whole sentence has to fit that
+ * cap or the clause that neutralizes the delete instruction is what falls off the
+ * end. The rendezvous path is the one unbounded part, and it is the operator's own
+ * server-side configuration for the console's single rendezvous mount, so a path too
+ * long to fit beside the sentence is left out rather than allowed to crowd out the
+ * recovery. What this measures at the rendered boundary is pinned by a test.
+ *
+ * @internal exported for testing
+ */
+export function notEmptyLead(rendezvousDir: string): string {
+  const recovery =
+    " is not empty; an exchange refuses to start on files an earlier " +
+    "exchange left there, so delete those on the host first. Your own " +
+    "input and results are not what it refuses over.";
+  const withPath = `the rendezvous directory ${rendezvousDir}${recovery}`;
+  return renderedDisplayCost(withPath) <= DEFAULT_MAX_DISPLAY_LENGTH
+    ? withPath
+    : `the rendezvous directory${recovery}`;
+}
+
+/**
+ * What a non-empty rendezvous directory holds, as its own warning message. Sorted,
+ * because readdir order is the filesystem's and not a promise, so the same directory
+ * reads the same way twice.
  *
  * Entry names are partner-chosen -- the partner syncs its own files into this
- * directory -- so each is escaped here, at the composition point that is this
- * warning's display sink: the job event stream carries the message to the console
- * verbatim.
+ * directory -- and reach the operator through the display sink that escapes the
+ * message, so they are composed raw and fitted by their RENDERED cost. A name is
+ * shown only when it fits whole: a name the cap chopped reads like a whole name the
+ * operator could go and delete, so one that does not fit is counted instead, and
+ * every later name is still tested rather than suppressed behind it. The count is
+ * then the only part that can still grow, and each iteration reserves the width it
+ * could reach.
  */
 function describeRendezvousEntries(entries: Array<string>): string {
-  const named = entries
-    .slice(0, MAX_NAMED_RENDEZVOUS_ENTRIES)
-    .map((entry) => sanitizeForDisplay(entry))
-    .join(", ");
-  const remaining = entries.length - MAX_NAMED_RENDEZVOUS_ENTRIES;
-  return remaining > 0 ? `${named} and ${remaining} more` : named;
+  const head = "the rendezvous directory holds ";
+  const budget = DEFAULT_MAX_DISPLAY_LENGTH - renderedDisplayCost(head);
+  let listed = "";
+  let listedCost = 0;
+  let shown = 0;
+  for (const entry of entries.slice(0, MAX_NAMED_RENDEZVOUS_ENTRIES)) {
+    const candidate = shown === 0 ? entry : `, ${entry}`;
+    // What the count would say if this name were the last one shown, so the width
+    // reserved is at least the width the listing ends on: skipping a name only
+    // lowers the final count.
+    const remaining = entries.length - shown - 1;
+    const cost =
+      listedCost +
+      renderedDisplayCost(candidate) +
+      (remaining > 0 ? renderedDisplayCost(andMoreSuffix(remaining)) : 0);
+    if (cost > budget) continue;
+    listed += candidate;
+    listedCost += renderedDisplayCost(candidate);
+    shown += 1;
+  }
+  if (shown === 0)
+    return (
+      `${head}${entries.length} ` +
+      `${entries.length === 1 ? "entry" : "entries"}, with names too long ` +
+      "to show here"
+    );
+  const omitted = entries.length - shown;
+  return `${head}${listed}${omitted > 0 ? andMoreSuffix(omitted) : ""}`;
 }
 
 /**
@@ -207,14 +275,16 @@ function describeRendezvousEntries(entries: Array<string>): string {
  * A directory that is not empty warns for a different reason: the console rendezvouses
  * every filedrop job out of the one mount, so a completed retain-mode run leaves its
  * whole transcript where the next run's entry guard refuses it, with no crash anywhere
- * in the story. The listing leaves out one entry: the workdir this launch itself just
- * created, which in the single-folder layout (rendezvous directory equal to the data
- * root) always sits inside the mount by the time this preflight runs. The warning
- * names what remains and leaves the launch to the operator, whose own input and
- * results may sit in that listing too and are not what the guard
- * objects to. It deliberately does not sort protocol files from foreign ones: that
- * grammar is the exchange's, and predicting the guard's verdict here would be a second
- * implementation of it.
+ * in the story. It takes two warnings in order -- the recovery, then what the mount
+ * holds -- because the display sink caps each message it renders, and one message
+ * carrying both would spend the recovery's budget on the listing. The listing leaves
+ * out one entry: the workdir this launch itself just created, which in the
+ * single-folder layout (rendezvous directory equal to the data root) always sits
+ * inside the mount by the time this preflight runs. It names what remains and leaves
+ * the launch to the operator, whose own input and results may sit in that listing too
+ * and are not what the guard objects to. It deliberately does not sort protocol files
+ * from foreign ones: that grammar is the exchange's, and predicting the guard's
+ * verdict here would be a second implementation of it.
  *
  * This does not create the directory, canonicalize it, reject a symlinked mount, or
  * enforce a mode.
@@ -265,12 +335,8 @@ export function rendezvousStartupWarnings(
       }
       if (entries !== undefined && entries.length > 0)
         warnings.push(
-          `the rendezvous directory ${rendezvousDir} is not empty; an ` +
-            "exchange refuses to start when an earlier exchange's files are " +
-            "still there, so delete those on the host before launching. " +
-            "Anything else here -- your own input or results, when they " +
-            "share this folder -- is not what the guard objects to. It holds " +
-            describeRendezvousEntries(entries),
+          notEmptyLead(rendezvousDir),
+          describeRendezvousEntries(entries),
         );
     }
   }
