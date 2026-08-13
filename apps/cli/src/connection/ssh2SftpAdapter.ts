@@ -52,6 +52,7 @@ import { SFTP_TCP_KEEPALIVE_DELAY_MS, SftpHeartbeat } from "./sftpHeartbeat";
 import {
   constrainKexToPlatformCapabilities,
   explainKexNegotiationFailure,
+  isUnperformableKexNegotiationFailure,
   unavailableKexPrimitives,
 } from "./sftpKexCapability";
 
@@ -2576,6 +2577,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           // remainder of the dial budget (measured: a re-dial 1 s after the
           // destroy, on a socket reading writable again).
           if (this.closing) return false;
+          // A key-exchange negotiation with nothing in common is terminal on a
+          // process missing a primitive: the offer this side can make is fixed
+          // for the life of the process -- the verdict is memoized because a
+          // provider is not swapped under a running program -- so every
+          // re-attempt puts the same withheld offer to the same server, a
+          // second apart, for the whole reconnect budget. What classifies it is
+          // that verdict rather than the message, which a server writes
+          // verbatim through its own SSH_MSG_DISCONNECT description.
+          if (isUnperformableKexNegotiationFailure(err, unavailablePrimitives))
+            return false;
           // Host-key verification failure is terminal: the server is actively
           // presenting a different or unknown key, so retrying the key exchange
           // against the same server changes nothing. ssh2's "Host denied
@@ -2591,9 +2602,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // naming the platform capability that withheld the algorithms, so the
       // operator is not left reading ssh2's bare "no matching key exchange
       // algorithm" as a server misconfiguration. Outside the retry loop rather
-      // than inside it, so the predicate above still classifies ssh2's own error
-      // text; on a host that can perform everything ssh2 offers, and for every
-      // other failure, the rejection passes through untouched.
+      // than inside it, which is load-bearing for the classification above:
+      // this REPLACES the message and keeps ssh2's own as the cause, so a
+      // predicate running after it would read this diagnostic instead of the
+      // fragment it matches. On a host that can perform everything ssh2 offers,
+      // and for every other failure, the rejection passes through untouched.
       throw explainKexNegotiationFailure(err, unavailablePrimitives);
     }
 

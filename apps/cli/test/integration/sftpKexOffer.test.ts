@@ -90,6 +90,17 @@ const serverOffersAPerformableKex = test.skipIf(
     selectedNativeProfile() === "restricted-crypto",
 );
 
+// The other side of that skip: on exactly that profile the suite's server is a
+// real OpenSSH sshd accepting only what the forced verdict withholds, which is
+// the deployment the fast-fail below exists for and the only one in the tree
+// where a native sshd refuses the whole offer.
+const serverOffersNoPerformableKex = test.skipIf(
+  !(
+    selectedBackend() === "native" &&
+    selectedNativeProfile() === "restricted-crypto"
+  ),
+);
+
 // A transfer long enough that the cut below lands inside the READ run rather than
 // at its edges, and the re-dial's budget for the read that follows it.
 const TRANSFER_BYTES = 512 * 1024;
@@ -172,17 +183,27 @@ function createKexinitReader(): {
  * both ways. The reader above answers only the identification string, so a dial
  * it reads can never do work; this reads the offer of a dial that goes on to
  * complete its handshake -- and of the re-dial that follows a dropped session.
+ *
+ * `accepted` counts the dials, `offers` records what they said, and a case about
+ * HOW MANY dials there were must read the first: a client that abandons the
+ * handshake -- as one whose key exchange finds nothing in common does -- can
+ * have its socket destroyed with its own SSH_MSG_KEXINIT still unread here
+ * (measured), so that dial is accepted and counted while its offer never
+ * decodes.
  */
 function createKexinitRecordingProxy(target: { host: string; port: number }): {
   port: Promise<number>;
   offers: string[][];
+  accepted: () => number;
   close: () => Promise<void>;
 } {
   const offers: string[][] = [];
+  let accepted = 0;
   let resolvePort!: (port: number) => void;
   const port = new Promise<number>((resolve) => (resolvePort = resolve));
 
   const server = net.createServer((client) => {
+    accepted++;
     const upstream = net.connect(target.port, target.host);
     // Either side going takes the other with it: a session the server drops has
     // to reach the client as a closed socket, or the adapter's recovery would
@@ -228,6 +249,7 @@ function createKexinitRecordingProxy(target: { host: string; port: number }): {
   return {
     port,
     offers,
+    accepted: () => accepted,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
@@ -641,6 +663,28 @@ describe("a server that accepts only algorithms this process cannot perform", ()
     );
   });
 
+  test("the dial ends at the first refusal, spending no reconnect budget", async () => {
+    // The incompatibility lasts the life of the process, so the connect loop
+    // must not re-dial it once a second for the whole reconnect budget. Driven
+    // with a budget of 3 through the relay, which counts the dials: the
+    // rejection arrives only once the loop is finished with them, so a retried
+    // dial is a second accepted connection here, not a slower test.
+    const relay = createKexinitRecordingProxy({ host: "127.0.0.1", port });
+    const adapter = new SSH2SFTPClientAdapter();
+    try {
+      await expect(
+        adapter.connect({
+          ...dialOptions(await relay.port),
+          maxReconnectAttempts: 3,
+        }),
+      ).rejects.toThrow("X25519");
+      expect(relay.accepted()).toBe(1);
+    } finally {
+      await adapter.end().catch(() => {});
+      await relay.close();
+    }
+  });
+
   test("a server that writes the failure message itself supplies no byte of the diagnostic", async () => {
     // The message fragment the diagnostic keys on is inside ssh2's rendering of
     // the server's own SSH_MSG_DISCONNECT description, so a server writes it
@@ -668,4 +712,55 @@ describe("a server that accepts only algorithms this process cannot perform", ()
     expect(error.message).not.toContain(marker);
     expect((error.cause as Error).message).toContain(marker);
   });
+});
+
+describe("a real OpenSSH server that accepts only what this process cannot perform", () => {
+  // The describe above drives the refusal against an in-process `ssh2.Server`,
+  // which composes its failure text the way ssh2's own client does. A real
+  // OpenSSH sshd answers the same negotiation with an SSH_MSG_DISCONNECT of its
+  // own, described `no matching key exchange method found` -- `method`, not the
+  // `algorithm` the fragment matches -- so which text reaches `error.message` is
+  // a race between ssh2's local negotiation failure and the server's disconnect,
+  // and it is settled here rather than reasoned about. It decides the whole
+  // control on the deployment this exists for: were the server's text to win,
+  // the fast-fail would never fire against OpenSSH at all.
+  //
+  // The suite's own server on this profile IS that sshd (its policy accepts
+  // curve25519 only), so the dial goes to it through the relay, which counts the
+  // dials it accepts.
+  serverOffersNoPerformableKex(
+    "ends the dial at the first refusal, naming the primitive",
+    async () => {
+      const server = inject("sftpServer");
+      const relay = createKexinitRecordingProxy(server);
+      const adapter = new SSH2SFTPClientAdapter();
+      const { hostKeyFingerprint, ...auth } = serverAuth(server.usera);
+      let thrown: unknown;
+      try {
+        await adapter.connect({
+          host: "127.0.0.1",
+          port: await relay.port,
+          ...auth,
+          readyTimeout: 5_000,
+          // A budget a retried dial would spend a second at a time, so the
+          // single accepted connection below is a classification and not an
+          // absent budget.
+          maxReconnectAttempts: 3,
+        });
+      } catch (err) {
+        thrown = err;
+      } finally {
+        await adapter.end().catch(() => {});
+        await relay.close();
+      }
+      const error = thrown as Error;
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toContain("X25519");
+      expect(error.message).toContain("server's administrator");
+      expect((error.cause as Error).message).toContain(
+        "no matching key exchange algorithm",
+      );
+      expect(relay.accepted()).toBe(1);
+    },
+  );
 });
