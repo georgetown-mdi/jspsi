@@ -1155,6 +1155,98 @@ describe("acceptor columns step: the send summary is gated on the inviting party
   });
 });
 
+describe("acceptor columns step: the columns the invitation will not accept", () => {
+  // An invitation carrying a present-but-empty `payload.receive` is the inviting
+  // party declaring it takes no column; core mirrors that onto this party as an
+  // empty `payload.send` and refuses the run against disclosed metadata, so the
+  // conflict is stated on this screen, where the marks that decide it are set.
+  const acceptsNoColumns: LinkageTerms = {
+    ...acceptorTerms,
+    payload: { receive: [] },
+  };
+
+  // The name fields satisfy both keys and the unrecognized column infers to role:
+  // payload, so this conflict is the only thing that can close the launch. That
+  // column carries a bidi override (U+202E) because it is the operator's own CSV
+  // header -- untrusted display input on this panel as on every other.
+  const bidiColumn = "notes\u202Eevil";
+
+  function mountStep(linkageTerms: LinkageTerms) {
+    const columns = ["first_name", "last_name", bidiColumn];
+    const rows = [Object.fromEntries(columns.map((c) => [c, "x"]))];
+    const columnsState = acceptorInitialColumnsState(columns);
+    const editorState = acceptorColumnsEditorState(
+      columnsState,
+      linkageTerms,
+      rows,
+    );
+    const noop = () => undefined;
+    app.render(
+      createElement(AcceptorColumnsStep, {
+        linkageTerms,
+        columns,
+        columnsState,
+        editorState,
+        verdict: acceptorVerdict(columns, linkageTerms, editorState),
+        onMetadataChange: noop,
+        onRemap: noop,
+        onReset: noop,
+        onLaunch: noop,
+        onBack: noop,
+      }),
+    );
+  }
+
+  test("names the column escaped, disables launch, and says why at the button", async () => {
+    mountStep(acceptsNoColumns);
+    await expect
+      .element(page.getByText("Your partner will not accept this column"))
+      .toBeInTheDocument();
+
+    // Scoped to the panel: the metadata grid on the same step renders the raw
+    // column name (a distinct surface), so a document-wide raw-character check
+    // would not pin this panel's escaping.
+    const panel = page.getByText(
+      "The invitation says your partner accepts no columns",
+      { exact: false },
+    );
+    const text = panel.element().textContent;
+    expect(text).toContain(sanitizeForDisplay(bidiColumn));
+    expect(text).not.toContain("\u202E");
+
+    // The gate itself, and the reason a keyboard/screen-reader user at the button
+    // hears: resolved through the button's own description, so a reason rendered
+    // but never associated fails here.
+    const start = page.getByRole("button", { name: "Start the exchange" });
+    await expect.element(start).toBeDisabled();
+    const reasonId = start.element().getAttribute("aria-describedby");
+    expect(reasonId).toBeTruthy();
+    expect(document.getElementById(reasonId!)?.textContent).toBe(
+      "Resolve the columns your partner will not accept above before you can start.",
+    );
+  });
+
+  test("an invitation that declares no payload set leaves the launch open", async () => {
+    // The declaration is the whole of the gate: the same file and marks under an
+    // invitation that names no payload set render no panel and no reason, and the
+    // launch stays available.
+    mountStep(acceptorTerms);
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeEnabled();
+    expect(
+      page.getByText("Your partner will not accept this column").query(),
+    ).toBeNull();
+    expect(app.container.textContent).not.toContain("before you can start");
+    expect(
+      page
+        .getByRole("button", { name: "Start the exchange" })
+        .element()
+        .getAttribute("aria-describedby"),
+    ).toBeNull();
+  });
+});
+
 describe("acceptor bench: run and completion", () => {
   // Consent, name, a fully-covered file, then Start the exchange -- the columns
   // step's launch, which auto-starts the run. The run token carries a future

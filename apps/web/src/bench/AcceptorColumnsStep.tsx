@@ -3,6 +3,7 @@ import { useEffect, useId, useRef } from "react";
 import {
   Alert,
   Button,
+  List,
   NativeSelect,
   Paper,
   Stack,
@@ -25,6 +26,7 @@ import { MetadataGrid } from "@components/MetadataGrid";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import {
+  acceptorColumnsTheInvitationWillNotAccept,
   acceptorDisclosedColumns,
   acceptorLaunchDisabled,
   acceptorStandardizationValid,
@@ -145,22 +147,34 @@ export function AcceptorColumnsStep({
   // block resolves the same fact for the same viewer, and both render the sentence
   // core carries.
   const partnerReceivesResult = linkageTerms.output.expectsOutput;
+  // The columns marked to send that the invitation declares the inviting party
+  // accepts none of: the exchange refuses to run on that pair, and every input the
+  // refusal reads is on this screen, so it is stated here rather than met after the
+  // operator has consented, chosen a file, and launched.
+  const unacceptedColumns = acceptorColumnsTheInvitationWillNotAccept(
+    linkageTerms,
+    editorState.metadata,
+  );
   const standardizationValid = acceptorStandardizationValid(
     editorState.standardization,
   );
   const launchDisabled =
-    acceptorLaunchDisabled(verdict, editorState) ||
+    acceptorLaunchDisabled(verdict, editorState, linkageTerms) ||
     connectionBlocked ||
     exchangeFilesBlocked;
   // Ties the disabled launch button to the blocked-reason line so a
   // keyboard/screen-reader user at the button hears why it is disabled and what to
-  // do -- the reason renders at mount, so its own live region never announces it.
+  // do. The column-conflict reason leads the chain: it is the one the operator
+  // resolves on this screen, at the marks directly above.
   const launchBlockedReasonId = useId();
-  const launchBlockedReason = connectionBlocked
-    ? "Set up the SFTP connection above before you can start."
-    : exchangeFilesBlocked
-      ? "Resolve the file-handling settings above before you can start."
-      : undefined;
+  const launchBlockedReason =
+    unacceptedColumns.length > 0
+      ? "Resolve the columns your partner will not accept above before you can start."
+      : connectionBlocked
+        ? "Set up the SFTP connection above before you can start."
+        : exchangeFilesBlocked
+          ? "Resolve the file-handling settings above before you can start."
+          : undefined;
 
   const remap = (type: LinkageField["type"], columnName: string) => {
     // Move focus to the verdict before the chosen Select unmounts (it does as soon
@@ -338,6 +352,43 @@ export function AcceptorColumnsStep({
               </Text>
             )}
           </Paper>
+        )}
+
+        {/* The invitation accepts no column while the marks below still send some:
+            the exchange refuses that pair before any data moves, so it is stated
+            beside the marks that decide it and directly above the control that
+            clears it. Not a live region -- the marks are the operator's own edits,
+            the grid below already voices the disclosed set, and the launch button's
+            blocked-reason line speaks for the gate; a third channel on the same
+            fact would announce over both. */}
+        {unacceptedColumns.length > 0 && (
+          <Alert
+            role="note"
+            color="red"
+            icon={<IconAlertCircle aria-hidden />}
+            title={
+              unacceptedColumns.length === 1
+                ? "Your partner will not accept this column"
+                : "Your partner will not accept these columns"
+            }
+          >
+            The invitation says your partner accepts no columns from your file,
+            but {unacceptedColumns.length === 1 ? "this one is" : "these are"}{" "}
+            still marked to send:
+            {/* The operator's OWN CSV headers, escaped at this sink like every
+                other column-name surface, and one per line so a name carrying a
+                list separator cannot read as two. */}
+            <List size="sm" withPadding listStyleType="circle" my={4}>
+              {unacceptedColumns.map((column) => (
+                <List.Item key={column}>{sanitizeForDisplay(column)}</List.Item>
+              ))}
+            </List>
+            The exchange cannot start while the two disagree. Set &quot;How it
+            is used&quot; below to anything other than &quot;Sent to your
+            partner&quot; for{" "}
+            {unacceptedColumns.length === 1 ? "that column" : "those columns"},
+            or ask your partner for an invitation that accepts them.
+          </Alert>
         )}
 
         <MetadataGrid

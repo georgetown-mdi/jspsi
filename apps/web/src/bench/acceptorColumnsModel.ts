@@ -268,16 +268,24 @@ export function acceptorUnsatisfiedTypes(
  * The launch gate's `disabled` predicate, ported from the legacy editor:
  * disabled when no key can match (`satisfiableKeyCount === 0`), OR the metadata
  * carries more than one identifier column, OR any authored cleaning step is
- * invalid/mid-edit. Partial coverage does NOT gate -- it threads a warning instead.
+ * invalid/mid-edit, OR the marked columns are ones the invitation will accept
+ * none of ({@link acceptorColumnsTheInvitationWillNotAccept}) -- a pair the
+ * exchange refuses to run on, whose whole remedy is an edit on this screen.
+ * Partial coverage does NOT gate -- it threads a warning instead.
  */
 export function acceptorLaunchDisabled(
   verdict: AcceptorVerdictViewModel,
   editorState: { metadata: Metadata; standardization: Standardization },
+  invitationTerms: LinkageTerms,
 ): boolean {
   return (
     verdict.satisfiableKeyCount === 0 ||
     hasMultipleIdentifiers(editorState.metadata) ||
-    !acceptorStandardizationValid(editorState.standardization)
+    !acceptorStandardizationValid(editorState.standardization) ||
+    acceptorColumnsTheInvitationWillNotAccept(
+      invitationTerms,
+      editorState.metadata,
+    ).length > 0
   );
 }
 
@@ -325,6 +333,37 @@ export function acceptorLaunchPayload(
  * the run transmits on. */
 export function acceptorDisclosedColumns(metadata: Metadata): Array<string> {
   return disclosedColumnNames(metadata);
+}
+
+/**
+ * The disclosed columns the invitation declares the inviting party will accept none
+ * of: the pair `assertPayloadSendDisclosed` refuses inside `prepareForExchange`,
+ * surfaced here before the operator launches into it. Empty when there is nothing to
+ * state, so the notice and the launch gate read one derivation and cannot disagree,
+ * and it empties as the operator re-marks those columns.
+ *
+ * Read from the INVITATION's own perspective, which is the terms this step holds. A
+ * present-but-empty `payload.receive` is the inviting party declaring it accepts no
+ * payload column (`deriveAcceptedLinkageTerms` mirrors it onto this party as an empty
+ * `payload.send`, which is the side core enforces); an ABSENT one is the lazy
+ * direction, reconciled against this party's own disclosure when the exchange runs. A
+ * NON-EMPTY declared set that disagrees with the disclosed columns is a different
+ * comparison with different remedies and is not covered here.
+ *
+ * Gated on the inviting party's `output.expectsOutput`, exactly as core gates the
+ * empty case on the mirrored `shareWithPartner`: an inviting party entitled to no
+ * result is sent no payload at all, so the run transmits nothing whatever the
+ * operator marks, core refuses nothing, and stating a conflict would contradict the
+ * panel beside it -- which renders core's no-payload sentence off that same fact.
+ */
+export function acceptorColumnsTheInvitationWillNotAccept(
+  invitationTerms: LinkageTerms,
+  metadata: Metadata,
+): Array<string> {
+  const receive = invitationTerms.payload?.receive;
+  if (receive === undefined || receive.length > 0) return [];
+  if (!invitationTerms.output.expectsOutput) return [];
+  return acceptorDisclosedColumns(metadata);
 }
 
 /** Whether the metadata carries more than one identifier column, surfaced as the

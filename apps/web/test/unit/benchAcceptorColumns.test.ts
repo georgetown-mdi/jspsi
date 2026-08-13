@@ -1,8 +1,15 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  assertPayloadSendDisclosed,
+  deriveAcceptedLinkageTerms,
+} from "@psilink/core";
+
+import {
   acceptorCleaningAttention,
   acceptorColumnsEditorState,
+  acceptorColumnsTheInvitationWillNotAccept,
+  acceptorDisclosedColumns,
   acceptorHasIdentifierConflict,
   acceptorInitialColumnsState,
   acceptorLaunchDisabled,
@@ -11,9 +18,12 @@ import {
   acceptorVerdict,
 } from "@bench/acceptorColumnsModel";
 
-import { setColumnTypeForMatching } from "@psi/metadataEditing";
+import {
+  setColumnDisclosure,
+  setColumnTypeForMatching,
+} from "@psi/metadataEditing";
 
-import type { CSVRow, LinkageTerms } from "@psilink/core";
+import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
 import type { AcceptorColumnsState } from "@bench/acceptorColumnsModel";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
@@ -233,7 +243,7 @@ describe("acceptor launch gates", () => {
   test("an unsatisfiable file disables launch (satisfiableKeyCount === 0)", () => {
     const { editorState } = editorFor(["notes"], nameTerms);
     const verdict = acceptorVerdict(["notes"], nameTerms, editorState);
-    expect(acceptorLaunchDisabled(verdict, editorState)).toBe(true);
+    expect(acceptorLaunchDisabled(verdict, editorState, nameTerms)).toBe(true);
   });
 
   test("a satisfiable file enables launch", () => {
@@ -243,7 +253,7 @@ describe("acceptor launch gates", () => {
       nameTerms,
       editorState,
     );
-    expect(acceptorLaunchDisabled(verdict, editorState)).toBe(false);
+    expect(acceptorLaunchDisabled(verdict, editorState, nameTerms)).toBe(false);
   });
 
   test("partial coverage warns but does not disable launch", () => {
@@ -254,7 +264,7 @@ describe("acceptor launch gates", () => {
       editorState,
     );
     expect(verdict.kind).toBe("partial");
-    expect(acceptorLaunchDisabled(verdict, editorState)).toBe(false);
+    expect(acceptorLaunchDisabled(verdict, editorState, nameTerms)).toBe(false);
   });
 
   test("two identifier columns disable launch even when the keys are satisfiable", () => {
@@ -264,7 +274,7 @@ describe("acceptor launch gates", () => {
     const verdict = acceptorVerdict(columns, nameTerms, editorState);
     expect(verdict.kind).toBe("allClear");
     expect(acceptorHasIdentifierConflict(editorState.metadata)).toBe(true);
-    expect(acceptorLaunchDisabled(verdict, editorState)).toBe(true);
+    expect(acceptorLaunchDisabled(verdict, editorState, nameTerms)).toBe(true);
   });
 
   test("a mid-edit cleaning step disables launch (standardization invalid)", () => {
@@ -292,7 +302,196 @@ describe("acceptor launch gates", () => {
       ]),
     });
     const verdict = acceptorVerdict(columns, dobTerms, withInvalid.editorState);
-    expect(acceptorLaunchDisabled(verdict, withInvalid.editorState)).toBe(true);
+    expect(
+      acceptorLaunchDisabled(verdict, withInvalid.editorState, dobTerms),
+    ).toBe(true);
+  });
+});
+
+describe("columns the invitation will not accept", () => {
+  // A file covering both keys plus one unrecognized column, which infers to role:
+  // payload -- so the file discloses exactly one column and every other gate is
+  // clear, leaving this comparison as the only thing that can close the launch.
+  const columns = ["first_name", "last_name", "notes"];
+
+  /** Every invitation shape this describe drives, named once. The equivalence
+   * test below reads this table rather than a copy of it, so a shape added here
+   * is checked against core's own enforcement without a second edit. */
+  const shapes = {
+    acceptsNothingAndTakesTheResult: { payload: { receive: [] } },
+    acceptsNothingAndTakesNoResult: {
+      output: { expectsOutput: false, shareWithPartner: true },
+      payload: { receive: [] },
+    },
+    declaresNoPayloadAtAll: {},
+    declaresOnlyWhatItSends: { payload: { send: [{ name: "risk_score" }] } },
+    acceptsTheDisclosedColumn: { payload: { receive: [{ name: "notes" }] } },
+    acceptsOnlyAColumnNotDisclosed: {
+      payload: { receive: [{ name: "risk_score" }] },
+    },
+  } satisfies Record<string, Partial<LinkageTerms>>;
+
+  /** The invitation's own perspective, which the columns step holds, carrying the
+   * named shape's payload declaration and output entitlement. Taking a name rather
+   * than a literal keeps {@link shapes} the only place a shape is written. */
+  function invitation(shape: keyof typeof shapes): LinkageTerms {
+    return { ...nameTerms, ...shapes[shape] };
+  }
+
+  /** Whether core itself refuses to run this pair, driven through the real
+   * functions rather than a second model of them: the invitation mirrored onto
+   * this party by {@link deriveAcceptedLinkageTerms}, checked by the
+   * {@link assertPayloadSendDisclosed} call `prepareForExchange` makes. */
+  function coreRefuses(terms: LinkageTerms, metadata: Metadata): boolean {
+    const accepted = deriveAcceptedLinkageTerms(terms, "Sam Alvarez");
+    try {
+      assertPayloadSendDisclosed(accepted.payload, metadata, accepted.output);
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
+  test("names the disclosed columns when the invitation accepts none and the inviting party receives the result", () => {
+    const terms = invitation("acceptsNothingAndTakesTheResult");
+    const { editorState } = editorFor(columns, terms);
+    expect(acceptorDisclosedColumns(editorState.metadata)).toEqual(["notes"]);
+    expect(
+      acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
+    ).toEqual(["notes"]);
+    // Every other gate is clear, so the conflict alone closes the launch.
+    const verdict = acceptorVerdict(columns, terms, editorState);
+    expect(verdict.kind).toBe("allClear");
+    expect(acceptorHasIdentifierConflict(editorState.metadata)).toBe(false);
+    expect(acceptorLaunchDisabled(verdict, editorState, terms)).toBe(true);
+  });
+
+  test("says nothing when the inviting party is entitled to no result", () => {
+    // Nothing is transmitted to a party that receives no result, so the run does
+    // not refuse this pair -- and the panel beside the grid already states that no
+    // column leaves whatever these marks say.
+    const terms = invitation("acceptsNothingAndTakesNoResult");
+    const { editorState } = editorFor(columns, terms);
+    expect(acceptorDisclosedColumns(editorState.metadata)).toEqual(["notes"]);
+    expect(
+      acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
+    ).toEqual([]);
+    const verdict = acceptorVerdict(columns, terms, editorState);
+    expect(acceptorLaunchDisabled(verdict, editorState, terms)).toBe(false);
+  });
+
+  test("says nothing when the invitation declares no payload set at all", () => {
+    // The lazy direction: an absent declaration is reconciled against this party's
+    // own disclosure when the exchange runs, not against a set it never named --
+    // whether the invitation carries no payload block, or one naming only what it
+    // sends.
+    for (const terms of [
+      invitation("declaresNoPayloadAtAll"),
+      invitation("declaresOnlyWhatItSends"),
+    ]) {
+      const { editorState } = editorFor(columns, terms);
+      expect(acceptorDisclosedColumns(editorState.metadata)).toEqual(["notes"]);
+      expect(
+        acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
+      ).toEqual([]);
+      const verdict = acceptorVerdict(columns, terms, editorState);
+      expect(acceptorLaunchDisabled(verdict, editorState, terms)).toBe(false);
+    }
+  });
+
+  test("says nothing about a non-empty declaration, which is a different comparison", () => {
+    const terms = invitation("acceptsTheDisclosedColumn");
+    const { editorState } = editorFor(columns, terms);
+    expect(
+      acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
+    ).toEqual([]);
+  });
+
+  test("clears as the operator re-marks every disclosed column, re-enabling launch", () => {
+    const terms = invitation("acceptsNothingAndTakesTheResult");
+    // A matched column additionally marked sent, so the edit that clears the
+    // conflict is exercised on both routes off that mark: back to matching for a
+    // linkage column, and ignored for the unrecognized one, which cannot match.
+    const sentTwice = setColumnDisclosure(
+      acceptorInitialColumnsState(columns).metadata,
+      "first_name",
+      "payload",
+    ).metadata;
+    const seeded = editorFor(columns, terms, { metadata: sentTwice });
+    expect(
+      acceptorColumnsTheInvitationWillNotAccept(
+        terms,
+        seeded.editorState.metadata,
+      ),
+    ).toEqual(["first_name", "notes"]);
+
+    // One of the two re-marked leaves the conflict standing on the other.
+    const partly = setColumnDisclosure(sentTwice, "notes", "ignored").metadata;
+    const halfCleared = editorFor(columns, terms, { metadata: partly });
+    expect(
+      acceptorColumnsTheInvitationWillNotAccept(
+        terms,
+        halfCleared.editorState.metadata,
+      ),
+    ).toEqual(["first_name"]);
+    expect(
+      acceptorLaunchDisabled(
+        acceptorVerdict(columns, terms, halfCleared.editorState),
+        halfCleared.editorState,
+        terms,
+      ),
+    ).toBe(true);
+
+    const cleared = setColumnDisclosure(partly, "first_name", "match").metadata;
+    const edited = editorFor(columns, terms, { metadata: cleared });
+    expect(acceptorDisclosedColumns(edited.editorState.metadata)).toEqual([]);
+    expect(
+      acceptorColumnsTheInvitationWillNotAccept(
+        terms,
+        edited.editorState.metadata,
+      ),
+    ).toEqual([]);
+    const verdict = acceptorVerdict(columns, terms, edited.editorState);
+    expect(verdict.kind).toBe("allClear");
+    expect(acceptorLaunchDisabled(verdict, edited.editorState, terms)).toBe(
+      false,
+    );
+  });
+
+  // The shape the equivalence deliberately excludes, named so that excluding it is
+  // an act rather than an omission; the test after the equivalence owns it.
+  const scopeLimitShape = "acceptsOnlyAColumnNotDisclosed";
+
+  test("fires exactly when core's own enforcement refuses the pair", () => {
+    // The web predicate states in this package a condition core enforces in its
+    // own, so a change to core's gate would leave the notice quietly wrong -- the
+    // operator told the exchange can start, and refused at launch. Every shape this
+    // describe drives, through core's real mirror and real assertion: the notice
+    // and the refusal agree, or this fails.
+    for (const shape of Object.keys(shapes) as Array<keyof typeof shapes>) {
+      if (shape === scopeLimitShape) continue;
+      const terms = invitation(shape);
+      const { editorState } = editorFor(columns, terms);
+      expect(
+        acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata)
+          .length > 0,
+        shape,
+      ).toBe(coreRefuses(terms, editorState.metadata));
+    }
+  });
+
+  test("leaves a disagreeing non-empty declaration to core, by design", () => {
+    // The equivalence above is scoped to the declaration this notice reads -- the
+    // empty one. A non-empty declaration that disagrees with the marks is a
+    // different comparison, with a named set and different remedies, and core
+    // still refuses it: the notice is silent here by design, and this is what says
+    // so rather than the equivalence test quietly excluding the case.
+    const terms = invitation(scopeLimitShape);
+    const { editorState } = editorFor(columns, terms);
+    expect(
+      acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
+    ).toEqual([]);
+    expect(coreRefuses(terms, editorState.metadata)).toBe(true);
   });
 });
 
