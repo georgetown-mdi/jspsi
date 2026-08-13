@@ -37,12 +37,17 @@
 //   - It matches names, not runs. That a job with the right name exists says
 //     nothing about whether the workflow holding it runs on a pull request to
 //     the protected branch, or whether the run succeeds. Rule 2 covers that
-//     question for the two workflows it names and for no others.
+//     question for the workflows GATING_WORKFLOWS names and for no others.
 //   - A job calling a reusable workflow produces composed check-run names
 //     (`caller / callee`); only the caller's own name is collected here.
-//   - Rule 2 reads the two files it names. A required context whose job lives in
-//     a third workflow is matched by rule 1 but its workflow's path filters are
-//     not read.
+//   - Rule 2's scope is the hand-held GATING_WORKFLOWS list rather than the
+//     branch rules. Rule 1 reads the required contexts but never maps one back
+//     to the workflow declaring its job, so making a job in an unlisted
+//     workflow required leaves that workflow's path filters unread here: the
+//     list has to grow with the merge gate. Mapping a context back would need
+//     one declaring file per name, which nothing constrains: two workflows may
+//     declare the same job name, and which of their check runs satisfies the
+//     requirement is GitHub's resolution to make rather than one to infer here.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -58,11 +63,16 @@ const WORKFLOW_FILE = /\.ya?ml$/;
 export const PROTECTED_BRANCHES = ["main", "staging"];
 
 /**
- * The workflows rule 2 holds filter-free. Both raise required check runs and
- * both are deliberately unfiltered; see the header comment in each.
+ * The workflows rule 2 holds filter-free: every file declaring a job the branch
+ * rules require a status check from. Each is deliberately unfiltered, and the
+ * header comment in each says why and points back here. Making a job in some
+ * other workflow required means adding that workflow here in the same edit --
+ * nothing derives this list, so nothing else notices it went short.
  */
 export const GATING_WORKFLOWS = [
   `${WORKFLOW_DIR}/codeql.yaml`,
+  `${WORKFLOW_DIR}/dependency_review.yaml`,
+  `${WORKFLOW_DIR}/native_alpine.yaml`,
   `${WORKFLOW_DIR}/static_checks.yaml`,
 ];
 
