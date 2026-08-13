@@ -79,7 +79,8 @@ export function transpositionCandidates(value: string): string[] {
 }
 
 /**
- * Every single-character deletion of `value`, excluding `value` itself.
+ * Every single-character deletion of `value`; each is one code point shorter
+ * than `value`, so `value` itself is never among them.
  *
  * These are the values within one edit distance of `value` that are SHORTER
  * than it; the partner's own value is expanded by its own party, so a deletion
@@ -95,7 +96,6 @@ export function deletionCandidates(value: string): string[] {
   for (let i = 0; i < points.length; i++) {
     candidates.add([...points.slice(0, i), ...points.slice(i + 1)].join(""));
   }
-  candidates.delete(value);
   return [...candidates];
 }
 
