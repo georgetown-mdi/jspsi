@@ -396,6 +396,73 @@ jobs:
       ).toContain("is named as a gating workflow but does not exist");
     });
   });
+
+  // A tree carrying every workflow the real constant names, all filter-free but
+  // for the one under test, run through the default `files` argument: what fails
+  // is the constant's own reach rather than a list the test supplied.
+  const gatingTreeWith = (file, source) =>
+    withTempRoot((root) => {
+      for (const named of GATING_WORKFLOWS) {
+        writeFileSync(
+          join(root, named),
+          named === file ? source : gatingWorkflow("Gate"),
+          "utf8",
+        );
+      }
+      return pathFilterViolations(root);
+    });
+
+  it.each(GATING_WORKFLOWS)("fails %s alone for a paths filter", (file) => {
+    const violations = gatingTreeWith(
+      file,
+      `on:
+  pull_request:
+    branches: [main, staging]
+    paths: ["apps/**"]
+jobs:
+  gate:
+    name: Gate
+`,
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain(
+      `${file} filters its pull_request trigger with paths:`,
+    );
+  });
+
+  it.each(GATING_WORKFLOWS)(
+    "fails %s alone for a paths-ignore filter",
+    (file) => {
+      const violations = gatingTreeWith(
+        file,
+        `on:
+  pull_request:
+    paths-ignore: ["docs/**"]
+jobs:
+  gate:
+    name: Gate
+`,
+      );
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain(
+        `${file} filters its pull_request trigger with paths-ignore:`,
+      );
+    },
+  );
+
+  it.each(GATING_WORKFLOWS)(
+    "fails %s alone for a dropped pull_request trigger",
+    (file) => {
+      const violations = gatingTreeWith(
+        file,
+        "on:\n  push:\n    branches: [main]\njobs:\n  gate:\n    name: Gate\n",
+      );
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain(
+        `${file} declares no on.pull_request trigger`,
+      );
+    },
+  );
 });
 
 describe("repository resolution", () => {
@@ -566,6 +633,15 @@ describe("the stated skip", () => {
 });
 
 describe("the real repository tree", () => {
+  it("names each workflow declaring a job the merge gate requires", () => {
+    expect(GATING_WORKFLOWS).toEqual([
+      ".github/workflows/codeql.yaml",
+      ".github/workflows/dependency_review.yaml",
+      ".github/workflows/native_alpine.yaml",
+      ".github/workflows/static_checks.yaml",
+    ]);
+  });
+
   it("has job names to match against, and no filter on the gating workflows", () => {
     const index = workflowJobIndex(repoRoot);
     expect(index.literal.size).toBeGreaterThan(0);
@@ -585,7 +661,7 @@ describe("the real repository tree", () => {
     expect(output).toContain("the required-context rule was SKIPPED");
     expect(output).toContain("neither GH_TOKEN nor GITHUB_TOKEN is set");
     expect(output).toContain(
-      "Path-filter rule passed: .github/workflows/codeql.yaml, .github/workflows/static_checks.yaml",
+      "Path-filter rule passed: .github/workflows/codeql.yaml, .github/workflows/dependency_review.yaml, .github/workflows/native_alpine.yaml, .github/workflows/static_checks.yaml",
     );
   });
 });
