@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 // Coverage of the display-sink ban in the repo-root eslint.config.mjs: no raw
 // error may be rendered at an operator-facing sink. Operator-facing escaping
@@ -44,6 +44,14 @@ async function banHits(filePath, source) {
 
 const CORE_FILE = resolve(repoRoot, "packages/core/src/banFixture.ts");
 const CLI_FILE = resolve(repoRoot, "apps/cli/src/banFixture.ts");
+
+// Loading the flat config and the typescript-eslint parser for the first time
+// is the expensive part of a lintText call, independent of which file or how
+// much text it is given; under cold process/CPU load that one-time cost alone
+// can exceed vitest's 5s test default. A beforeAll absorbs it once, under its
+// own explicit budget, so no individual case pays for it inside the default
+// test timeout.
+const LINTER_WARM_UP_TIMEOUT_MS = 30_000;
 
 // Reserved for the canary: a guarded path that exists on disk, parses, and is
 // linted by nothing else here.
@@ -130,6 +138,10 @@ function fixture(body) {
 }
 
 describe("the display-sink raw-error ban", () => {
+  beforeAll(async () => {
+    await banHits(CORE_FILE, fixture("record(err.message);"));
+  }, LINTER_WARM_UP_TIMEOUT_MS);
+
   it("lints the text it is handed, not the file on disk", async () => {
     expect(
       existsSync(CORE_FILE_FIRST_PARSE),
