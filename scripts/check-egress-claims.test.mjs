@@ -150,6 +150,24 @@ describe("URL literal matcher", () => {
     ]);
   });
 
+  it("names a rewritten literal's own line, not the line inside it", () => {
+    // The limit candidateOf carries: a literal the parser rewrote -- one
+    // holding any escape -- spells no offsets of its own, so a URL further
+    // into the same multi-line template is reported at the line that literal
+    // begins on. The hit and its host are unaffected, and a literal the file
+    // spells verbatim still reports the line the URL sits on.
+    const escaped =
+      "const banner = `cost: \\$5\n" +
+      "  a second line\n" +
+      "  https://evil.example/x`;\n";
+    expect(urlLiterals(escaped, FIXTURE)).toEqual([
+      { url: "https://evil.example/x", host: "evil.example", line: 1 },
+    ]);
+    expect(urlLiterals(escaped.replace("\\$5", "$5"), FIXTURE)).toEqual([
+      { url: "https://evil.example/x", host: "evil.example", line: 3 },
+    ]);
+  });
+
   it("does not trip on a scheme-only protocol comparison", () => {
     const source =
       'const protocol = isSecure(server) ? "https:" : "http:";\n' +
@@ -839,6 +857,44 @@ describe("literal extraction", () => {
         "apps/web/public/robots.txt",
       ),
     ).toEqual(["https://evil.example/sitemap.xml"]);
+  });
+
+  it("ends a raw-scanned URL at a brace that closes an expansion", () => {
+    // The formats scanned raw write `${...}` as syntax of their own, and no
+    // parser is run to say so: the `}` closing a shell default value ends the
+    // URL rather than landing in the host the check reports, while one closing
+    // a span opened inside the URL stays part of it.
+    for (const [path, source, expected] of [
+      [
+        "docker-entrypoint.sh",
+        ': "${SFTP_ENDPOINT:-https://backup.example.com}"\n',
+        { url: "https://backup.example.com", host: "backup.example.com" },
+      ],
+      [
+        "docker-entrypoint-fips.sh",
+        'exec curl "${ENDPOINT:-https://backup.example.com}/ping" "$@"\n',
+        { url: "https://backup.example.com", host: "backup.example.com" },
+      ],
+      [
+        "Dockerfile.fips",
+        'RUN curl -fsSLO "https://nodejs.org/dist/${NODE_VERSION}/node.tar.xz"\n',
+        {
+          url: "https://nodejs.org/dist/${NODE_VERSION}/node.tar.xz",
+          host: "nodejs.org",
+        },
+      ],
+    ]) {
+      expect([path, isJavaScriptFamily(path)]).toEqual([path, false]);
+      expect([path, urlLiterals(source, path)]).toEqual([
+        path,
+        [{ ...expected, line: 1 }],
+      ]);
+    }
+    // The parsed family reads the same characters the parser's way, where a
+    // brace closes an interpolation the parser marked or spells literal text.
+    expect(urlsIn("const u = 'https://${host}/x';\n")).toEqual([
+      "https://${host}/x",
+    ]);
   });
 
   it("reads a URL inside a quoted CSS data URI", () => {

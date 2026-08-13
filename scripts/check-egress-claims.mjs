@@ -272,9 +272,8 @@ const NOTICE_BASENAMES = new Set([
 
 // Where a URL ends inside the text carrying it: whitespace, the quote forms,
 // and the punctuation that brackets one in TypeScript, JSX, and CSS. Braces are
-// left out so that `${` and the span it opens stay part of the URL -- in a
-// template because the interpolated text belongs to the authority the literal
-// writes, and everywhere else because those characters are literal text. `[`
+// left out and read at endOfUrl instead, where whether a `}` closes syntax or
+// spells text is a question about the candidate rather than the character. `[`
 // and `]` are left out so an IPv6 host literal is not truncated to nothing.
 const URL_TERMINATOR = /[\s"'`<>(),;\\]/;
 
@@ -335,8 +334,11 @@ function lineOf(source, position) {
  * file. A segment whose text the file spells verbatim maps its own offsets
  * straight back; one the parser rewrote (a literal carrying an escape) reports
  * the position it begins at.
+ *
+ * A `raw` candidate is the whole text of a file no parser was run for, which
+ * is what decides how a brace in it is read (endOfUrl).
  */
-function candidateOf(source, segments) {
+function candidateOf(source, segments, raw = false) {
   let text = "";
   const placed = [];
   for (const segment of segments) {
@@ -347,7 +349,7 @@ function candidateOf(source, segments) {
     });
     text += segment.text;
   }
-  return { text, segments: placed };
+  return { text, segments: placed, raw };
 }
 
 /** The segment `offset` falls in. */
@@ -440,6 +442,46 @@ function parsedLiterals(source, path) {
 }
 
 /**
+ * Where the URL beginning at `start` ends: the first terminator the candidate's
+ * own reading of the text admits.
+ *
+ * A parsed candidate carries the parser's word on which spans interpolate, so a
+ * terminator inside one of them belongs to the expression rather than to the
+ * URL, and a brace is never a terminator at all: in a template it opens or
+ * closes a span whose text belongs to the authority the literal writes, and in
+ * a string or a JSX attribute value the parser says those characters are text.
+ *
+ * A raw candidate has no such word, and the formats scanned raw write braces as
+ * syntax of their own: shell and Dockerfile parameter expansion. There a `${`
+ * opens a span its matching `}` closes, both part of the URL
+ * (`https://nodejs.org/dist/${NODE_VERSION}/x`), while a `}` that opened
+ * nothing ends it -- the one closing `${SFTP_ENDPOINT:-https://host}`, which
+ * lands in the reported host if the URL swallows it.
+ */
+function endOfUrl(candidate, start) {
+  let depth = 0;
+  for (let offset = start; offset < candidate.text.length; offset += 1) {
+    const char = candidate.text[offset];
+    if (candidate.raw) {
+      if (char === "$" && candidate.text[offset + 1] === "{") {
+        depth += 1;
+        offset += 1;
+        continue;
+      }
+      if (char === "}") {
+        if (depth === 0) return offset;
+        depth -= 1;
+        continue;
+      }
+    }
+    if (URL_TERMINATOR.test(char) && !isInterpolated(candidate, offset)) {
+      return offset;
+    }
+  }
+  return candidate.text.length;
+}
+
+/**
  * The host `new URL()` resolves `authority` to, or undefined where it rejects
  * it outright. The parser is the oracle for both directions, and it is handed
  * an authority position rather than the literal as written: `stun:` and `turn:`
@@ -488,17 +530,7 @@ function urlsIn(source, candidate) {
     if (isInterpolated(candidate, match.index)) continue;
 
     const start = match.index + match[0].length;
-    let end = start;
-    while (end < candidate.text.length) {
-      if (
-        URL_TERMINATOR.test(candidate.text[end]) &&
-        !isInterpolated(candidate, end)
-      ) {
-        break;
-      }
-      end += 1;
-    }
-
+    const end = endOfUrl(candidate, start);
     const body = candidate.text.slice(start, end);
     const authorityStart = start + /^\/*/.exec(body)[0].length;
     let authority = "";
@@ -539,7 +571,7 @@ export function urlLiterals(source, path) {
     ? parsedLiterals(source, path)
     : undefined;
   const candidates = parsed ?? [
-    candidateOf(source, [{ text: source, sourceStart: 0 }]),
+    candidateOf(source, [{ text: source, sourceStart: 0 }], /* raw */ true),
   ];
   return candidates.flatMap((candidate) => urlsIn(source, candidate));
 }
