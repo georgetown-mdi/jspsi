@@ -1819,6 +1819,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // not re-issued after it. A typed TransportOperationStalledError (a UsageError)
   // so the poll loop and the rendezvous gate treat it as terminal, the same as
   // every other liveness bound.
+  //
+  // The captured error's message is the one fragment of this refusal the SERVER
+  // chose, so it is handed over as the builder's server-reported fragment rather
+  // than composed into the first-party sentence naming it: on one link those bytes
+  // would spend the sentence's budget and could compose framing of their own that
+  // read as this side's.
   private deadSessionError(
     operation: string,
     path: string,
@@ -1827,8 +1833,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return transportOperationStalledError(
       operation,
       path,
-      `the SFTP session was killed by a fatal server protocol error ` +
-        `(${this.fatalSftpError.message})`,
+      "the SFTP session was killed by a fatal server protocol error",
+      this.fatalSftpError.message,
     );
   }
 

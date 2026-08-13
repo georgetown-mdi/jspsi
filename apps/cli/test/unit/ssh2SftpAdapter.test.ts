@@ -999,6 +999,11 @@ describe("createExclusive", () => {
 // ~1 h whole-exchange budget. Each op needs its own case (a single op's test does
 // not prove the others are wrapped). The dead-session short-circuit for the same
 // four ops is covered by the fatal-wrapper-error guard tests below.
+//
+// Each stall reason is read off the RENDERED chain rather than the raw message:
+// the builder gives every fragment beyond the operation's own label a cause link
+// of its own, so the rendering boundary is where the operator meets the reason
+// and the only place asserting it says anything about what they read.
 
 describe("bounded metadata write/stat/delete", () => {
   test("bounds a withheld rename by the operation deadline", async () => {
@@ -1021,7 +1026,9 @@ describe("bounded metadata write/stat/delete", () => {
       await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
       const err = await captured;
       expect(err).toBeInstanceOf(TransportOperationStalledError);
-      expect((err as Error).message).toContain("withheld the rename response");
+      expect(sanitizeErrorForDisplay(err)).toContain(
+        "withheld the rename response",
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -1042,7 +1049,9 @@ describe("bounded metadata write/stat/delete", () => {
       await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
       const err = await captured;
       expect(err).toBeInstanceOf(TransportOperationStalledError);
-      expect((err as Error).message).toContain("withheld the delete response");
+      expect(sanitizeErrorForDisplay(err)).toContain(
+        "withheld the delete response",
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -1063,7 +1072,9 @@ describe("bounded metadata write/stat/delete", () => {
       await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
       const err = await captured;
       expect(err).toBeInstanceOf(TransportOperationStalledError);
-      expect((err as Error).message).toContain("withheld the stat response");
+      expect(sanitizeErrorForDisplay(err)).toContain(
+        "withheld the stat response",
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -1411,7 +1422,7 @@ describe("bounded put (idle window)", () => {
       await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
       const err = await captured;
       expect(err).toBeInstanceOf(TransportOperationStalledError);
-      expect((err as Error).message).toContain("made no upload progress");
+      expect(sanitizeErrorForDisplay(err)).toContain("made no upload progress");
     } finally {
       vi.useRealTimers();
     }
@@ -1448,7 +1459,7 @@ describe("bounded put (idle window)", () => {
       await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
       const err = await captured;
       expect(err).toBeInstanceOf(TransportOperationStalledError);
-      expect((err as Error).message).toContain("made no upload progress");
+      expect(sanitizeErrorForDisplay(err)).toContain("made no upload progress");
     } finally {
       vi.useRealTimers();
     }
@@ -1592,7 +1603,7 @@ describe("bounded put (idle window)", () => {
       await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
       const err = await captured;
       expect(err).toBeInstanceOf(TransportOperationStalledError);
-      expect((err as Error).message).toContain("made no upload progress");
+      expect(sanitizeErrorForDisplay(err)).toContain("made no upload progress");
     } finally {
       vi.useRealTimers();
     }
@@ -1675,7 +1686,7 @@ describe("bounded put (idle window)", () => {
       await vi.advanceTimersByTimeAsync(200);
       const err = await captured;
       expect(err).toBeInstanceOf(TransportOperationStalledError);
-      expect((err as Error).message).toContain("Malformed DATA packet");
+      expect(sanitizeErrorForDisplay(err)).toContain("Malformed DATA packet");
       // Only the first attempt reached the server; the second short-circuited.
       expect(calls).toBe(1);
     } finally {
@@ -1764,7 +1775,7 @@ describe("bounded put (idle window)", () => {
       await vi.advanceTimersByTimeAsync(200);
       const err = await captured;
       expect(err).toBeInstanceOf(TransportOperationStalledError);
-      expect((err as Error).message).toContain("Malformed DATA packet");
+      expect(sanitizeErrorForDisplay(err)).toContain("Malformed DATA packet");
       // Only the first attempt reached the server; the second short-circuited.
       expect(calls).toBe(1);
     } finally {
@@ -2373,7 +2384,7 @@ describe("fatal wrapper-error guard", () => {
     const listErr = await adapter.list("/remote/dir").catch((e: unknown) => e);
     expect(listErr).toBeInstanceOf(TransportOperationStalledError);
     expect(listErr).toBeInstanceOf(UsageError);
-    expect((listErr as Error).message).toContain("Malformed NAME packet");
+    expect(sanitizeErrorForDisplay(listErr)).toContain("Malformed NAME packet");
     // It did not even attempt to drive the dead session.
     expect(wrapper.opendir).not.toHaveBeenCalled();
 
@@ -2425,7 +2436,7 @@ describe("fatal wrapper-error guard", () => {
       .catch((e: unknown) => e);
     expect(putErr).toBeInstanceOf(TransportOperationStalledError);
     expect(putErr).toBeInstanceOf(UsageError);
-    expect((putErr as Error).message).toContain("Malformed DATA packet");
+    expect(sanitizeErrorForDisplay(putErr)).toContain("Malformed DATA packet");
     expect(put).not.toHaveBeenCalled();
 
     const deleteErr = await adapter

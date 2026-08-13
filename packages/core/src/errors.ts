@@ -373,9 +373,10 @@ export class DirectoryListingBoundsError extends UsageError {
  * generic advisory is suppressed and replaced with the specific "check the
  * endpoint and the peer, then retry" guidance -- the one terminal-transport
  * fault where re-running the command can succeed once the server recovers.
- * Call-site messages supply the specific stalled-operation detail, must not end
- * with terminal punctuation, and pass the path the operation named as a
- * `details` fragment.
+ * Call-site messages name the stalled operation and the refusal, must not end
+ * with terminal punctuation, and pass every value beyond that label -- how the
+ * operation stalled, the path it named, and any message the server itself
+ * reported -- as `details` fragments.
  */
 export class TransportOperationStalledError extends UsageError {
   readonly psilinkRecoveryHintEmitted = true;
