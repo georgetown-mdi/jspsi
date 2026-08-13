@@ -63,27 +63,40 @@ export const SFTP_STALL_DEADLINE_MS = 60_000;
  * `detail` states how it stalled, so the one error type carries an
  * operation-specific message.
  *
- * `path` takes a labelled cause link of its own rather than leading the summary:
- * read/write/delete operation paths carry a peer-supplied filename of no bounded
- * length, and on a shared link those bytes spend the budget the refusal and the
- * next step {@link TransportOperationStalledError} carries need. It is
- * interpolated raw and escaped where the error is rendered, so a hostile server's
- * control/ANSI or deceptive-Unicode characters are neutralized at the display
- * boundary rather than here, where escaping them would leave the sink to escape
- * them a second time. Both `path` and `detail` are additionally redacted here;
- * redaction is not escaping and so does not double (see
- * {@link redactPrivateKeyMaterial}).
+ * Every value beyond the operation's own label takes a labelled cause link of its
+ * own rather than riding the summary, ONE chooser per link. `path` carries a
+ * peer-supplied filename of no bounded length; `detail` is first-party prose at
+ * every call site but {@link ./ssh2SftpAdapter}'s dead-session one, which relays
+ * the fatal error the server itself reported through `serverReported`, bounded
+ * nowhere at all. On a shared link either would spend the budget the refusal and
+ * the next step {@link TransportOperationStalledError} carries need, and whichever
+ * filled it would then be free to compose the framing that introduced what it
+ * deleted.
+ *
+ * Each fragment is interpolated raw and escaped where the error is rendered, so a
+ * hostile server's control/ANSI or deceptive-Unicode characters are neutralized at
+ * the display boundary rather than here, where escaping them would leave the sink
+ * to escape them a second time. Each is additionally redacted here; redaction is
+ * not escaping and so does not double (see {@link redactPrivateKeyMaterial}).
  */
 export function transportOperationStalledError(
   operation: string,
   path: string,
   detail: string,
+  serverReported?: string,
 ): TransportOperationStalledError {
   return new TransportOperationStalledError(
-    `SFTP ${operation} stalled: ${redactPrivateKeyMaterial(detail)}; ` +
-      `refusing to wait on the server further`,
+    `SFTP ${operation} stalled; refusing to wait on the server further`,
     {
-      details: [`stalled ${operation} path: ${redactPrivateKeyMaterial(path)}`],
+      details: [
+        `how the ${operation} stalled: ${redactPrivateKeyMaterial(detail)}`,
+        `stalled ${operation} path: ${redactPrivateKeyMaterial(path)}`,
+        ...(serverReported === undefined
+          ? []
+          : [
+              `error the server reported: ${redactPrivateKeyMaterial(serverReported)}`,
+            ]),
+      ],
     },
   );
 }

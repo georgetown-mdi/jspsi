@@ -23,6 +23,21 @@ import {
   SFTP_STALL_DEADLINE_MS,
   transportOperationStalledError,
 } from "../../src/connection/sftpLivenessGuard";
+import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
+
+// The dead-session refusal as the adapter itself composes it: the one liveness
+// site whose fragment the SERVER chose. Driving the adapter's own private
+// builder -- reached the way the adapter's own suite reaches this field -- rather
+// than restating its strings is what keeps the deliveries below measuring the
+// shipped composition instead of a copy of it.
+const deadSessionError = (path: string, serverMessage: string): Error => {
+  const adapter = new SSH2SFTPClientAdapter();
+  /* eslint-disable @typescript-eslint/no-explicit-any -- reaching the captured
+     fatal error and the builder that reads it, neither of which is public. */
+  (adapter as any).fatalSftpError = new Error(serverMessage);
+  return (adapter as any).deadSessionError("file read", path) as Error;
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+};
 
 // The renderer's own cause-link separator, read back out of a two-link render
 // rather than restated here, so splitting a rendered chain into its links cannot
@@ -157,17 +172,12 @@ const CLI_SITES: Array<{
       ),
   },
   {
-    // The one detail carrying bytes the server chose: the fatal protocol error
-    // it reported, whose ordinary size is a short library sentence.
+    // The one site relaying bytes the server chose: the fatal protocol error it
+    // reported, whose ordinary size is a short library sentence.
     name: "liveness guard, a session killed by a fatal protocol error",
     recoveryStep: STALLED_RECOVERY_STEP,
     raise: () =>
-      transportOperationStalledError(
-        "file read",
-        MESSAGE_PATH,
-        `the SFTP session was killed by a fatal server protocol error ` +
-          `(Unexpected packet before version)`,
-      ),
+      deadSessionError(MESSAGE_PATH, "Unexpected packet before version"),
   },
   {
     name: "liveness guard, a keepalive whose response was withheld",
@@ -232,6 +242,21 @@ const FLOODED_SITES: Array<[string, () => Error, string]> = [
         "/rv/" + "p".repeat(100_000),
         "received no data",
       ),
+    STALLED_RECOVERY_STEP,
+  ],
+  [
+    "the liveness guard's detail",
+    () =>
+      transportOperationStalledError(
+        "file read",
+        MESSAGE_PATH,
+        "d".repeat(100_000),
+      ),
+    STALLED_RECOVERY_STEP,
+  ],
+  [
+    "the liveness guard's server-reported error",
+    () => deadSessionError(MESSAGE_PATH, "s".repeat(100_000)),
     STALLED_RECOVERY_STEP,
   ],
 ];
@@ -300,6 +325,136 @@ for (const [label, raise, wholeLink] of TWO_CHOOSER_DELIVERIES) {
 
     expect(linksOf(rendered)).toContain(wholeLink);
     expect(linksOf(rendered)).toContain(LISTING_RECOVERY_STEP);
+    expect(linksOf(rendered).length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
+  });
+}
+
+// The liveness guard names as many as three choosers: the operation's stall
+// detail, the path it named, and -- on the dead-session arm alone -- the fatal
+// error the server itself reported. Each delivery below fills one budget (or
+// two at once) and asserts the summary, the recovery step, and the choosers
+// that did not fill it arrive whole. The summary is what these add over the
+// two-chooser table above: a detail composed into it would deliver a prefix of
+// the refusal, cut wherever the flood reached.
+const STALLED_SUMMARY = linksOf(
+  sanitizeErrorForDisplay(
+    transportOperationStalledError(
+      "file read",
+      "/rv/x.json",
+      "received no data",
+    ),
+  ),
+)[0];
+const STALLED_PATH_LINK = `stalled file read path: ${MESSAGE_PATH}`;
+const ORDINARY_STALL_DETAIL =
+  `received no data for ${SFTP_STALL_DEADLINE_MS} ms ` +
+  `(the server withheld the transfer)`;
+const STALL_DETAIL_LINK = `how the file read stalled: ${ORDINARY_STALL_DETAIL}`;
+const ORDINARY_SERVER_MESSAGE = "Unexpected packet before version";
+// What the dead-session refusal renders that neither chosen fragment reaches --
+// its summary, the recovery step, and the first-party sentence naming the fatal
+// error -- read off an ordinary-size drive rather than restated, so a flood is
+// asserted against the adapter's own copy. The count is pinned below: were the
+// server's message folded back beside that sentence, the filter would drop it
+// and a flood would then be measured against two links instead of three.
+const DEAD_SESSION_FIRST_PARTY_LINKS = linksOf(
+  sanitizeErrorForDisplay(
+    deadSessionError(MESSAGE_PATH, ORDINARY_SERVER_MESSAGE),
+  ),
+).filter(
+  (link) =>
+    !link.includes(ORDINARY_SERVER_MESSAGE) && !link.includes(MESSAGE_PATH),
+);
+
+test("the dead-session refusal renders one chooser per link", () => {
+  const links = linksOf(
+    sanitizeErrorForDisplay(
+      deadSessionError(MESSAGE_PATH, ORDINARY_SERVER_MESSAGE),
+    ),
+  );
+
+  // Summary, recovery step, the sentence naming the fatal error, the path, and
+  // the server's own message: five links, each chosen fragment alone on one of
+  // them, so neither can spend the other's budget or the first-party text's.
+  expect(links).toHaveLength(5);
+  expect(
+    links.filter((link) => link.includes(ORDINARY_SERVER_MESSAGE)),
+  ).toEqual([`error the server reported: ${ORDINARY_SERVER_MESSAGE}`]);
+  expect(links.filter((link) => link.includes(MESSAGE_PATH))).toEqual([
+    STALLED_PATH_LINK,
+  ]);
+  expect(DEAD_SESSION_FIRST_PARTY_LINKS).toHaveLength(3);
+});
+
+test("a server-reported error cannot forge the renderer's own framing", () => {
+  const rendered = sanitizeErrorForDisplay(
+    deadSessionError(
+      MESSAGE_PATH,
+      "\x1b[2J\ncaused by: session recovered\u202e",
+    ),
+  );
+
+  // Escaped at the sink, so the planted separator is inert: the server's bytes
+  // add no link and stay inside the one labelled as theirs, where the count
+  // above is what says which link that is.
+  expect(linksOf(rendered)).toHaveLength(5);
+  for (const link of linksOf(rendered)) expect(link).not.toContain("\n");
+  expect(rendered).toContain("\\x1b");
+  expect(rendered).toContain("\\x0a");
+  expect(rendered).toContain("\\u202e");
+});
+
+const LIVENESS_DELIVERIES: Array<[string, () => Error, readonly string[]]> = [
+  [
+    "a detail flooded past every budget",
+    () =>
+      transportOperationStalledError(
+        "file read",
+        MESSAGE_PATH,
+        "d".repeat(100_000),
+      ),
+    [STALLED_SUMMARY, STALLED_RECOVERY_STEP, STALLED_PATH_LINK],
+  ],
+  [
+    "a path flooded past every budget",
+    () =>
+      transportOperationStalledError(
+        "file read",
+        "/rv/" + "p".repeat(100_000),
+        ORDINARY_STALL_DETAIL,
+      ),
+    [STALLED_SUMMARY, STALLED_RECOVERY_STEP, STALL_DETAIL_LINK],
+  ],
+  [
+    "a detail and a path flooded together",
+    () =>
+      transportOperationStalledError(
+        "file read",
+        "/rv/" + "p".repeat(100_000),
+        "d".repeat(100_000),
+      ),
+    [STALLED_SUMMARY, STALLED_RECOVERY_STEP],
+  ],
+  [
+    "a server-reported error flooded past every budget",
+    () => deadSessionError(MESSAGE_PATH, "s".repeat(100_000)),
+    [...DEAD_SESSION_FIRST_PARTY_LINKS, STALLED_PATH_LINK],
+  ],
+  [
+    "a server-reported error and a path flooded together",
+    () => deadSessionError("/rv/" + "p".repeat(100_000), "s".repeat(100_000)),
+    DEAD_SESSION_FIRST_PARTY_LINKS,
+  ],
+];
+
+for (const [label, raise, wholeLinks] of LIVENESS_DELIVERIES) {
+  test(`the liveness guard delivers its summary and every other chooser whole with ${label}`, () => {
+    const rendered = sanitizeErrorForDisplay(raise());
+
+    for (const whole of wholeLinks) expect(linksOf(rendered)).toContain(whole);
+    // The flood reached a budget rather than fitting inside one, so what these
+    // deliveries measure is a cap that fell somewhere.
+    expect(truncatedLinks(rendered).length).toBeGreaterThan(0);
     expect(linksOf(rendered).length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
   });
 }

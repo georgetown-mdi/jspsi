@@ -9,6 +9,7 @@ import {
   FrameSizeExceededError,
   TransportOperationStalledError,
   UsageError,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 import Ssh2SftpClient from "ssh2-sftp-client";
 
@@ -647,7 +648,11 @@ inProcessOnly(
       const listErr = await crashSFTP.list(SFTP_PATH).catch((e: unknown) => e);
       expect(listErr).toBeInstanceOf(TransportOperationStalledError);
       expect(listErr).toBeInstanceOf(UsageError);
-      expect((listErr as Error).message).toContain("Malformed NAME packet");
+      // The server's own words reach the operator on a labelled link of their
+      // own, so the rendered chain is where the fatal cause is read back.
+      expect(sanitizeErrorForDisplay(listErr)).toContain(
+        "Malformed NAME packet",
+      );
 
       // The same terminal failure on the lock path (createExclusive) and the read
       // path (get), so every server-driven operation fails cleanly post-crash.
