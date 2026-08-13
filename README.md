@@ -94,11 +94,15 @@ For more information, see [apps/cli](apps/cli/).
 The same Docker image serves the guided web experience from your own machine, with no Node.js setup, and runs the exchange (over SFTP or a shared directory) on that machine rather than browser-to-browser. It serves one party and is never shared beyond that host.
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
-2. From a directory holding your input CSV, run:
+2. From a directory holding your input CSV, for Mac / Linux, run:
 ```sh
 docker run --rm -p 127.0.0.1:3000:3000 \
   --env JOB_DATA_ROOT=/work -v "$PWD":/work \
   vdorie/psi-link:latest serve
+```
+   On Windows, navigate to that directory in the Docker console and run:
+```sh
+docker run --rm -p 127.0.0.1:3000:3000 --env JOB_DATA_ROOT=/work -v "${PWD}:/work" vdorie/psi-link:latest serve
 ```
 3. Visit [http://127.0.0.1:3000](http://127.0.0.1:3000) on that machine; press Ctrl-C when done.
 
