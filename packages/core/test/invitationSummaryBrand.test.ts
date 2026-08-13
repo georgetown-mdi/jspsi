@@ -1,8 +1,4 @@
-import { fileURLToPath } from "node:url";
-
 import { describe, expect, test } from "vitest";
-
-import ts from "typescript";
 
 import {
   BEL,
@@ -15,6 +11,7 @@ import {
 } from "../src/displayEscapingFixtures.js";
 import { summarizeInvitation } from "../src/invitationSummary.js";
 import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay.js";
+import { declaredPositions } from "./utils/declaredPositions.js";
 
 import type {
   InvitationLegalAgreementSummary,
@@ -62,158 +59,21 @@ function displayStrings(
   return [];
 }
 
-/** Absolute path of a repository file named relative to this test. */
-function repoPath(relative: string): string {
-  return fileURLToPath(new URL(relative, import.meta.url));
-}
-
-const SUMMARY_SOURCE = repoPath("../src/invitationSummary.ts");
-const SUMMARY_ROOT = "InvitationSummary";
-const CORE_ROOT = repoPath("../");
-
 /**
- * A bound on the compiler-API walk below sized as a backstop for a derivation
- * that never returns, not as an assertion about how fast a loaded machine can
- * build a program: the walk creates a whole `ts.Program` over the summary
- * source, which costs seconds on an idle container and several times that when
- * the rest of the suite is competing for the same cores.
+ * A bound on the compiler-API walk the coverage test below runs, sized as a
+ * backstop for a derivation that never returns, not as an assertion about how
+ * fast a loaded machine can build a program: the walk creates a whole
+ * `ts.Program` over the summary source, which costs seconds on an idle container
+ * and several times that when the rest of the suite is competing for the same
+ * cores.
  */
 const TYPE_WALK_HANG_BACKSTOP_MS = 60_000;
 
 /**
- * Type flags carrying no properties of their own, so a position of that type is
- * where a path ends. `VoidLike` covers the `undefined` an optional property's
- * union carries.
- */
-const STRUCTURELESS_TYPE =
-  ts.TypeFlags.StringLike |
-  ts.TypeFlags.NumberLike |
-  ts.TypeFlags.BooleanLike |
-  ts.TypeFlags.BigIntLike |
-  ts.TypeFlags.ESSymbolLike |
-  ts.TypeFlags.VoidLike |
-  ts.TypeFlags.Null |
-  ts.TypeFlags.Never |
-  ts.TypeFlags.Any |
-  ts.TypeFlags.Unknown;
-
-/**
- * Whether a path ends at this type. A `Displayable` is `string` intersected with
- * a phantom brand property, so an intersection carrying a string constituent ends
- * a path like a bare string does -- descending into the brand would invent a
- * position no value ever holds.
- */
-function endsPath(type: ts.Type): boolean {
-  if ((type.flags & STRUCTURELESS_TYPE) !== 0) return true;
-  return (
-    type.isIntersection() &&
-    type.types.some((member) => (member.flags & ts.TypeFlags.StringLike) !== 0)
-  );
-}
-
-/**
- * Every property path {@link InvitationSummary} and the summary structs nested
- * under it declare, read from those declarations with the compiler API at test
- * time and normalized the way {@link presentPositions} normalizes an observed
- * one: array and tuple indices collapse to `[]`, so a path reads
- * `linkageKeys[].elements[].transforms[].effect`. `optional` is the subset
- * declared `?` -- the positions that hold nothing unless a fixture reaches them,
- * and so the ones the escaping walk says nothing about until one does.
- *
- * Derived rather than listed here for the same reason the walk is recursive: an
- * optional field added to a summary struct joins this set with no edit to this
- * file, and fails the coverage check until a fixture populates it. A list would
- * only ever cover what someone remembered to add to it.
- */
-function declaredSummaryPositions(): {
-  all: Set<string>;
-  optional: Set<string>;
-} {
-  const configPath = repoPath("../tsconfig.json");
-  const config = ts.readConfigFile(configPath, ts.sys.readFile);
-  if (config.error !== undefined)
-    throw new Error(`cannot read ${configPath} for the summary derivation`);
-  const parsed = ts.parseJsonConfigFileContent(
-    config.config,
-    ts.sys,
-    CORE_ROOT,
-  );
-  const program = ts.createProgram({
-    rootNames: [SUMMARY_SOURCE],
-    options: { ...parsed.options, noEmit: true },
-  });
-  const checker = program.getTypeChecker();
-  const source = program.getSourceFile(SUMMARY_SOURCE);
-  if (source === undefined)
-    throw new Error(`${SUMMARY_SOURCE} is not in the program`);
-  const root = source.statements.find(
-    (statement): statement is ts.InterfaceDeclaration =>
-      ts.isInterfaceDeclaration(statement) &&
-      statement.name.text === SUMMARY_ROOT,
-  );
-  if (root === undefined)
-    throw new Error(`${SUMMARY_ROOT} is not declared in ${SUMMARY_SOURCE}`);
-
-  const all = new Set<string>();
-  const optional = new Set<string>();
-
-  // `enclosing` is the chain of struct types the current path runs through, so a
-  // summary struct that ever nests itself terminates instead of descending
-  // forever; every other repetition is a distinct path and is walked.
-  const collect = (
-    type: ts.Type,
-    prefix: string,
-    enclosing: ReadonlySet<ts.Type>,
-  ): void => {
-    for (const property of type.getProperties()) {
-      const declaration =
-        property.valueDeclaration ?? property.declarations?.[0];
-      if (declaration === undefined)
-        throw new Error(`no declaration for ${prefix}.${property.name}`);
-      const position =
-        prefix === "" ? property.name : `${prefix}.${property.name}`;
-      all.add(position);
-      if ((property.flags & ts.SymbolFlags.Optional) !== 0)
-        optional.add(position);
-      descend(
-        checker.getTypeOfSymbolAtLocation(property, declaration),
-        position,
-        enclosing,
-      );
-    }
-  };
-
-  const descend = (
-    type: ts.Type,
-    position: string,
-    enclosing: ReadonlySet<ts.Type>,
-  ): void => {
-    if (endsPath(type) || enclosing.has(type)) return;
-    if (type.isUnion()) {
-      for (const member of type.types) descend(member, position, enclosing);
-      return;
-    }
-    if (checker.isArrayType(type) || checker.isTupleType(type)) {
-      for (const element of checker.getTypeArguments(type as ts.TypeReference))
-        descend(element, `${position}[]`, enclosing);
-      return;
-    }
-    if (type.isIntersection()) {
-      for (const member of type.types) descend(member, position, enclosing);
-      return;
-    }
-    collect(type, position, new Set(enclosing).add(type));
-  };
-
-  descend(checker.getTypeAtLocation(root.name), "", new Set());
-  return { all, optional };
-}
-
-/**
  * Every position a built summary actually holds a value at, normalized the way
- * {@link declaredSummaryPositions} normalizes a declared one. Presence is read
- * from the VALUE, not the key: the builder returns object literals that carry an
- * absent optional field as an explicit `undefined`, which occupies no position.
+ * {@link declaredPositions} normalizes a declared one. Presence is read from the
+ * VALUE, not the key: the builder returns object literals that carry an absent
+ * optional field as an explicit `undefined`, which occupies no position.
  */
 function presentPositions(
   value: unknown,
@@ -314,7 +174,13 @@ describe("the display-struct brand", () => {
     "reaches every optional position the summary declares",
     { timeout: TYPE_WALK_HANG_BACKSTOP_MS },
     () => {
-      const declared = declaredSummaryPositions();
+      // An optional field added to a summary struct joins `declared.optional`
+      // with no edit here, and fails below until a fixture populates it.
+      const declared = declaredPositions({
+        sourcePathFromCoreRoot: "src/invitationSummary.ts",
+        rootInterface: "InvitationSummary",
+        stringIntersectionEndsPath: true,
+      });
       const reached = new Set<string>();
       for (const variant of hostileVariants)
         for (const position of presentPositions(

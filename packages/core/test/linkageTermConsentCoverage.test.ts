@@ -1,131 +1,32 @@
-import { fileURLToPath } from "node:url";
-
 import { describe, expect, test } from "vitest";
-
-import ts from "typescript";
 
 import {
   CONSENT_PROBE_TERMS,
   LINKAGE_TERM_CONSENT_CLASSIFICATION,
   consentRepresentationProbes,
 } from "../src/linkageTermConsentCoverage.js";
+import { declaredPositions } from "./utils/declaredPositions.js";
 
 import type { LinkageTerms } from "../src/config/linkageTerms.js";
 
-function repoPath(relative: string): string {
-  return fileURLToPath(new URL(relative, import.meta.url));
-}
-
-const TERMS_SOURCE = repoPath("../src/config/linkageTerms.ts");
-const TERMS_ROOT = "LinkageTerms";
-const CORE_ROOT = repoPath("../");
-
-/**
- * Type flags carrying no properties of their own, so a position of that type is
- * where a path ends. `VoidLike` covers the `undefined` an optional property's
- * union carries.
- */
-const STRUCTURELESS_TYPE =
-  ts.TypeFlags.StringLike |
-  ts.TypeFlags.NumberLike |
-  ts.TypeFlags.BooleanLike |
-  ts.TypeFlags.BigIntLike |
-  ts.TypeFlags.ESSymbolLike |
-  ts.TypeFlags.VoidLike |
-  ts.TypeFlags.Null |
-  ts.TypeFlags.Never |
-  ts.TypeFlags.Any |
-  ts.TypeFlags.Unknown;
-
 /**
  * Every property path {@link LinkageTerms} and the structs nested under it
- * declare, read from those declarations with the compiler API at test time, with
- * array and tuple indices collapsed to `[]` -- so a path reads
- * `linkageKeys[].elements[].transform[].function`.
+ * declare. Derived rather than listed because the classification table it feeds
+ * must fail on a field added to core, and a list only ever covers what someone
+ * remembered to add to it. The judgment the derivation cannot make -- whether an
+ * acceptor's consent turns on a field -- is what the table supplies.
  *
- * Derived rather than listed because the classification table it feeds must fail
- * on a field added to core, and a list only ever covers what someone remembered
- * to add to it. The judgment the derivation cannot make -- whether an acceptor's
- * consent turns on a field -- is what the table supplies.
+ * A transform step's `params` is the one position whose index signature is the
+ * value rather than structure: consent turns on the parameters as a set, so the
+ * record is classified whole. Any other index signature reaching the derivation
+ * throws instead.
  */
 function declaredTermPositions(): Set<string> {
-  const configPath = repoPath("../tsconfig.json");
-  const config = ts.readConfigFile(configPath, ts.sys.readFile);
-  if (config.error !== undefined)
-    throw new Error(
-      `cannot read ${configPath} for the linkage-terms derivation`,
-    );
-  const parsed = ts.parseJsonConfigFileContent(
-    config.config,
-    ts.sys,
-    CORE_ROOT,
-  );
-  const program = ts.createProgram({
-    rootNames: [TERMS_SOURCE],
-    options: { ...parsed.options, noEmit: true },
-  });
-  const checker = program.getTypeChecker();
-  const source = program.getSourceFile(TERMS_SOURCE);
-  if (source === undefined)
-    throw new Error(`${TERMS_SOURCE} is not in the program`);
-  const root = source.statements.find(
-    (statement): statement is ts.InterfaceDeclaration =>
-      ts.isInterfaceDeclaration(statement) &&
-      statement.name.text === TERMS_ROOT,
-  );
-  if (root === undefined)
-    throw new Error(`${TERMS_ROOT} is not declared in ${TERMS_SOURCE}`);
-
-  const positions = new Set<string>();
-
-  // `enclosing` is the chain of struct types the current path runs through, so a
-  // struct that ever nests itself terminates instead of descending forever; every
-  // other repetition is a distinct path and is walked.
-  const collect = (
-    type: ts.Type,
-    prefix: string,
-    enclosing: ReadonlySet<ts.Type>,
-  ): void => {
-    for (const property of type.getProperties()) {
-      const declaration =
-        property.valueDeclaration ?? property.declarations?.[0];
-      if (declaration === undefined)
-        throw new Error(`no declaration for ${prefix}.${property.name}`);
-      const position =
-        prefix === "" ? property.name : `${prefix}.${property.name}`;
-      positions.add(position);
-      descend(
-        checker.getTypeOfSymbolAtLocation(property, declaration),
-        position,
-        enclosing,
-      );
-    }
-  };
-
-  const descend = (
-    type: ts.Type,
-    position: string,
-    enclosing: ReadonlySet<ts.Type>,
-  ): void => {
-    if ((type.flags & STRUCTURELESS_TYPE) !== 0 || enclosing.has(type)) return;
-    if (type.isUnion()) {
-      for (const member of type.types) descend(member, position, enclosing);
-      return;
-    }
-    if (checker.isArrayType(type) || checker.isTupleType(type)) {
-      for (const element of checker.getTypeArguments(type as ts.TypeReference))
-        descend(element, `${position}[]`, enclosing);
-      return;
-    }
-    if (type.isIntersection()) {
-      for (const member of type.types) descend(member, position, enclosing);
-      return;
-    }
-    collect(type, position, new Set(enclosing).add(type));
-  };
-
-  descend(checker.getTypeAtLocation(root.name), "", new Set());
-  return positions;
+  return declaredPositions({
+    sourcePathFromCoreRoot: "src/config/linkageTerms.ts",
+    rootInterface: "LinkageTerms",
+    recordValuePositions: ["linkageKeys[].elements[].transform[].params"],
+  }).all;
 }
 
 /**
