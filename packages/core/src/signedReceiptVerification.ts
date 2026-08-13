@@ -16,8 +16,8 @@ import type { HandshakeRole } from "./types.js";
 // The verification consumer for the DUAL-SIGNED record (the signed evidence
 // bundle the signed-receipt step produces): it reads a stored record and checks,
 // per party, the certificate the record carries, the receipt signature made under
-// that certificate's key, the fingerprint pin when the verifier holds one, and the
-// identity the certificate authorizes. Read-only -- it never mutates or re-signs
+// that certificate's key, what anchors that certificate outside the record, and
+// the identity it authorizes. Read-only -- it never mutates or re-signs
 // the artifact -- and every check yields a status rather than throwing for any
 // record of the shape parseDualSignedRecord produces: the FIELD VALUES inside it
 // may be hostile (an identity the canonical encoder refuses, a malformed
@@ -34,13 +34,16 @@ import type { HandshakeRole } from "./types.js";
 // What "verified" costs here: a dual-signed record is self-consistent by
 // construction, so signature verification alone proves only that whoever holds the
 // two certificates' private keys signed this content -- an attacker who mints two
-// certificates of its own produces a bundle whose signatures verify. The PIN is
-// what makes it evidence: only a fingerprint pinned out-of-band ties a certificate
-// to the real partner. The report therefore never reaches `verified` without a pin
-// -- an unpinned run is `incomplete`, which is the third-party-auditor case the
-// acceptance wording calls "certificate fingerprint trust not established". The
-// trust model is specified in docs/spec/PROTOCOL.md (Signing identity and
-// certificate pinning).
+// certificates of its own produces a bundle whose signatures verify. ANCHORING is
+// what makes it evidence: a certificate counts only when something outside the
+// record ties it to a party the verifier knows -- a fingerprint pinned out-of-band,
+// or the verifier's own signing identity. The record carries two certificates, so
+// the report reaches `verified` only when BOTH are anchored; one anchored
+// certificate leaves the other slot mintable by whoever assembled the record, and
+// is `incomplete` -- the same tier as the third-party auditor's unanchored run,
+// which the acceptance wording calls "certificate fingerprint trust not
+// established". The trust model is specified in docs/spec/PROTOCOL.md (Signing
+// identity and certificate pinning).
 //
 // An unrecognized bundle version is rejected earlier, at parse
 // (parseDualSignedRecord pins the version literal), so a record reaching this
@@ -63,17 +66,59 @@ export type CertificateBindingStatus = "verified" | "failed";
 export type ReceiptSignatureStatus = "verified" | "failed";
 
 /**
- * The outcome of checking a certificate against a pinned fingerprint.
+ * What ties one certificate in the record to a party the verifier knows from
+ * outside it.
  *
- * - `verified`: this certificate's fingerprint matches the pinned value, so it is
- *   the party the verifier pinned out-of-band.
- * - `mismatch`: a pinned value was supplied and NEITHER certificate matches it --
- *   the record is not from the pinned partner.
- * - `not-pinned`: no pinned value was supplied for this certificate. A verifier
- *   holds a pin for its PARTNER only, so the other slot is `not-pinned` even on a
- *   fully pinned run; with no pin at all (the third-party auditor) both are.
+ * - `partner-pin`: its fingerprint matches a value the verifier pinned
+ *   out-of-band.
+ * - `local-identity`: it is the certificate of the verifier's own signing
+ *   identity. Certificates are public, so this says whose certificate occupies
+ *   the slot and nothing more -- whoever assembled the record could have copied
+ *   it in. What refuses a slot its certificate's holder did not sign is the
+ *   receipt signature there, which verifies only under the private key the
+ *   verifier holds.
+ * - `unanchored`: nothing outside the record vouches for this certificate. It is
+ *   still checked against itself (its self-signature, its signature over the
+ *   content, and the expected identities), all of which whoever assembled the
+ *   record can satisfy with a certificate it minted.
+ *
+ * Each pinned value reaches at most one certificate, so a single pinned value
+ * -- or two equal ones, whatever their spelling -- can never anchor both slots.
+ * The dedup runs across pinned values only: a pinned value and the verifier's
+ * own identity carrying the same digest can anchor a slot each on a record
+ * whose two slots repeat one certificate. That record verifies only under the
+ * verifier's own signing key at both slots, so it is not assemblable by an
+ * adversary; the residual is a misdescribed verdict in a self-pinned
+ * configuration, recorded here rather than closed.
  */
-export type FingerprintPinStatus = "verified" | "mismatch" | "not-pinned";
+export type CertificateAnchorStatus =
+  "partner-pin" | "local-identity" | "unanchored";
+
+/**
+ * What one anchoring value the verifier supplied reached in the record.
+ * `unmatched` means it matches neither certificate.
+ */
+export type AnchorMatchStatus = "matched" | "unmatched" | "not-supplied";
+
+/** How the verifier's own certificate fingerprint reached the verification,
+ * which fixes what a non-match costs. */
+export type LocalIdentitySource = "named" | "resolved";
+
+/** The verifier's own signing identity, as an anchor for the slot holding its
+ * own certificate. */
+export interface LocalIdentityAnchor {
+  /** The fingerprint of the verifier's own certificate, computed from the
+   * identity it holds rather than copied off the record being verified. */
+  fingerprint: string;
+  /**
+   * `named` when the verifier pointed this run at that identity, which asserts
+   * the record is one it signed: a value matching neither certificate is then a
+   * failure. `resolved` when it was found without being asked, where a non-match
+   * says only that this is not the verifier's own exchange, and leaves the slot
+   * unanchored rather than failing the run.
+   */
+  source: LocalIdentitySource;
+}
 
 /**
  * Whether a certificate authorizes the identity the verifier expected for that
@@ -99,8 +144,8 @@ export interface SignedReceiptPartyReport {
   certificateBinding: CertificateBindingStatus;
   /** The receipt signature in this slot. */
   signature: ReceiptSignatureStatus;
-  /** The fingerprint pin. */
-  fingerprintPin: FingerprintPinStatus;
+  /** What anchors this certificate outside the record. */
+  certificateAnchor: CertificateAnchorStatus;
   /** Whether the certificate authorizes the expected identity for this party. */
   assertedIdentity: AssertedIdentityStatus;
 }
@@ -110,10 +155,23 @@ export interface DualSignedRecordVerificationReport {
   /** The overall verdict, on the same tri-state as the unsigned record's report:
    * `failed` if any check was contradicted, `verified` only if every check ran and
    * passed, `incomplete` when nothing was contradicted but something could not be
-   * checked -- notably an absent fingerprint pin. */
+   * checked -- notably a certificate left unanchored. */
   outcome: RecordVerificationOutcome;
   initiator: SignedReceiptPartyReport;
   responder: SignedReceiptPartyReport;
+  /**
+   * What the fingerprints the verifier pinned reached: `matched` when every one
+   * of them matches a certificate the record carries, `unmatched` when one
+   * matches neither -- the record is not the pinned party's, which fails the
+   * verification.
+   */
+  pinnedFingerprints: AnchorMatchStatus;
+  /**
+   * What the verifier's own certificate fingerprint reached. A `named` identity
+   * that matches neither certificate fails the verification; a `resolved` one
+   * that matches neither is reported and leaves its slot unanchored.
+   */
+  localIdentity: AnchorMatchStatus;
   /** Whether the record's agreed-terms hash matches the one the caller supplied. */
   termsHash: TermsHashStatus;
   /**
@@ -133,12 +191,21 @@ export interface DualSignedRecordVerificationReport {
  * report is `incomplete`. */
 export interface DualSignedRecordVerificationInputs {
   /**
-   * The partner's certificate fingerprint, pinned out-of-band (the verifier's
-   * `signing.partner_fingerprint`, or a value supplied at the command line). This
-   * is the only input that turns a self-consistent record into evidence: without
-   * it the report cannot reach `verified`.
+   * Certificate fingerprints the verifier pinned out-of-band, one per party it
+   * can vouch for: the partner's alone on a party's own run (the verifier's
+   * `signing.partner_fingerprint`, or a value supplied at the command line), or
+   * both parties' for a verifier that was party to no exchange. Together with
+   * {@link localIdentity} these are what turn a self-consistent record into
+   * evidence: without an anchor on each certificate the report cannot reach
+   * `verified`.
    */
-  pinnedFingerprint?: string;
+  pinnedFingerprints?: readonly string[];
+  /**
+   * The verifier's own signing identity, which anchors the slot holding its own
+   * certificate without the verifier restating a fingerprint it could only copy
+   * off the record it is checking.
+   */
+  localIdentity?: LocalIdentityAnchor;
   /**
    * The two parties' expected identities, unordered. The record keys its parties
    * by handshake role, and no other artifact records which party held which role,
@@ -202,37 +269,110 @@ async function verifyParty(
 }
 
 // A certificate whose canonical bytes cannot be produced has no fingerprint to
-// compare, so it matches no pin. Reported as a non-match rather than thrown,
-// keeping the fail-safe contract as verifyParty's binding downgrade does.
-async function matchesPin(
+// compare, so it matches no anchoring value. Reported as a non-match rather than
+// thrown, keeping the fail-safe contract as verifyParty's binding downgrade does.
+async function certificateMatches(
   party: SignedReceiptParty,
-  pinnedFingerprint: string,
+  fingerprint: string,
 ): Promise<boolean> {
   try {
-    return await matchesPinnedFingerprint(party.certificate, pinnedFingerprint);
+    return await matchesPinnedFingerprint(party.certificate, fingerprint);
   } catch {
     return false;
   }
 }
 
-async function pinStatuses(
+/** Which of the record's two slots one anchoring value matches, in slot order. */
+type SlotMatches = readonly [boolean, boolean];
+
+async function slotMatches(
   record: DualSignedRecord,
-  pinnedFingerprint: string | undefined,
-): Promise<[FingerprintPinStatus, FingerprintPinStatus]> {
-  if (pinnedFingerprint === undefined || pinnedFingerprint.length === 0)
-    return ["not-pinned", "not-pinned"];
-  const [initiator, responder] = await Promise.all([
-    matchesPin(record.initiator, pinnedFingerprint),
-    matchesPin(record.responder, pinnedFingerprint),
+  fingerprint: string,
+): Promise<SlotMatches> {
+  return await Promise.all([
+    certificateMatches(record.initiator, fingerprint),
+    certificateMatches(record.responder, fingerprint),
   ]);
-  // A verifier pins its PARTNER's certificate, so exactly one slot is expected to
-  // match and the other is simply unpinned -- not a failure. Neither matching is
-  // the failure: the record is not the pinned partner's.
-  if (!initiator && !responder) return ["mismatch", "mismatch"];
-  return [
-    initiator ? "verified" : "not-pinned",
-    responder ? "verified" : "not-pinned",
+}
+
+interface AnchorAssignment {
+  anchors: [CertificateAnchorStatus, CertificateAnchorStatus];
+  pinnedFingerprints: AnchorMatchStatus;
+  localIdentity: AnchorMatchStatus;
+}
+
+/**
+ * Assign the anchoring values the verifier holds to the record's two certificate
+ * slots, as an assignment rather than a per-value test: equal pinned values count
+ * once and each value claims at most one slot, so one pinned value -- or two equal
+ * ones -- anchors a single slot and leaves the other to be anchored by something
+ * else or not at all. Whether a value matched at all is reported separately from
+ * what it anchored, so a value that matched a slot another value already claimed
+ * is not reported as matching nothing.
+ */
+async function assignAnchors(
+  record: DualSignedRecord,
+  inputs: DualSignedRecordVerificationInputs,
+): Promise<AnchorAssignment> {
+  const pins = (inputs.pinnedFingerprints ?? []).filter(
+    (fingerprint) => fingerprint.length > 0,
+  );
+  const [pinMatches, localMatches] = await Promise.all([
+    Promise.all(pins.map((pin) => slotMatches(record, pin))),
+    inputs.localIdentity === undefined
+      ? undefined
+      : slotMatches(record, inputs.localIdentity.fingerprint),
+  ]);
+
+  const anchors: [CertificateAnchorStatus, CertificateAnchorStatus] = [
+    "unanchored",
+    "unanchored",
   ];
+  const claim = (
+    matches: SlotMatches,
+    anchor: CertificateAnchorStatus,
+  ): void => {
+    const at = matches.findIndex(
+      (matched, slot) => matched && anchors[slot] === "unanchored",
+    );
+    if (at >= 0) anchors[at] = anchor;
+  };
+  // The pinned values go first: a pin is evidence about a party the verifier
+  // cannot otherwise reach, while the local identity's slot is the one the
+  // verifier could name either way.
+  //
+  // Two pinned values that reach the same slot are the same fingerprint whatever
+  // their spelling -- each matched the digest of the certificate in that slot --
+  // so their match patterns deduplicate the values without depending on how they
+  // were written. Without that, one fingerprint supplied twice would claim both
+  // slots of a record whose two slots carry a single certificate, and a record
+  // only that certificate's key holder can assemble -- both receipt signatures
+  // must verify under it -- would read as two independent anchors.
+  const claimedPatterns = new Set<string>();
+  for (const matches of pinMatches) {
+    const pattern = matches.join(",");
+    if (claimedPatterns.has(pattern)) continue;
+    claimedPatterns.add(pattern);
+    claim(matches, "partner-pin");
+  }
+  if (localMatches !== undefined) claim(localMatches, "local-identity");
+
+  const reached = (matches: SlotMatches): boolean => matches[0] || matches[1];
+  return {
+    anchors,
+    pinnedFingerprints:
+      pins.length === 0
+        ? "not-supplied"
+        : pinMatches.every(reached)
+          ? "matched"
+          : "unmatched",
+    localIdentity:
+      localMatches === undefined
+        ? "not-supplied"
+        : reached(localMatches)
+          ? "matched"
+          : "unmatched",
+  };
 }
 
 function identityStatuses(
@@ -267,17 +407,19 @@ function identityStatuses(
  * Verify a stored {@link DualSignedRecord}: for each party, re-derive the
  * canonical signed bytes and check that party's receipt signature against the
  * certificate the record carries, check that certificate's identity binding (its
- * self-signature), check its fingerprint against a pinned value when the caller
- * holds one, and check the identity it authorizes when the caller supplies the
- * expected pair. Read-only; it never mutates or re-signs the record.
+ * self-signature), check what anchors its certificate outside the record (a
+ * pinned fingerprint, or the caller's own signing identity), and check the
+ * identity it authorizes when the caller supplies the expected pair. Read-only;
+ * it never mutates or re-signs the record.
  *
  * Returns a {@link DualSignedRecordVerificationReport} on the same tri-state as
  * the unsigned record's report, so "not checked" is never reported as "verified".
- * The report reaches `verified` only when a fingerprint pin was supplied AND
- * matched: signature verification alone proves only that the holders of the two
+ * The report reaches `verified` only when BOTH certificates are anchored outside
+ * the record -- each by a pinned fingerprint or by the verifier's own signing
+ * identity: signature verification alone proves only that the holders of the two
  * embedded certificates' keys signed this content, which anyone can arrange with
- * two certificates of their own. A run with no pinned value is the third-party
- * auditor's, and is `incomplete`.
+ * two certificates of their own. A run that anchors one certificate, and the
+ * third-party auditor's run that anchors neither, are both `incomplete`.
  *
  * Fail-safe over field values: given a record of the shape
  * `parseDualSignedRecord` produces, every check yields a status rather than an
@@ -291,21 +433,21 @@ export async function verifyDualSignedRecord(
   record: DualSignedRecord,
   inputs: DualSignedRecordVerificationInputs = {},
 ): Promise<DualSignedRecordVerificationReport> {
-  const [initiatorChecks, responderChecks, pins] = await Promise.all([
+  const [initiatorChecks, responderChecks, anchoring] = await Promise.all([
     verifyParty(record.initiator, "initiator", record),
     verifyParty(record.responder, "responder", record),
-    pinStatuses(record, inputs.pinnedFingerprint),
+    assignAnchors(record, inputs),
   ]);
   const identities = identityStatuses(record, inputs.expectedIdentities);
 
   const initiator: SignedReceiptPartyReport = {
     ...initiatorChecks,
-    fingerprintPin: pins[0],
+    certificateAnchor: anchoring.anchors[0],
     assertedIdentity: identities[0],
   };
   const responder: SignedReceiptPartyReport = {
     ...responderChecks,
-    fingerprintPin: pins[1],
+    certificateAnchor: anchoring.anchors[1],
     assertedIdentity: identities[1],
   };
 
@@ -319,20 +461,29 @@ export async function verifyDualSignedRecord(
   const parties = [initiator, responder];
   const anyMismatch =
     termsHash === "mismatch" ||
+    // A pinned value matching neither certificate says this record is not the
+    // pinned party's. A resolved local identity matching neither says only that
+    // the verifier was not a party to this exchange, so it is reported rather
+    // than failed; one the verifier named asserts the opposite and fails.
+    anchoring.pinnedFingerprints === "unmatched" ||
+    (anchoring.localIdentity === "unmatched" &&
+      inputs.localIdentity?.source === "named") ||
     parties.some(
       (party) =>
         party.certificateBinding === "failed" ||
         party.signature === "failed" ||
-        party.fingerprintPin === "mismatch" ||
         party.assertedIdentity === "mismatch",
     );
-  // A verifier pins its partner's certificate and not its own, so one unpinned
-  // slot is the expected shape of a fully anchored run: what leaves the record
-  // unanchored is NO slot matching a pin, which is the third-party-auditor case.
+  // The record carries two certificates and a verdict speaks for both, so an
+  // unanchored slot holds the report short of `verified`: its certificate is one
+  // whoever assembled the record could have minted.
   const anyUnverified =
     termsHash === "not-checked" ||
-    !parties.some((party) => party.fingerprintPin === "verified") ||
-    parties.some((party) => party.assertedIdentity === "not-checked");
+    parties.some(
+      (party) =>
+        party.certificateAnchor === "unanchored" ||
+        party.assertedIdentity === "not-checked",
+    );
 
   const outcome: RecordVerificationOutcome = anyMismatch
     ? "failed"
@@ -343,6 +494,8 @@ export async function verifyDualSignedRecord(
     outcome,
     initiator,
     responder,
+    pinnedFingerprints: anchoring.pinnedFingerprints,
+    localIdentity: anchoring.localIdentity,
     termsHash,
     binder: record.content.binder,
   };

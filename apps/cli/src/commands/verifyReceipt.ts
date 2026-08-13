@@ -2,6 +2,7 @@ import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
 
 import {
+  computeCertificateFingerprint,
   computeTermsHash,
   deriveOurIdColumn,
   EXCHANGE_KEYS_VERSION,
@@ -13,6 +14,7 @@ import {
   parseVerificationKeys,
   reconstructCommittedData,
   recordedVersionMatches,
+  sanitizeErrorForDisplay,
   sanitizeForDisplay,
   SIGNED_RECEIPT_VERSION,
   toRetainedResult,
@@ -22,17 +24,20 @@ import {
 } from "@psilink/core";
 import type {
   AssertedIdentityStatus,
+  CertificateAnchorStatus,
   CertificateBindingStatus,
   CommitmentStatus,
   DualSignedRecord,
   DualSignedRecordVerificationInputs,
   DualSignedRecordVerificationReport,
   ExchangeRecord,
-  FingerprintPinStatus,
   LinkageTerms,
+  LocalIdentityAnchor,
+  LocalIdentitySource,
   ReceiptSignatureStatus,
   RecordVerificationReport,
   SignedReceiptPartyReport,
+  SigningIdentity,
   TermsHashStatus,
   VerificationKeys,
 } from "@psilink/core";
@@ -41,6 +46,10 @@ import { readConfigLinkageSource } from "../config";
 import { expandTilde } from "../fileUtils";
 import { keysPathFor } from "../recordFile";
 import { parseSensitiveJson, parseSensitiveYaml } from "../sensitiveFile";
+import {
+  defaultSigningIdentityPath,
+  loadSigningIdentity,
+} from "../signingIdentityFile";
 import {
   configureLogging,
   exitWithError,
@@ -60,8 +69,9 @@ import {
 //     nothing about the partner.
 //   - The dual-signed record (SIGNED): evidence against the partner. Each party's
 //     receipt signature is checked against the certificate the record carries, each
-//     certificate's identity binding is checked, and each fingerprint is checked
-//     against a pinned value when the verifier holds one.
+//     certificate's identity binding is checked, and each certificate is checked
+//     against what anchors it outside the record -- a fingerprint the verifier
+//     pinned, or the verifier's own signing identity.
 //
 // The positional accepts either artifact, dispatched on its format `version`; the
 // dual-signed record can also be named with --signed-record to verify both
@@ -73,8 +83,9 @@ import {
 // reconstructCommittedData). With no input/result the command still runs -- the
 // third-party-auditor case: it checks structure and version and reports each
 // commitment as not-opened rather than failing. The same case on the signed side is
-// a missing fingerprint pin: signatures and identity bindings are still checked and
-// the fingerprint trust is reported as not established.
+// an unanchored certificate: signatures and identity bindings are still checked,
+// the verdict names the slot nothing outside the record reaches, and it is graded
+// short of verified rather than failed.
 
 export function builder(cmd: Argv): Argv {
   return cmd
@@ -116,7 +127,16 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe:
         "the partner's pinned certificate fingerprint, for the signed-record " +
-        "check; overrides signing.partner_fingerprint in --config-file",
+        "check; overrides signing.partner_fingerprint in --config-file. Repeat " +
+        "it to pin both signers when you were not a party to the exchange -- a " +
+        "verified verdict needs both certificates anchored",
+    })
+    .option("identity-file", {
+      type: "string",
+      describe:
+        "path to your signing identity file, whose certificate anchors your " +
+        "own slot in the signed record; overrides signing.identity_file in " +
+        "--config-file (default: ~/.psilink/signing-identity.json)",
     })
     .option("config-file", {
       type: "string",
@@ -310,11 +330,83 @@ const COMMITMENT_WORD: Record<CommitmentStatus, string> = {
     "cannot be opened (no salt in the keys file; likely a wrong or drifted " +
     "keys file, not a problem with the record)",
 };
-const TERMS_WORD: Record<TermsHashStatus, string> = {
-  verified: "re-derives and matches",
-  mismatch: "DOES NOT MATCH",
-  "not-checked": "not checked (pass --config-file and --partner-terms)",
+/**
+ * What this run supplied, so a "not checked" line names an input that is still
+ * missing rather than one already on the command line, and the note explaining a
+ * config that carries no terms sits next to the line it explains.
+ * @internal exported for testing
+ */
+export interface SuppliedVerificationInputs {
+  /** The `--config-file` path, when one was named. */
+  configFile?: string;
+  /** Whether that config defined `linkage_terms`. */
+  localTerms: boolean;
+  /** Whether `--partner-terms` was supplied. */
+  partnerTerms: boolean;
+  /** How this party's signing identity was found, when one was. */
+  localIdentity?: LocalIdentitySource;
+  /** Whether this section carries the note explaining a config that defines no
+   * `linkage_terms`. A run reporting both artifacts prints it once, under the
+   * first agreed-terms line it explains. Defaults to carrying it. */
+  noteConfigTerms?: boolean;
+}
+
+const NOTHING_SUPPLIED: SuppliedVerificationInputs = {
+  localTerms: false,
+  partnerTerms: false,
 };
+
+// The inputs the agreed-terms hash is still waiting on. A config that was named
+// but defines no linkage_terms is not re-named as `--config-file` -- the operator
+// passed one; what is missing is terms in it.
+function missingTermsInputs(supplied: SuppliedVerificationInputs): string[] {
+  const missing: string[] = [];
+  if (!supplied.localTerms)
+    missing.push(
+      supplied.configFile === undefined
+        ? "--config-file"
+        : "a --config-file that defines linkage_terms",
+    );
+  if (!supplied.partnerTerms) missing.push("--partner-terms");
+  return missing;
+}
+
+// The agreed-terms hash is reported as not checked only when one of the two terms
+// documents is missing, so there is always an input to name. An empty remediation
+// would read as "pass" and send the operator nowhere, so it is refused rather than
+// rendered.
+function termsRemediation(supplied: SuppliedVerificationInputs): string {
+  const missing = missingTermsInputs(supplied);
+  if (missing.length === 0)
+    throw new Error(
+      "the agreed-terms hash is reported as not checked while both parties' " +
+        "terms were supplied",
+    );
+  return missing.join(" and ");
+}
+
+function termsWord(
+  status: TermsHashStatus,
+  supplied: SuppliedVerificationInputs,
+): string {
+  if (status === "verified") return "re-derives and matches";
+  if (status === "mismatch") return "DOES NOT MATCH";
+  return `not checked (pass ${termsRemediation(supplied)})`;
+}
+
+// The note a config carrying no linkage_terms earns: it names a path the operator
+// supplied, so it is escaped at this display sink.
+function configTermsNote(
+  supplied: SuppliedVerificationInputs,
+): string | undefined {
+  if (supplied.configFile === undefined || supplied.localTerms)
+    return undefined;
+  if (supplied.noteConfigTerms === false) return undefined;
+  return (
+    `  note: ${sanitizeForDisplay(`config file ${supplied.configFile}`)} ` +
+    "defines no linkage_terms, so it supplied no terms for this check"
+  );
+}
 
 /** Render the unsigned record's verification report to output lines and an exit
  * code (0 unless a check definitively failed). @internal exported for testing */
@@ -322,6 +414,7 @@ export function formatVerificationReport(
   report: RecordVerificationReport,
   warnings: string[],
   signedRecordSupplied = false,
+  supplied: SuppliedVerificationInputs = NOTHING_SUPPLIED,
 ): { lines: string[]; exitCode: number } {
   const lines: string[] = [];
   if (report.outcome === "failed")
@@ -340,7 +433,11 @@ export function formatVerificationReport(
     [string, CommitmentStatus]
   >)
     lines.push(`  commitment ${name}: ${COMMITMENT_WORD[status]}`);
-  lines.push(`  agreed-terms hash: ${TERMS_WORD[report.termsHash]}`);
+  lines.push(`  agreed-terms hash: ${termsWord(report.termsHash, supplied)}`);
+  // Directly under the line it explains: a config supplying no terms is why that
+  // line reads "not checked", and the two are unreadable apart.
+  const configNote = configTermsNote(supplied);
+  if (configNote !== undefined) lines.push(configNote);
   // A reconstruction warning interpolates a column name drawn from the supplied
   // files, so route it through the display-boundary sanitizer (as every sibling
   // command does for partner- or file-controlled text) before it reaches the
@@ -370,74 +467,207 @@ const RECEIPT_SIGNATURE_WORD: Record<ReceiptSignatureStatus, string> = {
   verified: "verifies over this receipt's content, bound to this party",
   failed: "DOES NOT VERIFY",
 };
-const FINGERPRINT_PIN_WORD: Record<FingerprintPinStatus, string> = {
-  verified: "matches the pinned value",
-  mismatch: "DOES NOT MATCH the pinned value",
-  "not-pinned": "no pinned value supplied for this certificate",
+const ANCHORED_CERTIFICATE_WORD: Record<
+  Exclude<CertificateAnchorStatus, "unanchored">,
+  string
+> = {
+  "partner-pin": "matches a fingerprint you pinned out-of-band",
+  "local-identity": "is your own signing identity's certificate",
+};
+
+/**
+ * What an unanchored slot says, in the clauses the report supports and no others:
+ * a check that did not run, or one that ran and matched this very certificate,
+ * must not be narrated as a check this certificate failed.
+ *
+ * A pinned value that matches this certificate and no other would have anchored
+ * this slot, so while the other slot carries a different certificate the report
+ * does support "no pinned value matches it". When both slots carry one
+ * certificate it does not: the value that anchored the other slot matches this
+ * one too, and what leaves the slot unanchored is that each value claims a single
+ * slot. The verifier's own certificate is ruled out only when an identity was
+ * actually compared and reached neither slot.
+ */
+function unanchoredCertificateWord(
+  party: SignedReceiptPartyReport,
+  other: SignedReceiptPartyReport,
+  report: DualSignedRecordVerificationReport,
+): string {
+  const clauses: string[] = [];
+  if (
+    report.pinnedFingerprints !== "not-supplied" &&
+    other.fingerprint !== party.fingerprint
+  )
+    clauses.push("no pinned value matches it");
+  if (report.localIdentity === "unmatched")
+    clauses.push("it is not your own certificate");
+  const supported = clauses.length === 0 ? "" : ` -- ${clauses.join(", and ")}`;
+  return `not anchored (nothing you supplied anchors it${supported})`;
+}
+
+// How the verdict's own sentence names each anchor. An unanchored slot has no
+// entry: it is the case the sentence must not claim.
+const ANCHOR_SOURCE_PHRASE: Partial<Record<CertificateAnchorStatus, string>> = {
+  "partner-pin": "a fingerprint you pinned out-of-band",
+  "local-identity": "your own signing identity",
 };
 const ASSERTED_IDENTITY_WORD: Record<AssertedIdentityStatus, string> = {
   verified: "matches an identity expected for this exchange",
   mismatch: "DOES NOT MATCH an identity expected for this exchange",
-  "not-checked":
-    "not checked (no expected identities; pass the exchange record, or " +
-    "--config-file with --partner-terms)",
-};
-const SIGNED_TERMS_WORD: Record<TermsHashStatus, string> = {
-  verified: "matches the terms this exchange agreed",
-  mismatch: "DOES NOT MATCH the terms this exchange agreed",
-  "not-checked":
-    "not checked (pass the exchange record, or --config-file with " +
-    "--partner-terms)",
+  "not-checked": "not checked (no expected identities)",
 };
 
-function signedPartyLines(party: SignedReceiptPartyReport): string[] {
+function signedTermsWord(
+  status: TermsHashStatus,
+  supplied: SuppliedVerificationInputs,
+): string {
+  if (status === "verified") return "matches the terms this exchange agreed";
+  if (status === "mismatch")
+    return "DOES NOT MATCH the terms this exchange agreed";
+  // The exchange record carries the hash outright, so it is the shorter route to
+  // this check than restating both parties' terms.
+  return `not checked (pass the exchange record, or ${termsRemediation(supplied)})`;
+}
+
+function assertedIdentityWord(
+  status: AssertedIdentityStatus,
+  supplied: SuppliedVerificationInputs,
+): string {
+  if (status !== "not-checked") return ASSERTED_IDENTITY_WORD[status];
+  return (
+    "not checked (no expected identities; pass the exchange record, or " +
+    `${termsRemediation(supplied)})`
+  );
+}
+
+function signedPartyLines(
+  party: SignedReceiptPartyReport,
+  other: SignedReceiptPartyReport,
+  report: DualSignedRecordVerificationReport,
+  supplied: SuppliedVerificationInputs,
+): string[] {
+  const anchorWord =
+    party.certificateAnchor === "unanchored"
+      ? unanchoredCertificateWord(party, other, report)
+      : ANCHORED_CERTIFICATE_WORD[party.certificateAnchor];
   return [
     // The identity is free text the certificate's holder chose, so it is escaped
     // at this display sink; the fingerprint beside it is recomputed by the
     // verifier rather than carried by the record.
     `  ${party.role}: ${sanitizeForDisplay(party.identity)}`,
-    `    certificate fingerprint ${party.fingerprint}: ` +
-      FINGERPRINT_PIN_WORD[party.fingerprintPin],
+    `    certificate fingerprint ${party.fingerprint}: ${anchorWord}`,
     `    certificate identity binding: ` +
       CERTIFICATE_BINDING_WORD[party.certificateBinding],
     `    receipt signature: ${RECEIPT_SIGNATURE_WORD[party.signature]}`,
-    `    asserted identity: ${ASSERTED_IDENTITY_WORD[party.assertedIdentity]}`,
+    `    asserted identity: ` +
+      assertedIdentityWord(party.assertedIdentity, supplied),
   ];
 }
 
-/** Name the certificates a set of party reports covers, for a sentence about what
- * the pin did or did not reach. */
-function certificatesPhrase(parties: SignedReceiptPartyReport[]): string {
-  const [first] = parties;
-  // The set is the pin-anchored parties of a VERIFIED verdict, and the verifier
-  // withholds that verdict until some certificate matched the pin. An empty set
-  // would leave the sentence claiming a match that did not happen -- evidence
-  // overstated -- so it is refused rather than phrased.
-  if (first === undefined)
-    throw new Error(
-      "a verified dual-signed record has no pin-anchored certificate: the " +
-        "verdict would claim a pinned value matched when none did",
+/** Name what anchored each certificate, for the verified verdict's sentence. */
+function anchorsPhrase(parties: SignedReceiptPartyReport[]): string {
+  return parties
+    .map((party) => {
+      const source = ANCHOR_SOURCE_PHRASE[party.certificateAnchor];
+      // A verified verdict means every certificate was anchored, and the verifier
+      // withholds that verdict while either slot is unanchored. An unanchored slot
+      // here would leave the sentence claiming an anchor that does not exist --
+      // evidence overstated -- so it is refused rather than phrased.
+      if (source === undefined)
+        throw new Error(
+          `a verified dual-signed record leaves the ${party.role}'s certificate ` +
+            "unanchored: the verdict would claim both certificates were " +
+            "anchored when one was not",
+        );
+      return `the ${party.role}'s by ${source}`;
+    })
+    .join(", and ");
+}
+
+// What to do about a certificate nothing outside the record vouches for, and what
+// a supplied anchor that reached neither certificate means. Each line stands on
+// its own: the run may be short one anchor, or hold one that belongs to another
+// exchange entirely.
+function anchoringLines(
+  report: DualSignedRecordVerificationReport,
+  supplied: SuppliedVerificationInputs,
+  unanchored: SignedReceiptPartyReport[],
+): string[] {
+  const lines: string[] = [];
+  if (report.pinnedFingerprints === "unmatched")
+    lines.push(
+      "  a pinned fingerprint matches NEITHER certificate in this record: " +
+        "this is not the record of the party you pinned.",
     );
-  if (parties.length === 1) return `the ${first.role}'s certificate`;
-  return "both parties' certificates";
+  if (
+    report.localIdentity === "unmatched" &&
+    supplied.localIdentity === "named"
+  )
+    lines.push(
+      "  the signing identity you named is neither certificate in this record: " +
+        "this is not a receipt you signed.",
+    );
+  else if (
+    report.localIdentity === "unmatched" &&
+    supplied.localIdentity === "resolved" &&
+    unanchored.length > 0
+  )
+    lines.push(
+      "  note: your own signing identity is neither certificate here, so it " +
+        "anchors nothing -- you were not a party to this exchange, or you have " +
+        "regenerated your identity since.",
+    );
+  // How to reach a verified verdict, but only while the anchors the run does
+  // hold are sound: a value that reached neither certificate is answered by the
+  // line above it, and telling the operator to supply more would talk past it.
+  const anchorContradicted =
+    report.pinnedFingerprints === "unmatched" ||
+    (report.localIdentity === "unmatched" &&
+      supplied.localIdentity === "named");
+  if (anchorContradicted) return lines;
+  if (unanchored.length === parties(report).length)
+    lines.push(
+      "  certificate fingerprint trust not established (no pinned value " +
+        "supplied): nothing ties the record's certificates to the partner you " +
+        "know. Pass --partner-fingerprint, or --config-file with " +
+        "signing.partner_fingerprint set.",
+    );
+  else if (unanchored.length > 0)
+    lines.push(
+      `  the ${unanchored[0]?.role}'s certificate is anchored by nothing ` +
+        "outside this record, which is what holds the verdict short of " +
+        "VERIFIED: pin that party's fingerprint (--partner-fingerprint, " +
+        "repeatable), or name your own signing identity with --identity-file " +
+        "when that slot is yours.",
+    );
+  return lines;
+}
+
+function parties(
+  report: DualSignedRecordVerificationReport,
+): SignedReceiptPartyReport[] {
+  return [report.initiator, report.responder];
 }
 
 /** Render the dual-signed record's verification report to output lines and an exit
  * code (0 unless a check definitively failed). @internal exported for testing */
 export function formatSignedRecordReport(
   report: DualSignedRecordVerificationReport,
+  supplied: SuppliedVerificationInputs = NOTHING_SUPPLIED,
 ): { lines: string[]; exitCode: number } {
   const lines: string[] = [];
-  // A pinned value anchors the one certificate whose fingerprint it matches, and
-  // nothing outside the record vouches for the other slot's, so the verdict states
-  // which slot it reached rather than speaking for both parties.
-  const parties = [report.initiator, report.responder];
-  const anchored = parties.filter(
-    (party) => party.fingerprintPin === "verified",
+  // The record carries two certificates and a verdict speaks for both, so the
+  // verdict states what anchored each of them -- and names the slot nothing
+  // outside the record reaches, rather than speaking past it.
+  const unanchored = parties(report).filter(
+    (party) => party.certificateAnchor === "unanchored",
   );
-  const unpinned = parties.filter(
-    (party) => party.fingerprintPin === "not-pinned",
-  );
+  const unanchoredSentences = unanchored
+    .map(
+      (party) =>
+        ` Nothing outside the record anchors the ${party.role}'s certificate.`,
+    )
+    .join("");
   if (report.outcome === "failed")
     lines.push(
       "SIGNED RECEIPT VERIFICATION FAILED: a check did not match -- the " +
@@ -447,23 +677,26 @@ export function formatSignedRecordReport(
   else if (report.outcome === "incomplete")
     lines.push(
       "SIGNED RECEIPT INCOMPLETE: nothing contradicted the dual-signed record, " +
-        "but not everything could be checked (see below).",
+        "but not everything could be checked (see below)." +
+        unanchoredSentences,
     );
   else
     lines.push(
-      "SIGNED RECEIPT VERIFIED: both signatures verify, and the pinned value " +
-        `matches ${certificatesPhrase(anchored)}.` +
-        unpinned
-          .map(
-            (party) =>
-              ` No pinned value authenticates the ${party.role}'s certificate.`,
-          )
-          .join(""),
+      "SIGNED RECEIPT VERIFIED: both signatures verify, and both certificates " +
+        `are anchored outside the record -- ${anchorsPhrase(parties(report))}.`,
     );
 
-  lines.push(...signedPartyLines(report.initiator));
-  lines.push(...signedPartyLines(report.responder));
-  lines.push(`  agreed-terms hash: ${SIGNED_TERMS_WORD[report.termsHash]}`);
+  lines.push(
+    ...signedPartyLines(report.initiator, report.responder, report, supplied),
+  );
+  lines.push(
+    ...signedPartyLines(report.responder, report.initiator, report, supplied),
+  );
+  lines.push(
+    `  agreed-terms hash: ${signedTermsWord(report.termsHash, supplied)}`,
+  );
+  const configNote = configTermsNote(supplied);
+  if (configNote !== undefined) lines.push(configNote);
   // The binder is derived from the exchange's session key, which only the two
   // parties ever held and neither retains, so it is reported rather than checked:
   // a verifier confirms the signers signed a receipt carrying this value, and only
@@ -474,32 +707,20 @@ export function formatSignedRecordReport(
       "both signatures, not recomputed (deriving it needs the exchange session " +
       "key, which only the two parties held).",
   );
-  if (unpinned.length === parties.length)
-    lines.push(
-      "  certificate fingerprint trust not established (no pinned value " +
-        "supplied): nothing ties the record's certificates to the partner you " +
-        "know. Pass --partner-fingerprint, or --config-file with " +
-        "signing.partner_fingerprint set.",
-    );
+  lines.push(...anchoringLines(report, supplied, unanchored));
   return { lines, exitCode: report.outcome === "failed" ? 1 : 0 };
 }
 
 // --- Handler -----------------------------------------------------------------
 
-/** What `--config-file` supplied for the agreed-terms hash check: this party's
- * linkage terms, or the note to report when the config defines none. */
-interface ConfigFileTerms {
-  terms?: LinkageTerms;
-  note?: string;
-}
-
 /**
  * This party's linkage terms, from the config named by `--config-file`.
  *
- * That config is also where `signing.partner_fingerprint` is read from -- the
- * signed-record verdict directs the operator to a config carrying exactly that
- * field -- so one defining no `linkage_terms` is accepted for the pin, and its
- * absent terms are reported as a note rather than refused.
+ * That config is also where `signing.partner_fingerprint` and
+ * `signing.identity_file` are read from -- the signed-record verdict directs the
+ * operator to a config carrying exactly those fields -- so one defining no
+ * `linkage_terms` is accepted for them, and its absent terms are reported beside
+ * the agreed-terms line rather than refused.
  *
  * A path that does not exist is a usage error: this command never auto-loads a
  * config, so a path that reaches here was named on the command line, and mapping
@@ -507,18 +728,15 @@ interface ConfigFileTerms {
  * merely not checked (the distinction {@link pinnedFingerprintFromConfig} draws
  * for the same file's pin).
  */
-function configFileTerms(configFile: string | undefined): ConfigFileTerms {
-  if (configFile === undefined) return {};
+function configFileTerms(
+  configFile: string | undefined,
+): LinkageTerms | undefined {
+  if (configFile === undefined) return undefined;
   const source = readConfigLinkageSource(expandTilde(configFile));
   if (source.status === "no-config-file")
     throw new UsageError(`config file ${configFile} does not exist`);
-  if (source.status === "no-linkage-terms")
-    return {
-      note:
-        `config file ${configFile} defines no linkage_terms, so it supplied ` +
-        "no terms for the agreed-terms hash check",
-    };
-  return { terms: source.source.linkageTerms };
+  if (source.status === "no-linkage-terms") return undefined;
+  return source.source.linkageTerms;
 }
 
 /**
@@ -547,25 +765,22 @@ function partnerTermsFrom(
 }
 
 /**
- * Read `signing.partner_fingerprint` out of an exchange config, so a party
- * re-verifying its own exchange gets the pin it already configured without
- * restating it on the command line. Only that one field is read (as
- * `psilink fingerprint` reads `signing.identity_file`), so an unrelated block that
- * this command never uses cannot fail a verification run. A malformed value is a
- * usage error naming the config: a pin that cannot be a fingerprint would
- * otherwise be indistinguishable from a partner whose certificate does not match.
+ * Read the `signing` block out of an exchange config, so a party re-verifying its
+ * own exchange gets the pin and the identity it already configured without
+ * restating either on the command line. Only the two fields this command uses are
+ * read from it, so an unrelated block a verification run never touches cannot
+ * fail one.
  *
  * `explicit` marks a path the operator named on the command line rather than a
  * default, and a named path that does not exist is a usage error rather than an
- * absent pin (the distinction `psilink fingerprint` draws for its own config
- * hints): a typo'd `--config-file` would otherwise verify unpinned and report
+ * empty block (the distinction `psilink fingerprint` draws for its own config
+ * hints): a typo'd `--config-file` would otherwise verify unanchored and report
  * trust as merely not established.
- * @internal exported for testing
  */
-export function pinnedFingerprintFromConfig(
+function signingBlockFromConfig(
   configFile: string | undefined,
   explicit: boolean,
-): string | undefined {
+): Record<string, unknown> | undefined {
   if (configFile === undefined) return undefined;
   const target = expandTilde(configFile);
   let text: string;
@@ -586,7 +801,21 @@ export function pinnedFingerprintFromConfig(
   // routes through the sensitive-file chokepoint, which reports path-only.
   const raw = parseSensitiveYaml(text, `config file ${configFile}`);
   const root = (raw ?? {}) as Record<string, unknown>;
-  const signing = (root["signing"] ?? {}) as Record<string, unknown>;
+  return (root["signing"] ?? {}) as Record<string, unknown>;
+}
+
+/**
+ * Read `signing.partner_fingerprint` out of an exchange config. A malformed value
+ * is a usage error naming the config: a pin that cannot be a fingerprint would
+ * otherwise be indistinguishable from a partner whose certificate does not match.
+ * @internal exported for testing
+ */
+export function pinnedFingerprintFromConfig(
+  configFile: string | undefined,
+  explicit: boolean,
+): string | undefined {
+  const signing = signingBlockFromConfig(configFile, explicit);
+  if (signing === undefined) return undefined;
   const pinned =
     signing["partner_fingerprint"] ?? signing["partnerFingerprint"];
   if (pinned === undefined) return undefined;
@@ -600,7 +829,24 @@ export function pinnedFingerprintFromConfig(
 }
 
 /**
- * What the signature checks are anchored to besides the fingerprint pin: the two
+ * Read `signing.identity_file` out of an exchange config, so the party that ran
+ * the exchange anchors its own slot from the same config the exchange used. A
+ * non-string value is left to the default path rather than refused: unlike the
+ * pin, nothing about this run turns on it, and the identity that is found is
+ * reported by what it anchors.
+ */
+function signingIdentityPathFromConfig(
+  configFile: string | undefined,
+  explicit: boolean,
+): string | undefined {
+  const signing = signingBlockFromConfig(configFile, explicit);
+  if (signing === undefined) return undefined;
+  const identityFile = signing["identity_file"] ?? signing["identityFile"];
+  return typeof identityFile === "string" ? identityFile : undefined;
+}
+
+/**
+ * What the signature checks are anchored to besides the certificates: the two
  * parties' identities (which each certificate must authorize) and the agreed-terms
  * hash the receipt content carries. The exchange record holds both already, so a
  * party verifying its own exchange supplies them by naming the record; an auditor
@@ -633,24 +879,101 @@ async function signedRecordExpectations(
   };
 }
 
-/** The pinned partner fingerprint for the signed-record check: the explicit flag
- * wins over the config, so a third party given a fingerprint out-of-band can
- * verify against a config it does not have (or one written for another partner). */
-function resolvePinnedFingerprint(
-  flagValue: string | undefined,
+/**
+ * The fingerprints pinned out-of-band for the signed-record check: every
+ * `--partner-fingerprint` value, or the config's `signing.partner_fingerprint`
+ * when the flag is absent. The flag wins over the config, so a third party given a
+ * fingerprint out-of-band can verify against a config it does not have (or one
+ * written for another partner), and a verifier that was party to no exchange
+ * repeats the flag to pin both signers. The record carries two certificates, so a
+ * third value could anchor nothing and is refused rather than quietly dropped.
+ */
+function resolvePinnedFingerprints(
+  flagValues: string[],
   configFile: string | undefined,
-): string | undefined {
-  // This command never auto-loads a config, so a path that reaches here was named
-  // on the command line.
-  if (flagValue === undefined)
-    return pinnedFingerprintFromConfig(configFile, configFile !== undefined);
-  if (!FINGERPRINT_REGEX.test(flagValue))
-    throw new UsageError(
-      "--partner-fingerprint must be a certificate fingerprint (an unpadded " +
-        "base64url SHA-256 digest, 43 characters); obtain it from your partner " +
-        "via 'psilink fingerprint' and a trusted out-of-band channel",
+): string[] {
+  if (flagValues.length === 0) {
+    // This command never auto-loads a config, so a path that reaches here was
+    // named on the command line.
+    const configured = pinnedFingerprintFromConfig(
+      configFile,
+      configFile !== undefined,
     );
-  return flagValue;
+    return configured === undefined ? [] : [configured];
+  }
+  if (flagValues.length > 2)
+    throw new UsageError(
+      "--partner-fingerprint may be given at most twice: a dual-signed record " +
+        "carries two certificates, so a third pinned value can anchor none of " +
+        "them",
+    );
+  for (const value of flagValues)
+    if (!FINGERPRINT_REGEX.test(value))
+      throw new UsageError(
+        "--partner-fingerprint must be a certificate fingerprint (an unpadded " +
+          "base64url SHA-256 digest, 43 characters); obtain it from your " +
+          "partner via 'psilink fingerprint' and a trusted out-of-band channel",
+      );
+  return flagValues;
+}
+
+/**
+ * This party's own certificate fingerprint, which anchors the slot holding its
+ * certificate. It is computed from the signing identity rather than restated by
+ * the operator, who could otherwise only copy the value off the very record being
+ * checked. `--identity-file` names the file; failing that, `signing.identity_file`
+ * from `--config-file` and then the default per-user path are tried in turn.
+ *
+ * A named file that is absent or unreadable is a usage error -- the operator
+ * pointed this run at it. A file found without being asked is not: it belongs to
+ * another exchange or another partner as easily as to this one, so it degrades to
+ * a logged warning and leaves the slot unanchored.
+ */
+async function resolveLocalIdentity(
+  identityFileArg: string | undefined,
+  configFile: string | undefined,
+  log: { warn: (message: string) => void },
+): Promise<LocalIdentityAnchor | undefined> {
+  const fingerprintOf = async (
+    identity: SigningIdentity,
+    source: LocalIdentitySource,
+  ): Promise<LocalIdentityAnchor> => ({
+    fingerprint: await computeCertificateFingerprint(identity.certificate),
+    source,
+  });
+  if (identityFileArg !== undefined) {
+    const named = await loadSigningIdentity(expandTilde(identityFileArg));
+    if (named === undefined)
+      throw new UsageError(
+        `signing identity file ${identityFileArg} does not exist`,
+      );
+    return await fingerprintOf(named, "named");
+  }
+  const configured = signingIdentityPathFromConfig(
+    configFile,
+    configFile !== undefined,
+  );
+  const target = expandTilde(configured ?? defaultSigningIdentityPath());
+  let resolved: SigningIdentity | undefined;
+  try {
+    resolved = await loadSigningIdentity(target);
+  } catch (err) {
+    log.warn(
+      `the signing identity at ${target} could not be read, so it anchors ` +
+        `no certificate in this record: ${sanitizeErrorForDisplay(err)}`,
+    );
+    return undefined;
+  }
+  if (resolved === undefined) {
+    if (configured !== undefined)
+      log.warn(
+        `the signing identity at ${target}, named by the configuration's ` +
+          `signing.identity_file, does not exist, so it anchors no ` +
+          `certificate in this record`,
+      );
+    return undefined;
+  }
+  return await fingerprintOf(resolved, "resolved");
 }
 
 export async function handler(argv: Arguments): Promise<void> {
@@ -675,8 +998,15 @@ export async function handler(argv: Arguments): Promise<void> {
       string | undefined;
     const signedRecordArg = singleValue(argv, "signed-record") as
       string | undefined;
-    const partnerFingerprintArg = singleValue(argv, "partner-fingerprint") as
+    const identityFileArg = singleValue(argv, "identity-file") as
       string | undefined;
+    // Repeatable, one pinned value per signer, so it is read as a list rather
+    // than through singleValue, which refuses a repeat.
+    const partnerFingerprintArgs = ((): string[] => {
+      const value = argv["partner-fingerprint"];
+      if (value === undefined) return [];
+      return (Array.isArray(value) ? value : [value]).map(String);
+    })();
 
     if ((inputFile === undefined) !== (resultFile === undefined))
       throw new UsageError(
@@ -701,8 +1031,7 @@ export async function handler(argv: Arguments): Promise<void> {
         );
     }
 
-    const configTerms = configFileTerms(configFile);
-    const localTerms = configTerms.terms;
+    const localTerms = configFileTerms(configFile);
     const partnerTerms = partnerTermsFrom(partnerTermsFile);
     const signedRecord =
       artifact.kind === "signed"
@@ -711,13 +1040,24 @@ export async function handler(argv: Arguments): Promise<void> {
           ? readSignedRecordFile(signedRecordArg)
           : undefined;
 
-    if (signedRecord === undefined && partnerFingerprintArg !== undefined)
+    if (signedRecord === undefined && partnerFingerprintArgs.length > 0)
       throw new UsageError(
-        "--partner-fingerprint pins the certificate in a dual-signed record, " +
+        "--partner-fingerprint pins a certificate in a dual-signed record, " +
+          "and no dual-signed record was named; pass --signed-record, or name " +
+          "the dual-signed record as the artifact to verify",
+      );
+    if (signedRecord === undefined && identityFileArg !== undefined)
+      throw new UsageError(
+        "--identity-file anchors your own certificate in a dual-signed record, " +
           "and no dual-signed record was named; pass --signed-record, or name " +
           "the dual-signed record as the artifact to verify",
       );
 
+    const supplied: SuppliedVerificationInputs = {
+      configFile,
+      localTerms: localTerms !== undefined,
+      partnerTerms: partnerTerms !== undefined,
+    };
     const lines: string[] = [];
     let exitCode = 0;
 
@@ -758,33 +1098,43 @@ export async function handler(argv: Arguments): Promise<void> {
         report,
         warnings,
         signedRecord !== undefined,
+        supplied,
       );
       lines.push(...rendered.lines);
       exitCode = Math.max(exitCode, rendered.exitCode);
     }
 
     if (signedRecord !== undefined) {
+      const localIdentity = await resolveLocalIdentity(
+        identityFileArg,
+        configFile,
+        log,
+      );
       const rendered = formatSignedRecordReport(
         await verifyDualSignedRecord(signedRecord, {
-          pinnedFingerprint: resolvePinnedFingerprint(
-            partnerFingerprintArg,
+          pinnedFingerprints: resolvePinnedFingerprints(
+            partnerFingerprintArgs,
             configFile,
           ),
+          localIdentity,
           ...(await signedRecordExpectations(
             artifact.kind === "record" ? artifact.record : undefined,
             localTerms,
             partnerTerms,
           )),
         }),
+        {
+          ...supplied,
+          localIdentity: localIdentity?.source,
+          // The note explaining a config that carries no terms belongs beside
+          // the first agreed-terms line it explains, and a combined run has
+          // already printed that line above.
+          noteConfigTerms: artifact.kind !== "record",
+        },
       );
       lines.push(...rendered.lines);
       exitCode = Math.max(exitCode, rendered.exitCode);
     }
-
-    // The note names a path the operator supplied, so it is escaped at this
-    // display sink as the record report's notes are.
-    if (configTerms.note !== undefined)
-      lines.push(`  note: ${sanitizeForDisplay(configTerms.note)}`);
 
     // The verdict is the command's result, so it goes to stdout; the log level
     // still governs any diagnostics the readers above emit.

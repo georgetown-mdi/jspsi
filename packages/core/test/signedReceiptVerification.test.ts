@@ -115,16 +115,19 @@ function withUnevaluableResponder(record: DualSignedRecord): DualSignedRecord {
   } as unknown as DualSignedRecord;
 }
 
-// What a party holding its own exchange record supplies: the partner's pin and
-// both parties' identities and agreed-terms hash.
+// What a party holding its own exchange record supplies: the partner's pin, its
+// own signing identity (found from the same config rather than restated), and
+// both parties' identities and agreed-terms hash. Party A is the initiator here,
+// so its own identity anchors that slot and the pin anchors the responder's.
 const fullyAnchored = {
-  pinnedFingerprint: fingerprintB,
+  pinnedFingerprints: [fingerprintB],
+  localIdentity: { fingerprint: fingerprintA, source: "resolved" } as const,
   expectedIdentities: ["Party A", "Party B"] as readonly [string, string],
   expectedTermsHash: TERMS_HASH,
 };
 
 describe("verifyDualSignedRecord", () => {
-  test("a valid record, fully anchored, verifies", async () => {
+  test("a valid record, both certificates anchored, verifies", async () => {
     const report = await verifyDualSignedRecord(
       await signedRecord(),
       fullyAnchored,
@@ -137,15 +140,116 @@ describe("verifyDualSignedRecord", () => {
     expect(report.initiator.assertedIdentity).toBe("verified");
     expect(report.responder.assertedIdentity).toBe("verified");
     expect(report.termsHash).toBe("verified");
-    // The verifier pins its PARTNER only, so its own slot is simply unpinned --
-    // which does not hold the record short of verified.
-    expect(report.responder.fingerprintPin).toBe("verified");
-    expect(report.initiator.fingerprintPin).toBe("not-pinned");
+    // Each slot names what anchored it: the verifier pins its PARTNER, and its
+    // own certificate is anchored by the signing identity it holds.
+    expect(report.responder.certificateAnchor).toBe("partner-pin");
+    expect(report.initiator.certificateAnchor).toBe("local-identity");
+    expect(report.pinnedFingerprints).toBe("matched");
+    expect(report.localIdentity).toBe("matched");
     // The report names each party and its fingerprint so an operator can see
     // whose certificate was checked.
     expect(report.initiator.fingerprint).toBe(fingerprintA);
     expect(report.responder.fingerprint).toBe(fingerprintB);
     expect(report.initiator.identity).toBe("Party A");
+  });
+
+  test("two pinned values anchor both slots for a verifier that was party to neither", async () => {
+    // The general mechanism, and the only one open to a verifier with no signing
+    // identity of its own: a fingerprint held out-of-band for each signer.
+    const report = await verifyDualSignedRecord(await signedRecord(), {
+      pinnedFingerprints: [fingerprintB, fingerprintA],
+      expectedIdentities: ["Party A", "Party B"],
+      expectedTermsHash: TERMS_HASH,
+    });
+    expect(report.outcome).toBe("verified");
+    expect(report.initiator.certificateAnchor).toBe("partner-pin");
+    expect(report.responder.certificateAnchor).toBe("partner-pin");
+    expect(report.localIdentity).toBe("not-supplied");
+  });
+
+  test("one anchored certificate is incomplete, never verified", async () => {
+    // Everything the record can say about itself checks out; what is missing is
+    // anything outside it vouching for the initiator's certificate, which whoever
+    // assembled the record could have minted.
+    const report = await verifyDualSignedRecord(await signedRecord(), {
+      pinnedFingerprints: [fingerprintB],
+      expectedIdentities: ["Party A", "Party B"],
+      expectedTermsHash: TERMS_HASH,
+    });
+    expect(report.outcome).toBe("incomplete");
+    expect(report.responder.certificateAnchor).toBe("partner-pin");
+    expect(report.initiator.certificateAnchor).toBe("unanchored");
+    expect(report.initiator.signature).toBe("verified");
+    expect(report.initiator.assertedIdentity).toBe("verified");
+    expect(report.termsHash).toBe("verified");
+  });
+
+  test("one pinned value cannot anchor both certificates", async () => {
+    // A record whose two slots carry the same certificate would otherwise let a
+    // single pin claim both and reach verified; each anchoring value claims at
+    // most one slot, so the second is left for something else to anchor.
+    const record = await signedRecord(content(), {
+      initiator: identityA,
+      responder: identityA,
+    });
+    const report = await verifyDualSignedRecord(record, {
+      pinnedFingerprints: [fingerprintA],
+      expectedIdentities: ["Party A", "Party A"],
+      expectedTermsHash: TERMS_HASH,
+    });
+    expect(report.initiator.certificateAnchor).toBe("partner-pin");
+    expect(report.responder.certificateAnchor).toBe("unanchored");
+    expect(report.outcome).toBe("incomplete");
+  });
+
+  test("the same fingerprint pinned twice cannot anchor both slots of a repeated certificate", async () => {
+    // The record anyone can assemble from a single certificate, against the pin
+    // supplied twice: without the pinned values counting once, the two of them
+    // would claim a slot each and a record with one signer behind both slots
+    // would reach verified.
+    const record = await signedRecord(content(), {
+      initiator: identityA,
+      responder: identityA,
+    });
+    const report = await verifyDualSignedRecord(record, {
+      pinnedFingerprints: [fingerprintA, fingerprintA],
+      expectedIdentities: ["Party A", "Party A"],
+      expectedTermsHash: TERMS_HASH,
+    });
+    expect(report.outcome).toBe("incomplete");
+    expect(report.initiator.certificateAnchor).toBe("partner-pin");
+    expect(report.responder.certificateAnchor).toBe("unanchored");
+  });
+
+  test("one fingerprint spelled two ways is still one pinned value", async () => {
+    // The pinned values are compared as digests rather than strings, so an
+    // unpadded fingerprint and its padded spelling are the same value; counting
+    // them separately would anchor both slots of a repeated certificate.
+    const record = await signedRecord(content(), {
+      initiator: identityA,
+      responder: identityA,
+    });
+    const report = await verifyDualSignedRecord(record, {
+      pinnedFingerprints: [fingerprintA, `${fingerprintA}=`],
+      expectedIdentities: ["Party A", "Party A"],
+      expectedTermsHash: TERMS_HASH,
+    });
+    expect(report.outcome).toBe("incomplete");
+    expect(report.responder.certificateAnchor).toBe("unanchored");
+  });
+
+  test("the same fingerprint pinned twice anchors one certificate, and is no mismatch", async () => {
+    const report = await verifyDualSignedRecord(await signedRecord(), {
+      ...fullyAnchored,
+      pinnedFingerprints: [fingerprintB, fingerprintB],
+      localIdentity: undefined,
+    });
+    expect(report.responder.certificateAnchor).toBe("partner-pin");
+    expect(report.initiator.certificateAnchor).toBe("unanchored");
+    // Both values did match a certificate, so neither says this is the wrong
+    // record: the run is short an anchor, not contradicted.
+    expect(report.pinnedFingerprints).toBe("matched");
+    expect(report.outcome).toBe("incomplete");
   });
 
   test("the binder is reported verbatim, not recomputed", async () => {
@@ -169,17 +273,48 @@ describe("verifyDualSignedRecord", () => {
 
   // --- The third-party auditor -----------------------------------------------
 
-  test("with no pinned value the signatures still verify, but the outcome is incomplete", async () => {
+  test("with nothing anchoring either certificate the signatures still verify, but the outcome is incomplete", async () => {
     const report = await verifyDualSignedRecord(await signedRecord());
     expect(report.outcome).toBe("incomplete");
     expect(report.initiator.signature).toBe("verified");
     expect(report.responder.signature).toBe("verified");
     expect(report.initiator.certificateBinding).toBe("verified");
     expect(report.responder.certificateBinding).toBe("verified");
-    expect(report.initiator.fingerprintPin).toBe("not-pinned");
-    expect(report.responder.fingerprintPin).toBe("not-pinned");
+    expect(report.initiator.certificateAnchor).toBe("unanchored");
+    expect(report.responder.certificateAnchor).toBe("unanchored");
+    expect(report.pinnedFingerprints).toBe("not-supplied");
+    expect(report.localIdentity).toBe("not-supplied");
     expect(report.initiator.assertedIdentity).toBe("not-checked");
     expect(report.termsHash).toBe("not-checked");
+  });
+
+  test("a signing identity found rather than named is reported when it anchors nothing", async () => {
+    // The verifier did not claim this record is one it signed -- psilink found
+    // the identity on its behalf -- so a non-match says only that this is not its
+    // exchange, and leaves the slot unanchored rather than contradicting the run.
+    const report = await verifyDualSignedRecord(await signedRecord(), {
+      ...fullyAnchored,
+      localIdentity: { fingerprint: fingerprintC, source: "resolved" },
+    });
+    expect(report.outcome).toBe("incomplete");
+    expect(report.localIdentity).toBe("unmatched");
+    expect(report.initiator.certificateAnchor).toBe("unanchored");
+    // A rotated local identity does not paint the partner's anchored slot: the
+    // pin reached it, and that stands on its own.
+    expect(report.responder.certificateAnchor).toBe("partner-pin");
+  });
+
+  test("a signing identity the verifier named must be one of the certificates", async () => {
+    // Naming it asserts this is a receipt the verifier signed, so a value
+    // matching neither certificate contradicts the run rather than falling short.
+    const report = await verifyDualSignedRecord(await signedRecord(), {
+      ...fullyAnchored,
+      localIdentity: { fingerprint: fingerprintC, source: "named" },
+    });
+    expect(report.outcome).toBe("failed");
+    expect(report.localIdentity).toBe("unmatched");
+    expect(report.responder.certificateAnchor).toBe("partner-pin");
+    expect(report.initiator.signature).toBe("verified");
   });
 
   test("a self-consistent record minted by an outsider never reaches verified without a pin", async () => {
@@ -256,14 +391,17 @@ describe("verifyDualSignedRecord", () => {
     expect(report.responder.signature).toBe("failed");
   });
 
-  test("a fingerprint matching neither certificate is a mismatch on both", async () => {
+  test("a fingerprint matching neither certificate fails the run", async () => {
     const report = await verifyDualSignedRecord(await signedRecord(), {
       ...fullyAnchored,
-      pinnedFingerprint: fingerprintC,
+      pinnedFingerprints: [fingerprintC],
     });
     expect(report.outcome).toBe("failed");
-    expect(report.initiator.fingerprintPin).toBe("mismatch");
-    expect(report.responder.fingerprintPin).toBe("mismatch");
+    expect(report.pinnedFingerprints).toBe("unmatched");
+    // The failure is attributed to the pin, not to the slot the verifier's own
+    // identity anchored: that anchor holds regardless.
+    expect(report.initiator.certificateAnchor).toBe("local-identity");
+    expect(report.responder.certificateAnchor).toBe("unanchored");
     // The signatures are sound; what failed is that this is not the pinned
     // partner's record.
     expect(report.initiator.signature).toBe("verified");
@@ -273,10 +411,11 @@ describe("verifyDualSignedRecord", () => {
   test("a malformed pinned value is a mismatch, never a match", async () => {
     const report = await verifyDualSignedRecord(await signedRecord(), {
       ...fullyAnchored,
-      pinnedFingerprint: "not a fingerprint",
+      pinnedFingerprints: ["not a fingerprint"],
     });
     expect(report.outcome).toBe("failed");
-    expect(report.responder.fingerprintPin).toBe("mismatch");
+    expect(report.pinnedFingerprints).toBe("unmatched");
+    expect(report.responder.certificateAnchor).toBe("unanchored");
   });
 
   test("a certificate outside the canonical domain yields a report, not a rejection", async () => {
@@ -289,8 +428,10 @@ describe("verifyDualSignedRecord", () => {
       fullyAnchored,
     );
     expect(report.outcome).toBe("failed");
-    expect(report.initiator.fingerprintPin).toBe("mismatch");
-    expect(report.responder.fingerprintPin).toBe("mismatch");
+    // The pinned value is the responder's, and that certificate cannot be
+    // evaluated at all, so it matches nothing here.
+    expect(report.pinnedFingerprints).toBe("unmatched");
+    expect(report.responder.certificateAnchor).toBe("unanchored");
     expect(report.responder.certificateBinding).toBe("failed");
     expect(report.responder.signature).toBe("failed");
     expect(report.responder.fingerprint).toBe("");
@@ -301,16 +442,17 @@ describe("verifyDualSignedRecord", () => {
 
   test("an unevaluable certificate does not sink the pin on the other slot", async () => {
     // The same record as above, with the pin on the slot that CAN be evaluated:
-    // that slot's match stands and the unevaluable one is simply unpinned. The
+    // that slot's match stands and the unevaluable one is simply unanchored. The
     // pin is therefore evaluated per certificate -- collapsing the pair to a
     // single mismatch whenever either certificate cannot be encoded would still
     // satisfy the out-of-domain pin above.
     const report = await verifyDualSignedRecord(
       withUnevaluableResponder(await signedRecord()),
-      { ...fullyAnchored, pinnedFingerprint: fingerprintA },
+      { ...fullyAnchored, pinnedFingerprints: [fingerprintA] },
     );
-    expect(report.initiator.fingerprintPin).toBe("verified");
-    expect(report.responder.fingerprintPin).toBe("not-pinned");
+    expect(report.initiator.certificateAnchor).toBe("partner-pin");
+    expect(report.responder.certificateAnchor).toBe("unanchored");
+    expect(report.pinnedFingerprints).toBe("matched");
   });
 
   test("a certificate whose self-signature does not verify fails the identity binding", async () => {
@@ -356,7 +498,7 @@ describe("verifyDualSignedRecord", () => {
     });
     const report = await verifyDualSignedRecord(record, {
       ...fullyAnchored,
-      pinnedFingerprint: fingerprintA,
+      pinnedFingerprints: [fingerprintA],
     });
     expect(report.initiator.assertedIdentity).toBe("verified");
     expect(report.responder.assertedIdentity).toBe("mismatch");
@@ -411,10 +553,15 @@ describe("cross-implementation bundle", () => {
     };
   };
 
-  test("a foreign-signed bundle parses and verifies against the pinned fingerprint", async () => {
+  test("a foreign-signed bundle parses and verifies against the pinned fingerprints", async () => {
     const record = parseDualSignedRecord(bundle.record);
     const report = await verifyDualSignedRecord(record, {
-      pinnedFingerprint: bundle.expected.responderFingerprint,
+      // The bundle is nobody's own exchange, so both signers are anchored the
+      // way a verifier that was party to neither anchors them: by fingerprint.
+      pinnedFingerprints: [
+        bundle.expected.responderFingerprint,
+        bundle.expected.initiatorFingerprint,
+      ],
       expectedIdentities: [
         bundle.expected.initiatorIdentity,
         bundle.expected.responderIdentity,
@@ -440,7 +587,7 @@ describe("cross-implementation bundle", () => {
           binder: "DqMqfqQWT3ezinyelof-x2r-aBMbuAnCpIFjI7cVvOA",
         },
       },
-      { pinnedFingerprint: bundle.expected.responderFingerprint },
+      { pinnedFingerprints: [bundle.expected.responderFingerprint] },
     );
     expect(report.outcome).toBe("failed");
     expect(report.initiator.signature).toBe("failed");

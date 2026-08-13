@@ -310,7 +310,10 @@ describe("signed receipt in the browser", () => {
     // or certificate body diverged would reject it.
     const record = parseDualSignedRecord(receiptBundle.record);
     const report = await verifyDualSignedRecord(record, {
-      pinnedFingerprint: receiptBundle.expected.responderFingerprint,
+      pinnedFingerprints: [
+        receiptBundle.expected.responderFingerprint,
+        receiptBundle.expected.initiatorFingerprint,
+      ],
       expectedIdentities: [
         receiptBundle.expected.initiatorIdentity,
         receiptBundle.expected.responderIdentity,
