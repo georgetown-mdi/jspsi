@@ -559,6 +559,7 @@ export class JobManager {
         this.jobRendezvousDir,
         this.jobInputDir,
         this.dataRoot,
+        workdir,
       ))
         this.appendEvent(record, { v: 1, type: "warning", message });
 

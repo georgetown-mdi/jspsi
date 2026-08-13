@@ -4,11 +4,18 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { MAX_ENDPOINT_PATH_LENGTH } from "@psilink/core";
+import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
+  MAX_ENDPOINT_PATH_LENGTH,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import { MAX_INPUT_NAME_LENGTH } from "@jobs/workInputName";
 
 import {
+  MAX_NAMED_RENDEZVOUS_ENTRIES,
+  notEmptyLead,
   rendezvousStartupWarnings,
   resolveJobRendezvousDir,
   resolveJobRendezvousFolderName,
@@ -225,7 +232,12 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const dataRoot = tempDir("data");
     const rendezvous = subDir(dataRoot, "rendezvous");
     const warnings = overlapWarnings(
-      rendezvousStartupWarnings(rendezvous, undefined, dataRoot),
+      rendezvousStartupWarnings(
+        rendezvous,
+        undefined,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      ),
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("the job data root");
@@ -235,7 +247,12 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const rendezvous = tempDir("rendezvous");
     const dataRoot = subDir(rendezvous, "data");
     const warnings = overlapWarnings(
-      rendezvousStartupWarnings(rendezvous, undefined, dataRoot),
+      rendezvousStartupWarnings(
+        rendezvous,
+        undefined,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      ),
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("the job data root");
@@ -245,7 +262,12 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const shared = tempDir("shared");
     const dataRoot = tempDir("data");
     const warnings = overlapWarnings(
-      rendezvousStartupWarnings(shared, shared, dataRoot),
+      rendezvousStartupWarnings(
+        shared,
+        shared,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      ),
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("the work-input directory");
@@ -256,7 +278,12 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const rendezvous = subDir(jobInput, "rendezvous");
     const dataRoot = tempDir("data");
     const warnings = overlapWarnings(
-      rendezvousStartupWarnings(rendezvous, jobInput, dataRoot),
+      rendezvousStartupWarnings(
+        rendezvous,
+        jobInput,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      ),
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("the work-input directory");
@@ -267,7 +294,12 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const dataRoot = subDir(rendezvous, "data");
     const jobInput = subDir(rendezvous, "input");
     const warnings = overlapWarnings(
-      rendezvousStartupWarnings(rendezvous, jobInput, dataRoot),
+      rendezvousStartupWarnings(
+        rendezvous,
+        jobInput,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      ),
     );
     expect(warnings).toHaveLength(2);
     expect(
@@ -282,8 +314,260 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const rendezvous = tempDir("rendezvous");
     const jobInput = tempDir("input");
     const dataRoot = tempDir("data");
-    expect(rendezvousStartupWarnings(rendezvous, jobInput, dataRoot)).toEqual(
-      [],
+    expect(
+      rendezvousStartupWarnings(
+        rendezvous,
+        jobInput,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      ),
+    ).toEqual([]);
+  });
+});
+
+/** Whether a preflight warning is one of those about what the directory holds --
+ * the not-empty lead, the listing that follows it, or the unlistable-mount notice --
+ * as opposed to the overlap and permission warnings the same call can raise. */
+function isContentWarning(warning: string): boolean {
+  return (
+    warning.includes("is not empty") ||
+    warning.includes("holds") ||
+    warning.includes("cannot be listed")
+  );
+}
+
+/** The rendezvous preflight run over a directory holding `entries`, isolated from
+ * the overlap branch by non-overlapping sibling fixtures, and reduced to the
+ * warnings about what the directory holds. Raw, as the preflight composes them and
+ * as the job event stream carries them. */
+function contentWarnings(entries: Array<string>): Array<string> {
+  const rendezvous = tempDir("rendezvous");
+  const dataRoot = tempDir("data");
+  for (const entry of entries)
+    fs.writeFileSync(path.join(rendezvous, entry), "");
+  return rendezvousStartupWarnings(
+    rendezvous,
+    tempDir("input"),
+    dataRoot,
+    path.join(dataRoot, "current-job"),
+  ).filter(isContentWarning);
+}
+
+/** The same warnings as the operator reads them: each console warning sink stores
+ * `sanitizeForDisplay(message)`, so this is core's real display transform -- escaping
+ * and 256-character cap both -- applied once to what the preflight composed. Every
+ * assertion about what the operator sees is made on this side of it. */
+function renderedContentWarnings(entries: Array<string>): Array<string> {
+  return contentWarnings(entries).map((warning) => sanitizeForDisplay(warning));
+}
+
+/** The transcript a completed retain-mode run leaves in the mount. */
+const retainedTranscript = [
+  "console-hello.json",
+  "partner-hello.json",
+  "console-partner-hello-ack.json",
+  "console-20260812T101500123Z-001-4096.json",
+  "partner-console-20260812T101500123Z-001-4096-ack.json",
+];
+
+describe("rendezvousStartupWarnings emptiness branch", () => {
+  test("an empty rendezvous directory is the silent case", () => {
+    expect(contentWarnings([])).toEqual([]);
+  });
+
+  test("a completed retain-mode run is reported to the next exchange", () => {
+    // The console rendezvouses every filedrop job out of the one mount, so the
+    // transcript a retain-mode run is asked to keep is still there when the
+    // operator starts the next exchange -- no crash anywhere in the story. The
+    // console reports it rather than letting the exchange's own entry guard end
+    // the next run mid-flow.
+    const [lead, listing] = renderedContentWarnings(retainedTranscript);
+    expect(lead).toContain("is not empty");
+    for (const name of retainedTranscript) expect(listing).toContain(name);
+  });
+
+  test("the lead reaches the operator carrying its whole recovery", () => {
+    // The sink caps what it renders, and the clause the cap would eat first is
+    // the one that keeps the recovery from reading as "empty this folder".
+    const [lead] = renderedContentWarnings(["console-hello.json"]);
+    expect(lead).toContain("an exchange refuses to start");
+    expect(lead).toContain("delete those on the host first");
+    expect(lead).toContain(
+      "Your own input and results are not what it refuses over",
     );
+    expect(lead).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  });
+
+  test("a console mount path rides in the lead", () => {
+    const lead = notEmptyLead("/data");
+    expect(lead).toContain("/data");
+    expect(sanitizeForDisplay(lead)).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  });
+
+  test("a mount path too long for the lead is left out of it", () => {
+    // The path is the lead's only unbounded part, and the recovery is what a
+    // truncation would cut, so the path is what gives way.
+    const deepMount = `/mnt/${"d".repeat(300)}`;
+    const lead = notEmptyLead(deepMount);
+    expect(lead).not.toContain(deepMount);
+    expect(lead).toContain("the rendezvous directory is not empty");
+    expect(lead).toContain(
+      "Your own input and results are not what it refuses over",
+    );
+    expect(sanitizeForDisplay(lead)).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  });
+
+  test("files the exchange has no claim on are reported the same way", () => {
+    // Sorting protocol files from foreign ones is the exchange's grammar, not the
+    // console's: the listing names what is there and the operator judges it.
+    const warnings = renderedContentWarnings(["patients.csv", "notes.txt"]);
+    expect(warnings).toHaveLength(2);
+    expect(warnings[1]).toContain("patients.csv");
+    expect(warnings[1]).toContain("notes.txt");
+  });
+
+  test("a subdirectory makes the mount non-empty as a loose file does", () => {
+    const rendezvous = tempDir("rendezvous");
+    const dataRoot = tempDir("data");
+    fs.mkdirSync(path.join(rendezvous, "prior-job"));
+    const warnings = rendezvousStartupWarnings(
+      rendezvous,
+      tempDir("input"),
+      dataRoot,
+      path.join(dataRoot, "current-job"),
+    ).filter(isContentWarning);
+    expect(warnings).toHaveLength(2);
+    expect(warnings[1]).toContain("prior-job");
+  });
+
+  test("the job's own just-created workdir does not make the mount non-empty", () => {
+    // Single-folder layout: the rendezvous directory IS the data root, and
+    // createJob has already made this job's workdir inside it by the time the
+    // preflight runs; a pristine mount must stay the silent case.
+    const shared = tempDir("shared");
+    const workdir = subDir(shared, "0f6e2c1a-current");
+    const warnings = rendezvousStartupWarnings(
+      shared,
+      undefined,
+      shared,
+      workdir,
+    ).filter(isContentWarning);
+    expect(warnings).toEqual([]);
+  });
+
+  test("leftovers beside the job's own workdir are reported without naming it", () => {
+    const shared = tempDir("shared");
+    const workdir = subDir(shared, "0f6e2c1a-current");
+    fs.writeFileSync(path.join(shared, "console-hello.json"), "");
+    const warnings = rendezvousStartupWarnings(
+      shared,
+      undefined,
+      shared,
+      workdir,
+    ).filter(isContentWarning);
+    expect(warnings).toHaveLength(2);
+    expect(warnings[1]).toContain("console-hello.json");
+    expect(warnings[1]).not.toContain("0f6e2c1a-current");
+  });
+
+  test("names are listed in a stable order whatever readdir returns", () => {
+    const [, listing] = renderedContentWarnings(["c.json", "a.json", "b.json"]);
+    expect(listing).toContain("a.json, b.json, c.json");
+  });
+
+  test("a long transcript is counted past the naming cap", () => {
+    const overflow = 3;
+    const entries = Array.from(
+      { length: MAX_NAMED_RENDEZVOUS_ENTRIES + overflow },
+      (_unused, index) => `m${String(index).padStart(3, "0")}.json`,
+    );
+    const [, listing] = renderedContentWarnings(entries);
+    expect(listing).toContain(`and ${overflow} more`);
+    expect(listing).toContain(entries[MAX_NAMED_RENDEZVOUS_ENTRIES - 1]);
+    expect(listing).not.toContain(entries[MAX_NAMED_RENDEZVOUS_ENTRIES]);
+    expect(listing).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  });
+
+  test("a partner-chosen name is escaped exactly once at the sink", () => {
+    // The partner syncs its own files into this directory, so an entry name is
+    // partner-controlled text on its way to a display sink. Escaping it here as
+    // well would reach the operator doubled: the transform is not idempotent.
+    const bellName = `drop${String.fromCharCode(7)}ping.json`;
+    const [, composed] = contentWarnings([bellName]);
+    expect(composed).toContain(bellName);
+    const rendered = sanitizeForDisplay(composed);
+    expect(rendered).toContain("drop\\x07ping.json");
+    expect(rendered).not.toContain("\\\\x07");
+  });
+
+  test("a name that escapes wide is counted rather than shown chopped", () => {
+    // Escaping expands: a filename filled to the 255-byte limit with a character
+    // that needs an escape renders several times its own length, so what bounds
+    // the listing is the name's RENDERED cost, measured before it is admitted.
+    const wide = String.fromCharCode(0xe9).repeat(127);
+    const [, listing] = renderedContentWarnings(["a.json", wide]);
+    expect(listing.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
+    expect(listing).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    // A name the cap chopped reads like a whole name the operator could go and
+    // delete, so the count absorbs it and the shorter name is still named.
+    expect(listing).toContain("a.json");
+    expect(listing).toContain("and 1 more");
+  });
+
+  test("a mount whose names all escape wide is counted rather than named", () => {
+    const wide = String.fromCharCode(0xe9).repeat(127);
+    const [, listing] = renderedContentWarnings([wide]);
+    expect(listing).toContain("1 entry");
+    expect(listing).not.toContain("\\xe9");
+    expect(listing).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  });
+
+  test("no warning truncates at the sink, whatever the mount holds", () => {
+    const wide = String.fromCharCode(0xe9).repeat(127);
+    const bell = `drop${String.fromCharCode(7)}ping.json`;
+    const shapes: Array<Array<string>> = [
+      ["console-hello.json"],
+      retainedTranscript,
+      Array.from(
+        { length: 4 * MAX_NAMED_RENDEZVOUS_ENTRIES },
+        (_unused, index) => `m${String(index).padStart(3, "0")}.json`,
+      ),
+      ["x".repeat(255)],
+      ["a.json", "x".repeat(255), "b.json"],
+      [wide, "c.json", bell],
+      Array.from(
+        { length: 12 },
+        (_unused, index) => `${index}-${String.fromCharCode(0xe9).repeat(120)}`,
+      ),
+    ];
+    for (const shape of shapes)
+      for (const warning of renderedContentWarnings(shape)) {
+        expect(warning).not.toContain(DISPLAY_TRUNCATION_MARKER);
+        expect(warning.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
+      }
+  });
+
+  test("an unlistable mount says so rather than reading as empty", () => {
+    if (process.getuid?.() === 0) return;
+    const rendezvous = tempDir("rendezvous");
+    fs.writeFileSync(path.join(rendezvous, "console-hello.json"), "");
+    fs.chmodSync(rendezvous, 0o300);
+    try {
+      const dataRoot = tempDir("data");
+      const warnings = rendezvousStartupWarnings(
+        rendezvous,
+        tempDir("input"),
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      );
+      expect(
+        warnings.some((warning) => warning.includes("cannot be listed")),
+      ).toBe(true);
+      expect(warnings.some((warning) => warning.includes("is not empty"))).toBe(
+        false,
+      );
+    } finally {
+      fs.chmodSync(rendezvous, 0o700);
+    }
   });
 });
