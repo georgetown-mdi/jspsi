@@ -467,13 +467,44 @@ const RECEIPT_SIGNATURE_WORD: Record<ReceiptSignatureStatus, string> = {
   verified: "verifies over this receipt's content, bound to this party",
   failed: "DOES NOT VERIFY",
 };
-const CERTIFICATE_ANCHOR_WORD: Record<CertificateAnchorStatus, string> = {
+const ANCHORED_CERTIFICATE_WORD: Record<
+  Exclude<CertificateAnchorStatus, "unanchored">,
+  string
+> = {
   "partner-pin": "matches a fingerprint you pinned out-of-band",
   "local-identity": "is your own signing identity's certificate",
-  unanchored:
-    "not anchored (no pinned value matches it, and it is not your own " +
-    "certificate)",
 };
+
+/**
+ * What an unanchored slot says, in the clauses the report supports and no others:
+ * a check that did not run, or one that ran and matched this very certificate,
+ * must not be narrated as a check this certificate failed.
+ *
+ * A pinned value that matches this certificate and no other would have anchored
+ * this slot, so while the other slot carries a different certificate the report
+ * does support "no pinned value matches it". When both slots carry one
+ * certificate it does not: the value that anchored the other slot matches this
+ * one too, and what leaves the slot unanchored is that each value claims a single
+ * slot. The verifier's own certificate is ruled out only when an identity was
+ * actually compared and reached neither slot.
+ */
+function unanchoredCertificateWord(
+  party: SignedReceiptPartyReport,
+  other: SignedReceiptPartyReport,
+  report: DualSignedRecordVerificationReport,
+): string {
+  const clauses: string[] = [];
+  if (
+    report.pinnedFingerprints !== "not-supplied" &&
+    other.fingerprint !== party.fingerprint
+  )
+    clauses.push("no pinned value matches it");
+  if (report.localIdentity === "unmatched")
+    clauses.push("it is not your own certificate");
+  const supported = clauses.length === 0 ? "" : ` -- ${clauses.join(", and ")}`;
+  return `not anchored (nothing you supplied anchors it${supported})`;
+}
+
 // How the verdict's own sentence names each anchor. An unanchored slot has no
 // entry: it is the case the sentence must not claim.
 const ANCHOR_SOURCE_PHRASE: Partial<Record<CertificateAnchorStatus, string>> = {
@@ -511,15 +542,20 @@ function assertedIdentityWord(
 
 function signedPartyLines(
   party: SignedReceiptPartyReport,
+  other: SignedReceiptPartyReport,
+  report: DualSignedRecordVerificationReport,
   supplied: SuppliedVerificationInputs,
 ): string[] {
+  const anchorWord =
+    party.certificateAnchor === "unanchored"
+      ? unanchoredCertificateWord(party, other, report)
+      : ANCHORED_CERTIFICATE_WORD[party.certificateAnchor];
   return [
     // The identity is free text the certificate's holder chose, so it is escaped
     // at this display sink; the fingerprint beside it is recomputed by the
     // verifier rather than carried by the record.
     `  ${party.role}: ${sanitizeForDisplay(party.identity)}`,
-    `    certificate fingerprint ${party.fingerprint}: ` +
-      CERTIFICATE_ANCHOR_WORD[party.certificateAnchor],
+    `    certificate fingerprint ${party.fingerprint}: ${anchorWord}`,
     `    certificate identity binding: ` +
       CERTIFICATE_BINDING_WORD[party.certificateBinding],
     `    receipt signature: ${RECEIPT_SIGNATURE_WORD[party.signature]}`,
@@ -650,8 +686,12 @@ export function formatSignedRecordReport(
         `are anchored outside the record -- ${anchorsPhrase(parties(report))}.`,
     );
 
-  lines.push(...signedPartyLines(report.initiator, supplied));
-  lines.push(...signedPartyLines(report.responder, supplied));
+  lines.push(
+    ...signedPartyLines(report.initiator, report.responder, report, supplied),
+  );
+  lines.push(
+    ...signedPartyLines(report.responder, report.initiator, report, supplied),
+  );
   lines.push(
     `  agreed-terms hash: ${signedTermsWord(report.termsHash, supplied)}`,
   );

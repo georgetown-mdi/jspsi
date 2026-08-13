@@ -202,6 +202,42 @@ describe("verifyDualSignedRecord", () => {
     expect(report.outcome).toBe("incomplete");
   });
 
+  test("the same fingerprint pinned twice cannot anchor both slots of a repeated certificate", async () => {
+    // The record anyone can assemble from a single certificate, against the pin
+    // supplied twice: without the pinned values counting once, the two of them
+    // would claim a slot each and a record with one signer behind both slots
+    // would reach verified.
+    const record = await signedRecord(content(), {
+      initiator: identityA,
+      responder: identityA,
+    });
+    const report = await verifyDualSignedRecord(record, {
+      pinnedFingerprints: [fingerprintA, fingerprintA],
+      expectedIdentities: ["Party A", "Party A"],
+      expectedTermsHash: TERMS_HASH,
+    });
+    expect(report.outcome).toBe("incomplete");
+    expect(report.initiator.certificateAnchor).toBe("partner-pin");
+    expect(report.responder.certificateAnchor).toBe("unanchored");
+  });
+
+  test("one fingerprint spelled two ways is still one pinned value", async () => {
+    // The pinned values are compared as digests rather than strings, so an
+    // unpadded fingerprint and its padded spelling are the same value; counting
+    // them separately would anchor both slots of a repeated certificate.
+    const record = await signedRecord(content(), {
+      initiator: identityA,
+      responder: identityA,
+    });
+    const report = await verifyDualSignedRecord(record, {
+      pinnedFingerprints: [fingerprintA, `${fingerprintA}=`],
+      expectedIdentities: ["Party A", "Party A"],
+      expectedTermsHash: TERMS_HASH,
+    });
+    expect(report.outcome).toBe("incomplete");
+    expect(report.responder.certificateAnchor).toBe("unanchored");
+  });
+
   test("the same fingerprint pinned twice anchors one certificate, and is no mismatch", async () => {
     const report = await verifyDualSignedRecord(await signedRecord(), {
       ...fullyAnchored,

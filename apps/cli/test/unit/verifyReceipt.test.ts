@@ -243,7 +243,8 @@ describe("formatSignedRecordReport", () => {
   ): SignedReceiptPartyReport => ({
     role,
     identity: `Party ${role === "initiator" ? "A" : "B"}`,
-    fingerprint: "Zm9vZmluZ2VycHJpbnQ",
+    fingerprint:
+      role === "initiator" ? "Zm9vZmluZ2VycHJpbnQ" : "YmFyZmluZ2VycHJpbnQ",
     certificateBinding: "verified",
     signature: "verified",
     certificateAnchor: role === "responder" ? "partner-pin" : "local-identity",
@@ -305,10 +306,14 @@ describe("formatSignedRecordReport", () => {
         "record anchors the initiator's certificate.",
     );
     const out = lines.join("\n");
+    // No signing identity was supplied, so nothing was compared against this
+    // certificate to rule out its being the operator's own: the line says what
+    // the run did check, and no more.
     expect(out).toContain(
-      "not anchored (no pinned value matches it, and it is not your own " +
-        "certificate)",
+      "not anchored (nothing you supplied anchors it -- no pinned value " +
+        "matches it)",
     );
+    expect(out).not.toContain("your own certificate");
     expect(out).toContain(
       "the initiator's certificate is anchored by nothing outside this record, " +
         "which is what holds the verdict short of VERIFIED",
@@ -316,6 +321,43 @@ describe("formatSignedRecordReport", () => {
     expect(out).toContain("--identity-file");
     // Short of verified is not a failure: the exit code stays 0.
     expect(exitCode).toBe(0);
+  });
+
+  test("an unanchored slot a pinned value does match is not reported as matching none", () => {
+    // Both slots carry one certificate, so the pin that anchored the responder's
+    // slot matches the initiator's certificate too: what leaves that slot
+    // unanchored is each value claiming a single slot, not a pin that missed.
+    const { lines } = formatSignedRecordReport(
+      report({
+        outcome: "incomplete",
+        initiator: party("initiator", {
+          certificateAnchor: "unanchored",
+          fingerprint: "YmFyZmluZ2VycHJpbnQ",
+        }),
+        localIdentity: "not-supplied",
+      }),
+    );
+    const out = lines.join("\n");
+    expect(out).toContain("not anchored (nothing you supplied anchors it)");
+    expect(out).not.toContain("no pinned value matches it");
+  });
+
+  test("an unanchored slot names your own identity only once one was compared", () => {
+    // The identity was resolved and reached neither certificate, so this slot's
+    // certificate is not the operator's -- a clause the report supports here and
+    // withholds when no identity was ever compared.
+    const { lines } = formatSignedRecordReport(
+      report({
+        outcome: "incomplete",
+        initiator: party("initiator", { certificateAnchor: "unanchored" }),
+        localIdentity: "unmatched",
+      }),
+      { localTerms: true, partnerTerms: true, localIdentity: "resolved" },
+    );
+    expect(lines.join("\n")).toContain(
+      "not anchored (nothing you supplied anchors it -- no pinned value " +
+        "matches it, and it is not your own certificate)",
+    );
   });
 
   test("a failed outcome carries no note asserting the signatures verified", () => {

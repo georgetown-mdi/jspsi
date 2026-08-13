@@ -72,9 +72,11 @@ export type ReceiptSignatureStatus = "verified" | "failed";
  * - `partner-pin`: its fingerprint matches a value the verifier pinned
  *   out-of-band.
  * - `local-identity`: it is the certificate of the verifier's own signing
- *   identity. That anchor is not circular -- the receipt signature in the slot
- *   verifies only under the private key the verifier holds, so a record cannot
- *   put the verifier's certificate in a slot the verifier did not sign.
+ *   identity. Certificates are public, so this says whose certificate occupies
+ *   the slot and nothing more -- whoever assembled the record could have copied
+ *   it in. What refuses a slot its certificate's holder did not sign is the
+ *   receipt signature there, which verifies only under the private key the
+ *   verifier holds.
  * - `unanchored`: nothing outside the record vouches for this certificate. It is
  *   still checked against itself (its self-signature, its signature over the
  *   content, and the expected identities), all of which whoever assembled the
@@ -295,13 +297,12 @@ interface AnchorAssignment {
 
 /**
  * Assign the anchoring values the verifier holds to the record's two certificate
- * slots, as an assignment rather than a per-value test: each value claims at most
- * one slot, so two equal pinned values -- or a pinned value that matches the
- * verifier's own certificate -- anchor one certificate between them and leave the
- * other slot to be anchored by something else or not at all. Whether a value
- * matched at all is reported separately from what it anchored, so a value that
- * matched a slot another value already claimed is not reported as matching
- * nothing.
+ * slots, as an assignment rather than a per-value test: equal pinned values count
+ * once and each value claims at most one slot, so one pinned value -- or two equal
+ * ones -- anchors a single slot and leaves the other to be anchored by something
+ * else or not at all. Whether a value matched at all is reported separately from
+ * what it anchored, so a value that matched a slot another value already claimed
+ * is not reported as matching nothing.
  */
 async function assignAnchors(
   record: DualSignedRecord,
@@ -333,7 +334,20 @@ async function assignAnchors(
   // The pinned values go first: a pin is evidence about a party the verifier
   // cannot otherwise reach, while the local identity's slot is the one the
   // verifier could name either way.
-  for (const matches of pinMatches) claim(matches, "partner-pin");
+  //
+  // Two pinned values that reach the same slot are the same fingerprint whatever
+  // their spelling -- each matched the digest of the certificate in that slot --
+  // so their match patterns deduplicate the values without depending on how they
+  // were written. Without that, one fingerprint supplied twice would claim both
+  // slots of a record whose two slots carry a single certificate, and a record
+  // anyone can assemble from one certificate would reach `verified`.
+  const claimedPatterns = new Set<string>();
+  for (const matches of pinMatches) {
+    const pattern = matches.join(",");
+    if (claimedPatterns.has(pattern)) continue;
+    claimedPatterns.add(pattern);
+    claim(matches, "partner-pin");
+  }
   if (localMatches !== undefined) claim(localMatches, "local-identity");
 
   const reached = (matches: SlotMatches): boolean => matches[0] || matches[1];
