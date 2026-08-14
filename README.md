@@ -196,7 +196,7 @@ docker run --rm vdorie/psi-link:latest --help
 
 # Documentation
 
-The full documentation set lives in [docs/](docs/README.md) and covers the protocol, threat model, exchange specification, deployment, and operations. The role-based reading guide there points each audience (program officers, security reviewers, IT staff, contributors, partner agencies) to the most relevant documents.
+The full documentation set lives in [docs/](docs/README.md) and covers the protocol, threat model, exchange specification, deployment, and operations. The role-based reading guide there points each audience (program officers, security reviewers, IT staff, contributors, partner agencies) to the most relevant documents. An agency security review starts with [docs/SHARED_RESPONSIBILITY.md](docs/SHARED_RESPONSIBILITY.md), which states the deployment model and what the project operates versus what the deploying agency operates.
 
 Repository-level resources:
 
