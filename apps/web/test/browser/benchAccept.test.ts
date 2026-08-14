@@ -772,6 +772,90 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
       .toBeEnabled();
   });
 
+  test("the blocked-reason region is mounted and silent while nothing blocks launch", async () => {
+    // The region exists before it has anything to say: assistive tech observes a
+    // live region from the moment it is in the document, so a reason that arrives
+    // later is an empty -> non-empty transition rather than a region mounting with
+    // its text already in place, which is announced unreliably.
+    await reachColumns("first_name,last_name\nAlice,Smith\n");
+    const region = page.getByTestId("launch-blocked-reason");
+    await expect.element(region).toBeInTheDocument();
+    expect(region.element().getAttribute("role")).toBe("status");
+    expect(region.element().textContent).toBe("");
+    // Nothing blocks, so the button is live and describes itself with nothing.
+    const start = page.getByRole("button", { name: "Start the exchange" });
+    await expect.element(start).toBeEnabled();
+    expect(start.element().getAttribute("aria-describedby")).toBeNull();
+  });
+
+  test("a reason arising mid-session lands in the region already mounted", async () => {
+    await reachColumns("first_name,last_name\nAlice,Smith\n");
+    const region = page.getByTestId("launch-blocked-reason").element();
+    expect(region.textContent).toBe("");
+
+    // Retype both matching columns to Other: no key can match, so a gate the
+    // operator opened themselves closes the launch after the step was mounted.
+    for (const columnName of ["first_name", "last_name"]) {
+      await userEvent.click(
+        page.getByRole("combobox", {
+          name: `Type for column ${columnName}`,
+          exact: true,
+        }),
+      );
+      await userEvent.click(
+        page.getByRole("option", { name: "Other (not used for matching)" }),
+      );
+    }
+    await expect
+      .element(page.getByText("This file cannot match yet"))
+      .toBeInTheDocument();
+
+    // The SAME node, not a replacement: a remounted region is a fresh one whose
+    // text was present at mount, which is the announcement this fix exists to
+    // avoid, and an identity check is the only thing that tells the two apart.
+    expect(page.getByTestId("launch-blocked-reason").element()).toBe(region);
+    expect(region.textContent).toBe(
+      "Set your columns to the missing field types above before you can start.",
+    );
+    const start = page.getByRole("button", { name: "Start the exchange" });
+    await expect.element(start).toBeDisabled();
+    expect(
+      document.getElementById(
+        start.element().getAttribute("aria-describedby") ?? "",
+      ),
+    ).toBe(region);
+  });
+
+  test("a two-identifier file says which rule to resolve at the disabled button", async () => {
+    // A model-side gate with no transport in it: the keys are all satisfiable and
+    // the invitation accepts what is marked, so the identifier rule alone closes
+    // the launch -- and the button carries its sentence rather than falling silent.
+    await reachColumns("id,identifier,first_name,last_name\n1,2,Alice,Smith\n");
+    const start = page.getByRole("button", { name: "Start the exchange" });
+    await expect.element(start).toBeDisabled();
+    const reasonId = start.element().getAttribute("aria-describedby");
+    expect(reasonId).toBeTruthy();
+    expect(document.getElementById(reasonId!)?.textContent).toBe(
+      "Choose a single record identifier column above before you can start.",
+    );
+
+    // Resolving it empties the region in place and re-opens the launch.
+    await userEvent.click(
+      page.getByRole("combobox", {
+        name: "Type for column identifier",
+        exact: true,
+      }),
+    );
+    await userEvent.click(
+      page.getByRole("option", { name: "Other (not used for matching)" }),
+    );
+    await expect.element(start).toBeEnabled();
+    expect(
+      page.getByTestId("launch-blocked-reason").element().textContent,
+    ).toBe("");
+    expect(start.element().getAttribute("aria-describedby")).toBeNull();
+  });
+
   test("Reset to defaults restores the file-derived defaults", async () => {
     await reachColumns("first_name,last_name\nAlice,Smith\n");
     await expect
@@ -1238,6 +1322,10 @@ describe("acceptor columns step: the columns the invitation will not accept", ()
       page.getByText("Your partner will not accept this column").query(),
     ).toBeNull();
     expect(app.container.textContent).not.toContain("before you can start");
+    // Silent, not absent: the region stands ready for a reason arising later.
+    await expect
+      .element(page.getByTestId("launch-blocked-reason"))
+      .toBeInTheDocument();
     expect(
       page
         .getByRole("button", { name: "Start the exchange" })

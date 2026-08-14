@@ -28,7 +28,7 @@ import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 import {
   acceptorColumnsTheInvitationWillNotAccept,
   acceptorDisclosedColumns,
-  acceptorLaunchDisabled,
+  acceptorLaunchBlockedReason,
   acceptorStandardizationValid,
   acceptorUnsatisfiedTypes,
 } from "./acceptorColumnsModel";
@@ -158,23 +158,18 @@ export function AcceptorColumnsStep({
   const standardizationValid = acceptorStandardizationValid(
     editorState.standardization,
   );
-  const launchDisabled =
-    acceptorLaunchDisabled(verdict, editorState, linkageTerms) ||
-    connectionBlocked ||
-    exchangeFilesBlocked;
   // Ties the disabled launch button to the blocked-reason line so a
   // keyboard/screen-reader user at the button hears why it is disabled and what to
-  // do. The column-conflict reason leads the chain: it is the one the operator
-  // resolves on this screen, at the marks directly above.
+  // do. The reason IS the gate: the button is disabled exactly while there is a
+  // sentence to describe it with, so no state can disable it silently.
   const launchBlockedReasonId = useId();
-  const launchBlockedReason =
-    unacceptedColumns.length > 0
-      ? "Resolve the columns your partner will not accept above before you can start."
-      : connectionBlocked
-        ? "Set up the SFTP connection above before you can start."
-        : exchangeFilesBlocked
-          ? "Resolve the file-handling settings above before you can start."
-          : undefined;
+  const launchBlockedReason = acceptorLaunchBlockedReason(
+    verdict,
+    editorState,
+    linkageTerms,
+    { connectionBlocked, exchangeFilesBlocked },
+  );
+  const launchDisabled = launchBlockedReason !== undefined;
 
   const remap = (type: LinkageField["type"], columnName: string) => {
     // Move focus to the verdict before the chosen Select unmounts (it does as soon
@@ -439,15 +434,20 @@ export function AcceptorColumnsStep({
         <Button variant="subtle" onClick={onReset}>
           Reset to defaults
         </Button>
-        {launchBlockedReason !== undefined && (
-          <p
-            id={launchBlockedReasonId}
-            className={`${styles.small} ${styles.sub}`}
-            role="status"
-          >
-            {launchBlockedReason}
-          </p>
-        )}
+        {/* Mounted whether or not it currently has content: assistive tech observes
+            a live region from the moment it exists, so a reason that appears
+            mid-session -- an edit above closing the gate the operator just opened --
+            is an empty -> non-empty transition it announces, where a region mounting
+            with its text already in place is announced unreliably. Same contract as
+            the verdict's own region above. */}
+        <p
+          id={launchBlockedReasonId}
+          className={`${styles.small} ${styles.sub}`}
+          role="status"
+          data-testid="launch-blocked-reason"
+        >
+          {launchBlockedReason}
+        </p>
       </div>
     </>
   );

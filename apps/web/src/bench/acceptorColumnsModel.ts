@@ -265,28 +265,69 @@ export function acceptorUnsatisfiedTypes(
 }
 
 /**
- * The launch gate's `disabled` predicate, ported from the legacy editor:
- * disabled when no key can match (`satisfiableKeyCount === 0`), OR the metadata
- * carries more than one identifier column, OR any authored cleaning step is
- * invalid/mid-edit, OR the marked columns are ones the invitation will accept
- * none of ({@link acceptorColumnsTheInvitationWillNotAccept}) -- a pair the
- * exchange refuses to run on, whose whole remedy is an edit on this screen.
- * Partial coverage does NOT gate -- it threads a warning instead.
+ * The gates the columns step itself contributes, which the model cannot derive from
+ * the terms and the editor state: the transport connection an SFTP accept must have
+ * authored, and a file-handling combination core refuses. Passed in so the whole
+ * launch chain -- model-side and step-side -- resolves in one place.
  */
-export function acceptorLaunchDisabled(
+export interface AcceptorLaunchStepBlocks {
+  /** An SFTP accept whose transport connection is not authored yet. */
+  connectionBlocked: boolean;
+  /** A file-handling combination core refuses. */
+  exchangeFilesBlocked: boolean;
+}
+
+const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
+  connectionBlocked: false,
+  exchangeFilesBlocked: false,
+};
+
+/**
+ * The launch gate, expressed as the sentence the step shows beside the disabled
+ * button and points its `aria-describedby` at -- `undefined` exactly when nothing
+ * blocks, which is what the step disables on. Ported from the legacy editor's
+ * predicate: no key can match (`satisfiableKeyCount === 0`), OR the marked columns
+ * are ones the invitation will accept none of
+ * ({@link acceptorColumnsTheInvitationWillNotAccept}) -- a pair the exchange refuses
+ * to run on -- OR the metadata carries more than one identifier column, OR an
+ * authored cleaning step is invalid/mid-edit, OR one of the step's own blocks.
+ * Partial coverage does NOT gate -- it threads a warning instead.
+ *
+ * The gate and the explanation are ONE derivation rather than two that agree, so a
+ * state that disables the button while telling a screen-reader operator nothing is
+ * unrepresentable rather than merely tested against.
+ *
+ * The chain follows the step's own reading order, so the sentence names the topmost
+ * unresolved surface and an operator working down the screen is sent to the first
+ * thing they meet: the verdict, then the columns the invitation will not accept,
+ * then the grid's identifier rule, then the cleaning steps, then the connection and
+ * file-handling cards below them. Each names what to fix on this screen, in the
+ * words of the notice it points at.
+ */
+export function acceptorLaunchBlockedReason(
   verdict: AcceptorVerdictViewModel,
   editorState: { metadata: Metadata; standardization: Standardization },
   invitationTerms: LinkageTerms,
-): boolean {
-  return (
-    verdict.satisfiableKeyCount === 0 ||
-    hasMultipleIdentifiers(editorState.metadata) ||
-    !acceptorStandardizationValid(editorState.standardization) ||
+  stepBlocks: AcceptorLaunchStepBlocks = NO_STEP_BLOCKS,
+): string | undefined {
+  if (verdict.satisfiableKeyCount === 0)
+    return "Set your columns to the missing field types above before you can start.";
+  if (
     acceptorColumnsTheInvitationWillNotAccept(
       invitationTerms,
       editorState.metadata,
     ).length > 0
-  );
+  )
+    return "Resolve the columns your partner will not accept above before you can start.";
+  if (hasMultipleIdentifiers(editorState.metadata))
+    return "Choose a single record identifier column above before you can start.";
+  if (!acceptorStandardizationValid(editorState.standardization))
+    return "Finish or fix the highlighted cleaning steps above before you can start.";
+  if (stepBlocks.connectionBlocked)
+    return "Set up the SFTP connection above before you can start.";
+  if (stepBlocks.exchangeFilesBlocked)
+    return "Resolve the file-handling settings above before you can start.";
+  return undefined;
 }
 
 /** Whether every authored cleaning step is well-formed, gating launch so a
