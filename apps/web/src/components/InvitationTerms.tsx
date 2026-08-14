@@ -32,6 +32,14 @@ function yesNo(value: boolean): string {
   return value ? "Yes" : "No";
 }
 
+/** The count phrase every payload-column notice states its magnitude with ("1 data
+ * column", "3 data columns"). Shared so the outbound-send, egress-request, and
+ * ingress lines cannot drift in wording or in the singular/plural form they take at
+ * a count of one. */
+function dataColumns(count: number): string {
+  return `${count} data ${count === 1 ? "column" : "columns"}`;
+}
+
 /** Join phrases into an Oxford-comma English list ("a", "a and b", "a, b, and c"),
  * for the self-describing "Other details" summary. */
 function joinList(items: Array<string>): string {
@@ -61,6 +69,67 @@ function Term({
       </Text>
       {children}
     </Stack>
+  );
+}
+
+/**
+ * One tier of the always-visible core: a heading caption and the facts grouped under
+ * it, marked up as a role="group" the heading names. Every tier renders through this
+ * one component -- the direction tiers, the mechanics tier, the partner-constraint
+ * tier, and the legal-agreement governance frame -- so their grouping, heading level,
+ * and accessible-name wiring cannot diverge tier by tier, and a tier added later gets
+ * the same announcement without re-deriving it.
+ *
+ * The group is named by its own visible heading via aria-labelledby, so its
+ * accessible name has a single source and cannot drift from the caption a sighted
+ * reader sees. `accessibleName` replaces that with a fixed aria-label, for a tier
+ * whose visible heading is a full sentence rather than a name: a screen reader would
+ * otherwise announce the whole sentence as the group's name and then read it again as
+ * the heading.
+ */
+function TermsTier({
+  heading,
+  headingOrder,
+  accessibleName,
+  children,
+}: {
+  heading: ReactNode;
+  /** Semantic level of the tier caption, one below the terms heading, so the tiers
+   * nest under it and a screen reader can jump between them by heading. */
+  headingOrder: 2 | 3 | 4;
+  /** A short fixed noun phrase naming the group, for a tier whose heading is a
+   * sentence. Omitted by every tier whose heading already names it. */
+  accessibleName?: string;
+  children: ReactNode;
+}) {
+  const headingId = useId();
+  return (
+    <Stack
+      role="group"
+      aria-label={accessibleName}
+      aria-labelledby={accessibleName === undefined ? headingId : undefined}
+      gap="xs"
+    >
+      <Title order={headingOrder} fz="md" fw={600} id={headingId}>
+        {heading}
+      </Title>
+      {children}
+    </Stack>
+  );
+}
+
+/**
+ * The magnitude of this viewer's own outbound send, stated above the column-name
+ * chips so a reader takes in how much leaves before reading which columns do. It
+ * renders only where the set is both known and non-empty -- an empty set and a
+ * not-yet-chosen file each state their own case in this slot instead -- so the
+ * sentence never asserts a definite send that does not happen. Normal weight rather
+ * than dimmed, for the reason the whole slot is: the viewer's own disclosure must not
+ * read lighter than the egress request beside it.
+ */
+function OutboundSendCount({ count }: { count: number }) {
+  return (
+    <Text size="sm">You will send {dataColumns(count)} to your partner.</Text>
   );
 }
 
@@ -329,11 +398,13 @@ function CondensableDetails({
 /**
  * Renders the inviter's linkage terms decoded from an invitation for review. The
  * always-visible core is organized by disclosure DIRECTION and ordered by how much
- * the consent decision turns on it, into labelled role="group" tiers ("What you
- * disclose", "What the exchange produces", "What you receive", "How records are
- * matched", then the legal agreement), with the dense remainder behind a single
- * default-collapsed "Other details" disclosure; each tier's own inline comment
- * carries its rationale.
+ * the consent decision turns on it, into labelled tiers ("What you disclose", "What
+ * the exchange produces", "What you receive", "How records are matched", then the
+ * legal agreement), with the dense remainder behind a single default-collapsed
+ * "Other details" disclosure; each tier's own inline comment carries its rationale.
+ * Every one of them renders through {@link TermsTier}, so the grouping, heading
+ * level, and accessible name a tier is announced with are authored once rather than
+ * per tier.
  *
  * Every "proposed but not yet applied" caveat (psi-c count-only, deduplicate, and
  * per-element fuzzy comparison) follows ONE placement rule, so the flagging is
@@ -371,6 +442,14 @@ function CondensableDetails({
  * payload step transmits nothing at all to a partner not entitled to one, so a
  * column list there would name a disclosure that does not happen -- and the two
  * sides resolve that one fact from opposite `output` fields.
+ *
+ * Every payload direction therefore states its magnitude as a count in the core, in
+ * the one phrasing `dataColumns` builds. The outbound-send slot is the one that also
+ * names its columns, so there the count LEADS the chips ({@link OutboundSendCount}):
+ * the disclosure that turns hardest on how much leaves is the one a reader must not
+ * have to total up from a row of chips. It renders only over a known, non-empty set
+ * -- an empty send and a not-yet-chosen file each state their own case in that slot
+ * -- so no count line asserts a send the exchange does not make.
  *
  * An attached legal agreement is promoted
  * in full -- its reference, PURPOSE, and expiry render in the core (not a bare flag),
@@ -452,11 +531,12 @@ export function InvitationTerms({
   disclosedPayloadColumns?: Array<string>;
   /** This viewer's OWN outbound disclosure: the columns it will send to its
    * partner for matched records. Distinct from {@link disclosedPayloadColumns}
-   * (what the INVITER sends). Rendered as chips in the always-visible core, just
-   * above "Other details" -- the same slot the inviter's "proposing" send block
-   * uses -- so the disclosure sits with the agreed terms rather than after the
-   * whole panel. The acceptor passes its live metadata disclosure here; the inviter
-   * does not (its own send already renders from `payload.send` under "proposing").
+   * (what the INVITER sends). Rendered as a count and then chips in the
+   * always-visible core, just above "Other details" -- the same slot the inviter's
+   * "proposing" send block uses -- so the disclosure sits with the agreed terms
+   * rather than after the whole panel. The acceptor passes its live metadata
+   * disclosure here; the inviter does not (its own send already renders from
+   * `payload.send` under "proposing").
    * `[]` renders the explicit "no columns are sent" line; undefined renders no send
    * list because the set is not yet known -- e.g. the review screen before a file is
    * chosen, where the `review` perspective instead surfaces a fixed-copy
@@ -521,10 +601,8 @@ export function InvitationTerms({
   const egressNotice =
     receiveCount > 0
       ? perspective === "proposing"
-        ? `You request ${receiveCount} data ` +
-          `${receiveCount === 1 ? "column" : "columns"} from your partner.`
-        : `Your partner requests ${receiveCount} data ` +
-          `${receiveCount === 1 ? "column" : "columns"} from you.`
+        ? `You request ${dataColumns(receiveCount)} from your partner.`
+        : `Your partner requests ${dataColumns(receiveCount)} from you.`
       : undefined;
   // A count of the columns the inviter will SEND the acceptor for matched records
   // (summary.payload.send) -- inbound partner data the acceptor receives. A count,
@@ -544,8 +622,7 @@ export function InvitationTerms({
   // "requests". Mirrors the "Result sharing" block's "You will receive ..." framing.
   const ingressNotice =
     perspective !== "proposing" && sendCount > 0
-      ? `You will receive ${sendCount} data ` +
-        `${sendCount === 1 ? "column" : "columns"} from your partner.`
+      ? `You will receive ${dataColumns(sendCount)} from your partner.`
       : undefined;
   // Result sharing is stated viewer-relative: LINE A is the viewer's OWN receipt,
   // LINE B the partner's. This split -- not the raw inviter fields -- is what the
@@ -639,18 +716,14 @@ export function InvitationTerms({
   // fact is not skimmed past), "What the exchange produces" (the matching method and
   // result sharing -- what is revealed and to whom), "What you receive" (inbound
   // partner data), and "How records are matched" (the linkage strategy and matching
-  // keys -- mechanics the diligent open, kept below the outcome). Each tier is a
-  // role="group" whose caption is a HEADING (Title) referenced by aria-labelledby, so
-  // a screen reader can both jump between tiers by heading and hear each as one
-  // related set. An attached legal agreement is a cross-cutting governance frame (not
-  // a direction), so it carries its own group, named by a fixed "Legal agreement"
-  // aria-label (a short noun phrase distinct from its lead heading, so a screen reader
-  // does not announce that full sentence twice).
-  const produceGroupLabelId = useId();
-  const discloseGroupLabelId = useId();
-  const receiveGroupLabelId = useId();
-  const matchingGroupLabelId = useId();
-  const constraintGroupLabelId = useId();
+  // keys -- mechanics the diligent open, kept below the outcome). Every tier renders
+  // through {@link TermsTier}, which is what makes a tier a role="group" whose caption
+  // is a HEADING (Title) naming it, so a screen reader can both jump between tiers by
+  // heading and hear each as one related set. An attached legal agreement is a
+  // cross-cutting governance frame (not a direction), so it carries its own tier,
+  // named by a fixed "Legal agreement" aria-label (a short noun phrase distinct from
+  // its lead heading, so a screen reader does not announce that full sentence twice).
+
   // The fields carrying a partner-authored allowedCharacters class, surfaced
   // always-visible: a partner-defined character-class constraint applies to a
   // linkage field, so the acceptor must be on notice before consenting rather than
@@ -766,20 +839,10 @@ export function InvitationTerms({
           disclosure is its hardest-to-undo fact, and it must not be skimmed past
           before consent. Holds the acceptor's outbound send (the columns it will
           send, or the pre-file forward-reference) plus the egress request for its
-          data; the inviter's own send chips under "proposing". A labelled
-          role="group" captioned by a heading, rendered only when this viewer
-          discloses something. */}
+          data; the inviter's own send chips under "proposing". Rendered only when
+          this viewer discloses something. */}
       {showsDiscloseGroup && (
-        <Stack role="group" aria-labelledby={discloseGroupLabelId} gap="xs">
-          <Title
-            order={tierHeadingOrder}
-            fz="md"
-            fw={600}
-            id={discloseGroupLabelId}
-          >
-            What you disclose
-          </Title>
-
+        <TermsTier heading="What you disclose" headingOrder={tierHeadingOrder}>
           {/* The inviter's own send, surfaced as chips (reusing {@link ColumnChips},
               the home page's default-exchange-columns visual). Only the inviter's
               "proposing" preview shows it here; the acceptor's send renders below.
@@ -794,10 +857,13 @@ export function InvitationTerms({
             >
               {summary.payload !== undefined &&
               summary.payload.send.length > 0 ? (
-                <ColumnChips
-                  columns={summary.payload.send}
-                  labelledBy={proposingSendCaptionId}
-                />
+                <>
+                  <OutboundSendCount count={summary.payload.send.length} />
+                  <ColumnChips
+                    columns={summary.payload.send}
+                    labelledBy={proposingSendCaptionId}
+                  />
+                </>
               ) : (
                 <Text size="sm" c="dimmed">
                   No columns are sent to your partner; your file is used only to
@@ -831,17 +897,24 @@ export function InvitationTerms({
               captionId={outboundSendCaptionId}
             >
               {outboundColumns.length > 0 ? (
-                // These are the operator's OWN CSV headers (from the live metadata
-                // disclosure), not a sanitized summary value, so sanitize them for
-                // display like every other column-name surface (ColumnChips renders
-                // verbatim) -- a header carrying bidi/zero-width/homoglyph characters
-                // must not misrepresent to the operator what leaves their machine.
-                <ColumnChips
-                  columns={outboundColumns.map((name) =>
-                    sanitizeForDisplay(name),
-                  )}
-                  labelledBy={outboundSendCaptionId}
-                />
+                <>
+                  {/* Counted off the same array the chips below render, so the two
+                      cannot disagree, and as a plain length -- none of the operator's
+                      header text enters the sentence. */}
+                  <OutboundSendCount count={outboundColumns.length} />
+                  {/* These are the operator's OWN CSV headers (from the live
+                      metadata disclosure), not a sanitized summary value, so
+                      sanitize them for display like every other column-name surface
+                      (ColumnChips renders verbatim) -- a header carrying
+                      bidi/zero-width/homoglyph characters must not misrepresent to
+                      the operator what leaves their machine. */}
+                  <ColumnChips
+                    columns={outboundColumns.map((name) =>
+                      sanitizeForDisplay(name),
+                    )}
+                    labelledBy={outboundSendCaptionId}
+                  />
+                </>
               ) : (
                 <Text size="sm" c="dimmed">
                   No columns are sent to your partner; only the linkage result
@@ -882,7 +955,7 @@ export function InvitationTerms({
               {egressNotice}
             </Text>
           )}
-        </Stack>
+        </TermsTier>
       )}
 
       {/* Direction tier -- WHAT THE EXCHANGE PRODUCES: the matching method (what the
@@ -891,17 +964,11 @@ export function InvitationTerms({
           with the matching mechanics (linkage strategy, matching keys) split into
           their own "How records are matched" tier below, so this group answers the
           single question "what does the exchange reveal, and to whom" rather than
-          overloading three unlike concerns. A labelled role="group" captioned by a
-          heading. */}
-      <Stack role="group" aria-labelledby={produceGroupLabelId} gap="xs">
-        <Title
-          order={tierHeadingOrder}
-          fz="md"
-          fw={600}
-          id={produceGroupLabelId}
-        >
-          What the exchange produces
-        </Title>
+          overloading three unlike concerns. */}
+      <TermsTier
+        heading="What the exchange produces"
+        headingOrder={tierHeadingOrder}
+      >
         <Term label="Matching method">
           <Text size="sm">
             {summary.algorithm === "psi-c" ? (
@@ -994,26 +1061,17 @@ export function InvitationTerms({
             </>
           )}
         </Term>
-      </Stack>
+      </TermsTier>
 
       <CondensableDetails condensed={condensed}>
         {/* Direction tier -- WHAT YOU RECEIVE: partner data arriving to this viewer.
           The acceptor's ingress (a count of the columns the invitation will send it
           for matched records) -- the weaker signal, since receiving is not a
           disclosure BY the acceptor -- or, mirrored, the inviter's own request of its
-          partner under "proposing" (that request is the inviter's inbound). A
-          labelled role="group" captioned by a heading, rendered only when this viewer
-          receives partner data. */}
+          partner under "proposing" (that request is the inviter's inbound). Rendered
+          only when this viewer receives partner data. */}
         {showsReceiveGroup && (
-          <Stack role="group" aria-labelledby={receiveGroupLabelId} gap="xs">
-            <Title
-              order={tierHeadingOrder}
-              fz="md"
-              fw={600}
-              id={receiveGroupLabelId}
-            >
-              What you receive
-            </Title>
+          <TermsTier heading="What you receive" headingOrder={tierHeadingOrder}>
             {ingressNotice !== undefined && (
               <Text size="sm" fw={500}>
                 {ingressNotice}
@@ -1024,7 +1082,7 @@ export function InvitationTerms({
                 {egressNotice}
               </Text>
             )}
-          </Stack>
+          </TermsTier>
         )}
 
         {/* Tier -- HOW RECORDS ARE MATCHED: the mechanics of the match, split out of
@@ -1032,19 +1090,12 @@ export function InvitationTerms({
           because it is verification detail the diligent open, not the headline the
           consent decision turns on. Holds the linkage strategy (single-pass only) and
           the always-visible field summary, with the dense per-key rule detail behind
-          a default-collapsed "Matching strategies" disclosure. A labelled
-          role="group" captioned by a heading; always rendered, since there is always
-          at least one linkage key. */}
-        <Stack role="group" aria-labelledby={matchingGroupLabelId} gap="xs">
-          <Title
-            order={tierHeadingOrder}
-            fz="md"
-            fw={600}
-            id={matchingGroupLabelId}
-          >
-            How records are matched
-          </Title>
-
+          a default-collapsed "Matching strategies" disclosure. Always rendered, since
+          there is always at least one linkage key. */}
+        <TermsTier
+          heading="How records are matched"
+          headingOrder={tierHeadingOrder}
+        >
           {/* Single-pass is disclosure-affecting AND a mandatory-consistency term the
             acceptor adopts, so it must be visible at the consent point, not only on
             the inviter's authoring control. Surfaced only for single-pass (cascade
@@ -1132,7 +1183,7 @@ export function InvitationTerms({
               </Collapse>
             </div>
           </Stack>
-        </Stack>
+        </TermsTier>
 
         {/* Partner-authored allowed-character constraints, promoted to the
           always-visible core as their own labelled group so a partner-defined
@@ -1149,15 +1200,10 @@ export function InvitationTerms({
           expectation, not a guarantee; the group's accessible name is fixed via
           aria-labelledby, so no raw partner text enters the name. */}
         {constrainedFields.length > 0 && (
-          <Stack role="group" aria-labelledby={constraintGroupLabelId} gap="xs">
-            <Title
-              order={tierHeadingOrder}
-              fz="md"
-              fw={600}
-              id={constraintGroupLabelId}
-            >
-              Partner-defined character constraints
-            </Title>
+          <TermsTier
+            heading="Partner-defined character constraints"
+            headingOrder={tierHeadingOrder}
+          >
             <Text size="sm">{CONSENT_FACTS.allowedCharacterPatterns.note}</Text>
             <Stack gap="xs">
               {/* Keyed by index: the fields are already deduped and their order is
@@ -1191,7 +1237,7 @@ export function InvitationTerms({
                 </Stack>
               ))}
             </Stack>
-          </Stack>
+          </TermsTier>
         )}
 
         {/* The legal agreement -- a cross-cutting GOVERNANCE frame, not a disclosure
@@ -1207,27 +1253,35 @@ export function InvitationTerms({
           accessible name is the fixed "Legal agreement" aria-label, so no raw partner
           text enters the name. */}
         {summary.legalAgreement !== undefined && (
-          <Stack role="group" aria-label="Legal agreement" gap={2}>
-            <Title order={tierHeadingOrder} fz="md" fw={600}>
-              This invitation attaches a legal agreement.
-            </Title>
-            <Text size="sm">Reference: {summary.legalAgreement.reference}</Text>
-            {/* "Stated purpose", not "Purpose": the value is partner-authored free
-              text, sanitized but never vetted by psilink (only byte-compared against
-              the partner's own copy at exchange time), so the label marks it as
-              partner-attested rather than an authorization psilink endorses -- the
-              same provenance-marking the allowed-character constraint uses. */}
-            <Text size="sm">
-              Stated purpose: {summary.legalAgreement.purpose}
-            </Text>
-            {/* Name the subject ("Agreement valid through ...") rather than a bare
-              "Valid through <date>": it sits on the same screen as the separate
-              invitation-expiry line below, and at a glance the two same-weight dates
-              are otherwise easy to conflate. */}
-            <Text size="xs" c="dimmed">
-              Agreement valid through {summary.legalAgreement.expirationDate}
-            </Text>
-          </Stack>
+          <TermsTier
+            heading="This invitation attaches a legal agreement."
+            headingOrder={tierHeadingOrder}
+            accessibleName="Legal agreement"
+          >
+            {/* The agreement's three fields read as one block, tighter than the
+                spacing between a tier's heading and its content. */}
+            <Stack gap={2}>
+              <Text size="sm">
+                Reference: {summary.legalAgreement.reference}
+              </Text>
+              {/* "Stated purpose", not "Purpose": the value is partner-authored free
+                text, sanitized but never vetted by psilink (only byte-compared
+                against the partner's own copy at exchange time), so the label marks
+                it as partner-attested rather than an authorization psilink endorses
+                -- the same provenance-marking the allowed-character constraint
+                uses. */}
+              <Text size="sm">
+                Stated purpose: {summary.legalAgreement.purpose}
+              </Text>
+              {/* Name the subject ("Agreement valid through ...") rather than a bare
+                "Valid through <date>": it sits on the same screen as the separate
+                invitation-expiry line below, and at a glance the two same-weight
+                dates are otherwise easy to conflate. */}
+              <Text size="xs" c="dimmed">
+                Agreement valid through {summary.legalAgreement.expirationDate}
+              </Text>
+            </Stack>
+          </TermsTier>
         )}
 
         {/* A real disclosure: the toggle carries aria-expanded and aria-controls,
