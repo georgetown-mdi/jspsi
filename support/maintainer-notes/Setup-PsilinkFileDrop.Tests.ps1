@@ -1,9 +1,10 @@
 <#
 .SYNOPSIS
     Pester suite over the path-resolution functions in
-    Setup-PsilinkFileDrop.ps1, and over the console command it closes on.
-    Maintainer-facing: it lives outside the guide folder, and an operator
-    following the setup page never receives it.
+    Setup-PsilinkFileDrop.ps1, the console command it closes on, and the
+    preflight question it turns an unusable image away on. Maintainer-facing:
+    it lives outside the guide folder, and an operator following the setup page
+    never receives it.
 
 .DESCRIPTION
     The script under test is dot-sourced with -LoadFunctionsOnly, which defines
@@ -12,13 +13,18 @@
     run still reaches the banner -- because a guard that silently swallowed the
     flow would leave every operator with a script that does nothing.
 
-    Two halves:
+    Three kinds of test:
 
       - Pure: UNC and device-prefix parsing, drive-kind classification, the
         dialect map, password masking, the rule that names the shared folder
         and the console command the closing screen prints from it, and that the
         switch defines the sequences the launcher reaches through it. These
         need no rig and no rights.
+      - Stub-engine: a .cmd standing in for the container engine, either passed
+        by path to one function or put ahead of the PATH so a whole run of the
+        flow reaches it. That second form is what lets a test read back which
+        calls the flow made -- and, for the image-capability question, which it
+        did not go on to make.
       - Rig-backed: a share the runner serves itself over loopback, a drive
         letter mapped to it, and a standalone DFS namespace with a link into
         that share. Built the way support/maintainer-notes/ci-resolution-rig.ps1
@@ -74,8 +80,8 @@ BeforeAll {
     function Start-PowerShellChild {
         <#  Run powershell.exe and return its exit code and both streams.
 
-            $PSHOME rather than the bare name, because one caller strips the
-            PATH; a temporary file rather than the console for standard input,
+            $PSHOME rather than the bare name, because callers strip the PATH
+            down; a temporary file rather than the console for standard input,
             so that a guard which failed and let the flow reach a prompt ends
             the run rather than blocking it. The timeout is the backstop for
             anything else that waits. #>
@@ -533,6 +539,265 @@ Describe 'Invoke-Docker' {
 
         $threw | Should -BeTrue
         $raised | Should -Be 'CommandNotFoundException'
+    }
+}
+
+Describe 'The image capability check' {
+    BeforeAll {
+        $script:CapabilityStubRoot = Join-Path $env:TEMP ('psilink-capability-stub-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        New-Item -ItemType Directory -Path $script:CapabilityStubRoot -Force | Out-Null
+
+        # An engine standing in for a released image published before the doctor
+        # existed: it exits 0 and prints the zero-setup help, which names no
+        # doctor. The exit code is the shape that matters here -- such an image
+        # answers 0 to this and 64 to a battery, and 64 is also what the doctor
+        # answers for a value it refuses, so a code cannot decide the question.
+        $script:PreDoctorEngine = Join-Path $script:CapabilityStubRoot 'predoctor.cmd'
+        Set-Content -LiteralPath $script:PreDoctorEngine -Encoding Ascii -Value @(
+            '@echo off',
+            'echo psilink [command] [options]',
+            'echo Usage:',
+            'echo   psilink [--save] [options] URL INPUT_FILE [OUTPUT_FILE]',
+            'echo Commands:',
+            'echo   psilink init [args..]   Write a commented configuration template',
+            'echo   psilink exchange        Execute a recurring exchange',
+            'exit /b 0')
+
+        $script:DoctorEngine = Join-Path $script:CapabilityStubRoot 'withdoctor.cmd'
+        Set-Content -LiteralPath $script:DoctorEngine -Encoding Ascii -Value @(
+            '@echo off',
+            'echo Usage: psilink doctor probe or doctor mount DIRECTORY',
+            'echo Commands:',
+            'echo   psilink doctor probe   Check the file drop over the network',
+            'echo   psilink doctor mount   Check an already-mounted file-drop directory',
+            'exit /b 0')
+
+        # Docker reserves 125 and above for its own failure to start a
+        # container, which the script's battery arms already read as their own
+        # case; the capability question has to keep the same line.
+        $script:UnstartableEngine = Join-Path $script:CapabilityStubRoot 'unstartable.cmd'
+        Set-Content -LiteralPath $script:UnstartableEngine -Encoding Ascii -Value @(
+            '@echo off',
+            'echo docker: error during connect 1>&2',
+            'exit /b 125')
+
+        # Records what it was asked to run, so the invocation itself can be
+        # read back rather than inferred from the answer.
+        $script:RecordingEngine = Join-Path $script:CapabilityStubRoot 'recorder.cmd'
+        Set-Content -LiteralPath $script:RecordingEngine -Encoding Ascii -Value @(
+            '@echo off',
+            '>"%PSILINK_STUB_ARGS%" echo %*',
+            'echo Usage: psilink doctor probe or doctor mount DIRECTORY',
+            'exit /b 0')
+    }
+
+    AfterAll {
+        Remove-Item -LiteralPath $script:CapabilityStubRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'calls an image whose doctor answers for itself capable' {
+        $result = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest' -Engine $script:DoctorEngine
+
+        $result.Capable | Should -BeTrue
+    }
+
+    It 'calls an image whose help names no doctor too old, though it exits 0' {
+        $result = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest' -Engine $script:PreDoctorEngine
+
+        $result.Capable | Should -BeFalse
+        $result.Reason | Should -Be 'NoDoctor'
+    }
+
+    It 'keeps an engine that could not start the container apart from an old image' {
+        # The two remedies point opposite ways -- refresh the image, versus read
+        # what the engine said -- so merging them would send an operator whose
+        # Docker is down off pulling an image they already have.
+        $result = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest' -Engine $script:UnstartableEngine
+
+        $result.Capable | Should -BeFalse
+        $result.Reason | Should -Be 'EngineFailed'
+        $result.ExitCode | Should -Be 125
+    }
+
+    It 'asks the question with no battery and no share input' {
+        # What makes this safe to run before the credentials are collected: it
+        # names neither battery, so nothing it reports can be about the share.
+        $argsFile = Join-Path $script:CapabilityStubRoot 'recorded-args.txt'
+        $previous = $env:PSILINK_STUB_ARGS
+        try {
+            $env:PSILINK_STUB_ARGS = $argsFile
+            $result = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest' -Engine $script:RecordingEngine
+            $result.Capable | Should -BeTrue
+        } finally {
+            if ($null -eq $previous) { Remove-Item env:PSILINK_STUB_ARGS -ErrorAction SilentlyContinue }
+            else { $env:PSILINK_STUB_ARGS = $previous }
+        }
+
+        # Read defensively: a stub that wrote nothing must reach the assertions
+        # as an empty string it can report, not as a throw inside Trim.
+        $recorded = ''
+        if (Test-Path -LiteralPath $argsFile) {
+            $recorded = ([string] (Get-Content -LiteralPath $argsFile -Raw)).Trim()
+        }
+        $recorded | Should -Match 'vdorie/psi-link:latest' -Because $recorded
+        $recorded | Should -Match 'doctor' -Because $recorded
+        $recorded | Should -Match '--help' -Because $recorded
+        $recorded | Should -Not -Match 'probe' -Because $recorded
+        $recorded | Should -Not -Match 'mount' -Because $recorded
+    }
+}
+
+Describe 'The image capability check inside the setup flow' {
+    BeforeAll {
+        # Two whole engines, each named so the flow's own `docker` calls reach
+        # it through the PATH. Each answers preflight normally and then serves
+        # one of the two shapes of `doctor --help`, and appends every call it
+        # was given to PSILINK_STUB_LOG -- which is what lets a test assert what
+        # the flow did NOT go on to run.
+        #
+        # Labels rather than parenthesised blocks: a `)` anywhere in the help
+        # text would close a block early, and the pre-doctor help is the real
+        # CLI's, punctuation included.
+        $script:StaleEngineRoot = Join-Path $env:TEMP ('psilink-flow-stale-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:CapableEngineRoot = Join-Path $env:TEMP ('psilink-flow-capable-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        New-Item -ItemType Directory -Path $script:StaleEngineRoot -Force | Out-Null
+        New-Item -ItemType Directory -Path $script:CapableEngineRoot -Force | Out-Null
+
+        $prologue = @(
+            '@echo off',
+            '>>"%PSILINK_STUB_LOG%" echo %*',
+            'echo %*| findstr /C:"version --format" >nul',
+            'if not errorlevel 1 goto engineversion',
+            'echo %*| findstr /C:"image inspect" >nul',
+            'if not errorlevel 1 goto imagepresent',
+            'echo %*| findstr /C:"doctor --help" >nul',
+            'if not errorlevel 1 goto doctorhelp',
+            'echo unexpected engine call: %*',
+            'exit /b 99',
+            ':engineversion',
+            'echo linux 27.1.1',
+            'exit /b 0',
+            ':imagepresent',
+            'exit /b 0',
+            ':doctorhelp')
+
+        Set-Content -LiteralPath (Join-Path $script:StaleEngineRoot 'docker.cmd') -Encoding Ascii -Value ($prologue + @(
+            'echo psilink [command] [options]',
+            'echo Usage:',
+            'echo   psilink [--save] [options] URL INPUT_FILE [OUTPUT_FILE]',
+            'exit /b 0'))
+
+        Set-Content -LiteralPath (Join-Path $script:CapableEngineRoot 'docker.cmd') -Encoding Ascii -Value ($prologue + @(
+            'echo Usage: psilink doctor probe or doctor mount DIRECTORY',
+            'echo   psilink doctor probe   Check the file drop over the network',
+            'echo   psilink doctor mount   Check an already-mounted file-drop directory',
+            'exit /b 0'))
+
+        function Invoke-SetupWithEngine {
+            <#  Run the setup flow with one of the stub engines ahead of a
+                minimal PATH, and return the run beside the calls the engine
+                recorded. The PATH is cut down to the system directories for the
+                same reason the -LoadFunctionsOnly guard's own flow test cuts
+                it: a runner with a real Docker would otherwise answer first. #>
+            param(
+                [Parameter(Mandatory = $true)][string] $EngineRoot,
+                [Parameter(Mandatory = $true)][string] $SetupScript,
+                [string[]] $ScriptArguments = @()
+            )
+
+            $log = Join-Path $EngineRoot ('calls-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.log')
+            $originalPath = $env:PATH
+            $originalLog = $env:PSILINK_STUB_LOG
+            try {
+                $env:PSILINK_STUB_LOG = $log
+                $env:PATH = @(
+                    $EngineRoot,
+                    (Join-Path $env:SystemRoot 'System32'),
+                    $env:SystemRoot,
+                    (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0')
+                ) -join ';'
+                $run = Start-PowerShellChild -Arguments (@(
+                    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$SetupScript`"") +
+                    $ScriptArguments) -TimeoutSeconds 120
+            } finally {
+                $env:PATH = $originalPath
+                if ($null -eq $originalLog) { Remove-Item env:PSILINK_STUB_LOG -ErrorAction SilentlyContinue }
+                else { $env:PSILINK_STUB_LOG = $originalLog }
+            }
+
+            $calls = ''
+            if (Test-Path -LiteralPath $log) {
+                $calls = [string] (Get-Content -LiteralPath $log -Raw)
+            }
+            return [ordered]@{
+                TimedOut = $run.TimedOut
+                Exit     = $run.Exit
+                Output   = [string] $run.Output
+                Errors   = [string] $run.Errors
+                Calls    = $calls
+            }
+        }
+    }
+
+    AfterAll {
+        Remove-Item -LiteralPath $script:StaleEngineRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $script:CapableEngineRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'turns a stale image away on the -Server path, blaming neither the values nor itself' {
+        $run = Invoke-SetupWithEngine -EngineRoot $script:StaleEngineRoot -SetupScript $setupScript -ScriptArguments @(
+            '-Server', 'fs-04.agency.gov', '-Share', 'exchange', '-SkipConfirm')
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$($run.Calls)"
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 1 -Because $shape
+        $run.Output | Should -Match 'too old' -Because $shape
+        $run.Output | Should -Match 'docker pull vdorie/psi-link:latest' -Because $shape
+        # The two things a 64 from the battery can honestly mean. This is
+        # neither: it is the image, so neither may be printed here.
+        $run.Output | Should -Not -Match 'defect in Setup-PsilinkFileDrop.ps1' -Because $shape
+        $run.Output | Should -Not -Match 'refused the values' -Because $shape
+    }
+
+    It 'turns a stale image away on the interactive path too, before it asks for anything' {
+        # No path and no credentials are collected first, so one check covers
+        # both entry paths rather than each needing its own arm.
+        $run = Invoke-SetupWithEngine -EngineRoot $script:StaleEngineRoot -SetupScript $setupScript
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$($run.Calls)"
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 1 -Because $shape
+        $run.Output | Should -Match 'too old' -Because $shape
+        $run.Output | Should -Not -Match 'Enter the file-drop folder' -Because $shape
+        $run.Output | Should -Not -Match 'credentials for the file server' -Because $shape
+    }
+
+    It 'reaches no battery with an image that cannot produce a verdict' {
+        # The property the placement buys: every verdict arm below reads a code
+        # from one of these two batteries, so an image turned away before either
+        # runs cannot reach one.
+        $run = Invoke-SetupWithEngine -EngineRoot $script:StaleEngineRoot -SetupScript $setupScript -ScriptArguments @(
+            '-Server', 'fs-04.agency.gov', '-Share', 'exchange', '-SkipConfirm')
+
+        $run.Calls | Should -Not -BeNullOrEmpty
+        $run.Calls | Should -Match 'doctor --help' -Because $run.Calls
+        $run.Calls | Should -Not -Match 'doctor probe' -Because $run.Calls
+        $run.Calls | Should -Not -Match 'doctor mount' -Because $run.Calls
+        $run.Calls | Should -Not -Match 'volume create' -Because $run.Calls
+    }
+
+    It 'lets an image that carries the doctor through to the flow' {
+        # The other direction: the gate has to be silent for a current image, or
+        # it would trade one misdiagnosis for another. The run stops at the
+        # first prompt below it rather than completing a setup, which is why the
+        # exit code is left out of this one.
+        $run = Invoke-SetupWithEngine -EngineRoot $script:CapableEngineRoot -SetupScript $setupScript
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$($run.Calls)"
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Output | Should -Match 'image carries the checks' -Because $shape
+        $run.Output | Should -Not -Match 'too old' -Because $shape
+        $run.Calls | Should -Match 'doctor --help' -Because $run.Calls
     }
 }
 

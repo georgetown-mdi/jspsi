@@ -118,6 +118,8 @@ Every code above is below 125, which Docker reserves for its own failure to star
 
 A usage error -- a missing or malformed input, or a bad flag -- is not in that set: it exits 64 (`EX_USAGE`) and prints no verdict on either stream, because the checks never ran. A caller that sees 64 has established nothing about the share.
 
+64 is also what an image predating this command answers to `doctor probe`: option validation does not reject the two words as positionals, so they reach the zero-setup default command, which reads the first of them as a server URL and refuses it. No exit code separates that from a doctor rejecting an input, and a published image cannot be changed after the fact, so a caller that may meet an older image establishes the command's presence before it runs any battery -- `doctor --help` answers that without reading an `SMB_*` value or touching the share -- rather than reading a 64 as a verdict about its own inputs.
+
 ## Cleanup limits
 
 Probe cleanup is attempted, never guaranteed. A delete is issued for every

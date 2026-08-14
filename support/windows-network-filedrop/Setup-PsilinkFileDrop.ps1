@@ -186,6 +186,50 @@ function Get-DialectMountVersion {
     return $versMap[$Dialect]
 }
 
+function Test-DoctorCapableImage {
+    <#  Whether the image carries `psilink doctor` at all.
+
+        An image published before the doctor existed answers a battery with
+        exit 64, the same code the doctor itself uses for an input it refuses
+        -- the words "doctor probe" are not flags, so they fall past the
+        option validation to the zero-setup command, which reads the first of
+        them as a server URL and rejects it as a usage error. No exit code
+        tells those two apart, and a released image cannot be changed after
+        the fact, so the question has to be settled here, before any battery
+        runs and before an operator is asked for a password.
+
+        `doctor --help` is what settles it. It reaches no share, reads no
+        SMB_* value and starts no check, so nothing it says can be about the
+        file drop; an image carrying the command prints the doctor's own usage,
+        and one without it prints the zero-setup usage, which names no doctor.
+        Output rather than exit code, because both answer 0.
+
+        Returns a hashtable with Capable, and with Reason ('NoDoctor' or
+        'EngineFailed'), ExitCode and Output when it is $false. An engine that
+        could not start the container at all is its own answer rather than an
+        old image: Docker reserves 125 and above for that, as the batteries
+        below already read it. #>
+    param(
+        [Parameter(Mandatory = $true)][string] $Image,
+        [string] $Engine = 'docker'
+    )
+
+    $help = Invoke-Docker -Engine $Engine -DockerArgs @('run', '--rm', $Image, 'doctor', '--help')
+    if ($help.ExitCode -ge 125) {
+        return @{ Capable  = $false
+                  Reason   = 'EngineFailed'
+                  ExitCode = $help.ExitCode
+                  Output   = $help.Output }
+    }
+    if ($help.ExitCode -eq 0 -and $help.Output -match 'doctor') {
+        return @{ Capable = $true }
+    }
+    return @{ Capable  = $false
+              Reason   = 'NoDoctor'
+              ExitCode = $help.ExitCode
+              Output   = $help.Output }
+}
+
 # ==========================================================================
 # The credentials and the volume
 #
@@ -681,6 +725,45 @@ if ($imagePresent.ExitCode -ne 0) {
     }
 }
 
+# Asked once, here, rather than beside either battery: everything below this
+# point either interprets a verdict or collects what a verdict needs, and part 2
+# asks for the share password. An image that cannot produce a verdict has to be
+# turned away before the operator types one.
+$doctorImage = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest'
+if (-not $doctorImage.Capable) {
+    if ($doctorImage.Reason -eq 'EngineFailed') {
+        Write-Head 'Could not run the checks'
+        Write-Bad "Docker could not start a container from the image (exit $($doctorImage.ExitCode))."
+        Write-Host ''
+        Write-Host $doctorImage.Output
+        Write-Host ''
+        Write-Note 'Nothing about your file drop has been tested. This is Docker'
+        Write-Note 'failing to start a container, not a verdict about your share,'
+        Write-Note 'so there is nothing here to fix on the server. The message'
+        Write-Note 'Docker printed is the one to read.'
+        exit 1
+    }
+    Write-Head 'The psilink image on this PC is too old'
+    Write-Bad 'It does not carry the checks this script runs.'
+    Write-Note 'Nothing about your file drop has been tested. Nothing is wrong'
+    Write-Note 'with your share, your credentials, or this script -- the checks'
+    Write-Note 'it would have run are simply not in this copy of the image.'
+    Write-Info ''
+    Write-Info 'The image is fetched only when it is missing, never to refresh'
+    Write-Info 'one already here, so a copy from before the checks existed'
+    Write-Info 'survives every re-run. Refresh it, then run this again:'
+    Write-Info ''
+    Write-Info '    docker pull vdorie/psi-link:latest'
+    Write-Info ''
+    Write-Info 'If that reports the image is already up to date, or this message'
+    Write-Info 'comes back after it, then the published image does not carry the'
+    Write-Info 'checks yet and there is nothing to update to. Set the file drop'
+    Write-Info 'up by hand in the meantime: see the troubleshooting page, "Doing'
+    Write-Info 'it by hand".'
+    exit 1
+}
+Write-Good 'The psilink image carries the checks.'
+
 # ==========================================================================
 # Part 1: work out where the file drop really lives
 # ==========================================================================
@@ -884,18 +967,20 @@ try {
         exit $probeExit
     }
     # Anything else is not a verdict at all: the codes above are the whole set
-    # the checks produce. An image too old to carry them answers here, which is
-    # the one cause worth naming -- the image is fetched only when it is
-    # missing, so an old copy is never refreshed by running this again.
+    # the checks produce. An image too old to carry them is not among the
+    # causes -- preflight turned that one away before this ran -- so a code
+    # outside the set points at an image newer than this script, which is what
+    # part 4's arm says of the same case.
     if ($probeExit -ne 0) {
         Write-Head 'Could not run the checks'
         Write-Bad "The checks answered with an exit code this script does not know ($probeExit)."
-        Write-Note 'Nothing has been established about your file drop. The likeliest'
-        Write-Note 'cause is a copy of the psilink image that predates these checks,'
-        Write-Note 'because the image is fetched only when it is missing, never to'
-        Write-Note 'refresh one already on this PC.'
+        Write-Note 'Nothing has been established about your file drop, and nothing'
+        Write-Note 'is wrong with your share: this script does not recognise what'
+        Write-Note 'the checks answered. The likeliest cause is an image newer'
+        Write-Note 'than this script.'
         Write-Info ''
-        Write-Info 'Run "docker pull vdorie/psi-link:latest" and try again.'
+        Write-Info 'Look for a newer copy of this script wherever you downloaded'
+        Write-Info 'it.'
         exit $probeExit
     }
     Write-Good 'The share is reachable, writable, and supports rename.'
@@ -989,8 +1074,10 @@ try {
         exit 9
     }
     if ($test.ExitCode -eq 64) {
-        # Unlike part 3, no operator value reaches this battery: the marker,
-        # token, and mount directory are all generated here.
+        # Self-blame is the whole answer here, in a way it is not in part 3: no
+        # operator value reaches this battery -- the marker, token and mount
+        # directory are all generated here -- and the other producer of 64, an
+        # image with no doctor command at all, was turned away in preflight.
         Write-Bad 'The checks refused the values this script gave them.'
         Write-Note 'Nothing was established about the folder. This is a defect in'
         Write-Note 'Setup-PsilinkFileDrop.ps1; please report it, with the message'
@@ -1009,8 +1096,6 @@ try {
         exit 9
     }
     if ($test.ExitCode -ne 0) {
-        # Part 3 returned 0 from the same image, so it carries the checks; a
-        # code outside their set here points the other way from part 3's arm.
         Write-Bad "The checks answered with an exit code this script does not know ($($test.ExitCode))."
         Write-Note 'Nothing has been established about the folder either way. The'
         Write-Note 'likeliest cause is an image newer than this script -- look for a'
