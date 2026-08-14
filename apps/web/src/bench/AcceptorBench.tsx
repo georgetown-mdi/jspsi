@@ -723,6 +723,7 @@ export function AcceptorBench() {
     run,
     outputs,
     failure,
+    warnings: runWarnings,
     jobId,
     reattached,
     reattaching,
@@ -1398,6 +1399,7 @@ export function AcceptorBench() {
               outputs={outputs}
               failure={failure}
               warning={launched?.warning}
+              runWarnings={runWarnings}
               serverJob={acceptServerJob}
               jobId={jobId}
               reattached={reattached}

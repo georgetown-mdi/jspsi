@@ -14,6 +14,7 @@ import {
   RECONNECTING_HEADING,
   ReattachedRunNotice,
   ReattachingNotice,
+  RunWarningsAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
   WithheldResultInset,
@@ -40,11 +41,15 @@ import type { RunOutputs } from "./runOutputs";
  *
  * The partial-coverage advisory the confirm-columns step raised surfaces here as
  * an amber alert (this run column's half of that advisory; the work column's
- * Problems block carries the other half). A failed run renders the failure
- * vocabulary's alert for its category, each with its one concrete way forward
- * -- an acceptor seat cannot mint, so every non-retryable recovery is a link
- * to the quick path to paste a fresh invitation, and a config fault returns to
- * the confirm-columns step. No failure clears any operator input.
+ * Problems block carries the other half). The run's own non-fatal warnings --
+ * the appliance's rendezvous preflight among them -- surface separately through
+ * the shared {@link RunWarningsAlert}, which a failure does not clear.
+ *
+ * A failed run renders the failure vocabulary's alert for its category, each
+ * with its one concrete way forward -- an acceptor seat cannot mint, so every
+ * non-retryable recovery is a link to the quick path to paste a fresh
+ * invitation, and a config fault returns to the confirm-columns step. No failure
+ * clears any operator input.
  */
 export function AcceptorExchangeSection({
   invitation,
@@ -52,6 +57,7 @@ export function AcceptorExchangeSection({
   outputs,
   failure,
   warning,
+  runWarnings,
   serverJob,
   jobId,
   reattached,
@@ -65,8 +71,14 @@ export function AcceptorExchangeSection({
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
   /** The confirm-columns step's partial-coverage advisory, kept visible through
-   * the run and cleared on a failure. */
+   * the run and cleared on a failure. Authored by this seat before the run, so
+   * distinct from `runWarnings`, which the run itself raises. */
   warning: AlertContent | undefined;
+  /** The run's accumulated non-fatal warnings (the driver's `onWarning` slot),
+   * rendered through the shared alert as the inviter seat renders them. Unlike
+   * the coverage advisory above these survive a failure: a preflight warning the
+   * failure may have followed from must not vanish with the run. */
+  runWarnings: ReadonlyArray<string>;
   /** Whether this accept executes on the console appliance (a server-job run)
    * rather than in this browser. On the appliance the CLI child conducts the
    * exchange while the tab stays open, so the keep-open callout names the running
@@ -241,6 +253,7 @@ export function AcceptorExchangeSection({
           finishedAt={run.finishedAt}
         />
       )}
+      <RunWarningsAlert warnings={runWarnings} />
       <StatusPanel
         run={run}
         done={phase === "done"}

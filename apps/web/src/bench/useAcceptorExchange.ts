@@ -30,6 +30,7 @@ import {
   stagesFor,
 } from "./exchangeRun";
 import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
+import { appendSanitizedRunWarning } from "./runWarnings";
 import { buildRunOutputs } from "./runOutputs";
 import { failureFor } from "./useInviterExchange";
 import { invitationUsable } from "./inviterModel";
@@ -243,6 +244,13 @@ export function useAcceptorExchange({
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
+  /** The run's non-fatal warnings in arrival order, each already escaped at this
+   * hook's display boundary ({@link appendSanitizedRunWarning}). The console's
+   * rendezvous preflight raises these before the exchange starts -- a non-empty
+   * mount, an overlap with the input directory or the data root -- and the accepting
+   * seat is the one most likely to launch into a mount the partner has been syncing
+   * into, so they must reach it as they reach the inviter. */
+  warnings: ReadonlyArray<string>;
   /** The appliance job id of the current server-job accept, once created; undefined
    * on a browser accept and before the job exists. Drives the completed-run
    * recurring hand-off panel. */
@@ -263,6 +271,7 @@ export function useAcceptorExchange({
   const [run, setRun] = useState<ExchangeRun>(() => initialRun("acceptor"));
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
+  const [warnings, setWarnings] = useState<Array<string>>([]);
   // The status of an exchange this accept re-attached to on a busy (409) create,
   // else undefined. Drives the run surface's recovery-style copy; reset when a run
   // restarts or the launch is discarded.
@@ -323,6 +332,7 @@ export function useAcceptorExchange({
     setRun(initialRun("acceptor"));
     setOutputs(undefined);
     setFailure(undefined);
+    setWarnings([]);
     setCurrentJobId(undefined);
     setReattached(undefined);
     setReattaching(false);
@@ -492,6 +502,8 @@ export function useAcceptorExchange({
         setOutputs(generated);
         setRun((prev) => runWithCompletion(prev, new Date()));
       },
+      onWarning: (message) =>
+        setWarnings((prev) => appendSanitizedRunWarning(prev, message)),
       onError: ({ category, error }) => {
         // Dev-gated: the raw Error object's message/cause can embed partner-/
         // server-controlled bytes, so a production console carries none of it,
@@ -557,6 +569,7 @@ export function useAcceptorExchange({
       setRun(initialRun("acceptor"));
       setOutputs(undefined);
       setFailure(undefined);
+      setWarnings([]);
       setCurrentJobId(undefined);
       setReattached(undefined);
       setReattaching(false);
@@ -621,6 +634,7 @@ export function useAcceptorExchange({
     run,
     outputs,
     failure,
+    warnings,
     jobId: currentJobId,
     reattached,
     reattaching,

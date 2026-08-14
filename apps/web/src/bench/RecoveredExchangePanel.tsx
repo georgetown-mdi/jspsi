@@ -27,11 +27,13 @@ import { failureFor } from "./useInviterExchange";
 
 import {
   DownloadRow,
+  RunWarningsAlert,
   WithheldResultInset,
   recoveredExchangeHeading,
 } from "./BenchRunSurface";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
+import { appendSanitizedRunWarning } from "./runWarnings";
 import { reattachedRunState } from "./reattachedRunState";
 import styles from "./bench.module.css";
 
@@ -116,12 +118,13 @@ function recoveryLead(
  * transient/unreachable probe (a network error or non-404 fault) renders nothing
  * but LEAVES the record intact, so a blip never destroys the way back to a live
  * exchange. A live id renders the panel: one of three headings -- still running,
- * finished, or stopped (failed/cancelled) -- the re-attached run's timeline
- * (replayed through the same run-state fold the hooks use), the appliance download
- * hrefs on a finished run only, the collapsed "run this on a schedule" graduation
- * hand-off on any run that is not stopped (self-gated away when the hand-off is
- * unavailable), "Stop this exchange" while running, and "Discard" (behind a
- * confirm, since it is an irreversible removal of appliance-only data) always.
+ * finished, or stopped (failed/cancelled) -- the run's non-fatal warnings, the
+ * re-attached run's timeline (replayed through the same run-state fold the hooks
+ * use), the appliance download hrefs on a finished run only, the collapsed "run
+ * this on a schedule" graduation hand-off on any run that is not stopped
+ * (self-gated away when the hand-off is unavailable), "Stop this exchange" while
+ * running, and "Discard" (behind a confirm, since it is an irreversible removal
+ * of appliance-only data) always.
  *
  * Unmounting the panel aborts only its own stream consumption -- it carries no
  * cancel intent, so the appliance's run keeps going and the panel is the way back
@@ -139,6 +142,11 @@ export function RecoveredExchangePanel() {
   const [run, setRun] = useState<ExchangeRun>();
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
+  // The re-attached run's non-fatal warnings, each escaped at this display
+  // boundary. The SSE replay is full-history, so a warning the exchange raised
+  // before this browser attached arrives here too -- which is the whole point on
+  // a seat that may never have seen the launch.
+  const [warnings, setWarnings] = useState<Array<string>>([]);
   // The probe's initial read of the run status, so a re-attached terminal run
   // heads correctly -- finished-successful or stopped -- immediately rather than
   // flashing "still running" until the replay lands.
@@ -208,6 +216,8 @@ export function RecoveredExchangePanel() {
             current ? runWithCompletion(current, new Date()) : current,
           );
         },
+        onWarning: (message) =>
+          setWarnings((current) => appendSanitizedRunWarning(current, message)),
         onError: ({ category, error }) => {
           whenDiagnostic(() => console.error(error));
           setFailure(failureFor(category, error));
@@ -270,6 +280,7 @@ export function RecoveredExchangePanel() {
           <span style={{ whiteSpace: "pre-line" }}>{failure.message}</span>
         </Alert>
       )}
+      <RunWarningsAlert warnings={warnings} />
       <StatusPanel
         run={run}
         done={outputs !== undefined}
