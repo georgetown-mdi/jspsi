@@ -208,7 +208,7 @@ PSI-Link does not hold an ATO of its own; an ATO is granted to a specific deploy
 
 The project's privacy posture is published as a standalone statement at [PRIVACY.md](../PRIVACY.md): what the project collects and retains on its own behalf, how the container deployment and the hosted web application differ in what the project operates and can observe, and what each supporting service sees. A privacy review should start there.
 
-The operational counterpart is [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md): the privacy statement covers data practices, that document covers who operates what, and each points at the other rather than repeating it.
+The operational counterpart is [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md): the privacy statement is the authority on data practices, that document on who operates what. Both set out the two deployments, each in its own terms, and the responsibility document links back to the privacy statement for the data-practices detail.
 
 The statement points into the design documents for the underlying detail, and a reviewer working through it will want the same four: what data flows and what is retained ([SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling)), how the persistent credential is protected ([SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security)), what third-party supporting services can observe ([SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security)), and who can attack what ([SECURITY_DESIGN.md#threat-model](SECURITY_DESIGN.md#threat-model)).
 

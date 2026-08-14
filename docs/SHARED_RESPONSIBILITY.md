@@ -14,35 +14,32 @@ It is not a certification, an attestation, or a contract. It describes how PSI-L
 
 ## PSI-Link is not a hosted service
 
-- **It is software you run, not a service run on your behalf.** The one exception is the hosted deployment of the web application, covered below.
-- **The deploying agency is the sole controller of the data it processes.** The project is not a controller, processor, or business associate for that data.
-- **There are no accounts, no registration, no license check, no update ping, no usage analytics, and no telemetry**, in either deployment.
-- **The project collects, transmits, and retains no personal data on its own behalf.**
+A security questionnaire's vendor rows have no vendor to land on. The deploying agency runs the software and is the sole controller of the data it processes; the project is neither controller, processor, nor business associate for that data, and operates nothing on the agency's behalf. Nothing in either deployment asks an agency to register, checks a license, calls home for updates, or reports usage.
 
-The privacy statement carries these claims in full, together with the repository check that backstops them against drift ([PRIVACY.md](../PRIVACY.md)).
+The hosted deployment of the web application is the single exception to "operates nothing", and [Hosted web application](#hosted-web-application) below bounds what it changes.
+
+No personal data is collected, transmitted, or retained by the project on its own behalf. [PRIVACY.md](../PRIVACY.md) is the authority on that answer, and carries the repository check that backstops it against drift; this document takes it as given and states who operates what.
 
 ## The two deployments
 
-The split differs by deployment, and a responsibility table written for one is misleading about the other. Read the section matching what you are deploying.
+The split differs by deployment, and a responsibility table written for one is misleading about the other. Read the section for the deployment in question.
 
 ### Container deployment (CLI and local console)
 
 This is the deployment supported for production use.
 
-- **What the project operates: nothing.** The container runs on the agency's machine or in its infrastructure. No component of it reports to the project.
-- **What it connects to:** only the SFTP server or shared directory the agency configures for the exchange.
-- **No agency data is transmitted to, stored on, or accessible from project-operated infrastructure.** The project receives no data, no metadata, and no record that an exchange occurred.
-- **Distribution is the one third-party touch.** Pulling the image from a public registry tells that registry's operator that the pull happened, as with any container image.
+- **The project operates no part of it.** The container runs on hardware the agency controls, connects only to the SFTP server or shared directory the agency configured for the exchange, and no component of it reports back.
+- **No agency data is transmitted to, stored on, or accessible from project-operated infrastructure** -- the exchange touches none. The project receives no data, no metadata, and no record that an exchange took place.
+- **Even the registry the image comes from is not project-operated.** It is a public one, and what it can observe is one row of [Third-party supporting services](#third-party-supporting-services).
 
-The local console is part of this deployment: it is served by the same container to the operator's own machine over loopback and is not reachable beyond that host ([DEPLOYMENT.md](DEPLOYMENT.md#server-job-api)).
+The local console is part of this deployment rather than a hosted one: it rides in the same container, served over loopback to the operator's own machine and reachable from nowhere else ([DEPLOYMENT.md](DEPLOYMENT.md#server-job-api)).
 
 ### Hosted web application
 
-- **Status: evaluation and demonstration.** The hosted deployment is not recommended for production exchanges of real records; use the container deployment for those.
-- **The project operates infrastructure here**, because the application is served from project-controlled hosting. That is what makes the second table below differ from the first.
-- **Data handling stays in the browser.** The input file is read, matched, and written locally and is never uploaded. This is a reviewed property of the codebase rather than a browser-enforced one ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#egress-hardening-and-its-limits)).
-- **What the project therefore receives** is the web server's request logs (client IP address, timestamp, requested path, user agent) and, from the bundled peer-coordination server, the derived rendezvous identifiers, connection timing, and client IP address.
-- **What it does not receive:** exchange content, the input file, the linkage identifiers, the shared secret, the agreed terms, or any record of what was linked. The coordination server relays opaque setup messages and never sees data-channel content ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security)).
+- **Status: evaluation and demonstration.** Real records belong in the container deployment.
+- **This is the one deployment where the project operates infrastructure at all**, since the application is served from project-controlled hosting. That is what makes the second table below differ from the first.
+- **What that infrastructure receives is delivery and rendezvous metadata:** the web server's request logs, and the connection metadata the bundled peer-coordination server needs to introduce two browsers. [PRIVACY.md](../PRIVACY.md#hosted-web-application) enumerates the fields.
+- **What it does not receive is the exchange:** not its content, the input file, the linkage identifiers, the shared secret, the agreed terms, or any record of what was linked. Matching happens in the browser -- a reviewed property of the codebase, not one the browser enforces ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#egress-hardening-and-its-limits)) -- and the coordination server relays opaque setup messages rather than data-channel content ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security)).
 
 An agency that deploys the web application on its own infrastructure takes every project-side row of the hosted table below.
 
@@ -84,7 +81,7 @@ An exchange relies on services operated by one of the parties, by the project, o
 
 | Supporting service | Typically operated by | What it can observe |
 |--------------------|----------------------|---------------------|
-| Peer coordination (signaling) | The project, for the hosted web application; the agency, if it deploys the web application itself; or a public third-party service if you point at one | Rendezvous identifiers, connection timing, and client IP addresses. Never data-channel content. |
+| Peer coordination (signaling) | The project, for the hosted web application; the agency, if it deploys the web application itself; or a public third-party service the agency points at | Rendezvous identifiers, connection timing, and client IP addresses. Never data-channel content. |
 | STUN | A third party. The hosted web application is configured by default with two public STUN servers | The client IP address that queried it, and nothing further. |
 | TURN relay | Whoever the agency configures; commonly a commercial ICE service | The two endpoints' addresses and the traffic volume between them. It forwards encrypted DTLS packets without terminating the session. |
 | Shared SFTP server or file drop | One of the two parties, or a third party both trust | The exchange's files: ciphertext and file timing on a recurring, authenticated exchange; readable content on a zero-setup exchange, which relies on the transport alone. |
@@ -108,7 +105,7 @@ The per-service detail is in [PRIVACY.md](../PRIVACY.md#what-supporting-services
 
 ## What this document does not cover
 
-- **Data practices** -- what is collected, transmitted, and retained, and by whom: [PRIVACY.md](../PRIVACY.md). That statement covers the data; this one covers the operational responsibility for it, and neither repeats the other.
+- **Data practices** -- what is collected, transmitted, and retained, and by whom: [PRIVACY.md](../PRIVACY.md) is the authority. Both documents set out the two deployments, because the responsibility split turns on the same facts; each states them in its own terms, and this one links back for the data-practices detail rather than carrying it.
 - **Regulatory framings and control mappings** -- NIST SP 800-53, FIPS 140, HIPAA, FERPA, CJIS, IRS 1075, Section 508, export control: [COMPLIANCE.md](COMPLIANCE.md).
 - **The threat model and the security controls themselves**: [SECURITY_DESIGN.md](SECURITY_DESIGN.md).
 - **How to operate a deployment** -- the container, the console appliance, the SFTP server checklist, and egress restriction: [DEPLOYMENT.md](DEPLOYMENT.md).
