@@ -14,6 +14,8 @@ Where another document in this repository covers a topic in detail, this documen
 
 PSI-Link is designed to perform privacy-preserving record linkage between two partner agencies that have a signed data sharing agreement. The base PSI protocol exposes only the membership intersection between the parties; records that are not in the intersection are not disclosed. See [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling) for the data-handling guarantees and [PROTOCOL.md](spec/PROTOCOL.md) for the cryptographic details.
 
+What the project operates and what the deploying agency operates -- stated separately for the container deployment and the hosted web application, with the responsibility split a security questionnaire asks for -- is in [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md).
+
 The following table summarizes the data classifications PSI-Link is and is not designed for. "Suitable" does not relieve the deploying agency of its own compliance obligations.
 
 | Data type | Suitable? | Notes |
@@ -206,6 +208,8 @@ PSI-Link does not hold an ATO of its own; an ATO is granted to a specific deploy
 
 The project's privacy posture is published as a standalone statement at [PRIVACY.md](../PRIVACY.md): what the project collects and retains on its own behalf, how the container deployment and the hosted web application differ in what the project operates and can observe, and what each supporting service sees. A privacy review should start there.
 
+The operational counterpart is [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md): the privacy statement is the authority on data practices, that document on who operates what. Both set out the two deployments, each in its own terms, and the responsibility document links back to the privacy statement for the data-practices detail.
+
 The statement points into the design documents for the underlying detail, and a reviewer working through it will want the same four: what data flows and what is retained ([SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling)), how the persistent credential is protected ([SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security)), what third-party supporting services can observe ([SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security)), and who can attack what ([SECURITY_DESIGN.md#threat-model](SECURITY_DESIGN.md#threat-model)).
 
 ### Privacy Impact Assessment
@@ -222,6 +226,7 @@ If a reviewer identifies a compliance-relevant gap that is not addressed here, p
 ## See also
 
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - threat model, authentication design, channel security, NIST 800-53 mapping
+- [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md) - the deployment model and the project/agency responsibility split, per deployment
 - [PROTOCOL.md](spec/PROTOCOL.md) - PSI and key-exchange protocol specification
 - [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md) - constraining an SFTP exchange's SSH layer to approved algorithms
 - [RELEASES.md](RELEASES.md) - release artifacts, signing, and SBOM

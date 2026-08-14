@@ -23,7 +23,7 @@ The statements in this document about what PSI-Link connects to have a mechanica
 
 ## Two deployments
 
-The answers below differ by deployment. Read the section matching what you are deploying.
+The answers below differ by deployment. Read the section matching what you are deploying. The operational counterpart to this section -- who operates each part of a deployment, area by area -- is in [docs/SHARED_RESPONSIBILITY.md](docs/SHARED_RESPONSIBILITY.md).
 
 ### Container deployment (CLI and local console)
 
@@ -88,6 +88,7 @@ The project holds no personal data and cannot respond to access, correction, or 
 ## See also
 
 - [docs/COMPLIANCE.md](docs/COMPLIANCE.md) - regulatory framings, data classification, and the considerations a privacy review should cover
+- [docs/SHARED_RESPONSIBILITY.md](docs/SHARED_RESPONSIBILITY.md) - the deployment model and what the project operates versus what the deploying agency operates
 - [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md) - threat model, data handling, channel security, and the at-rest model for managed exchanges
 - [SECURITY.md](SECURITY.md) - vulnerability reporting and supported versions
 - [SUPPORT.md](SUPPORT.md) - where to direct other questions
