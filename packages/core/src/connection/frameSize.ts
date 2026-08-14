@@ -80,7 +80,7 @@ export const MAX_PSI_DECODE_ELEMENTS = Math.floor(
  * (deduplicated) linkage-key values `D`, reached only when every cell holds a
  * value that occurs nowhere else; for sparse or repeating keys `D` is lower. This
  * budget is on cells, not on `D`: the true `D` is never computed (it would cost a
- * full dedup before connecting) and never exchanged (it would disclose each key's
+ * full dedup at prepare time) and never exchanged (it would disclose each key's
  * duplication and sparsity structure -- see the role-resolution discussion in
  * docs/spec/PROTOCOL.md), so bounding the cell count is the conservative gate.
  *
@@ -185,12 +185,11 @@ const SINGLE_PASS_REPLY_OVERHEAD_BYTES = 256;
 /**
  * Does a single party's own dataset alone exceed the single-pass ceiling? True
  * when `keyCount * recordCount > MAX_SINGLE_PASS_CELLS`. This is the
- * coarse one-party gate the {@link prepareForExchange} pre-flight uses before
- * connecting, when only this party's row count is known: if a party's own
- * contribution already exceeds the budget, single-pass cannot succeed whatever
- * the partner's size. The authoritative two-party check is
- * {@link singlePassExchangeExceedsCap}, run post-handshake once both counts are
- * exchanged.
+ * coarse one-party gate the {@link prepareForExchange} pre-flight uses, when only
+ * this party's row count is known: if a party's own contribution already exceeds
+ * the budget, single-pass cannot succeed whatever the partner's size. The
+ * authoritative two-party check is {@link singlePassExchangeExceedsCap}, run
+ * post-handshake once both counts are exchanged.
  */
 export function singlePassDatasetExceedsCap(
   keyCount: number,

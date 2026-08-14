@@ -265,7 +265,7 @@ export interface RunProtocolResult {
  * parameter, not embedded in `connection`.
  *
  * When `auth` is an {@link AuthPersist}, `keyFilePath` must be a non-empty,
- * non-whitespace string; this is checked before any connection is opened so
+ * non-whitespace string; this is checked before any credential is presented so
  * that a whitespace-only path does not silently create a file named " " in
  * the current directory. `sharedSecret` is validated by {@link authenticateConnection}
  * after the connection opens. `keyFilePath` is checked for non-emptiness only
@@ -343,9 +343,9 @@ export async function runProtocol(
   // the emitter exists, so every emission site is a no-op in the default
   // (flag-off) run.
   //
-  // Fail closed and loud FIRST -- before the runtime banner, any connection, or
-  // any other exchange work: if --event-stream was given but fd 3 is not actually
-  // wired, throw a UsageError (exit 64 at the command boundary) here rather than
+  // Fail closed and loud FIRST -- before the runtime banner or any other exchange
+  // work: if --event-stream was given but fd 3 is not actually wired, throw a
+  // UsageError (exit 64 at the command boundary) here rather than
   // silently dropping every event or crashing mid-run on the first write. This is
   // the top of the protocol lifecycle every exchange-running command reaches, so
   // the one check covers exchange, zero-setup, and the online invite/accept alike.
@@ -368,7 +368,7 @@ export async function runProtocol(
   // result/record generation after runExchange returns is "output". A single
   // terminal event fires per run -- the result on success, or one classified
   // error -- so it is emitted from exactly one of the two catch boundaries: the
-  // pre-connection prepare block just below, or the main try's catch.
+  // prepare block just below, or the main try's catch.
   let terminalPhase: ErrorPhase = "prepare";
 
   // Captured in the outer scope so the post-handshake saveKeyFile call below
@@ -411,14 +411,13 @@ export async function runProtocol(
       ),
     );
   };
-  // Pre-connection prepare block. Its throw sites -- the channel and caller-
-  // contract guards, the shared-secret readiness check (an expired or malformed
-  // secret), the key-file-path preflight, and the client/connection/bridge
-  // construction -- all run before the main try below, whose catch is the other
-  // error-emission site. This catch gives them the same single terminal error
-  // event (phase "prepare") and rethrows; the two regions are disjoint, so no
-  // failure route passes through both catches and the one-terminal-event
-  // guarantee holds on every path.
+  // The prepare block. Its throw sites -- the channel and caller-contract guards,
+  // the shared-secret readiness check (an expired or malformed secret), the
+  // key-file-path preflight, and the client/connection/bridge construction -- all
+  // run before the main try below, whose catch is the other error-emission site.
+  // This catch gives them the same single terminal error event (phase "prepare")
+  // and rethrows; the two regions are disjoint, so no failure route passes through
+  // both catches and the one-terminal-event guarantee holds on every path.
   try {
     if (connection.channel !== "filedrop" && connection.channel !== "sftp")
       // Only reachable via an unsafe cast past ProtocolConnectionConfig.
@@ -464,20 +463,21 @@ export async function runProtocol(
       );
     if (auth) {
       // Fail fast on the locally-knowable secret preconditions -- a malformed or
-      // already-expired shared secret -- BEFORE opening any connection. Both are
-      // determinable without a peer, and deferring them to authenticateConnection
-      // (which runs only after the connection is open) would let a dead credential
-      // first drive the file-sync rendezvous, whose losing side can then surface a
-      // misleading "peer abandoned the handshake; retry" hint for what is really an
-      // expired or malformed secret. Running the same tagged check here keeps both
-      // parties' failure deterministic and correctly hinted, with no rendezvous
-      // I/O. authenticateConnection still runs it (and the post-handshake expiry
-      // check) as the authoritative boundary for library consumers that bypass
-      // runProtocol. The shared check carries psilinkRecoveryHintEmitted, so the
-      // catch block below suppresses its generic advisory.
+      // already-expired shared secret -- BEFORE any credential is presented. Both
+      // are determinable without a peer, and deferring them to
+      // authenticateConnection (which runs only after the connection is open) would
+      // let a dead credential first drive the file-sync rendezvous, whose losing
+      // side can then surface a misleading "peer abandoned the handshake; retry"
+      // hint for what is really an expired or malformed secret. Running the same
+      // tagged check here keeps both parties' failure deterministic and correctly
+      // hinted, with no rendezvous I/O. authenticateConnection still runs it (and
+      // the post-handshake expiry check) as the authoritative boundary for library
+      // consumers that bypass runProtocol. The shared check carries
+      // psilinkRecoveryHintEmitted, so the catch block below suppresses its
+      // generic advisory.
       assertSharedSecretReadyForHandshake(auth);
-      // Validate and trim the key-file path before any connection is opened, so a
-      // misconfiguration fails here -- with no rendezvous I/O and before the
+      // Validate and trim the key-file path before any credential is presented, so
+      // a misconfiguration fails here -- with no rendezvous I/O and before the
       // partner can be left holding a rotated token this side cannot persist --
       // rather than at saveKeyFile post-handshake. Returns the trimmed path, which
       // the saveKeyFile call below reuses without re-reading the caller's auth.
