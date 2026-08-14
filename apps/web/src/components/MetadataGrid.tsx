@@ -18,6 +18,7 @@ import {
   setColumnType,
 } from "@psi/metadataEditing";
 
+import { ColumnName, isolatedColumnName } from "@components/ColumnName";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import type { SelectProps } from "@mantine/core";
@@ -91,6 +92,12 @@ function conflictTypeControlAria(
  * `@psilink/core`. One screen states one account -- a live region gated apart from
  * the panel beside it speaks a disclosure the screen denies, to the reader least
  * placed to check the other channel.
+ *
+ * Every column name the grid emits -- the row header, both control labels, and both
+ * live regions -- goes through {@link ColumnName} / {@link isolatedColumnName},
+ * which is also what the host's own column-name surfaces use, so a name reads the
+ * same in the row as in the notices beside it. That module carries what the
+ * isolation does and does not contain.
  */
 export function MetadataGrid({
   metadata,
@@ -120,7 +127,9 @@ export function MetadataGrid({
     ? OUTBOUND_SEND_NO_PAYLOAD_SENTENCE
     : disclosed.length === 0
       ? "No columns will be sent to your partner."
-      : `Columns sent to your partner: ${disclosed.join(", ")}.`;
+      : `Columns sent to your partner: ${disclosed
+          .map(isolatedColumnName)
+          .join(", ")}.`;
 
   // Announce the disclosure summary on a debounce. The timer is cleared on every
   // change and on unmount, so a rapid edit burst announces once and a teardown
@@ -157,7 +166,7 @@ export function MetadataGrid({
     setActionAnnouncement(
       result.demotedIdentifiers.length === 0
         ? ""
-        : `${result.demotedIdentifiers.join(", ")} ${
+        : `${result.demotedIdentifiers.map(isolatedColumnName).join(", ")} ${
             result.demotedIdentifiers.length === 1 ? "is" : "are"
           } no longer the record identifier and will not be sent; only one ` +
             "column can be the record identifier.",
@@ -206,14 +215,16 @@ export function MetadataGrid({
             return (
               <Table.Tr key={column.name}>
                 <Table.Th scope="row" style={{ fontWeight: 500 }}>
-                  {column.name}
+                  <ColumnName name={column.name} />
                 </Table.Th>
                 <Table.Td>
                   <Select
                     data={TYPE_OPTIONS}
                     value={column.type}
                     allowDeselect={false}
-                    aria-label={`Type for column ${column.name}`}
+                    aria-label={`Type for column ${isolatedColumnName(
+                      column.name,
+                    )}`}
                     {...(inConflict
                       ? conflictTypeControlAria(conflictErrorId)
                       : {})}
@@ -230,7 +241,9 @@ export function MetadataGrid({
                     }))}
                     value={disclosureOf(column)}
                     allowDeselect={false}
-                    aria-label={`How column ${column.name} is used`}
+                    aria-label={`How column ${isolatedColumnName(
+                      column.name,
+                    )} is used`}
                     onChange={(value) =>
                       value !== null && onDisclosure(column.name, value)
                     }

@@ -29,6 +29,8 @@ import { BenchLobby } from "@bench/BenchLobby";
 import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
 
+import { isolatedColumnName } from "@components/ColumnName";
+
 import { createAppMount } from "./renderApp";
 
 import type {
@@ -798,7 +800,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     for (const columnName of ["first_name", "last_name"]) {
       await userEvent.click(
         page.getByRole("combobox", {
-          name: `Type for column ${columnName}`,
+          name: `Type for column ${isolatedColumnName(columnName)}`,
           exact: true,
         }),
       );
@@ -842,7 +844,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     // Resolving it empties the region in place and re-opens the launch.
     await userEvent.click(
       page.getByRole("combobox", {
-        name: "Type for column identifier",
+        name: `Type for column ${isolatedColumnName("identifier")}`,
         exact: true,
       }),
     );
@@ -864,7 +866,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
 
     // Retype first_name to a non-matching type via the grid, dropping a key.
     const typeSelect = page.getByRole("combobox", {
-      name: "Type for column first_name",
+      name: `Type for column ${isolatedColumnName("first_name")}`,
     });
     await userEvent.click(typeSelect);
     await userEvent.click(
@@ -894,11 +896,13 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     expect(errorId).toBeTruthy();
 
     // Both offending Type controls carry the control-level error signal and
-    // point their description at the visible error element. (exact: true --
-    // "Type for column id" is a substring of "Type for column identifier".)
+    // point their description at the visible error element. (exact: true, kept
+    // because the labels here name `id` and `identifier`: the isolate closing
+    // each name is what separates the two, and an inexact match would not say
+    // whether it read that or the shorter name's prefix.)
     for (const columnName of ["id", "identifier"]) {
       const control = page.getByRole("combobox", {
-        name: `Type for column ${columnName}`,
+        name: `Type for column ${isolatedColumnName(columnName)}`,
         exact: true,
       });
       expect(control.element().getAttribute("aria-invalid")).toBe("true");
@@ -907,7 +911,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
 
     // A non-identifier Type control carries no stale error association.
     const bystander = page.getByRole("combobox", {
-      name: "Type for column first_name",
+      name: `Type for column ${isolatedColumnName("first_name")}`,
       exact: true,
     });
     expect(bystander.element().getAttribute("aria-invalid")).toBeNull();
@@ -916,7 +920,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     // Retype one identifier to Other: the conflict clears and no control keeps a
     // stale aria-invalid/association.
     const idControl = page.getByRole("combobox", {
-      name: "Type for column identifier",
+      name: `Type for column ${isolatedColumnName("identifier")}`,
       exact: true,
     });
     await userEvent.click(idControl);
@@ -925,7 +929,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     );
     expect(page.getByTestId("identifier-conflict").query()).toBeNull();
     const survivor = page.getByRole("combobox", {
-      name: "Type for column id",
+      name: `Type for column ${isolatedColumnName("id")}`,
       exact: true,
     });
     expect(survivor.element().getAttribute("aria-invalid")).toBeNull();
@@ -1074,16 +1078,14 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
   });
 });
 
-describe("acceptor columns step: disclosure summary sanitization", () => {
-  test("a disclosed column name carrying a bidi override renders escaped, never raw", async () => {
-    // The operator's own CSV header is untrusted display input: a bidi override
-    // (U+202E, right-to-left override) embedded in a column name must not
-    // reorder the summary of what leaves the machine. The name is unrecognized,
-    // so it infers to role: payload -- the disclosed set -- while
-    // first_name/last_name satisfy both keys, so the "What you will send" panel
-    // renders instead of the mapper.
-    const bidiColumn = "notes\u202Eevil";
-    const columns = ["first_name", "last_name", bidiColumn];
+describe("acceptor columns step: one column name across the screen", () => {
+  // The screen where the operator decides what leaves the machine names the same
+  // header in four places -- the grid row, the grid's two control labels, and the
+  // disclosed-columns panel -- and they have to be the same name. These names are
+  // the operator's own CSV header, so they are shown verbatim inside a bidi
+  // isolate rather than escaped; what the isolate contains and what it does not is
+  // on @components/ColumnName.
+  function mountStep(columns: Array<string>) {
     const rows = [Object.fromEntries(columns.map((c) => [c, "x"]))];
     const columnsState = acceptorInitialColumnsState(columns);
     const editorState = acceptorColumnsEditorState(
@@ -1091,7 +1093,6 @@ describe("acceptor columns step: disclosure summary sanitization", () => {
       acceptorTerms,
       rows,
     );
-    const verdict = acceptorVerdict(columns, acceptorTerms, editorState);
     const noop = () => undefined;
     app.render(
       createElement(AcceptorColumnsStep, {
@@ -1099,7 +1100,7 @@ describe("acceptor columns step: disclosure summary sanitization", () => {
         columns,
         columnsState,
         editorState,
-        verdict,
+        verdict: acceptorVerdict(columns, acceptorTerms, editorState),
         onMetadataChange: noop,
         onRemap: noop,
         onReset: noop,
@@ -1107,19 +1108,120 @@ describe("acceptor columns step: disclosure summary sanitization", () => {
         onBack: noop,
       }),
     );
+  }
 
-    // Scoped to the summary panel: the metadata grid on the same step renders
-    // the raw column name (a distinct surface), so a document-wide raw-character
-    // check would not pin this panel's escaping.
-    const summary = page.getByText("For each matched row:", { exact: false });
-    await expect.element(summary).toBeInTheDocument();
-    const text = summary.element().textContent;
-    // The escaped form sanitizeForDisplay produces (a visible backslash-u
-    // literal), never the raw override character.
-    expect(text).toContain(
-      `For each matched row: ${sanitizeForDisplay(bidiColumn)}.`,
+  /** The grid's row headers, in row order. */
+  function rowHeaderNames(): Array<string> {
+    return [...app.container.querySelectorAll('th[scope="row"]')].map(
+      (element) => element.textContent,
     );
-    expect(text).not.toContain("\u202E");
+  }
+
+  test("a header carrying a bidi override reads alike in the grid row and the panel", async () => {
+    // A right-to-left override (U+202E) and a zero-width joiner (U+200D): the two
+    // classes that make a name read differently from its bytes. The name is
+    // unrecognized, so it infers to role: payload -- the disclosed set -- while
+    // first_name/last_name satisfy both keys, so the "What you will send" panel
+    // renders instead of the mapper.
+    const bidiColumn = "notes\u202Eevil\u200D";
+    mountStep(["first_name", "last_name", bidiColumn]);
+    await expect
+      .element(page.getByText("For each matched row:", { exact: false }))
+      .toBeInTheDocument();
+
+    // The grid's row header and the panel's entry are the SAME string, and it is
+    // the header the operator's file carries -- the disagreement this pins is a
+    // name that reads one way in the row the operator marks and another in the
+    // sentence stating what that mark sends.
+    const panel = page
+      .getByText("For each matched row:", { exact: false })
+      .element();
+    expect(rowHeaderNames()).toEqual(["first_name", "last_name", bidiColumn]);
+    expect(panel.textContent).toBe(`For each matched row: ${bidiColumn}.`);
+
+    // Both sit in a <bdi> the browser actually isolates, which is what keeps the
+    // override off the copy around them: asserted through the computed style, so
+    // a <bdi> the engine does not isolate fails here rather than passing on the
+    // element name alone.
+    const isolates = [...app.container.querySelectorAll("bdi")];
+    expect(isolates.map((element) => element.textContent)).toEqual([
+      bidiColumn,
+      "first_name",
+      "last_name",
+      bidiColumn,
+    ]);
+    for (const element of isolates) {
+      expect(getComputedStyle(element).unicodeBidi).toBe("isolate");
+    }
+
+    // The two control labels are strings, so they carry the isolate as characters
+    // instead. Read off the DOM rather than through a role query, since what is
+    // pinned is the label the app emits.
+    const labels = [
+      ...app.container.querySelectorAll("[aria-label^='Type for column ']"),
+      ...app.container.querySelectorAll("[aria-label^='How column ']"),
+    ].map((element) => element.getAttribute("aria-label"));
+    expect(labels).toContain(
+      `Type for column ${isolatedColumnName(bidiColumn)}`,
+    );
+    expect(labels).toContain(
+      `How column ${isolatedColumnName(bidiColumn)} is used`,
+    );
+
+    // And nothing anywhere on the step shows the escaped form -- the whole step,
+    // not one panel, since what holds the surfaces together is that none of them
+    // escapes: a single site put back on sanitizeForDisplay fails here.
+    expect(app.container.textContent).not.toContain(
+      sanitizeForDisplay(bidiColumn),
+    );
+  });
+
+  test("the quick-fix mapper offers the header isolated and binds it raw", async () => {
+    // Neither column infers to a linkage type, so the mapper takes the panel's
+    // slot with one native select per missing field. An <option> cannot hold a
+    // <bdi>, so its label carries the isolate as characters -- while its VALUE
+    // stays the raw header, since that is the identity the remap binds and a
+    // display form there would bind a column the file does not have.
+    const bidiColumn = "notes‮evil";
+    mountStep([bidiColumn, "other"]);
+    await expect
+      .element(page.getByText("Map a column to each missing field"))
+      .toBeInTheDocument();
+
+    const options = [...app.container.querySelectorAll("option")].filter(
+      (option) => option.value !== "",
+    );
+    expect(options.map((option) => option.value)).toContain(bidiColumn);
+    expect(options.map((option) => option.textContent)).toContain(
+      isolatedColumnName(bidiColumn),
+    );
+  });
+
+  test("two long headers sharing a prefix stay distinct in the grid", async () => {
+    // Why the grid isolates rather than escapes: sanitizeForDisplay bounds its
+    // OUTPUT, and a code point past U+00FF escapes to six characters, so two
+    // schema-valid headers (MAX_NAME_LENGTH is 256) sharing a long non-Latin
+    // prefix collapse to the same truncated string -- the equality below. An
+    // operator reading that would be marking two grid rows that look like one.
+    const sharedPrefix = "\u0444".repeat(45);
+    const first = `${sharedPrefix}_a`;
+    const second = `${sharedPrefix}_b`;
+    expect(sanitizeForDisplay(first)).toBe(sanitizeForDisplay(second));
+
+    mountStep(["first_name", "last_name", first, second]);
+    await expect
+      .element(page.getByText("For each matched row:", { exact: false }))
+      .toBeInTheDocument();
+
+    expect(rowHeaderNames()).toEqual([
+      "first_name",
+      "last_name",
+      first,
+      second,
+    ]);
+    // Whole and unescaped, so a non-Latin header reads as itself on the
+    // operator's own authoring surface rather than as a run of escapes.
+    expect(app.container.textContent).not.toContain("\\u0444");
   });
 });
 
@@ -1206,7 +1308,9 @@ describe("acceptor columns step: the send summary is gated on the inviting party
     // while the region is still empty.
     await expect
       .element(page.getByTestId("disclosure-summary-announcement"))
-      .toHaveTextContent("Columns sent to your partner: risk_score.");
+      .toHaveTextContent(
+        `Columns sent to your partner: ${isolatedColumnName("risk_score")}.`,
+      );
     expect(app.container.textContent).not.toContain(noPayloadSentence);
     await expect
       .element(page.getByText("For each matched row:", { exact: false }))
@@ -1231,7 +1335,9 @@ describe("acceptor columns step: the send summary is gated on the inviting party
     // operator hearing nothing where a disclosure does happen.
     await expect
       .element(page.getByTestId("disclosure-summary-announcement"))
-      .toHaveTextContent("Columns sent to your partner: risk_score.");
+      .toHaveTextContent(
+        `Columns sent to your partner: ${isolatedColumnName("risk_score")}.`,
+      );
     expect(app.container.textContent).not.toContain(noPayloadSentence);
     await expect
       .element(page.getByText("For each matched row:", { exact: false }))
@@ -1251,8 +1357,8 @@ describe("acceptor columns step: the columns the invitation will not accept", ()
 
   // The name fields satisfy both keys and the unrecognized column infers to role:
   // payload, so this conflict is the only thing that can close the launch. That
-  // column carries a bidi override (U+202E) because it is the operator's own CSV
-  // header -- untrusted display input on this panel as on every other.
+  // column carries a bidi override (U+202E) because the alert names it beside the
+  // grid row the operator has to change, and the two must name it alike.
   const bidiColumn = "notes\u202Eevil";
 
   function mountStep(linkageTerms: LinkageTerms) {
@@ -1281,22 +1387,24 @@ describe("acceptor columns step: the columns the invitation will not accept", ()
     );
   }
 
-  test("names the column escaped, disables launch, and says why at the button", async () => {
+  test("names the column as the grid does, disables launch, and says why at the button", async () => {
     mountStep(acceptsNoColumns);
     await expect
       .element(page.getByText("Your partner will not accept this column"))
       .toBeInTheDocument();
 
-    // Scoped to the panel: the metadata grid on the same step renders the raw
-    // column name (a distinct surface), so a document-wide raw-character check
-    // would not pin this panel's escaping.
-    const panel = page.getByText(
-      "The invitation says your partner accepts no columns",
-      { exact: false },
+    // The alert tells the operator which grid row to change, so it names the
+    // column exactly as that row does -- isolated, never escaped. An entry
+    // reading differently from the row it points at is the failure here.
+    const item = app.container.querySelector<HTMLElement>("li bdi");
+    expect(item?.textContent).toBe(bidiColumn);
+    const rowHeaders = [
+      ...app.container.querySelectorAll('th[scope="row"]'),
+    ].map((element) => element.textContent);
+    expect(rowHeaders).toContain(bidiColumn);
+    expect(app.container.textContent).not.toContain(
+      sanitizeForDisplay(bidiColumn),
     );
-    const text = panel.element().textContent;
-    expect(text).toContain(sanitizeForDisplay(bidiColumn));
-    expect(text).not.toContain("\u202E");
 
     // The gate itself, and the reason a keyboard/screen-reader user at the button
     // hears: resolved through the button's own description, so a reason rendered
