@@ -3578,8 +3578,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * terminates the exchange. A no-op returning `true` when the mode is off,
    * during teardown, or when a session is already live. A dial that fails once
    * teardown has been latched reports the same `false` and reports nothing to the
-   * operator: this run has no next tick, and the failure may be the teardown's own
-   * destroy settling this very dial.
+   * operator -- this run has no next tick, and the failure may be the teardown's
+   * own destroy settling this very dial. The fatal classification takes
+   * precedence over that silence, inside the window as out.
    *
    * Core forwards it unwrapped (see {@link runTransition}), so its acquire of the
    * transition lock -- which is what keeps two handshakes, or a handshake and a
