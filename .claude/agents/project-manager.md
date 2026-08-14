@@ -22,6 +22,11 @@ user to "let me know" -- you will not hear back. If you need something only the
 human can answer, return a NEEDS INPUT result (below); the main thread that
 spawned you owns the loop and will re-spawn you with the answers folded in.
 
+For the same reason, never start a long command with `run_in_background` -- you
+have no turn left for the completion notification to land in. Run it in the
+FOREGROUND with a raised `timeout` (the Bash tool's ceiling is 600000 ms); split
+a command that exceeds the ceiling, or hand the work back to the caller.
+
 ## Workflow
 
 1. **Understand the input.** It is a finding, question, or note from a working
