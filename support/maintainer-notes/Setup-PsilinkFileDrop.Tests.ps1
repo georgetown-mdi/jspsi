@@ -2,9 +2,9 @@
 .SYNOPSIS
     Pester suite over the path-resolution functions in
     Setup-PsilinkFileDrop.ps1, the console command it closes on, and the
-    preflight question it turns an unusable image away on. Maintainer-facing:
-    it lives outside the guide folder, and an operator following the setup page
-    never receives it.
+    image-capability question it turns an unusable image away on before it asks
+    for a password. Maintainer-facing: it lives outside the guide folder, and an
+    operator following the setup page never receives it.
 
 .DESCRIPTION
     The script under test is dot-sourced with -LoadFunctionsOnly, which defines
@@ -606,6 +606,12 @@ Describe 'The image capability check' {
 
         $result.Capable | Should -BeFalse
         $result.Reason | Should -Be 'NoDoctor'
+        # The verdict is fixed, so what the image said is the whole of the
+        # evidence the flow can print under it -- and this bucket holds a
+        # `doctor --help` that crashed in a current image as well as the
+        # documented old one.
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'URL INPUT_FILE'
     }
 
     It 'keeps an engine that could not start the container apart from an old image' {
@@ -649,37 +655,42 @@ Describe 'The image capability check' {
 
 Describe 'The image capability check inside the setup flow' {
     BeforeAll {
-        # Two whole engines, each named so the flow's own `docker` calls reach
-        # it through the PATH. Each answers preflight normally and then serves
-        # one of the two shapes of `doctor --help`, and appends every call it
-        # was given to PSILINK_STUB_LOG -- which is what lets a test assert what
-        # the flow did NOT go on to run.
+        # Whole engines, each named so the flow's own `docker` calls reach it
+        # through the PATH. Each answers preflight normally and then serves one
+        # of the shapes of `doctor --help` -- or, for the third, refuses to run
+        # a container at all -- and appends every call it was given to
+        # PSILINK_STUB_LOG, which is what lets a test assert what the flow did
+        # NOT go on to run.
         #
         # Labels rather than parenthesised blocks: a `)` anywhere in the help
         # text would close a block early, and the pre-doctor help is the real
         # CLI's, punctuation included.
         $script:StaleEngineRoot = Join-Path $env:TEMP ('psilink-flow-stale-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         $script:CapableEngineRoot = Join-Path $env:TEMP ('psilink-flow-capable-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:NoRunEngineRoot = Join-Path $env:TEMP ('psilink-flow-norun-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         New-Item -ItemType Directory -Path $script:StaleEngineRoot -Force | Out-Null
         New-Item -ItemType Directory -Path $script:CapableEngineRoot -Force | Out-Null
+        New-Item -ItemType Directory -Path $script:NoRunEngineRoot -Force | Out-Null
 
-        $prologue = @(
+        $engineHead = @(
             '@echo off',
             '>>"%PSILINK_STUB_LOG%" echo %*',
             'echo %*| findstr /C:"version --format" >nul',
             'if not errorlevel 1 goto engineversion',
             'echo %*| findstr /C:"image inspect" >nul',
-            'if not errorlevel 1 goto imagepresent',
-            'echo %*| findstr /C:"doctor --help" >nul',
-            'if not errorlevel 1 goto doctorhelp',
+            'if not errorlevel 1 goto imagepresent')
+        $engineTail = @(
             'echo unexpected engine call: %*',
             'exit /b 99',
             ':engineversion',
             'echo linux 27.1.1',
             'exit /b 0',
             ':imagepresent',
-            'exit /b 0',
-            ':doctorhelp')
+            'exit /b 0')
+
+        $prologue = $engineHead + @(
+            'echo %*| findstr /C:"doctor --help" >nul',
+            'if not errorlevel 1 goto doctorhelp') + $engineTail + @(':doctorhelp')
 
         Set-Content -LiteralPath (Join-Path $script:StaleEngineRoot 'docker.cmd') -Encoding Ascii -Value ($prologue + @(
             'echo psilink [command] [options]',
@@ -692,6 +703,13 @@ Describe 'The image capability check inside the setup flow' {
             'echo   psilink doctor probe   Check the file drop over the network',
             'echo   psilink doctor mount   Check an already-mounted file-drop directory',
             'exit /b 0'))
+
+        # The same engine with the doctor branch taken out, so it answers only
+        # the two preflight questions and refuses everything else loudly: any
+        # `docker run` at all reaches the unexpected-call arm, which exits 99 and
+        # names the call it was given. That is what makes "the local answer runs
+        # no container" an assertion rather than a reading of the flow.
+        Set-Content -LiteralPath (Join-Path $script:NoRunEngineRoot 'docker.cmd') -Encoding Ascii -Value ($engineHead + $engineTail)
 
         function Invoke-SetupWithEngine {
             <#  Run the setup flow with one of the stub engines ahead of a
@@ -742,6 +760,7 @@ Describe 'The image capability check inside the setup flow' {
     AfterAll {
         Remove-Item -LiteralPath $script:StaleEngineRoot -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $script:CapableEngineRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $script:NoRunEngineRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 
     It 'turns a stale image away on the -Server path, blaming neither the values nor itself' {
@@ -757,19 +776,47 @@ Describe 'The image capability check inside the setup flow' {
         # neither: it is the image, so neither may be printed here.
         $run.Output | Should -Not -Match 'defect in Setup-PsilinkFileDrop.ps1' -Because $shape
         $run.Output | Should -Not -Match 'refused the values' -Because $shape
+        # And what the image itself answered, printed after the remedy. The
+        # verdict is fixed, so this is the only thing an operator whose
+        # `doctor --help` crashed in a current image has to report.
+        $run.Output | Should -Match '\(exit 0\)' -Because $shape
+        $run.Output | Should -Match 'URL INPUT_FILE' -Because $shape
     }
 
-    It 'turns a stale image away on the interactive path too, before it asks for anything' {
-        # No path and no credentials are collected first, so one check covers
-        # both entry paths rather than each needing its own arm.
-        $run = Invoke-SetupWithEngine -EngineRoot $script:StaleEngineRoot -SetupScript $setupScript
+    It 'turns a stale image away on the resolved-path route too, before the credentials' {
+        # The other way in: -DropPath goes through the path resolution the
+        # -Server form skips, and the check sits below that resolution, so one
+        # arm cannot stand for both routes. A reserved TLD (RFC 6761) for the
+        # server, because the flow asks Windows whether it can reach the path
+        # on the way down, and no machine can ever answer to this one.
+        $run = Invoke-SetupWithEngine -EngineRoot $script:StaleEngineRoot -SetupScript $setupScript -ScriptArguments @(
+            '-DropPath', '\\fs-04.invalid\exchange\psilink', '-SkipConfirm')
         $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$($run.Calls)"
 
         $run.TimedOut | Should -BeFalse -Because $shape
         $run.Exit | Should -Be 1 -Because $shape
         $run.Output | Should -Match 'too old' -Because $shape
-        $run.Output | Should -Not -Match 'Enter the file-drop folder' -Because $shape
         $run.Output | Should -Not -Match 'credentials for the file server' -Because $shape
+    }
+
+    It 'runs no container at all for a folder that turns out to be local' {
+        # The local answer needs no battery -- it prints a direct -v mount and
+        # leaves -- so it must not be made to survive a container first. The
+        # engine here refuses every `docker run`, so a capability check asked
+        # above the path resolution fails this run rather than merely slowing
+        # it.
+        $run = Invoke-SetupWithEngine -EngineRoot $script:NoRunEngineRoot -SetupScript $setupScript -ScriptArguments @(
+            '-DropPath', 'C:\psilink-local-drop')
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$($run.Calls)"
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 0 -Because $shape
+        $run.Output | Should -Match 'already local' -Because $shape
+        $run.Output | Should -Match 'do not need a Docker volume at all' -Because $shape
+        $run.Output | Should -Not -Match 'too old' -Because $shape
+        $run.Output | Should -Not -Match 'unexpected engine call' -Because $shape
+        $run.Calls | Should -Match 'image inspect' -Because $run.Calls
+        $run.Calls | Should -Not -Match 'doctor --help' -Because $run.Calls
     }
 
     It 'reaches no battery with an image that cannot produce a verdict' {
@@ -786,16 +833,18 @@ Describe 'The image capability check inside the setup flow' {
         $run.Calls | Should -Not -Match 'volume create' -Because $run.Calls
     }
 
-    It 'lets an image that carries the doctor through to the flow' {
+    It 'lets an image that carries the doctor through to the credentials' {
         # The other direction: the gate has to be silent for a current image, or
         # it would trade one misdiagnosis for another. The run stops at the
-        # first prompt below it rather than completing a setup, which is why the
-        # exit code is left out of this one.
-        $run = Invoke-SetupWithEngine -EngineRoot $script:CapableEngineRoot -SetupScript $setupScript
+        # first prompt below it -- the username -- rather than completing a
+        # setup, which is why the exit code is left out of this one.
+        $run = Invoke-SetupWithEngine -EngineRoot $script:CapableEngineRoot -SetupScript $setupScript -ScriptArguments @(
+            '-Server', 'fs-04.agency.gov', '-Share', 'exchange', '-SkipConfirm')
         $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$($run.Calls)"
 
         $run.TimedOut | Should -BeFalse -Because $shape
         $run.Output | Should -Match 'image carries the checks' -Because $shape
+        $run.Output | Should -Match 'credentials for the file server' -Because $shape
         $run.Output | Should -Not -Match 'too old' -Because $shape
         $run.Calls | Should -Match 'doctor --help' -Because $run.Calls
     }
