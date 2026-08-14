@@ -716,11 +716,16 @@ Describe 'The image capability check inside the setup flow' {
                 minimal PATH, and return the run beside the calls the engine
                 recorded. The PATH is cut down to the system directories for the
                 same reason the -LoadFunctionsOnly guard's own flow test cuts
-                it: a runner with a real Docker would otherwise answer first. #>
+                it: a runner with a real Docker would otherwise answer first.
+
+                -TimeoutSeconds is a backstop for a run that ends on its own and
+                the whole of the wait for one that cannot, so a case judging the
+                second asks for a shorter one than the default. #>
             param(
                 [Parameter(Mandatory = $true)][string] $EngineRoot,
                 [Parameter(Mandatory = $true)][string] $SetupScript,
-                [string[]] $ScriptArguments = @()
+                [string[]] $ScriptArguments = @(),
+                [int] $TimeoutSeconds = 120
             )
 
             $log = Join-Path $EngineRoot ('calls-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.log')
@@ -736,7 +741,7 @@ Describe 'The image capability check inside the setup flow' {
                 ) -join ';'
                 $run = Start-PowerShellChild -Arguments (@(
                     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$SetupScript`"") +
-                    $ScriptArguments) -TimeoutSeconds 120
+                    $ScriptArguments) -TimeoutSeconds $TimeoutSeconds
             } finally {
                 $env:PATH = $originalPath
                 if ($null -eq $originalLog) { Remove-Item env:PSILINK_STUB_LOG -ErrorAction SilentlyContinue }
@@ -835,18 +840,31 @@ Describe 'The image capability check inside the setup flow' {
 
     It 'lets an image that carries the doctor through to the credentials' {
         # The other direction: the gate has to be silent for a current image, or
-        # it would trade one misdiagnosis for another. The run stops at the
-        # first prompt below it -- the username -- rather than completing a
-        # setup, which is why the exit code is left out of this one.
+        # it would trade one misdiagnosis for another. Nothing below the gate
+        # ends a run driven this way -- part 2 reads the share password with
+        # Read-Host -AsSecureString, which reads the console rather than the
+        # redirected standard input every child here is given, and waits there
+        # -- so reaching the credentials and waiting IS the evidence that a
+        # capable image was let through, and there is no exit code to assert.
+        # Twenty seconds rather than the flow default: every terminating case
+        # above completes a whole run in under one, so the wait has only to
+        # cover reaching the prompt.
         $run = Invoke-SetupWithEngine -EngineRoot $script:CapableEngineRoot -SetupScript $setupScript -ScriptArguments @(
-            '-Server', 'fs-04.agency.gov', '-Share', 'exchange', '-SkipConfirm')
-        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$($run.Calls)"
+            '-Server', 'fs-04.agency.gov', '-Share', 'exchange', '-SkipConfirm') -TimeoutSeconds 20
+        $output = [string] $run.Output
+        # The tail as well as the calls: this is a run nothing ended, so how far
+        # it had reached is the whole of what a failure here has to report.
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$($run.Calls) tail=" +
+            (($output.Substring([Math]::Max(0, $output.Length - 200))) -replace '\s+', ' ')
 
-        $run.TimedOut | Should -BeFalse -Because $shape
-        $run.Output | Should -Match 'image carries the checks' -Because $shape
-        $run.Output | Should -Match 'credentials for the file server' -Because $shape
-        $run.Output | Should -Not -Match 'too old' -Because $shape
-        $run.Calls | Should -Match 'doctor --help' -Because $run.Calls
+        $run.Calls | Should -Match 'doctor --help' -Because $shape
+        $output | Should -Match 'image carries the checks' -Because $shape
+        $output | Should -Match 'credentials for the file server' -Because $shape
+        $output | Should -Not -Match 'too old' -Because $shape
+        # Held as a check rather than left to the reasoning above: a Windows
+        # PowerShell that did answer the password prompt from a redirect would
+        # end this run instead of waiting, and fails here.
+        $run.TimedOut | Should -BeTrue -Because $shape
     }
 }
 
