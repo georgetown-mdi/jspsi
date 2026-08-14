@@ -37,6 +37,7 @@ import {
   stagesFor,
 } from "./exchangeRun";
 import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
+import { appendSanitizedRunWarning } from "./runWarnings";
 import { buildRunOutputs } from "./runOutputs";
 import { invitationUsable } from "./inviterModel";
 import { selectExchangeDriver } from "./exchangeDriverSelection";
@@ -533,11 +534,8 @@ export function useInviterExchange({
         setOutputs(generated);
         setRun((current) => runWithCompletion(current, new Date()));
       },
-      // Server/CLI-controlled text sanitized at this display boundary, like
-      // failureFor's alert content; accumulated so no notice displaces an
-      // earlier one.
       onWarning: (message) =>
-        setWarnings((current) => [...current, sanitizeForDisplay(message)]),
+        setWarnings((current) => appendSanitizedRunWarning(current, message)),
       onError: ({ category, error }) => {
         // Dev-gated: the raw Error object's message/cause can embed partner-/
         // server-controlled bytes, so a production console carries none of it,

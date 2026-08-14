@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { sanitizeForDisplay } from "@psilink/core";
-
 import {
   createFetchJobApiClient,
   createServerJobZeroSetupDriver,
@@ -18,6 +16,7 @@ import {
   runWithStages,
 } from "./exchangeRun";
 import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
+import { appendSanitizedRunWarning } from "./runWarnings";
 import { failureFor } from "./useInviterExchange";
 
 import type {
@@ -198,10 +197,8 @@ export function useDirectExchange({
         setOutputs(generated);
         setRun((current) => runWithCompletion(current, new Date()));
       },
-      // Server/CLI-controlled text sanitized at this display boundary, like
-      // failureFor's alert content; accumulated so no notice displaces an earlier.
       onWarning: (message) =>
-        setWarnings((current) => [...current, sanitizeForDisplay(message)]),
+        setWarnings((current) => appendSanitizedRunWarning(current, message)),
       onError: ({ category, error }) => {
         // Dev-gated: the raw error can embed server/CLI-controlled bytes, so a
         // production console carries none of it; the user-facing alert is

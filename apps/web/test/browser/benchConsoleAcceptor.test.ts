@@ -682,3 +682,87 @@ describe("console acceptor re-attaches on a busy create", () => {
     );
   });
 });
+
+// The two messages the appliance's rendezvous preflight raises, in order, when the
+// mount is not empty. The listing names entries the PARTNER chose: the partner syncs
+// its own files into the rendezvous directory, which is exactly why the accepting
+// seat -- the one launching into a mount the partner has been syncing into -- has to
+// see them.
+const NOT_EMPTY_LEAD =
+  "the rendezvous directory /mnt/rendezvous is not empty; an exchange refuses " +
+  "to start on files an earlier exchange left there, so delete those on the " +
+  "host first. Your own input and results are not what it refuses over.";
+// A partner-chosen entry name carrying a literal backslash and a non-ASCII code
+// point, composed RAW by the appliance for the console sink's single escape.
+const PARTNER_ENTRY = "q1\\cohorté.csv";
+const PARTNER_ENTRY_ESCAPED = "q1\\\\cohort\\xe9.csv";
+
+describe("console acceptor run warnings", () => {
+  test("puts the appliance's preflight warnings in front of the accepting operator", async () => {
+    const api = stubServerJobAccept();
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorBench));
+    await reachAcceptStart();
+
+    await vi.waitFor(() => expect(api.hasEventStream()).toBe(true));
+    api.emitEvent({ v: 1, type: "warning", message: NOT_EMPTY_LEAD });
+    api.emitEvent({
+      v: 1,
+      type: "warning",
+      message: `the rendezvous directory holds ${PARTNER_ENTRY}`,
+    });
+
+    // Both stand together, in arrival order: the second never displaces the first.
+    await expect
+      .element(page.getByText("The exchange reported warnings"))
+      .toBeInTheDocument();
+    await expect.element(page.getByText(NOT_EMPTY_LEAD)).toBeInTheDocument();
+
+    // The partner's entry name reaches the operator escaped EXACTLY ONCE -- the sink
+    // escapes, the shared renderer does not. A second pass would double the
+    // backslash, so the doubled form is what pins the single pass.
+    await expect
+      .element(
+        page.getByText(
+          `the rendezvous directory holds ${PARTNER_ENTRY_ESCAPED}`,
+        ),
+      )
+      .toBeInTheDocument();
+    expect(app.container.textContent).not.toContain(PARTNER_ENTRY);
+    expect(app.container.textContent).not.toContain("q1\\\\\\\\cohort");
+
+    // A warning is not a terminal: it survives the run finishing, so it cannot be
+    // scrolled away by the completion panel arriving over it.
+    api.emitEvent({ v: 1, type: "result", resultWritten: true });
+    api.closeEvents();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange complete");
+    await expect.element(page.getByText(NOT_EMPTY_LEAD)).toBeInTheDocument();
+  });
+
+  test("keeps the warning up when the run it preceded then fails", async () => {
+    const api = stubServerJobAccept();
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorBench));
+    await reachAcceptStart();
+
+    await vi.waitFor(() => expect(api.hasEventStream()).toBe(true));
+    api.emitEvent({ v: 1, type: "warning", message: NOT_EMPTY_LEAD });
+    await expect.element(page.getByText(NOT_EMPTY_LEAD)).toBeInTheDocument();
+
+    // The entry guard refusing over what the preflight named is the whole story the
+    // warning exists to explain, so the failure alert must not take it off screen.
+    api.emitEvent({
+      v: 1,
+      type: "error",
+      category: "exchange",
+      message: "the rendezvous directory is not empty",
+    });
+    api.closeEvents();
+    await expect
+      .element(page.getByText("The exchange reported a warning"))
+      .toBeInTheDocument();
+    await expect.element(page.getByText(NOT_EMPTY_LEAD)).toBeInTheDocument();
+  });
+});

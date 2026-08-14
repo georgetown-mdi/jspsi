@@ -764,3 +764,62 @@ describe("console lobby occupancy probe (no stored attachment)", () => {
     expect(api.captured.some((r) => r.url.endsWith("/events"))).toBe(false);
   });
 });
+
+describe("console strand recovery panel run warnings", () => {
+  // The rendezvous preflight's not-empty lead, and a listing naming a PARTNER-chosen
+  // entry (the partner syncs its own files into the rendezvous mount). Both are
+  // composed raw by the appliance for the console sink's single escape.
+  const NOT_EMPTY_LEAD =
+    "the rendezvous directory /mnt/rendezvous is not empty; an exchange " +
+    "refuses to start on files an earlier exchange left there, so delete " +
+    "those on the host first. Your own input and results are not what it " +
+    "refuses over.";
+  const PARTNER_ENTRY = "q1\\cohorté.csv";
+  const PARTNER_ENTRY_ESCAPED = "q1\\\\cohort\\xe9.csv";
+
+  test("delivers a replayed warning to the operator who re-attached, escaped once", async () => {
+    // The SSE replay is full-history, so a warning raised at launch reaches a
+    // browser that attaches afterwards -- including one that never saw the launch.
+    persistAttachment("job-live", "acceptor", "filedrop");
+    const api = stubRecoveryApi({ jobId: "job-live", status: "running" });
+    app.render(createElement(InviterBench));
+
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some((r) => r.url === "/api/jobs/job-live/events"),
+      ).toBe(true),
+    );
+    api.emit({ v: 1, type: "warning", message: NOT_EMPTY_LEAD });
+    api.emit({
+      v: 1,
+      type: "warning",
+      message: `the rendezvous directory holds ${PARTNER_ENTRY}`,
+    });
+
+    await expect
+      .element(page.getByText("The exchange reported warnings"))
+      .toBeInTheDocument();
+    await expect.element(page.getByText(NOT_EMPTY_LEAD)).toBeInTheDocument();
+    // Escaped once at this panel's sink, not again at the shared renderer: a second
+    // pass would show the partner's one backslash as four.
+    await expect
+      .element(
+        page.getByText(
+          `the rendezvous directory holds ${PARTNER_ENTRY_ESCAPED}`,
+        ),
+      )
+      .toBeInTheDocument();
+    expect(app.container.textContent).not.toContain(PARTNER_ENTRY);
+    expect(app.container.textContent).not.toContain("q1\\\\\\\\cohort");
+
+    // The replayed terminal does not take the warning off screen.
+    api.emit({ v: 1, type: "result", resultWritten: true });
+    api.close();
+    await expect
+      .element(
+        page.getByText("An exchange started from this console has finished"),
+      )
+      .toBeInTheDocument();
+    await expect.element(page.getByText(NOT_EMPTY_LEAD)).toBeInTheDocument();
+  });
+});
