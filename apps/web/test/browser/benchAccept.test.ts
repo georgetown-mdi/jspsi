@@ -1182,7 +1182,7 @@ describe("acceptor columns step: one column name across the screen", () => {
     // <bdi>, so its label carries the isolate as characters -- while its VALUE
     // stays the raw header, since that is the identity the remap binds and a
     // display form there would bind a column the file does not have.
-    const bidiColumn = "notes‮evil";
+    const bidiColumn = "notes\u202Eevil";
     mountStep([bidiColumn, "other"]);
     await expect
       .element(page.getByText("Map a column to each missing field"))
