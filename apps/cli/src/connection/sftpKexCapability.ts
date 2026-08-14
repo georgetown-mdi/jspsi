@@ -143,7 +143,12 @@ const KEX_NEGOTIATION_FAILURE_FRAGMENT = "no matching key exchange algorithm";
 // module constructs it solely for a rejection the fragment and the capability
 // verdict have already classified, and nothing outside this module constructs it
 // at all.
-class UnperformableKexNegotiationError extends Error {}
+class UnperformableKexNegotiationError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "UnperformableKexNegotiationError";
+  }
+}
 
 const hasNegotiationFailureFragment = (error: unknown): boolean =>
   error instanceof Error &&
