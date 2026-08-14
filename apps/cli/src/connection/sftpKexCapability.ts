@@ -134,6 +134,21 @@ export function unavailableKexPrimitives(): readonly KexPrimitive[] {
  */
 const KEX_NEGOTIATION_FAILURE_FRAGMENT = "no matching key exchange algorithm";
 
+// The diagnostic explainKexNegotiationFailure raises, carried as a type rather
+// than recognized by its text: the diagnostic REPLACES ssh2's message and keeps
+// ssh2's error one cause link down, so a dial path classifying downstream of it
+// -- the connection-per-poll cycle-start re-dial, which sees what the dial
+// sequence threw rather than what ssh2 raised -- has no fragment left to match
+// on. A type is also the one recognizer no party on the wire can write: this
+// module constructs it solely for a rejection the fragment and the capability
+// verdict have already classified, and nothing outside this module constructs it
+// at all.
+class UnperformableKexNegotiationError extends Error {}
+
+const hasNegotiationFailureFragment = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message.includes(KEX_NEGOTIATION_FAILURE_FRAGMENT);
+
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -306,6 +321,12 @@ function emptiedOperatorListError(
  * cannot perform one of `unavailable` -- the permanently incompatible case, on
  * which no re-dial and no elapsed time changes anything.
  *
+ * It recognizes the rejection as ssh2 raised it AND as
+ * {@link explainKexNegotiationFailure} re-raised it, so the two dial paths reach
+ * the same verdict over one rejection rather than carrying a matcher each: the
+ * connect loop's retry predicate classifies ahead of that re-raise, and the
+ * connection-per-poll cycle-start re-dial behind it.
+ *
  * The capability verdict is what conditions this, and it carries the whole
  * weight: the message fragment is not psilink's to trust, ssh2 rendering a
  * server's `SSH_MSG_DISCONNECT` description into the same message, and a
@@ -324,8 +345,8 @@ export function isUnperformableKexNegotiationFailure(
 ): boolean {
   return (
     unavailable.length > 0 &&
-    error instanceof Error &&
-    error.message.includes(KEX_NEGOTIATION_FAILURE_FRAGMENT)
+    (error instanceof UnperformableKexNegotiationError ||
+      hasNegotiationFailureFragment(error))
   );
 }
 
@@ -347,9 +368,13 @@ export function explainKexNegotiationFailure(
   error: unknown,
   unavailable: readonly KexPrimitive[],
 ): unknown {
-  if (!isUnperformableKexNegotiationFailure(error, unavailable)) return error;
+  // The fragment rather than the wider classification above, which also answers
+  // for a rejection this function has already explained: matching that one would
+  // wrap the diagnostic in a second copy of itself.
+  if (unavailable.length === 0 || !hasNegotiationFailureFragment(error))
+    return error;
   const names = primitiveNames(unavailable);
-  return new Error(
+  return new UnperformableKexNegotiationError(
     `the SFTP server accepts no key exchange this host can perform: its ` +
       `crypto provider offers no ${names}. Ask the server's administrator to ` +
       `enable an ECDH or Diffie-Hellman group exchange, or run psilink on a ` +

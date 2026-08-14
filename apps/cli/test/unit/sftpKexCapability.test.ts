@@ -11,6 +11,7 @@ import {
   constrainKexToPlatformCapabilities,
   detectUnavailableKexPrimitives,
   explainKexNegotiationFailure,
+  isUnperformableKexNegotiationFailure,
   unavailableKexPrimitives,
 } from "../../src/connection/sftpKexCapability";
 import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
@@ -371,6 +372,64 @@ describe("explainKexNegotiationFailure", () => {
     expect(explained.message).toContain("X25519");
     expect(explained.message).toContain("server's administrator");
     expect(explained.cause).toBe(negotiationFailure);
+  });
+
+  test("leaves its own diagnostic alone rather than wrapping it twice", () => {
+    // The classification below answers for the diagnostic as well as for ssh2's
+    // rejection, so an explanation keyed on it would nest a second copy of itself
+    // and bury ssh2's error a link deeper than the display sink renders.
+    const explained = explainKexNegotiationFailure(negotiationFailure, [
+      MISSING,
+    ]);
+    expect(explainKexNegotiationFailure(explained, [MISSING])).toBe(explained);
+  });
+});
+
+// The one classifier both dial paths call. They classify on opposite sides of the
+// diagnostic -- the connect loop's retry predicate reads ssh2's rejection, the
+// connection-per-poll cycle-start re-dial reads what the dial sequence threw
+// after explainKexNegotiationFailure replaced its message -- so answering for
+// both shapes is what keeps the two paths from disagreeing about one rejection.
+describe("isUnperformableKexNegotiationFailure", () => {
+  const negotiationFailure = new Error(
+    "getConnection: Handshake failed: no matching key exchange algorithm",
+  );
+  const explained = explainKexNegotiationFailure(negotiationFailure, [MISSING]);
+
+  test("recognizes ssh2's own rejection", () => {
+    expect(
+      isUnperformableKexNegotiationFailure(negotiationFailure, [MISSING]),
+    ).toBe(true);
+  });
+
+  test("recognizes the diagnostic raised for it, whose message no longer carries the fragment", () => {
+    expect((explained as Error).message).not.toContain(
+      "no matching key exchange algorithm",
+    );
+    expect(isUnperformableKexNegotiationFailure(explained, [MISSING])).toBe(
+      true,
+    );
+  });
+
+  test("answers no for either shape once every primitive is available", () => {
+    // The verdict carries the whole weight: the fragment is written by whoever
+    // sends the SSH_MSG_DISCONNECT description, and a disconnect precedes host-key
+    // verification. On a host that can perform everything ssh2 offers, a written
+    // fragment decides nothing at all.
+    expect(isUnperformableKexNegotiationFailure(negotiationFailure, [])).toBe(
+      false,
+    );
+    expect(isUnperformableKexNegotiationFailure(explained, [])).toBe(false);
+  });
+
+  test("answers no for an unrelated rejection and for a non-Error", () => {
+    expect(
+      isUnperformableKexNegotiationFailure(
+        new Error("getConnection: Host denied (verification failed)"),
+        [MISSING],
+      ),
+    ).toBe(false);
+    expect(isUnperformableKexNegotiationFailure("nope", [MISSING])).toBe(false);
   });
 });
 

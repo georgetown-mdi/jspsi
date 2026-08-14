@@ -3573,12 +3573,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * that rides those options, so a server presenting a different key on a re-dial
    * is still rejected. Resolves `true` once a session is live, `false` on a
    * transient dial failure (the caller skips this cycle and retries next tick),
-   * and rejects only on a fatal condition (a host-key rejection) that terminates
-   * the exchange. A no-op returning `true` when the mode is off, during teardown,
-   * or when a session is already live. A dial that fails once teardown has been
-   * latched reports the same `false` and reports nothing to the operator: this run
-   * has no next tick, and the failure may be the teardown's own destroy settling
-   * this very dial.
+   * and rejects only on a fatal condition -- a host-key rejection, or a key
+   * exchange this process cannot perform (see {@link isFatalDialError}) -- that
+   * terminates the exchange. A no-op returning `true` when the mode is off,
+   * during teardown, or when a session is already live. A dial that fails once
+   * teardown has been latched reports the same `false` and reports nothing to the
+   * operator: this run has no next tick, and the failure may be the teardown's own
+   * destroy settling this very dial.
    *
    * Core forwards it unwrapped (see {@link runTransition}), so its acquire of the
    * transition lock -- which is what keeps two handshakes, or a handshake and a
@@ -3592,8 +3593,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * why the drain is here and not inside the transition: it must run with the
    * transition lock released, and every re-establishment in a run passes through
    * this method. The drain is FENCED and the dial is not: core's poll loop treats
-   * a rejection from here as a terminal dial error, which is right for the
-   * host-key rejection above and wrong for a best-effort cleanup sweep, so the
+   * a rejection from here as a terminal dial error, which is right for the fatal
+   * dial rejections above and wrong for a best-effort cleanup sweep, so the
    * sweep's outcome cannot decide the exchange's.
    */
   ensureConnected(): Promise<boolean> {
@@ -3681,17 +3682,36 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   // A dial failure that must terminate the exchange rather than be retried on the
-  // next tick. A host-key verification failure means the server is presenting a
-  // different or unknown key -- a trust-boundary fault (possible MITM) that must
-  // fail loudly and fast, never be papered over as a transient network blip and
-  // ridden to a generic peer-silence timeout. ssh2 surfaces it as "Host denied
-  // (verification failed)", the same stable fragment connect()'s retry predicate
-  // treats as terminal (re-verify on any ssh2 upgrade per
-  // docs/spec/DEPENDENCY_PINS.md). Bad credentials are caught at the initial
-  // connect() before any cycle; a mid-exchange credential rotation is transient
-  // here and bounded by the peer-inactivity ceiling.
+  // next tick. Two classes qualify, each permanent in its own way.
+  //
+  // A host-key verification failure means the server is presenting a different or
+  // unknown key -- a trust-boundary fault (possible MITM) that must fail loudly
+  // and fast, never be papered over as a transient network blip and ridden to a
+  // generic peer-silence timeout. ssh2 surfaces it as "Host denied (verification
+  // failed)", the same stable fragment connect()'s retry predicate treats as
+  // terminal (re-verify on any ssh2 upgrade per docs/spec/DEPENDENCY_PINS.md).
+  //
+  // A key exchange this process cannot perform is permanent for the life of the
+  // run: the capability verdict is memoized because a crypto provider is not
+  // swapped under a running program, so every tick puts the same withheld offer
+  // to the same server until the peer-inactivity ceiling ends the run with a
+  // generic peer-silence error, in place of the diagnostic the first cycle
+  // already had. The classifier is the connect loop's own, read over the same
+  // verdict, so the two dial paths cannot disagree about one rejection -- and it
+  // is that verdict, this process's reading of its own crypto provider taken
+  // before the dial, that conditions this, never a message a server or an
+  // on-path attacker can write (see sftpKexCapability).
+  //
+  // Bad credentials are caught at the initial connect() before any cycle; a
+  // mid-exchange credential rotation is transient here and bounded by the
+  // peer-inactivity ceiling.
   private isFatalDialError(error: unknown): boolean {
-    return error instanceof Error && error.message.includes("Host denied");
+    if (error instanceof Error && error.message.includes("Host denied"))
+      return true;
+    return isUnperformableKexNegotiationFailure(
+      error,
+      unavailableKexPrimitives(),
+    );
   }
 
   /**

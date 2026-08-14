@@ -83,7 +83,7 @@ answer to what separates a partner loss from a deliberate release.
 | --- | --- | --- |
 | `DialSucceeded(g)` | a dial completes its post-connect sequence | `connectLocked`, via `SftpAdapterLedger.dialSucceeded` |
 | `DialRetried` | the dialing loop re-attempts past the first | `connectLocked`, via `countConnectRetry` |
-| `DialFailed(fatal?)` | retry exhausted; a `"Host denied"` rejection is fatal | `connectLocked`'s retry predicate, and `isFatalDialError` at the cycle-start dial |
+| `DialFailed(fatal?)` | retry exhausted; a `"Host denied"` rejection is fatal, as is a key exchange this process cannot perform | `connectLocked`'s retry predicate, and `isFatalDialError` at the cycle-start dial |
 | `PartnerDropObserved(g)` | an operation rejects and the trigger reads a loss | `shouldRecoverFromSessionLoss`, charged in `redialForRecovery` |
 | `PartnerDropAbsorbedByDial(g)` | a dial completes with `g` still live and its session already gone | `connectLocked`, ahead of the advance |
 | `SessionReplacedByDial(g)` | a dial completes with `g`'s session still live -- a repeat `connect()` on an open connection | the same site |
