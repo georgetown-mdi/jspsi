@@ -6,7 +6,7 @@ import { getLogger } from "@psilink/core";
 
 /**
  * Pre-flight validation for an authenticated exchange's key-file path, run
- * before any connection is opened so a misconfiguration fails deterministically
+ * before any credential is presented so a misconfiguration fails deterministically
  * -- with no rendezvous I/O and before the partner can be left holding a rotated
  * token this side cannot persist. It mirrors what {@link saveKeyFile} will do
  * post-handshake (a recursive parent `mkdir`, a write, and -- on POSIX -- a
@@ -35,10 +35,9 @@ export function preflightKeyFilePath(
   keyFilePath: string,
   log: ReturnType<typeof getLogger>,
 ): string {
-  // Guards against a missing or whitespace-only keyFilePath before any
-  // connection is opened (a whitespace-only path would create a file named
-  // " " in the current directory rather than failing clearly). Trim leading
-  // and trailing whitespace from the supplied value before using it: a
+  // Guards against a missing or whitespace-only keyFilePath (which would create a
+  // file named " " in the current directory rather than failing clearly). Trim
+  // leading and trailing whitespace from the supplied value before using it: a
   // value like "  ./key  " is almost certainly user typo and would
   // otherwise become "  ." for dirname and " ./key  " for the file name,
   // producing a confusing on-disk artifact rather than the intended file.
@@ -84,9 +83,8 @@ export function preflightKeyFilePath(
     // parent stat succeeds and the short-named probe and parent read-open both
     // pass, so swallowing it would let pre-flight wrongly pass and leave
     // saveKeyFile to fail on the long name post-handshake, after the secret has
-    // rotated. Rethrow those so they still halt pre-flight before any
-    // connection opens (the behavior before the (B) fix), keeping the failure
-    // on the recoverable side of the handshake.
+    // rotated. Rethrow those so they still halt pre-flight before any credential
+    // is presented, keeping the failure on the recoverable side of the handshake.
     if (
       code !== "ENOENT" &&
       code !== "ENOTDIR" &&

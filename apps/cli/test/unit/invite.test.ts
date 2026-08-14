@@ -386,8 +386,8 @@ test("validateInvite: online carries the disclosed-columns subset from the infer
   expect(token.disclosedPayloadColumns).toEqual(["notes", "member_id"]);
   // The same disclosed set is persisted into the saved config's
   // disclosedPayloadColumns (the send-side commitment), so a later recurring
-  // `psilink exchange` can verify its metadata still discloses it before
-  // connecting -- byte-identical to the token copy.
+  // `psilink exchange` can verify its metadata still discloses it before any
+  // credential, terms, or data are sent -- byte-identical to the token copy.
   if (ready.mode !== "online") throw new Error("expected online mode");
   expect(ready.dataSpec.disclosedPayloadColumns).toEqual(
     token.disclosedPayloadColumns,

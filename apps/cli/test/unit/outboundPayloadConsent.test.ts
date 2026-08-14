@@ -199,6 +199,14 @@ test("pending, interactive, confirmed: the set is recorded and the spec updated"
     await confirm(spec, metadataDisclosing(["diagnosis", "notes"]), true),
   ).toBe(undefined);
   expect(promptConfirmMock).toHaveBeenCalledTimes(1);
+  // The heading leads with what the answer still decides -- that nothing has been
+  // sent -- and claims nothing about connection order: an unpinned SFTP
+  // configuration establishes first-use host-key trust over a credential-free probe
+  // ahead of this question, so a heading promising that nothing has connected would
+  // not hold there. Pinned so the wording cannot drift into one that does.
+  expect(promptWrites).toContain(
+    "Nothing is sent until you confirm what this exchange will send:",
+  );
   // The columns reach the terminal the question is asked on, one per line, so a
   // name carrying the list separator cannot be misread as two -- the treatment the
   // acceptance display gives the same fact, under the same label.

@@ -917,9 +917,10 @@ export async function handler(argv: Arguments): Promise<void> {
     });
 
     // Resolve the signed-receipt inputs from the config's `signing` block before
-    // connecting, so a certificate-mode block with no signing identity fails fast
-    // (exit 64) rather than after the handshake. `null` when signing is not
-    // configured for certificate mode, which leaves the exchange unsigned.
+    // any credential, terms, or data are sent, so a certificate-mode block with no
+    // signing identity fails fast (exit 64) rather than after the handshake.
+    // `null` when signing is not configured for certificate mode, which leaves the
+    // exchange unsigned.
     let signing: SigningPersist | null;
     try {
       signing = await resolveSigningPersist(exchangeDataSpec.signing);

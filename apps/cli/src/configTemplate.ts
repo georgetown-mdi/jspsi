@@ -248,21 +248,21 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 # committed to disclose to the partner when the exchange was established -- the
 # send-side counterpart of expected_payload_columns. 'psilink invite' fills this
 # in automatically from the invitation it published; you rarely set it by hand.
-# Before connecting, an exchange checks that your current metadata still discloses
-# exactly this set and fails (exit 64) otherwise, so a drift is caught locally
-# instead of aborting on the partner's side. To disclose less on purpose, re-invite
-# the partner rather than editing this. An empty list means "disclose nothing";
-# omit the field if you made no such commitment.
+# Before anything is sent, an exchange checks that your current metadata still
+# discloses exactly this set and fails (exit 64) otherwise, so a drift is caught
+# locally instead of aborting on the partner's side. To disclose less on purpose,
+# re-invite the partner rather than editing this. An empty list means "disclose
+# nothing"; omit the field if you made no such commitment.
 # disclosed_payload_columns:
 #   - matched_record_id
 
 # outbound_payload_consent: your own record of the columns you confirmed you send
 # to the partner. 'psilink accept' fills this in from the set it showed you, and
-# an exchange that resolves a different set stops and asks again before it
-# connects rather than sending it; you rarely set it by hand. status is confirmed
-# (with the columns) or pending, which asks at the first run that can resolve
-# them. Omit the field for an exchange whose outbound columns you authored
-# yourself, such as one you invited a partner to.
+# an exchange that resolves a different set stops and asks again rather than
+# sending it; you rarely set it by hand. status is confirmed (with the columns)
+# or pending, which asks at the first run that can resolve them. Omit the field
+# for an exchange whose outbound columns you authored yourself, such as one you
+# invited a partner to.
 # outbound_payload_consent:
 #   status: confirmed
 #   columns:

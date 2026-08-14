@@ -190,7 +190,7 @@ export function assertAlgorithmImplemented(algorithm: Algorithm): void {
  * party's records can never match more than one partner record. Running a
  * `deduplicate: true` term would silently deliver one-to-one matching under a
  * consented many-cardinality term -- the disclosure-fidelity gap this refusal
- * closes. Refused pre-connection in {@link prepareForExchange} for this party's
+ * closes. Refused at prepare time in {@link prepareForExchange} for this party's
  * own terms, and for both parties' agreed terms by
  * {@link resolveLinkageCardinality} after the terms exchange, before the PSI
  * rounds begin.
@@ -220,9 +220,9 @@ export function assertDeduplicateImplemented(deduplicate: boolean): void {
  * `certificate`-mode block, so a `session-derived` config would complete an
  * exchange and leave the operator with the ordinary unsigned record: the receipt
  * the configuration asked for is never produced, and nothing says so. Refuse it
- * in {@link prepareForExchange} instead, before any connection, so the answer
- * arrives while the operator is still configuring rather than as a missing file
- * after a completed exchange.
+ * in {@link prepareForExchange} instead, before any credential, terms, or data
+ * are sent, so the answer arrives while the operator is still configuring rather
+ * than as a missing file after a completed exchange.
  *
  * The guard ALLOWLISTS the two modes the exchange honors -- `certificate` (signs
  * and swaps a dual-signed receipt) and `none` (asks for no receipt, as does an
@@ -319,9 +319,9 @@ export function resolveExchangeInputs(
  * - Fails closed when an explicit (authoritative) standardization contradicts
  *   the linkage terms.
  *
- * Call this before establishing a connection. After the handshake role and PSI
- * role are resolved, {@link runExchange} builds the key iterables and runs
- * the protocol.
+ * Call this before the exchange's connection is opened. After the handshake role
+ * and PSI role are resolved, {@link runExchange} builds the key iterables and
+ * runs the protocol.
  *
  * @param exchangeDataSpec  Exchange parameters, loaded from a config if
  *                possible.
@@ -345,26 +345,26 @@ export function prepareForExchange(
     columnNames,
   );
 
-  // Fail closed on a count-only (`psi-c`) algorithm before connecting: no
-  // count-only run path exists, so a `psi-c` run would reveal matched identifiers
-  // under a self-attested record asserting only a count. Refuse here (friendly,
-  // pre-connection, revealing nothing) and again at the run boundary (runExchange)
+  // Fail closed on a count-only (`psi-c`) algorithm before any credential, terms,
+  // or data are sent: no count-only run path exists, so a `psi-c` run would reveal
+  // matched identifiers under a self-attested record asserting only a count. Refuse
+  // here (friendly, revealing nothing) and again at the run boundary (runExchange)
   // so the refusal holds even for a PreparedExchange built without going through
   // this function. See assertAlgorithmImplemented.
   assertAlgorithmImplemented(linkageTerms.algorithm);
 
-  // Fail closed on a deduplicating term before connecting: matching runs
-  // strictly one-to-one, so `deduplicate: true` cannot be honored and would
-  // silently under-deliver the consented cardinality. Refused again from both
-  // parties' agreed terms in runExchange (resolveLinkageCardinality), which
-  // holds for a PreparedExchange built without going through this function. See
-  // assertDeduplicateImplemented.
+  // Fail closed on a deduplicating term before any credential, terms, or data are
+  // sent: matching runs strictly one-to-one, so `deduplicate: true` cannot be
+  // honored and would silently under-deliver the consented cardinality. Refused
+  // again from both parties' agreed terms in runExchange
+  // (resolveLinkageCardinality), which holds for a PreparedExchange built without
+  // going through this function. See assertDeduplicateImplemented.
   assertDeduplicateImplemented(linkageTerms.deduplicate);
 
-  // Fail closed on a signing mode with no run path before connecting: only
-  // certificate mode signs a receipt, so a session-derived block would otherwise
-  // run to completion and leave the operator the unsigned record they did not
-  // ask for. See assertSigningModeImplemented.
+  // Fail closed on a signing mode with no run path before any credential, terms,
+  // or data are sent: only certificate mode signs a receipt, so a session-derived
+  // block would otherwise run to completion and leave the operator the unsigned
+  // record they did not ask for. See assertSigningModeImplemented.
   assertSigningModeImplemented(exchangeDataSpec.signing?.mode);
 
   // Reject a payload data dictionary that does not match what metadata transmits.
@@ -401,9 +401,9 @@ export function prepareForExchange(
   // inviter's send, the mirror leaves the acceptor's absent, and the set is
   // resolved from its own CSV header -- so a recorded confirmation is what makes it
   // chosen rather than inferred. A front end that shows the set and asks records
-  // the answer and passes here; one that does not refuses, before connecting,
-  // rather than transmit a set neither party chose. A no-op for every party with no
-  // consent record, which is every non-acceptor. See
+  // the answer and passes here; one that does not refuses, before any credential,
+  // terms, or data are sent, rather than transmit a set neither party chose. A
+  // no-op for every party with no consent record, which is every non-acceptor. See
   // assertOutboundPayloadConsented.
   assertOutboundPayloadConsented(
     exchangeDataSpec.outboundPayloadConsent,
@@ -411,10 +411,10 @@ export function prepareForExchange(
     linkageTerms.output,
   );
 
-  // Pre-flight the single-pass dataset ceiling, before connecting. This is a
-  // coarse, ONE-PARTY lower-bound gate: it can only see this party's own row
-  // count, not the partner's nor either side's distinct-value counts (which are
-  // never known before connecting, and never exchanged). If this party's own
+  // Pre-flight the single-pass dataset ceiling. This is a coarse, ONE-PARTY
+  // lower-bound gate: it can only see this party's own row count, not the
+  // partner's nor either side's distinct-value counts (never computed locally, and
+  // never exchanged). If this party's own
   // keyCount * rows already exceeds the budget, single-pass cannot succeed
   // whatever the partner's size, so fail here rather than after the handshake and
   // the PSI encryption. The authoritative, symmetric two-party check runs in
@@ -474,9 +474,9 @@ export function prepareForExchange(
     );
 
   // Fail closed on a transform that fans one value out into several match
-  // candidates before connecting: matching runs on a single value per record, so
-  // a splitting record would contribute no key at all and match less than the
-  // terms describe. Run over the RESOLVED standardization (authored or default,
+  // candidates: matching runs on a single value per record, so a splitting record
+  // would contribute no key at all and match less than the terms describe. Run
+  // over the RESOLVED standardization (authored or default,
   // which declares no fan-out) plus the terms' element transforms, so both
   // authoring surfaces are covered; the terms half is refused again at the run
   // boundary. See assertFanOutImplemented.
@@ -773,7 +773,7 @@ export async function runExchange(
   // Last line of defense for the disclosure-integrity guarantee: refuse a
   // count-only (`psi-c`) algorithm before any matched identifier is revealed, so
   // the self-attested record can never attest count-only over an
-  // identifier-revealing run. prepareForExchange refuses it pre-connection; this
+  // identifier-revealing run. prepareForExchange refuses it at prepare time; this
   // holds even for a PreparedExchange constructed without going through it, and
   // fires before the terms exchange puts anything on the wire. See
   // assertAlgorithmImplemented.
