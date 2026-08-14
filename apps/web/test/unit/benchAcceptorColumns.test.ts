@@ -12,7 +12,7 @@ import {
   acceptorDisclosedColumns,
   acceptorHasIdentifierConflict,
   acceptorInitialColumnsState,
-  acceptorLaunchDisabled,
+  acceptorLaunchBlockedReason,
   acceptorLaunchPayload,
   acceptorUnsatisfiedTypes,
   acceptorVerdict,
@@ -240,10 +240,16 @@ describe("acceptor quick-fix mapper", () => {
 });
 
 describe("acceptor launch gates", () => {
-  test("an unsatisfiable file disables launch (satisfiableKeyCount === 0)", () => {
+  // The gate IS the reason: `undefined` is the only enabled state, so a test that
+  // pins the sentence pins the gate too, and a state that closes the gate without a
+  // sentence -- the disabled button a screen-reader operator is told nothing about --
+  // cannot be written.
+  test("an unsatisfiable file disables launch (satisfiableKeyCount === 0) and says which columns to set", () => {
     const { editorState } = editorFor(["notes"], nameTerms);
     const verdict = acceptorVerdict(["notes"], nameTerms, editorState);
-    expect(acceptorLaunchDisabled(verdict, editorState, nameTerms)).toBe(true);
+    expect(acceptorLaunchBlockedReason(verdict, editorState, nameTerms)).toBe(
+      "Set your columns to the missing field types above before you can start.",
+    );
   });
 
   test("a satisfiable file enables launch", () => {
@@ -253,7 +259,9 @@ describe("acceptor launch gates", () => {
       nameTerms,
       editorState,
     );
-    expect(acceptorLaunchDisabled(verdict, editorState, nameTerms)).toBe(false);
+    expect(
+      acceptorLaunchBlockedReason(verdict, editorState, nameTerms),
+    ).toBeUndefined();
   });
 
   test("partial coverage warns but does not disable launch", () => {
@@ -264,20 +272,24 @@ describe("acceptor launch gates", () => {
       editorState,
     );
     expect(verdict.kind).toBe("partial");
-    expect(acceptorLaunchDisabled(verdict, editorState, nameTerms)).toBe(false);
+    expect(
+      acceptorLaunchBlockedReason(verdict, editorState, nameTerms),
+    ).toBeUndefined();
   });
 
-  test("two identifier columns disable launch even when the keys are satisfiable", () => {
+  test("two identifier columns disable launch even when the keys are satisfiable, naming the identifier rule", () => {
     const columns = ["id", "identifier", "first_name", "last_name"];
     const { editorState } = editorFor(columns, nameTerms);
     // The keys are covered, but the seed carries two identifiers.
     const verdict = acceptorVerdict(columns, nameTerms, editorState);
     expect(verdict.kind).toBe("allClear");
     expect(acceptorHasIdentifierConflict(editorState.metadata)).toBe(true);
-    expect(acceptorLaunchDisabled(verdict, editorState, nameTerms)).toBe(true);
+    expect(acceptorLaunchBlockedReason(verdict, editorState, nameTerms)).toBe(
+      "Choose a single record identifier column above before you can start.",
+    );
   });
 
-  test("a mid-edit cleaning step disables launch (standardization invalid)", () => {
+  test("a mid-edit cleaning step disables launch (standardization invalid) and points at the steps", () => {
     // A date_of_birth field whose recommended parse_date step is cleared mid-edit:
     // the override layer carries an invalid step, so the gate must close.
     const dobTerms: LinkageTerms = {
@@ -303,8 +315,80 @@ describe("acceptor launch gates", () => {
     });
     const verdict = acceptorVerdict(columns, dobTerms, withInvalid.editorState);
     expect(
-      acceptorLaunchDisabled(verdict, withInvalid.editorState, dobTerms),
-    ).toBe(true);
+      acceptorLaunchBlockedReason(verdict, withInvalid.editorState, dobTerms),
+    ).toBe(
+      "Finish or fix the highlighted cleaning steps above before you can start.",
+    );
+  });
+
+  // The step's own gates, which the model cannot derive: an SFTP accept with no
+  // connection authored, and a file-handling combination core refuses.
+  const satisfiableColumns = ["first_name", "last_name"];
+  const satisfiable = editorFor(satisfiableColumns, nameTerms);
+  const satisfiableVerdict = acceptorVerdict(
+    satisfiableColumns,
+    nameTerms,
+    satisfiable.editorState,
+  );
+
+  test("an unauthored transport connection disables launch and names the connection card", () => {
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        { connectionBlocked: true, exchangeFilesBlocked: false },
+      ),
+    ).toBe("Set up the SFTP connection above before you can start.");
+  });
+
+  test("a refused file-handling combination disables launch and names those settings", () => {
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        { connectionBlocked: false, exchangeFilesBlocked: true },
+      ),
+    ).toBe("Resolve the file-handling settings above before you can start.");
+  });
+
+  test("omitting the step's own gates is the same as none of them being set", () => {
+    // The default the model tests read, stated once so it is a decision rather than
+    // an accident of the signature.
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+      ),
+    ).toBe(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        { connectionBlocked: false, exchangeFilesBlocked: false },
+      ),
+    );
+  });
+
+  test("with several gates closed the sentence names the topmost surface on the screen", () => {
+    // A file that can match nothing AND carries two identifiers AND has no
+    // connection authored: the operator is sent to the verdict at the top of the
+    // step, not to a gate further down that a fix up there may clear anyway.
+    const columns = ["id", "identifier", "notes"];
+    const { editorState } = editorFor(columns, nameTerms);
+    const verdict = acceptorVerdict(columns, nameTerms, editorState);
+    expect(verdict.satisfiableKeyCount).toBe(0);
+    expect(acceptorHasIdentifierConflict(editorState.metadata)).toBe(true);
+    expect(
+      acceptorLaunchBlockedReason(verdict, editorState, nameTerms, {
+        connectionBlocked: true,
+        exchangeFilesBlocked: true,
+      }),
+    ).toBe(
+      "Set your columns to the missing field types above before you can start.",
+    );
   });
 });
 
@@ -359,11 +443,14 @@ describe("columns the invitation will not accept", () => {
     expect(
       acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
     ).toEqual(["notes"]);
-    // Every other gate is clear, so the conflict alone closes the launch.
+    // Every other gate is clear, so the conflict alone closes the launch -- and
+    // the sentence the button is described by is the conflict's own.
     const verdict = acceptorVerdict(columns, terms, editorState);
     expect(verdict.kind).toBe("allClear");
     expect(acceptorHasIdentifierConflict(editorState.metadata)).toBe(false);
-    expect(acceptorLaunchDisabled(verdict, editorState, terms)).toBe(true);
+    expect(acceptorLaunchBlockedReason(verdict, editorState, terms)).toBe(
+      "Resolve the columns your partner will not accept above before you can start.",
+    );
   });
 
   test("says nothing when the inviting party is entitled to no result", () => {
@@ -377,7 +464,9 @@ describe("columns the invitation will not accept", () => {
       acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
     ).toEqual([]);
     const verdict = acceptorVerdict(columns, terms, editorState);
-    expect(acceptorLaunchDisabled(verdict, editorState, terms)).toBe(false);
+    expect(
+      acceptorLaunchBlockedReason(verdict, editorState, terms),
+    ).toBeUndefined();
   });
 
   test("says nothing when the invitation declares no payload set at all", () => {
@@ -395,7 +484,9 @@ describe("columns the invitation will not accept", () => {
         acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
       ).toEqual([]);
       const verdict = acceptorVerdict(columns, terms, editorState);
-      expect(acceptorLaunchDisabled(verdict, editorState, terms)).toBe(false);
+      expect(
+        acceptorLaunchBlockedReason(verdict, editorState, terms),
+      ).toBeUndefined();
     }
   });
 
@@ -435,12 +526,14 @@ describe("columns the invitation will not accept", () => {
       ),
     ).toEqual(["first_name"]);
     expect(
-      acceptorLaunchDisabled(
+      acceptorLaunchBlockedReason(
         acceptorVerdict(columns, terms, halfCleared.editorState),
         halfCleared.editorState,
         terms,
       ),
-    ).toBe(true);
+    ).toBe(
+      "Resolve the columns your partner will not accept above before you can start.",
+    );
 
     const cleared = setColumnDisclosure(partly, "first_name", "match").metadata;
     const edited = editorFor(columns, terms, { metadata: cleared });
@@ -453,9 +546,9 @@ describe("columns the invitation will not accept", () => {
     ).toEqual([]);
     const verdict = acceptorVerdict(columns, terms, edited.editorState);
     expect(verdict.kind).toBe("allClear");
-    expect(acceptorLaunchDisabled(verdict, edited.editorState, terms)).toBe(
-      false,
-    );
+    expect(
+      acceptorLaunchBlockedReason(verdict, edited.editorState, terms),
+    ).toBeUndefined();
   });
 
   // The shape the equivalence deliberately excludes, named so that excluding it is

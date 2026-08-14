@@ -237,7 +237,7 @@ export function validateAdvancedInvite(
   }
 
   // Every authored cleaning step must be well-formed before Generate -- the same
-  // launch gate the acceptor applies (acceptorLaunchDisabled's step-validity
+  // launch gate the acceptor applies (acceptorLaunchBlockedReason's step-validity
   // clause). A step left
   // mid-edit (a cleared substring.start) or a malformed/over-length raw pattern would
   // otherwise reach the exchange, where core runs it as a silent full-field exclusion
