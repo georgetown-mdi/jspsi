@@ -15,6 +15,10 @@ caller.
 
 - Refute, do not confirm. Approach each claim looking for the counterexample.
 - Run the evidence yourself; do not take a claim's own justification on faith.
+- Never start a long command with `run_in_background`: you have no turn left for
+  the completion notification to land in. Run it in the FOREGROUND with a raised
+  `timeout` (the Bash tool's ceiling is 600000 ms); split a command that exceeds
+  the ceiling, or hand the work back to the caller.
 - Return a verdict per claim: HOLDS, REFUTED, or COULD-NOT-VERIFY.
 - COULD-NOT-VERIFY gates the loop exactly like REFUTED -- an unverifiable claim is
   not a passing claim.

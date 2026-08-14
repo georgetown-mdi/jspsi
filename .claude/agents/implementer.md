@@ -21,6 +21,10 @@ produce is your final message to the caller. Never end expecting a reply.
 - If the prompt drops you in a fresh isolated worktree (no `node_modules` -- check
   with `ls node_modules`), run `bash .claude/scripts/worktree-init.sh` once before
   you build or test; it provisions deps and builds core so the suite runs.
+- Never start a long command with `run_in_background`: you have no turn left for
+  the completion notification to land in. Run it in the FOREGROUND with a raised
+  `timeout` (the Bash tool's ceiling is 600000 ms); split a command that exceeds
+  the ceiling, or hand the work back to the caller.
 - Before you report, run `npm run typecheck && npm run lint && npm run format` and
   the tests relevant to your change (a core change means every workspace unit
   suite), and state in your report whether the work is committed.
