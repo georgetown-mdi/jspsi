@@ -1,22 +1,29 @@
+import { EventEmitter } from "node:events";
+
 import { describe, expect, test, vi } from "vitest";
 
 import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
 
-// How the connect loop classifies a key-exchange negotiation that found nothing
-// the two ends have in common: terminal on a process that cannot perform one of
-// the primitives its offer needed, retryable everywhere else. The permanent case
-// is permanent for the life of the process -- the capability verdict is memoized
-// because a crypto provider is not swapped under a running program -- so a
-// re-attempt puts the same withheld offer to the same server, and an operator who
-// raised max_reconnect_attempts waits a second per attempt for the diagnostic the
-// first attempt already had.
+// How each of the two dial paths classifies a key-exchange negotiation that found
+// nothing the two ends have in common: terminal on a process that cannot perform
+// one of the primitives its offer needed, retryable everywhere else. The
+// permanent case is permanent for the life of the process -- the capability
+// verdict is memoized because a crypto provider is not swapped under a running
+// program -- so a re-attempt puts the same withheld offer to the same server. At
+// the connect loop an operator who raised max_reconnect_attempts waits a second
+// per attempt for the diagnostic the first attempt already had; at the
+// connection-per-poll cycle-start re-dial, which the unattended scheduled run
+// takes cycle after cycle, the whole run waits out the peer-inactivity ceiling
+// for it and then reports peer silence instead.
 //
 // The verdict is the whole condition, and these drive both of its values, because
 // the message fragment alone cannot carry the classification: ssh2 renders a
 // server's SSH_MSG_DISCONNECT description into the same message and a disconnect
 // precedes host-key verification, so a server or an on-path attacker writes the
 // fragment verbatim. What that party gets on a host that CAN perform everything
-// ssh2 offers is the third case below -- the full reconnect budget, unchanged.
+// ssh2 offers is what it got before the classification existed, driven on both
+// paths below: the full reconnect budget at the connect loop, and a skipped cycle
+// with another tick to come at the re-dial.
 //
 // What the offer itself looks like on the wire under the same forced verdict is
 // driven in test/integration/sftpKexOffer.test.ts, which also drives this
@@ -204,6 +211,209 @@ describe("the same negotiation failure on a host that can perform everything", (
       expect(error.message).not.toContain("X25519");
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+// --- the connection-per-poll cycle-start re-dial --------------------------
+//
+// The other dial path, and the one an unattended scheduled run takes at every
+// poll tick. It classifies DOWNSTREAM of the diagnostic: what reaches it is what
+// the dial sequence threw, whose message the diagnostic replaced and whose cause
+// holds ssh2's own, so the fragment the connect loop matched is no longer there.
+// A rejection ends the exchange; `false` skips this cycle for the next tick.
+
+// A faithful stand-in for the ssh2 Client ssh2-sftp-client exposes on `.client`:
+// the EventEmitter surface the adapter's transport-lifecycle watch attaches to,
+// the socket seams the idle release drives, and the no-ops connect() would
+// otherwise warn about.
+const releasableClient = () =>
+  Object.assign(new EventEmitter(), {
+    setNoDelay: () => {},
+    _sock: { setKeepAlive: () => {}, writableEnded: false, destroy: () => {} },
+    end: () => {},
+  });
+
+// An adapter in connection-per-poll mode whose first dial -- the exchange's own
+// connect() -- succeeds and whose cycle-start re-dial rejects with `redialError`.
+// The session is modeled by a flag the fixture's own dial sets, so a test can
+// drop it the way a released or server-dropped session leaves the adapter.
+function cyclingAdapter(redialError: () => Error) {
+  const wrapper = {
+    open: vi.fn(),
+    close: vi.fn(),
+    opendir: vi.fn(),
+    readdir: vi.fn(),
+    on: vi.fn(),
+  };
+  const session = { live: false };
+  let dials = 0;
+  const connect = vi.fn().mockImplementation(async () => {
+    dials += 1;
+    if (dials === 1) {
+      session.live = true;
+      return;
+    }
+    throw redialError();
+  });
+  const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
+  const log = {
+    warn: vi.fn(),
+    info: vi.fn(),
+    debug: vi.fn(),
+    trace: vi.fn(),
+    error: vi.fn(),
+  };
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  (adapter as any).log = log;
+  (adapter as any).client = {
+    get sftp() {
+      return session.live ? wrapper : null;
+    },
+    connect,
+    client: releasableClient(),
+    end: vi.fn().mockResolvedValue(true),
+    realPath: vi.fn().mockResolvedValue("/"),
+  };
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+  return { adapter, session, log, dials: () => dials };
+}
+
+type CyclingAdapter = ReturnType<typeof cyclingAdapter>;
+
+// One poll cycle's start over a session that is gone: the exchange's connect(),
+// then the idle boundary's release modeled by dropping the session, then the
+// re-dial the poll loop drives at the next tick. `budget` is the operator's
+// max_reconnect_attempts, which the re-dial inherits from the retained options.
+async function redialAfterRelease(
+  fixture: CyclingAdapter,
+  budget: number,
+): Promise<boolean | Error> {
+  await fixture.adapter.connect({
+    host: "sftp.example.org",
+    maxReconnectAttempts: budget,
+  });
+  fixture.session.live = false;
+  return fixture.adapter.ensureConnected().catch((error: Error) => error);
+}
+
+// The line the transient branch reports before skipping the cycle: its presence
+// is what says a rejection was classified as transient, and its absence what says
+// the cycle was never skipped at all.
+const SKIPPED_CYCLE_WARNING = "skipping this poll cycle";
+
+const warnedAboutASkippedCycle = (fixture: CyclingAdapter): boolean =>
+  fixture.log.warn.mock.calls.some((call) =>
+    (call[0] as string).includes(SKIPPED_CYCLE_WARNING),
+  );
+
+describe("a cycle-start re-dial into a key exchange this process cannot perform", () => {
+  test("ends the exchange at once instead of skipping the cycle", async () => {
+    forcedVerdict.unavailable = [MISSING];
+    try {
+      // A non-zero budget is what makes the dial count meaningful: neither the
+      // dial's own retry loop nor the poll loop above it may spend anything on a
+      // negotiation whose outcome this process's crypto provider has already
+      // fixed.
+      const fixture = cyclingAdapter(() => new Error(NEGOTIATION_FAILURE));
+      const outcome = await redialAfterRelease(fixture, 3);
+
+      // A rejection is what core's poll loop treats as terminal; `false` there
+      // would be another skipped cycle, and another tick into the ceiling.
+      expect(outcome).toBeInstanceOf(Error);
+      expect(fixture.dials()).toBe(2);
+      expect(warnedAboutASkippedCycle(fixture)).toBe(false);
+    } finally {
+      forcedVerdict.unavailable = [];
+    }
+  });
+
+  test("carries the diagnostic naming the primitive, ssh2's error one link down", async () => {
+    forcedVerdict.unavailable = [MISSING];
+    try {
+      // What the operator reads in place of the peer-silence error the ceiling
+      // produced: the missing primitive, the remedy, and ssh2's own text still
+      // reachable beneath it.
+      const outcome = (await redialAfterRelease(
+        cyclingAdapter(() => new Error(NEGOTIATION_FAILURE)),
+        3,
+      )) as Error;
+
+      expect(outcome.message).toContain("X25519");
+      expect(outcome.message).toContain("server's administrator");
+      expect((outcome.cause as Error).message).toContain(
+        "no matching key exchange algorithm",
+      );
+    } finally {
+      forcedVerdict.unavailable = [];
+    }
+  });
+
+  test("the same failure on a host that can perform everything skips the cycle", async () => {
+    // The verdict is the whole condition here as at the connect loop: with
+    // nothing unavailable the identical message is an ordinary dial failure, so a
+    // server that writes the fragment through its own SSH_MSG_DISCONNECT
+    // description ends no exchange. Budget 0 keeps this to the one re-dial.
+    const fixture = cyclingAdapter(() => new Error(NEGOTIATION_FAILURE));
+    const outcome = await redialAfterRelease(fixture, 0);
+
+    expect(outcome).toBe(false);
+    expect(warnedAboutASkippedCycle(fixture)).toBe(true);
+  });
+
+  test("a host-key rejection stays fatal, and keeps its own message", async () => {
+    forcedVerdict.unavailable = [MISSING];
+    try {
+      // The classification that was already here, driven on a host missing the
+      // primitive: the two coexist, and a possible MITM is not re-raised as a
+      // key-exchange diagnostic.
+      const outcome = (await redialAfterRelease(
+        cyclingAdapter(() => new Error("Host denied (verification failed)")),
+        3,
+      )) as Error;
+
+      expect(outcome).toBeInstanceOf(Error);
+      expect(outcome.message).toContain("Host denied");
+      expect(outcome.message).not.toContain("X25519");
+    } finally {
+      forcedVerdict.unavailable = [];
+    }
+  });
+
+  test("an ordinary transient dial failure still skips the cycle", async () => {
+    forcedVerdict.unavailable = [MISSING];
+    try {
+      // The verdict is a property of the process, not of the dial: a briefly
+      // unreachable server must not become terminal on a host that happens to be
+      // missing a primitive.
+      const fixture = cyclingAdapter(() => new Error("connect ECONNREFUSED"));
+      const outcome = await redialAfterRelease(fixture, 0);
+
+      expect(outcome).toBe(false);
+      expect(warnedAboutASkippedCycle(fixture)).toBe(true);
+    } finally {
+      forcedVerdict.unavailable = [];
+    }
+  });
+
+  test("a dial the teardown settled reports nothing and skips, on such a host too", async () => {
+    forcedVerdict.unavailable = [MISSING];
+    try {
+      // An abandoning teardown destroys the transport under a dial in flight, and
+      // that rejection carries the same error a genuine peer close does. This run
+      // has no next tick to promise, so it stays silent -- and the verdict must
+      // not turn the teardown's own doing into a reported failure.
+      const fixture: CyclingAdapter = cyclingAdapter(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (fixture.adapter as any).closing = true;
+        return new Error("Connection closed");
+      });
+      const outcome = await redialAfterRelease(fixture, 0);
+
+      expect(outcome).toBe(false);
+      expect(fixture.log.warn).not.toHaveBeenCalled();
+    } finally {
+      forcedVerdict.unavailable = [];
     }
   });
 });
