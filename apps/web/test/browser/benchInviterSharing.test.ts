@@ -91,13 +91,15 @@ describe("inviter sharing summary: one column name in both voices", () => {
       )
       .toBeInTheDocument();
 
-    // The chip is a <bdi> the browser actually isolates -- asserted through the
-    // computed style, so a <bdi> the engine does not isolate fails here rather
-    // than passing on the element name alone -- and it holds the operator's own
-    // header verbatim, so what they select and copy is that header and nothing
-    // more.
+    // Every name the step shows is a <bdi> the browser actually isolates --
+    // asserted through the computed style, so a <bdi> the engine does not
+    // isolate fails here rather than passing on the element name alone. In
+    // document order: one grid row header per column, then the disclosed
+    // column's chip. Each holds the operator's own header verbatim, so what
+    // they select and copy is that header and nothing more.
     const isolates = [...app.container.querySelectorAll("bdi")];
     expect(isolates.map((element) => element.textContent)).toEqual([
+      ...csv.columns,
       bidiColumn,
     ]);
     for (const element of isolates) {

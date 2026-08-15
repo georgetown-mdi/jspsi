@@ -68,8 +68,15 @@ function boundedName(name: string): string {
  * FIRST STRONG ISOLATE and POP DIRECTIONAL ISOLATE (Unicode UAX #9). Text between
  * them is laid out on its own resolved direction, and the whole isolate counts as
  * a single neutral character to the text around it, so nothing inside can reorder
- * anything outside. PDI also terminates any embedding or override the isolated
- * text left open, which is what bounds an unbalanced name.
+ * anything outside. PDI also terminates any embedding or override (RLE, LRE, RLO,
+ * LRO, a missing PDF) the isolated text left open, which is what bounds an
+ * unbalanced name of that class. The isolate class itself is the string form's
+ * residual: per UAX #9 BD9/X6a a name carrying an unmatched PDI closes this
+ * wrapper's isolate early, and one carrying an unmatched RLI, LRI, or FSI
+ * consumes the closing PDI and leaves the wrapper open over the copy that
+ * follows. Whether the `<bdi>` element form shares that hole is a question about
+ * the browser's layout, unmeasured here; the names are the operator's own
+ * headers, on the trust basis the module note above records.
  */
 const FIRST_STRONG_ISOLATE = "\u2068";
 const POP_DIRECTIONAL_ISOLATE = "\u2069";

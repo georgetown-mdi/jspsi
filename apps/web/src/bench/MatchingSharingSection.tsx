@@ -29,13 +29,14 @@ const SEMANTIC_TYPES = Object.keys(SEMANTIC_TYPE_LABELS) as Array<SemanticType>;
  * two callbacks and the single-identifier rule's demotions come back down as
  * `announcement`.
  *
- * The disclosed set this step names -- the chip list and the summary its live
- * region speaks -- carries the operator's own CSV headers through
- * {@link ColumnName} / {@link isolatedColumnName}, the treatment the ledger's
- * send row beside it and the acceptor's confirm-columns screen show the same
- * names with, so a header cannot read one way in the chips and another in the
- * sentence or the rail. That module carries what the isolation does and does not
- * contain.
+ * Every place this step names a header -- the grid's row headers and its two
+ * control labels, the chip list, and the summary its live region speaks --
+ * carries the operator's own CSV headers through {@link ColumnName} /
+ * {@link isolatedColumnName}, the treatment the ledger's send row beside it
+ * and the acceptor's confirm-columns grid show the same names with, so a
+ * header cannot read one way where its disclosure is set and another in the
+ * chips, the sentence, or the rail. That module carries what the isolation
+ * does and does not contain.
  */
 export function MatchingSharingSection({
   metadata,
@@ -106,11 +107,11 @@ export function MatchingSharingSection({
                   scope="row"
                   className={`${styles.mono} ${styles.rowHeader}`}
                 >
-                  {column.name}
+                  <ColumnName name={column.name} />
                 </th>
                 <td>
                   <NativeSelect
-                    aria-label={`Type for ${column.name}`}
+                    aria-label={`Type for ${isolatedColumnName(column.name)}`}
                     value={column.type}
                     data={SEMANTIC_TYPES.map((type) => ({
                       value: type,
@@ -126,7 +127,7 @@ export function MatchingSharingSection({
                 </td>
                 <td>
                   <NativeSelect
-                    aria-label={`How ${column.name} is used`}
+                    aria-label={`How ${isolatedColumnName(column.name)} is used`}
                     value={disclosureOf(column)}
                     data={disclosureChoicesForType(column.type).map(
                       (choice) => ({
