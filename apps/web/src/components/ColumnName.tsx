@@ -38,15 +38,23 @@ import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
  * A column name cut to what paints: {@link MAX_NAME_LENGTH} code points, then
  * {@link DISPLAY_TRUNCATION_MARKER}. Nothing bounds a CSV header at intake and
  * isolation escapes nothing, so without this an arbitrarily long header paints
- * whole over the screen that holds the launch gate. Cut at the ceiling the wire
- * enforces -- the partner's parse of the payload frame refuses a longer name, as
- * does `ColumnMetadata.name` wherever metadata is parsed rather than inferred -- so
- * the cut can never reach a name an exchange completes on, and two carryable headers
+ * whole over the screen that holds the launch gate. The ceiling is the wire's --
+ * the partner's parse of the payload frame refuses a longer name, as does
+ * `ColumnMetadata.name` wherever metadata is parsed rather than inferred -- so the
+ * cut can never reach a name an exchange completes on, and two carryable headers
  * sharing a prefix stay distinct. It does reach longer ones: this screen's metadata
  * comes from `inferMetadata` over the file's own header, which no schema bounds, so
  * an oversized header renders cut here and is refused only by the partner, after the
- * frame is sent. By code point, not UTF-16 unit, so the cut never splits a surrogate
- * pair; an override the cut leaves open is closed by the isolate around it.
+ * frame is sent.
+ *
+ * The cut counts code points -- so it never splits a surrogate pair, and an override
+ * it leaves open is closed by the isolate around it -- while both of those ceilings
+ * count UTF-16 units. The two disagree in one direction only: a name long enough to
+ * cut is past the ceiling on either count, so the mark never elides a name that
+ * transmits. The other direction is silent, and the absence of a mark is no verdict
+ * on what can be carried -- a header of {@link MAX_NAME_LENGTH} astral characters is
+ * twice that many units, renders whole and unmarked here, and is still refused on
+ * the wire.
  */
 function boundedName(name: string): string {
   const codePoints = [...name];

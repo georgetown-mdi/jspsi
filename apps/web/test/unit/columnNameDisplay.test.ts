@@ -20,10 +20,11 @@ describe("isolatedColumnName", () => {
   });
 
   test("a name at core's own ceiling renders whole", () => {
-    // The cut sits where a name stops being one an exchange would carry
-    // (ColumnMetadata.name and preparePayload both enforce this ceiling), so it can
-    // never elide a name that transmits -- which is what keeps two accepted headers
-    // sharing a long prefix distinct in the grid.
+    // The cut sits where a name stops being one an exchange would carry -- the
+    // partner's parse of the payload frame refuses a longer name, as does
+    // ColumnMetadata.name wherever metadata is parsed rather than inferred -- so it
+    // can never elide a name that transmits, which is what keeps two accepted
+    // headers sharing a long prefix distinct in the grid.
     const name = "\u0444".repeat(MAX_NAME_LENGTH);
     expect(isolatedColumnName(name)).toBe(`${FSI}${name}${PDI}`);
   });

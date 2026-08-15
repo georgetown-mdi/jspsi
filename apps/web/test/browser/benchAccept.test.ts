@@ -1303,14 +1303,16 @@ describe("acceptor columns step: one column name across the screen", () => {
     expect(app.container.textContent).not.toContain("\\u0444");
   });
 
-  // The one hostile class whose containment this panel can be measured on: driven in
-  // this Chromium over these names, an unterminated RLO is the only one of the
-  // unclosed classes (RLO, LRO, RLI, LRI, FSI, a stray PDF) that moves a glyph at
-  // all -- with all-Latin neighbours in an LTR sentence the other five lay out
-  // identically isolated or not, so an order assertion on them would hold with the
-  // isolation gone. What contains those five is not driven here: it rests on the
-  // computed `unicode-bidi: isolate` asserted above and on the PDI semantics
-  // ColumnName cites (UAX #9).
+  // The one hostile class whose containment this panel can be measured on by ORDER:
+  // driven in this Chromium over these names, an unterminated RLO is the only one of
+  // the unclosed classes (RLO, LRO, RLE, RLI, LRI, FSI, a stray PDF) that reorders
+  // the three names. With all-Latin neighbours in an LTR sentence the others leave
+  // "pre", "evil", "post" in the order the panel lists them whether or not they are
+  // isolated, so an order assertion on them would hold with the isolation gone. That
+  // is a claim about order alone and not about layout: an unterminated RLE or RLI
+  // still shifts the glyphs after it along the line, isolated or not. What contains
+  // the others is not driven here: it rests on the computed `unicode-bidi: isolate`
+  // asserted above and on the PDI semantics ColumnName cites (UAX #9).
   const RIGHT_TO_LEFT_OVERRIDE = "\u202E";
   const PANEL_NAMES = ["pre", `notes${RIGHT_TO_LEFT_OVERRIDE}evil`, "post"];
 
