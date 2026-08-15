@@ -333,8 +333,9 @@ export function explainPeerIdentificationFailure(
         cause: chainDetailCauses(
           [
             `The usual cause is a firewall or gateway enforcing a source-IP ` +
-              `allowlist this host is not on: ask whoever administers the ` +
-              `server whether this host's address may reach the SFTP port.`,
+              `allowlist this host is not on, though a connection throttle ` +
+              `reads the same way: ask whoever administers the server ` +
+              `whether this host's address may reach the SFTP port.`,
             READ_PROVENANCE,
             endpointDetail,
           ],
@@ -351,8 +352,9 @@ export function explainPeerIdentificationFailure(
         [
           `Check that the configured host and port name the SFTP service, and ` +
             `that no proxy or middlebox stands in front of them. An SSH ` +
-            `server that sends over ${PEER_ANSWER_READ_MAX_BYTES} bytes of ` +
-            `banner first, or identifies itself late, reads this way too.`,
+            `server whose banner approaches the ` +
+            `${PEER_ANSWER_READ_MAX_BYTES}-byte read bound, or that ` +
+            `identifies itself late, reads this way too.`,
           READ_PROVENANCE,
           endpointDetail,
           `first bytes the peer sent: ` +
