@@ -12,6 +12,7 @@ import { withCapturedLogs } from "@psilink/core/testing";
 
 import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
+import { APPENDED_MARKERS, createKexinitRecordingRelay } from "./kexOfferWire";
 import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
 
 // A live connection-per-poll exchange whose partner's SFTP endpoint changes its
@@ -29,7 +30,10 @@ import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
 // verdict in one, by the operator's own algorithms.kex under an empty verdict in
 // the other -- so the server refuses the identical offer with the identical
 // message, and what decides "end the exchange" against "skip this cycle" is the
-// verdict alone.
+// verdict alone. Each arm holds that reading of the wire as a check of its own:
+// the relay decodes every dial's own SSH_MSG_KEXINIT, so what a cycle-start
+// re-dial offered is read from the socket alongside the classification it
+// produced.
 //
 // Why a second listener rather than a control on the suite's own server: measured
 // against the pinned ssh2, a Server's `algorithms.kex` is read ONCE, as the
@@ -175,66 +179,18 @@ async function startKexRestrictedListener(): Promise<{
 }
 
 /**
- * A relay in front of a real SFTP server that copies bytes both ways and can be
- * pointed at a different upstream between connections. The exchange dials the
- * relay's own port throughout, so a re-dial after {@link pointAt} is the same
- * endpoint answering with a different key-exchange policy.
- *
- * `accepted` counts the dials, which is what a case waits on to know the poll
- * loop is cycling through here before the flip lands.
+ * What every dial through the relay must have carried: the constrained offer,
+ * identical from dial to dial. A cycle-start re-dial enters `connectLocked` with
+ * the RETAINED connect options, already constrained, so constraining them again
+ * has to be a no-op -- a compounded or dropped constraint is an offer differing
+ * from the one the exchange opened on.
  */
-function createSwitchingRelay(initial: { host: string; port: number }): {
-  port: Promise<number>;
-  pointAt: (target: { host: string; port: number }) => void;
-  accepted: () => number;
-  close: () => Promise<void>;
-} {
-  let target = initial;
-  let accepted = 0;
-  let resolvePort!: (port: number) => void;
-  const port = new Promise<number>((resolve) => (resolvePort = resolve));
-  const live = new Set<net.Socket>();
-
-  const server = net.createServer((client) => {
-    accepted += 1;
-    const upstream = net.connect(target.port, target.host);
-    live.add(client);
-    live.add(upstream);
-    // Either side going takes the other with it: a session the server drops has
-    // to reach the client as a closed socket, or the adapter would wait out its
-    // deadline for a close this relay swallowed.
-    const cut = (): void => {
-      client.destroy();
-      upstream.destroy();
-      live.delete(client);
-      live.delete(upstream);
-    };
-    for (const socket of [client, upstream]) {
-      socket.on("error", cut);
-      socket.on("close", cut);
-    }
-    upstream.on("data", (chunk: Buffer) => client.write(chunk));
-    client.on("data", (chunk: Buffer) => upstream.write(chunk));
-  });
-  server.listen(0, "127.0.0.1", () => {
-    resolvePort((server.address() as net.AddressInfo).port);
-  });
-  return {
-    port,
-    pointAt: (next) => {
-      target = next;
-    },
-    accepted: () => accepted,
-    close: () =>
-      new Promise<void>((resolve) => {
-        // Destroyed rather than waited on: server.close() fires its callback
-        // only once every relayed connection has ended, and a case that ends
-        // with a live session would hang the runner instead.
-        for (const socket of live) socket.destroy();
-        live.clear();
-        server.close(() => resolve());
-      }),
-  };
+function expectOneConstrainedOfferThroughout(offers: string[][]): void {
+  for (const offer of offers) {
+    expect(offer.filter((name) => /25519/i.test(name))).toEqual([]);
+    for (const marker of APPENDED_MARKERS) expect(offer).toContain(marker);
+  }
+  for (const offer of offers.slice(1)) expect(offer).toEqual(offers[0]);
 }
 
 inProcessOnly(
@@ -244,7 +200,7 @@ inProcessOnly(
     forcedVerdict.unavailable = [forcedMissingPrimitive];
     const srv = await startInProcessSftpServer();
     const restricted = await startKexRestrictedListener();
-    const relay = createSwitchingRelay(srv.handle);
+    const relay = createKexinitRecordingRelay(srv.handle);
     const dir = await fsp.mkdtemp(
       path.join(srv.handle.backingDir, "kex-flip-permanent-"),
     );
@@ -291,10 +247,14 @@ inProcessOnly(
           receiver.start();
           // Cycle at least once through the relay first, so what the flip
           // interrupts is a poll loop that was dialing this endpoint happily.
-          const dialsBefore = relay.accepted();
-          await waitFor(() => relay.accepted() > dialsBefore, {
-            what: "a cycle-start re-dial through the relay",
+          // Waited out as a re-dial whose own SSH_MSG_KEXINIT the relay
+          // DECODED rather than as one it merely accepted: a dial that completes
+          // its handshake is the one whose offer can be read at all.
+          const offersBeforeStart = relay.offers.length;
+          await waitFor(() => relay.offers.length > offersBeforeStart, {
+            what: "a cycle-start re-dial's own SSH_MSG_KEXINIT through the relay",
           });
+          const offersUpToTheFlip = relay.offers.slice();
 
           const flippedAt = Date.now();
           relay.pointAt(restricted);
@@ -311,6 +271,8 @@ inProcessOnly(
             endedAfterMs,
             dialsMeetingTheFlip,
             dialsAfterTheEnd: restricted.connections() - dialsMeetingTheFlip,
+            offersUpToTheFlip,
+            cycleStartRedials: offersUpToTheFlip.length - offersBeforeStart,
           };
         },
         (level) => level === "WARN" || level === "ERROR",
@@ -342,6 +304,12 @@ inProcessOnly(
       // retried tick after tick, and nothing was dialed after the end.
       expect(outcome.dialsMeetingTheFlip).toBe(1);
       expect(outcome.dialsAfterTheEnd).toBe(0);
+      // What the cycle-start re-dial OFFERED, read off the socket: the dial
+      // the exchange opened on and every cycle-start re-dial that completed one
+      // carry the same X25519-free offer, both markers included, under the
+      // forced verdict this arm classifies on.
+      expect(outcome.cycleStartRedials).toBeGreaterThanOrEqual(1);
+      expectOneConstrainedOfferThroughout(outcome.offersUpToTheFlip);
       // And that cycle was ended rather than skipped -- the two are the branches
       // this leg separates, and the skip promises a next tick that never comes.
       expect(
@@ -357,7 +325,7 @@ inProcessOnly(
       relay.pointAt(srv.handle);
       await receiver.close().catch(() => {});
       await sender.close().catch(() => {});
-      await relay.close();
+      await relay.close({ destroyLiveSessions: true });
       await restricted.close();
       await fsp.rm(dir, { recursive: true, force: true });
       await srv.stop();
@@ -377,7 +345,7 @@ inProcessOnly(
     // skipped and the next tick carries the exchange on.
     const srv = await startInProcessSftpServer();
     const restricted = await startKexRestrictedListener();
-    const relay = createSwitchingRelay(srv.handle);
+    const relay = createKexinitRecordingRelay(srv.handle);
     const dir = await fsp.mkdtemp(
       path.join(srv.handle.backingDir, "kex-flip-transient-"),
     );
@@ -475,12 +443,18 @@ inProcessOnly(
         "no matching key exchange algorithm",
       );
       expect(skipped[0].message).not.toContain("X25519");
+      // The wire this arm shares with the one above: the operator's own
+      // algorithms.kex withheld on every dial what the forced verdict withholds
+      // there, so the refusal both arms classify is the same refusal of the same
+      // offer.
+      expect(relay.offers.length).toBeGreaterThanOrEqual(2);
+      expectOneConstrainedOfferThroughout(relay.offers);
     } finally {
       receiver.stop();
       relay.pointAt(srv.handle);
       await receiver.close().catch(() => {});
       await sender.close().catch(() => {});
-      await relay.close();
+      await relay.close({ destroyLiveSessions: true });
       await restricted.close();
       await fsp.rm(dir, { recursive: true, force: true });
       await srv.stop();
