@@ -10,6 +10,7 @@ import {
   hasMultipleIdentifiers,
 } from "@psi/metadataEditing";
 
+import { ColumnName, isolatedColumnName } from "@components/ColumnName";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import { disclosedColumnNames } from "@psilink/core";
@@ -27,6 +28,14 @@ const SEMANTIC_TYPES = Object.keys(SEMANTIC_TYPE_LABELS) as Array<SemanticType>;
  * ever see. Presentational over the host's metadata; edits go up through the
  * two callbacks and the single-identifier rule's demotions come back down as
  * `announcement`.
+ *
+ * The disclosed set this step names -- the chip list and the summary its live
+ * region speaks -- carries the operator's own CSV headers through
+ * {@link ColumnName} / {@link isolatedColumnName}, the treatment the ledger's
+ * send row beside it and the acceptor's confirm-columns screen show the same
+ * names with, so a header cannot read one way in the chips and another in the
+ * sentence or the rail. That module carries what the isolation does and does not
+ * contain.
  */
 export function MatchingSharingSection({
   metadata,
@@ -53,7 +62,7 @@ export function MatchingSharingSection({
   const summary =
     sent.length === 0
       ? "No columns will be sent to your partner."
-      : `Columns sent to your partner: ${sent.join(", ")}.`;
+      : `Columns sent to your partner: ${sent.map(isolatedColumnName).join(", ")}.`;
   const [summaryAnnouncement, setSummaryAnnouncement] = useState("");
   const summaryRef = useRef(summary);
   summaryRef.current = summary;
@@ -167,7 +176,7 @@ export function MatchingSharingSection({
           <ul className={styles.columnChips}>
             {sent.map((column) => (
               <li key={column} className={styles.mono}>
-                {column}
+                <ColumnName name={column} />
               </li>
             ))}
           </ul>

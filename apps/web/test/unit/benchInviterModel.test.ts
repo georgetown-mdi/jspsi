@@ -44,8 +44,18 @@ import {
   unsealEditor,
 } from "@bench/inviterModel";
 
+// The send-row expectation derives its form from this function, so it pins that
+// the row carries the same form the step's chips do, not what that form is; the
+// literal FSI/PDI expectations live in
+// apps/web/test/unit/columnNameDisplay.test.ts.
+import { isolatedColumnName } from "@components/ColumnName";
+
 import type { AcquiredCsv } from "@bench/inviterModel";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+
+// A right-to-left override, written as an escape so the source carries no raw
+// control byte (which would reorder the line it sits on).
+const RLO = "\u202e";
 
 // Headers chosen from inferMetadata's exact-match alias table: four linkage
 // types (enough to back several default keys), one _id-suffixed identifier,
@@ -87,7 +97,7 @@ describe("spine derivation from the read file", () => {
     expect(editor.draft.identity).toBe("Dana Okafor");
 
     const send = ledgerValue(editor, "You will send");
-    expect(send.value).toBe("program_code");
+    expect(send.value).toBe(isolatedColumnName("program_code"));
 
     const matchedOn = ledgerValue(editor, "Matched on");
     expect(Array.isArray(matchedOn.value)).toBe(true);
@@ -99,6 +109,31 @@ describe("spine derivation from the read file", () => {
     );
     expect(ledgerValue(editor, "Agreement").muted).toBe("None");
     expect(ledgerValue(editor, "How it runs").value).toBe("Browser");
+  });
+
+  test("the send row isolates the operator's own headers", () => {
+    // A header carrying a right-to-left override, unrecognized so it infers to
+    // the disclosed set: the ledger names it verbatim inside the isolate, which
+    // is how step 2's chips beside this rail show the same set. Escaping it here
+    // would put one header two ways on the one screen where the operator decides
+    // what leaves their machine.
+    const bidiColumn = `notes${RLO}evil`;
+    const editor = editorFromCsv("Dana", {
+      ...csv,
+      columns: ["client_id", "first_name", "last_name", "dob", bidiColumn],
+      rawRows: [
+        {
+          client_id: "1",
+          first_name: "Ann",
+          last_name: "Lee",
+          dob: "01/02/1990",
+          [bidiColumn]: "x",
+        },
+      ],
+    });
+    const send = ledgerValue(editor, "You will send");
+    expect(send.value).toBe(isolatedColumnName(bidiColumn));
+    expect(send.value).toContain(RLO);
   });
 
   test("an unmatchable file derives zero keys", () => {

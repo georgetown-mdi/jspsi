@@ -20,6 +20,12 @@ import { InviterBench } from "@bench/InviterBench";
 import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
 
+// The ledger expectation derives its form from this function, so it pins that the
+// send row carries the same form step 2's chips do, not what that form is; the
+// literal FSI/PDI expectations live in
+// apps/web/test/unit/columnNameDisplay.test.ts.
+import { isolatedColumnName } from "@components/ColumnName";
+
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 import { captureDownloads } from "./captureDownloads";
 
@@ -400,7 +406,7 @@ describe("inviter bench", () => {
         (row) => row.querySelector("dt")?.childNodes[0].textContent === label,
       );
     expect(ledgerRow("You will send")?.querySelector("dd")?.textContent).toBe(
-      "program_code",
+      isolatedColumnName("program_code"),
     );
     expect(ledgerRow("Expires")?.querySelector("dd")?.textContent).toBe(
       "1 hour after you share",

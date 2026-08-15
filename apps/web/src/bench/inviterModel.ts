@@ -27,6 +27,8 @@ import {
 
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
+import { isolatedColumnName } from "@components/ColumnName";
+
 import { selectExchangeDriver } from "./exchangeDriverSelection";
 
 import type {
@@ -947,6 +949,12 @@ export interface LedgerOutcome {
  * live from the draft. Once the invitation is minted its absolute `expires`
  * moment replaces the relative lifetime phrase, and once the exchange
  * completes `outcome` replaces the forward-looking rows with what happened.
+ *
+ * The send row names the operator's OWN disclosed CSV headers, so they take the
+ * isolation their column-name surfaces show them with ({@link isolatedColumnName})
+ * rather than the escape partner-controlled text takes: this row sits beside the
+ * step that sets the disclosure, and a header reading two ways across the two would
+ * be a disagreement about what leaves the machine.
  */
 export function inviterLedgerRows(
   editor: InviterEditor | undefined,
@@ -971,7 +979,7 @@ export function inviterLedgerRows(
       ? {
           label: "You will send",
           reference: "Step 2",
-          value: sent.join(", "),
+          value: sent.map(isolatedColumnName).join(", "),
           shareBar: true,
         }
       : {
