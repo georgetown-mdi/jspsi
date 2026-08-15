@@ -165,6 +165,39 @@ describe("observePeerAnswer reads what answered the port", () => {
     });
   });
 
+  test("reads a preamble past the read bound as non-SSH, identification string and all", async () => {
+    // The FAILING side of the bound above, driven because the copy is written
+    // around it: a real SSH server whose banner outruns the read lands in the
+    // non-SSH classification, so the operator's message states what the first
+    // bytes carried rather than what the peer is.
+    const preamble = "authorized use only\r\n".repeat(32);
+    expect(preamble.length).toBeGreaterThan(PEER_ANSWER_READ_MAX_BYTES);
+    const endpoint = await peerAnswering((socket) => {
+      socket.write(preamble);
+      socket.end("SSH-2.0-OpenSSH_9.6p1\r\n");
+    });
+    const answer = await observePeerAnswer(endpoint, BUDGET_MS);
+    expect(answer.kind).toBe("non-ssh");
+    if (answer.kind !== "non-ssh") return;
+    expect(answer.shape).toBe("unrecognized");
+  });
+
+  test("reads an identification string that arrives after the budget as non-SSH", async () => {
+    // The other half of the same bound: the deadline. A peer whose preamble
+    // fits but whose identification string arrives late is classified on what
+    // was read by then.
+    const endpoint = await peerAnswering((socket) => {
+      socket.write("authorized use only\r\n");
+      // Unref'd: the case settles on the deadline, and nothing here should hold
+      // the loop open waiting for a write whose whole point is arriving late.
+      setTimeout(() => socket.end("SSH-2.0-OpenSSH_9.6p1\r\n"), 400).unref();
+    });
+    const answer = await observePeerAnswer(endpoint, 100);
+    expect(answer.kind).toBe("non-ssh");
+    if (answer.kind !== "non-ssh") return;
+    expect(answer.shape).toBe("unrecognized");
+  });
+
   test("bounds the excerpt and stops reading against a peer answering with megabytes", async () => {
     const endpoint = await peerAnswering((socket) =>
       socket.write(
@@ -314,43 +347,54 @@ describe("explainPeerIdentificationFailure partitions the peer's bytes", () => {
     ).toBe(true);
   });
 
-  test("the first-party text survives a maximally long peer excerpt", () => {
-    // Every byte escaping to four display characters, at the excerpt bound: the
-    // longest a peer's link can render, and the excerpt is what truncates.
-    const excerpt = "\x00".repeat(PEER_EXCERPT_MAX_BYTES);
-    const links = rendered(
-      explainPeerIdentificationFailure(
-        dialRejection,
-        { kind: "non-ssh", shape: "unrecognized", excerpt },
-        endpoint,
-      ),
-    ).split("\ncaused by: ");
-    const summary = links[0];
-    expect(summary).toContain("never identified itself");
-    expect(summary).toContain("something other than an SSH server");
-    expect(summary.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
-    const guidance = links.find((link) =>
-      link.startsWith("Check that the configured"),
-    );
-    expect(guidance).toBeDefined();
-    expect(links.some((link) => link.includes("no credential"))).toBe(true);
-    expect(links).toContain(
-      `configured endpoint: ${endpoint.host}:${endpoint.port}`,
-    );
-    const peerLink = links.find((link) =>
-      link.startsWith("first bytes the peer sent:"),
-    );
-    expect(peerLink).toBeDefined();
-    expect(peerLink).toContain("\\x00");
-    expect(peerLink?.length).toBeLessThanOrEqual(
-      DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
-    );
-    // The peer's own link is the ONLY one its bytes can spend: every link the
-    // operator has to act on renders whole beside a peer flooding its own.
-    expect(
-      links.filter((link) => link.includes(DISPLAY_TRUNCATION_MARKER)),
-    ).toEqual([peerLink]);
-  });
+  // Every shape, because each names its own likely cause and they are not the
+  // same length: the longest summary is the one the display cap binds first.
+  test.each(["http", "tls-alert", "unrecognized"] as const)(
+    "the first-party text survives a maximally long peer excerpt (%s)",
+    (shape) => {
+      // Every byte escaping to four display characters, at the excerpt bound: the
+      // longest a peer's link can render, and the excerpt is what truncates.
+      const excerpt = "\x00".repeat(PEER_EXCERPT_MAX_BYTES);
+      const links = rendered(
+        explainPeerIdentificationFailure(
+          dialRejection,
+          { kind: "non-ssh", shape, excerpt },
+          endpoint,
+        ),
+      ).split("\ncaused by: ");
+      const summary = links[0];
+      expect(summary).toContain("did not identify itself");
+      // What the peer's first bytes carried, which is what was read -- not a
+      // verdict on what the peer is, which the bounded read cannot establish.
+      expect(summary).toContain("the first bytes the peer");
+      expect(summary).toContain("not an SSH identification string");
+      expect(summary.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
+      const guidance = links.find((link) =>
+        link.startsWith("Check that the configured"),
+      );
+      expect(guidance).toBeDefined();
+      // The recovery step names the read bound the verdict rests on, so an
+      // operator whose server has a long banner can recognize their own case.
+      expect(guidance).toContain(String(PEER_ANSWER_READ_MAX_BYTES));
+      expect(links.some((link) => link.includes("no credential"))).toBe(true);
+      expect(links).toContain(
+        `configured endpoint: ${endpoint.host}:${endpoint.port}`,
+      );
+      const peerLink = links.find((link) =>
+        link.startsWith("first bytes the peer sent:"),
+      );
+      expect(peerLink).toBeDefined();
+      expect(peerLink).toContain("\\x00");
+      expect(peerLink?.length).toBeLessThanOrEqual(
+        DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
+      );
+      // The peer's own link is the ONLY one its bytes can spend: every link the
+      // operator has to act on renders whole beside a peer flooding its own.
+      expect(
+        links.filter((link) => link.includes(DISPLAY_TRUNCATION_MARKER)),
+      ).toEqual([peerLink]);
+    },
+  );
 
   test("escapes the peer's control bytes rather than letting them reach the terminal", () => {
     const text = rendered(

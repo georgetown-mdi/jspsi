@@ -5,7 +5,10 @@ import { expect, test } from "vitest";
 import type Ssh2SftpClient from "ssh2-sftp-client";
 import type { SFTPWrapper } from "ssh2";
 
-import { isPreIdentificationDialFailure } from "../../src/connection/sftpPeerIdentification";
+import {
+  isPreIdentificationDialFailure,
+  peerProbeTarget,
+} from "../../src/connection/sftpPeerIdentification";
 import { createRawSftpClient } from "../rawSftpClient";
 import {
   type InProcessSftpServer,
@@ -716,6 +719,62 @@ test(
       closedHavingSentNothing: "gated",
       resetAtAccept: "gated",
     });
+  },
+  TEST_TIMEOUT_MS,
+);
+
+const LOOPBACK_HOST = "127.0.0.1";
+
+// The endpoint a PORTLESS dial of the pinned client actually used, read off the
+// address the stack itself names in its refusal -- the one place it reports
+// where it went. Undefined when the dial failed some other way, which here means
+// something is answering that port: such a rejection names no address, and
+// re-deriving one would be re-deriving the premise under test.
+async function portlessDialTarget(): Promise<
+  { host: string; port: number } | undefined
+> {
+  const client = createRawSftpClient();
+  try {
+    await client.connect({
+      host: LOOPBACK_HOST,
+      // No `port`: the case under test, and what core hands ssh2 for a config
+      // that sets none.
+      username: "unused",
+      readyTimeout: READY_TIMEOUT_MS,
+      retries: 1,
+    });
+    return undefined;
+  } catch (err) {
+    const refused = /ECONNREFUSED (\S+):(\d+)/.exec(
+      (err as { message?: string }).message ?? "",
+    );
+    return refused ? { host: refused[1], port: Number(refused[2]) } : undefined;
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+// The endpoint premise beside the wording one: the diagnosis opens a connection
+// of its own, so it has to reach the endpoint the failed dial reached, the
+// default-port case included -- a read of a different port would report about a
+// peer the dial never spoke to. The default is not asserted as a number here; it
+// is whatever the pinned stack dialed, and the diagnosis's resolved target is
+// held to that.
+test(
+  "the diagnosis resolves a portless config to the endpoint the pinned stack dialed",
+  async (ctx) => {
+    const dialed = await portlessDialTarget();
+    if (dialed === undefined)
+      ctx.skip(
+        `a portless dial of ${LOOPBACK_HOST} was not refused, so the stack ` +
+          `named no address to read its default port from`,
+      );
+    expect(
+      peerProbeTarget({
+        channel: "sftp",
+        server: { host: LOOPBACK_HOST, username: "unused" },
+      }),
+    ).toEqual(dialed);
   },
   TEST_TIMEOUT_MS,
 );

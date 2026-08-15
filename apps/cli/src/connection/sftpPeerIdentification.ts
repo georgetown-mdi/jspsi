@@ -1,8 +1,8 @@
 // Diagnoses a dial that died before the peer identified itself as an SSH server.
 //
 // The defect this closes: an SSH server writes its identification string
-// ("SSH-2.0-...") first and unconditionally, before any per-connection policy
-// runs, so a dial that reaches host-key verification never sees anything else.
+// ("SSH-2.0-...") unconditionally, before any per-connection policy runs, so a
+// dial that reaches host-key verification never sees anything else.
 // When something OTHER than an SSH server answers the port -- a proxy replying
 // with an HTML error page, a TLS service, a firewall closing the connection in
 // front of the server -- the pinned stack reports every one of those as the same
@@ -31,11 +31,11 @@ import { chainDetailCauses, redactPrivateKeyMaterial } from "@psilink/core";
 import type { SFTPConnectionConfig } from "@psilink/core";
 
 /**
- * The port ssh2 dials when connect options carry none (measured against the
- * pinned version: a portless connect to a closed loopback address rejects with
- * `connect ECONNREFUSED 127.0.0.1:22`). Core omits `port` from the connect
- * options when the config sets none, so the diagnosis has to reproduce that
- * default to reach the same endpoint the failed dial did.
+ * The port ssh2 dials when connect options carry none. Core omits `port` from
+ * the connect options when the config sets none, so the diagnosis has to
+ * reproduce that default to reach the same endpoint the failed dial did -- see
+ * {@link peerProbeTarget}, whose agreement with the pinned stack is a check
+ * rather than prose.
  */
 const SSH2_DEFAULT_PORT = 22;
 
@@ -50,10 +50,18 @@ const SSH2_DEFAULT_PORT = 22;
 export const PEER_ANSWER_READ_BUDGET_MS = 2_000;
 
 /**
- * Bytes {@link observePeerAnswer} reads before it stops reading. Above
+ * Bytes {@link observePeerAnswer} RETAINS before it stops reading. Above
  * {@link PEER_EXCERPT_MAX_BYTES} on purpose: an SSH server may legally send
- * lines ahead of its identification string, and reading past the excerpt keeps
- * such a server from being classified by its preamble alone.
+ * lines ahead of its identification string, and reading past the excerpt lets
+ * such a server be recognized by that string rather than by its preamble -- as
+ * far as this bound reaches. One whose preamble runs past it, or whose
+ * identification string arrives after {@link PEER_ANSWER_READ_BUDGET_MS}, is
+ * classified as non-SSH, which is why the copy states what the peer's first
+ * bytes carried rather than what the peer is.
+ *
+ * A retention bound rather than a ceiling on what transits: the socket is never
+ * paused, so one delivery -- up to the stream's high-water mark -- can arrive
+ * before the stop rule fires, and this is what survives it.
  */
 export const PEER_ANSWER_READ_MAX_BYTES = 512;
 
@@ -253,16 +261,24 @@ class PeerIdentificationError extends Error {
   }
 }
 
+/**
+ * What the peer's first bytes carried, said as the evidence it is rather than as
+ * a verdict on what the peer is. The read is bounded twice -- by
+ * {@link PEER_ANSWER_READ_MAX_BYTES} and {@link PEER_ANSWER_READ_BUDGET_MS} --
+ * and an SSH server may legally send lines ahead of its identification string,
+ * so a real one whose preamble outruns either bound lands here as well. Hence
+ * the likelihood wording, and the caveat the recovery step carries.
+ */
 const NON_SSH_SHAPE_DESCRIPTION: Record<PeerAnswerShape, string> = {
   http:
-    `an HTTP response rather than an SSH identification string, so a web ` +
-    `server -- or a proxy or gateway intercepting this port -- is answering it`,
+    `an HTTP response, not an SSH identification string -- most likely a web ` +
+    `server, or a proxy or gateway intercepting this port`,
   "tls-alert":
-    `a TLS alert record rather than an SSH identification string, ` +
-    `so a service speaking TLS, or a TLS-terminating proxy, is answering it`,
+    `a TLS alert record, not an SSH identification string -- most likely a ` +
+    `service speaking TLS, or a TLS-terminating proxy`,
   unrecognized:
-    `data that is not an SSH identification string, so something ` +
-    `other than an SSH server is answering it`,
+    `not an SSH identification string -- most likely something other than an ` +
+    `SSH server answering this port`,
 };
 
 /**
@@ -327,13 +343,16 @@ export function explainPeerIdentificationFailure(
       },
     );
   return new PeerIdentificationError(
-    `the SFTP server never identified itself: the peer answering this ` +
-      `endpoint sent ${NON_SSH_SHAPE_DESCRIPTION[answer.shape]}.`,
+    `the SFTP server did not identify itself: the first bytes the peer ` +
+      `answering this endpoint sent were ` +
+      `${NON_SSH_SHAPE_DESCRIPTION[answer.shape]}.`,
     {
       cause: chainDetailCauses(
         [
           `Check that the configured host and port name the SFTP service, and ` +
-            `that no proxy or middlebox stands in front of them.`,
+            `that no proxy or middlebox stands in front of them. An SSH ` +
+            `server that sends over ${PEER_ANSWER_READ_MAX_BYTES} bytes of ` +
+            `banner first, or identifies itself late, reads this way too.`,
           READ_PROVENANCE,
           endpointDetail,
           `first bytes the peer sent: ` +
@@ -343,6 +362,26 @@ export function explainPeerIdentificationFailure(
       ),
     },
   );
+}
+
+/**
+ * The endpoint the diagnosis reads, which has to be the endpoint the dial it
+ * diagnoses used -- a read of a different port would report about a peer the
+ * dial never spoke to. Config-supplied where the config sets a port, and ssh2's
+ * own default where it does not; that the two agree is a check rather than
+ * prose (`apps/cli/test/integration/sftpStackPremises.test.ts` reads the port
+ * the pinned stack dials portlessly off its own rejection and holds this to it).
+ *
+ * @internal
+ */
+export function peerProbeTarget(config: SFTPConnectionConfig): {
+  host: string;
+  port: number;
+} {
+  return {
+    host: config.server.host,
+    port: config.server.port ?? SSH2_DEFAULT_PORT,
+  };
 }
 
 /**
@@ -366,10 +405,7 @@ export async function withPeerIdentificationDiagnosis<T>(
     return await probe();
   } catch (err) {
     if (!isPreIdentificationDialFailure(err)) throw err;
-    const endpoint = {
-      host: config.server.host,
-      port: config.server.port ?? SSH2_DEFAULT_PORT,
-    };
+    const endpoint = peerProbeTarget(config);
     // Clamped to the connect budget the operator configured, so a run that
     // shortened it does not get a longer diagnosis than the dial it diagnoses.
     const budgetMs = Math.min(
