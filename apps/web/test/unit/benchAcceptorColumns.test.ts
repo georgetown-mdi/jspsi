@@ -3,17 +3,19 @@ import { describe, expect, test } from "vitest";
 import {
   assertPayloadSendDisclosed,
   deriveAcceptedLinkageTerms,
+  safeParseLinkageTerms,
+  sanitizeForDisplay,
 } from "@psilink/core";
 
 import {
   acceptorCleaningAttention,
   acceptorColumnsEditorState,
-  acceptorColumnsTheInvitationWillNotAccept,
   acceptorDisclosedColumns,
   acceptorHasIdentifierConflict,
   acceptorInitialColumnsState,
   acceptorLaunchBlockedReason,
   acceptorLaunchPayload,
+  acceptorPayloadDeclarationConflict,
   acceptorUnsatisfiedTypes,
   acceptorVerdict,
 } from "@bench/acceptorColumnsModel";
@@ -392,7 +394,7 @@ describe("acceptor launch gates", () => {
   });
 });
 
-describe("columns the invitation will not accept", () => {
+describe("the invitation's declared payload set against the marks", () => {
   // A file covering both keys plus one unrecognized column, which infers to role:
   // payload -- so the file discloses exactly one column and every other gate is
   // clear, leaving this comparison as the only thing that can close the launch.
@@ -413,6 +415,12 @@ describe("columns the invitation will not accept", () => {
     acceptsOnlyAColumnNotDisclosed: {
       payload: { receive: [{ name: "risk_score" }] },
     },
+    acceptsTheDisclosedColumnAndOneTheFileLacks: {
+      payload: { receive: [{ name: "notes" }, { name: "risk_score" }] },
+    },
+    acceptsTheDisclosedColumnAndOneMarkedForMatching: {
+      payload: { receive: [{ name: "notes" }, { name: "first_name" }] },
+    },
   } satisfies Record<string, Partial<LinkageTerms>>;
 
   /** The invitation's own perspective, which the columns step holds, carrying the
@@ -421,6 +429,22 @@ describe("columns the invitation will not accept", () => {
   function invitation(shape: keyof typeof shapes): LinkageTerms {
     return { ...nameTerms, ...shapes[shape] };
   }
+
+  const inferredMarks = acceptorInitialColumnsState(columns).metadata;
+
+  /** The mark states every shape is driven in. The inferred marks disclose one
+   * column, so a declaration can only omit that one or name others; the second
+   * state discloses two, which is what makes a NON-EMPTY declaration able to omit
+   * one while naming another -- the under-declared direction the empty declaration
+   * cannot produce on this file. */
+  const markStates = {
+    asInferred: inferredMarks,
+    firstNameAlsoSent: setColumnDisclosure(
+      inferredMarks,
+      "first_name",
+      "payload",
+    ).metadata,
+  } satisfies Record<string, Metadata>;
 
   /** Whether core itself refuses to run this pair, driven through the real
    * functions rather than a second model of them: the invitation mirrored onto
@@ -440,14 +464,22 @@ describe("columns the invitation will not accept", () => {
     const terms = invitation("acceptsNothingAndTakesTheResult");
     const { editorState } = editorFor(columns, terms);
     expect(acceptorDisclosedColumns(editorState.metadata)).toEqual(["notes"]);
-    expect(
-      acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
-    ).toEqual(["notes"]);
+    const conflict = acceptorPayloadDeclarationConflict(
+      terms,
+      editorState.metadata,
+    );
+    expect(conflict?.kind).toBe("acceptsNothing");
+    expect(conflict?.sentButNotDeclared).toEqual(["notes"]);
+    expect(conflict?.declaredButNotSent).toEqual([]);
+    expect(conflict?.title).toBe("Your partner will not accept this column");
     // Every other gate is clear, so the conflict alone closes the launch -- and
     // the sentence the button is described by is the conflict's own.
     const verdict = acceptorVerdict(columns, terms, editorState);
     expect(verdict.kind).toBe("allClear");
     expect(acceptorHasIdentifierConflict(editorState.metadata)).toBe(false);
+    expect(acceptorLaunchBlockedReason(verdict, editorState, terms)).toBe(
+      conflict?.launchBlockedReason,
+    );
     expect(acceptorLaunchBlockedReason(verdict, editorState, terms)).toBe(
       "Resolve the columns your partner will not accept above before you can start.",
     );
@@ -461,8 +493,8 @@ describe("columns the invitation will not accept", () => {
     const { editorState } = editorFor(columns, terms);
     expect(acceptorDisclosedColumns(editorState.metadata)).toEqual(["notes"]);
     expect(
-      acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
-    ).toEqual([]);
+      acceptorPayloadDeclarationConflict(terms, editorState.metadata),
+    ).toBeUndefined();
     const verdict = acceptorVerdict(columns, terms, editorState);
     expect(
       acceptorLaunchBlockedReason(verdict, editorState, terms),
@@ -481,8 +513,8 @@ describe("columns the invitation will not accept", () => {
       const { editorState } = editorFor(columns, terms);
       expect(acceptorDisclosedColumns(editorState.metadata)).toEqual(["notes"]);
       expect(
-        acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
-      ).toEqual([]);
+        acceptorPayloadDeclarationConflict(terms, editorState.metadata),
+      ).toBeUndefined();
       const verdict = acceptorVerdict(columns, terms, editorState);
       expect(
         acceptorLaunchBlockedReason(verdict, editorState, terms),
@@ -490,12 +522,12 @@ describe("columns the invitation will not accept", () => {
     }
   });
 
-  test("says nothing about a non-empty declaration, which is a different comparison", () => {
+  test("says nothing when the declaration names exactly the columns the marks send", () => {
     const terms = invitation("acceptsTheDisclosedColumn");
     const { editorState } = editorFor(columns, terms);
     expect(
-      acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
-    ).toEqual([]);
+      acceptorPayloadDeclarationConflict(terms, editorState.metadata),
+    ).toBeUndefined();
   });
 
   test("clears as the operator re-marks every disclosed column, re-enabling launch", () => {
@@ -503,27 +535,21 @@ describe("columns the invitation will not accept", () => {
     // A matched column additionally marked sent, so the edit that clears the
     // conflict is exercised on both routes off that mark: back to matching for a
     // linkage column, and ignored for the unrecognized one, which cannot match.
-    const sentTwice = setColumnDisclosure(
-      acceptorInitialColumnsState(columns).metadata,
-      "first_name",
-      "payload",
-    ).metadata;
+    const sentTwice = markStates.firstNameAlsoSent;
     const seeded = editorFor(columns, terms, { metadata: sentTwice });
     expect(
-      acceptorColumnsTheInvitationWillNotAccept(
-        terms,
-        seeded.editorState.metadata,
-      ),
+      acceptorPayloadDeclarationConflict(terms, seeded.editorState.metadata)
+        ?.sentButNotDeclared,
     ).toEqual(["first_name", "notes"]);
 
     // One of the two re-marked leaves the conflict standing on the other.
     const partly = setColumnDisclosure(sentTwice, "notes", "ignored").metadata;
     const halfCleared = editorFor(columns, terms, { metadata: partly });
     expect(
-      acceptorColumnsTheInvitationWillNotAccept(
+      acceptorPayloadDeclarationConflict(
         terms,
         halfCleared.editorState.metadata,
-      ),
+      )?.sentButNotDeclared,
     ).toEqual(["first_name"]);
     expect(
       acceptorLaunchBlockedReason(
@@ -539,11 +565,8 @@ describe("columns the invitation will not accept", () => {
     const edited = editorFor(columns, terms, { metadata: cleared });
     expect(acceptorDisclosedColumns(edited.editorState.metadata)).toEqual([]);
     expect(
-      acceptorColumnsTheInvitationWillNotAccept(
-        terms,
-        edited.editorState.metadata,
-      ),
-    ).toEqual([]);
+      acceptorPayloadDeclarationConflict(terms, edited.editorState.metadata),
+    ).toBeUndefined();
     const verdict = acceptorVerdict(columns, terms, edited.editorState);
     expect(verdict.kind).toBe("allClear");
     expect(
@@ -551,40 +574,250 @@ describe("columns the invitation will not accept", () => {
     ).toBeUndefined();
   });
 
-  // The shape the equivalence deliberately excludes, named so that excluding it is
-  // an act rather than an omission; the test after the equivalence owns it.
-  const scopeLimitShape = "acceptsOnlyAColumnNotDisclosed";
+  test("a non-empty declaration that omits a marked column names it, and a re-mark here clears it", () => {
+    // Under-declaration against a NON-EMPTY declaration: the declaration names one
+    // of the two columns the marks send. The remedy is entirely local, so the
+    // notice leads with it and the gate re-opens on the edit alone.
+    const terms = invitation("acceptsTheDisclosedColumn");
+    const marked = editorFor(columns, terms, {
+      metadata: markStates.firstNameAlsoSent,
+    });
+    const conflict = acceptorPayloadDeclarationConflict(
+      terms,
+      marked.editorState.metadata,
+    );
+    expect(conflict?.kind).toBe("setMismatch");
+    expect(conflict?.sentButNotDeclared).toEqual(["first_name"]);
+    expect(conflict?.declaredButNotSent).toEqual([]);
+    expect(conflict?.title).toBe("Your partner does not expect this column");
+    const verdict = acceptorVerdict(columns, terms, marked.editorState);
+    expect(verdict.satisfiableKeyCount).toBeGreaterThan(0);
+    expect(
+      acceptorLaunchBlockedReason(verdict, marked.editorState, terms),
+    ).toBe(
+      "Resolve the columns your partner does not expect above before you can start.",
+    );
+
+    const reMarked = editorFor(columns, terms, {
+      metadata: setColumnDisclosure(
+        markStates.firstNameAlsoSent,
+        "first_name",
+        "match",
+      ).metadata,
+    });
+    expect(
+      acceptorPayloadDeclarationConflict(terms, reMarked.editorState.metadata),
+    ).toBeUndefined();
+    expect(
+      acceptorLaunchBlockedReason(
+        acceptorVerdict(columns, terms, reMarked.editorState),
+        reMarked.editorState,
+        terms,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("a declared column the file does not have is named as absent, and no local edit is offered", () => {
+    // Over-declaration with no local remedy at all: the operator cannot mark a
+    // column their file does not have, so the entry says so and the notice's copy
+    // leads with the corrected invitation.
+    const terms = invitation("acceptsTheDisclosedColumnAndOneTheFileLacks");
+    const { editorState } = editorFor(columns, terms);
+    const conflict = acceptorPayloadDeclarationConflict(
+      terms,
+      editorState.metadata,
+    );
+    expect(conflict?.kind).toBe("setMismatch");
+    expect(conflict?.sentButNotDeclared).toEqual([]);
+    expect(conflict?.declaredButNotSent).toEqual([
+      { displayName: "risk_score", inFile: false },
+    ]);
+    expect(conflict?.title).toBe(
+      "Your partner expects a column you are not sending",
+    );
+    const verdict = acceptorVerdict(columns, terms, editorState);
+    expect(acceptorLaunchBlockedReason(verdict, editorState, terms)).toBe(
+      "Resolve the columns your partner expects above before you can start.",
+    );
+  });
+
+  test("a declared column the file does have is flagged as one the operator could mark, and marking it clears the conflict", () => {
+    // The secondary remedy, which exists only here: the column is in the file, so
+    // marking it to send is available -- at the cost of disclosing more, which is
+    // why it is never the notice's lead.
+    const terms = invitation(
+      "acceptsTheDisclosedColumnAndOneMarkedForMatching",
+    );
+    const { editorState } = editorFor(columns, terms);
+    expect(
+      acceptorPayloadDeclarationConflict(terms, editorState.metadata)
+        ?.declaredButNotSent,
+    ).toEqual([{ displayName: "first_name", inFile: true }]);
+
+    const widened = editorFor(columns, terms, {
+      metadata: markStates.firstNameAlsoSent,
+    });
+    expect(
+      acceptorPayloadDeclarationConflict(terms, widened.editorState.metadata),
+    ).toBeUndefined();
+    expect(
+      acceptorLaunchBlockedReason(
+        acceptorVerdict(columns, terms, widened.editorState),
+        widened.editorState,
+        terms,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("a declared column the file keeps as its record identifier is offered too, at the cost of the identifier", () => {
+    // The same offer over a column that is neither matched on nor sent: `record_id`
+    // infers to the identifier role, so `inFile` is read from the metadata whatever
+    // use the column currently has, and what widening costs here is the one column
+    // the file keeps unsent to index its own matched rows -- not matching, which
+    // this column does not do.
+    const identifierColumns = ["first_name", "last_name", "record_id"];
+    const terms: LinkageTerms = {
+      ...nameTerms,
+      payload: { receive: [{ name: "record_id" }] },
+    };
+    const { editorState } = editorFor(identifierColumns, terms);
+    expect(
+      editorState.metadata.find((column) => column.name === "record_id")?.role,
+    ).toBe("identifier");
+    expect(acceptorDisclosedColumns(editorState.metadata)).toEqual([]);
+    expect(
+      acceptorPayloadDeclarationConflict(terms, editorState.metadata)
+        ?.declaredButNotSent,
+    ).toEqual([{ displayName: "record_id", inFile: true }]);
+
+    const widened = setColumnDisclosure(
+      editorState.metadata,
+      "record_id",
+      "payload",
+    ).metadata;
+    expect(acceptorPayloadDeclarationConflict(terms, widened)).toBeUndefined();
+    expect(widened.some((column) => column.role === "identifier")).toBe(false);
+  });
+
+  test("both directions at once are stated together, and clearing one leaves the other named", () => {
+    // Core reports both directions in one refusal, so both are carried in one
+    // statement: an operator who clears the marked column must not meet an
+    // unmentioned second problem on the next attempt.
+    const terms = invitation("acceptsOnlyAColumnNotDisclosed");
+    const { editorState } = editorFor(columns, terms);
+    const conflict = acceptorPayloadDeclarationConflict(
+      terms,
+      editorState.metadata,
+    );
+    expect(conflict?.sentButNotDeclared).toEqual(["notes"]);
+    expect(conflict?.declaredButNotSent).toEqual([
+      { displayName: "risk_score", inFile: false },
+    ]);
+    expect(conflict?.title).toBe(
+      "Your columns do not match what your partner expects",
+    );
+    const verdict = acceptorVerdict(columns, terms, editorState);
+    expect(acceptorLaunchBlockedReason(verdict, editorState, terms)).toBe(
+      "Resolve the columns that do not match what your partner expects above before you can start.",
+    );
+
+    // Re-marking the one column the operator controls leaves the launch closed on
+    // the direction they cannot fix, which the same statement already named.
+    const reMarked = editorFor(columns, terms, {
+      metadata: setColumnDisclosure(inferredMarks, "notes", "ignored").metadata,
+    });
+    const remaining = acceptorPayloadDeclarationConflict(
+      terms,
+      reMarked.editorState.metadata,
+    );
+    expect(remaining?.sentButNotDeclared).toEqual([]);
+    expect(remaining?.declaredButNotSent).toEqual([
+      { displayName: "risk_score", inFile: false },
+    ]);
+    expect(
+      acceptorLaunchBlockedReason(
+        acceptorVerdict(columns, terms, reMarked.editorState),
+        reMarked.editorState,
+        terms,
+      ),
+    ).toBe(
+      "Resolve the columns your partner expects above before you can start.",
+    );
+  });
+
+  test("a declared name is escaped and the operator's own header is not", () => {
+    // The two halves of one statement have different provenance: the declaration
+    // is the partner's text, which reaches the operator escaped at this sink; the
+    // marked names are the operator's own CSV headers, which the step renders
+    // through ColumnName's isolation and so must arrive here verbatim. Applying
+    // either treatment to both is the failure this pins.
+    // Written as an escape, never as a raw byte, so a test about an invisible
+    // character is itself readable: U+202E RIGHT-TO-LEFT OVERRIDE, which reorders
+    // the copy around it wherever it is rendered unescaped and uncontained.
+    const partnerName = "risk\u202Escore";
+    const ownHeader = "notes\u202Eevil";
+    const ownColumns = ["first_name", "last_name", ownHeader];
+    const terms: LinkageTerms = {
+      ...nameTerms,
+      payload: { receive: [{ name: partnerName }] },
+    };
+    const { editorState } = editorFor(ownColumns, terms);
+    const conflict = acceptorPayloadDeclarationConflict(
+      terms,
+      editorState.metadata,
+    );
+    expect(conflict?.declaredButNotSent).toEqual([
+      { displayName: sanitizeForDisplay(partnerName), inFile: false },
+    ]);
+    expect(conflict?.declaredButNotSent[0].displayName).not.toBe(partnerName);
+    expect(conflict?.sentButNotDeclared).toEqual([ownHeader]);
+  });
+
+  test("every shape this describe drives is an invitation core would accept", () => {
+    // The equivalence below is only worth what its shapes are: a shape core's own
+    // schema would refuse at decode can never reach this step, so agreeing with
+    // core on it would prove nothing.
+    for (const shape of Object.keys(shapes) as Array<keyof typeof shapes>)
+      expect(safeParseLinkageTerms(invitation(shape)).success, shape).toBe(
+        true,
+      );
+  });
+
+  test("a non-empty declaration cannot arrive alongside an inviting party entitled to no result", () => {
+    // Why the non-empty comparison is ungated in both directions, exactly as core
+    // leaves it, without contradicting the panel that says nothing is sent: the
+    // pair those two statements would need is not a parseable invitation. Gating
+    // the comparison on the output direction as the empty case does would instead
+    // silence a refusal that does happen.
+    expect(
+      safeParseLinkageTerms({
+        ...nameTerms,
+        output: { expectsOutput: false, shareWithPartner: true },
+        payload: { receive: [{ name: "risk_score" }] },
+      }).success,
+    ).toBe(false);
+  });
 
   test("fires exactly when core's own enforcement refuses the pair", () => {
     // The web predicate states in this package a condition core enforces in its
     // own, so a change to core's gate would leave the notice quietly wrong -- the
     // operator told the exchange can start, and refused at launch. Every shape this
-    // describe drives, through core's real mirror and real assertion: the notice
-    // and the refusal agree, or this fails.
-    for (const shape of Object.keys(shapes) as Array<keyof typeof shapes>) {
-      if (shape === scopeLimitShape) continue;
-      const terms = invitation(shape);
-      const { editorState } = editorFor(columns, terms);
-      expect(
-        acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata)
-          .length > 0,
-        shape,
-      ).toBe(coreRefuses(terms, editorState.metadata));
-    }
-  });
-
-  test("leaves a disagreeing non-empty declaration to core, by design", () => {
-    // The equivalence above is scoped to the declaration this notice reads -- the
-    // empty one. A non-empty declaration that disagrees with the marks is a
-    // different comparison, with a named set and different remedies, and core
-    // still refuses it: the notice is silent here by design, and this is what says
-    // so rather than the equivalence test quietly excluding the case.
-    const terms = invitation(scopeLimitShape);
-    const { editorState } = editorFor(columns, terms);
-    expect(
-      acceptorColumnsTheInvitationWillNotAccept(terms, editorState.metadata),
-    ).toEqual([]);
-    expect(coreRefuses(terms, editorState.metadata)).toBe(true);
+    // describe drives, in every mark state, through core's real mirror and real
+    // assertion: the notice and the refusal agree, or this fails.
+    for (const shape of Object.keys(shapes) as Array<keyof typeof shapes>)
+      for (const marks of Object.keys(markStates) as Array<
+        keyof typeof markStates
+      >) {
+        const terms = invitation(shape);
+        const { editorState } = editorFor(columns, terms, {
+          metadata: markStates[marks],
+        });
+        expect(
+          acceptorPayloadDeclarationConflict(terms, editorState.metadata) !==
+            undefined,
+          `${shape} / ${marks}`,
+        ).toBe(coreRefuses(terms, editorState.metadata));
+      }
   });
 });
 
