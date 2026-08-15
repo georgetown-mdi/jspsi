@@ -1,4 +1,8 @@
-import { assessLinkageSatisfiability, inferMetadata } from "@psilink/core";
+import {
+  assessLinkageSatisfiability,
+  inferMetadata,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import {
   SEMANTIC_TYPE_LABELS,
@@ -287,22 +291,25 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  * button and points its `aria-describedby` at -- `undefined` exactly when nothing
  * blocks, which is what the step disables on. Ported from the legacy editor's
  * predicate: no key can match (`satisfiableKeyCount === 0`), OR the marked columns
- * are ones the invitation will accept none of
- * ({@link acceptorColumnsTheInvitationWillNotAccept}) -- a pair the exchange refuses
- * to run on -- OR the metadata carries more than one identifier column, OR an
- * authored cleaning step is invalid/mid-edit, OR one of the step's own blocks.
- * Partial coverage does NOT gate -- it threads a warning instead.
+ * disagree with the payload set the invitation declares for this party
+ * ({@link acceptorPayloadDeclarationConflict}) -- a pair the exchange refuses to run
+ * on -- OR the metadata carries more than one identifier column, OR an authored
+ * cleaning step is invalid/mid-edit, OR one of the step's own blocks. Partial
+ * coverage does NOT gate -- it threads a warning instead.
  *
  * The gate and the explanation are ONE derivation rather than two that agree, so a
  * state that disables the button while telling a screen-reader operator nothing is
- * unrepresentable rather than merely tested against.
+ * unrepresentable rather than merely tested against. The declaration conflict holds
+ * that shape across its own variants too: the sentence is the one the conflict
+ * itself carries, so the notice's title and the button's reason are chosen in a
+ * single place and cannot name different directions of the same disagreement.
  *
  * The chain follows the step's own reading order, so the sentence names the topmost
  * unresolved surface and an operator working down the screen is sent to the first
- * thing they meet: the verdict, then the columns the invitation will not accept,
- * then the grid's identifier rule, then the cleaning steps, then the connection and
- * file-handling cards below them. Each names what to fix on this screen, in the
- * words of the notice it points at.
+ * thing they meet: the verdict, then the declaration conflict, then the grid's
+ * identifier rule, then the cleaning steps, then the connection and file-handling
+ * cards below them. Each names what to fix on this screen, in the words of the
+ * notice it points at.
  */
 export function acceptorLaunchBlockedReason(
   verdict: AcceptorVerdictViewModel,
@@ -312,13 +319,12 @@ export function acceptorLaunchBlockedReason(
 ): string | undefined {
   if (verdict.satisfiableKeyCount === 0)
     return "Set your columns to the missing field types above before you can start.";
-  if (
-    acceptorColumnsTheInvitationWillNotAccept(
-      invitationTerms,
-      editorState.metadata,
-    ).length > 0
-  )
-    return "Resolve the columns your partner will not accept above before you can start.";
+  const declarationConflict = acceptorPayloadDeclarationConflict(
+    invitationTerms,
+    editorState.metadata,
+  );
+  if (declarationConflict !== undefined)
+    return declarationConflict.launchBlockedReason;
   if (hasMultipleIdentifiers(editorState.metadata))
     return "Choose a single record identifier column above before you can start.";
   if (!acceptorStandardizationValid(editorState.standardization))
@@ -377,34 +383,182 @@ export function acceptorDisclosedColumns(metadata: Metadata): Array<string> {
 }
 
 /**
- * The disclosed columns the invitation declares the inviting party will accept none
- * of: the pair `assertPayloadSendDisclosed` refuses inside `prepareForExchange`,
- * surfaced here before the operator launches into it. Empty when there is nothing to
- * state, so the notice and the launch gate read one derivation and cannot disagree,
- * and it empties as the operator re-marks those columns.
+ * One column the invitation's declared payload set names that this party's marks do
+ * not send -- core's OVER-declaration. The remedy for it is mostly the partner's, so
+ * the entry carries what decides which remedies exist rather than the name alone.
+ */
+export interface AcceptorDeclaredColumnGap {
+  /**
+   * The declared name as the notice shows it: partner-controlled text, escaped
+   * ({@link sanitizeForDisplay}) at this boundary because this view-model IS its
+   * display sink -- the step renders the string as given. The operator's own column
+   * names in the same notice take the opposite treatment (`ColumnName`'s bidi
+   * isolation, applied where they are rendered), so the two provenances stay
+   * distinguishable: only the half the operator cannot inspect is escaped.
+   */
+  displayName: string;
+  /**
+   * Whether the operator's own file has a column of that name, which is what decides
+   * whether marking it to send exists as a remedy at all. Read from the metadata,
+   * which carries one entry per column of the chosen file.
+   */
+  inFile: boolean;
+}
+
+/**
+ * Whether the invitation declares no payload column at all for this party
+ * (`acceptsNothing`) or declares a set that disagrees with the marks
+ * (`setMismatch`). The two are one refusal in core but not one remedy: an empty
+ * declaration cannot be satisfied locally by disclosing more, since widening the
+ * marks cannot make the partner accept a column it declared it takes none of.
+ */
+export type AcceptorPayloadDeclarationConflictKind =
+  "acceptsNothing" | "setMismatch";
+
+/**
+ * The disagreement between the payload set the invitation declares for this party
+ * and the columns the operator's marks disclose: the pair
+ * `assertPayloadSendDisclosed` refuses inside `prepareForExchange`, surfaced before
+ * the operator launches into it. Both directions can hold at once -- core reports
+ * them in one refusal -- so both are carried here and stated together, rather than
+ * one being revealed after the other is cleared.
+ */
+export interface AcceptorPayloadDeclarationConflict {
+  kind: AcceptorPayloadDeclarationConflictKind;
+  /** The notice's visible title, naming the direction(s) that hold. */
+  title: string;
+  /**
+   * The launch gate's sentence for this conflict, carried beside the title so the
+   * button's reason and the notice it points at are chosen in one place.
+   */
+  launchBlockedReason: string;
+  /**
+   * Columns the marks disclose that the declaration does not name -- core's
+   * UNDER-declaration. The operator's OWN CSV headers, raw: the step renders them
+   * through `ColumnName`, the isolation every column-name sink on that screen uses.
+   * Non-empty is the direction with a local remedy, cleared by re-marking those
+   * columns on this screen.
+   */
+  sentButNotDeclared: Array<string>;
+  /**
+   * Columns the declaration names that the marks do not send -- core's
+   * OVER-declaration, in the order the declaration lists them. Partner-controlled
+   * names ({@link AcceptorDeclaredColumnGap}), whose remedy leads with a corrected
+   * invitation or a different file.
+   */
+  declaredButNotSent: Array<AcceptorDeclaredColumnGap>;
+}
+
+/**
+ * The disagreement between the invitation's declared payload set for this party and
+ * the operator's marks, or `undefined` when there is nothing to state -- so the
+ * notice and the launch gate read ONE derivation and cannot disagree, and it clears
+ * as the operator re-marks.
  *
- * Read from the INVITATION's own perspective, which is the terms this step holds. A
- * present-but-empty `payload.receive` is the inviting party declaring it accepts no
- * payload column (`deriveAcceptedLinkageTerms` mirrors it onto this party as an empty
- * `payload.send`, which is the side core enforces); an ABSENT one is the lazy
- * direction, reconciled against this party's own disclosure when the exchange runs. A
- * NON-EMPTY declared set that disagrees with the disclosed columns is a different
- * comparison with different remedies and is not covered here.
+ * Mirrors {@link assertPayloadSendDisclosed} exactly: an exact-set comparison in
+ * both directions, with the ONE gate core has. Read from the INVITATION's own
+ * perspective, which is the terms this step holds. An ABSENT `payload.receive` is
+ * the lazy direction -- reconciled against this party's own disclosure when the
+ * exchange runs, never held to equality -- while a PRESENT one mirrors onto this
+ * party as the `payload.send` core enforces (`deriveAcceptedLinkageTerms`).
  *
- * Gated on the inviting party's `output.expectsOutput`, exactly as core gates the
- * empty case on the mirrored `shareWithPartner`: an inviting party entitled to no
+ * Only the EMPTY declaration is gated on the inviting party's `output.expectsOutput`
+ * (core's `shareWithPartner` on the mirrored side): an inviting party entitled to no
  * result is sent no payload at all, so the run transmits nothing whatever the
  * operator marks, core refuses nothing, and stating a conflict would contradict the
- * panel beside it -- which renders core's no-payload sentence off that same fact.
+ * panel beside it -- which renders core's no-payload sentence off that same fact. A
+ * NON-EMPTY declaration is ungated in both directions, exactly as core leaves it: it
+ * is an accuracy control over a dictionary that is exchanged, consented to, and
+ * written into the exchange record whatever the output direction. That cannot
+ * contradict the same panel either, and by construction rather than by a second
+ * gate here -- `LinkageTermsSchema` refuses a non-empty `payload.receive` alongside
+ * `expectsOutput: false`, so an invitation carrying one never reaches this step (the
+ * unit suite drives that refusal, which is what keeps this ungated).
  */
-export function acceptorColumnsTheInvitationWillNotAccept(
+export function acceptorPayloadDeclarationConflict(
   invitationTerms: LinkageTerms,
   metadata: Metadata,
-): Array<string> {
-  const receive = invitationTerms.payload?.receive;
-  if (receive === undefined || receive.length > 0) return [];
-  if (!invitationTerms.output.expectsOutput) return [];
-  return acceptorDisclosedColumns(metadata);
+): AcceptorPayloadDeclarationConflict | undefined {
+  const declared = invitationTerms.payload?.receive;
+  if (declared === undefined) return undefined;
+  if (declared.length === 0 && !invitationTerms.output.expectsOutput)
+    return undefined;
+  const declaredNames = declared.map((column) => column.name);
+  const disclosed = acceptorDisclosedColumns(metadata);
+  const declaredSet = new Set(declaredNames);
+  const disclosedSet = new Set(disclosed);
+  const sentButNotDeclared = disclosed.filter((name) => !declaredSet.has(name));
+  const declaredButNotSent = declaredNames
+    .filter((name) => !disclosedSet.has(name))
+    .map((name) => ({
+      displayName: sanitizeForDisplay(name),
+      inFile: metadata.some((column) => column.name === name),
+    }));
+  if (sentButNotDeclared.length === 0 && declaredButNotSent.length === 0)
+    return undefined;
+  return {
+    ...declarationConflictWording(
+      declaredNames.length === 0,
+      sentButNotDeclared.length,
+      declaredButNotSent.length,
+    ),
+    sentButNotDeclared,
+    declaredButNotSent,
+  };
+}
+
+/**
+ * The title and the launch sentence for a conflict, chosen together so the button's
+ * reason is always the words of the notice it points at. Each variant names the
+ * direction(s) that actually hold, since they send the operator to different
+ * remedies: an empty declaration is the partner's to widen, an unexpected column is
+ * the operator's to re-mark here, and a column the partner expects but this file
+ * does not send may have no local remedy at all.
+ */
+function declarationConflictWording(
+  declaresNothing: boolean,
+  sentButNotDeclaredCount: number,
+  declaredButNotSentCount: number,
+): Pick<
+  AcceptorPayloadDeclarationConflict,
+  "kind" | "title" | "launchBlockedReason"
+> {
+  if (declaresNothing)
+    return {
+      kind: "acceptsNothing",
+      title:
+        sentButNotDeclaredCount === 1
+          ? "Your partner will not accept this column"
+          : "Your partner will not accept these columns",
+      launchBlockedReason:
+        "Resolve the columns your partner will not accept above before you can start.",
+    };
+  if (declaredButNotSentCount === 0)
+    return {
+      kind: "setMismatch",
+      title:
+        sentButNotDeclaredCount === 1
+          ? "Your partner does not expect this column"
+          : "Your partner does not expect these columns",
+      launchBlockedReason:
+        "Resolve the columns your partner does not expect above before you can start.",
+    };
+  if (sentButNotDeclaredCount === 0)
+    return {
+      kind: "setMismatch",
+      title:
+        declaredButNotSentCount === 1
+          ? "Your partner expects a column you are not sending"
+          : "Your partner expects columns you are not sending",
+      launchBlockedReason:
+        "Resolve the columns your partner expects above before you can start.",
+    };
+  return {
+    kind: "setMismatch",
+    title: "Your columns do not match what your partner expects",
+    launchBlockedReason:
+      "Resolve the columns that do not match what your partner expects above before you can start.",
+  };
 }
 
 /** Whether the metadata carries more than one identifier column, surfaced as the

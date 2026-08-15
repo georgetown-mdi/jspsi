@@ -24,9 +24,9 @@ import { MetadataGrid } from "@components/MetadataGrid";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import {
-  acceptorColumnsTheInvitationWillNotAccept,
   acceptorDisclosedColumns,
   acceptorLaunchBlockedReason,
+  acceptorPayloadDeclarationConflict,
   acceptorStandardizationValid,
   acceptorUnsatisfiedTypes,
 } from "./acceptorColumnsModel";
@@ -44,6 +44,24 @@ import type {
   Standardization,
 } from "@psilink/core";
 import type { ReactNode } from "react";
+
+/**
+ * The operator's OWN CSV headers as the declaration notice lists them: through the
+ * same ColumnName every column-name surface on this screen uses, so a name here
+ * reads exactly as it does in the grid row the operator has to change, and one per
+ * line so a name carrying a list separator cannot read as two.
+ */
+function MarkedColumnList({ names }: { names: Array<string> }) {
+  return (
+    <List size="sm" withPadding listStyleType="circle" my={4}>
+      {names.map((column) => (
+        <List.Item key={column}>
+          <ColumnName name={column} />
+        </List.Item>
+      ))}
+    </List>
+  );
+}
 
 /**
  * The acceptor's "Confirm your columns" work surface (step 3 of 3): a port of the
@@ -145,14 +163,22 @@ export function AcceptorColumnsStep({
   // block resolves the same fact for the same viewer, and both render the sentence
   // core carries.
   const partnerReceivesResult = linkageTerms.output.expectsOutput;
-  // The columns marked to send that the invitation declares the inviting party
-  // accepts none of: the exchange refuses to run on that pair, and every input the
+  // How the marks below disagree with the payload set the invitation declares for
+  // this party: the exchange refuses to run on that pair, and every input the
   // refusal reads is on this screen, so it is stated here rather than met after the
   // operator has consented, chosen a file, and launched.
-  const unacceptedColumns = acceptorColumnsTheInvitationWillNotAccept(
+  const declarationConflict = acceptorPayloadDeclarationConflict(
     linkageTerms,
     editorState.metadata,
   );
+  // Which remedies the declared-but-unsent half even has: a column this file does
+  // not carry cannot be marked at all, so only the columns it does carry get the
+  // offer to widen the disclosure, and only the ones it lacks get "choose another
+  // file".
+  const expectedInFile =
+    declarationConflict?.declaredButNotSent.filter((gap) => gap.inFile) ?? [];
+  const expectedMissingFromFile =
+    declarationConflict?.declaredButNotSent.filter((gap) => !gap.inFile) ?? [];
   const standardizationValid = acceptorStandardizationValid(
     editorState.standardization,
   );
@@ -354,42 +380,106 @@ export function AcceptorColumnsStep({
           </Paper>
         )}
 
-        {/* The invitation accepts no column while the marks below still send some:
-            the exchange refuses that pair before any data moves, so it is stated
-            beside the marks that decide it and directly above the control that
-            clears it. Not a live region -- the marks are the operator's own edits,
-            the grid below already voices the disclosed set, and the launch button's
-            blocked-reason line speaks for the gate; a third channel on the same
-            fact would announce over both. */}
-        {unacceptedColumns.length > 0 && (
+        {/* The marks below and the payload set the invitation declares for this
+            party disagree: the exchange refuses that pair before any data moves, so
+            it is stated beside the marks that decide it and directly above the
+            control that clears it. Both directions are stated at once -- core
+            refuses them in one message -- so clearing one does not reveal the other
+            on the next attempt. Not a live region -- the marks are the operator's
+            own edits, the grid below already voices the disclosed set, and the
+            launch button's blocked-reason line speaks for the gate; a third channel
+            on the same fact would announce over both. */}
+        {declarationConflict !== undefined && (
           <Alert
             role="note"
             color="red"
             icon={<IconAlertCircle aria-hidden />}
-            title={
-              unacceptedColumns.length === 1
-                ? "Your partner will not accept this column"
-                : "Your partner will not accept these columns"
-            }
+            title={declarationConflict.title}
           >
-            The invitation says your partner accepts no columns from your file,
-            but {unacceptedColumns.length === 1 ? "this one is" : "these are"}{" "}
-            still marked to send:
-            {/* The operator's OWN CSV headers, shown through the same ColumnName
-                every column-name surface on this screen uses, and one per line so
-                a name carrying a list separator cannot read as two. */}
-            <List size="sm" withPadding listStyleType="circle" my={4}>
-              {unacceptedColumns.map((column) => (
-                <List.Item key={column}>
-                  <ColumnName name={column} />
-                </List.Item>
-              ))}
-            </List>
-            The exchange cannot start while the two disagree. Set &quot;How it
-            is used&quot; below to anything other than &quot;Sent to your
-            partner&quot; for{" "}
-            {unacceptedColumns.length === 1 ? "that column" : "those columns"},
-            or ask your partner for an invitation that accepts them.
+            {declarationConflict.kind === "acceptsNothing" ? (
+              <>
+                The invitation says your partner accepts no columns from your
+                file, but{" "}
+                {declarationConflict.sentButNotDeclared.length === 1
+                  ? "this one is"
+                  : "these are"}{" "}
+                still marked to send:
+                <MarkedColumnList
+                  names={declarationConflict.sentButNotDeclared}
+                />
+                The exchange cannot start while the two disagree. Set &quot;How
+                it is used&quot; below to anything other than &quot;Sent to your
+                partner&quot; for{" "}
+                {declarationConflict.sentButNotDeclared.length === 1
+                  ? "that column"
+                  : "those columns"}
+                , or ask your partner for an invitation that accepts them.
+              </>
+            ) : (
+              <>
+                The invitation lists exactly which columns your partner expects
+                from your file, and the exchange cannot start until your marks
+                match that list.
+                {declarationConflict.sentButNotDeclared.length > 0 && (
+                  <>
+                    <Text size="sm" mt="xs">
+                      Marked to send, but not on your partner&apos;s list:
+                    </Text>
+                    <MarkedColumnList
+                      names={declarationConflict.sentButNotDeclared}
+                    />
+                    {/* The direction with a remedy on this screen, so it leads
+                        with that remedy: the notice clears as the operator
+                        re-marks, without a new invitation. */}
+                    Set &quot;How it is used&quot; below to anything other than
+                    &quot;Sent to your partner&quot; for{" "}
+                    {declarationConflict.sentButNotDeclared.length === 1
+                      ? "that column"
+                      : "those columns"}
+                    , or ask your partner for an invitation that expects{" "}
+                    {declarationConflict.sentButNotDeclared.length === 1
+                      ? "it"
+                      : "them"}
+                    .
+                  </>
+                )}
+                {declarationConflict.declaredButNotSent.length > 0 && (
+                  <>
+                    <Text size="sm" mt="xs">
+                      Expected by your partner, but not marked to send:
+                    </Text>
+                    {/* The invitation's OWN names, which the model has already
+                        escaped for this sink -- partner-controlled text, unlike
+                        the operator's headers above. Keyed by position: nothing
+                        stops a declaration naming the same column twice. */}
+                    <List size="sm" withPadding listStyleType="circle" my={4}>
+                      {declarationConflict.declaredButNotSent.map(
+                        (gap, index) => (
+                          <List.Item key={index}>
+                            {gap.displayName}
+                            {!gap.inFile && " - not a column in this file"}
+                          </List.Item>
+                        ),
+                      )}
+                    </List>
+                    {/* The remedy here is mostly the partner's: widening the
+                        operator's own disclosure to match is offered only where the
+                        column exists, and never as the fix. */}
+                    Ask your partner for an invitation that expects what your
+                    file sends
+                    {expectedMissingFromFile.length > 0 &&
+                      `, or choose a file that has ${
+                        expectedMissingFromFile.length === 1
+                          ? "that column"
+                          : "those columns"
+                      }`}
+                    .
+                    {expectedInFile.length > 0 &&
+                      ' Where your file does have such a column, you can set it to "Sent to your partner" below instead - that discloses more than you have marked so far, and takes the column out of matching.'}
+                  </>
+                )}
+              </>
+            )}
           </Alert>
         )}
 
