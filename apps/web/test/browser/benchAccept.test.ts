@@ -29,6 +29,11 @@ import { BenchLobby } from "@bench/BenchLobby";
 import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
 
+// Assertions below derive their expected string from this function, so they pin
+// that a string sink carries the same form the panel does, not what that form is;
+// the literal FSI/PDI/marker expectations live in
+// apps/web/test/unit/columnNameDisplay.test.ts, which is load-bearing for all of
+// them.
 import { isolatedColumnName } from "@components/ColumnName";
 
 import { createAppMount } from "./renderApp";
@@ -239,6 +244,42 @@ async function encodeExpiredToken(): Promise<string> {
 
 function csvFile(content: string): File {
   return new File([content], "cohort_intake.csv", { type: "text/csv" });
+}
+
+/** The given substrings in visual reading order, measured with a Range over the
+ * text nodes under `root`. Glyph level rather than element level, which is what
+ * makes it discriminating: an unterminated override reorders the glyphs a
+ * neighbouring name's box already holds without moving that box, so sorting the
+ * elements' own rectangles reports the DOM order either way. Throws on a substring
+ * that is absent or paints nothing, so an order it returns is one the browser
+ * actually laid out rather than a sort over empty boxes. */
+function visualOrderWithin(
+  root: Node,
+  substrings: Array<string>,
+): Array<string> {
+  const texts: Array<Text> = [];
+  if (root instanceof Text) texts.push(root);
+  else {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      texts.push(node as Text);
+    }
+  }
+  return substrings
+    .map((substring) => {
+      const hit = texts
+        .map((node) => ({ node, start: node.data.indexOf(substring) }))
+        .find(({ start }) => start >= 0);
+      if (hit === undefined) throw new Error(`not rendered: ${substring}`);
+      const range = document.createRange();
+      range.setStart(hit.node, hit.start);
+      range.setEnd(hit.node, hit.start + substring.length);
+      const box = range.getBoundingClientRect();
+      if (box.width === 0) throw new Error(`paints nothing: ${substring}`);
+      return { substring, box };
+    })
+    .sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)
+    .map((entry) => entry.substring);
 }
 
 const app = createAppMount();
@@ -671,29 +712,6 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     await expect
       .element(page.getByRole("heading", { name: "Confirm your columns" }))
       .toBeInTheDocument();
-  }
-
-  /** The given substrings of one text node in visual reading order, measured with a
-   * Range: a run of names inside a single text node has no element to take a box.
-   * Throws on a substring that is absent or paints nothing, so an order it returns
-   * is one the browser actually laid out rather than a sort over empty boxes. */
-  function visualOrderWithin(
-    node: Text,
-    substrings: Array<string>,
-  ): Array<string> {
-    return substrings
-      .map((substring) => {
-        const start = node.data.indexOf(substring);
-        if (start < 0) throw new Error(`not in the row: ${substring}`);
-        const range = document.createRange();
-        range.setStart(node, start);
-        range.setEnd(node, start + substring.length);
-        const box = range.getBoundingClientRect();
-        if (box.width === 0) throw new Error(`paints nothing: ${substring}`);
-        return { substring, box };
-      })
-      .sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)
-      .map((entry) => entry.substring);
   }
 
   test("a blocked file shows the exact block copy and disables Start the exchange", async () => {
@@ -1285,59 +1303,44 @@ describe("acceptor columns step: one column name across the screen", () => {
     expect(app.container.textContent).not.toContain("\\u0444");
   });
 
-  /** The disclosed-columns panel's names in visual reading order, measured off the
-   * rendered boxes: containment is a layout property, and the DOM order is the same
-   * whether or not the browser let a name's override out into the sentence. */
-  function panelNamesInVisualOrder(): Array<string> {
+  // The one hostile class whose containment this panel can be measured on: driven in
+  // this Chromium over these names, an unterminated RLO is the only one of the
+  // unclosed classes (RLO, LRO, RLI, LRI, FSI, a stray PDF) that moves a glyph at
+  // all -- with all-Latin neighbours in an LTR sentence the other five lay out
+  // identically isolated or not, so an order assertion on them would hold with the
+  // isolation gone. What contains those five is not driven here: it rests on the
+  // computed `unicode-bidi: isolate` asserted above and on the PDI semantics
+  // ColumnName cites (UAX #9).
+  const RIGHT_TO_LEFT_OVERRIDE = "\u202E";
+  const PANEL_NAMES = ["pre", `notes${RIGHT_TO_LEFT_OVERRIDE}evil`, "post"];
+
+  test("an unterminated override leaves the names beside it where the panel lists them", async () => {
+    mountStep(["first_name", "last_name", ...PANEL_NAMES]);
+    await expect
+      .element(page.getByText("For each matched row:", { exact: false }))
+      .toBeInTheDocument();
     const panel = page
       .getByText("For each matched row:", { exact: false })
       .element();
-    return [...panel.querySelectorAll("bdi")]
-      .map((element) => ({
-        name: element.textContent,
-        box: element.getBoundingClientRect(),
-      }))
-      .sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)
-      .map((entry) => entry.name);
-  }
-
-  // The classes that reorder whatever follows them when nothing contains them: an
-  // override or an isolate the name never closes, and a POP closing one it never
-  // opened. Which of them the isolation actually bounds is a fact about the browser,
-  // so each is driven rather than asserted in prose.
-  const UNCLOSED_BIDI_CLASSES = [
-    { label: "an unterminated RLO", control: "\u202E" },
-    { label: "an unterminated LRO", control: "\u202D" },
-    { label: "an unterminated RLI", control: "\u2067" },
-    { label: "an unterminated LRI", control: "\u2066" },
-    { label: "an unterminated FSI", control: "\u2068" },
-    { label: "a stray PDF", control: "\u202C" },
-  ];
-
-  test.each(UNCLOSED_BIDI_CLASSES)(
-    "$label in a header leaves the names beside it where the panel lists them",
-    async ({ control }) => {
-      const hostile = `notes${control}evil`;
-      mountStep(["first_name", "last_name", "pre", hostile, "post"]);
-      await expect
-        .element(page.getByText("For each matched row:", { exact: false }))
-        .toBeInTheDocument();
-      expect(panelNamesInVisualOrder()).toEqual(["pre", hostile, "post"]);
-    },
-  );
+    expect(visualOrderWithin(panel, ["pre", "evil", "post"])).toEqual([
+      "pre",
+      "evil",
+      "post",
+    ]);
+  });
 
   test("the same measurement sees the reordering the isolation prevents", async () => {
-    // The control for the six checks above: they assert a layout property, and are
-    // worth nothing unless the instrument can see that property break. The same
-    // names in the same sentence, rendered without the isolation the step renders
-    // them with, come out in a visual order the DOM does not hold.
-    const names = ["notes\u202Eevil", "pre", "post"];
+    // The control for the check above: it asserts a layout property, and is worth
+    // nothing unless the instrument can see that property break. The same names in
+    // the same sentence and the same arrangement, rendered without the isolation the
+    // panel renders them with, come out in a visual order the DOM does not hold --
+    // the override carries "evil" past the name listed after it.
     app.render(
       createElement(
         "p",
         null,
         "For each matched row: ",
-        ...names.flatMap((name, index) => [
+        ...PANEL_NAMES.flatMap((name, index) => [
           index > 0 ? ", " : "",
           createElement("span", { key: name }, name),
         ]),
@@ -1347,16 +1350,12 @@ describe("acceptor columns step: one column name across the screen", () => {
     await expect
       .element(page.getByText("For each matched row:", { exact: false }))
       .toBeInTheDocument();
-    const spans = [...app.container.querySelectorAll("span")];
-    expect(spans.map((element) => element.textContent)).toEqual(names);
-    const visualOrder = spans
-      .map((element) => ({
-        name: element.textContent,
-        box: element.getBoundingClientRect(),
-      }))
-      .sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)
-      .map((entry) => entry.name);
-    expect(visualOrder).not.toEqual(names);
+    const paragraph = app.container.querySelector("p") as Element;
+    expect(visualOrderWithin(paragraph, ["pre", "evil", "post"])).toEqual([
+      "pre",
+      "post",
+      "evil",
+    ]);
   });
 });
 

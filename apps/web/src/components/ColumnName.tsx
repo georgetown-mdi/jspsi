@@ -19,27 +19,33 @@ import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
  * else: an accented or non-Latin header renders as itself rather than as escapes
  * on the operator's own authoring surface, and two headers sharing a long prefix
  * stay distinct as far as {@link MAX_NAME_LENGTH}, the ceiling past which no name
- * transmits anyway.
+ * completes an exchange anyway.
  *
  * The boundary, because it does not show in the rendering: a homoglyph (Cyrillic
  * U+0430 for Latin "a"), a zero-width character, or a tab or newline (HTML folds
  * either into the space beside it) makes two headers differing only by that read
- * alike here, and escaping is what would tell them apart. The names are the
- * operator's own file's, so the usual cost of that is the legibility of their own
- * header -- but this screen is where the disclosure is set, one mark per grid row,
- * so a crafted twin pair costs a row marked for the column the operator did not
- * mean: a mis-directed disclosure, not legibility alone. Nothing here decides what
- * is sent; it decides only how the name reads.
+ * alike here, and escaping is what would tell them apart. One such pair no treatment
+ * tells apart: two headers past {@link MAX_NAME_LENGTH} code points sharing their
+ * first {@link MAX_NAME_LENGTH} render as the same cut string in every sink on this
+ * screen. The names are the operator's own file's, so the usual cost of that is the
+ * legibility of their own header -- but this screen is where the disclosure is set,
+ * one mark per grid row, so a crafted twin pair costs a row marked for the column
+ * the operator did not mean: a mis-directed disclosure, not legibility alone.
+ * Nothing here decides what is sent; it decides only how the name reads.
  */
 
 /**
  * A column name cut to what paints: {@link MAX_NAME_LENGTH} code points, then
  * {@link DISPLAY_TRUNCATION_MARKER}. Nothing bounds a CSV header at intake and
  * isolation escapes nothing, so without this an arbitrarily long header paints
- * whole over the screen that holds the launch gate. Cut at the ceiling core's own
- * `ColumnMetadata.name` and `preparePayload` enforce, so it can never reach a name
- * an exchange would accept, and two accepted headers sharing a prefix stay
- * distinct. By code point, not UTF-16 unit, so the cut never splits a surrogate
+ * whole over the screen that holds the launch gate. Cut at the ceiling the wire
+ * enforces -- the partner's parse of the payload frame refuses a longer name, as
+ * does `ColumnMetadata.name` wherever metadata is parsed rather than inferred -- so
+ * the cut can never reach a name an exchange completes on, and two carryable headers
+ * sharing a prefix stay distinct. It does reach longer ones: this screen's metadata
+ * comes from `inferMetadata` over the file's own header, which no schema bounds, so
+ * an oversized header renders cut here and is refused only by the partner, after the
+ * frame is sent. By code point, not UTF-16 unit, so the cut never splits a surrogate
  * pair; an override the cut leaves open is closed by the isolate around it.
  */
 function boundedName(name: string): string {
