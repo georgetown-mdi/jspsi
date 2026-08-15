@@ -7,6 +7,8 @@ import {
 import { commitAcceptance } from "@psi/acceptConsent";
 import { isBareSftpHost } from "@psi/sftpHost";
 
+import { isolatedColumnName } from "@components/ColumnName";
+
 import { TRANSPORT_LEDGER_LABELS, dateTimeLabel } from "./inviterModel";
 import { saveRailNote } from "./saveExchangeModel";
 
@@ -19,7 +21,7 @@ import type { AcceptableInvitation } from "@psi/acceptInvitation";
  * progression the top bar walks, the disclosure ledger built from the decoded
  * invitation's terms and the acceptor's own live metadata disclosure, the single
  * Customize fact, and the consent-gate helper the consent step submits through. No
- * React and no I/O -- the tested boundary for "the spine derives
+ * rendering and no I/O -- the tested boundary for "the spine derives
  * done/current/pending", "the ledger names exactly what the acceptor sends", and
  * "the consent gate blocks until both the checkbox and a non-empty name are
  * supplied".
@@ -34,7 +36,8 @@ import type { AcceptableInvitation } from "@psi/acceptInvitation";
  * forward-reference wording (the exact set is confirmed after choosing a file),
  * matching {@link InvitationTerms}. Partner-controlled strings reach the ledger
  * through {@link summarizeInvitation}, the one sanitizing boundary; the acceptor's
- * own column names are sanitized per name here, as the columns-step summary does.
+ * own column names take the isolation the confirm-columns screen shows them with
+ * ({@link isolatedColumnName}) rather than that escape.
  */
 
 /** The acceptor's three spine steps, in order -- the steps the top bar walks. */
@@ -148,10 +151,13 @@ export const ACCEPTOR_SEND_FORWARD_REFERENCE =
 
 /** The acceptor's outbound send row, keyed to the ledger's tense. `disclosure` is
  * the acceptor's OWN live disclosed column names ({@link disclosedColumnNames} over
- * its metadata) once a file exists -- the exact set core transmits -- each
- * sanitized for display since they are operator-file strings. Undefined before a
- * file is chosen (no metadata yet), where the row carries the invitation's
- * forward-reference rather than a claim it cannot yet make. */
+ * its metadata) once a file exists -- the exact set core transmits -- each isolated
+ * rather than escaped by {@link isolatedColumnName}: this row names the same set the
+ * confirm-columns step's panel does, beside it on the one screen where the operator
+ * decides what leaves the machine, so a header that read two ways across the two
+ * would be a disagreement about exactly that. Undefined before a file is chosen (no
+ * metadata yet), where the row carries the invitation's forward-reference rather
+ * than a claim it cannot yet make. */
 function acceptorSendRow(
   label: string,
   disclosure: ReadonlyArray<string> | undefined,
@@ -164,7 +170,7 @@ function acceptorSendRow(
     return { label, muted: "No additional columns", shareBar: true };
   return {
     label,
-    value: disclosure.map((name) => sanitizeForDisplay(name)).join(", "),
+    value: disclosure.map((name) => isolatedColumnName(name)).join(", "),
     shareBar: true,
   };
 }
@@ -299,7 +305,7 @@ export function acceptorDoneLedgerTag(invitingParty: string): string {
  *
  * `metadata` is the LAUNCHED metadata -- the frozen pair that actually ran -- so the
  * "You sent" row names the exact disclosed set ({@link disclosedColumnNames}) core
- * transmitted, sanitized per name. A settled ledger always has a launched pair, so
+ * transmitted, isolated per name. A settled ledger always has a launched pair, so
  * unlike {@link acceptorLedgerRows} it is required here.
  */
 export function acceptorDoneLedgerRows(

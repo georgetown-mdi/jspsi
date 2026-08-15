@@ -19,6 +19,8 @@ import {
   invitingPartyName,
 } from "@bench/acceptorModel";
 
+import { isolatedColumnName } from "@components/ColumnName";
+
 import type {
   FileDropEndpoint,
   InvitationToken,
@@ -219,7 +221,7 @@ describe("acceptor ledger rows", () => {
     expect(rowValue(rows, "How it runs")).toBe("Browser");
   });
 
-  test("from the columns step on, the send row names the disclosed metadata columns, sanitized", () => {
+  test("from the columns step on, the send row names the disclosed metadata columns, isolated", () => {
     // The acceptor's live metadata discloses a payload column the invitation never
     // requested (the inviter authored no payload.receive). The send row must name it.
     const rows = acceptorLedgerRows(
@@ -228,12 +230,11 @@ describe("acceptor ledger rows", () => {
       DISCLOSING_METADATA,
     );
     const sent = rowValue(rows, "You will send");
-    expect(typeof sent).toBe("string");
-    expect(sent).toContain("enroll");
-    expect(sent).toContain("_date");
-    // Sanitized as an operator-file string: the injection bytes never render raw.
-    expect(sent).not.toContain(ESC);
-    expect(sent).not.toContain(RLO);
+    // The header verbatim inside the isolate, which is how the confirm-columns step
+    // beside this ledger shows the same disclosed set: escaping it here would put
+    // one header two ways on the one screen where the operator decides what leaves.
+    expect(sent).toBe(isolatedColumnName(EVIL_COLUMN));
+    expect(sent).toContain(RLO);
     expect(rowMuted(rows, "You will send")).toBeUndefined();
   });
 
@@ -311,12 +312,8 @@ describe("acceptor completion ledger", () => {
       "How it runs",
     ]);
     // The "You sent" row names the LAUNCHED metadata's disclosed set -- the frozen
-    // pair that actually ran -- sanitized, not the invitation's request.
-    const sent = rowValue(rows, "You sent");
-    expect(sent).toContain("enroll");
-    expect(sent).toContain("_date");
-    expect(sent).not.toContain(ESC);
-    expect(sent).not.toContain(RLO);
+    // pair that actually ran -- isolated, not the invitation's request.
+    expect(rowValue(rows, "You sent")).toBe(isolatedColumnName(EVIL_COLUMN));
     expect(rowValue(rows, "You received")).toBe(
       "1,847 matched rows + enrollment_date, program_code",
     );

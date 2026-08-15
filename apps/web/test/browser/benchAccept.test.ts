@@ -673,6 +673,29 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
       .toBeInTheDocument();
   }
 
+  /** The given substrings of one text node in visual reading order, measured with a
+   * Range: a run of names inside a single text node has no element to take a box.
+   * Throws on a substring that is absent or paints nothing, so an order it returns
+   * is one the browser actually laid out rather than a sort over empty boxes. */
+  function visualOrderWithin(
+    node: Text,
+    substrings: Array<string>,
+  ): Array<string> {
+    return substrings
+      .map((substring) => {
+        const start = node.data.indexOf(substring);
+        if (start < 0) throw new Error(`not in the row: ${substring}`);
+        const range = document.createRange();
+        range.setStart(node, start);
+        range.setEnd(node, start + substring.length);
+        const box = range.getBoundingClientRect();
+        if (box.width === 0) throw new Error(`paints nothing: ${substring}`);
+        return { substring, box };
+      })
+      .sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)
+      .map((entry) => entry.substring);
+  }
+
   test("a blocked file shows the exact block copy and disables Start the exchange", async () => {
     await reachColumns("notes\nhello\n");
     await expect
@@ -966,6 +989,44 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
       .toBeInTheDocument();
   });
 
+  test("the ledger's send row shows a header as the step's panel does, and contains it", async () => {
+    // The step's panel and this ledger row name the SAME disclosed set, side by
+    // side on the one screen where the operator decides what leaves the machine, so
+    // a header escaped in one and verbatim in the other reads two ways at once. The
+    // row carries the step's isolation as characters instead: a ledger value is a
+    // string sink, where no element can hold it.
+    const hostile = "notes\u202Eevil";
+    await reachColumns(
+      `first_name,last_name,pre,${hostile},post\nAlice,Smith,a,b,c\n`,
+    );
+    const ledger = document.querySelector(
+      'aside[aria-label="This exchange"]',
+    ) as Element;
+    const sendValue = Array.from(ledger.querySelectorAll("div"))
+      .find((row) => row.querySelector("dt")?.textContent === "You will send")
+      ?.querySelector("dd");
+    expect(sendValue?.textContent).toBe(
+      ["pre", hostile, "post"].map(isolatedColumnName).join(", "),
+    );
+    // And nowhere on the screen is the escaped form: the panel and this row name
+    // the same set, so an escape on either is the disagreement this pins.
+    expect(document.body.textContent).not.toContain(
+      sanitizeForDisplay(hostile),
+    );
+
+    // And the isolate characters do the work the <bdi> does in the panel: the tail
+    // of the override-bearing name stays ahead of the name listed after it, which
+    // is what an unterminated override moves. Measured through a Range, since the
+    // whole row is one text node with no element to take a box.
+    const value = sendValue?.firstChild;
+    expect(value).toBeInstanceOf(Text);
+    expect(visualOrderWithin(value as Text, ["pre", "evil", "post"])).toEqual([
+      "pre",
+      "evil",
+      "post",
+    ]);
+  });
+
   test("the step-3 ledger footer swaps to the local-only line", async () => {
     await reachColumns("first_name,last_name\nAlice,Smith\n");
     const ledger = document.querySelector('aside[aria-label="This exchange"]');
@@ -1222,6 +1283,80 @@ describe("acceptor columns step: one column name across the screen", () => {
     // Whole and unescaped, so a non-Latin header reads as itself on the
     // operator's own authoring surface rather than as a run of escapes.
     expect(app.container.textContent).not.toContain("\\u0444");
+  });
+
+  /** The disclosed-columns panel's names in visual reading order, measured off the
+   * rendered boxes: containment is a layout property, and the DOM order is the same
+   * whether or not the browser let a name's override out into the sentence. */
+  function panelNamesInVisualOrder(): Array<string> {
+    const panel = page
+      .getByText("For each matched row:", { exact: false })
+      .element();
+    return [...panel.querySelectorAll("bdi")]
+      .map((element) => ({
+        name: element.textContent,
+        box: element.getBoundingClientRect(),
+      }))
+      .sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)
+      .map((entry) => entry.name);
+  }
+
+  // The classes that reorder whatever follows them when nothing contains them: an
+  // override or an isolate the name never closes, and a POP closing one it never
+  // opened. Which of them the isolation actually bounds is a fact about the browser,
+  // so each is driven rather than asserted in prose.
+  const UNCLOSED_BIDI_CLASSES = [
+    { label: "an unterminated RLO", control: "\u202E" },
+    { label: "an unterminated LRO", control: "\u202D" },
+    { label: "an unterminated RLI", control: "\u2067" },
+    { label: "an unterminated LRI", control: "\u2066" },
+    { label: "an unterminated FSI", control: "\u2068" },
+    { label: "a stray PDF", control: "\u202C" },
+  ];
+
+  test.each(UNCLOSED_BIDI_CLASSES)(
+    "$label in a header leaves the names beside it where the panel lists them",
+    async ({ control }) => {
+      const hostile = `notes${control}evil`;
+      mountStep(["first_name", "last_name", "pre", hostile, "post"]);
+      await expect
+        .element(page.getByText("For each matched row:", { exact: false }))
+        .toBeInTheDocument();
+      expect(panelNamesInVisualOrder()).toEqual(["pre", hostile, "post"]);
+    },
+  );
+
+  test("the same measurement sees the reordering the isolation prevents", async () => {
+    // The control for the six checks above: they assert a layout property, and are
+    // worth nothing unless the instrument can see that property break. The same
+    // names in the same sentence, rendered without the isolation the step renders
+    // them with, come out in a visual order the DOM does not hold.
+    const names = ["notes\u202Eevil", "pre", "post"];
+    app.render(
+      createElement(
+        "p",
+        null,
+        "For each matched row: ",
+        ...names.flatMap((name, index) => [
+          index > 0 ? ", " : "",
+          createElement("span", { key: name }, name),
+        ]),
+        ".",
+      ),
+    );
+    await expect
+      .element(page.getByText("For each matched row:", { exact: false }))
+      .toBeInTheDocument();
+    const spans = [...app.container.querySelectorAll("span")];
+    expect(spans.map((element) => element.textContent)).toEqual(names);
+    const visualOrder = spans
+      .map((element) => ({
+        name: element.textContent,
+        box: element.getBoundingClientRect(),
+      }))
+      .sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)
+      .map((entry) => entry.name);
+    expect(visualOrder).not.toEqual(names);
   });
 });
 

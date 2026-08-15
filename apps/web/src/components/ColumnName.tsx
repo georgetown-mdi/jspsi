@@ -1,10 +1,13 @@
+import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
+
 /**
  * How the acceptor's confirm-columns screen shows one of the operator's column
  * names: verbatim, inside a bidi isolate. Every column-name sink on that screen
  * goes through this module -- the grid's row header and its two control labels,
  * the quick-fix mapper's options, the disclosed-columns panel, the alert naming
- * the columns the invitation will not accept, and the grid's live regions -- so
- * one name reads the same wherever the screen puts it.
+ * the columns the invitation will not accept, the grid's live regions, and the
+ * ledger's "You will send" row -- so one name reads the same wherever the screen
+ * puts it.
  *
  * These names are the operator's OWN CSV header, read from the file they chose,
  * not the partner-controlled text `sanitizeForDisplay` exists for, so they do not
@@ -12,19 +15,40 @@
  * right-to-left override, or an embedding it never closes, otherwise reorders the
  * sentence, label, or table row it is interpolated into -- and this is the screen
  * where the operator decides what leaves their machine, so the copy around a name
- * has to mean what it says. Isolation buys exactly that and spends nothing else:
- * an accented or non-Latin header renders as itself rather than as escapes on the
- * operator's own authoring surface, and two long headers sharing a prefix stay
- * distinct because nothing is truncated.
+ * has to mean what it says. Isolation buys exactly that and spends almost nothing
+ * else: an accented or non-Latin header renders as itself rather than as escapes
+ * on the operator's own authoring surface, and two headers sharing a long prefix
+ * stay distinct as far as {@link MAX_NAME_LENGTH}, the ceiling past which no name
+ * transmits anyway.
  *
- * The boundary, because it does not show in the rendering: a homoglyph
- * (Cyrillic U+0430 for Latin "a") or a zero-width character inside a name is
- * shown as it is, so two headers differing only by one read alike here. Escaping
- * would tell those apart, at the price of the two costs above -- and the names are
- * the operator's own file's, so what the boundary costs is legibility of their own
- * header, never a disclosure. Nothing here decides what is sent; it decides only
- * how the name reads.
+ * The boundary, because it does not show in the rendering: a homoglyph (Cyrillic
+ * U+0430 for Latin "a"), a zero-width character, or a tab or newline (HTML folds
+ * either into the space beside it) makes two headers differing only by that read
+ * alike here, and escaping is what would tell them apart. The names are the
+ * operator's own file's, so the usual cost of that is the legibility of their own
+ * header -- but this screen is where the disclosure is set, one mark per grid row,
+ * so a crafted twin pair costs a row marked for the column the operator did not
+ * mean: a mis-directed disclosure, not legibility alone. Nothing here decides what
+ * is sent; it decides only how the name reads.
  */
+
+/**
+ * A column name cut to what paints: {@link MAX_NAME_LENGTH} code points, then
+ * {@link DISPLAY_TRUNCATION_MARKER}. Nothing bounds a CSV header at intake and
+ * isolation escapes nothing, so without this an arbitrarily long header paints
+ * whole over the screen that holds the launch gate. Cut at the ceiling core's own
+ * `ColumnMetadata.name` and `preparePayload` enforce, so it can never reach a name
+ * an exchange would accept, and two accepted headers sharing a prefix stay
+ * distinct. By code point, not UTF-16 unit, so the cut never splits a surrogate
+ * pair; an override the cut leaves open is closed by the isolate around it.
+ */
+function boundedName(name: string): string {
+  const codePoints = [...name];
+  if (codePoints.length <= MAX_NAME_LENGTH) return name;
+  return (
+    codePoints.slice(0, MAX_NAME_LENGTH).join("") + DISPLAY_TRUNCATION_MARKER
+  );
+}
 
 /**
  * FIRST STRONG ISOLATE and POP DIRECTIONAL ISOLATE (Unicode UAX #9). Text between
@@ -48,15 +72,15 @@ const POP_DIRECTIONAL_ISOLATE = "\u2069";
  * wrap is a property a reader can check by looking at the call site.
  */
 export function isolatedColumnName(name: string): string {
-  return FIRST_STRONG_ISOLATE + name + POP_DIRECTIONAL_ISOLATE;
+  return FIRST_STRONG_ISOLATE + boundedName(name) + POP_DIRECTIONAL_ISOLATE;
 }
 
 /**
- * One column name as rendered text: the name verbatim inside a `<bdi>`, whose
+ * One column name as rendered text: the name inside a `<bdi>`, whose
  * `unicode-bidi: isolate` is the markup form of {@link isolatedColumnName}. The
  * element carries the isolation, so the name the operator selects and copies out
  * of the page is their own header and nothing more.
  */
 export function ColumnName({ name }: { name: string }) {
-  return <bdi>{name}</bdi>;
+  return <bdi>{boundedName(name)}</bdi>;
 }
