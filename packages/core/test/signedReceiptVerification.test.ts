@@ -221,6 +221,47 @@ describe("verifyDualSignedRecord", () => {
     expect(report.responder.certificateAnchor).toBe("unanchored");
   });
 
+  test("a pin equal to the verifier's own identity cannot anchor both slots of a repeated certificate", async () => {
+    // The same record against a verifier that pinned its OWN fingerprint: the
+    // pin and the identity carry one digest, so they are one anchoring value
+    // and claim one slot between them, not a slot each.
+    const record = await signedRecord(content(), {
+      initiator: identityA,
+      responder: identityA,
+    });
+    const report = await verifyDualSignedRecord(record, {
+      pinnedFingerprints: [fingerprintA],
+      localIdentity: { fingerprint: fingerprintA, source: "resolved" },
+      expectedIdentities: ["Party A", "Party A"],
+      expectedTermsHash: TERMS_HASH,
+    });
+    expect(report.outcome).toBe("incomplete");
+    expect(report.initiator.certificateAnchor).toBe("partner-pin");
+    expect(report.responder.certificateAnchor).toBe("unanchored");
+    // Both values did reach a certificate, so neither is reported as matching
+    // nothing: the run is short an anchor, not contradicted.
+    expect(report.pinnedFingerprints).toBe("matched");
+    expect(report.localIdentity).toBe("matched");
+  });
+
+  test("a named self-pin equal to the local identity still leaves the repeated slot unanchored", async () => {
+    // The `named` source asserts the record is one the verifier signed, which is
+    // true here, so nothing fails; what the dedup withholds is the second
+    // anchor.
+    const record = await signedRecord(content(), {
+      initiator: identityA,
+      responder: identityA,
+    });
+    const report = await verifyDualSignedRecord(record, {
+      pinnedFingerprints: [fingerprintA],
+      localIdentity: { fingerprint: fingerprintA, source: "named" },
+      expectedIdentities: ["Party A", "Party A"],
+      expectedTermsHash: TERMS_HASH,
+    });
+    expect(report.outcome).toBe("incomplete");
+    expect(report.responder.certificateAnchor).toBe("unanchored");
+  });
+
   test("one fingerprint spelled two ways is still one pinned value", async () => {
     // The pinned values are compared as digests rather than strings, so an
     // unpadded fingerprint and its padded spelling are the same value; counting

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,7 +35,8 @@ import {
   formatSignedRecordReport,
   formatVerificationReport,
   handler,
-  pinnedFingerprintFromConfig,
+  pinnedFingerprintFrom,
+  readConfigSigningBlock,
   readExchangeRecordFile,
   readSignedRecordFile,
   readVerifiableArtifact,
@@ -56,15 +58,31 @@ const missingIdentityDir = join(
   tmpdir(),
   `verify-receipt-no-identity-${process.pid}`,
 );
+const defaultIdentityFile = join(missingIdentityDir, "signing-identity.json");
 vi.mock("../../src/signingIdentityFile", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../src/signingIdentityFile")>();
-  return {
-    ...actual,
-    defaultSigningIdentityPath: () =>
-      join(missingIdentityDir, "signing-identity.json"),
-  };
+  return { ...actual, defaultSigningIdentityPath: () => defaultIdentityFile };
 });
+
+/** Put `contents` at the per-user default identity path for the duration of
+ * `run`, which is otherwise kept empty for the tests that assert a slot
+ * unanchored. `mode` is applied after the write so the process umask cannot
+ * narrow a deliberately over-permissive fixture. */
+async function withDefaultIdentity<T>(
+  contents: string,
+  run: () => Promise<T>,
+  mode = 0o600,
+): Promise<T> {
+  fs.mkdirSync(missingIdentityDir, { recursive: true });
+  writeFileSync(defaultIdentityFile, contents, { mode });
+  fs.chmodSync(defaultIdentityFile, mode);
+  try {
+    return await run();
+  } finally {
+    fs.rmSync(defaultIdentityFile, { force: true });
+  }
+}
 
 // The handler installs a diagnostic sink and applies --log-level across every
 // logger; both are restored between tests.
@@ -626,12 +644,14 @@ describe("reading a dual-signed record", () => {
   });
 });
 
-describe("pinnedFingerprintFromConfig", () => {
+describe("the config's signing block", () => {
   const writeConfig = (dir: string, body: string): string => {
     const path = join(dir, "psilink.yaml");
     writeFileSync(path, body);
     return path;
   };
+  const pinIn = (configFile: string | undefined, explicit: boolean) =>
+    pinnedFingerprintFrom(readConfigSigningBlock(configFile, explicit));
 
   test("reads signing.partner_fingerprint", async () => {
     const identity = await generateSigningIdentity("Party B");
@@ -642,31 +662,25 @@ describe("pinnedFingerprintFromConfig", () => {
       tmp(),
       `signing:\n  mode: certificate\n  partner_fingerprint: ${fingerprint}\n`,
     );
-    expect(pinnedFingerprintFromConfig(path, true)).toBe(fingerprint);
+    expect(pinIn(path, true)).toBe(fingerprint);
   });
 
   test("no signing block and no config named each yield no pin", () => {
     const dir = tmp();
-    expect(
-      pinnedFingerprintFromConfig(writeConfig(dir, "linkage_terms:\n"), true),
-    ).toBeUndefined();
-    expect(pinnedFingerprintFromConfig(undefined, false)).toBeUndefined();
+    expect(pinIn(writeConfig(dir, "linkage_terms:\n"), true)).toBeUndefined();
+    expect(pinIn(undefined, false)).toBeUndefined();
   });
 
   test("a config path named on the command line must exist", () => {
     // Mapping the missing file to "no pin" would verify a typo'd path unpinned
     // and report the fingerprint trust as merely not established.
     const path = join(tmp(), "absent.yaml");
-    expect(() => pinnedFingerprintFromConfig(path, true)).toThrow(UsageError);
-    expect(() => pinnedFingerprintFromConfig(path, true)).toThrow(
-      /absent\.yaml does not exist/,
-    );
+    expect(() => pinIn(path, true)).toThrow(UsageError);
+    expect(() => pinIn(path, true)).toThrow(/absent\.yaml does not exist/);
   });
 
   test("a defaulted config path that does not exist yields no pin", () => {
-    expect(
-      pinnedFingerprintFromConfig(join(tmp(), "absent.yaml"), false),
-    ).toBeUndefined();
+    expect(pinIn(join(tmp(), "absent.yaml"), false)).toBeUndefined();
   });
 
   test("a malformed pin is a usage error, not a silent mismatch later", () => {
@@ -676,10 +690,8 @@ describe("pinnedFingerprintFromConfig", () => {
       tmp(),
       "signing:\n  mode: certificate\n  partner_fingerprint: too-short\n",
     );
-    expect(() => pinnedFingerprintFromConfig(path, true)).toThrow(UsageError);
-    expect(() => pinnedFingerprintFromConfig(path, true)).toThrow(
-      /not a certificate fingerprint/,
-    );
+    expect(() => pinIn(path, true)).toThrow(UsageError);
+    expect(() => pinIn(path, true)).toThrow(/not a certificate fingerprint/);
   });
 });
 
@@ -1166,5 +1178,141 @@ describe("handler", () => {
     });
     expect(exits).toEqual([64]);
     expect(stderr).toContain("no dual-signed record was named");
+  });
+
+  test("an identity file whose private key no longer matches still anchors the slot", async () => {
+    // This command signs nothing, so the anchor comes from the certificate half
+    // alone and the private key beside it is never imported: a file the signing
+    // path refuses as inconsistent still says whose certificate holds the slot.
+    const { signedPath, identityPath, pin } = await exchangeArtifacts();
+    const stored = JSON.parse(readFileSync(identityPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const other = await generateSigningIdentity("Party A");
+    writeFileSync(
+      identityPath,
+      JSON.stringify({ ...stored, privateKey: other.privateKey }),
+    );
+    const { stdout, exits, exitCode } = await runVerify({
+      record: signedPath,
+      "partner-fingerprint": pin,
+      "identity-file": identityPath,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("is your own signing identity's certificate");
+    expect(exitCode).toBe(0);
+  });
+
+  test("an identity file readable by other users is still reported", async () => {
+    if (process.platform === "win32") return;
+    // Taking only the certificate half does not make the file safe to leave
+    // world-readable: the private key is still in it, and the warning names it.
+    const { signedPath, identityPath, pin } = await exchangeArtifacts();
+    fs.chmodSync(identityPath, 0o644);
+    const { stderr, exits } = await runVerify({
+      record: signedPath,
+      "log-level": "warn",
+      "partner-fingerprint": pin,
+      "identity-file": identityPath,
+    });
+    expect(exits).toEqual([]);
+    expect(stderr).toContain("restrict to 0600");
+    expect(stderr).toContain("signing private key");
+  });
+
+  test("pinning both signers reaches a verdict without reading the default identity file", async () => {
+    // A verifier that pins both signers anchors both slots and can use no
+    // identity of its own, so whatever sits at the per-user default path goes
+    // unread -- a file that cannot be parsed would otherwise warn on a run that
+    // never needed it.
+    const { signedPath, pin, ownFingerprint } = await exchangeArtifacts();
+    const readFile = vi.spyOn(fs, "readFileSync");
+    try {
+      const { stdout, stderr, exits, exitCode } = await withDefaultIdentity(
+        "{ not an identity",
+        () =>
+          runVerify({
+            record: signedPath,
+            "log-level": "warn",
+            "partner-fingerprint": [pin, ownFingerprint],
+          }),
+      );
+      expect(exits).toEqual([]);
+      expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
+      expect(stdout).not.toContain("Nothing outside the record anchors");
+      expect(stderr).toBe("");
+      expect(
+        readFile.mock.calls.some(([target]) => target === defaultIdentityFile),
+      ).toBe(false);
+      expect(exitCode).toBe(0);
+    } finally {
+      readFile.mockRestore();
+    }
+  });
+
+  test("the default identity file still anchors a slot the pins leave open", async () => {
+    // The other side of reading it late: a party that pinned only its partner
+    // is anchored by the identity it never had to name.
+    const { signedPath, identityPath, pin } = await exchangeArtifacts();
+    const { stdout, exits, exitCode } = await withDefaultIdentity(
+      readFileSync(identityPath, "utf8"),
+      () => runVerify({ record: signedPath, "partner-fingerprint": pin }),
+    );
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("is your own signing identity's certificate");
+    expect(stdout).not.toContain("Nothing outside the record anchors");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a world-readable default identity file is reported on the late read", async () => {
+    if (process.platform === "win32") return;
+    // The read the fallback defers is still a read of a file holding a private
+    // key, so the permission nudge has to survive being deferred with it -- the
+    // operator never named this file, and this run is where they hear about it.
+    const { signedPath, identityPath, pin } = await exchangeArtifacts();
+    const { stdout, stderr, exits, exitCode } = await withDefaultIdentity(
+      readFileSync(identityPath, "utf8"),
+      () =>
+        runVerify({
+          record: signedPath,
+          "log-level": "warn",
+          "partner-fingerprint": pin,
+        }),
+      0o644,
+    );
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("is your own signing identity's certificate");
+    expect(stderr).toContain(defaultIdentityFile);
+    expect(stderr).toContain("restrict to 0600");
+    expect(stderr).toContain("signing private key");
+    expect(exitCode).toBe(0);
+  });
+
+  test("the config's signing block is read once per invocation", async () => {
+    // The pin and the identity path are two fields of one block of a
+    // secret-bearing document, so the run parses it once for both; the other
+    // read of the same config is the linkage-terms half.
+    const { recordPath, signedPath, identityPath, pin } =
+      await exchangeArtifacts();
+    const configPath = writeYaml(
+      `signing:\n  mode: certificate\n  partner_fingerprint: ${pin}\n` +
+        `  identity_file: ${identityPath}\n`,
+    );
+    const readFile = vi.spyOn(fs, "readFileSync");
+    try {
+      const { stdout, exits } = await runVerify({
+        record: recordPath,
+        "signed-record": signedPath,
+        "config-file": configPath,
+      });
+      expect(exits).toEqual([]);
+      expect(stdout).toContain("SIGNED RECEIPT VERIFIED");
+      expect(
+        readFile.mock.calls.filter(([target]) => target === configPath),
+      ).toHaveLength(2);
+    } finally {
+      readFile.mockRestore();
+    }
   });
 });

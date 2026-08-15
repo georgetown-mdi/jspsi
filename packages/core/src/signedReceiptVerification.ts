@@ -82,14 +82,10 @@ export type ReceiptSignatureStatus = "verified" | "failed";
  *   content, and the expected identities), all of which whoever assembled the
  *   record can satisfy with a certificate it minted.
  *
- * Each pinned value reaches at most one certificate, so a single pinned value
- * -- or two equal ones, whatever their spelling -- can never anchor both slots.
- * The dedup runs across pinned values only: a pinned value and the verifier's
- * own identity carrying the same digest can anchor a slot each on a record
- * whose two slots repeat one certificate. That record verifies only under the
- * verifier's own signing key at both slots, so it is not assemblable by an
- * adversary; the residual is a misdescribed verdict in a self-pinned
- * configuration, recorded here rather than closed.
+ * Each anchoring value reaches at most one certificate, so a single value -- or
+ * several carrying the same digest, whatever their spelling and whether they
+ * arrived as pins or as the verifier's own identity -- can never anchor both
+ * slots.
  */
 export type CertificateAnchorStatus =
   "partner-pin" | "local-identity" | "unanchored";
@@ -303,12 +299,13 @@ interface AnchorAssignment {
 
 /**
  * Assign the anchoring values the verifier holds to the record's two certificate
- * slots, as an assignment rather than a per-value test: equal pinned values count
- * once and each value claims at most one slot, so one pinned value -- or two equal
- * ones -- anchors a single slot and leaves the other to be anchored by something
- * else or not at all. Whether a value matched at all is reported separately from
- * what it anchored, so a value that matched a slot another value already claimed
- * is not reported as matching nothing.
+ * slots, as an assignment rather than a per-value test: equal values count once
+ * and each value claims at most one slot, so one anchoring value -- or several
+ * equal ones, pinned or derived from the verifier's own identity -- anchors a
+ * single slot and leaves the other to be anchored by something else or not at
+ * all. Whether a value matched at all is reported separately from what it
+ * anchored, so a value that matched a slot another value already claimed is not
+ * reported as matching nothing.
  */
 async function assignAnchors(
   record: DualSignedRecord,
@@ -341,21 +338,28 @@ async function assignAnchors(
   // cannot otherwise reach, while the local identity's slot is the one the
   // verifier could name either way.
   //
-  // Two pinned values that reach the same slot are the same fingerprint whatever
-  // their spelling -- each matched the digest of the certificate in that slot --
-  // so their match patterns deduplicate the values without depending on how they
-  // were written. Without that, one fingerprint supplied twice would claim both
-  // slots of a record whose two slots carry a single certificate, and a record
-  // only that certificate's key holder can assemble -- both receipt signatures
-  // must verify under it -- would read as two independent anchors.
+  // Two anchoring values that reach the same slots are the same fingerprint
+  // whatever their spelling and wherever they came from -- each matched the
+  // digest of the certificate in that slot -- so their match patterns
+  // deduplicate the values without depending on how they were written. Without
+  // that, one fingerprint supplied twice, or a pin equal to the verifier's own
+  // identity, would claim both slots of a record whose two slots carry a single
+  // certificate, and a record only that certificate's key holder can assemble --
+  // both receipt signatures must verify under it -- would read as two
+  // independent anchors. Values that reach NO slot share a pattern without being
+  // one value; nothing turns on that, since none of them claims a slot anyway.
   const claimedPatterns = new Set<string>();
-  for (const matches of pinMatches) {
+  const claimOnce = (
+    matches: SlotMatches,
+    anchor: CertificateAnchorStatus,
+  ): void => {
     const pattern = matches.join(",");
-    if (claimedPatterns.has(pattern)) continue;
+    if (claimedPatterns.has(pattern)) return;
     claimedPatterns.add(pattern);
-    claim(matches, "partner-pin");
-  }
-  if (localMatches !== undefined) claim(localMatches, "local-identity");
+    claim(matches, anchor);
+  };
+  for (const matches of pinMatches) claimOnce(matches, "partner-pin");
+  if (localMatches !== undefined) claimOnce(localMatches, "local-identity");
 
   const reached = (matches: SlotMatches): boolean => matches[0] || matches[1];
   return {

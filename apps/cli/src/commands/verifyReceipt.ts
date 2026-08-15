@@ -37,7 +37,6 @@ import type {
   ReceiptSignatureStatus,
   RecordVerificationReport,
   SignedReceiptPartyReport,
-  SigningIdentity,
   TermsHashStatus,
   VerificationKeys,
 } from "@psilink/core";
@@ -48,7 +47,7 @@ import { keysPathFor } from "../recordFile";
 import { parseSensitiveJson, parseSensitiveYaml } from "../sensitiveFile";
 import {
   defaultSigningIdentityPath,
-  loadSigningIdentity,
+  loadSigningCertificate,
 } from "../signingIdentityFile";
 import {
   configureLogging,
@@ -765,6 +764,18 @@ function partnerTermsFrom(
 }
 
 /**
+ * The `signing` block of an exchange config, read once per invocation and shared
+ * by the two fields this command takes from it: the config is a secret-bearing
+ * document, so it is read and parsed once rather than once per field. It carries
+ * the config path as the operator wrote it, for the messages that name it.
+ * @internal exported for testing
+ */
+export interface ConfigSigningBlock {
+  configFile: string;
+  fields: Record<string, unknown>;
+}
+
+/**
  * Read the `signing` block out of an exchange config, so a party re-verifying its
  * own exchange gets the pin and the identity it already configured without
  * restating either on the command line. Only the two fields this command uses are
@@ -776,11 +787,12 @@ function partnerTermsFrom(
  * empty block (the distinction `psilink fingerprint` draws for its own config
  * hints): a typo'd `--config-file` would otherwise verify unanchored and report
  * trust as merely not established.
+ * @internal exported for testing
  */
-function signingBlockFromConfig(
+export function readConfigSigningBlock(
   configFile: string | undefined,
   explicit: boolean,
-): Record<string, unknown> | undefined {
+): ConfigSigningBlock | undefined {
   if (configFile === undefined) return undefined;
   const target = expandTilde(configFile);
   let text: string;
@@ -801,47 +813,50 @@ function signingBlockFromConfig(
   // routes through the sensitive-file chokepoint, which reports path-only.
   const raw = parseSensitiveYaml(text, `config file ${configFile}`);
   const root = (raw ?? {}) as Record<string, unknown>;
-  return (root["signing"] ?? {}) as Record<string, unknown>;
+  return {
+    configFile,
+    fields: (root["signing"] ?? {}) as Record<string, unknown>,
+  };
 }
 
 /**
- * Read `signing.partner_fingerprint` out of an exchange config. A malformed value
- * is a usage error naming the config: a pin that cannot be a fingerprint would
- * otherwise be indistinguishable from a partner whose certificate does not match.
+ * `signing.partner_fingerprint` from the config's signing block. A malformed
+ * value is a usage error naming the config: a pin that cannot be a fingerprint
+ * would otherwise be indistinguishable from a partner whose certificate does not
+ * match.
  * @internal exported for testing
  */
-export function pinnedFingerprintFromConfig(
-  configFile: string | undefined,
-  explicit: boolean,
+export function pinnedFingerprintFrom(
+  signing: ConfigSigningBlock | undefined,
 ): string | undefined {
-  const signing = signingBlockFromConfig(configFile, explicit);
   if (signing === undefined) return undefined;
   const pinned =
-    signing["partner_fingerprint"] ?? signing["partnerFingerprint"];
+    signing.fields["partner_fingerprint"] ??
+    signing.fields["partnerFingerprint"];
   if (pinned === undefined) return undefined;
   if (typeof pinned !== "string" || !FINGERPRINT_REGEX.test(pinned))
     throw new UsageError(
-      `config file ${configFile} has a signing.partner_fingerprint that is ` +
-        "not a certificate fingerprint (an unpadded base64url SHA-256 digest, " +
-        "43 characters); obtain it from your partner via 'psilink fingerprint'",
+      `config file ${signing.configFile} has a signing.partner_fingerprint ` +
+        "that is not a certificate fingerprint (an unpadded base64url SHA-256 " +
+        "digest, 43 characters); obtain it from your partner via " +
+        "'psilink fingerprint'",
     );
   return pinned;
 }
 
 /**
- * Read `signing.identity_file` out of an exchange config, so the party that ran
+ * `signing.identity_file` from the config's signing block, so the party that ran
  * the exchange anchors its own slot from the same config the exchange used. A
  * non-string value is left to the default path rather than refused: unlike the
  * pin, nothing about this run turns on it, and the identity that is found is
  * reported by what it anchors.
  */
-function signingIdentityPathFromConfig(
-  configFile: string | undefined,
-  explicit: boolean,
+function signingIdentityPathFrom(
+  signing: ConfigSigningBlock | undefined,
 ): string | undefined {
-  const signing = signingBlockFromConfig(configFile, explicit);
   if (signing === undefined) return undefined;
-  const identityFile = signing["identity_file"] ?? signing["identityFile"];
+  const identityFile =
+    signing.fields["identity_file"] ?? signing.fields["identityFile"];
   return typeof identityFile === "string" ? identityFile : undefined;
 }
 
@@ -890,15 +905,10 @@ async function signedRecordExpectations(
  */
 function resolvePinnedFingerprints(
   flagValues: string[],
-  configFile: string | undefined,
+  signing: ConfigSigningBlock | undefined,
 ): string[] {
   if (flagValues.length === 0) {
-    // This command never auto-loads a config, so a path that reaches here was
-    // named on the command line.
-    const configured = pinnedFingerprintFromConfig(
-      configFile,
-      configFile !== undefined,
-    );
+    const configured = pinnedFingerprintFrom(signing);
     return configured === undefined ? [] : [configured];
   }
   if (flagValues.length > 2)
@@ -918,45 +928,59 @@ function resolvePinnedFingerprints(
 }
 
 /**
- * This party's own certificate fingerprint, which anchors the slot holding its
- * certificate. It is computed from the signing identity rather than restated by
- * the operator, who could otherwise only copy the value off the very record being
- * checked. `--identity-file` names the file; failing that, `signing.identity_file`
- * from `--config-file` and then the default per-user path are tried in turn.
- *
- * A named file that is absent or unreadable is a usage error -- the operator
- * pointed this run at it. A file found without being asked is not: it belongs to
- * another exchange or another partner as easily as to this one, so it degrades to
- * a logged warning and leaves the slot unanchored.
+ * The certificate fingerprint of the signing identity stored at `identityPath`,
+ * as an anchor for the slot holding that certificate. Only the CERTIFICATE half
+ * of the file is used: the anchor says whose certificate occupies a slot, which
+ * the public half states on its own, and what refuses a slot its holder did not
+ * sign is the receipt signature there. This command is read-only and signs
+ * nothing, so the private key stored beside the certificate is neither imported
+ * nor compared against it.
  */
-async function resolveLocalIdentity(
-  identityFileArg: string | undefined,
-  configFile: string | undefined,
+async function identityAnchorAt(
+  identityPath: string,
+  source: LocalIdentitySource,
+): Promise<LocalIdentityAnchor | undefined> {
+  const certificate = await loadSigningCertificate(identityPath);
+  if (certificate === undefined) return undefined;
+  return {
+    fingerprint: await computeCertificateFingerprint(certificate),
+    source,
+  };
+}
+
+/**
+ * This party's own anchor from the identity file `--identity-file` names. The
+ * operator pointed this run at that file, so an absent or unreadable one is a
+ * usage error, and the anchor it yields asserts the record is one this party
+ * signed.
+ */
+async function namedLocalIdentity(
+  identityFileArg: string,
+): Promise<LocalIdentityAnchor> {
+  const named = await identityAnchorAt(expandTilde(identityFileArg), "named");
+  if (named === undefined)
+    throw new UsageError(
+      `signing identity file ${identityFileArg} does not exist`,
+    );
+  return named;
+}
+
+/**
+ * This party's own anchor from an identity file it did not name on the command
+ * line: the config's `signing.identity_file`, or the default per-user path. Such
+ * a file belongs to another exchange or another partner as easily as to this
+ * one, so an unreadable or (when the config named it) absent file degrades to a
+ * logged warning and leaves the slot unanchored.
+ */
+async function foundLocalIdentity(
+  identityPath: string,
+  from: "config" | "per-user default",
   log: { warn: (message: string) => void },
 ): Promise<LocalIdentityAnchor | undefined> {
-  const fingerprintOf = async (
-    identity: SigningIdentity,
-    source: LocalIdentitySource,
-  ): Promise<LocalIdentityAnchor> => ({
-    fingerprint: await computeCertificateFingerprint(identity.certificate),
-    source,
-  });
-  if (identityFileArg !== undefined) {
-    const named = await loadSigningIdentity(expandTilde(identityFileArg));
-    if (named === undefined)
-      throw new UsageError(
-        `signing identity file ${identityFileArg} does not exist`,
-      );
-    return await fingerprintOf(named, "named");
-  }
-  const configured = signingIdentityPathFromConfig(
-    configFile,
-    configFile !== undefined,
-  );
-  const target = expandTilde(configured ?? defaultSigningIdentityPath());
-  let resolved: SigningIdentity | undefined;
+  const target = expandTilde(identityPath);
+  let resolved: LocalIdentityAnchor | undefined;
   try {
-    resolved = await loadSigningIdentity(target);
+    resolved = await identityAnchorAt(target, "resolved");
   } catch (err) {
     log.warn(
       `the signing identity at ${target} could not be read, so it anchors ` +
@@ -964,16 +988,89 @@ async function resolveLocalIdentity(
     );
     return undefined;
   }
-  if (resolved === undefined) {
-    if (configured !== undefined)
-      log.warn(
-        `the signing identity at ${target}, named by the configuration's ` +
-          `signing.identity_file, does not exist, so it anchors no ` +
-          `certificate in this record`,
-      );
-    return undefined;
-  }
-  return await fingerprintOf(resolved, "resolved");
+  if (resolved === undefined && from === "config")
+    log.warn(
+      `the signing identity at ${target}, named by the configuration's ` +
+        `signing.identity_file, does not exist, so it anchors no ` +
+        `certificate in this record`,
+    );
+  return resolved;
+}
+
+/**
+ * The identity file the operator chose for this run, if any. Choosing none is
+ * what leaves the per-user default to be consulted, and is distinct from
+ * choosing one that turned out to be unreadable or absent: neither yields an
+ * anchor, and only the first looks anywhere else.
+ */
+interface ChosenLocalIdentity {
+  /** The identity file the flag or the config named, when either did. */
+  file?: string;
+  /** Its anchor; absent when that file could not be read. */
+  anchor?: LocalIdentityAnchor;
+}
+
+/**
+ * This party's own anchor from the identity file the operator chose:
+ * `--identity-file` first, then the config's `signing.identity_file`.
+ */
+async function chosenLocalIdentity(
+  identityFileArg: string | undefined,
+  signing: ConfigSigningBlock | undefined,
+  log: { warn: (message: string) => void },
+): Promise<ChosenLocalIdentity> {
+  if (identityFileArg !== undefined)
+    return {
+      file: identityFileArg,
+      anchor: await namedLocalIdentity(identityFileArg),
+    };
+  const configured = signingIdentityPathFrom(signing);
+  if (configured === undefined) return {};
+  return {
+    file: configured,
+    anchor: await foundLocalIdentity(configured, "config", log),
+  };
+}
+
+/**
+ * Verify the dual-signed record, reading no more of this party's own identity
+ * than the run's anchors need. An identity the operator chose is read up front,
+ * since choosing one is a statement about this record either way. The per-user
+ * default is consulted only while a slot is still unanchored, so a run whose
+ * pins anchor both slots reaches its verdict without that file being read at
+ * all.
+ */
+async function verifySignedRecord(
+  record: DualSignedRecord,
+  inputs: Omit<DualSignedRecordVerificationInputs, "localIdentity">,
+  chosen: ChosenLocalIdentity,
+  log: { warn: (message: string) => void },
+): Promise<{
+  report: DualSignedRecordVerificationReport;
+  localIdentity: LocalIdentityAnchor | undefined;
+}> {
+  const report = await verifyDualSignedRecord(record, {
+    ...inputs,
+    localIdentity: chosen.anchor,
+  });
+  const anchoredEverySlot = parties(report).every(
+    (party) => party.certificateAnchor !== "unanchored",
+  );
+  if (chosen.file !== undefined || anchoredEverySlot)
+    return { report, localIdentity: chosen.anchor };
+  const resolved = await foundLocalIdentity(
+    defaultSigningIdentityPath(),
+    "per-user default",
+    log,
+  );
+  if (resolved === undefined) return { report, localIdentity: undefined };
+  return {
+    report: await verifyDualSignedRecord(record, {
+      ...inputs,
+      localIdentity: resolved,
+    }),
+    localIdentity: resolved,
+  };
 }
 
 export async function handler(argv: Arguments): Promise<void> {
@@ -1105,33 +1202,36 @@ export async function handler(argv: Arguments): Promise<void> {
     }
 
     if (signedRecord !== undefined) {
-      const localIdentity = await resolveLocalIdentity(
-        identityFileArg,
+      // This command never auto-loads a config, so a path that reaches here was
+      // named on the command line.
+      const signing = readConfigSigningBlock(
         configFile,
-        log,
+        configFile !== undefined,
       );
-      const rendered = formatSignedRecordReport(
-        await verifyDualSignedRecord(signedRecord, {
+      const { report, localIdentity } = await verifySignedRecord(
+        signedRecord,
+        {
           pinnedFingerprints: resolvePinnedFingerprints(
             partnerFingerprintArgs,
-            configFile,
+            signing,
           ),
-          localIdentity,
           ...(await signedRecordExpectations(
             artifact.kind === "record" ? artifact.record : undefined,
             localTerms,
             partnerTerms,
           )),
-        }),
-        {
-          ...supplied,
-          localIdentity: localIdentity?.source,
-          // The note explaining a config that carries no terms belongs beside
-          // the first agreed-terms line it explains, and a combined run has
-          // already printed that line above.
-          noteConfigTerms: artifact.kind !== "record",
         },
+        await chosenLocalIdentity(identityFileArg, signing, log),
+        log,
       );
+      const rendered = formatSignedRecordReport(report, {
+        ...supplied,
+        localIdentity: localIdentity?.source,
+        // The note explaining a config that carries no terms belongs beside
+        // the first agreed-terms line it explains, and a combined run has
+        // already printed that line above.
+        noteConfigTerms: artifact.kind !== "record",
+      });
       lines.push(...rendered.lines);
       exitCode = Math.max(exitCode, rendered.exitCode);
     }
