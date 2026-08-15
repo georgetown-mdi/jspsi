@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -419,7 +420,14 @@ describe("the real repository", () => {
   });
 
   it("exits 1 from the CLI entry point over a redundant override", () => {
-    const root = mkdtempSync(join(tmpdir(), "brace-expansion-override-"));
+    // Realpath, because the entry guard compares process.argv[1] -- the path as
+    // spelled on the command line -- against a module URL node has already
+    // resolved through its symlinks. Where the system temporary directory is
+    // itself a symlink, as macOS's /var is, the unresolved path misses the guard
+    // and the copy exits 0 without ever running the check.
+    const root = realpathSync(
+      mkdtempSync(join(tmpdir(), "brace-expansion-override-")),
+    );
     try {
       // The entry reads its two inputs from the directory above itself, so a
       // copy under a fixture pair is what puts the failing branch on a process.
