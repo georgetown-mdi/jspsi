@@ -27,6 +27,12 @@ contributor) can pick up and implement without coming back to you for context.
 Two tiers; pick by the size of the work, not by habit. Both use Markdown, `-`
 not `*` for bullets, and soft line wrapping.
 
+Right-size the work itself, not just the body: an issue should land as roughly
+a 150-900 changed-line PR, and work projecting past ~1,200 lines is split first
+(measured: PRs above that cause follow-up fixes at roughly four times the rate
+of smaller ones). Small is fine -- several small issues batch well into one
+orchestration session -- so never inflate or merge tasks to fill a session.
+
 **Light -- the default.** A task whose expected diff is under roughly 100 lines
 and adds no new behavior: a correction, a sweep, a test pin, a doc or spec line,
 a deferred review finding. Its whole body is under 20 lines -- one summary
