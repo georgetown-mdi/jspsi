@@ -5,7 +5,8 @@ import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
  * names: verbatim, inside a bidi isolate. Every column-name sink on that screen
  * goes through this module -- the grid's row header and its two control labels,
  * the quick-fix mapper's options, the disclosed-columns panel, the alert naming
- * the columns the invitation will not accept, the grid's live regions, and the
+ * the operator's own columns in the payload-declaration conflict notice (whose
+ * declaration-sourced names take the escape instead), the grid's live regions, and the
  * ledger's "You will send" row -- so one name reads the same wherever the screen
  * puts it.
  *
