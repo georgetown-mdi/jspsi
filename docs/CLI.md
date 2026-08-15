@@ -313,6 +313,8 @@ psilink probe-host-key SFTP_URL [--json] [--connect-timeout <duration>]
 
 `SFTP_URL` is an `sftp://host[:port]` address; you supply no username, path, or credential, and none is sent to the server (the probe refuses before authenticating). A non-sftp scheme is a usage error. `--connect-timeout` bounds the connection attempt (e.g. `10s`), enforced as the SSH ready timeout. By default the command prints a human-readable summary; `--json` instead prints one line of machine-readable JSON -- `{"fingerprint":"SHA256:...","key_type":"..."}` -- on stdout for a script to consume. A transport failure (unreachable, refused, or timed out) exits 69; a usage error exits 64. The console's "read the fingerprint from the server" affordance runs this command for the operator.
 
+When something other than an SSH server answers the address, the failure says so rather than reading as an unreachable host. A peer that replies with a web page, with TLS, or with any other non-SSH data is named as such and a short excerpt of what it sent is shown -- usually a proxy or gateway intercepting the port. A peer that accepts the connection and then closes it without sending anything is reported separately, since an SSH server always identifies itself first: that is most often a firewall or IP allowlist standing in front of the server rather than the server itself. The same diagnosis applies to the first-use host-key prompt, which runs the same probe.
+
 ## Checking a network file drop
 
 ```sh

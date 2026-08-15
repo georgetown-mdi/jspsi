@@ -290,7 +290,11 @@ const PERSISTENT_SHARED_CLIENT_LISTENERS_PER_EVENT = 2;
  * sweep's, those writes being entries of a directory this party's own poll
  * listing enumerates and that listing's refusal governs. An assumption rather
  * than an enforced cap, and the only one, which is affordable because crossing
- * this number costs a stderr line and nothing else.
+ * this number costs a stderr line and nothing else. What that assumption has
+ * behind it is a run rather than an argument alone: the cleanup sweep is driven
+ * at the width its listing bound admits and its fan measured at the server
+ * (`concurrentDeleteFanWidth.test.ts`), evidence for the assumption rather than
+ * a bound making it one.
  */
 const PEAK_SHARED_CLIENT_LISTENERS_PER_EVENT =
   MAX_SPLIT_SCOPE_ENTRY_SWEEP_DELETES +

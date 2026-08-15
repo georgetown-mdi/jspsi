@@ -695,8 +695,9 @@ export class FileSyncMessageLoop {
       // method is absent, so the optional call short-circuits to undefined). A
       // transient re-dial failure returns false -- skip this cycle and retry on
       // the next tick (the peer-inactivity ceiling still terminates the exchange
-      // if dials keep failing for the whole budget); a fatal one (host-key or
-      // credential rejection) rejects and is surfaced terminally.
+      // if dials keep failing for the whole budget); a re-dial that REJECTS is
+      // surfaced terminally. Which failures are fatal enough to reject is the
+      // transport adapter's classification, not one core can see or enforce.
       let sessionReady: boolean | undefined;
       try {
         sessionReady = await deps.client().ensureConnected?.();

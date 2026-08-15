@@ -7,6 +7,7 @@ import {
 } from "@psilink/core";
 import type { ConnectionConfig, PresentedHostKey } from "@psilink/core";
 
+import { withPeerIdentificationDiagnosis } from "./connection/sftpPeerIdentification";
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
 import { persistHostKeyFingerprint } from "./config";
 import { promptConfirm } from "./util/cli";
@@ -82,14 +83,16 @@ const hostKeyRefusal = (summary: string, details: string[]): UsageError =>
   });
 
 const REAL_DEPS: HostKeyTrustDeps = {
-  probe: (connection, verbosity) =>
-    new FileSyncConnection(new SSH2SFTPClientAdapter({ verbosity }), {
-      verbose: verbosity,
-    }).probeHostKeyFingerprint(
-      // The caller guarantees an sftp connection before invoking the probe (see
-      // establishHostKeyTrust); narrow for probeHostKeyFingerprint's signature.
-      connection as Extract<ConnectionConfig, { channel: "sftp" }>,
-    ),
+  probe: (connection, verbosity) => {
+    // The caller guarantees an sftp connection before invoking the probe (see
+    // establishHostKeyTrust); narrow for probeHostKeyFingerprint's signature.
+    const config = connection as Extract<ConnectionConfig, { channel: "sftp" }>;
+    return withPeerIdentificationDiagnosis(config, () =>
+      new FileSyncConnection(new SSH2SFTPClientAdapter({ verbosity }), {
+        verbose: verbosity,
+      }).probeHostKeyFingerprint(config),
+    );
+  },
   confirm: promptConfirm,
 };
 
