@@ -282,7 +282,7 @@ describe("the base a worktree starts on", () => {
     });
 
     expect(status).toBe(0);
-    expect(output).not.toContain("REFUSING");
+    expect(output).not.toContain("NOT re-pointing");
     expect(head(tree)).toBe(before);
     expect(
       existsSync(join(tree, "packages", "core", "dist", "built.txt")),

@@ -155,6 +155,10 @@ install_from_lockfile() {
   cp "$WORKTREE/package-lock.json" "$saved"
   (cd "$WORKTREE" && npm ci --no-audit --no-fund) || status=$?
   if [ "$status" -ne 0 ]; then
+    if ! cmp -s "$saved" "$WORKTREE/package-lock.json"; then
+      cp "$saved" "$WORKTREE/package-lock.json"
+      echo "worktree-init: the failed 'npm ci' had rewritten package-lock.json; restored the committed bytes." >&2
+    fi
     rm -f "$saved"
     {
       echo "worktree-init: 'npm ci' failed (exit $status), so this tree has no deps to build or test on."
