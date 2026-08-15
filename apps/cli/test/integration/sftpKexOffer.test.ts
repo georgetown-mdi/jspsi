@@ -20,6 +20,11 @@ import {
   startInProcessSftpServer,
 } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
+import {
+  APPENDED_MARKERS,
+  createKexinitRecordingRelay,
+  decodeOfferedKexAlgorithms,
+} from "./kexOfferWire";
 import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
 
 // What the SFTP client actually OFFERS, read off the wire from the client's own
@@ -72,7 +77,6 @@ const { SSH2SFTPClientAdapter } =
 const { probeHostKeyLines } = await import("../../src/commands/probeHostKey");
 
 const SSH_MSG_DISCONNECT = 1;
-const SSH_MSG_KEXINIT = 20;
 const SSH_DISCONNECT_PROTOCOL_ERROR = 2;
 
 // Only the in-process backend can be told to cut a session mid-operation (see
@@ -105,20 +109,6 @@ const serverOffersNoPerformableKex = test.skipIf(
 // at its edges, and the re-dial's budget for the read that follows it.
 const TRANSFER_BYTES = 512 * 1024;
 const RECOVERY_TIMEOUT_MS = 60_000;
-
-// The ten name-lists an SSH_MSG_KEXINIT carries, in wire order (RFC 4253 7.1).
-// Only the first is read; the rest are skipped to reach nothing, so this decodes
-// exactly one packet and models no part of ssh2.
-function decodeOfferedKexAlgorithms(payload: Buffer): string[] {
-  if (payload.readUInt8(0) !== SSH_MSG_KEXINIT)
-    throw new Error(`first packet was message ${payload.readUInt8(0)}`);
-  // message type (1) + cookie (16)
-  const length = payload.readUInt32BE(17);
-  return payload
-    .subarray(21, 21 + length)
-    .toString("utf8")
-    .split(",");
-}
 
 /**
  * A listener that speaks just enough SSH to make a client send its KEXINIT --
@@ -178,83 +168,6 @@ function createKexinitReader(): {
 }
 
 /**
- * A relay in front of a REAL SFTP server that records the key-exchange
- * algorithms of every dial that passes through it and otherwise copies bytes
- * both ways. The reader above answers only the identification string, so a dial
- * it reads can never do work; this reads the offer of a dial that goes on to
- * complete its handshake -- and of the re-dial that follows a dropped session.
- *
- * `accepted` counts the dials, `offers` records what they said, and a case about
- * HOW MANY dials there were must read the first: a client that abandons the
- * handshake -- as one whose key exchange finds nothing in common does -- can
- * have its socket destroyed with its own SSH_MSG_KEXINIT still unread here
- * (measured), so that dial is accepted and counted while its offer never
- * decodes.
- */
-function createKexinitRecordingProxy(target: { host: string; port: number }): {
-  port: Promise<number>;
-  offers: string[][];
-  accepted: () => number;
-  close: () => Promise<void>;
-} {
-  const offers: string[][] = [];
-  let accepted = 0;
-  let resolvePort!: (port: number) => void;
-  const port = new Promise<number>((resolve) => (resolvePort = resolve));
-
-  const server = net.createServer((client) => {
-    accepted++;
-    const upstream = net.connect(target.port, target.host);
-    // Either side going takes the other with it: a session the server drops has
-    // to reach the client as a closed socket, or the adapter's recovery would
-    // wait out its deadline for a close this relay swallowed.
-    const cut = (): void => {
-      client.destroy();
-      upstream.destroy();
-    };
-    for (const socket of [client, upstream]) {
-      socket.on("error", cut);
-      socket.on("close", cut);
-    }
-    upstream.on("data", (chunk: Buffer) => client.write(chunk));
-
-    let sniffed = Buffer.alloc(0);
-    let identificationConsumed = false;
-    let recorded = false;
-    client.on("data", (chunk: Buffer) => {
-      upstream.write(chunk);
-      if (recorded) return;
-      sniffed = Buffer.concat([sniffed, chunk]);
-      if (!identificationConsumed) {
-        const end = sniffed.indexOf("\n");
-        if (end === -1) return;
-        sniffed = sniffed.subarray(end + 1);
-        identificationConsumed = true;
-      }
-      if (sniffed.length < 4) return;
-      const packetLength = sniffed.readUInt32BE(0);
-      if (sniffed.length < 4 + packetLength) return;
-      const paddingLength = sniffed.readUInt8(4);
-      offers.push(
-        decodeOfferedKexAlgorithms(
-          sniffed.subarray(5, 4 + packetLength - paddingLength),
-        ),
-      );
-      recorded = true;
-    });
-  });
-  server.listen(0, "127.0.0.1", () => {
-    resolvePort((server.address() as net.AddressInfo).port);
-  });
-  return {
-    port,
-    offers,
-    accepted: () => accepted,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
-  };
-}
-
-/**
  * A listener that answers the identification string and then sends one
  * `SSH_MSG_DISCONNECT` carrying a description of the caller's choosing -- the
  * server-controlled text ssh2 renders into its `Client` error message. Written
@@ -303,11 +216,6 @@ function createDisconnectingServer(description: string): {
   });
   return { port, close: () => server.close() };
 }
-
-// The two names ssh2 appends outside the offer it filters: the `ext-info` marker
-// and the Terrapin (CVE-2023-48795) strict-key-exchange marker. Losing either to
-// the constraint would trade a handshake failure for a downgraded handshake.
-const APPENDED_MARKERS = ["ext-info-c", "kex-strict-c-v00@openssh.com"];
 
 // One dial's worth of connect options: no retries, so a listener that never
 // completes a handshake costs one attempt rather than the default budget.
@@ -531,7 +439,7 @@ describe("the constrained offer against a real SFTP server", () => {
       // is what says the constrained offer negotiated as far as host-key
       // presentation, not merely that the offer was constrained.
       const server = inject("sftpServer");
-      const relay = createKexinitRecordingProxy(server);
+      const relay = createKexinitRecordingRelay(server);
       try {
         const result = await probeHostKeyLines({
           sftpUrl: `sftp://127.0.0.1:${await relay.port}`,
@@ -564,7 +472,7 @@ describe("the constrained offer against a real SFTP server", () => {
       // offer differing from the first. The unit suite pins that in memory; this
       // is the pair of offers on the wire, from a session the server really cut.
       const srv = await startInProcessSftpServer();
-      const relay = createKexinitRecordingProxy(srv.handle);
+      const relay = createKexinitRecordingRelay(srv.handle);
       const adapter = new SSH2SFTPClientAdapter();
       const dir = await fsp.mkdtemp(path.join(srv.handle.backingDir, "kex-"));
       await fsp.writeFile(
@@ -669,7 +577,7 @@ describe("a server that accepts only algorithms this process cannot perform", ()
     // with a budget of 3 through the relay, which counts the dials: the
     // rejection arrives only once the loop is finished with them, so a retried
     // dial is a second accepted connection here, not a slower test.
-    const relay = createKexinitRecordingProxy({ host: "127.0.0.1", port });
+    const relay = createKexinitRecordingRelay({ host: "127.0.0.1", port });
     const adapter = new SSH2SFTPClientAdapter();
     try {
       await expect(
@@ -732,7 +640,7 @@ describe("a real OpenSSH server that accepts only what this process cannot perfo
     "ends the dial at the first refusal, naming the primitive",
     async () => {
       const server = inject("sftpServer");
-      const relay = createKexinitRecordingProxy(server);
+      const relay = createKexinitRecordingRelay(server);
       const adapter = new SSH2SFTPClientAdapter();
       const { hostKeyFingerprint, ...auth } = serverAuth(server.usera);
       let thrown: unknown;
