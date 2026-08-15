@@ -123,9 +123,9 @@ function TermsTier({
  * chips so a reader takes in how much leaves before reading which columns do. It
  * renders only where the set is both known and non-empty -- an empty set and a
  * not-yet-chosen file each state their own case in this slot instead -- so the
- * sentence never asserts a definite send that does not happen. Normal weight rather
- * than dimmed, for the reason the whole slot is: the viewer's own disclosure must not
- * read lighter than the egress request beside it.
+ * sentence never asserts a definite send that does not happen. Renders undimmed
+ * (no `c="dimmed"`), unlike the empty-set fallback text that occupies this same
+ * slot when the set is empty.
  */
 function OutboundSendCount({ count }: { count: number }) {
   return (
