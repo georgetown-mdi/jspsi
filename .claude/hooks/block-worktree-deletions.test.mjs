@@ -507,13 +507,28 @@ describe("block-worktree-deletions hook", () => {
   // exactly as the `-c` spelling does, and a command-line `-c` wins over the file.
   // Which value git ends up with is git's own resolution, asked of it rather than
   // reimplemented here, so each row is put to a real repo whose sibling tree holds
-  // uncommitted work: the hook must refuse exactly the rows that destroy it.
+  // uncommitted work: the hook must refuse exactly the rows that destroy it. The
+  // one row whose live-git outcome moves across the git 2.44/2.45 force-counting
+  // boundary is held to the one-sided property instead -- never destroyed under a
+  // command the hook allowed, and blocked whichever side of that boundary runs.
   it("blocks exactly the cleans a persisted clean.requireForce turns destructive", () => {
-    for (const { spelling, from, persisted } of [
-      // Off in the repo's own config file: the holder's single -f then reaches
-      // the doubled force that takes a healthy nested tree, and reaching into an
-      // unowned tree needs no flag at all.
-      { spelling: "git clean -df", from: "dir", persisted: "false" },
+    for (const {
+      spelling,
+      from,
+      persisted,
+      versionDependentForceCount = false,
+    } of [
+      // Off in the repo's own config file: on git <= 2.44 the holder's single -f
+      // then reaches the doubled force that takes a healthy nested tree, while
+      // git >= 2.45 no longer feeds that counter from the config (the boundary
+      // the hook's header records) and skips the tree. Reaching into an unowned
+      // tree needs no flag at all, on either side of it.
+      {
+        spelling: "git clean -df",
+        from: "dir",
+        persisted: "false",
+        versionDependentForceCount: true,
+      },
       { spelling: "git clean -d", from: "tree", persisted: "false" },
       { spelling: "git clean", from: "tree", persisted: "false" },
       // A `-c` on the command line settles the value either way round.
@@ -538,7 +553,18 @@ describe("block-worktree-deletions hook", () => {
       const label = `${spelling} from ${from}, persisted ${persisted}`;
       const blocked = verdict(spelling, { cwd, projectDir: dir }).status === 2;
       spawnSync("bash", ["-c", spelling], { cwd });
-      expect(existsSync(precious), label).toBe(!blocked);
+      // The fail-closed property, which holds whatever git runs it: work
+      // destroyed by a command the hook allowed is the one outcome no version
+      // may produce.
+      expect(blocked || existsSync(precious), label).toBe(true);
+      if (versionDependentForceCount) {
+        // The hook models no git version, so its verdict is the same on both
+        // sides of the boundary while live git's effect is not: that verdict is
+        // what this row can assert.
+        expect(blocked, label).toBe(true);
+      } else {
+        expect(existsSync(precious), label).toBe(!blocked);
+      }
     }
   });
 
