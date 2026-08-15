@@ -209,6 +209,41 @@ test("on a lost create race, adopts the winner's identity instead of failing", a
   }
 });
 
+test("on a lost create race, no divergence warning fires for the discarded local intent", async () => {
+  const idPath = path.join(dir, "id.json");
+  // The winner's on-disk identity matches the config; only this invocation's
+  // discarded intent diverges. Binding nothing, it must not warn about the
+  // divergence -- the same silence the plain Loaded path keeps.
+  idFile.saveSigningIdentity(
+    idPath,
+    await generateSigningIdentity("Config Party"),
+  );
+  const realLoad = idFile.loadSigningIdentity;
+  let calls = 0;
+  const spy = vi
+    .spyOn(idFile, "loadSigningIdentity")
+    .mockImplementation(async (p: string) => {
+      calls += 1;
+      return calls === 1 ? undefined : realLoad(p);
+    });
+  try {
+    const warn = vi.fn();
+    const { identity, action } = await resolveSigningIdentity({
+      identityPath: idPath,
+      identityArg: "Loser Party",
+      configIdentity: "Config Party",
+      force: false,
+      log: { warn },
+    });
+    expect(action).toBe("Loaded");
+    expect(identity.certificate.identity).toBe("Config Party");
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0][0]).not.toContain("linkage_terms.identity");
+  } finally {
+    spy.mockRestore();
+  }
+});
+
 test("retries the exclusive create after the winner vanishes, then creates", async () => {
   const idPath = path.join(dir, "id.json");
   const realSave = idFile.saveSigningIdentity;

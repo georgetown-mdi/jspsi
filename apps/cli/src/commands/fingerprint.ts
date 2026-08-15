@@ -219,20 +219,24 @@ export async function resolveSigningIdentity(
   // rejects. Surface that at the binding rather than leaving it to fail at the
   // partner's exchange. It warns rather than blocks: which identity to bind is
   // the operator's own choice, and the config may legitimately be edited to
-  // match afterwards.
-  if (
-    input.configIdentity !== undefined &&
-    input.configIdentity.length > 0 &&
-    identityString !== input.configIdentity
-  )
-    input.log.warn(
-      `the signing identity is bound to "${identityString}", which differs ` +
-        `from linkage_terms.identity "${input.configIdentity}" in the config. ` +
-        "Your partner verifies a receipt against the identity in the agreed " +
-        "terms, so they will reject a receipt signed under this certificate. " +
-        "Make the two match: regenerate with --force and a matching " +
-        "--identity, or set linkage_terms.identity to the bound identity.",
-    );
+  // match afterwards. Called only on the paths that write a binding: an
+  // invocation that adopts another process's file binds nothing, the same
+  // silence the plain Loaded path keeps.
+  const warnOnConfigDivergence = () => {
+    if (
+      input.configIdentity !== undefined &&
+      input.configIdentity.length > 0 &&
+      identityString !== input.configIdentity
+    )
+      input.log.warn(
+        `the signing identity is bound to "${identityString}", which differs ` +
+          `from linkage_terms.identity "${input.configIdentity}" in the config. ` +
+          "Your partner verifies a receipt against the identity in the agreed " +
+          "terms, so they will reject a receipt signed under this certificate. " +
+          "Make the two match: regenerate with --force and a matching " +
+          "--identity, or set linkage_terms.identity to the bound identity.",
+      );
+  };
   const identity = await generateSigningIdentity(identityString);
 
   // A genuine first creation (no file on disk at all) is exclusive, so two
@@ -253,6 +257,7 @@ export async function resolveSigningIdentity(
     for (let attempt = 1; ; attempt++) {
       try {
         saveSigningIdentity(input.identityPath, identity, { exclusive: true });
+        warnOnConfigDivergence();
         return { identity, action: "Created" };
       } catch (err) {
         if (!(err instanceof FileExistsError)) throw err;
@@ -277,6 +282,7 @@ export async function resolveSigningIdentity(
   }
 
   saveSigningIdentity(input.identityPath, identity);
+  warnOnConfigDivergence();
   return { identity, action: "Regenerated" };
 }
 
