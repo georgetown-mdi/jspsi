@@ -346,7 +346,9 @@ describe("review and create", () => {
     expect(byLabel.get("Your name")?.value).toBe("Dana Okafor");
     expect(byLabel.get("Your name")?.changeTarget).toBe("file");
     expect(byLabel.get("Your file")?.value).toBe("clients.csv - 1 rows");
-    expect(byLabel.get("Columns shared")?.value).toBe("program_code");
+    expect(byLabel.get("Columns shared")?.value).toBe(
+      isolatedColumnName("program_code"),
+    );
     expect(byLabel.get("Columns shared")?.changeTarget).toBe("columns");
     expect(byLabel.get("Cleaning")?.value).toMatch(
       /^\d+ fields?, filled in from your file$/,

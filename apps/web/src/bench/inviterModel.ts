@@ -1312,7 +1312,7 @@ export function answersRows(
     },
     {
       label: "Columns shared",
-      value: sent.length > 0 ? sent.join(", ") : "None",
+      value: sent.length > 0 ? sent.map(isolatedColumnName).join(", ") : "None",
       mono: sent.length > 0,
       changeTarget: "columns",
     },

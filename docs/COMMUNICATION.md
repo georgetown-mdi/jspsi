@@ -32,7 +32,7 @@ The inviter chooses a CSV and enters its name, then walks a short required spine
 
 The spine also shows, once a file is chosen, which columns it will send to the partner for matched rows, and its disclosure is adjustable in place before creating. This is awareness only, not a gate: the displayed set is derived from the same predicate the exchange transmits on (so it cannot drift from what leaves the machine), and no column the default terms send stops being sent because of it. When it would send no columns it says so explicitly. Those disclosed columns are also declared in the invitation's payload data dictionary, so the partner's consent screen lists them as columns it will receive.
 
-The names in that display are the inviter's own file's headers, so the chip list naming them, the summary a screen reader hears, and the exchange ledger's row stating what will be sent each show one verbatim inside a bidi isolate rather than escaped: the same treatment, for the same reasons, that the acceptor's confirm-columns step gives the same names (see [Confirm your columns](#confirm-your-columns)).
+The names in that display are the inviter's own file's headers, so the chip list naming them, the summary a screen reader hears, the exchange ledger's row stating what will be sent, and the check-your-answers restatement of that set each show one verbatim inside a bidi isolate rather than escaped: the same treatment, for the same reasons, that the acceptor's confirm-columns step gives the same names (see [Confirm your columns](#confirm-your-columns)).
 
 ### Customizing the terms
 
