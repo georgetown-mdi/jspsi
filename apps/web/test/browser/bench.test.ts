@@ -20,10 +20,22 @@ import { InviterBench } from "@bench/InviterBench";
 import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
 
+// The ledger expectation derives its form from this function, so it pins that the
+// send row carries the same form step 2's chips do, not what that form is; the
+// literal FSI/PDI expectations live in
+// apps/web/test/unit/columnNameDisplay.test.ts.
+import { isolatedColumnName } from "@components/ColumnName";
+
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 import { captureDownloads } from "./captureDownloads";
 
 import type { PreparedExchange } from "@psilink/core";
+
+// The grid's control labels isolate the header they name (the treatment
+// MatchingSharingSection applies), so selectors derive the label from the
+// same function rather than restating its output.
+const typeLabel = (name: string) => `Type for ${isolatedColumnName(name)}`;
+const usedLabel = (name: string) => `How ${isolatedColumnName(name)} is used`;
 
 // The bench components touch the router seam (the lobby's Links). This suite
 // asserts the bench's structure, landmarks, and tokens, not navigation.
@@ -400,7 +412,7 @@ describe("inviter bench", () => {
         (row) => row.querySelector("dt")?.childNodes[0].textContent === label,
       );
     expect(ledgerRow("You will send")?.querySelector("dd")?.textContent).toBe(
-      "program_code",
+      isolatedColumnName("program_code"),
     );
     expect(ledgerRow("Expires")?.querySelector("dd")?.textContent).toBe(
       "1 hour after you share",
@@ -416,7 +428,7 @@ describe("inviter bench", () => {
     // Undiscloses the only sent column: the ledger and the empty-state inset
     // track the edit.
     await page
-      .getByLabelText("How program_code is used")
+      .getByLabelText(usedLabel("program_code"))
       .selectOptions("ignored");
     await expect
       .element(page.getByText("Nothing - matching only"))
@@ -436,7 +448,7 @@ describe("inviter bench", () => {
     // Retyping the ignored column to the record identifier displaces the inferred
     // one; the displacement is announced.
     await page
-      .getByLabelText("Type for program_code")
+      .getByLabelText(typeLabel("program_code"))
       .selectOptions("identifier");
     await expect
       .element(
@@ -482,11 +494,9 @@ describe("inviter bench", () => {
       .element(page.getByText("Problem: choose a single record identifier."))
       .toBeInTheDocument();
 
-    await page
-      .getByLabelText("How identifier is used")
-      .selectOptions("ignored");
+    await page.getByLabelText(usedLabel("identifier")).selectOptions("ignored");
     await expect
-      .element(page.getByLabelText("How identifier is used"))
+      .element(page.getByLabelText(usedLabel("identifier")))
       .toHaveValue("ignored");
     expect(document.querySelector('section[aria-label="Problems"]')).toBeNull();
   });
@@ -706,7 +716,7 @@ describe("inviter bench", () => {
     // On step 2, undisclose the sent column so there is an in-progress edit to
     // pin as surviving the Back.
     await page
-      .getByLabelText("How program_code is used")
+      .getByLabelText(usedLabel("program_code"))
       .selectOptions("ignored");
     await page
       .getByRole("button", { name: "Continue to review & create" })
@@ -722,7 +732,7 @@ describe("inviter bench", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Matching & sharing");
     await expect
-      .element(page.getByLabelText("How program_code is used"))
+      .element(page.getByLabelText(usedLabel("program_code")))
       .toHaveValue("ignored");
 
     // Back again lands on step 1 with the loaded file still shown -- not a
@@ -744,7 +754,7 @@ describe("inviter bench", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Matching & sharing");
     await expect
-      .element(page.getByLabelText("How program_code is used"))
+      .element(page.getByLabelText(usedLabel("program_code")))
       .toHaveValue("ignored");
   });
 
@@ -846,7 +856,7 @@ describe("inviter bench", () => {
       .toHaveTextContent("Matching & sharing");
     // The section's own controls keep rendering with their edited state intact.
     await expect
-      .element(page.getByLabelText("How first_name is used"))
+      .element(page.getByLabelText(usedLabel("first_name")))
       .toBeInTheDocument();
   });
 
@@ -1079,7 +1089,7 @@ describe("inviter bench", () => {
         .getByRole("button", { name: "Continue to matching & sharing" })
         .click();
       await page
-        .getByLabelText("How member_id is used")
+        .getByLabelText(usedLabel("member_id"))
         .selectOptions("ignored");
       await flushPendingUpdates();
       expect(unloadPrompted()).toBe(false);

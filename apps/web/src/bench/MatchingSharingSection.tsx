@@ -10,6 +10,7 @@ import {
   hasMultipleIdentifiers,
 } from "@psi/metadataEditing";
 
+import { ColumnName, isolatedColumnName } from "@components/ColumnName";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import { disclosedColumnNames } from "@psilink/core";
@@ -27,6 +28,16 @@ const SEMANTIC_TYPES = Object.keys(SEMANTIC_TYPE_LABELS) as Array<SemanticType>;
  * ever see. Presentational over the host's metadata; edits go up through the
  * two callbacks and the single-identifier rule's demotions come back down as
  * `announcement`.
+ *
+ * The grid's row headers and its two control labels, the chip list, and the
+ * summary its live region speaks carry the operator's own CSV headers through
+ * {@link ColumnName} / {@link isolatedColumnName}, the treatment the ledger's
+ * send row beside it and the acceptor's confirm-columns grid show the same
+ * names with, so a header cannot read one way where its disclosure is set and
+ * another in the chips, the sentence, or the rail. The seam: the demotion
+ * `announcement` this component renders is composed by its caller and does not
+ * take the treatment here. That module carries what the isolation does and
+ * does not contain.
  */
 export function MatchingSharingSection({
   metadata,
@@ -53,7 +64,7 @@ export function MatchingSharingSection({
   const summary =
     sent.length === 0
       ? "No columns will be sent to your partner."
-      : `Columns sent to your partner: ${sent.join(", ")}.`;
+      : `Columns sent to your partner: ${sent.map(isolatedColumnName).join(", ")}.`;
   const [summaryAnnouncement, setSummaryAnnouncement] = useState("");
   const summaryRef = useRef(summary);
   summaryRef.current = summary;
@@ -97,11 +108,11 @@ export function MatchingSharingSection({
                   scope="row"
                   className={`${styles.mono} ${styles.rowHeader}`}
                 >
-                  {column.name}
+                  <ColumnName name={column.name} />
                 </th>
                 <td>
                   <NativeSelect
-                    aria-label={`Type for ${column.name}`}
+                    aria-label={`Type for ${isolatedColumnName(column.name)}`}
                     value={column.type}
                     data={SEMANTIC_TYPES.map((type) => ({
                       value: type,
@@ -117,7 +128,7 @@ export function MatchingSharingSection({
                 </td>
                 <td>
                   <NativeSelect
-                    aria-label={`How ${column.name} is used`}
+                    aria-label={`How ${isolatedColumnName(column.name)} is used`}
                     value={disclosureOf(column)}
                     data={disclosureChoicesForType(column.type).map(
                       (choice) => ({
@@ -167,7 +178,7 @@ export function MatchingSharingSection({
           <ul className={styles.columnChips}>
             {sent.map((column) => (
               <li key={column} className={styles.mono}>
-                {column}
+                <ColumnName name={column} />
               </li>
             ))}
           </ul>
