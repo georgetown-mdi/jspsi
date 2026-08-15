@@ -360,6 +360,8 @@ Print this party's signing certificate fingerprint, creating the signing identit
 
 The identity lives at `~/.psilink/signing-identity.json` by default; `--identity-file` overrides that path, as does `signing.identity_file` in the configuration named by `--config-file`. Creation is announced rather than silent. The identity string bound into the certificate -- the party's name, organization, and contact -- comes from `--identity`, or from `linkage_terms.identity` in the configuration when the flag is absent; once an identity exists, `--identity` is ignored unless `--force` is also given.
 
+Bind the identity that matches `linkage_terms.identity` in your configuration. A partner verifies a receipt against the identity in the agreed terms rather than the one the presented certificate carries, so a certificate bound to any other string signs receipts the partner rejects. Binding one that diverges from the configured value warns and proceeds -- which string to bind is your choice, and editing `linkage_terms.identity` to match is the other way to reconcile them -- but bring the two into agreement before you share the fingerprint.
+
 `--force` regenerates the identity: a new key with a new fingerprint, which invalidates every fingerprint a partner has already pinned. They must re-pin before your receipts verify again, so treat it as a coordinated action rather than a retry.
 
 `--export-certificate PATH` additionally writes this party's public certificate -- the certificate alone, never the private key -- to `PATH` for sending to a partner. Naming the signing identity file itself is refused rather than allowed to overwrite the private key with the certificate.

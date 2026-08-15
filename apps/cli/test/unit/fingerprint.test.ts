@@ -16,9 +16,16 @@ import {
 import { loadSigningIdentity } from "../../src/signingIdentityFile";
 import * as idFile from "../../src/signingIdentityFile";
 import { FileExistsError } from "../../src/fileUtils";
+import {
+  argv,
+  captureStdio,
+  snapshotDiagnosticSinkAndLevel,
+} from "../loggingTestSupport";
 
 let dir: string;
 const noopLog = { warn: () => {} };
+
+snapshotDiagnosticSinkAndLevel();
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-fp-test-"));
@@ -266,14 +273,157 @@ test("fails with a usage error (not a stale exists error) when a create race fla
 
 test("falls back to the config identity when --identity is absent", async () => {
   const idPath = path.join(dir, "id.json");
+  const warn = vi.fn();
   const { identity, action } = await resolveSigningIdentity({
     identityPath: idPath,
     configIdentity: "Configured Party",
     force: false,
-    log: noopLog,
+    log: { warn },
   });
   expect(action).toBe("Created");
   expect(identity.certificate.identity).toBe("Configured Party");
+  // nothing to diverge from: the bound identity IS the config's
+  expect(warn).not.toHaveBeenCalled();
+});
+
+// --- creation-time divergence from linkage_terms.identity --------------------
+
+test("warns when the bound identity diverges from the config identity", async () => {
+  const idPath = path.join(dir, "id.json");
+  const warn = vi.fn();
+  const { identity, action } = await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "Party A",
+    configIdentity: "Party A, Agency A, a@agency-a.gov",
+    force: false,
+    log: { warn },
+  });
+  // warned, but still created and bound to the requested identity
+  expect(action).toBe("Created");
+  expect(identity.certificate.identity).toBe("Party A");
+  expect(warn).toHaveBeenCalledOnce();
+  const message = warn.mock.calls[0]?.[0] as string;
+  // both values are named, along with the downstream consequence
+  expect(message).toContain('"Party A"');
+  expect(message).toContain('"Party A, Agency A, a@agency-a.gov"');
+  expect(message).toContain("linkage_terms.identity");
+  expect(message).toContain("reject");
+});
+
+test("is silent when the bound identity matches the config identity", async () => {
+  const idPath = path.join(dir, "id.json");
+  const warn = vi.fn();
+  const { identity } = await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "Party A",
+    configIdentity: "Party A",
+    force: false,
+    log: { warn },
+  });
+  expect(identity.certificate.identity).toBe("Party A");
+  expect(warn).not.toHaveBeenCalled();
+});
+
+test("is silent when the config carries no linkage_terms.identity", async () => {
+  const idPath = path.join(dir, "id.json");
+  const warn = vi.fn();
+  await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "Party A",
+    force: false,
+    log: { warn },
+  });
+  expect(warn).not.toHaveBeenCalled();
+});
+
+test("an empty config identity is treated as absent, not as a divergence", async () => {
+  const idPath = path.join(dir, "id.json");
+  const warn = vi.fn();
+  await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "Party A",
+    configIdentity: "",
+    force: false,
+    log: { warn },
+  });
+  expect(warn).not.toHaveBeenCalled();
+});
+
+test("a --force re-key that keeps a divergent bound identity warns", async () => {
+  const idPath = path.join(dir, "id.json");
+  await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "Party A",
+    force: false,
+    log: noopLog,
+  });
+  // No --identity, so the re-key carries the existing binding forward; it is
+  // still the identity the new certificate is bound to.
+  const warn = vi.fn();
+  const { action } = await resolveSigningIdentity({
+    identityPath: idPath,
+    configIdentity: "Party A, Agency A",
+    force: true,
+    log: { warn },
+  });
+  expect(action).toBe("Regenerated");
+  expect(warn).toHaveBeenCalledOnce();
+  expect(warn.mock.calls[0]?.[0]).toContain("linkage_terms.identity");
+});
+
+test("an existing identity is loaded without a divergence warning", async () => {
+  const idPath = path.join(dir, "id.json");
+  await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "Party A",
+    force: false,
+    log: noopLog,
+  });
+  // The check is about the binding being made; a load binds nothing.
+  const warn = vi.fn();
+  const { action } = await resolveSigningIdentity({
+    identityPath: idPath,
+    configIdentity: "Party A, Agency A",
+    force: false,
+    log: { warn },
+  });
+  expect(action).toBe("Loaded");
+  expect(warn).not.toHaveBeenCalled();
+});
+
+test("handler puts the divergence warning on stderr, leaving stdout the bare value", async () => {
+  const idPath = path.join(dir, "id.json");
+  const cfg = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(cfg, "linkage_terms:\n  identity: Party From Config\n");
+  const { stdoutWrites, stderrWrites, restore } = captureStdio();
+  // console.log is vitest-intercepted, so it never reaches the stdout spy;
+  // collect it into the same buffer to see everything a run puts on stdout.
+  const logSpy = vi
+    .spyOn(console, "log")
+    .mockImplementation((...args: unknown[]) => {
+      stdoutWrites.push(args.map((a) => String(a)).join(" ") + "\n");
+    });
+  try {
+    await handler(
+      argv({
+        identity: "Party A",
+        "identity-file": idPath,
+        "config-file": cfg,
+        force: false,
+      }),
+    );
+  } finally {
+    logSpy.mockRestore();
+    restore();
+  }
+  const stored = await loadSigningIdentity(idPath);
+  if (stored === undefined) throw new Error("the identity was not persisted");
+  const fingerprint = await computeCertificateFingerprint(stored.certificate);
+  // stdout carries the value and nothing else, so `FP=$(psilink fingerprint)`
+  // captures a clean fingerprint even when the warning fires.
+  expect(stdoutWrites.join("")).toBe(`${fingerprint}\n`);
+  expect(stderrWrites.join("")).toContain("linkage_terms.identity");
+  expect(stderrWrites.join("")).toContain("Party From Config");
 });
 
 // --- handler: --export-certificate guard -------------------------------------
