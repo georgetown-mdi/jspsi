@@ -767,7 +767,18 @@ inProcessOnly(
     });
     const receiver = new FileSyncConnection(receiverAdapter, {
       verbose: -1,
-      pollingFrequency: 10,
+      // Slower than the 10 ms the rest of this file polls at, because the wait
+      // below arms each drop on an idle wire and only this spacing gives it one.
+      // The wait reads SFTP requests, which an SSH handshake is not, so at 10 ms
+      // the gap it measures is the shadow of the next cycle's dial rather than
+      // the cycle boundary: whether it opens at all turns on how long a handshake
+      // takes on the machine running it. Measured here, that is around 53 ms
+      // where this suite runs in CI -- wide enough to read as quiet -- against
+      // roughly 14 ms on a fast host, where the wire never falls silent for the
+      // sample's length and the wait runs out. At this spacing the silence is the
+      // released cycle's own idle on either machine, which is what the arming
+      // means to name.
+      pollingFrequency: 200,
     });
     const failures: unknown[] = [];
     sender.on("error", (err: unknown) => failures.push(err));
