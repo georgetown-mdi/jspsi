@@ -118,6 +118,7 @@ function renderTerms(
     condensed?: boolean;
     disclosedPayloadColumns?: Array<string>;
     outboundColumns?: Array<string>;
+    headingOrder?: 1 | 2 | 3;
   },
 ) {
   app.render(
@@ -125,6 +126,9 @@ function renderTerms(
       linkageTerms,
       ...(options?.perspective ? { perspective: options.perspective } : {}),
       ...(options?.condensed ? { condensed: true } : {}),
+      ...(options?.headingOrder !== undefined
+        ? { headingOrder: options.headingOrder }
+        : {}),
       ...(options?.disclosedPayloadColumns !== undefined
         ? { disclosedPayloadColumns: options.disclosedPayloadColumns }
         : {}),
@@ -1504,6 +1508,209 @@ describe("InvitationTerms: the outbound-send caption does not presuppose a non-e
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).toContain(caption);
     expect(app.container.textContent).not.toContain(presupposingCaption);
+  });
+});
+
+describe("InvitationTerms: the outbound send states its count before the column names", () => {
+  // The send is the reader's own data leaving, and a row of chips leaves the
+  // magnitude of it to be totted up. A count line above the chips gives the "how
+  // much" first -- visibly, and in DOM order, so a screen reader hears it before it
+  // reaches the named list. The line must be truthful in every branch of the slot, so
+  // it renders only over a set that is both KNOWN and NON-EMPTY: the empty send, the
+  // pre-file review screen, and the no-payload direction each keep their own copy
+  // with no count asserted over them.
+  const acceptorCaption = "What you will send to your partner";
+  const inviterCaption = "Columns sent to your partner";
+  // An invitation that gives the inviting party no result: nothing is sent at all, so
+  // there is no magnitude to state.
+  const oneSided: LinkageTerms = {
+    ...terms,
+    output: { expectsOutput: false, shareWithPartner: true },
+  };
+
+  // The count element itself -- the deepest node whose whole text is the sentence --
+  // so the ordering assertion compares that line against the chips rather than an
+  // ancestor that contains both.
+  function lineWithText(sentence: string): HTMLElement {
+    const match = Array.from(app.container.querySelectorAll("*")).find(
+      (element) =>
+        element.children.length === 0 &&
+        element.textContent.trim() === sentence,
+    );
+    if (!(match instanceof HTMLElement))
+      throw new Error(`no element holds exactly: ${sentence}`);
+    return match;
+  }
+
+  // The count line is present, in the viewer's own disclosure tier, and precedes the
+  // chip list it counts.
+  async function expectCountLeadsChips(sentence: string, caption: string) {
+    const disclose = group("What you disclose");
+    await expect.element(disclose).toBeInTheDocument();
+    expect(disclose.element().textContent).toContain(sentence);
+    const chips = page.getByRole("list", { name: caption });
+    await expect.element(chips).toBeInTheDocument();
+    expect(
+      lineWithText(sentence).compareDocumentPosition(chips.element()) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  }
+
+  test("the acceptor's own send leads with the count of the columns it sends", async () => {
+    // A chosen file supplies three columns: the magnitude is stated as a sentence
+    // above the three chips, not left to be counted off them.
+    renderTerms(terms, {
+      perspective: "accepted",
+      outboundColumns: ["risk_score", "diagnosis", "zip"],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    await expectCountLeadsChips(
+      "You will send 3 data columns to your partner.",
+      acceptorCaption,
+    );
+  });
+
+  test("a single column is stated in the singular", async () => {
+    renderTerms(terms, {
+      perspective: "accepted",
+      outboundColumns: ["risk_score"],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    await expectCountLeadsChips(
+      "You will send 1 data column to your partner.",
+      acceptorCaption,
+    );
+    // The plural form of the same sentence is not also on screen: a count of one
+    // reading "1 data columns" would be the tell of a bare template.
+    expect(app.container.textContent).not.toContain("1 data columns");
+  });
+
+  test("the inviter's own declared send leads with its count too", async () => {
+    // The same slot under "proposing" (the module terms declare one send column), so
+    // the two blocks that can hold a column list state their magnitude alike.
+    renderTerms(terms, { perspective: "proposing" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    await expectCountLeadsChips(
+      "You will send 1 data column to your partner.",
+      inviterCaption,
+    );
+  });
+
+  test("no count is asserted over an empty send", async () => {
+    // A chosen file that sends nothing: the explicit "No columns are sent ..."
+    // confirmation stands alone. A count line here would state a send in the same
+    // breath as its own denial.
+    renderTerms(terms, { perspective: "accepted", outboundColumns: [] });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      "No columns are sent to your partner",
+    );
+    expect(app.container.textContent).not.toContain("You will send");
+  });
+
+  test("no count is asserted on the pre-file review screen, where the set is not known", async () => {
+    // outboundColumns undefined at the consent decision point: the forward-reference
+    // says the columns are confirmed after a file is chosen, and a count above it
+    // would claim a magnitude nothing has determined yet.
+    renderTerms(terms, { perspective: "review" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(app.container.textContent).toContain("After you choose your file");
+    expect(app.container.textContent).not.toContain("You will send");
+  });
+
+  test("no count is asserted when the partner receives no result", async () => {
+    // The direction answers the slot ahead of the acceptor's own set: no column
+    // leaves whatever the file holds, so the count of that file's columns would name
+    // a send that does not happen.
+    renderTerms(oneSided, {
+      perspective: "accepted",
+      outboundColumns: ["risk_score", "diagnosis"],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(app.container.textContent).toContain(NO_PAYLOAD_SENTENCE);
+    expect(app.container.textContent).not.toContain("You will send");
+  });
+});
+
+describe("InvitationTerms: every labelled tier is announced through one shared block", () => {
+  // The tiers are authored once rather than per tier: each is a role="group" whose
+  // FIRST child is the heading that names it, at one level below the terms heading.
+  // Pinning that shared structure -- not merely that each caption is a heading --
+  // is what makes a tier added later with hand-rolled markup fail here rather than
+  // announce differently from its siblings.
+  const namedByOwnHeading = [
+    "What you disclose",
+    "What the exchange produces",
+    "What you receive",
+    "How records are matched",
+    "Partner-defined character constraints",
+  ];
+
+  // Terms that bring every tier on screen at once: a two-way payload (so both
+  // direction tiers render), the module fixture's constrained field, and its legal
+  // agreement.
+  const everyTier: LinkageTerms = {
+    ...terms,
+    payload: { send: [{ name: "risk_score" }], receive: [{ name: "ssn" }] },
+  };
+
+  test("each tier is a group named by its own leading heading", async () => {
+    renderTerms(everyTier);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    for (const name of namedByOwnHeading) {
+      const tier = group(name);
+      await expect.element(tier).toBeInTheDocument();
+      const element = tier.element();
+      // Named from the one visible caption, never a second aria-label that could
+      // drift from it.
+      expect(element.getAttribute("aria-label")).toBeNull();
+      const labelledBy = element.getAttribute("aria-labelledby");
+      expect(labelledBy).toBeTruthy();
+      const heading = document.getElementById(labelledBy!);
+      expect(heading?.textContent).toBe(name);
+      // The caption leads its tier, so a reader jumping by heading lands above every
+      // fact it names rather than in the middle of them.
+      expect(element.firstElementChild).toBe(heading);
+      // One level below the terms heading, which defaults to h2 here.
+      expect(heading?.tagName).toBe("H3");
+    }
+  });
+
+  test("the legal agreement takes the same block under a fixed short name", async () => {
+    // Its visible heading is a whole sentence, so the group carries a short noun
+    // phrase as its name instead -- a screen reader would otherwise announce the
+    // sentence as the name and then read it again as the heading. The block around it
+    // is the same one: a leading heading at the tier level.
+    renderTerms(everyTier);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const legal = group("Legal agreement").element();
+    expect(legal.getAttribute("aria-label")).toBe("Legal agreement");
+    expect(legal.getAttribute("aria-labelledby")).toBeNull();
+    const heading = legal.firstElementChild;
+    expect(heading?.tagName).toBe("H3");
+    expect(heading?.textContent).toBe(
+      "This invitation attaches a legal agreement.",
+    );
+  });
+
+  test("every tier caption follows the terms heading level together", async () => {
+    // headingOrder 1 is the bench review step, where the terms heading is the page's
+    // own h1: every tier caption moves with it, so the outline nests rather than
+    // skipping a level -- and moves together, since one component sets them all.
+    renderTerms(everyTier, { headingOrder: 1 });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    for (const name of namedByOwnHeading)
+      await expect
+        .element(page.getByRole("heading", { name, level: 2 }))
+        .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("heading", {
+          name: "This invitation attaches a legal agreement.",
+          level: 2,
+        }),
+      )
+      .toBeInTheDocument();
   });
 });
 
