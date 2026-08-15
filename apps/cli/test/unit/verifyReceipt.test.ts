@@ -67,13 +67,16 @@ vi.mock("../../src/signingIdentityFile", async (importOriginal) => {
 
 /** Put `contents` at the per-user default identity path for the duration of
  * `run`, which is otherwise kept empty for the tests that assert a slot
- * unanchored. */
+ * unanchored. `mode` is applied after the write so the process umask cannot
+ * narrow a deliberately over-permissive fixture. */
 async function withDefaultIdentity<T>(
   contents: string,
   run: () => Promise<T>,
+  mode = 0o600,
 ): Promise<T> {
   fs.mkdirSync(missingIdentityDir, { recursive: true });
-  writeFileSync(defaultIdentityFile, contents, { mode: 0o600 });
+  writeFileSync(defaultIdentityFile, contents, { mode });
+  fs.chmodSync(defaultIdentityFile, mode);
   try {
     return await run();
   } finally {
@@ -1259,6 +1262,30 @@ describe("handler", () => {
     expect(exits).toEqual([]);
     expect(stdout).toContain("is your own signing identity's certificate");
     expect(stdout).not.toContain("Nothing outside the record anchors");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a world-readable default identity file is reported on the late read", async () => {
+    if (process.platform === "win32") return;
+    // The read the fallback defers is still a read of a file holding a private
+    // key, so the permission nudge has to survive being deferred with it -- the
+    // operator never named this file, and this run is where they hear about it.
+    const { signedPath, identityPath, pin } = await exchangeArtifacts();
+    const { stdout, stderr, exits, exitCode } = await withDefaultIdentity(
+      readFileSync(identityPath, "utf8"),
+      () =>
+        runVerify({
+          record: signedPath,
+          "log-level": "warn",
+          "partner-fingerprint": pin,
+        }),
+      0o644,
+    );
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("is your own signing identity's certificate");
+    expect(stderr).toContain(defaultIdentityFile);
+    expect(stderr).toContain("restrict to 0600");
+    expect(stderr).toContain("signing private key");
     expect(exitCode).toBe(0);
   });
 

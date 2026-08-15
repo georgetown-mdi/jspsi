@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   UsageError,
   computeCertificateFingerprint,
   generateSigningIdentity,
+  getLogger,
 } from "@psilink/core";
 import {
   defaultSigningIdentityPath,
@@ -129,10 +130,10 @@ test("loadSigningCertificate does not import the private key beside it", async (
   expect(await loadSigningCertificate(idPath)).toEqual(id.certificate);
 });
 
-test("loadSigningCertificate rejects an unrecognized identity-file version", async () => {
+test("both loaders reject an unrecognized identity-file version", async () => {
   // The certificate carries its own version, but a document that is not a
   // signing identity of a recognized format is not mined for one here while
-  // loadSigningIdentity refuses it.
+  // loadSigningIdentity refuses it, so the two refusals are pinned together.
   const idPath = path.join(dir, "future.json");
   const id = await generateSigningIdentity("Party A");
   fs.writeFileSync(
@@ -142,6 +143,10 @@ test("loadSigningCertificate rejects an unrecognized identity-file version", asy
   );
   await expect(loadSigningCertificate(idPath)).rejects.toThrow(UsageError);
   await expect(loadSigningCertificate(idPath)).rejects.toThrow(
+    /malformed or unsupported/,
+  );
+  await expect(loadSigningIdentity(idPath)).rejects.toThrow(UsageError);
+  await expect(loadSigningIdentity(idPath)).rejects.toThrow(
     /malformed or unsupported/,
   );
 });
@@ -161,6 +166,39 @@ test("loadSigningCertificate rejects a certificate whose self-signature is broke
   );
   await expect(loadSigningCertificate(idPath)).rejects.toThrow(UsageError);
 });
+
+test.each([
+  ["loadSigningIdentity", loadSigningIdentity],
+  ["loadSigningCertificate", loadSigningCertificate],
+] as const)(
+  "%s warns about an over-permissive file it then refuses",
+  async (_name, load) => {
+    if (process.platform === "win32") return;
+    // The nudge belongs to the read, not to a parse that succeeded: a document
+    // neither loader can make sense of was read off disk all the same, and the
+    // private key is in it whether or not this format is recognized.
+    const idPath = path.join(dir, "over-permissive.json");
+    fs.writeFileSync(idPath, "{ not an identity", { mode: 0o644 });
+    fs.chmodSync(idPath, 0o644);
+    const warn = vi
+      .spyOn(getLogger("file-utils"), "warn")
+      .mockImplementation(() => {});
+    try {
+      await expect(load(idPath)).rejects.toThrow(UsageError);
+      const warned = warn.mock.calls.map(([message]) => String(message));
+      expect(
+        warned.some(
+          (message) =>
+            message.includes(idPath) &&
+            message.includes("restrict to 0600") &&
+            message.includes("signing private key"),
+        ),
+      ).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  },
+);
 
 test("defaultSigningIdentityPath is per-user, not per-working-directory", () => {
   const p = defaultSigningIdentityPath();

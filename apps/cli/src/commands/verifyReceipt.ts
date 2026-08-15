@@ -930,10 +930,11 @@ function resolvePinnedFingerprints(
 /**
  * The certificate fingerprint of the signing identity stored at `identityPath`,
  * as an anchor for the slot holding that certificate. Only the CERTIFICATE half
- * of the file is read: the anchor says whose certificate occupies a slot, which
+ * of the file is used: the anchor says whose certificate occupies a slot, which
  * the public half states on its own, and what refuses a slot its holder did not
  * sign is the receipt signature there. This command is read-only and signs
- * nothing, so the private key beside it stays on disk.
+ * nothing, so the private key stored beside the certificate is neither imported
+ * nor compared against it.
  */
 async function identityAnchorAt(
   identityPath: string,
@@ -1035,8 +1036,8 @@ async function chosenLocalIdentity(
  * Verify the dual-signed record, reading no more of this party's own identity
  * than the run's anchors need. An identity the operator chose is read up front,
  * since choosing one is a statement about this record either way. The per-user
- * default is consulted only when a slot is still unanchored without it, so a run
- * that pins both signers reaches its verdict without that file being read at
+ * default is consulted only while a slot is still unanchored, so a run whose
+ * pins anchor both slots reaches its verdict without that file being read at
  * all.
  */
 async function verifySignedRecord(

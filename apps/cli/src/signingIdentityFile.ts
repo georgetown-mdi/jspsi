@@ -56,6 +56,10 @@ function readIdentityDocument(
         (err instanceof Error ? err.message : String(err)),
     );
   }
+  // Warned about on the read rather than on a successful parse: a file whose
+  // JSON or version a loader goes on to reject was still read off disk, and it
+  // holds the private key whether or not this process could make sense of it.
+  warnIfFileOverPermissive(identityPath, "signing private key");
   return {
     document: parseSensitiveJson(source, `signing identity at ${identityPath}`),
   };
@@ -80,7 +84,7 @@ function malformedIdentity(identityPath: string, err: unknown): UsageError {
  *
  * For a caller that will SIGN with the identity. One that only needs to know
  * whose certificate the file holds takes {@link loadSigningCertificate}, which
- * leaves the private key on disk.
+ * never imports the private key.
  */
 export async function loadSigningIdentity(
   identityPath: string,
@@ -93,18 +97,18 @@ export async function loadSigningIdentity(
   } catch (err: unknown) {
     throw malformedIdentity(identityPath, err);
   }
-  warnIfFileOverPermissive(identityPath, "signing private key");
   return identity;
 }
 
 /**
- * Load the CERTIFICATE half of the signing identity at `identityPath`, leaving
- * the private key beside it on disk: the file's format version and its
- * certificate (key encoding and self-signature) are checked, the private key is
- * neither imported nor compared against the certificate. Resolves `undefined`
- * if the file does not exist; rejects and warns on the same terms as
- * {@link loadSigningIdentity}, the permission warning included -- the file
- * holds the private key whichever half was taken from it.
+ * Load the CERTIFICATE half of the signing identity at `identityPath`: the
+ * file's format version and its certificate (key encoding and self-signature)
+ * are checked, the private key stored beside it is neither imported nor
+ * compared against the certificate. The whole document is read and parsed
+ * either way, so this is a narrower USE of the file, not a narrower read of it.
+ * Resolves `undefined` if the file does not exist; rejects and warns on the
+ * same terms as {@link loadSigningIdentity}, the permission warning included --
+ * the file holds the private key whichever half was taken from it.
  *
  * For a caller that only needs to know WHOSE certificate the file holds -- a
  * fingerprint to compare, an identity to name -- rather than to sign with it.
@@ -136,7 +140,6 @@ export async function loadSigningCertificate(
   } catch (err: unknown) {
     throw malformedIdentity(identityPath, err);
   }
-  warnIfFileOverPermissive(identityPath, "signing private key");
   return certificate;
 }
 
