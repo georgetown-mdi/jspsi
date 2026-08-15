@@ -3,11 +3,14 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  parseCertificate,
   parseSigningIdentity,
+  recordedVersionMatches,
   serializeSigningIdentity,
+  SIGNING_IDENTITY_VERSION,
   UsageError,
 } from "@psilink/core";
-import type { SigningIdentity } from "@psilink/core";
+import type { SigningCertificate, SigningIdentity } from "@psilink/core";
 
 import { warnIfFileOverPermissive, writeFileOwnerOnly } from "./fileUtils";
 import { parseSensitiveJson } from "./sensitiveFile";
@@ -34,23 +37,15 @@ export function defaultSigningIdentityPath(): string {
   return path.join(DEFAULT_SIGNING_IDENTITY_DIR, "signing-identity.json");
 }
 
-/**
- * Load and validate the signing identity at `identityPath`. Resolves
- * `undefined` if the file does not exist (so a caller can lazily create it).
- * Rejects with a {@link UsageError} on a malformed, unreadable, or inconsistent
- * file -- the same exit-64 classification a malformed key file gets. Warns
- * (advisory) if the file is readable by other users. Validation reaches
- * `crypto.subtle`, so the load is asynchronous; the file read itself is not.
- */
-export async function loadSigningIdentity(
+// The identity file read both loaders share, parsed only as far as JSON. A read
+// failure carries only a path and errno (no file content), safe to surface. The
+// JSON parse can echo a span of the source, and this file holds the P-256
+// private key, so it routes through parseSensitiveJson, which reports path-only
+// (see sensitiveFile.ts). The wrapper distinguishes an absent file from one
+// whose JSON is `null`.
+function readIdentityDocument(
   identityPath: string,
-): Promise<SigningIdentity | undefined> {
-  // Read, then parse through the sensitive-file chokepoint. A read failure
-  // carries only a path and errno (no file content), safe to surface. The JSON
-  // parse can echo a span of the source, and this file holds the P-256 private
-  // key, so it routes through parseSensitiveJson, which reports path-only (see
-  // sensitiveFile.ts). parseSigningIdentity's schema error names paths and types,
-  // never the key value, so it is kept.
+): { document: unknown } | undefined {
   let source: string;
   try {
     source = fs.readFileSync(identityPath, "utf8");
@@ -61,18 +56,88 @@ export async function loadSigningIdentity(
         (err instanceof Error ? err.message : String(err)),
     );
   }
-  const raw = parseSensitiveJson(source, `signing identity at ${identityPath}`);
+  return {
+    document: parseSensitiveJson(source, `signing identity at ${identityPath}`),
+  };
+}
+
+function malformedIdentity(identityPath: string, err: unknown): UsageError {
+  // A schema or signing error names paths and types, never the key value, so it
+  // is kept.
+  return new UsageError(
+    `signing identity at ${identityPath} is malformed or unsupported: ` +
+      (err instanceof Error ? err.message : String(err)),
+  );
+}
+
+/**
+ * Load and validate the signing identity at `identityPath`. Resolves
+ * `undefined` if the file does not exist (so a caller can lazily create it).
+ * Rejects with a {@link UsageError} on a malformed, unreadable, or inconsistent
+ * file -- the same exit-64 classification a malformed key file gets. Warns
+ * (advisory) if the file is readable by other users. Validation reaches
+ * `crypto.subtle`, so the load is asynchronous; the file read itself is not.
+ *
+ * For a caller that will SIGN with the identity. One that only needs to know
+ * whose certificate the file holds takes {@link loadSigningCertificate}, which
+ * leaves the private key on disk.
+ */
+export async function loadSigningIdentity(
+  identityPath: string,
+): Promise<SigningIdentity | undefined> {
+  const read = readIdentityDocument(identityPath);
+  if (read === undefined) return undefined;
   let identity: SigningIdentity;
   try {
-    identity = await parseSigningIdentity(raw);
+    identity = await parseSigningIdentity(read.document);
   } catch (err: unknown) {
-    throw new UsageError(
-      `signing identity at ${identityPath} is malformed or unsupported: ` +
-        (err instanceof Error ? err.message : String(err)),
-    );
+    throw malformedIdentity(identityPath, err);
   }
   warnIfFileOverPermissive(identityPath, "signing private key");
   return identity;
+}
+
+/**
+ * Load the CERTIFICATE half of the signing identity at `identityPath`, leaving
+ * the private key beside it on disk: the file's format version and its
+ * certificate (key encoding and self-signature) are checked, the private key is
+ * neither imported nor compared against the certificate. Resolves `undefined`
+ * if the file does not exist; rejects and warns on the same terms as
+ * {@link loadSigningIdentity}, the permission warning included -- the file
+ * holds the private key whichever half was taken from it.
+ *
+ * For a caller that only needs to know WHOSE certificate the file holds -- a
+ * fingerprint to compare, an identity to name -- rather than to sign with it.
+ * A caller that will sign takes {@link loadSigningIdentity}, whose consistency
+ * check is what refuses a private key that no longer matches its certificate.
+ */
+export async function loadSigningCertificate(
+  identityPath: string,
+): Promise<SigningCertificate | undefined> {
+  const read = readIdentityDocument(identityPath);
+  if (read === undefined) return undefined;
+  // The certificate carries its own version literal, but the document around it
+  // does not have to be an identity file at all; checking it keeps an
+  // unrecognized identity format from being mined for a certificate here while
+  // loadSigningIdentity refuses it.
+  if (!recordedVersionMatches(read.document, SIGNING_IDENTITY_VERSION))
+    throw malformedIdentity(
+      identityPath,
+      new Error(
+        `expected version ${SIGNING_IDENTITY_VERSION}; this is not a signing ` +
+          "identity file of a recognized format",
+      ),
+    );
+  let certificate: SigningCertificate;
+  try {
+    certificate = await parseCertificate(
+      (read.document as Record<string, unknown>)["certificate"],
+    );
+  } catch (err: unknown) {
+    throw malformedIdentity(identityPath, err);
+  }
+  warnIfFileOverPermissive(identityPath, "signing private key");
+  return certificate;
 }
 
 /**

@@ -9,6 +9,7 @@ import {
 } from "@psilink/core";
 import {
   defaultSigningIdentityPath,
+  loadSigningCertificate,
   loadSigningIdentity,
   saveSigningIdentity,
 } from "../../src/signingIdentityFile";
@@ -97,6 +98,68 @@ test("loadSigningIdentity rejects with UsageError on a tampered (inconsistent) i
   id.privateKey = other.privateKey;
   fs.writeFileSync(idPath, JSON.stringify(id), { mode: 0o600 });
   await expect(loadSigningIdentity(idPath)).rejects.toThrow(UsageError);
+});
+
+test("loadSigningCertificate resolves undefined when the file does not exist", async () => {
+  await expect(
+    loadSigningCertificate(path.join(dir, "missing.json")),
+  ).resolves.toBeUndefined();
+});
+
+test("loadSigningCertificate returns the identity's certificate", async () => {
+  const idPath = path.join(dir, "signing-identity.json");
+  const id = await generateSigningIdentity("Party A, Agency A");
+  saveSigningIdentity(idPath, id);
+  const certificate = await loadSigningCertificate(idPath);
+  expect(certificate).toEqual(id.certificate);
+});
+
+test("loadSigningCertificate does not import the private key beside it", async () => {
+  // A caller that only needs whose certificate this is takes the public half,
+  // so a private key the signing path refuses -- here not a key at all -- does
+  // not stand between it and the certificate.
+  const idPath = path.join(dir, "inconsistent.json");
+  const id = await generateSigningIdentity("Party A");
+  fs.writeFileSync(
+    idPath,
+    JSON.stringify({ ...id, privateKey: "not a key at all" }),
+    { mode: 0o600 },
+  );
+  await expect(loadSigningIdentity(idPath)).rejects.toThrow(UsageError);
+  expect(await loadSigningCertificate(idPath)).toEqual(id.certificate);
+});
+
+test("loadSigningCertificate rejects an unrecognized identity-file version", async () => {
+  // The certificate carries its own version, but a document that is not a
+  // signing identity of a recognized format is not mined for one here while
+  // loadSigningIdentity refuses it.
+  const idPath = path.join(dir, "future.json");
+  const id = await generateSigningIdentity("Party A");
+  fs.writeFileSync(
+    idPath,
+    JSON.stringify({ ...id, version: "psilink-signing-identity/v99" }),
+    { mode: 0o600 },
+  );
+  await expect(loadSigningCertificate(idPath)).rejects.toThrow(UsageError);
+  await expect(loadSigningCertificate(idPath)).rejects.toThrow(
+    /malformed or unsupported/,
+  );
+});
+
+test("loadSigningCertificate rejects a certificate whose self-signature is broken", async () => {
+  // The identity binding is still checked: an altered certificate no longer
+  // ties the identity it names to the key that signs with it.
+  const idPath = path.join(dir, "tampered-certificate.json");
+  const id = await generateSigningIdentity("Party A");
+  fs.writeFileSync(
+    idPath,
+    JSON.stringify({
+      ...id,
+      certificate: { ...id.certificate, identity: "Party Z" },
+    }),
+    { mode: 0o600 },
+  );
+  await expect(loadSigningCertificate(idPath)).rejects.toThrow(UsageError);
 });
 
 test("defaultSigningIdentityPath is per-user, not per-working-directory", () => {
