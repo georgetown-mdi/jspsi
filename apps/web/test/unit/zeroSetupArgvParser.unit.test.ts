@@ -53,6 +53,19 @@ const RENDEZVOUS_URL = "file:///srv/jobs/abc/rendezvous";
  * near-instant exit, because the same bound covers the real CLI's cold start. */
 const CHILD_EXIT_TIMEOUT_MS = 60_000;
 
+/**
+ * The budget for every test in the suite below, vitest's 5s default being the
+ * wrong scale for them: each spawns two real node children -- the stub, then the
+ * built CLI, whose ~1MB bundle every spawn parses afresh -- where a sibling unit
+ * test only calls a function. On a loaded machine those spawns run past 5s, and
+ * the file then reds with a bare test timeout rather than a parser verdict, while
+ * the {@link CHILD_EXIT_TIMEOUT_MS} bound each spawn already carries never gets to
+ * fire. Sized above that bound so the child-level timeout is the one that reports,
+ * naming the child that stalled; carried by the suite rather than by each test so
+ * a test added later cannot silently fall back to the 5s default.
+ */
+const SPAWN_TEST_TIMEOUT_MS = CHILD_EXIT_TIMEOUT_MS + 10_000;
+
 /** The newest mtime under `dir`, so a dist built before the last source edit is
  * rebuilt rather than silently parsed as though it were current. */
 function newestMtimeMs(dir: string): number {
@@ -72,6 +85,11 @@ function newestMtimeMs(dir: string): number {
  * rather than gating on the artifact keeps this suite from turning into a silent
  * skip: a run without the built CLI would otherwise report a pass with the parser
  * -- the whole point of the file -- never driven.
+ *
+ * The budget here is the build's, and sized for one: a from-scratch rollup of the
+ * CLI runs to a minute or more on a loaded machine. It buys the tests nothing --
+ * vitest bounds a hook separately from the tests it precedes, so the first spawn
+ * below answers to {@link SPAWN_TEST_TIMEOUT_MS} like every other.
  */
 beforeAll(() => {
   const built = fs.existsSync(CLI_ENTRY)
@@ -146,87 +164,91 @@ function parseWithRealCli(
   const result = spawnSync(process.execPath, [CLI_ENTRY, ...argv], {
     cwd,
     encoding: "utf8",
-    timeout: 60_000,
+    timeout: CHILD_EXIT_TIMEOUT_MS,
   });
   return { status: result.status, stderr: result.stderr };
 }
 
-describe("the console's zero-setup argv is accepted by the CLI's own parser", () => {
-  test("every emitted file-sync token survives a real parse", async () => {
-    const fileSyncArgs = retainModeFileSyncArgs();
-    // The card's model resolves retain mode's implications, so the emitted set is
-    // the trio plus the party name -- the argv the appliance really builds.
-    expect(fileSyncArgs.length).toBe(4);
-    const { argv, dir } = await captureFiledropArgv(fileSyncArgs);
+describe(
+  "the console's zero-setup argv is accepted by the CLI's own parser",
+  { timeout: SPAWN_TEST_TIMEOUT_MS },
+  () => {
+    test("every emitted file-sync token survives a real parse", async () => {
+      const fileSyncArgs = retainModeFileSyncArgs();
+      // The card's model resolves retain mode's implications, so the emitted set is
+      // the trio plus the party name -- the argv the appliance really builds.
+      expect(fileSyncArgs.length).toBe(4);
+      const { argv, dir } = await captureFiledropArgv(fileSyncArgs);
 
-    // Where the driver put them: after the connection positional and ahead of the
-    // record flag and the trailing input/output positionals.
-    expect(argv[0]).toBe(RENDEZVOUS_URL);
-    expect(argv.slice(1, 1 + fileSyncArgs.length)).toEqual(fileSyncArgs);
-    expect(argv[argv.length - 2].endsWith("input.csv")).toBe(true);
-    expect(argv[argv.length - 1].endsWith("output.csv")).toBe(true);
+      // Where the driver put them: after the connection positional and ahead of the
+      // record flag and the trailing input/output positionals.
+      expect(argv[0]).toBe(RENDEZVOUS_URL);
+      expect(argv.slice(1, 1 + fileSyncArgs.length)).toEqual(fileSyncArgs);
+      expect(argv[argv.length - 2].endsWith("input.csv")).toBe(true);
+      expect(argv[argv.length - 1].endsWith("output.csv")).toBe(true);
 
-    const parsed = parseWithRealCli(argv, dir);
-    // The parser took every token: no unknown-option refusal, and not the usage
-    // exit it takes on one (the negative control below drives that path).
-    expect(parsed.stderr).not.toContain("Unknown argument");
-    expect(parsed.status).not.toBe(EXIT_USAGE);
-    // Parsing ran to completion rather than short-circuiting: the run reached the
-    // input file, which this argv deliberately does not create.
-    expect(parsed.stderr).toContain("input.csv does not exist");
-  });
+      const parsed = parseWithRealCli(argv, dir);
+      // The parser took every token: no unknown-option refusal, and not the usage
+      // exit it takes on one (the negative control below drives that path).
+      expect(parsed.stderr).not.toContain("Unknown argument");
+      expect(parsed.status).not.toBe(EXIT_USAGE);
+      // Parsing ran to completion rather than short-circuiting: the run reached the
+      // input file, which this argv deliberately does not create.
+      expect(parsed.stderr).toContain("input.csv does not exist");
+    });
 
-  test("a token the parser does not know is refused, so the check above discriminates", async () => {
-    const fileSyncArgs = retainModeFileSyncArgs();
-    const { argv, dir } = await captureFiledropArgv(fileSyncArgs);
-    const mistyped = argv.map((token) =>
-      token === "--retain-files" ? "--retain-file" : token,
-    );
-    expect(mistyped).not.toEqual(argv);
+    test("a token the parser does not know is refused, so the check above discriminates", async () => {
+      const fileSyncArgs = retainModeFileSyncArgs();
+      const { argv, dir } = await captureFiledropArgv(fileSyncArgs);
+      const mistyped = argv.map((token) =>
+        token === "--retain-files" ? "--retain-file" : token,
+      );
+      expect(mistyped).not.toEqual(argv);
 
-    const parsed = parseWithRealCli(mistyped, dir);
-    expect(parsed.status).toBe(EXIT_USAGE);
-    expect(parsed.stderr).toContain("Unknown arguments: retain-file");
-  });
+      const parsed = parseWithRealCli(mistyped, dir);
+      expect(parsed.status).toBe(EXIT_USAGE);
+      expect(parsed.stderr).toContain("Unknown arguments: retain-file");
+    });
 
-  test("the foreign-file policy has no flag, which is why zero-setup withholds it", async () => {
-    // The capabilities gate's reason, driven rather than asserted: the card offers
-    // `unexpected_files` only where a configuration document carries it, and a
-    // zero-setup run composes none. Were it emitted anyway, the run would not
-    // silently drop the operator's choice -- the CLI would refuse the command.
-    const { argv, dir } = await captureFiledropArgv([
-      ...retainModeFileSyncArgs(),
-      "--unexpected-files=warn",
-    ]);
-    const parsed = parseWithRealCli(argv, dir);
-    expect(parsed.status).toBe(EXIT_USAGE);
-    expect(parsed.stderr).toContain("Unknown arguments: unexpected-files");
-  });
+    test("the foreign-file policy has no flag, which is why zero-setup withholds it", async () => {
+      // The capabilities gate's reason, driven rather than asserted: the card offers
+      // `unexpected_files` only where a configuration document carries it, and a
+      // zero-setup run composes none. Were it emitted anyway, the run would not
+      // silently drop the operator's choice -- the CLI would refuse the command.
+      const { argv, dir } = await captureFiledropArgv([
+        ...retainModeFileSyncArgs(),
+        "--unexpected-files=warn",
+      ]);
+      const parsed = parseWithRealCli(argv, dir);
+      expect(parsed.status).toBe(EXIT_USAGE);
+      expect(parsed.stderr).toContain("Unknown arguments: unexpected-files");
+    });
 
-  test("the production driver's own spawn of the built CLI parses", async () => {
-    const dir = scratchDir("zs-real");
-    const terminal = await awaitJobTerminalState(
-      (onTerminal) =>
-        spawnZeroSetupJob({
-          binaryPath: CLI_ENTRY,
-          connectionArgs: [RENDEZVOUS_URL],
-          fileSyncArgs: retainModeFileSyncArgs(),
-          inputPath: path.join(dir, "input.csv"),
-          outputPath: path.join(dir, "output.csv"),
-          recordPath: path.join(dir, "record.json"),
-          workdir: dir,
-          eventStream: true,
-          handlers: {
-            onEvent: () => undefined,
-            onDegraded: () => undefined,
-            onTerminal,
-          },
-        }),
-      CHILD_EXIT_TIMEOUT_MS,
-    );
-    // No stub in the middle: the driver assembled the argv and the built CLI
-    // parsed it. A rejected token would have exited usage instead.
-    expect(terminal.exitCode).not.toBe(EXIT_USAGE);
-    expect(terminal.outcome).toBe("failed");
-  });
-});
+    test("the production driver's own spawn of the built CLI parses", async () => {
+      const dir = scratchDir("zs-real");
+      const terminal = await awaitJobTerminalState(
+        (onTerminal) =>
+          spawnZeroSetupJob({
+            binaryPath: CLI_ENTRY,
+            connectionArgs: [RENDEZVOUS_URL],
+            fileSyncArgs: retainModeFileSyncArgs(),
+            inputPath: path.join(dir, "input.csv"),
+            outputPath: path.join(dir, "output.csv"),
+            recordPath: path.join(dir, "record.json"),
+            workdir: dir,
+            eventStream: true,
+            handlers: {
+              onEvent: () => undefined,
+              onDegraded: () => undefined,
+              onTerminal,
+            },
+          }),
+        CHILD_EXIT_TIMEOUT_MS,
+      );
+      // No stub in the middle: the driver assembled the argv and the built CLI
+      // parsed it. A rejected token would have exited usage instead.
+      expect(terminal.exitCode).not.toBe(EXIT_USAGE);
+      expect(terminal.outcome).toBe("failed");
+    });
+  },
+);
