@@ -400,17 +400,15 @@ export function validateAndSanitizeEvent(value: unknown): RelayEvent | null {
     !RELAY_EVENT_TYPES.has(type as RelayEventType)
   )
     return null;
-  const sanitized = sanitizeValue(record) as Record<string, unknown>;
-  const event: RelayEvent = {
-    ...sanitized,
-    v: 1,
-    type: type as RelayEventType,
-  };
-  if (type === "warning" && typeof record.message === "string")
-    event.message = sanitizeForDisplay(record.message, {
-      maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
-    });
-  return event;
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(record))
+    sanitized[sanitizeForDisplay(key)] =
+      type === "warning" && key === "message" && typeof field === "string"
+        ? sanitizeForDisplay(field, {
+            maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+          })
+        : sanitizeValue(field);
+  return { ...sanitized, v: 1, type: type as RelayEventType };
 }
 
 /**

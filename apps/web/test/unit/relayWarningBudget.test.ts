@@ -34,10 +34,12 @@ import type { RelayEvent } from "@jobs/cliDriver";
 // per-value default cuts the cross-party host-key divergence notice off before
 // its re-pin instruction and its out-of-band confirmation step -- at exactly the
 // moment the operator is being told the two parties observed different host
-// keys. This drives the real notice, with every fragment flooded, from the child
-// process's fd 3 to the string a seat renders, and fails unless the delivered
-// text still ends on the composition's own closing clause. Two budgets that
-// silently diverge are what it exists to catch.
+// keys. One leg drives the real notice, with every fragment flooded, from the
+// child process's fd 3 to the string a seat renders, and fails unless the
+// delivered text still ends on the composition's own closing clause. The real
+// notice measures well under the shared budget, so a second leg drives a message
+// composed at the budget over the same chain: that one is what catches two
+// budgets silently diverging, at either boundary, anywhere below the constant.
 
 const dirs: Array<string> = [];
 
@@ -83,6 +85,31 @@ function cliWarningMessage(): string {
   return redactAndSanitizeForDisplay(composed!, {
     maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
   });
+}
+
+/** The clause the synthetic warning below ends on, sitting at the far end of the
+ * shared budget where any boundary that re-caps under it cuts the clause away. */
+const SYNTHETIC_TAIL = " the clause no boundary below the budget can keep.";
+
+/**
+ * A first-party warning composed to exactly the shared budget, in printable
+ * ASCII so every pass escapes it to itself and its delivered length is its
+ * composed length.
+ *
+ * The real divergence notice measures well under the budget, so driving it holds
+ * only that both boundaries clear THAT notice: either one re-capped anywhere
+ * between the notice's length and the budget still delivers it whole. This
+ * message is what ties the two boundaries to the constant itself -- it survives
+ * only while the relay and the seat both cap at or above
+ * {@link WARNING_MESSAGE_MAX_DISPLAY_LENGTH}.
+ */
+function warningComposedAtBudget(): string {
+  const head =
+    "a first-party warning composed to the whole warning budget, then padded: ";
+  const padding = "x".repeat(
+    WARNING_MESSAGE_MAX_DISPLAY_LENGTH - head.length - SYNTHETIC_TAIL.length,
+  );
+  return `${head}${padding}${SYNTHETIC_TAIL}`;
 }
 
 /**
@@ -186,4 +213,23 @@ test("a relayed CLI warning reaches a console seat ending on its own clause", as
   expect(rendered.length).toBeGreaterThan(
     DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
   );
+});
+
+test("a warning composed at the shared budget reaches a seat uncut", async () => {
+  const message = warningComposedAtBudget();
+  expect(message.length).toBe(WARNING_MESSAGE_MAX_DISPLAY_LENGTH);
+
+  const relayed = await relayWarningFromChild(message);
+  const warnings = relayed.filter((event) => event.type === "warning");
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0].message).toBe(message);
+
+  const delivered = await warningsAtSeat(relayed);
+  expect(delivered).toHaveLength(1);
+
+  const [rendered] = appendSanitizedRunWarning([], delivered[0]);
+  expect(rendered).toBe(message);
+  expect(rendered.length).toBe(WARNING_MESSAGE_MAX_DISPLAY_LENGTH);
+  expect(rendered.endsWith(SYNTHETIC_TAIL)).toBe(true);
+  expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
 });
