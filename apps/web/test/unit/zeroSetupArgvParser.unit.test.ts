@@ -55,16 +55,19 @@ const CHILD_EXIT_TIMEOUT_MS = 60_000;
 
 /**
  * The budget for every test in the suite below, vitest's 5s default being the
- * wrong scale for them: each spawns two real node children -- the stub, then the
- * built CLI, whose ~1MB bundle every spawn parses afresh -- where a sibling unit
- * test only calls a function. On a loaded machine those spawns run past 5s, and
- * the file then reds with a bare test timeout rather than a parser verdict, while
- * the {@link CHILD_EXIT_TIMEOUT_MS} bound each spawn already carries never gets to
- * fire. Sized above that bound so the child-level timeout is the one that reports,
- * naming the child that stalled; carried by the suite rather than by each test so
- * a test added later cannot silently fall back to the 5s default.
+ * wrong scale for them: each spawns up to two sequential real node children --
+ * the stub, then the built CLI, whose ~1MB bundle every spawn parses afresh --
+ * where a sibling unit test only calls a function. On a loaded machine those
+ * spawns run past 5s, and the file then reds with a bare test timeout rather
+ * than a parser verdict, while the {@link CHILD_EXIT_TIMEOUT_MS} bound each
+ * spawn already carries never gets to fire. Sized above the sum both spawns of
+ * one test may legitimately take, so a child-level timeout is always the one
+ * that reports, naming the child that stalled; carried by the suite rather
+ * than by each test so a test added later cannot silently fall back to the 5s
+ * default.
  */
-const SPAWN_TEST_TIMEOUT_MS = CHILD_EXIT_TIMEOUT_MS + 10_000;
+const SPAWNS_PER_TEST = 2;
+const SPAWN_TEST_TIMEOUT_MS = SPAWNS_PER_TEST * CHILD_EXIT_TIMEOUT_MS + 10_000;
 
 /** The newest mtime under `dir`, so a dist built before the last source edit is
  * rebuilt rather than silently parsed as though it were current. */
