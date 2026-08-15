@@ -56,6 +56,7 @@ export {
   displayText,
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
+  WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
 } from "./utils/sanitizeForDisplay";
 export type {
   Displayable,

@@ -4,6 +4,7 @@ import {
   ConnectionError,
   OperatorConfigError,
   UsageError,
+  WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
@@ -251,26 +252,6 @@ export function buildStageEndEvent(
   };
 }
 
-/**
- * Display cap for a warning event's message, above the per-value default.
- *
- * A warning is a COMPOSITION, not a value: first-party explanation and recovery
- * text around fragments each already escaped and capped where they were
- * interpolated. The per-value default is sized for one fragment, so applying it
- * to the composition truncates the composition's own instruction -- and the
- * host-key divergence warning is exactly the warning a supervisor that discards
- * stderr has nothing else to read. The stderr log path delivers that warning
- * whole; this path must not deliver less of it.
- *
- * Sized to admit that warning with every fragment at its own cap and escaped a
- * second time here (a second pass doubles an already-doubled backslash), rather
- * than to the length the copy happens to have. What holds the size is the check
- * that renders the divergence warning with all four fragments flooded -- both
- * parties' key types and both fingerprints -- and fails unless its explanation
- * and its re-pin instruction both survive.
- */
-const WARNING_MESSAGE_MAX_LENGTH = 4096;
-
 /** Build a warning event from a non-fatal warning message. */
 export function buildWarningEvent(message: string): WarningEvent {
   return {
@@ -282,9 +263,12 @@ export function buildWarningEvent(message: string): WarningEvent {
     // event is already redacted (sanitizeErrorForDisplay), so the warning is
     // where the stream would otherwise carry key material in the clear. Both
     // live warning sources redact per fragment where they compose, so the
-    // fail-closed dangling rule has nothing left to consume here.
+    // fail-closed dangling rule has nothing left to consume here. The cap is the
+    // shared warning-composition budget, not the per-value default, so a
+    // consumer that re-escapes this field at the same budget delivers the whole
+    // composition rather than re-capping it.
     message: redactAndSanitizeForDisplay(message, {
-      maxLength: WARNING_MESSAGE_MAX_LENGTH,
+      maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
     }),
   };
 }

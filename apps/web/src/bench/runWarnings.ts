@@ -1,4 +1,7 @@
-import { sanitizeForDisplay } from "@psilink/core";
+import {
+  WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 /**
  * Fold one driver `onWarning` message into a seat's accumulated run warnings.
@@ -21,6 +24,16 @@ import { sanitizeForDisplay } from "@psilink/core";
  * rendered result for the preflight class; no check covers the composed count
  * along the CLI route.
  *
+ * Every message this boundary folds is a whole warning COMPOSITION, so the cap
+ * here is the composition budget rather than the per-value default: the CLI's
+ * warnings are fitted to {@link WARNING_MESSAGE_MAX_DISPLAY_LENGTH} where they
+ * are built, and of the appliance's own preflight notices two fit themselves
+ * tighter while the rest interpolate the operator-configured path unfitted and
+ * spend this budget when that path is long (the spec's console-route paragraph
+ * records the split). A seat cannot tell which source handed it a message and
+ * does not need to: the per-value default would cut a CLI notice off before
+ * its recovery instruction, which is the part an operator acts on.
+ *
  * Every seat that offers the driver an `onWarning` slot folds through this
  * function, so the four run surfaces cannot drift into separate escaping
  * rules. Accumulating (rather than replacing) is what keeps a later notice from
@@ -30,5 +43,10 @@ export function appendSanitizedRunWarning(
   current: ReadonlyArray<string>,
   message: string,
 ): Array<string> {
-  return [...current, sanitizeForDisplay(message)];
+  return [
+    ...current,
+    sanitizeForDisplay(message, {
+      maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+    }),
+  ];
 }

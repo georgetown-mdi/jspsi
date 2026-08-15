@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
 } from "@psilink/core";
 
 import { appendSanitizedRunWarning } from "@bench/runWarnings";
@@ -47,13 +47,16 @@ describe("appendSanitizedRunWarning", () => {
 
   test("caps a partner-grown message at the display budget", () => {
     // The partner controls how long the entry listing gets by syncing files in.
-    // The cap is the sink's, so no seat can render past it.
-    const raw = PARTNER_ENTRY_WARNING("a".repeat(4096));
+    // The cap is the sink's -- the whole-warning budget, since every message
+    // this boundary folds is a composition -- so no seat can render past it.
+    const raw = PARTNER_ENTRY_WARNING(
+      "a".repeat(WARNING_MESSAGE_MAX_DISPLAY_LENGTH + 1),
+    );
 
     const [rendered] = appendSanitizedRunWarning([], raw);
 
     expect(rendered.length).toBe(
-      DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
+      WARNING_MESSAGE_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
     );
     expect(rendered.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(true);
   });

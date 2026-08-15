@@ -42,6 +42,39 @@ export const DISPLAY_TRUNCATION_MARKER = "...[truncated]";
  */
 export const DEFAULT_MAX_DISPLAY_LENGTH = 256;
 
+/**
+ * Cap on the output characters a boundary emits for a whole composed WARNING,
+ * above the per-value {@link DEFAULT_MAX_DISPLAY_LENGTH}.
+ *
+ * A warning is a COMPOSITION, not a value: first-party explanation and recovery
+ * text around fragments each already escaped and capped where they were
+ * interpolated. The per-value default is sized for one fragment, so applying it
+ * to the composition truncates the composition's own instruction -- and the
+ * cross-party host-key divergence warning is exactly the warning a supervisor
+ * that discards stderr, or an operator watching a console seat, has nothing
+ * else to read. The stderr log path delivers that warning whole; no other path
+ * may deliver less of it.
+ *
+ * Three boundaries carry a whole warning message and take this cap rather than
+ * the default, so none of the three re-caps what an earlier one delivered: the
+ * CLI's fd-3 warning event, the console relay that re-validates that stream
+ * (`validateAndSanitizeEvent`), and the console seat that renders it
+ * (`appendSanitizedRunWarning`). A boundary carrying a single value keeps the
+ * default -- including the CLI's stderr log of a composed terms-exchange
+ * warning, which today interpolates only two date values and sits well under
+ * it; a terms warning composed past the default would render cut there while
+ * arriving whole on fd 3.
+ *
+ * Sized to admit that warning with every fragment at its own cap and escaped
+ * again at each boundary it crosses (a further pass doubles an already-doubled
+ * backslash), rather than to the length the copy happens to have. What holds the
+ * size is the pair of checks that render the divergence warning with all four
+ * fragments flooded -- both parties' key types and both fingerprints -- at the
+ * fd-3 event and at the console seat, and fail unless its explanation and its
+ * re-pin instruction both survive.
+ */
+export const WARNING_MESSAGE_MAX_DISPLAY_LENGTH = 4096;
+
 /** Options for {@link sanitizeForDisplay}. */
 export interface SanitizeForDisplayOptions {
   /**
