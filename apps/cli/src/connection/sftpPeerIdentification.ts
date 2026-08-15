@@ -268,9 +268,9 @@ const NON_SSH_SHAPE_DESCRIPTION: Record<PeerAnswerShape, string> = {
 /**
  * How the second connection was made, said once so no message implies psilink
  * learned this from the failed dial or presented anything to get it. A link of
- * its own beside the recovery step rather than a sentence appended to it: first
- * -party copy is capped by the display boundary exactly as anyone else's is, and
- * a step and this together outgrow one link's budget.
+ * its own beside the recovery step rather than a sentence appended to it:
+ * first-party copy is capped by the display boundary exactly as anyone else's
+ * is, and a step and this together outgrow one link's budget.
  */
 const READ_PROVENANCE =
   `psilink read this on a second connection to the same endpoint, opened ` +
