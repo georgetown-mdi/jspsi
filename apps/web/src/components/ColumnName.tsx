@@ -8,7 +8,12 @@ import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
  * the operator's own columns in the payload-declaration conflict notice (whose
  * declaration-sourced names take the escape instead), the grid's live regions, and the
  * ledger's "You will send" row -- so one name reads the same wherever the screen
- * puts it.
+ * puts it. That last notice is the one place two provenances meet, and its split
+ * costs a collision this accepts: a declared name the operator's file also carries
+ * reaches them escaped in the notice and verbatim here in the grid row the notice
+ * sends them to, so the two forms are the same string only for a name of printable
+ * ASCII carrying no backslash. Escaping the half the operator cannot inspect is
+ * worth reading one name in two forms.
  *
  * These names are the operator's OWN CSV header, read from the file they chose,
  * not the partner-controlled text `sanitizeForDisplay` exists for, so they do not

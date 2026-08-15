@@ -669,6 +669,36 @@ describe("the invitation's declared payload set against the marks", () => {
     ).toBeUndefined();
   });
 
+  test("a declared column the file keeps as its record identifier is offered too, at the cost of the identifier", () => {
+    // The same offer over a column that is neither matched on nor sent: `record_id`
+    // infers to the identifier role, so `inFile` is read from the metadata whatever
+    // use the column currently has, and what widening costs here is the one column
+    // the file keeps unsent to index its own matched rows -- not matching, which
+    // this column does not do.
+    const identifierColumns = ["first_name", "last_name", "record_id"];
+    const terms: LinkageTerms = {
+      ...nameTerms,
+      payload: { receive: [{ name: "record_id" }] },
+    };
+    const { editorState } = editorFor(identifierColumns, terms);
+    expect(
+      editorState.metadata.find((column) => column.name === "record_id")?.role,
+    ).toBe("identifier");
+    expect(acceptorDisclosedColumns(editorState.metadata)).toEqual([]);
+    expect(
+      acceptorPayloadDeclarationConflict(terms, editorState.metadata)
+        ?.declaredButNotSent,
+    ).toEqual([{ displayName: "record_id", inFile: true }]);
+
+    const widened = setColumnDisclosure(
+      editorState.metadata,
+      "record_id",
+      "payload",
+    ).metadata;
+    expect(acceptorPayloadDeclarationConflict(terms, widened)).toBeUndefined();
+    expect(widened.some((column) => column.role === "identifier")).toBe(false);
+  });
+
   test("both directions at once are stated together, and clearing one leaves the other named", () => {
     // Core reports both directions in one refusal, so both are carried in one
     // statement: an operator who clears the marked column must not meet an

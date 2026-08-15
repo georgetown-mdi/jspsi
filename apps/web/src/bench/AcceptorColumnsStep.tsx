@@ -464,7 +464,11 @@ export function AcceptorColumnsStep({
                     </List>
                     {/* The remedy here is mostly the partner's: widening the
                         operator's own disclosure to match is offered only where the
-                        column exists, and never as the fix. */}
+                        column exists, and never as the fix. Its cost is stated
+                        without naming a role: one sentence covers a list whose
+                        columns can sit at different uses -- one matching, one the
+                        record identifier, one ignored -- and the grid row it points
+                        at is where the use each of them gives up is shown. */}
                     Ask your partner for an invitation that expects what your
                     file sends
                     {expectedMissingFromFile.length > 0 &&
@@ -475,7 +479,7 @@ export function AcceptorColumnsStep({
                       }`}
                     .
                     {expectedInFile.length > 0 &&
-                      ' Where your file does have such a column, you can set it to "Sent to your partner" below instead - that discloses more than you have marked so far, and takes the column out of matching.'}
+                      ' Where your file does have such a column, you can set it to "Sent to your partner" below instead - that discloses more than you have marked so far, and each column has a single use, so sending it replaces the use it has now.'}
                   </>
                 )}
               </>

@@ -19,6 +19,10 @@ import {
 } from "@bench/acceptorColumnsModel";
 import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
 
+// The grid labels its controls through this helper, so a query for one derives the
+// expected label from it rather than restating the isolate as literal characters.
+import { isolatedColumnName } from "@components/ColumnName";
+
 import { createAppMount } from "./renderApp";
 
 import type { LinkageTerms } from "@psilink/core";
@@ -59,6 +63,17 @@ const acceptorTerms: LinkageTerms = {
 // is itself readable: U+202E RIGHT-TO-LEFT OVERRIDE reorders the copy around it
 // wherever it is rendered unescaped and uncontained.
 const RLO = "\u202E";
+
+// The over-declared half's remedies as the notice states them: the partner's first,
+// then the local widening and what it costs. Pinned once, since the two tests that
+// read it drive the offer over columns sitting at different uses -- what it costs
+// must be one true sentence for both, naming no role.
+const WIDENING_OFFER =
+  "Ask your partner for an invitation that expects what your file sends." +
+  " Where your file does have such a column, you can set it to " +
+  '"Sent to your partner" below instead - that discloses more than you ' +
+  "have marked so far, and each column has a single use, so sending it " +
+  "replaces the use it has now.";
 
 function mountStep(linkageTerms: LinkageTerms, columns: Array<string>) {
   const rows = [Object.fromEntries(columns.map((c) => [c, "x"]))];
@@ -176,14 +191,38 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
         page.getByText("Your partner expects a column you are not sending"),
       )
       .toBeInTheDocument();
-    expect(app.container.textContent).toContain(
-      "Ask your partner for an invitation that expects what your file sends." +
-        " Where your file does have such a column, you can set it to " +
-        '"Sent to your partner" below instead - that discloses more than you ' +
-        "have marked so far, and takes the column out of matching.",
-    );
+    expect(app.container.textContent).toContain(WIDENING_OFFER);
     expect(app.container.textContent).not.toContain(
       "not a column in this file",
     );
+  });
+
+  test("offers the same widening, at the same stated cost, for a column the file keeps as its record identifier", async () => {
+    // The role the offer's cost must not be written against: `record_id` is this
+    // file's record identifier, so it is neither matched on nor sent, and a cost
+    // named as matching would be false about the one column the operator keeps
+    // unsent to index their own results. The offer is the same one -- the column
+    // is in the file -- and what it costs is the use the row below shows.
+    const identifierColumns = ["first_name", "last_name", "record_id"];
+    mountStep(
+      { ...acceptorTerms, payload: { receive: [{ name: "record_id" }] } },
+      identifierColumns,
+    );
+    await expect
+      .element(
+        page.getByText("Your partner expects a column you are not sending"),
+      )
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(WIDENING_OFFER);
+
+    // The use the sentence says sending replaces, as the grid states it: the
+    // control the operator is sent to holds one choice, and here it is the
+    // identifier -- not matching, which this column does not do. The label carries
+    // the isolate as characters (a string sink cannot hold the markup), so the
+    // query is built from the same helper the grid labels with.
+    const use = app.container.querySelector<HTMLInputElement>(
+      `[aria-label="How column ${isolatedColumnName("record_id")} is used"]`,
+    );
+    expect(use?.value).toBe("Unique record identifier - not sent");
   });
 });
