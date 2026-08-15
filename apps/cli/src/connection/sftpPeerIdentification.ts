@@ -251,9 +251,9 @@ export function observePeerAnswer(
   });
 }
 
-/** The diagnostic this module raises, carried as a type rather than recognized
- * by its text, so a caller classifying downstream of it has something no party
- * on the wire can write. */
+/** The diagnostic this module raises. A distinct subtype so a future caller
+ * can classify on the type rather than the text; nothing classifies on it
+ * today. */
 class PeerIdentificationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
