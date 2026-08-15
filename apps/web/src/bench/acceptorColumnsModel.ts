@@ -23,6 +23,7 @@ import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
 import type {
   CSVRow,
+  Displayable,
   LinkageField,
   LinkageTerms,
   Metadata,
@@ -396,7 +397,7 @@ export interface AcceptorDeclaredColumnGap {
    * isolation, applied where they are rendered), so the two provenances stay
    * distinguishable: only the half the operator cannot inspect is escaped.
    */
-  displayName: string;
+  displayName: Displayable;
   /**
    * Whether the operator's own file has a column of that name, which is what decides
    * whether marking it to send exists as a remedy at all. Read from the metadata,
