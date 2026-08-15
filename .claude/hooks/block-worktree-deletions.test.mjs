@@ -608,26 +608,61 @@ describe("block-worktree-deletions hook", () => {
       `(cd ${ROOT} && rm -rf agent-other)`,
       `{ cd ${ROOT}; rm -rf agent-other; }`,
       `bash -c "rm -rf ${SIBLING}"`,
-      `r\\m -rf ${SIBLING}`,
       `timeout 5 rm -rf ${SIBLING}`,
       `TREE=${SIBLING}; rm -rf "$TREE"`,
     ]);
   });
 
-  it("reads a deletion standing after a lone backgrounding `&`", () => {
-    expectBlocked([
-      `ls & rm -rf ${SIBLING}`,
-      `sleep 1 & rm -rf ${SIBLING}/dist &`,
-      `cd ${ROOT} & rm -rf agent-other`,
-    ]);
-    // The `&&` spelling is not two separators, and a `&` inside a redirection
-    // leaves the deletion it belongs to in the stage that names its target.
+  it("keeps a `&` inside a redirect joined to the deletion it belongs to", () => {
+    // Whichever side of the operands the redirect stands on: a split at the `&`
+    // would sever the command word from the target that follows the redirect.
     expectBlocked([
       `ls && rm -rf ${SIBLING}`,
       `rm -rf ${SIBLING} 2>&1`,
       `rm -rf ${SIBLING} &> /dev/null`,
+      `rm -rf 2>&1 -- ${SIBLING}`,
+      `find ${SIBLING} 2>&1 -delete`,
     ]);
-    expectAllowed([`ls & rm -rf node_modules`, `ls && rm -rf dist`]);
+    // Backgrounded composition is a stated limit: the deletion behind a lone
+    // `&` is not seen, pinned here so the header cannot go stale.
+    expectAllowed([
+      `ls & rm -rf ${SIBLING}`,
+      `cd ${ROOT} & rm -rf agent-other`,
+      `ls && rm -rf dist`,
+    ]);
+  });
+
+  // The header claims the real-git probes run only while their answer can still
+  // change the verdict; with no guarded root under the cleaned directory the
+  // verdict is null at any force, so no probe may spawn. A logging git on PATH
+  // turns that claim into a check.
+  it("spawns no git while no guarded root sits under the cleaned directory", () => {
+    const shim = mkdtempSync(join(tmpdir(), "block-worktree-deletions-shim-"));
+    fixtures.push(shim);
+    const log = join(shim, "calls.log");
+    writeFileSync(join(shim, "git"), `#!/bin/sh\necho "$@" >> "${log}"\n`, {
+      mode: 0o755,
+    });
+    const plain = mkdtempSync(
+      join(tmpdir(), "block-worktree-deletions-plain-"),
+    );
+    fixtures.push(plain);
+    const { status } = spawnSync("node", [HOOK], {
+      input: JSON.stringify({
+        tool_name: "Bash",
+        tool_input: { command: "git clean -fd" },
+        cwd: plain,
+        agent_id: AGENT_ID,
+      }),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CLAUDE_PROJECT_DIR: PROJECT,
+        PATH: `${shim}:${process.env.PATH}`,
+      },
+    });
+    expect(status).toBe(0);
+    expect(existsSync(log)).toBe(false);
   });
 
   it("reads past the prefix words it peels, and stops at the ones it does not", () => {
@@ -643,9 +678,10 @@ describe("block-worktree-deletions hook", () => {
     expectAllowed([`nohup ls ${SIBLING}`, `timeout 5 rm -rf ${SIBLING}`]);
   });
 
-  it("reads the `\\rm` spelling that only suppresses alias expansion", () => {
+  it("reads the backslashed spellings the shell strips to the same program", () => {
     expectBlocked([
       `\\rm -rf ${SIBLING}`,
+      `r\\m -rf ${SIBLING}`,
       `\\mv ${SIBLING} /tmp/parked`,
       `sudo \\rm -rf ${SIBLING}`,
       `find ${SIBLING} -print0 | xargs -0 \\rm -rf`,

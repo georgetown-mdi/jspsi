@@ -78,19 +78,26 @@
 // warrants. What this hook binds is the accident -- a session deleting a tree it
 // can see by path -- and not a determined bypass; a command it allows is not
 // thereby endorsed.
-//   - COMPOSITION IS NOT UNWRAPPED. Stages are split on &&, ||, ;, a lone &, a
-//     newline and the pipe, and nothing else: a subshell, a brace group, or a
-//     command substitution keeps its brackets inside the stage that carries it,
-//     so `(cd ../agent-other && rm -rf .)` reads as a `(cd` and an `rm` whose
+//   - COMPOSITION IS NOT UNWRAPPED. Stages are split on &&, ||, ;, a newline
+//     and the pipe, and nothing else: a subshell, a brace group, or a command
+//     substitution keeps its brackets inside the stage that carries it, so
+//     `(cd ../agent-other && rm -rf .)` reads as a `(cd` and an `rm` whose
 //     target is `.)`, neither of which names a worktree. Nor is a command inside
-//     `bash -c "..."` read, or one behind an alias or a shell function.
+//     `bash -c "..."` read, or one behind an alias or a shell function. A lone
+//     `&` is not a separator either -- the same byte sits inside redirect words
+//     (`2>&1`, `&>`), where a split severs a command from operands that follow
+//     the redirect, and a backgrounded `cd` never moves the parent shell's
+//     directory, so splitting there opens worse holes than it closes (both
+//     measured against real bash) -- which leaves `cmd & rm -rf <tree>` reading
+//     as one stage whose command is `cmd`, the deletion behind the `&` unseen.
 //   - THE COMMAND WORD IS MATCHED LITERALLY, by basename after quotes are
 //     stripped -- from the whole command line before the deletion pre-filter and
-//     from each token before the match -- and after one leading backslash is
-//     dropped, that backslash only suppressing alias expansion. So a quoted
-//     spelling (`r"m"`, `m"v"`) and the `\rm` spelling are both caught, while a
-//     backslash inside the word (`r\m`) names the same program to the shell and a
-//     different one to this hook.
+//     from each token before the match -- and after backslashes are dropped, the
+//     shell removing each one outside quotes. So the quoted spellings (`r"m"`,
+//     `m"v"`) and the backslashed spellings (`\rm`, `r\m`) are all caught; a
+//     backslash that was inside quotes names a genuinely different program to
+//     the shell and is still read as the deleting command here, an over-refusal
+//     in the guarded direction.
 //   - ONLY sudo, command, env, nice, time, nohup, setsid, doas AND stdbuf ARE
 //     PEELED as prefix words, along with their flags and the values those flags
 //     take (`sudo -u NAME`, `nice -n 10`). Another wrapper stands where the
@@ -148,14 +155,14 @@ const GIT_PROBE_TIMEOUT_MS = 5000;
 const DELETING_COMMANDS = new Set(["rm", "rmdir", "unlink", "shred", "mv"]);
 
 // Cheap pre-filter: a command that names none of these -- tested with quotes
-// stripped the same blunt way the tokenizer strips them, so a quoted command
-// word (`r"m"`) is not hidden from the gate -- cannot be any form this hook
-// reads, and skipping it keeps the filesystem probes below off every unrelated
-// Bash call.
+// and backslashes stripped the same blunt way the token match strips them, so a
+// quoted (`r"m"`) or backslashed (`r\m`) command word is not hidden from the
+// gate -- cannot be any form this hook reads, and skipping it keeps the
+// filesystem probes below off every unrelated Bash call.
 const DELETION_MENTION = /\b(rm|rmdir|unlink|shred|mv|find|xargs|git)\b/;
 
 function mentionsDeletion(command) {
-  return DELETION_MENTION.test(command.replace(/['"]/g, ""));
+  return DELETION_MENTION.test(command.replace(/['"\\]/g, ""));
 }
 
 // Put a read-only question to real git and return its answer, or null when it
@@ -183,19 +190,22 @@ function resolvesAsRepository(directory) {
   return askGit(["rev-parse", "--show-prefix"], directory) === "";
 }
 
-// The directories under a worktree root that git would not skip, and so removes
-// along with any uncommitted work in them.
-function treesGitWouldNotSkip(root) {
+// The first directory under a worktree root that git would not skip, and so
+// removes along with any uncommitted work in it. One probe subprocess per entry,
+// so it stops at the first hit rather than pricing every sibling.
+function firstTreeGitWouldNotSkip(root) {
   let entries;
   try {
     entries = readdirSync(root, { withFileTypes: true });
   } catch {
-    return [];
+    return undefined;
   }
-  return entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => `${root}/${entry.name}`)
-    .filter((tree) => !resolvesAsRepository(tree));
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const tree = `${root}/${entry.name}`;
+    if (!resolvesAsRepository(tree)) return tree;
+  }
+  return undefined;
 }
 
 function block(reason) {
@@ -215,11 +225,14 @@ function block(reason) {
 
 // Split a command line into pipelines, then each pipeline into its stages, so a
 // deletion hidden in a compound command or fed from an earlier stage is still
-// inspected. Pragmatic, not a full shell parser. A lone `&` backgrounds what
-// stands in front of it and separates it from what follows, so it splits too;
-// `&&` is tried first at every position, which is what keeps that one whole.
+// inspected. Pragmatic, not a full shell parser. A lone `&` is deliberately not
+// a separator: the same byte sits inside redirect words (`2>&1`, `&>`), where a
+// split severs the command from operands that follow the redirect, and a
+// backgrounded `cd X &` runs in a subshell that never moves the parent shell's
+// directory -- both measured against real bash. Backgrounded composition stays
+// a stated limit in the header.
 function splitPipelines(command) {
-  return command.split(/\s*(?:&&|\|\||[;\n&])\s*/);
+  return command.split(/\s*(?:&&|\|\||[;\n])\s*/);
 }
 
 function splitStages(pipeline) {
@@ -249,10 +262,13 @@ const COMMAND_PREFIX_WORDS = new Set([
   "stdbuf",
 ]);
 
-// The program a word names, as the shell resolves it: a leading backslash only
-// suppresses alias expansion, so `\rm` runs rm.
+// The program a word names, as the shell resolves it: outside quotes the shell
+// removes a backslash and keeps the character behind it, so `\rm` and `r\m`
+// both run rm. A backslash that was inside quotes names a genuinely different
+// program; it is still read as the deleting command here, an over-refusal in
+// the guarded direction.
 function commandName(word) {
-  return basename(word.replace(/^\\/, ""));
+  return basename(word.replace(/\\/g, ""));
 }
 
 // The command words this hook reads. A prefix word's flag may take a value
@@ -584,6 +600,11 @@ function gitCleanVerdict(
     (arg) => arg === "--directories" || /^-[a-ce-z]*d/.test(arg),
   );
   if (!cleansDirectories) return null;
+  // The roots check comes first: with no guarded root under the directory the
+  // verdict is null at any force, so the config probe's answer could not change
+  // it and must not run (the header's only-while-it-can-matter invariant).
+  const roots = rootsUnder(directory, knownRoots);
+  if (roots.length === 0) return null;
   // A lifted force requirement satisfies git's baseline, so this counts it as one
   // force: a single real -f on top of it reaches the doubled force that removes a
   // nested repository on git <= 2.44, where a disabled requireForce feeds the same
@@ -596,14 +617,12 @@ function gitCleanVerdict(
     flagForce +
     (forceRequirementLifted(directory, configSettings, flagForce) ? 1 : 0);
   if (force === 0) return null;
-  const roots = rootsUnder(directory, knownRoots);
-  if (roots.length === 0) return null;
   if (force >= 2) {
     const [root] = roots;
     return `'git clean' with a doubled force and -d in '${directory}' can remove nested repositories, including the ${describeTrees(treeCount(root))} under '${root}'`;
   }
   for (const root of roots) {
-    const [orphan] = treesGitWouldNotSkip(root);
+    const orphan = firstTreeGitWouldNotSkip(root);
     if (orphan !== undefined) {
       return `'git clean' with -d in '${directory}' would remove '${orphan}', which git no longer resolves as a repository and so no longer skips`;
     }
