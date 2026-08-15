@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Place a fresh git worktree on the branching base and provision its node_modules,
 # so build/test work without a full `npm install`. Run it once, from inside the
-# worktree, before building or testing:
+# worktree, before your first edit (the base-ref re-point below only moves a
+# tree that holds no work of its own):
 #
 #   bash .claude/scripts/worktree-init.sh
 #

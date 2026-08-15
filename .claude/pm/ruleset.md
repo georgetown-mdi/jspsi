@@ -27,6 +27,14 @@ contributor) can pick up and implement without coming back to you for context.
 Two tiers; pick by the size of the work, not by habit. Both use Markdown, `-`
 not `*` for bullets, and soft line wrapping.
 
+Right-size the work itself, not just the body: substantive work is scoped so
+an issue lands as roughly a 150-900 changed-line PR, and work projecting past
+~1,200 lines is split first -- a 2026-08 retro measured PRs above that line
+causing follow-up fixes at roughly four times the rate of smaller ones. Small
+no-new-behavior items are unaffected: they take the Light tier below and batch
+well, several to one orchestration session; never inflate or merge tasks to
+fill a session.
+
 **Light -- the default.** A task whose expected diff is under roughly 100 lines
 and adds no new behavior: a correction, a sweep, a test pin, a doc or spec line,
 a deferred review finding. Its whole body is under 20 lines -- one summary

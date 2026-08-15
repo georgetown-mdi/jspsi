@@ -175,6 +175,15 @@ Each returned entry's `claim` is the contract's own text -- the Workflow paired 
 role's answer back to the claim as asked. Write it verbatim into the table and the
 ledger; a paraphrase makes the round untraceable to the contract it ran under.
 
+## Authoring a Workflow schema
+
+This command's own scripts are checked in and never edited here, but they are
+the repo's reference Workflows, so the schema rules for a long-form agent live
+here: put the required list property first; instruct "populate every property;
+empty array when none"; and set no `maxLength` on free text -- the validator
+counts characters, the model cannot, so retries never converge; ask for brevity
+in the property's description instead.
+
 ## What you do NOT do
 
 - Do not review the diff yourself or add your own findings.
