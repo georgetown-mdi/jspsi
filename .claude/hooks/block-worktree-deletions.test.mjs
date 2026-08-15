@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -54,7 +54,25 @@ function makeRepoWithWorktree() {
   writeFileSync(join(tree, "uncommitted.txt"), "exists nowhere else\n");
   const own = join(dir, ".claude", "worktrees", `agent-${AGENT_ID}`);
   git("worktree", "add", "-q", "--detach", own, "HEAD");
-  return { dir, tree, own, precious: join(tree, "uncommitted.txt") };
+  return { dir, git, tree, own, precious: join(tree, "uncommitted.txt") };
+}
+
+// The two ways an agent worktree goes orphaned in practice: its superproject's
+// admin directory removed, and its gitlink left pointing at a gitdir that is
+// gone. Either one stops real git reading the tree as a repository to skip.
+function orphan(state, dir, tree) {
+  if (state === "adminDirRemoved") {
+    rmSync(join(dir, ".git", "worktrees", basename(tree)), {
+      recursive: true,
+      force: true,
+    });
+  }
+  if (state === "danglingGitlink") {
+    writeFileSync(
+      join(tree, ".git"),
+      `gitdir: ${join(dir, ".git", "worktrees", "gone")}\n`,
+    );
+  }
 }
 
 // Run the hook as a real subprocess with a synthesized PreToolUse payload on
@@ -438,6 +456,92 @@ describe("block-worktree-deletions hook", () => {
     }
   });
 
+  // What holds a nested worktree back from a holder's single-force clean is git
+  // skipping a REPOSITORY, not a path, and an orphaned tree has stopped being
+  // one -- so the spelling that leaves a healthy tree alone takes an orphaned
+  // tree and the uncommitted work in it. That is git's behavior rather than this
+  // hook's reading of it, so every row is put to a real repo whose sibling tree
+  // holds work that exists nowhere else, in the state named: the hook must refuse
+  // exactly the rows that destroy it, and leave a holder clean over healthy trees
+  // alone. A failure means git's behavior moved and the hook's reading of it has
+  // to move too.
+  it("blocks exactly the holder cleans real git takes an orphaned tree with", () => {
+    for (const { state, spelling } of [
+      { state: "healthy", spelling: "git clean -df" },
+      { state: "healthy", spelling: "git clean -dfx" },
+      { state: "adminDirRemoved", spelling: "git clean -df" },
+      { state: "adminDirRemoved", spelling: "git clean -dfx" },
+      { state: "adminDirRemoved", spelling: "git clean --force -d" },
+      { state: "danglingGitlink", spelling: "git clean -df" },
+      // No -d leaves every untracked directory standing, a dry run reports
+      // rather than deletes, and an unforced clean is one git refuses outright:
+      // real git spares the orphan through all three, so the hook must too.
+      { state: "adminDirRemoved", spelling: "git clean -f" },
+      { state: "adminDirRemoved", spelling: "git clean -fx" },
+      { state: "adminDirRemoved", spelling: "git clean -dfn" },
+      { state: "adminDirRemoved", spelling: "git clean -d" },
+    ]) {
+      const { dir, tree, precious } = makeRepoWithWorktree();
+      orphan(state, dir, tree);
+      const label = `${state}: ${spelling}`;
+      const blocked =
+        verdict(spelling, { cwd: dir, projectDir: dir }).status === 2;
+      spawnSync("bash", ["-c", spelling], { cwd: dir });
+      expect(existsSync(precious), label).toBe(!blocked);
+    }
+  });
+
+  it("names the orphaned tree it refused", () => {
+    const { dir, tree } = makeRepoWithWorktree();
+    orphan("adminDirRemoved", dir, tree);
+    const { status, stderr } = verdict("git clean -df", {
+      cwd: dir,
+      projectDir: dir,
+    });
+    expect(status).toBe(2);
+    expect(stderr).toContain(tree);
+    expect(stderr).toContain("no longer resolves as a repository");
+  });
+
+  // A `clean.requireForce` turned off in a config file lifts git's own refusal
+  // exactly as the `-c` spelling does, and a command-line `-c` wins over the file.
+  // Which value git ends up with is git's own resolution, asked of it rather than
+  // reimplemented here, so each row is put to a real repo whose sibling tree holds
+  // uncommitted work: the hook must refuse exactly the rows that destroy it.
+  it("blocks exactly the cleans a persisted clean.requireForce turns destructive", () => {
+    for (const { spelling, from, persisted } of [
+      // Off in the repo's own config file: the holder's single -f then reaches
+      // the doubled force that takes a healthy nested tree, and reaching into an
+      // unowned tree needs no flag at all.
+      { spelling: "git clean -df", from: "dir", persisted: "false" },
+      { spelling: "git clean -d", from: "tree", persisted: "false" },
+      { spelling: "git clean", from: "tree", persisted: "false" },
+      // A `-c` on the command line settles the value either way round.
+      {
+        spelling: "git -c clean.requireForce=true clean -d",
+        from: "tree",
+        persisted: "false",
+      },
+      {
+        spelling: "git -c clean.requireForce=false clean -d",
+        from: "tree",
+        persisted: "true",
+      },
+      // Left on in the file, git refuses the unforced clean and skips the
+      // healthy nested trees, so neither row is a deletion to refuse.
+      { spelling: "git clean -d", from: "tree", persisted: "true" },
+      { spelling: "git clean -df", from: "dir", persisted: "true" },
+    ]) {
+      const { dir, git, tree, precious } = makeRepoWithWorktree();
+      git("config", "clean.requireForce", persisted);
+      const cwd = from === "dir" ? dir : tree;
+      const label = `${spelling} from ${from}, persisted ${persisted}`;
+      const blocked = verdict(spelling, { cwd, projectDir: dir }).status === 2;
+      spawnSync("bash", ["-c", spelling], { cwd });
+      expect(existsSync(precious), label).toBe(!blocked);
+    }
+  });
+
   // One holder `git clean` spelling is version-dependent, so it cannot join the
   // live-git differential above: `clean.requireForce=false` plus a single real -f
   // reaches git's nested-repo removal threshold on git <= 2.44 (where a disabled
@@ -503,11 +607,49 @@ describe("block-worktree-deletions hook", () => {
     expectAllowed([
       `(cd ${ROOT} && rm -rf agent-other)`,
       `{ cd ${ROOT}; rm -rf agent-other; }`,
-      `ls & rm -rf ${SIBLING}`,
       `bash -c "rm -rf ${SIBLING}"`,
-      `\\rm -rf ${SIBLING}`,
+      `r\\m -rf ${SIBLING}`,
       `timeout 5 rm -rf ${SIBLING}`,
       `TREE=${SIBLING}; rm -rf "$TREE"`,
+    ]);
+  });
+
+  it("reads a deletion standing after a lone backgrounding `&`", () => {
+    expectBlocked([
+      `ls & rm -rf ${SIBLING}`,
+      `sleep 1 & rm -rf ${SIBLING}/dist &`,
+      `cd ${ROOT} & rm -rf agent-other`,
+    ]);
+    // The `&&` spelling is not two separators, and a `&` inside a redirection
+    // leaves the deletion it belongs to in the stage that names its target.
+    expectBlocked([
+      `ls && rm -rf ${SIBLING}`,
+      `rm -rf ${SIBLING} 2>&1`,
+      `rm -rf ${SIBLING} &> /dev/null`,
+    ]);
+    expectAllowed([`ls & rm -rf node_modules`, `ls && rm -rf dist`]);
+  });
+
+  it("reads past the prefix words it peels, and stops at the ones it does not", () => {
+    expectBlocked([
+      `nohup rm -rf ${SIBLING}`,
+      `setsid rm -rf ${SIBLING}`,
+      `doas rm -rf ${SIBLING}`,
+      `doas -u vdorie rm -rf ${SIBLING}`,
+      `stdbuf -oL rm -rf ${SIBLING}`,
+      `stdbuf -o 0 rm -rf ${SIBLING}`,
+      `nohup setsid rm -rf ${SIBLING}`,
+    ]);
+    expectAllowed([`nohup ls ${SIBLING}`, `timeout 5 rm -rf ${SIBLING}`]);
+  });
+
+  it("reads the `\\rm` spelling that only suppresses alias expansion", () => {
+    expectBlocked([
+      `\\rm -rf ${SIBLING}`,
+      `\\mv ${SIBLING} /tmp/parked`,
+      `sudo \\rm -rf ${SIBLING}`,
+      `find ${SIBLING} -print0 | xargs -0 \\rm -rf`,
+      `find ${SIBLING} -name '*.ts' -exec \\rm {} +`,
     ]);
   });
 

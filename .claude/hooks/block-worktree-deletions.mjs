@@ -15,10 +15,16 @@
 //   - a path that CONTAINS live worktrees, the `rm -rf /workspace` shape, which
 //     names no worktree at all
 //   - a `git clean` that would delete INSIDE a worktree this session does not
-//     own -- its force coming from a flag or from a `-c clean.requireForce=false`
-//     that lifts git's own requirement -- and one whose force (a flag and that
-//     config counted together) reaches a doubled `-ff` plus -d in a directory
-//     that merely holds worktrees
+//     own -- its force coming from a flag or from a `clean.requireForce` git
+//     resolves to false, which lifts git's own requirement -- and one whose force
+//     (a flag and that config counted together) reaches a doubled `-ff` plus -d
+//     in a directory that merely holds worktrees
+//   - a single-force `git clean` with -d in a directory that merely holds
+//     worktrees while any directory under the guarded root no longer resolves as
+//     a repository: git skips a repository, not a path, so an ORPHANED tree --
+//     one whose `.git/worktrees/<name>` admin dir was removed, or whose gitlink
+//     points at a gitdir that is gone -- is taken by that single force along with
+//     the uncommitted work in it
 //   - `git worktree remove --force`, which takes a tree git's own refusal would
 //     have held on to
 //
@@ -43,40 +49,55 @@
 //     that refusal is blocked. That plain spelling is how a finished tree is
 //     retired, so it stays open to every session, owner or not
 //   - `git clean -fdx` in a directory that merely HOLDS worktrees, which real git
-//     answers with "Skipping repository" for each nested one; only a doubled
-//     force plus -d takes them. Reaching INTO a tree is the other case and needs
-//     no doubling -- a single -f deletes that tree's untracked files, -fd its
-//     untracked directories. The test beside this file drives real git against a
-//     real linked worktree for every spelling rather than modelling the rule
+//     answers with "Skipping repository" for each nested one, while every one of
+//     them still resolves as a repository; only a doubled force plus -d takes
+//     those. Reaching INTO a tree is the other case and needs no doubling -- a
+//     single -f deletes that tree's untracked files, -fd its untracked
+//     directories. The test beside this file drives real git against a real
+//     linked worktree for every spelling rather than modelling the rule
 //   - any `git clean` dry run (-n, --dry-run), which deletes nothing
 //
 // The commands read as deletions are rm, rmdir, unlink, shred, mv, find with a
 // deleting action, and those same commands reached through xargs in a pipeline,
 // plus the two git spellings above.
 //
-// STATED LIMITS. This hook reads a plain command line and nothing more, so each
-// of the following reaches a worktree past it. They are recorded rather than
-// closed: closing them means a shell-syntax-aware parser, a larger and more
-// fragile thing than the accident this guards against warrants. What this hook
-// binds is the accident -- a session deleting a tree it can see by path -- and
-// not a determined bypass; a command it allows is not thereby endorsed.
-//   - COMPOSITION IS NOT UNWRAPPED. Stages are split on &&, ||, ;, a newline
-//     and the pipe, and nothing else: a subshell, a brace group, or a command
-//     substitution keeps its brackets inside the stage that carries it, so
-//     `(cd ../agent-other && rm -rf .)` reads as a `(cd` and an `rm` whose
-//     target is `.)`, neither of which names a worktree. A single `&` is not a
-//     separator either, so a deletion standing after one reads as an argument of
-//     the command in front of it. Nor is a command inside `bash -c "..."` read,
-//     or one behind an alias or a shell function.
+// TWO QUESTIONS ARE PUT TO REAL GIT rather than modelled from its on-disk layout
+// or its configuration precedence: whether a directory under the guarded root
+// still resolves as a repository, and whether a config file has turned
+// clean.requireForce off. Both probes are read-only, bounded by a timeout, and
+// run only while their answer can still change the verdict, so an ordinary Bash
+// call reaches neither. A repository probe that cannot answer leaves the
+// directory treated as unresolved, so the tree stays guarded; a config probe that
+// cannot answer leaves git's default in place, which is the requirement of a
+// force this hook assumed before it asked.
+//
+// STATED LIMITS. Beyond the two questions above, this hook reads a plain command
+// line and nothing more, so each of the following reaches a worktree past it.
+// They are recorded rather than closed: closing them means a shell-syntax-aware
+// parser, a larger and more fragile thing than the accident this guards against
+// warrants. What this hook binds is the accident -- a session deleting a tree it
+// can see by path -- and not a determined bypass; a command it allows is not
+// thereby endorsed.
+//   - COMPOSITION IS NOT UNWRAPPED. Stages are split on &&, ||, ;, a lone &, a
+//     newline and the pipe, and nothing else: a subshell, a brace group, or a
+//     command substitution keeps its brackets inside the stage that carries it,
+//     so `(cd ../agent-other && rm -rf .)` reads as a `(cd` and an `rm` whose
+//     target is `.)`, neither of which names a worktree. Nor is a command inside
+//     `bash -c "..."` read, or one behind an alias or a shell function.
 //   - THE COMMAND WORD IS MATCHED LITERALLY, by basename after quotes are
 //     stripped -- from the whole command line before the deletion pre-filter and
-//     from each token before the match -- so a quoted spelling (`r"m"`, `m"v"`)
-//     is caught, while an escaped one (`\rm`, `r\m`) names the same program to
-//     the shell and a different one to this hook.
-//   - ONLY sudo, command, env, nice AND time ARE PEELED as prefix words, along
-//     with their flags and the values those flags take (`sudo -u NAME`,
-//     `nice -n 10`). Another wrapper -- `timeout 5 rm ...`, `nohup`, `setsid` --
-//     stands where the command word belongs and the stage reads as the wrapper.
+//     from each token before the match -- and after one leading backslash is
+//     dropped, that backslash only suppressing alias expansion. So a quoted
+//     spelling (`r"m"`, `m"v"`) and the `\rm` spelling are both caught, while a
+//     backslash inside the word (`r\m`) names the same program to the shell and a
+//     different one to this hook.
+//   - ONLY sudo, command, env, nice, time, nohup, setsid, doas AND stdbuf ARE
+//     PEELED as prefix words, along with their flags and the values those flags
+//     take (`sudo -u NAME`, `nice -n 10`). Another wrapper stands where the
+//     command word belongs and the stage reads as the wrapper -- `timeout 5 rm
+//     ...` among them, deliberately: peeling it means skipping a positional
+//     duration, which is modelling that tool's grammar rather than reading a
+//     prefix word.
 //   - TARGETS THAT ONLY EXIST AT RUNTIME are not seen: a path read from a file,
 //     built up in a variable, or produced by a glob whose literal prefix names
 //     no worktree.
@@ -99,22 +120,30 @@
 //     `GIT_DIR` and `-c core.worktree=` do not, each put to real git in the test
 //     beside this file. A redirect spelling outside that measured set would pass
 //     unread.
-//   - clean.requireForce IS READ ONLY AS A `-c clean.requireForce=<off>` on the
-//     command line, `<off>` one of git's boolean-false spellings (false, no, off,
-//     0, empty), the last such `-c` winning as real git resolves it. A
-//     `--config-env` naming an environment variable, or a `GIT_CONFIG_*` pair,
-//     sets the same key from a value this hook cannot see, so neither is read.
+//   - clean.requireForce IS READ FROM THE COMMAND LINE AND FROM THE CONFIG FILES
+//     GIT ITSELF RESOLVES, AND FROM NOTHING ELSE. On the command line it is a
+//     `-c clean.requireForce=<off>`, `<off>` one of git's boolean-false spellings
+//     (false, no, off, 0, empty), the last such `-c` winning and any `-c` setting
+//     of the key winning over the files, as real git resolves it; the persisted
+//     value is asked of `git config` in the directory being cleaned rather than
+//     resolved here. That probe runs in this hook's own environment, so a spelling
+//     that moves which files git reads for the command alone -- an inline
+//     `GIT_CONFIG_GLOBAL=`, `HOME=` or `GIT_CONFIG_*` assignment, or a
+//     `--config-env` naming an environment variable -- sets the key from a value
+//     the probe does not see.
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude. Any
 // unexpected failure here falls through to exit 0 (fail open) so a bug in this
 // hook can never wedge every Bash command.
 
+import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
 const CLAUDE_DIR = ".claude";
 const WORKTREES_DIR = "worktrees";
 const AGENT_TREE_PREFIX = "agent-";
+const GIT_PROBE_TIMEOUT_MS = 5000;
 
 const DELETING_COMMANDS = new Set(["rm", "rmdir", "unlink", "shred", "mv"]);
 
@@ -127,6 +156,46 @@ const DELETION_MENTION = /\b(rm|rmdir|unlink|shred|mv|find|xargs|git)\b/;
 
 function mentionsDeletion(command) {
   return DELETION_MENTION.test(command.replace(/['"]/g, ""));
+}
+
+// Put a read-only question to real git and return its answer, or null when it
+// gave none: no git on PATH, a directory that is gone, a non-zero exit, or a run
+// that outlived the timeout.
+function askGit(args, cwd) {
+  const probe = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    timeout: GIT_PROBE_TIMEOUT_MS,
+    stdio: ["ignore", "pipe", "ignore"],
+    env: { ...process.env, LC_ALL: "C", GIT_PAGER: "cat" },
+  });
+  return probe.status === 0 ? (probe.stdout ?? "").trim() : null;
+}
+
+// Whether git resolves `directory` as a repository root -- the property that
+// makes `git clean` skip it instead of removing it. An empty prefix is git's own
+// answer that the directory it started from is the top of a working tree; a
+// directory that only sits inside one answers with the path down to it, and an
+// orphaned worktree answers not at all. Asked of git rather than read out of the
+// gitlink, because which of those states git still treats as a repository is
+// git's behavior and not this hook's reading of the layout.
+function resolvesAsRepository(directory) {
+  return askGit(["rev-parse", "--show-prefix"], directory) === "";
+}
+
+// The directories under a worktree root that git would not skip, and so removes
+// along with any uncommitted work in them.
+function treesGitWouldNotSkip(root) {
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `${root}/${entry.name}`)
+    .filter((tree) => !resolvesAsRepository(tree));
 }
 
 function block(reason) {
@@ -146,9 +215,11 @@ function block(reason) {
 
 // Split a command line into pipelines, then each pipeline into its stages, so a
 // deletion hidden in a compound command or fed from an earlier stage is still
-// inspected. Pragmatic, not a full shell parser.
+// inspected. Pragmatic, not a full shell parser. A lone `&` backgrounds what
+// stands in front of it and separates it from what follows, so it splits too;
+// `&&` is tried first at every position, which is what keeps that one whole.
 function splitPipelines(command) {
-  return command.split(/\s*(?:&&|\|\||[;\n])\s*/);
+  return command.split(/\s*(?:&&|\|\||[;\n&])\s*/);
 }
 
 function splitStages(pipeline) {
@@ -163,14 +234,26 @@ function tokenize(stage) {
 }
 
 // Words that stand in front of the real command word without changing which
-// command runs.
+// command runs. Each takes only option-shaped arguments of its own, so peeling it
+// needs no knowledge of its grammar -- which is why `timeout`, whose duration
+// stands as a bare positional, is deliberately absent.
 const COMMAND_PREFIX_WORDS = new Set([
   "sudo",
   "command",
   "env",
   "nice",
   "time",
+  "nohup",
+  "setsid",
+  "doas",
+  "stdbuf",
 ]);
+
+// The program a word names, as the shell resolves it: a leading backslash only
+// suppresses alias expansion, so `\rm` runs rm.
+function commandName(word) {
+  return basename(word.replace(/^\\/, ""));
+}
 
 // The command words this hook reads. A prefix word's flag may take a value
 // (`sudo -u NAME`) that would otherwise stand where the command word belongs; a
@@ -216,7 +299,7 @@ function invocation(tokens) {
         next !== undefined &&
         index + 1 < tokens.length &&
         !next.startsWith("-") &&
-        !INSPECTED_COMMANDS.has(basename(next))
+        !INSPECTED_COMMANDS.has(commandName(next))
       ) {
         index++;
       }
@@ -226,7 +309,11 @@ function invocation(tokens) {
   }
   const word = tokens[index];
   if (word === undefined) return null;
-  return { name: basename(word), args: tokens.slice(index + 1), environment };
+  return {
+    name: commandName(word),
+    args: tokens.slice(index + 1),
+    environment,
+  };
 }
 
 // The `.claude/worktrees` root a path lies under and the single worktree inside
@@ -349,11 +436,11 @@ function deletesPaths(command) {
     return (
       command.args.includes("-delete") ||
       (command.args.some((arg) => /^-(exec|execdir|ok|okdir)$/.test(arg)) &&
-        command.args.some((arg) => DELETING_COMMANDS.has(basename(arg))))
+        command.args.some((arg) => DELETING_COMMANDS.has(commandName(arg))))
     );
   }
   if (command.name === "xargs") {
-    return command.args.some((arg) => DELETING_COMMANDS.has(basename(arg)));
+    return command.args.some((arg) => DELETING_COMMANDS.has(commandName(arg)));
   }
   return false;
 }
@@ -401,17 +488,17 @@ function gitInvocation(args) {
 }
 
 // `git clean` refuses to delete without a force UNLESS `clean.requireForce` is
-// configured off, so a `-c` that disables it satisfies the force condition on
+// configured off, so a setting that disables it satisfies the force condition on
 // its own. The key is compared case-folded (git folds config key names) and the
 // value against git's boolean-false spellings, both measured against real git in
 // the test beside this file; the last `-c` setting of the key wins, as real git
-// resolves it. A `--config-env` spelling or a `GIT_CONFIG_*` environment pair
-// names a value this hook cannot see and is not read.
+// resolves it. Null when no `-c` names the key at all, which is what sends the
+// question on to git's own config files.
 const REQUIRE_FORCE_KEY = "clean.requireforce";
 const FORCE_DISABLING_VALUES = new Set(["false", "no", "off", "0", ""]);
 
-function requireForceDisabled(configSettings) {
-  let disabled = false;
+function commandLineRequireForce(configSettings) {
+  let disabled = null;
   for (const setting of configSettings) {
     const equals = setting.indexOf("=");
     const key = (
@@ -424,6 +511,22 @@ function requireForceDisabled(configSettings) {
     disabled = FORCE_DISABLING_VALUES.has(value);
   }
   return disabled;
+}
+
+// Whether git's own requirement of a force is lifted for this clean. A `-c` on
+// the command line settles it, winning over the config files as real git resolves
+// it; otherwise the persisted value is asked of git in the directory being
+// cleaned rather than resolved here. A doubled flag force has already carried the
+// command past every threshold this config could move it to, so the probe is
+// skipped there.
+function forceRequirementLifted(directory, configSettings, flagForce) {
+  const fromCommandLine = commandLineRequireForce(configSettings);
+  if (fromCommandLine !== null) return fromCommandLine;
+  if (flagForce >= 2) return false;
+  return (
+    askGit(["config", "--type=bool", "--get", REQUIRE_FORCE_KEY], directory) ===
+    "false"
+  );
 }
 
 // Any unambiguous abbreviation of `--force`. git accepts a long option shortened
@@ -453,33 +556,59 @@ function isDryRun(args) {
 // The two `git clean` cases, which real git answers differently. Reaching INTO a
 // worktree is an ordinary clean of that tree, so one force takes its untracked
 // files and -d its untracked directories. A directory that merely HOLDS
-// worktrees loses them only to a doubled force with -d, because git skips a
-// nested repository for every lesser spelling.
-function gitCleanVerdict(args, directory, ownTrees, knownRoots, forceDisabled) {
+// worktrees loses the healthy ones only to a doubled force with -d, because git
+// skips a nested repository for every lesser spelling -- and loses an orphaned
+// one, which git no longer reads as a repository to skip, to a single force
+// with -d.
+function gitCleanVerdict(
+  args,
+  directory,
+  ownTrees,
+  knownRoots,
+  configSettings,
+) {
   if (isDryRun(args)) return null;
-  // A disabled `clean.requireForce` satisfies git's baseline force requirement,
-  // so this counts it as one force: a single real -f on top of it reaches the
-  // doubled force that removes a nested repository on git <= 2.44, where a
-  // disabled requireForce feeds the same force counter a real -f does. git >= 2.45
-  // stopped feeding that counter from the config, so there this shape only skips
-  // the nested tree and the guard, which blocks it either way, conservatively
-  // over-refuses it rather than model the git version. That boundary was settled
-  // by driving real git across it (the 2.44/2.45 versions), not by reading git.
-  const force = forceCount(args) + (forceDisabled ? 1 : 0);
-  if (force === 0) return null;
+  const flagForce = forceCount(args);
   const context = worktreeContext(directory);
   if (context !== null) {
     if (owns(directory, ownTrees)) return null;
+    if (
+      flagForce === 0 &&
+      !forceRequirementLifted(directory, configSettings, flagForce)
+    ) {
+      return null;
+    }
     return `'git clean' would delete inside '${directory}', an agent worktree this session does not own${ownershipNote(ownTrees)}`;
   }
   const cleansDirectories = args.some(
     (arg) => arg === "--directories" || /^-[a-ce-z]*d/.test(arg),
   );
-  if (force < 2 || !cleansDirectories) return null;
-  const [root] = rootsUnder(directory, knownRoots);
-  return root === undefined
-    ? null
-    : `'git clean' with a doubled force and -d in '${directory}' can remove nested repositories, including the ${describeTrees(treeCount(root))} under '${root}'`;
+  if (!cleansDirectories) return null;
+  // A lifted force requirement satisfies git's baseline, so this counts it as one
+  // force: a single real -f on top of it reaches the doubled force that removes a
+  // nested repository on git <= 2.44, where a disabled requireForce feeds the same
+  // force counter a real -f does. git >= 2.45 stopped feeding that counter from
+  // the config, so there this shape only reaches the single-force threshold and
+  // the guard, which blocks it either way, conservatively over-refuses it rather
+  // than model the git version. That boundary was settled by driving real git
+  // across it (the 2.44/2.45 versions), not by reading git.
+  const force =
+    flagForce +
+    (forceRequirementLifted(directory, configSettings, flagForce) ? 1 : 0);
+  if (force === 0) return null;
+  const roots = rootsUnder(directory, knownRoots);
+  if (roots.length === 0) return null;
+  if (force >= 2) {
+    const [root] = roots;
+    return `'git clean' with a doubled force and -d in '${directory}' can remove nested repositories, including the ${describeTrees(treeCount(root))} under '${root}'`;
+  }
+  for (const root of roots) {
+    const [orphan] = treesGitWouldNotSkip(root);
+    if (orphan !== undefined) {
+      return `'git clean' with -d in '${directory}' would remove '${orphan}', which git no longer resolves as a repository and so no longer skips`;
+    }
+  }
+  return null;
 }
 
 // The directory a git invocation ends up working in: each `-C` applied from
@@ -503,7 +632,7 @@ function gitVerdict(args, cwd, ownTrees, knownRoots, environment) {
       directory,
       ownTrees,
       knownRoots,
-      requireForceDisabled(git.configSettings),
+      git.configSettings,
     );
   }
   if (git.subcommand !== "worktree" || git.args[0] !== "remove") return null;
