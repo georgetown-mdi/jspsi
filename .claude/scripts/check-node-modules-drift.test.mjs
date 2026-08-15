@@ -340,7 +340,7 @@ describe("the drift report", () => {
   it("names both remedies when the packages are shared", () => {
     const report = formatDrift("/tree", drift, "/primary").join("\n");
     expect(report).toContain("npm install` in /primary");
-    expect(report).toContain("npm install` in /tree");
+    expect(report).toContain("npm ci` in /tree");
     expect(report).toContain("does not write into /primary");
   });
 });

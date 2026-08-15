@@ -1,4 +1,7 @@
 node_modules
+# Agent isolation worktrees: another branch's working tree, whose files a
+# tree-wide format run would rewrite underneath the session working in it.
+.claude/worktrees
 dist
 *.local*
 .env*

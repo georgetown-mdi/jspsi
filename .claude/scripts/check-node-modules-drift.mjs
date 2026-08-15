@@ -225,7 +225,7 @@ export function formatDrift(dir, drift, sharedFrom = null, limit = LISTED) {
     lines.push(
       `These packages are shared by symlink from ${sharedFrom}, whose install does not match this lockfile (it may be older, or from another branch).`,
       `Keep sharing them (fast): run \`npm install\` in ${sharedFrom}, then re-run this script.`,
-      `Fix this tree alone (slower): run \`npm install\` in ${dir} -- it replaces the symlinks with a private tree matching this lockfile, and does not write into ${sharedFrom}.`,
+      `Fix this tree alone (slower): run \`npm ci\` in ${dir} -- it replaces the symlinks with a private tree pinned to this lockfile, cannot rewrite it, and does not write into ${sharedFrom}.`,
     );
   } else {
     lines.push(

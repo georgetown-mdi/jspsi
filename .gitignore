@@ -1,6 +1,9 @@
 node_modules
 .DS_Store
+# Worktrees: linked checkouts of this repo, carried by their own branches and
+# never content of this one. The agent harness puts them under .claude/.
 .worktrees
+.claude/worktrees/
 dist
 coverage
 *.local*
