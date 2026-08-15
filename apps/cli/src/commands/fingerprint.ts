@@ -143,7 +143,8 @@ export interface ResolveSigningIdentityInput {
   identityPath: string;
   /** `--identity`; binds a new identity, or (with no existing file) names it. */
   identityArg?: string;
-  /** `linkage_terms.identity` from the config, used when no `--identity`. */
+  /** `linkage_terms.identity` from the config, used when no `--identity`, and
+   * the value a newly bound identity is checked for divergence against. */
   configIdentity?: string;
   /** `--force`: regenerate even if an identity already exists. */
   force: boolean;
@@ -155,7 +156,8 @@ export interface ResolveSigningIdentityInput {
  * it is unit-testable without the CLI plumbing. Loads the identity at
  * `identityPath`; if absent (or `force`), generates and persists a new one. A
  * `--force` regeneration of an existing identity re-keys it under the same bound
- * identity unless `--identity` overrides. Returns the identity and the action
+ * identity unless `--identity` overrides. Binding an identity that differs from
+ * `configIdentity` warns and proceeds. Returns the identity and the action
  * taken; never auto-creates at any path other than this one.
  *
  * @throws {UsageError} if no identity is available to bind a new key.
@@ -211,6 +213,30 @@ export async function resolveSigningIdentity(
         '--identity "Name, Organization, contact" or set ' +
         "linkage_terms.identity in the config",
     );
+  // A partner verifies a receipt against the identity in the AGREED TERMS, not
+  // the one the presented certificate carries, so a certificate bound to
+  // anything other than linkage_terms.identity signs receipts the partner
+  // rejects. Surface that at the binding rather than leaving it to fail at the
+  // partner's exchange. It warns rather than blocks: which identity to bind is
+  // the operator's own choice, and the config may legitimately be edited to
+  // match afterwards. Called only on the paths that write a binding: an
+  // invocation that adopts another process's file binds nothing, the same
+  // silence the plain Loaded path keeps.
+  const warnOnConfigDivergence = () => {
+    if (
+      input.configIdentity !== undefined &&
+      input.configIdentity.length > 0 &&
+      identityString !== input.configIdentity
+    )
+      input.log.warn(
+        `the signing identity is bound to "${identityString}", which differs ` +
+          `from linkage_terms.identity "${input.configIdentity}" in the config. ` +
+          "Your partner verifies a receipt against the identity in the agreed " +
+          "terms, so they will reject a receipt signed under this certificate. " +
+          "Make the two match: regenerate with --force and a matching " +
+          "--identity, or set linkage_terms.identity to the bound identity.",
+      );
+  };
   const identity = await generateSigningIdentity(identityString);
 
   // A genuine first creation (no file on disk at all) is exclusive, so two
@@ -231,6 +257,7 @@ export async function resolveSigningIdentity(
     for (let attempt = 1; ; attempt++) {
       try {
         saveSigningIdentity(input.identityPath, identity, { exclusive: true });
+        warnOnConfigDivergence();
         return { identity, action: "Created" };
       } catch (err) {
         if (!(err instanceof FileExistsError)) throw err;
@@ -255,6 +282,7 @@ export async function resolveSigningIdentity(
   }
 
   saveSigningIdentity(input.identityPath, identity);
+  warnOnConfigDivergence();
   return { identity, action: "Regenerated" };
 }
 
