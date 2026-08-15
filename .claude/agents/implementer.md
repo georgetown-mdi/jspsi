@@ -19,8 +19,12 @@ produce is your final message to the caller. Never end expecting a reply.
 - Work only on the branch or worktree the prompt names. Never commit to staging or
   main; never attribute yourself on a commit.
 - If the prompt drops you in a fresh isolated worktree (no `node_modules` -- check
-  with `ls node_modules`), run `bash .claude/scripts/worktree-init.sh` once before
-  you build or test; it provisions deps and builds core so the suite runs.
+  with `ls node_modules`), run `bash .claude/scripts/worktree-init.sh` before your
+  first edit rather than before your first build: the harness cuts the tree from the
+  default branch, and the script re-points it onto `origin/staging`, provisions deps
+  and builds core. Once the tree holds a commit or an edit the script leaves the
+  base alone and only reports it, so moving the work onto `origin/staging` is then
+  yours to do by hand.
 - Never start a long command with `run_in_background`: you have no turn left for
   the completion notification to land in. Run it in the FOREGROUND with a raised
   `timeout` (the Bash tool's ceiling is 600000 ms); split a command that exceeds
