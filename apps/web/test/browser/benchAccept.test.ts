@@ -1303,18 +1303,40 @@ describe("acceptor columns step: one column name across the screen", () => {
     expect(app.container.textContent).not.toContain("\\u0444");
   });
 
-  // The one hostile class whose containment this panel can be measured on by ORDER:
-  // driven in this Chromium over these names, an unterminated RLO is the only one of
-  // the unclosed classes (RLO, LRO, RLE, RLI, LRI, FSI, a stray PDF) that reorders
-  // the three names. With all-Latin neighbours in an LTR sentence the others leave
-  // "pre", "evil", "post" in the order the panel lists them whether or not they are
-  // isolated, so an order assertion on them would hold with the isolation gone. That
-  // is a claim about order alone and not about layout: an unterminated RLE or RLI
-  // still shifts the glyphs after it along the line, isolated or not. What contains
-  // the others is not driven here: it rests on the computed `unicode-bidi: isolate`
-  // asserted above and on the PDI semantics ColumnName cites (UAX #9).
+  // What the checks below measure is ORDER, not layout: an unterminated RLE or RLI
+  // still shifts the glyphs after it along the line, isolated or not. And what
+  // contains a class whose order holds either way is the computed
+  // `unicode-bidi: isolate` asserted above and the PDI semantics ColumnName cites
+  // (UAX #9), neither of which this measurement stands in for.
   const RIGHT_TO_LEFT_OVERRIDE = "\u202E";
-  const PANEL_NAMES = ["pre", `notes${RIGHT_TO_LEFT_OVERRIDE}evil`, "post"];
+
+  function namesCarrying(marker: string): Array<string> {
+    return ["pre", `notes${marker}evil`, "post"];
+  }
+
+  const PANEL_NAMES = namesCarrying(RIGHT_TO_LEFT_OVERRIDE);
+
+  /** The visual order of the three names in the sentence the panel renders, laid
+   * out with none of the isolation the panel gives them. */
+  async function unisolatedVisualOrder(marker: string): Promise<Array<string>> {
+    app.render(
+      createElement(
+        "p",
+        null,
+        "For each matched row: ",
+        ...namesCarrying(marker).flatMap((name, index) => [
+          index > 0 ? ", " : "",
+          createElement("span", { key: name }, name),
+        ]),
+        ".",
+      ),
+    );
+    await expect
+      .element(page.getByText("For each matched row:", { exact: false }))
+      .toBeInTheDocument();
+    const paragraph = app.container.querySelector("p") as Element;
+    return visualOrderWithin(paragraph, ["pre", "evil", "post"]);
+  }
 
   test("an unterminated override leaves the names beside it where the panel lists them", async () => {
     mountStep(["first_name", "last_name", ...PANEL_NAMES]);
@@ -1333,32 +1355,41 @@ describe("acceptor columns step: one column name across the screen", () => {
 
   test("the same measurement sees the reordering the isolation prevents", async () => {
     // The control for the check above: it asserts a layout property, and is worth
-    // nothing unless the instrument can see that property break. The same names in
-    // the same sentence and the same arrangement, rendered without the isolation the
-    // panel renders them with, come out in a visual order the DOM does not hold --
-    // the override carries "evil" past the name listed after it.
-    app.render(
-      createElement(
-        "p",
-        null,
-        "For each matched row: ",
-        ...PANEL_NAMES.flatMap((name, index) => [
-          index > 0 ? ", " : "",
-          createElement("span", { key: name }, name),
-        ]),
-        ".",
-      ),
-    );
-    await expect
-      .element(page.getByText("For each matched row:", { exact: false }))
-      .toBeInTheDocument();
-    const paragraph = app.container.querySelector("p") as Element;
-    expect(visualOrderWithin(paragraph, ["pre", "evil", "post"])).toEqual([
+    // nothing unless the instrument can see that property break. Stripped of the
+    // isolation the panel renders them with, the same names in the same sentence
+    // come out in a visual order the DOM does not hold -- the override carries
+    // "evil" past the name listed after it.
+    expect(await unisolatedVisualOrder(RIGHT_TO_LEFT_OVERRIDE)).toEqual([
       "pre",
       "post",
       "evil",
     ]);
   });
+
+  // Why that pair uses an RLO and no other class: with all-Latin neighbours in an
+  // LTR sentence, each class below leaves the names where the panel lists them even
+  // unisolated, so an order assertion on it would hold with the isolation gone and
+  // measure nothing.
+  const OTHER_UNCLOSED_CLASSES = [
+    { className: "a left-to-right override (U+202D)", marker: "\u202D" },
+    { className: "a right-to-left embedding (U+202B)", marker: "\u202B" },
+    { className: "a left-to-right embedding (U+202A)", marker: "\u202A" },
+    { className: "a right-to-left isolate (U+2067)", marker: "\u2067" },
+    { className: "a left-to-right isolate (U+2066)", marker: "\u2066" },
+    { className: "a first-strong isolate (U+2068)", marker: "\u2068" },
+    { className: "a stray PDF (U+202C)", marker: "\u202C" },
+  ];
+
+  test.each(OTHER_UNCLOSED_CLASSES)(
+    "$className leaves the names where the panel lists them, unisolated",
+    async ({ marker }) => {
+      expect(await unisolatedVisualOrder(marker)).toEqual([
+        "pre",
+        "evil",
+        "post",
+      ]);
+    },
+  );
 });
 
 describe("acceptor columns step: the send summary is gated on the inviting party receiving a result", () => {
