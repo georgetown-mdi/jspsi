@@ -11,8 +11,10 @@ import {
   UsageError,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
+import type { SFTPConnectionConfig } from "@psilink/core";
 import Ssh2SftpClient from "ssh2-sftp-client";
 
+import { withPeerIdentificationDiagnosis } from "../../src/connection/sftpPeerIdentification";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { selectedBackend } from "../sftpServer";
 import {
@@ -767,6 +769,28 @@ test("probeHostKeyFingerprint returns the server's real fingerprint without auth
       ...auth,
     },
   });
+  expect(presented.fingerprint).toBe(srv.hostKeyFingerprint);
+});
+
+test("the peer-identification diagnosis leaves a real SSH server's probe alone", async () => {
+  // The control for the non-SSH peers the unit suite drives with bare listeners:
+  // the wrapper both probe entry points run their probe through, against a
+  // server that really does speak SSH, returns the fingerprint and adds nothing.
+  const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
+    verbose: -1,
+    pollingFrequency: 10,
+  });
+  const config: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: srv.host,
+      port: srv.port,
+      username: srv.usera.username,
+    },
+  };
+  const presented = await withPeerIdentificationDiagnosis(config, () =>
+    conn.probeHostKeyFingerprint(config),
+  );
   expect(presented.fingerprint).toBe(srv.hostKeyFingerprint);
 });
 

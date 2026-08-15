@@ -1,9 +1,14 @@
-import type { Socket } from "node:net";
+import net from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 
 import { expect, test } from "vitest";
 import type Ssh2SftpClient from "ssh2-sftp-client";
 import type { SFTPWrapper } from "ssh2";
 
+import {
+  isPreIdentificationDialFailure,
+  peerProbeTarget,
+} from "../../src/connection/sftpPeerIdentification";
 import { createRawSftpClient } from "../rawSftpClient";
 import {
   type InProcessSftpServer,
@@ -600,6 +605,176 @@ inProcessOnly(
       await client.end().catch(() => {});
       await srv.stop();
     }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+// What a proxy or gateway answering the SFTP port sends instead of an SSH
+// identification string.
+const HTTP_ERROR_PAGE =
+  "HTTP/1.0 403 Forbidden\r\n" +
+  "Content-Type: text/html\r\n" +
+  "\r\n" +
+  "<html><head><title>Forbidden</title></head></html>\r\n";
+
+interface BarePeer {
+  host: string;
+  port: number;
+  /**
+   * Destroy the accepted connection, then close the listener. The destroy is
+   * what lets the close settle: after this stack has rejected a dial the
+   * connection is still open on this side, and `close()` waits on it (measured
+   * -- it did not settle within 1.5 s until the accepted socket was gone).
+   */
+  stop(): Promise<void>;
+}
+
+// A bare TCP listener answering one connection the way `answer` says, on a port
+// the kernel picks: the peer shape no SFTP backend can be made to take, one that
+// is not an SSH server at all.
+function barePeer(answer: (socket: Socket) => void): Promise<BarePeer> {
+  return new Promise((resolve) => {
+    const accepted: Socket[] = [];
+    const server = net.createServer((socket) => {
+      accepted.push(socket);
+      // A reset peer's own socket errors on the write side; nothing here reads
+      // it, and an unhandled 'error' would fail the file.
+      socket.on("error", () => {});
+      answer(socket);
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as AddressInfo;
+      resolve({
+        host: "127.0.0.1",
+        port,
+        stop: () =>
+          new Promise<void>((closed) => {
+            for (const socket of accepted) socket.destroy();
+            server.close(() => closed());
+          }),
+      });
+    });
+  });
+}
+
+type DialGateOutcome = "gated" | "rejected past the gate" | "connected";
+
+// Dial such a peer with the pinned client and report whether the rejection it
+// raises still reaches the diagnosis's gate.
+async function preIdentificationDialOutcome(
+  answer: (socket: Socket) => void,
+): Promise<DialGateOutcome> {
+  const peer = await barePeer(answer);
+  const client = createRawSftpClient();
+  try {
+    await client.connect({
+      host: peer.host,
+      port: peer.port,
+      // Inert: none of these dials reaches userauth.
+      username: "unused",
+      readyTimeout: READY_TIMEOUT_MS,
+      // One attempt, as dialOptions above holds itself to, so the verdict below
+      // reads a single rejection rather than the last of a retried series.
+      retries: 1,
+    });
+    return "connected";
+  } catch (err) {
+    return isPreIdentificationDialFailure(err)
+      ? "gated"
+      : "rejected past the gate";
+  } finally {
+    await peer.stop();
+  }
+}
+
+// The premise arming the host-key probe's non-SSH-answer diagnosis
+// (`apps/cli/src/connection/sftpPeerIdentification.ts`): the rejection this
+// stack raises for a dial that ended before the peer sent an SSH identification
+// string still carries wording the diagnosis matches. A version that reworded it
+// disarms the diagnosis -- which degrades to the undiagnosed rejection, never to
+// a wrong one -- and nothing else here would show it. Driven against bare
+// listeners rather than the test SFTP server, an SSH server being the one thing
+// these peers must not be, so this case is not backend-scoped like the ones
+// above.
+test(
+  "a peer that never identifies itself is rejected in wording the diagnosis gates on",
+  async () => {
+    expect({
+      httpErrorPage: await preIdentificationDialOutcome((socket) => {
+        socket.write(HTTP_ERROR_PAGE);
+        socket.end();
+      }),
+      closedHavingSentNothing: await preIdentificationDialOutcome((socket) => {
+        socket.end();
+      }),
+      // A reset rather than a close, because that is what the ECONNRESET
+      // fragment is for -- and driven with resetAndDestroy rather than destroy,
+      // which at accept with nothing left to read arrives as an ordinary close
+      // (measured) and would leave that fragment unexercised.
+      resetAtAccept: await preIdentificationDialOutcome((socket) => {
+        socket.resetAndDestroy();
+      }),
+    }).toEqual({
+      httpErrorPage: "gated",
+      closedHavingSentNothing: "gated",
+      resetAtAccept: "gated",
+    });
+  },
+  TEST_TIMEOUT_MS,
+);
+
+const LOOPBACK_HOST = "127.0.0.1";
+
+// The endpoint a PORTLESS dial of the pinned client actually used, read off the
+// address the stack itself names in its refusal -- the one place it reports
+// where it went. Undefined when the dial failed some other way, which here means
+// something is answering that port: such a rejection names no address, and
+// re-deriving one would be re-deriving the premise under test.
+async function portlessDialTarget(): Promise<
+  { host: string; port: number } | undefined
+> {
+  const client = createRawSftpClient();
+  try {
+    await client.connect({
+      host: LOOPBACK_HOST,
+      // No `port`: the case under test, and what core hands ssh2 for a config
+      // that sets none.
+      username: "unused",
+      readyTimeout: READY_TIMEOUT_MS,
+      retries: 1,
+    });
+    return undefined;
+  } catch (err) {
+    const refused = /ECONNREFUSED (\S+):(\d+)/.exec(
+      (err as { message?: string }).message ?? "",
+    );
+    return refused ? { host: refused[1], port: Number(refused[2]) } : undefined;
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+// The endpoint premise beside the wording one: the diagnosis opens a connection
+// of its own, so it has to reach the endpoint the failed dial reached, the
+// default-port case included -- a read of a different port would report about a
+// peer the dial never spoke to. The default is not asserted as a number here; it
+// is whatever the pinned stack dialed, and the diagnosis's resolved target is
+// held to that.
+test(
+  "the diagnosis resolves a portless config to the endpoint the pinned stack dialed",
+  async (ctx) => {
+    const dialed = await portlessDialTarget();
+    if (dialed === undefined)
+      ctx.skip(
+        `a portless dial of ${LOOPBACK_HOST} was not refused, so the stack ` +
+          `named no address to read its default port from`,
+      );
+    expect(
+      peerProbeTarget({
+        channel: "sftp",
+        server: { host: LOOPBACK_HOST, username: "unused" },
+      }),
+    ).toEqual(dialed);
   },
   TEST_TIMEOUT_MS,
 );
