@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { Fragment, useEffect, useId, useRef } from "react";
 
 import {
   Alert,
@@ -17,11 +17,9 @@ import {
   IconCircleCheck,
 } from "@tabler/icons-react";
 
-import {
-  OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
-  sanitizeForDisplay,
-} from "@psilink/core";
+import { OUTBOUND_SEND_NO_PAYLOAD_SENTENCE } from "@psilink/core";
 
+import { ColumnName, isolatedColumnName } from "@components/ColumnName";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
@@ -303,8 +301,11 @@ export function AcceptorColumnsStep({
                   data={[
                     { value: "", label: "Choose a column", disabled: true },
                     ...columns.map((column) => ({
+                      // The option's VALUE stays the raw header -- it is the
+                      // identity `remap` binds the field to; only the label is a
+                      // display string.
                       value: column,
-                      label: column,
+                      label: isolatedColumnName(column),
                     })),
                   ]}
                   onChange={(event) => {
@@ -334,15 +335,19 @@ export function AcceptorColumnsStep({
               </Text>
             ) : (
               <Text size="xs">
-                {/* These are the operator's OWN CSV headers, not a sanitized
-                    summary value, so sanitize them for display like every other
-                    column-name surface -- a header carrying bidi/zero-width/
-                    homoglyph characters must not misrepresent to the operator
-                    what leaves their machine. */}
+                {/* The operator's OWN CSV headers, shown through the same
+                    ColumnName every column-name surface on this screen uses, so
+                    the name here reads exactly as it does in the grid row the
+                    operator marked -- and a header carrying bidi characters
+                    cannot reorder this sentence about what leaves the machine.
+                    What the isolation does not contain is stated on ColumnName. */}
                 For each matched row:{" "}
-                {disclosed
-                  .map((column) => sanitizeForDisplay(column))
-                  .join(", ")}
+                {disclosed.map((column, index) => (
+                  <Fragment key={column}>
+                    {index > 0 && ", "}
+                    <ColumnName name={column} />
+                  </Fragment>
+                ))}
                 .
               </Text>
             )}
@@ -370,12 +375,14 @@ export function AcceptorColumnsStep({
             The invitation says your partner accepts no columns from your file,
             but {unacceptedColumns.length === 1 ? "this one is" : "these are"}{" "}
             still marked to send:
-            {/* The operator's OWN CSV headers, escaped at this sink like every
-                other column-name surface, and one per line so a name carrying a
-                list separator cannot read as two. */}
+            {/* The operator's OWN CSV headers, shown through the same ColumnName
+                every column-name surface on this screen uses, and one per line so
+                a name carrying a list separator cannot read as two. */}
             <List size="sm" withPadding listStyleType="circle" my={4}>
               {unacceptedColumns.map((column) => (
-                <List.Item key={column}>{sanitizeForDisplay(column)}</List.Item>
+                <List.Item key={column}>
+                  <ColumnName name={column} />
+                </List.Item>
               ))}
             </List>
             The exchange cannot start while the two disagree. Set &quot;How it
