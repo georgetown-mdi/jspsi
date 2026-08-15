@@ -3,7 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import {
+  WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import type { ChildProcess } from "node:child_process";
 import type { Readable } from "node:stream";
@@ -377,6 +380,14 @@ const RELAY_EVENT_TYPES = new Set<RelayEventType>([
  * hostile string that somehow reached the stream cannot inject a control
  * sequence into a downstream consumer. Returns null for anything that does not
  * match the schema.
+ *
+ * The relay knows which source handed it a string, which is what lets the budget
+ * differ by field: a `warning` event's own `message` is a whole composition the
+ * CLI fitted to {@link WARNING_MESSAGE_MAX_DISPLAY_LENGTH}, so this pass takes
+ * that same budget and the console seat receives the explanation and the
+ * recovery instruction the CLI put in it. Every other string -- a stage label, a
+ * terminal error message, a nested value anywhere, this event's own keys --
+ * carries one value and keeps the per-value default.
  */
 export function validateAndSanitizeEvent(value: unknown): RelayEvent | null {
   if (value === null || typeof value !== "object" || Array.isArray(value))
@@ -390,7 +401,16 @@ export function validateAndSanitizeEvent(value: unknown): RelayEvent | null {
   )
     return null;
   const sanitized = sanitizeValue(record) as Record<string, unknown>;
-  return { ...sanitized, v: 1, type: type as RelayEventType };
+  const event: RelayEvent = {
+    ...sanitized,
+    v: 1,
+    type: type as RelayEventType,
+  };
+  if (type === "warning" && typeof record.message === "string")
+    event.message = sanitizeForDisplay(record.message, {
+      maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+    });
+  return event;
 }
 
 /**

@@ -3,6 +3,12 @@ import fs from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 
 import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
+  WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+} from "@psilink/core";
+
+import {
   JOB_CLI_BINARY_ENV,
   classifyExit,
   resolveCliBinaryPath,
@@ -127,6 +133,46 @@ describe("validateAndSanitizeEvent enforces the v1 vocabulary and sanitizes", ()
     const message = event?.message as string;
     expect(message).not.toContain("");
     expect(message).not.toContain("\n");
+  });
+
+  test("a warning message takes the composition budget, every other string the default", () => {
+    const flood = "x".repeat(WARNING_MESSAGE_MAX_DISPLAY_LENGTH + 100);
+    const perValueCap =
+      DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length;
+
+    // The warning's own message is a whole composition; a sibling field on the
+    // same event, a nested one, a stage label, and a terminal error's message
+    // each carry one value and keep the per-value cap.
+    const warning = validateAndSanitizeEvent({
+      v: 1,
+      type: "warning",
+      message: flood,
+      detail: flood,
+      nested: { message: flood },
+    });
+    expect((warning?.message as string).length).toBe(
+      WARNING_MESSAGE_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
+    );
+    expect((warning?.detail as string).length).toBe(perValueCap);
+    expect((warning?.nested as { message: string }).message.length).toBe(
+      perValueCap,
+    );
+
+    const stage = validateAndSanitizeEvent({
+      v: 1,
+      type: "stage",
+      id: "s1",
+      label: flood,
+    });
+    expect((stage?.label as string).length).toBe(perValueCap);
+
+    const failure = validateAndSanitizeEvent({
+      v: 1,
+      type: "error",
+      category: "exchange",
+      message: flood,
+    });
+    expect((failure?.message as string).length).toBe(perValueCap);
   });
 
   test("sanitizes nested string fields (stages array)", () => {

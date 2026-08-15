@@ -197,12 +197,14 @@ function andMoreSuffix(count: number): string {
  * exchange does about it, the step that clears it, and the files the operator must
  * NOT be read as being told to delete.
  *
- * The sink escapes and CAPS what it renders, so the whole sentence has to fit that
- * cap or the clause that neutralizes the delete instruction is what falls off the
- * end. The rendezvous path is the one unbounded part, and it is the operator's own
- * server-side configuration for the console's single rendezvous mount, so a path too
- * long to fit beside the sentence is left out rather than allowed to crowd out the
- * recovery. What this measures at the rendered boundary is pinned by a test.
+ * The sink escapes and CAPS what it renders, so the whole sentence has to fit the
+ * budget this composition is measured against ({@link DEFAULT_MAX_DISPLAY_LENGTH},
+ * at or under the sink's own) or the clause that neutralizes the delete instruction
+ * is what falls off the end. The rendezvous path is the one unbounded part, and it is
+ * the operator's own server-side configuration for the console's single rendezvous
+ * mount, so a path too long to fit beside the sentence is left out rather than
+ * allowed to crowd out the recovery. What this measures at the rendered boundary is
+ * pinned by a test.
  *
  * @internal exported for testing
  */
