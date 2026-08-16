@@ -212,8 +212,8 @@ test("on a lost create race, adopts the winner's identity instead of failing", a
 test("on a lost create race, no divergence warning fires for the discarded local intent", async () => {
   const idPath = path.join(dir, "id.json");
   // The winner's on-disk identity matches the config; only this invocation's
-  // discarded intent diverges. Binding nothing, it must not warn about the
-  // divergence -- the same silence the plain Loaded path keeps.
+  // discarded intent diverges. The identity in effect is the winner's, so there
+  // is nothing to warn about -- the discarded intent binds nothing.
   idFile.saveSigningIdentity(
     idPath,
     await generateSigningIdentity("Config Party"),
@@ -406,7 +406,7 @@ test("a --force re-key that keeps a divergent bound identity warns", async () =>
   expect(warn.mock.calls[0]?.[0]).toContain("linkage_terms.identity");
 });
 
-test("an existing identity is loaded without a divergence warning", async () => {
+test("loading an existing divergent identity warns on every run", async () => {
   const idPath = path.join(dir, "id.json");
   await resolveSigningIdentity({
     identityPath: idPath,
@@ -414,7 +414,9 @@ test("an existing identity is loaded without a divergence warning", async () => 
     force: false,
     log: noopLog,
   });
-  // The check is about the binding being made; a load binds nothing.
+  // A config edited after the binding was made leaves the divergence standing,
+  // and nothing else re-reports it: the load path is the only place a routine
+  // run sees it.
   const warn = vi.fn();
   const { action } = await resolveSigningIdentity({
     identityPath: idPath,
@@ -423,7 +425,98 @@ test("an existing identity is loaded without a divergence warning", async () => 
     log: { warn },
   });
   expect(action).toBe("Loaded");
+  expect(warn).toHaveBeenCalledOnce();
+  const message = warn.mock.calls[0]?.[0] as string;
+  expect(message).toContain('"Party A"');
+  expect(message).toContain('"Party A, Agency A"');
+  expect(message).toContain("linkage_terms.identity");
+  expect(message).toContain("reject");
+
+  // Deliberate nagging: the second run repeats it rather than remembering that
+  // the first one warned.
+  const warnAgain = vi.fn();
+  await resolveSigningIdentity({
+    identityPath: idPath,
+    configIdentity: "Party A, Agency A",
+    force: false,
+    log: { warn: warnAgain },
+  });
+  expect(warnAgain).toHaveBeenCalledOnce();
+});
+
+test("loading a matching identity stays silent", async () => {
+  const idPath = path.join(dir, "id.json");
+  await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "Party A",
+    force: false,
+    log: noopLog,
+  });
+  const warn = vi.fn();
+  const { action } = await resolveSigningIdentity({
+    identityPath: idPath,
+    configIdentity: "Party A",
+    force: false,
+    log: { warn },
+  });
+  expect(action).toBe("Loaded");
   expect(warn).not.toHaveBeenCalled();
+});
+
+test("loading with no config identity stays silent", async () => {
+  const idPath = path.join(dir, "id.json");
+  await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "Party A",
+    force: false,
+    log: noopLog,
+  });
+  const warn = vi.fn();
+  const { action } = await resolveSigningIdentity({
+    identityPath: idPath,
+    force: false,
+    log: { warn },
+  });
+  expect(action).toBe("Loaded");
+  expect(warn).not.toHaveBeenCalled();
+});
+
+test("an adopted concurrent identity that diverges warns", async () => {
+  const idPath = path.join(dir, "id.json");
+  // The winner's on-disk binding is what this run ends up using, so it is the
+  // value the config is compared against -- not this invocation's discarded
+  // --identity intent, which matches the config here and binds nothing.
+  idFile.saveSigningIdentity(
+    idPath,
+    await generateSigningIdentity("Winner Party"),
+  );
+  const realLoad = idFile.loadSigningIdentity;
+  let calls = 0;
+  const spy = vi
+    .spyOn(idFile, "loadSigningIdentity")
+    .mockImplementation(async (p: string) => {
+      calls += 1;
+      return calls === 1 ? undefined : realLoad(p);
+    });
+  try {
+    const warn = vi.fn();
+    const { identity, action } = await resolveSigningIdentity({
+      identityPath: idPath,
+      identityArg: "Config Party",
+      configIdentity: "Config Party",
+      force: false,
+      log: { warn },
+    });
+    expect(action).toBe("Loaded");
+    expect(identity.certificate.identity).toBe("Winner Party");
+    const messages = warn.mock.calls.map((c) => c[0] as string);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toContain("another process created");
+    expect(messages[1]).toContain("linkage_terms.identity");
+    expect(messages[1]).toContain('"Winner Party"');
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test("handler puts the divergence warning on stderr, leaving stdout the bare value", async () => {
@@ -459,6 +552,43 @@ test("handler puts the divergence warning on stderr, leaving stdout the bare val
   expect(stdoutWrites.join("")).toBe(`${fingerprint}\n`);
   expect(stderrWrites.join("")).toContain("linkage_terms.identity");
   expect(stderrWrites.join("")).toContain("Party From Config");
+});
+
+test("handler warns on a divergent load and still prints the bare value", async () => {
+  const idPath = path.join(dir, "id.json");
+  const cfg = path.join(dir, "psilink.yaml");
+  // The identity was bound before the config named a different party -- the
+  // routine re-run that used to print the fingerprint and nothing else.
+  const stored = await generateSigningIdentity("Party A");
+  idFile.saveSigningIdentity(idPath, stored);
+  fs.writeFileSync(cfg, "linkage_terms:\n  identity: Party From Config\n");
+  const { stdoutWrites, stderrWrites, restore } = captureStdio();
+  const logSpy = vi
+    .spyOn(console, "log")
+    .mockImplementation((...args: unknown[]) => {
+      stdoutWrites.push(args.map((a) => String(a)).join(" ") + "\n");
+    });
+  try {
+    await handler(
+      argv({
+        "identity-file": idPath,
+        "config-file": cfg,
+        force: false,
+      }),
+    );
+  } finally {
+    logSpy.mockRestore();
+    restore();
+  }
+  const fingerprint = await computeCertificateFingerprint(stored.certificate);
+  expect(stdoutWrites.join("")).toBe(`${fingerprint}\n`);
+  const stderr = stderrWrites.join("");
+  expect(stderr).toContain("Loaded signing identity");
+  expect(stderr).toContain("linkage_terms.identity");
+  expect(stderr).toContain("Party From Config");
+  expect(stderr).toContain("Party A");
+  // The identity file is untouched by a load that warns.
+  await expect(loadSigningIdentity(idPath)).resolves.toEqual(stored);
 });
 
 // --- handler: --export-certificate guard -------------------------------------

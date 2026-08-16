@@ -287,6 +287,10 @@ connection:
   path: /mnt/sftp-share/exchanges/agency-a-agency-b
 ```
 
+### Signing identity and the agreed terms
+
+Under `signing.mode: certificate` the run loads this party's signing identity before any credential, terms, or data are sent. A partner verifies a receipt against the identity in the agreed terms rather than the one the certificate carries, so an identity bound to anything other than the run's `linkage_terms.identity` -- or the `--identity` that replaces it for that run -- signs receipts the partner rejects. The run warns, naming both values and the two ways to reconcile them, and proceeds: which identity to bind is your choice, and the exchange itself still completes. The warning fires on every run while the two differ, so a scheduled exchange repeats it each cycle until you reconcile them, either with [`psilink fingerprint --force --identity`](#signing-identity-fingerprint) or by editing `linkage_terms.identity`.
+
 ### Sweeping a stale exchange directory
 
 A crashed or mismatched prior run can leave protocol files in an `sftp`/`filedrop` directory that stall the next rendezvous. `--sweep-exchange-files` deletes every protocol file in the directory before the rendezvous -- this party's and the peer's hellos, acks, locks, joining sentinels, and messages -- and starts a fresh exchange. Foreign (non-protocol) files are never touched. It is accepted by `psilink exchange` and the zero-setup form, is CLI-only, and is never persisted to `psilink.yaml`. Confirm that no other session is using the directory before passing it: a sweep during a live exchange destroys that exchange's state.
@@ -363,6 +367,8 @@ Print this party's signing certificate fingerprint, creating the signing identit
 The identity lives at `~/.psilink/signing-identity.json` by default; `--identity-file` overrides that path, as does `signing.identity_file` in the configuration named by `--config-file`. Creation is announced rather than silent. The identity string bound into the certificate -- the party's name, organization, and contact -- comes from `--identity`, or from `linkage_terms.identity` in the configuration when the flag is absent; once an identity exists, `--identity` is ignored unless `--force` is also given.
 
 Bind the identity that matches `linkage_terms.identity` in your configuration. A partner verifies a receipt against the identity in the agreed terms rather than the one the presented certificate carries, so a certificate bound to any other string signs receipts the partner rejects. Binding one that diverges from the configured value warns and proceeds -- which string to bind is your choice, and editing `linkage_terms.identity` to match is the other way to reconcile them -- but bring the two into agreement before you share the fingerprint.
+
+The warning is not confined to the run that binds the identity: a later run that only reads the existing one warns the same way, so a configuration edited after the identity was created still reports the divergence. It repeats on every run while the two differ, and the fingerprint value on stdout is unaffected.
 
 `--force` regenerates the identity: a new key with a new fingerprint, which invalidates every fingerprint a partner has already pinned. They must re-pin before your receipts verify again, so treat it as a coordinated action rather than a retry.
 

@@ -36,6 +36,7 @@ import {
 } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveReceiptOutput } from "../receiptFile";
+import { warnOnIdentityDivergence } from "../signingIdentityDivergence";
 import {
   defaultSigningIdentityPath,
   loadSigningIdentity,
@@ -745,11 +746,20 @@ export async function prepareDataset(
  * signing step fails closed on verification (no partner certificate can be
  * trusted).
  *
+ * `termsIdentity` is this run's `linkage_terms.identity` -- the identity the
+ * partner verifies the loaded certificate against -- and a certificate bound to
+ * anything else warns on `log` before the exchange proceeds (see
+ * {@link warnOnIdentityDivergence}). Pass it and the run's logger on every call:
+ * a load that skipped the check would leave the divergence to fail at the
+ * partner's end of a completed exchange.
+ *
  * @throws {UsageError} when `mode: certificate` is set but no signing identity
  *   exists at the resolved path, or the file is malformed/unreadable.
  */
 export async function resolveSigningPersist(
   signing: SigningConfig | undefined,
+  termsIdentity: string | undefined,
+  log: { warn: (message: string) => void },
 ): Promise<SigningPersist | null> {
   if (signing === undefined || signing.mode !== "certificate") return null;
   const identityPath = expandTilde(
@@ -762,6 +772,7 @@ export async function resolveSigningPersist(
         `found at ${identityPath}; run 'psilink fingerprint' to create one, or ` +
         `set signing.identity_file to the correct path`,
     );
+  warnOnIdentityDivergence(identity.certificate, termsIdentity, log);
   return {
     identity,
     partnerFingerprint: signing.partnerFingerprint,
@@ -879,16 +890,24 @@ export async function handler(argv: Arguments): Promise<void> {
       exitWithError(log, err, err instanceof UsageError ? 64 : 69);
     }
 
+    // termsIdentity is the identity this run PUTS IN THE AGREED TERMS, which is
+    // what a partner verifies a signed receipt's certificate against. It is left
+    // undefined where neither the flag nor the config supplies one: `identity`
+    // then falls back to the local account name purely to label the record, and
+    // there is no configured value for a certificate to diverge from.
     let identity: string;
+    let termsIdentity: string | undefined;
     if (options.identity) {
       identity = options.identity;
+      termsIdentity = identity;
       if (exchangeDataSpec.linkageTerms)
         exchangeDataSpec.linkageTerms = {
           ...exchangeDataSpec.linkageTerms,
           identity,
         };
     } else {
-      identity = exchangeDataSpec.linkageTerms?.identity ?? userInfo().username;
+      termsIdentity = exchangeDataSpec.linkageTerms?.identity;
+      identity = termsIdentity ?? userInfo().username;
     }
 
     let prepared: PreparedExchange;
@@ -918,12 +937,18 @@ export async function handler(argv: Arguments): Promise<void> {
 
     // Resolve the signed-receipt inputs from the config's `signing` block before
     // any credential, terms, or data are sent, so a certificate-mode block with no
-    // signing identity fails fast (exit 64) rather than after the handshake.
-    // `null` when signing is not configured for certificate mode, which leaves the
-    // exchange unsigned.
+    // signing identity fails fast (exit 64) rather than after the handshake, and
+    // an identity bound to something other than this run's terms identity is
+    // warned about while the run can still be stopped rather than after it has
+    // produced receipts the partner rejects. `null` when signing is not configured
+    // for certificate mode, which leaves the exchange unsigned.
     let signing: SigningPersist | null;
     try {
-      signing = await resolveSigningPersist(exchangeDataSpec.signing);
+      signing = await resolveSigningPersist(
+        exchangeDataSpec.signing,
+        termsIdentity,
+        log,
+      );
     } catch (err) {
       exitWithError(log, err, err instanceof UsageError ? 64 : 69);
     }
