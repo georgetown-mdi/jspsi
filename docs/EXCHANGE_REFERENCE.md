@@ -199,7 +199,7 @@ The first eight values are the complete type set for a `linkage_fields[].type`. 
 
 Additional types will be added as their use case arises.
 
-A column named `zip`, `zip5`, `zip_5`, `zipcode`, or `zip_code` is inferred as `zip_code`. Like `phone_number` and `email_address`, it is a matchable type with no default linkage key, so an inferred ZIP column is used for matching only when a key references it and is not sent as payload unless you mark it so.
+A ZIP column is inferred as `zip_code` from any of its recognized names (`zip` and its spellings; the complete table is in [DEFAULT_STANDARDIZATION.md](spec/DEFAULT_STANDARDIZATION.md#type-inference-from-column-names)). Like `phone_number` and `email_address`, it is a matchable type with no default linkage key, so an inferred ZIP column is used for matching only when a key references it and is not sent as payload unless you mark it so.
 
 #### Constraints
 
@@ -984,6 +984,8 @@ What inference assigns, when it runs:
 | A name ending in `_id` | `identifier` | `identifier` when it is the header's only `identifier`-typed column, otherwise `payload` | `true` |
 | Anything else | `other` | `payload` | `true` |
 
+The complete list of column names that infer each type, with the role and payload default each assigns, is in [DEFAULT_STANDARDIZATION.md](spec/DEFAULT_STANDARDIZATION.md#type-inference-from-column-names).
+
 Both identifier rows produce `type: identifier`, and that type is what decides the `role`: a header carrying exactly one `identifier`-typed column roles it `identifier` whatever its name, so a lone `case_id` indexes the records. A header carrying several gives `role: identifier` to a column named `id` or `identifier` when one is present, and to no column at all otherwise -- two `_id` columns and nothing else leaves both roled `payload`, so none of this party's columns indexes its own records in the result.
 
 The two identifier rows are the ones to check before an exchange: an inferred identifier column is transmitted, so a party that does not intend to disclose its own record keys authors a `metadata` block and sets `is_payload: false` on them. Inference never assigns `ignored` -- that role is opt-in only.
@@ -1036,6 +1038,8 @@ standardization:
 ```
 
 Each linkage field may have at most one data standardization transformation. Fields not covered by an explicit transformation are given an identity transformation and connected to a linkage field by matching the field's semantic type against the input column's metadata.
+
+A configuration that authors no `standardization` at all is cleaned by the per-type defaults instead. Their exact step sequences, parameters, and results -- a cross-party contract, since both parties must derive identical keys -- are specified in [DEFAULT_STANDARDIZATION.md](spec/DEFAULT_STANDARDIZATION.md).
 
 When an exchange configuration authors its own `standardization`, that standardization is treated as authoritative: if it contradicts the linkage terms -- a transformation `output` naming no declared linkage field, or a `steps` entry naming an unknown `function` -- it fails closed (the CLI exits 64) with a message naming the offending output or function, rather than warning and proceeding past the contradiction. A direct `exchange`, and any run that mints no invitation, is refused during data preparation, before any credential, terms, or data are sent -- on an unpinned SFTP configuration the first-use host-key probe is the one connection that precedes it, and it presents no credential (see [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#sftp-host-key-verification)); a config-source `psilink invite` is refused at mint time, before the token is disclosed, so an inconsistent configuration never yields an invitation the same config's later `exchange` would reject. A configuration that authors no `standardization` reconstructs the default per-type cleaning from its metadata and terms, so it is unaffected by this check.
 
@@ -1150,6 +1154,7 @@ An end-to-end annotated specification covering every component is planned; see [
 
 - [DESIGN.md](DESIGN.md) - overview of exchange specification purpose and its four components
 - [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md) - the self-attested exchange record this specification's governance fields and `retention_disposition` pointer feed into
+- [DEFAULT_STANDARDIZATION.md](spec/DEFAULT_STANDARDIZATION.md) - the per-type default cleaning pipelines and the column-name inference table, for a configuration that authors no `standardization` or `metadata` block
 - [PROTOCOL.md](spec/PROTOCOL.md) - how linkage terms parameterize the PSI protocol
 - [COMMUNICATION.md](COMMUNICATION.md) - how `connection` fields map to channel infrastructure
 - [DEPLOYMENT.md](DEPLOYMENT.md) - operating the supporting services referenced in `connection` fields
