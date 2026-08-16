@@ -2016,9 +2016,18 @@ const COUNT_ONLY_INPUT_CHOICE_BOUND =
   "which records to ask about. A crafted list, or a second run differing by one " +
   "record, turns a count into an answer about one person.";
 
-/** Every sentence the count-only tier puts on this surface. */
-const COUNT_ONLY_TIER_COPY = [
-  COUNT_ONLY_STATEMENT,
+/**
+ * The five gated tier sentences, read from the shared table by this surface and by
+ * the web consent screen. The gate is what makes them one class: while the exchange
+ * refuses a psi-c invitation not one of them is reachable on EITHER surface, so an
+ * absence assertion over this list states a cross-surface invariant.
+ *
+ * COUNT_ONLY_STATEMENT is deliberately not in it. That sentence is shared wording
+ * with a different placement on each surface -- the web renders it as its
+ * matching-method headline for any psi-c invitation, beside the refusal caveat --
+ * so its absence is a fact about this prompt alone and is asserted as one.
+ */
+const COUNT_ONLY_GATED_TIER_NOTES = [
   CONSENT_FACTS.countOnlyResult.note,
   CONSENT_FACTS.countOnlyRoundDisclosures.note,
   CONSENT_FACTS.countOnlyReportedCount.note,
@@ -2041,6 +2050,7 @@ function renderAppliedCountOnlyFacts(
     expectsOutput: true,
     shareWithPartner: true,
   },
+  ownOutboundSend: ReadonlyArray<string> = [],
 ): string {
   const block: Array<string> = [];
   logDecisionFacts(
@@ -2054,7 +2064,7 @@ function renderAppliedCountOnlyFacts(
       }),
       psiCApplied: true,
     },
-    [],
+    ownOutboundSend,
   );
   return block.join("\n");
 }
@@ -2090,15 +2100,22 @@ test("the psi-c caveat states the refusal, on both surfaces, from one terms docu
   // of it may reach an operator while the run refuses these terms: a count-only
   // guarantee stated for an exchange that aborts is the same error as the caveat
   // saying identifiers are revealed, facing the other way. This is the gate, read
-  // through the real APPLIED_SETTINGS.psiC rather than around it.
+  // through the real APPLIED_SETTINGS.psiC rather than around it, over both the
+  // payload-carrying document psi-c refuses and the conforming one.
   const shaped = renderDisplayInvitation(log, {
     ...sampleToken(FUTURE()),
     linkageTerms: COUNT_ONLY_PROBE_TERMS,
   });
-  for (const copy of COUNT_ONLY_TIER_COPY) {
+  for (const copy of COUNT_ONLY_GATED_TIER_NOTES) {
     expect(countOnly).not.toContain(copy);
     expect(shaped).not.toContain(copy);
   }
+  // The headline is the other class: shared wording the web renders beside the
+  // refusal caveat, which this prompt withholds until the run honors the algorithm.
+  // Asserted for this surface only, so the list above keeps stating the invariant
+  // both surfaces hold rather than one this one alone does.
+  expect(countOnly).not.toContain(COUNT_ONLY_STATEMENT);
+  expect(shaped).not.toContain(COUNT_ONLY_STATEMENT);
 });
 
 test("an applied count-only exchange states its disclosure tier on the register the protocol assigns each half", () => {
@@ -2129,6 +2146,35 @@ test("an applied count-only exchange states its disclosure tier on the register 
   expect(block).toContain("  columns you will send (enforced): (none)");
   expect(block).toContain(`    ${CONSENT_FACTS.countOnlyNoPayload.note}`);
   expect(block).not.toContain("the inviting party receives no result");
+});
+
+test("a count-only rendering refuses a resolved outbound set rather than state (none) over it", () => {
+  // The "(none)" line states a precondition -- psi-c refuses payload in either
+  // direction when the terms are authored, at the local prepare step, and at the
+  // agreed-terms run boundary -- rather than a set the renderer read. A set carrying
+  // a column means none of those refusals held, and printing "(none)" over it would
+  // take the operator's consent to a disclosure that happens, on the one screen
+  // where the disclosure IS the decision. Driven with the flag forced on and a
+  // column in the set, so the check is measured firing rather than assumed.
+  expect(() => renderAppliedCountOnlyFacts(undefined, ["risk_score"])).toThrow(
+    /no payload in either direction/,
+  );
+  // Non-vacuous the other way: the same call with an empty set renders the line, so
+  // the throw above is the column's doing and not the flag's.
+  expect(renderAppliedCountOnlyFacts()).toContain(
+    "  columns you will send (enforced): (none)",
+  );
+  // And the check is the count-only branch's alone: a psi invitation resolving the
+  // same set lists it, which is what makes the refusal a statement about psi-c.
+  const log = getLogger("accept-display-count-only-outbound-test");
+  log.setLevel("silent");
+  expect(
+    renderDisplayInvitation(
+      log,
+      { ...sampleToken(FUTURE()), linkageTerms: CONSENT_PROBE_TERMS },
+      ["risk_score"],
+    ),
+  ).toContain("  columns you will send (enforced):\n    - risk_score");
 });
 
 test("the count a party did not compute is caveated only where both parties are entitled to one", () => {

@@ -13,6 +13,7 @@ import { InvitationTerms } from "@components/InvitationTerms";
 import {
   BEL,
   CONSENT_PROBE_TERMS,
+  COUNT_ONLY_PROBE_TERMS,
   ESC,
   PRINTABLE_ASCII,
   RLO,
@@ -2028,29 +2029,43 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
     // revealed; a caveat saying the matched identifiers are still revealed would
     // describe a run that does not happen.
     //
-    // Rendered from core's shared consent probe -- the same terms document the
+    // Rendered from core's shared consent probes -- the same terms documents the
     // CLI's pin uses -- so the two pins measure one sentence against one input.
-    renderTerms({ ...CONSENT_PROBE_TERMS, algorithm: "psi-c" });
-    await expect
-      .element(group("What the exchange produces"))
-      .toBeInTheDocument();
-    expect(app.container.textContent).toContain(PSI_C_CAVEAT);
-    expect(app.container.textContent).not.toContain(
-      "matched records are still revealed",
-    );
-    // The headline the caveat qualifies renders for a proposed psi-c as well: it
-    // states what the algorithm reveals, which is what the caveat then says this
-    // version will not run. Spelled out because it is the sentence both surfaces
-    // read from one source once the tier below it applies.
-    expect(app.container.textContent).toContain(
-      "Only the number of records you have in common is revealed, not which " +
-        "records match.",
-    );
-    // The gate, read through the real APPLIED_SETTINGS.psiC rather than around it:
-    // while the exchange refuses these terms, not one sentence of the tier the
-    // caveat gives way to may reach the screen.
-    for (const copy of COUNT_ONLY_TIER_COPY)
-      expect(app.container.textContent).not.toContain(copy);
+    //
+    // Both documents, mirroring the CLI's two-document sweep: the payload-carrying
+    // one psi-c refuses, and the conforming one (COUNT_ONLY_PROBE_TERMS), which is
+    // the shape an invitation will have in the wild once the run path lands. A gate
+    // measured on the refused shape alone would leave the shape that matters
+    // unswept.
+    for (const linkageTerms of [
+      { ...CONSENT_PROBE_TERMS, algorithm: "psi-c" as const },
+      COUNT_ONLY_PROBE_TERMS,
+    ]) {
+      // A fresh mount per document, so each assertion reads that document's render
+      // rather than the previous one still on screen.
+      app.unmount();
+      renderTerms(linkageTerms);
+      await expect
+        .element(group("What the exchange produces"))
+        .toBeInTheDocument();
+      expect(app.container.textContent).toContain(PSI_C_CAVEAT);
+      expect(app.container.textContent).not.toContain(
+        "matched records are still revealed",
+      );
+      // The headline the caveat qualifies renders for a proposed psi-c as well: it
+      // states what the algorithm reveals, which is what the caveat then says this
+      // version will not run. Spelled out because it is the sentence both surfaces
+      // read from one source once the tier below it applies.
+      expect(app.container.textContent).toContain(
+        "Only the number of records you have in common is revealed, not which " +
+          "records match.",
+      );
+      // The gate, read through the real APPLIED_SETTINGS.psiC rather than around
+      // it: while the exchange refuses these terms, not one sentence of the tier
+      // the caveat gives way to may reach the screen.
+      for (const copy of COUNT_ONLY_TIER_COPY)
+        expect(app.container.textContent).not.toContain(copy);
+    }
   });
 
   test("the psi-c count-only caveat is always-visible in the core, not one expand down", async () => {

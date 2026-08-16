@@ -124,9 +124,10 @@ export const CONSENT_FACTS = {
       "neither, so this sits in the run's register rather than the partner's -- " +
       "the same one as the membership a non-receiving partner learns.",
     note:
-      "Your partner also learns how many records you hold, and how many of them " +
-      "carry a value for the key being matched on. Neither number is your " +
-      "overlap, and a count-only exchange hides neither.",
+      "Your partner also learns how many records you hold, and how many values " +
+      "you contribute for the key being matched on -- the values that appear " +
+      "exactly once in your file. Neither number is your overlap, and a " +
+      "count-only exchange hides neither.",
   },
   countOnlyReportedCount: {
     basis: "trust-contingent",

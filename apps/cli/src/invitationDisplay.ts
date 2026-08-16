@@ -320,6 +320,18 @@ export function logDecisionFacts(
   // "(none)", not a presupposed non-empty disclosure.
   const outboundLabel = marked("columns you will send", "outboundSend");
   const countOnlyApplied = summary.algorithm === "psi-c" && summary.psiCApplied;
+  // The count-only "(none)" below states a precondition of the algorithm rather than
+  // a set this renderer read: psi-c refuses payload in either direction where the
+  // terms are authored, at the local prepare step, and at the agreed-terms run
+  // boundary (docs/spec/PROTOCOL.md, PSI-C). A resolved set carrying a column means
+  // none of those refusals held, and printing "(none)" over it would take the
+  // operator's consent to a disclosure that happens. The message states the fact and
+  // names no column.
+  if (countOnlyApplied && (ownOutboundSend?.length ?? 0) > 0)
+    throw new Error(
+      "count-only exchange resolved a non-empty outbound column set: a psi-c " +
+        "run carries no payload in either direction",
+    );
   if (countOnlyApplied) {
     // The algorithm answers this slot ahead of the entitlement the other cases read:
     // a count-only exchange carries no payload in either direction whoever receives
@@ -353,8 +365,13 @@ export function logDecisionFacts(
   // A count-only algorithm states a DISCLOSURE guarantee, so what qualifies it sits
   // with the headline it bears on rather than further down -- the caveat while the
   // exchange refuses to run on those terms, and the tier's own facts once it does.
-  // Every sentence is the shared one the web consent screen renders, so the two
-  // surfaces cannot say different things about what a psi-c invitation does here.
+  // Both are read from the shared table, and the gate is what the two surfaces hold
+  // in common: while the exchange refuses psi-c, not one of the five tier sentences
+  // is reachable on either of them. COUNT_ONLY_DISCLOSURE_STATEMENT is shared wording
+  // rather than a shared placement -- the web screen carries it as its matching-method
+  // headline for any psi-c invitation, qualified in place by the refusal caveat, where
+  // this prompt names the algorithm and prints the statement only once the run honors
+  // it.
   if (summary.algorithm === "psi-c" && !summary.psiCApplied)
     emit(`    ${PROPOSED_NOT_APPLIED_NOTES.psiC}`);
   if (countOnlyApplied) {

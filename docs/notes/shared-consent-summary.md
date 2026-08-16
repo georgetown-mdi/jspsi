@@ -333,13 +333,20 @@ about a proposed count-only exchange in the first place.
 ## The count-only tier, authored behind the flag it waits on
 
 What that caveat gives way to is authored and wired already, behind the same
-`psiCApplied` the caveat reads. Both surfaces render the tier where the summary
-says the run honors the algorithm, and neither renders a word of it while the
-exchange refuses a `psi-c` invitation outright -- so landing the count-only run
-path flips the copy by flipping one flag, rather than by a copy edit made at the
-same time and hoped to match. Each surface's render test pins both sides of that
-gate: the caveat present and the tier absent today, the tier's own wording and
-placement measured with the flag moved.
+`psiCApplied` the caveat reads. Both surfaces render the tier's facts where the
+summary says the run honors the algorithm, and the gate keeps every one of those
+sentences off both surfaces while the exchange refuses a `psi-c` invitation
+outright -- so landing the count-only run path flips the copy by flipping one
+flag, rather than by a copy edit made at the same time and hoped to match.
+
+The count-only disclosure statement itself is shared wording rather than a shared
+placement. The web screen carries it as the matching-method headline for any
+`psi-c` invitation, qualified in place by the refusal caveat directly beneath it;
+the CLI accept prompt names the algorithm there and prints the statement only
+where the flag says the run honors it. Each surface's render test pins both sides
+of the gate it holds: the caveat present and the tier's sentences absent under a
+refused invitation, the tier's own wording and placement measured with the flag
+moved.
 
 Count-only is the mildest disclosure psilink offers and it is not zero disclosure,
 which is why the tier is more than one replacement sentence. The intersection

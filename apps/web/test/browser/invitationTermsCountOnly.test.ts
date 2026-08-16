@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { page } from "vitest/browser";
 
-import { createElement } from "react";
+import { Component, createElement } from "react";
 
 import {
   CONSENT_FACTS,
@@ -17,6 +17,8 @@ import { InvitationTerms } from "@components/InvitationTerms";
 
 import { COUNT_ONLY_PROBE_TERMS } from "@psilink/core/testing";
 import { createAppMount } from "./renderApp";
+
+import type { ComponentProps, ReactNode } from "react";
 
 import type * as PsilinkCore from "@psilink/core";
 import type { LinkageTerms } from "@psilink/core";
@@ -52,6 +54,59 @@ function renderCountOnly(overrides?: Partial<LinkageTerms>): void {
       linkageTerms: { ...COUNT_ONLY_PROBE_TERMS, ...overrides },
     }),
   );
+}
+
+const REFUSAL_TESTID = "count-only-render-refusal";
+
+/**
+ * An error boundary that renders a caught render error's message, standing in for
+ * the route-level catch boundary the app mounts these terms under. It is what lets
+ * the count-only slot's fail-closed check be read as a message rather than as an
+ * unhandled error, on the surface whose impossible-state idiom is a render throw.
+ */
+class CaughtRenderError extends Component<
+  { children: ReactNode },
+  { message: string }
+> {
+  state: { message: string } = { message: "" };
+
+  static getDerivedStateFromError(error: unknown): { message: string } {
+    return {
+      message:
+        error instanceof Error ? error.message : "a non-Error was thrown",
+    };
+  }
+
+  render(): ReactNode {
+    return this.state.message === ""
+      ? this.props.children
+      : createElement(
+          "p",
+          { "data-testid": REFUSAL_TESTID },
+          this.state.message,
+        );
+  }
+}
+
+/** The count-only terms mounted under {@link CaughtRenderError}. */
+function renderCountOnlyUnderBoundary(
+  overrides: Partial<ComponentProps<typeof InvitationTerms>> = {},
+): void {
+  app.render(
+    createElement(
+      CaughtRenderError,
+      null,
+      createElement(InvitationTerms, {
+        linkageTerms: COUNT_ONLY_PROBE_TERMS,
+        ...overrides,
+      }),
+    ),
+  );
+}
+
+/** The caught message, absent while the terms render. */
+function refusal() {
+  return page.getByTestId(REFUSAL_TESTID);
 }
 
 // A named tier of the always-visible core (role=group + aria-labelledby). Asserting
@@ -129,5 +184,57 @@ describe("InvitationTerms: the count-only tier a run that honors psi-c renders",
     expect(app.container.textContent).toContain(
       CONSENT_FACTS.countOnlyInputChoice.note,
     );
+  });
+
+  test("refuses a viewer's non-empty outbound set rather than state no columns are sent over it", async () => {
+    // The slot states a precondition of the algorithm -- psi-c refuses payload in
+    // either direction when the terms are authored, at the local prepare step, and
+    // at the agreed-terms run boundary -- rather than a set this component read. A
+    // viewer's set carrying a column means none of those refusals held, and "no data
+    // columns in either direction" rendered over it would take the operator's
+    // consent to a disclosure that happens. Driven with a column in the set on each
+    // of the two viewers, so the check is measured firing rather than assumed.
+    //
+    // React logs a caught render error to console.error; silence it so a deliberate
+    // throw does not spam the run (it is caught here, never window-unhandled).
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    try {
+      renderCountOnlyUnderBoundary({ outboundColumns: ["risk_score"] });
+      await expect.element(refusal()).toBeInTheDocument();
+      expect(refusal().element().textContent).toContain(
+        "sends no data column in either direction",
+      );
+
+      // The inviter's declared send occupies the same slot under "proposing", so the
+      // check follows the viewer rather than the one prop the acceptor passes.
+      app.unmount();
+      renderCountOnlyUnderBoundary({
+        perspective: "proposing",
+        linkageTerms: {
+          ...COUNT_ONLY_PROBE_TERMS,
+          payload: { send: [{ name: "risk_score" }], receive: [] },
+        },
+      });
+      await expect.element(refusal()).toBeInTheDocument();
+      expect(refusal().element().textContent).toContain(
+        "sends no data column in either direction",
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  test("states the slot where the set the algorithm requires is empty", async () => {
+    // The other half of the check above: with the empty set psi-c requires, the same
+    // mount renders the block, so the refusals are the column's doing rather than
+    // the mount's.
+    renderCountOnlyUnderBoundary({ outboundColumns: [] });
+    await expect.element(tier("What you disclose")).toBeInTheDocument();
+    expect(tier("What you disclose").element().textContent).toContain(
+      CONSENT_FACTS.countOnlyNoPayload.note,
+    );
+    expect(refusal().elements()).toHaveLength(0);
   });
 });

@@ -690,6 +690,25 @@ export function InvitationTerms({
   // entitlement answers the slot as it does for psi, and no block here describes a
   // run that does not happen.
   const countOnlyApplied = summary.algorithm === "psi-c" && summary.psiCApplied;
+  // The set the count-only block takes the slot from: the inviter's declared send
+  // under "proposing", the acceptor's own resolved columns otherwise -- the same
+  // viewer-relative pair the blocks below render.
+  const viewerOutboundSend =
+    perspective === "proposing"
+      ? (summary.payload?.send ?? [])
+      : (outboundColumns ?? []);
+  // The count-only block states a precondition of the algorithm rather than a set
+  // this component read: psi-c refuses payload in either direction where the terms
+  // are authored, at the local prepare step, and at the agreed-terms run boundary
+  // (docs/spec/PROTOCOL.md, PSI-C). A viewer's set carrying a column means none of
+  // those refusals held, and rendering "no columns are sent to your partner" over it
+  // would take the operator's consent to a disclosure that happens. The message
+  // states the fact and names no column.
+  if (countOnlyApplied && viewerOutboundSend.length > 0)
+    throw new Error(
+      "count-only terms carry a non-empty outbound column set: a psi-c " +
+        "exchange sends no data column in either direction",
+    );
   const outboundNoPayloadRenders = !countOnlyApplied && !partnerReceivesResult;
   const proposingSendChipsRender =
     perspective === "proposing" &&
