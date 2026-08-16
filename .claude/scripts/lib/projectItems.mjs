@@ -72,6 +72,133 @@ export function githubToken({
 }
 
 /**
+ * Wall-clock bound on one GraphQL request. A healthy board call answers in 2-6
+ * seconds, so a request still unanswered at 20 s is stalled rather than slow,
+ * and waiting longer only converts a fast failure into a hang.
+ */
+export const GRAPHQL_REQUEST_TIMEOUT_MS = 20_000;
+
+/**
+ * Attempts a single `graphql` call makes before giving up, and the base of the
+ * linear backoff between them (attempt N waits N * base). The whole worst case
+ * -- every attempt timing out plus both waits -- is 3 * 20 s + 1 s + 2 s = 63 s,
+ * which has to stay well inside the 120 s an agent harness allows a foreground
+ * command: a ladder longer than that budget recreates the hang it exists to
+ * bound, only with more steps. Raising either constant means re-checking that
+ * sum, which `projectItems.test.mjs` asserts.
+ */
+export const GRAPHQL_MAX_ATTEMPTS = 3;
+export const GRAPHQL_RETRY_BACKOFF_MS = 1_000;
+
+/** An attempt failure another attempt could plausibly get past. */
+class TransientRequestError extends Error {}
+
+/**
+ * Whether an HTTP status is worth another attempt: 429 and 5xx are the server
+ * asking for (or admitting to) a later try, and 408 is the transport giving up
+ * on this one. Every other 4xx -- a bad token, a revoked scope, a malformed
+ * query -- fails identically however many times it is sent, so retrying only
+ * delays a certain failure.
+ */
+function isRetryableStatus(status) {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+/**
+ * Issue one request and parse its body. Rejects with a TransientRequestError for
+ * a network-level failure or a retryable status, and with a plain Error for a
+ * response that will read the same way every time.
+ */
+async function readGraphqlResponse(query, variables, token, signal) {
+  // Serialized outside the try: an unserializable `variables` is a caller bug
+  // that every attempt would hit, not a transport failure worth retrying.
+  const requestBody = JSON.stringify(
+    variables ? { query, variables } : { query },
+  );
+  let res;
+  let text;
+  try {
+    res = await fetch(GRAPHQL_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
+      },
+      body: requestBody,
+      signal,
+    });
+    text = await res.text();
+  } catch (err) {
+    throw new TransientRequestError(`request failed: ${err.message}`, {
+      cause: err,
+    });
+  }
+  if (isRetryableStatus(res.status)) {
+    throw new TransientRequestError(
+      `HTTP ${res.status}: ${text.slice(0, 300)}`,
+    );
+  }
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `non-JSON response (HTTP ${res.status}): ${text.slice(0, 300)}`,
+    );
+  }
+  if (body.data == null) {
+    const detail = body.errors
+      ? JSON.stringify(body.errors)
+      : text.slice(0, 300);
+    throw new Error(`error response (HTTP ${res.status}): ${detail}`);
+  }
+  return body;
+}
+
+/**
+ * One attempt, bounded by a wall-clock deadline. The bound is a race against a
+ * timer rather than the abort signal alone: aborting only asks the transport to
+ * stop, and a transport -- or an interposed proxy -- that does not honor the
+ * request would hang past the deadline, which is the failure the bound exists to
+ * prevent. The signal is still passed and fired, so the socket is torn down
+ * rather than left in flight.
+ */
+async function requestWithinTimeout(query, variables, token, timeoutMs) {
+  const controller = new AbortController();
+  const expiry = new TransientRequestError(
+    `no response within ${timeoutMs} ms`,
+  );
+  let timedOut = false;
+  let timer;
+  const inFlight = readGraphqlResponse(
+    query,
+    variables,
+    token,
+    controller.signal,
+  );
+  // The abort below rejects `inFlight` after the race has settled; with no
+  // handler attached that late rejection surfaces as an unhandled rejection.
+  inFlight.catch(() => {});
+  const deadline = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      reject(expiry);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([inFlight, deadline]);
+  } catch (err) {
+    // A transport that does honor the signal rejects with its own abort error
+    // first; report the deadline that caused it either way.
+    throw timedOut ? expiry : err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * POST a GraphQL query or mutation to the GitHub API over Node `fetch`, returning
  * the parsed `{ data, errors }` body. Using Node rather than `gh api graphql`
  * lets these scripts run inside the command sandbox: Node verifies TLS against
@@ -80,39 +207,59 @@ export function githubToken({
  * default; running with NODE_USE_ENV_PROXY=1 in the environment -- e.g. via
  * Claude Code's local settings -- makes fetch honor it.)
  *
+ * Each attempt is bounded by GRAPHQL_REQUEST_TIMEOUT_MS and a transient failure
+ * -- a timeout, a network error, or a retryable status (see isRetryableStatus)
+ * -- is retried up to GRAPHQL_MAX_ATTEMPTS times with a linear backoff, each
+ * retry noted on stderr. When the attempts run out, or on a failure no retry can
+ * help, the thrown error names the endpoint and how many attempts were made, so
+ * a stall reads as a bounded, loud failure instead of a hang.
+ *
+ * Retry covers writes as well as reads, on the premise that every mutation these
+ * scripts send is idempotent for the same value: `updateProjectV2ItemFieldValue`
+ * and `updateProjectV2DraftIssue` both set a field to the value given rather
+ * than appending to or incrementing it, so re-sending one after a stall the
+ * server had in fact applied leaves the same state. A mutation that breaks that
+ * premise -- one that creates, appends, or accumulates -- breaks this policy with
+ * it, and needs a caller-side path that does not retry.
+ *
  * A response is returned whenever it carries `data` -- even an HTTP 200 that also
  * has `errors`, which is how GraphQL reports a partial result (e.g. one NOT_FOUND
  * node in a batch). This preserves the "one bad ID does not sink the whole fetch"
  * behavior that `fetchItems` relies on. A response with no usable `data` (auth
  * failure, rate limit, malformed body) throws. `variables` is omitted from the
- * request body when not given.
+ * request body when not given. `options` overrides the timeout and retry budget
+ * for tests; production callers pass none.
  */
-export async function graphql(query, variables) {
-  const res = await fetch(GRAPHQL_ENDPOINT, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${githubToken()}`,
-      "Content-Type": "application/json",
-      "User-Agent": USER_AGENT,
-    },
-    body: JSON.stringify(variables ? { query, variables } : { query }),
-  });
-  const text = await res.text();
-  let body;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    throw new Error(
-      `GitHub GraphQL returned non-JSON (HTTP ${res.status}): ${text.slice(0, 300)}`,
-    );
+export async function graphql(query, variables, options = {}) {
+  const {
+    timeoutMs = GRAPHQL_REQUEST_TIMEOUT_MS,
+    maxAttempts = GRAPHQL_MAX_ATTEMPTS,
+    backoffMs = GRAPHQL_RETRY_BACKOFF_MS,
+  } = options;
+  // Resolve the token once rather than per attempt, so a retry ladder does not
+  // re-run `gh auth token` for every try.
+  const token = githubToken();
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await requestWithinTimeout(query, variables, token, timeoutMs);
+    } catch (err) {
+      if (!(err instanceof TransientRequestError) || attempt >= maxAttempts) {
+        throw new Error(
+          `GitHub GraphQL request to ${GRAPHQL_ENDPOINT} failed after ` +
+            `${attempt} attempt${attempt === 1 ? "" : "s"}: ${err.message}`,
+          { cause: err },
+        );
+      }
+      const backoff = backoffMs * attempt;
+      // A retry that succeeds would otherwise leave only an unexplained pause:
+      // say what stalled, so an intermittent endpoint is visible in a run log.
+      process.stderr.write(
+        `note: GraphQL attempt ${attempt} of ${maxAttempts} failed ` +
+          `(${err.message}); retrying in ${backoff} ms\n`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, backoff));
+    }
   }
-  if (body.data == null) {
-    const detail = body.errors
-      ? JSON.stringify(body.errors)
-      : text.slice(0, 300);
-    throw new Error(`GitHub GraphQL error (HTTP ${res.status}): ${detail}`);
-  }
-  return body;
 }
 
 /** Derive an item's PVTI_ global node ID from its project number and numeric ID. */
