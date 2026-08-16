@@ -34,6 +34,12 @@ export {
 } from "./utils/logger";
 export type { DiagnosticSink } from "./utils/logger";
 export { retryPromise, withTimeout, TimeoutError } from "./utils/promise";
+// The untrusted-JSON chokepoint. Barrelled because a partner wire frame is
+// parsed outside this package too -- the CLI's WebRTC broker signaling client
+// reads JSON text off a socket the signaling server and the remote peer both
+// feed -- and that parse must be the same structurally-bounded one, not a second
+// implementation of it (CONTRIBUTING.md, Untrusted-JSON parsing).
+export { parseBoundedJson, JsonStructureBoundError } from "./utils/boundedJson";
 // @internal: the CLI config writer (saveConfig) delegates to this snakeize
 // direction so the read and write paths share one recurse-and-skip traversal;
 // not a stable public API (see the declaration's JSDoc).
