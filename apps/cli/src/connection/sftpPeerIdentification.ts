@@ -183,9 +183,10 @@ function classifyPeerAnswer(bytes: Uint8Array): PeerAnswer {
 /**
  * Open one TCP connection to `host:port`, read whatever the peer sends within
  * `budgetMs`, and report what it establishes. Writes NOTHING: no credential, no
- * identification string, no SSH traffic at all -- the whole point of the
- * host-key probe this backs is that nothing is presented to an unverified
- * server, and a socket that only reads presents nothing at all.
+ * identification string, no SSH traffic at all -- the host-key probe this backs
+ * rests on nothing being presented to an unverified server, and the dial paths
+ * reach here having just failed against a peer that answered the port wrongly;
+ * a socket that only reads presents nothing at all to either.
  *
  * Best-effort by construction. It runs after the dial has already failed and
  * against a peer that may answer a second connection differently (a load
@@ -387,15 +388,73 @@ export function peerProbeTarget(config: SFTPConnectionConfig): {
 }
 
 /**
+ * The same endpoint for a caller holding ssh2's connect options rather than the
+ * psilink config they were built from -- the transport adapter's dial paths,
+ * which enter the dial sequence with the retained options and never with the
+ * config behind them. Reads `host` and `port` because those are the fields core
+ * assigns from the config after its default-deny `providerOptions` filter, so no
+ * operator-supplied key can move the endpoint out from under this.
+ *
+ * `undefined` when the options carry no host, or a port of a type ssh2 would
+ * coerce rather than use as given: the endpoint the dial reached cannot then be
+ * reproduced, and a dial this cannot follow keeps the rejection it already had.
+ *
+ * @internal
+ */
+export function peerProbeTargetFromConnectOptions(options: {
+  host?: unknown;
+  port?: unknown;
+}): { host: string; port: number } | undefined {
+  const { host, port } = options;
+  if (typeof host !== "string" || host === "") return undefined;
+  if (port !== undefined && typeof port !== "number") return undefined;
+  return { host, port: port ?? SSH2_DEFAULT_PORT };
+}
+
+/**
+ * Read the peer's first bytes and compose what they say about `error`, for a
+ * rejection the caller has already put to {@link isPreIdentificationDialFailure}.
+ * The read is what every consumer shares -- one bounded, credential-free
+ * connection and one classification of what came back -- so a second consumer
+ * grows no second matcher that could disagree with this one about the same
+ * rejection.
+ *
+ * The gate is the CALLER's rather than this function's because a caller that
+ * spends a budget on the read (see the adapter's once-per-connection bound) has
+ * to know whether the read will run before it spends it.
+ *
+ * `connectBudgetMs` is the per-attempt connect budget the failed dial ran under;
+ * the read is clamped to it, so a run that shortened the connect does not get a
+ * longer diagnosis than the dial it diagnoses.
+ *
+ * @internal
+ */
+export async function diagnosePeerAnswer(
+  error: unknown,
+  endpoint: { host: string; port: number },
+  connectBudgetMs: number | undefined,
+): Promise<unknown> {
+  const budgetMs = Math.min(
+    PEER_ANSWER_READ_BUDGET_MS,
+    connectBudgetMs ?? PEER_ANSWER_READ_BUDGET_MS,
+  );
+  return explainPeerIdentificationFailure(
+    error,
+    await observePeerAnswer(endpoint, budgetMs),
+    endpoint,
+  );
+}
+
+/**
  * Run `probe` and, when it fails before the peer identified itself as an SSH
  * server, re-raise the rejection with what a bounded credential-free read of the
  * peer's first bytes says about it. Every other failure -- and every success --
  * passes through untouched.
  *
- * This is the one place the classification lives; the host-key probe's two
- * entry points (`probe-host-key` and the first-use trust flow) both run their
- * probe through it, and the dial paths can consume the same three parts rather
- * than growing a second matcher that could disagree with this one.
+ * The host-key probe's two entry points (`probe-host-key` and the first-use
+ * trust flow) run their probe through this; the transport adapter's dial paths
+ * consume the same gate and the same read directly, having their own budget to
+ * hold them to.
  *
  * @internal
  */
@@ -407,17 +466,10 @@ export async function withPeerIdentificationDiagnosis<T>(
     return await probe();
   } catch (err) {
     if (!isPreIdentificationDialFailure(err)) throw err;
-    const endpoint = peerProbeTarget(config);
-    // Clamped to the connect budget the operator configured, so a run that
-    // shortened it does not get a longer diagnosis than the dial it diagnoses.
-    const budgetMs = Math.min(
-      PEER_ANSWER_READ_BUDGET_MS,
-      config.options?.serverConnectTimeoutMs ?? PEER_ANSWER_READ_BUDGET_MS,
-    );
-    throw explainPeerIdentificationFailure(
+    throw await diagnosePeerAnswer(
       err,
-      await observePeerAnswer(endpoint, budgetMs),
-      endpoint,
+      peerProbeTarget(config),
+      config.options?.serverConnectTimeoutMs,
     );
   }
 }

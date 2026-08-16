@@ -15,6 +15,8 @@ import {
   explainPeerIdentificationFailure,
   isPreIdentificationDialFailure,
   observePeerAnswer,
+  peerProbeTarget,
+  peerProbeTargetFromConnectOptions,
   withPeerIdentificationDiagnosis,
 } from "../../src/connection/sftpPeerIdentification";
 import type { PeerAnswer } from "../../src/connection/sftpPeerIdentification";
@@ -410,6 +412,49 @@ describe("explainPeerIdentificationFailure partitions the peer's bytes", () => {
     );
     expect(text).toContain("\\x1b[2Jcleared\\x0d\\x0afaked line");
     expect(text).not.toContain("\x1b");
+  });
+});
+
+describe("peerProbeTargetFromConnectOptions follows the dial it diagnoses", () => {
+  // The dial paths enter the dial sequence with ssh2's connect options and never
+  // with the config behind them, so the endpoint is derived twice. Both
+  // derivations are held to the pinned stack through THIS agreement plus the
+  // integration premise that reads the port a portless dial actually used and
+  // holds peerProbeTarget to it; a second default here would be a second premise
+  // nothing checks.
+  test("agrees with the config-shaped derivation, default port included", () => {
+    expect(
+      peerProbeTargetFromConnectOptions({ host: "sftp.example.test" }),
+    ).toEqual(
+      peerProbeTarget({
+        channel: "sftp",
+        server: { host: "sftp.example.test", username: "unused" },
+      }),
+    );
+    expect(
+      peerProbeTargetFromConnectOptions({
+        host: "sftp.example.test",
+        port: 2222,
+      }),
+    ).toEqual(
+      peerProbeTarget({
+        channel: "sftp",
+        server: { host: "sftp.example.test", port: 2222, username: "unused" },
+      }),
+    );
+  });
+
+  test("reproduces no endpoint from options that name none", () => {
+    // A dial this cannot follow: reading some other endpoint would report about
+    // a peer it never spoke to, so the caller keeps the rejection it had.
+    expect(peerProbeTargetFromConnectOptions({})).toBeUndefined();
+    expect(peerProbeTargetFromConnectOptions({ host: "" })).toBeUndefined();
+    expect(
+      peerProbeTargetFromConnectOptions({
+        host: "sftp.example.test",
+        port: "2222",
+      }),
+    ).toBeUndefined();
   });
 });
 

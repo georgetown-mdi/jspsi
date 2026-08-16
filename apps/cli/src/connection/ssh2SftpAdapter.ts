@@ -55,6 +55,11 @@ import {
   isUnperformableKexNegotiationFailure,
   unavailableKexPrimitives,
 } from "./sftpKexCapability";
+import {
+  diagnosePeerAnswer,
+  isPreIdentificationDialFailure,
+  peerProbeTargetFromConnectOptions,
+} from "./sftpPeerIdentification";
 
 // A single entry as ssh2's SFTPWrapper.readdir reports it. Only the fields the
 // transport consumes are typed; ssh2 supplies more (longname, the rest of
@@ -837,6 +842,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // loss it was recovering from instead of an error of this adapter's own making.
   // Never cleared: it is only ever set on a connection already closing.
   private abandonedTeardownClosedTransport = false;
+  // Latched true once a dial failure has been put to the non-SSH-answer
+  // diagnosis, which is the whole of its budget on this connection: the
+  // diagnosis opens a TCP connection of its own, and the connection-per-poll
+  // mode dials at every cycle start, so an unlatched one would re-dial a peer
+  // that is already answering wrongly once per tick for as long as the condition
+  // stands. Latched where the read is spent rather than where it produces a
+  // diagnostic, because the connection is the cost. Never cleared: what it says
+  // is that this run has already told the operator what answered the port.
+  private peerAnswerDiagnosisSpent = false;
   // The connection's one terminal close, memoized by end() on its first call: a
   // repeat or concurrent close awaits this one instead of driving a second on the
   // same client. Driving a second is not merely wasteful -- this close does not
@@ -2611,7 +2625,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // predicate running after it would read this diagnostic instead of the
       // fragment it matches. On a host that can perform everything ssh2 offers,
       // and for every other failure, the rejection passes through untouched.
-      throw explainKexNegotiationFailure(err, unavailablePrimitives);
+      throw await this.diagnoseDialFailure(
+        explainKexNegotiationFailure(err, unavailablePrimitives),
+        connectOptions,
+      );
     }
 
     // A dial reaching here with a generation still live ended that generation,
@@ -2764,6 +2781,62 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // the dial rather than at the charge, so the line describes a session this
     // side has in fact re-established.
     if (absorbedAPartnerDrop) this.warnSessionRecovered();
+  }
+
+  // What the dial sequence hands its caller when the dial failed: the rejection
+  // it already had, or -- for a dial that ended before the peer identified itself
+  // as an SSH server -- that rejection re-raised with what a bounded,
+  // credential-free read of the peer's first bytes says about it. The pinned
+  // stack reports a proxy answering with an HTML page, a TLS service, and a
+  // firewall closing the connection in front of the server all as the same
+  // `Connection lost before handshake`, which reads exactly like an unreachable
+  // host; the diagnosis names what answered. See ./sftpPeerIdentification, which
+  // owns the gate, the read, and the copy -- consumed here rather than restated,
+  // so the dial paths and the host-key probe cannot disagree about one rejection.
+  //
+  // Seated in connectLocked because that is the one path to ssh2's connect: the
+  // first dial, the connection-per-poll cycle-start re-dial, the recovery re-dial
+  // and the teardown's all reach it here rather than at four call sites. It
+  // therefore runs inside the session transition the dial holds, adding the read
+  // budget -- 2 s, clamped to the connect's own -- to a dial that has already
+  // failed, which is a fifth of what a transition waiting behind it is allowed to
+  // wait (TRANSITION_ACQUIRE_TIMEOUT_MS) and is spent once for the connection.
+  //
+  // Four conditions have to hold before the read is opened, and each is a check
+  // rather than a note because each is a way this could be wrong:
+  //   - The connection's one diagnosis is unspent (see peerAnswerDiagnosisSpent),
+  //     which is what keeps a cycle-start re-dial from re-dialing the peer every
+  //     tick.
+  //   - No teardown is under way. An abandoning teardown destroys the transport
+  //     beneath a dial in flight and that dial rejects with the very wording this
+  //     gates on, so a diagnosis there would read a peer about a close of this
+  //     adapter's own making -- and spend the operator's one diagnosis, and up to
+  //     the read budget of teardown wall clock, doing it.
+  //   - The failure is not one this adapter already classifies as terminal (see
+  //     isFatalDialError), which keeps that classification independent of the
+  //     fragment list the gate below rests on: a host-key rejection and an
+  //     unperformable key exchange keep the message it reads, unwrapped, however
+  //     that list grows or the stack rewords itself.
+  //   - The endpoint the dial used can be reproduced from the options it used.
+  private async diagnoseDialFailure(
+    error: unknown,
+    connectOptions: Ssh2SftpClient.ConnectOptions,
+  ): Promise<unknown> {
+    if (this.peerAnswerDiagnosisSpent) return error;
+    if (this.closing || this.tearingDown) return error;
+    if (this.isFatalDialError(error)) return error;
+    if (!isPreIdentificationDialFailure(error)) return error;
+    const endpoint = peerProbeTargetFromConnectOptions(connectOptions);
+    if (endpoint === undefined) return error;
+    this.peerAnswerDiagnosisSpent = true;
+    // The per-attempt connect budget core sets from serverConnectTimeoutMs, which
+    // the read is clamped to; a direct adapter caller that set none leaves the
+    // read on its own default.
+    const connectBudgetMs =
+      typeof connectOptions.readyTimeout === "number"
+        ? connectOptions.readyTimeout
+        : undefined;
+    return diagnosePeerAnswer(error, endpoint, connectBudgetMs);
   }
 
   /**
