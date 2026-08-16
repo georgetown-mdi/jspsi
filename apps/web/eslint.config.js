@@ -27,6 +27,41 @@ const rawRowsAccessBan = {
     "Read `.rawRows` only in the enumerated consumers (see rawRowsConsumers in apps/web/eslint.config.js). The console acquired CSV has no rows (a throwing getter); author from the profiled rowCount / dateInputFormat / column samples instead. If this is a legitimate new rawRows consumer, add its file to rawRowsConsumers.",
 };
 
+// Every seat that hands the exchange driver an `onWarning` slot must fold the
+// message through `appendSanitizedRunWarning` (src/bench/runWarnings.ts), the one
+// display boundary the console's run surfaces share. The manager's own preflight
+// warnings are composed RAW precisely because that boundary escapes them exactly
+// once: a seat that escaped again would show one backslash in a partner filename as
+// four, and a seat that escaped not at all would put a partner's ESC, bidi override,
+// or confusable straight into the operator's page. Neither failure is visible in a
+// unit test of the boundary itself -- both are a seat routing AROUND it -- so this is
+// the executable form of that routing, which was prose until it was a rule.
+//
+// The bound is the call shape: an `onWarning` property of an object LITERAL --
+// keyed plainly, quoted, or computed -- whose value is a function literal or a
+// named reference. A function literal has to name the boundary somewhere in its
+// body, so a seat that reaches the boundary through an intermediate helper reads as
+// a violation (add the helper's own site, do not silence it) and one that merely
+// mentions the name without folding through it reads as clean; a named reference
+// reads as a violation on sight, since a selector cannot follow it to the body. A
+// type declaration and a destructuring pattern are not seats and are not matched.
+//
+// One bypass shape stays open: a bare shorthand `{ onWarning }`. A seat forwarding a
+// slot its own caller owns -- a prop, or the handler the driver destructured -- is
+// written exactly that way, and telling it from a locally-defined handler needs
+// scope, which a selector does not have. Every shape that IS matched is pinned case
+// by case in scripts/eslint-seat-warning-sink-ban.test.mjs.
+const seatWarningSinkBan = {
+  selector:
+    "ObjectExpression > Property" +
+    ":matches([key.name='onWarning'],[key.value='onWarning'])" +
+    ":not([shorthand=true])" +
+    "[value.type=/^(ArrowFunctionExpression|FunctionExpression|Identifier|MemberExpression)$/]" +
+    ":not(:has(CallExpression[callee.name='appendSanitizedRunWarning']))",
+  message:
+    "Fold an onWarning message through appendSanitizedRunWarning (src/bench/runWarnings.ts): it is the one display boundary the run surfaces share, and the manager composes its warnings raw because that boundary escapes them exactly once.",
+};
+
 // The files that legitimately read `.rawRows`: the hosted file-intake and draft
 // consumers plus the exchange-run and coverage-worker internals that read rawRows off
 // non-acquired shapes (a prepared/minted invitation, a worker request, the
@@ -100,6 +135,7 @@ export default [
         "error",
         sensitiveYamlParseBan,
         rawRowsAccessBan,
+        seatWarningSinkBan,
       ],
       "no-restricted-imports": [
         "error",
@@ -120,14 +156,20 @@ export default [
     },
   },
   {
-    // The enumerated rawRows consumers keep the sensitive-parse ban but are exempt
-    // from the rawRows-access ban. A separate block (not an `ignores`) because flat
-    // config replaces a rule's whole options across blocks: re-setting
-    // no-restricted-syntax to the YAML ban alone drops the rawRows selector for these
-    // files while the broad block above still applies it everywhere else.
+    // The enumerated rawRows consumers keep the sensitive-parse and warning-sink
+    // bans but are exempt from the rawRows-access ban. A separate block (not an
+    // `ignores`) because flat config replaces a rule's whole options across blocks:
+    // re-setting no-restricted-syntax to a subset drops the other selectors for these
+    // files while the broad block above still applies them everywhere else. One of
+    // these files (useInviterExchange.ts) is a warning seat, so dropping the
+    // warning-sink ban here would leave a quarter of the seats uncovered.
     files: rawRowsConsumers,
     rules: {
-      "no-restricted-syntax": ["error", sensitiveYamlParseBan],
+      "no-restricted-syntax": [
+        "error",
+        sensitiveYamlParseBan,
+        seatWarningSinkBan,
+      ],
     },
   },
   // Any other config...

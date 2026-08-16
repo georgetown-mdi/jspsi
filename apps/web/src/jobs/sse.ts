@@ -2,9 +2,18 @@
  * Render one server-sent-events frame: an `id:` line carrying the monotonic
  * event id (so a browser's EventSource echoes it as `Last-Event-ID` on
  * reconnect) and a `data:` line carrying the JSON event, terminated by the blank
- * line that ends a frame. The event is already sanitized upstream (every string
- * field passed through the display escaper at the trust boundary), so JSON
- * serialization here cannot carry a raw control byte.
+ * line that ends a frame.
+ *
+ * A CLI-relayed event arrives with every string field already escaped at the
+ * trust boundary, so it carries no raw control byte to begin with. A
+ * manager-composed event does not: the rendezvous preflight names partner-chosen
+ * directory entries and composes them RAW so the console seat stays the one
+ * altitude that escapes them, and a filename is free to carry a newline, a
+ * carriage return, and a whole forged `data:` line. What keeps that inside one
+ * frame is `JSON.stringify` escaping every newline class within the serialized
+ * string, leaving the `\n` here as the writer's own terminator. Pinned end to
+ * end -- from a name on a real mount to what a seat renders -- rather than
+ * claimed, by `apps/web/test/unit/jobWarningFraming.unit.test.ts`.
  */
 export function renderSseFrame(id: number, event: unknown): string {
   return `id: ${id}\ndata: ${JSON.stringify(event)}\n\n`;
