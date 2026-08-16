@@ -366,6 +366,14 @@ export const OUTBOUND_SEND_NO_PAYLOAD_SENTENCE =
  * own; the count-only tier is exactly where a second account would cost most,
  * since a reader takes "only a number" for the safe option.
  *
+ * Shared wording, not a shared placement, and this line alone of the tier: the
+ * web consent screen renders it as its matching-method headline for ANY `psi-c`
+ * invitation, qualified in place by {@link PROPOSED_NOT_APPLIED_NOTES.psiC}
+ * while the exchange refuses to run on those terms, where the CLI accept prompt
+ * names the algorithm there and prints this line only where `psiCApplied` says
+ * the run honors it. The `countOnly*` facts have no such split -- both surfaces
+ * hold every one of them behind that same flag.
+ *
  * Fixed first-party copy naming no value, so a surface may render it verbatim.
  */
 export const COUNT_ONLY_DISCLOSURE_STATEMENT =
@@ -389,11 +397,13 @@ export const COUNT_ONLY_DISCLOSURE_STATEMENT =
  *
  * Shared for the same reason the classification is. The count-only entry is the
  * one that moves: what it flips TO is authored already, as
- * {@link COUNT_ONLY_DISCLOSURE_STATEMENT} and the `countOnly*` facts above, and
- * both surfaces already render that tier -- behind `psiCApplied`, so the flip is
- * `APPLIED_SETTINGS.psiC` landing with the run path rather than a copy edit.
- * This entry is what the same change deletes; the render tests pinning both
- * sides of the gate make that a deliberate edit on each surface.
+ * {@link COUNT_ONLY_DISCLOSURE_STATEMENT} and the `countOnly*` facts above. The
+ * facts are what both surfaces hold behind `psiCApplied`, so the flip is
+ * `APPLIED_SETTINGS.psiC` landing with the run path rather than a copy edit; the
+ * statement is shared wording each surface places for itself, and on the web
+ * consent screen it renders beside this very entry (see its own docblock). This
+ * entry is what the same change deletes; the render tests pinning both sides of
+ * the gate make that a deliberate edit on each surface.
  */
 export const PROPOSED_NOT_APPLIED_NOTES = {
   psiC:

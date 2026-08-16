@@ -67,12 +67,16 @@ describe("the count-only consent tier", () => {
     expect(COUNT_ONLY_DISCLOSURE_STATEMENT.length).toBeGreaterThan(0);
   });
 
-  test("is gated off every surface while the exchange does not conduct a count-only run", () => {
-    // The tier is authored and both surfaces render it, behind one flag: the run
-    // path lands with `APPLIED_SETTINGS.psiC`, and until it does an acceptor must
-    // meet the refusal rather than a disclosure guarantee for a run that aborts.
-    // The gate is a summary field rather than a renderer's own reading, so this is
-    // what makes the flip one edit instead of two.
+  test("keeps its gated notes off every surface while the exchange does not conduct a count-only run", () => {
+    // The five notes are authored and both surfaces render them behind one flag:
+    // the run path lands with `APPLIED_SETTINGS.psiC`, and until it does an acceptor
+    // must meet the refusal rather than a disclosure guarantee for a run that
+    // aborts. The gate is a summary field rather than a renderer's own reading, so
+    // this is what makes the flip one edit instead of two. The headline those notes
+    // qualify is shared wording each surface places for itself -- the web consent
+    // screen shows it for any psi-c invitation beside the caveat, the CLI accept
+    // prompt only behind this flag -- so each surface's own render test pins that
+    // half.
     expect(APPLIED_SETTINGS.psiC).toBe(false);
     expect(
       summarizeInvitation({ linkageTerms: COUNT_ONLY_PROBE_TERMS }).psiCApplied,

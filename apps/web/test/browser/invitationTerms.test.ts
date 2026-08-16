@@ -83,23 +83,27 @@ const terms: LinkageTerms = {
 // The corrected count-only caveat, spelled out as the whole sentence rather than
 // read from PROPOSED_NOT_APPLIED_NOTES. What it SAYS is load-bearing and moving:
 // psi-c is asserted on every run path today, so the exchange is refused before any
-// identifier is revealed, and when the count-only run path lands both this and the
-// CLI accept prompt's pin (apps/cli/test/unit/accept.test.ts) flip to the
-// count-only disclosure statement. Pinning the sentence on both surfaces, against
-// the same terms document, is what makes that flip a deliberate edit on each rather
-// than a divergence neither notices.
+// identifier is revealed, and when the count-only run path lands the caveat goes
+// from both this pin and the CLI accept prompt's (apps/cli/test/unit/accept.test.ts),
+// each giving way to the count-only tier its own surface places. Pinning the
+// sentence on both surfaces, against the same terms document, is what makes that a
+// deliberate edit on each rather than a divergence neither notices.
 const PSI_C_CAVEAT =
   "Your partner proposes a count-only exchange, but this version of the " +
   "exchange does not yet apply it and will refuse to run; ask your partner " +
   'for an invitation using the "psi" algorithm.';
 
-// The tier that caveat gives way to, authored and rendered behind `psiCApplied`.
-// Every sentence of it, so the gate is measured over the whole tier rather than
-// over a sample of it: a count-only guarantee stated for an exchange that refuses
-// to run is the same error as the caveat claiming identifiers are revealed, facing
-// the other way. Its own rendering is pinned in invitationTermsCountOnly.test.ts,
-// which is where the flag can be moved; here the real flag decides.
-const COUNT_ONLY_TIER_COPY = [
+// The five gated tier notes that caveat gives way to, authored and rendered behind
+// `psiCApplied`. All five, so the gate is measured over the whole gated set rather
+// than over a sample of it: a count-only guarantee stated for an exchange that
+// refuses to run is the same error as the caveat claiming identifiers are revealed,
+// facing the other way. The count-only disclosure statement is deliberately not in
+// the list -- this screen renders it as its matching-method headline for any psi-c
+// invitation, beside the caveat, and the test below asserts it PRESENT there, where
+// the CLI accept prompt asserts its own absence. Their rendering is pinned in
+// invitationTermsCountOnly.test.ts, which is where the flag can be moved; here the
+// real flag decides.
+const COUNT_ONLY_GATED_TIER_NOTES = [
   CONSENT_FACTS.countOnlyResult.note,
   CONSENT_FACTS.countOnlyRoundDisclosures.note,
   CONSENT_FACTS.countOnlyReportedCount.note,
@@ -2054,16 +2058,19 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
       );
       // The headline the caveat qualifies renders for a proposed psi-c as well: it
       // states what the algorithm reveals, which is what the caveat then says this
-      // version will not run. Spelled out because it is the sentence both surfaces
-      // read from one source once the tier below it applies.
+      // version will not run. Spelled out because it is shared wording the two
+      // surfaces place differently -- this screen shows it for any psi-c invitation,
+      // the CLI accept prompt withholds it until the run honors the algorithm -- so
+      // its presence here is a fact about this screen and is asserted as one.
       expect(app.container.textContent).toContain(
         "Only the number of records you have in common is revealed, not which " +
           "records match.",
       );
       // The gate, read through the real APPLIED_SETTINGS.psiC rather than around
-      // it: while the exchange refuses these terms, not one sentence of the tier
-      // the caveat gives way to may reach the screen.
-      for (const copy of COUNT_ONLY_TIER_COPY)
+      // it: while the exchange refuses these terms, not one of the five gated tier
+      // notes may reach the screen. That absence IS the cross-surface invariant --
+      // the CLI's pin asserts the same five against its own prompt.
+      for (const copy of COUNT_ONLY_GATED_TIER_NOTES)
         expect(app.container.textContent).not.toContain(copy);
     }
   });

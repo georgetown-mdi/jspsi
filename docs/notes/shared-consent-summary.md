@@ -321,9 +321,10 @@ marker says only that the expansion is proposed, and a refusal claim there would
 the same error facing the other way.
 
 That the count-only caveat is a moving target is the reason it is pinned by a
-render test on both surfaces: when the count-only run path lands, both flip to the
-count-only disclosure statement together, as a deliberate edit rather than a silent
-divergence.
+render test on both surfaces: when the count-only run path lands the caveat goes
+from both of them, as a deliberate edit rather than a silent divergence. What each
+surface shows in its place is the count-only tier below -- whose gated facts the
+two render alike, and whose headline they place differently.
 
 The caveat copy is carried once, beside the classification, and rendered twice --
 for the same reason the classification is. Two surfaces authoring their own
@@ -396,6 +397,15 @@ the reason, and the sentence is a fact of the tier rather than a second reading 
 the entitlement one. Stating the refusal where the operator is deciding what
 leaves their machine is also where the specification puts it -- at the choice, not
 as a surprise once the run aborts.
+
+Each surface backs that sentence with a render-side refusal rather than printing
+it over a contradiction: an applied `psi-c` whose viewer-side outbound set carries
+a column, or whose invitation declares payload in either direction, throws instead
+of rendering the guarantee. Those throws are a backstop and not the remedy, which
+puts one item on the ungate checklist ahead of the flag: the count-only run path
+must refuse an input-metadata payload column and a payload-declaring `psi-c`
+document actionably, at accept and at parse, BEFORE `APPLIED_SETTINGS.psiC` flips,
+or an operator meets a raw render error where an actionable refusal belongs.
 
 That the CLI puts the whole tier in its twice-printed decision block, where it
 prints the algorithm and its caveat today, is the same judgment read from the

@@ -428,14 +428,18 @@ function CondensableDetails({
  * enters a caveat and neither surface can restate one. Render tests pin each caveat
  * at its headline's level against the accessibility tree.
  *
- * The same placement rule governs the count-only tier the psi-c caveat gives way to
- * once `psiCApplied` says the run honors the algorithm: the statement of what a
- * count-only exchange reveals, what its rounds disclose beside the count, and the
- * bound a partner's choice of input puts on both are always-visible with the
- * headline, and its no-payload sentence takes the outbound-send slot ahead of every
- * entitlement-driven block there. Every sentence, and the enforced-versus-partner
- * basis behind it, is read from `COUNT_ONLY_DISCLOSURE_STATEMENT` and `CONSENT_FACTS`
- * in `@psilink/core`.
+ * The same placement rule governs the count-only facts the psi-c caveat gives way to
+ * once `psiCApplied` says the run honors the algorithm: what the run itself holds,
+ * what its rounds disclose beside the count, and the bound a partner's choice of
+ * input puts on both are always-visible with the matching-method headline, the
+ * reported-count caveat sits with result sharing, and the no-payload sentence takes
+ * the outbound-send slot ahead of every entitlement-driven block there. Those five
+ * sentences are what the flag gates. The headline is not one of them: this screen
+ * renders `COUNT_ONLY_DISCLOSURE_STATEMENT` for ANY psi-c invitation, qualified in
+ * place by the refusal caveat while the exchange will not run on those terms, where
+ * the CLI accept prompt prints that same wording only once the flag says the run
+ * honors it. Every sentence, and the enforced-versus-partner basis behind it, is
+ * read from `COUNT_ONLY_DISCLOSURE_STATEMENT` and `CONSENT_FACTS` in `@psilink/core`.
  *
  * Two payload facts whose detail lives in the "Other details" disclosure carry an
  * always-visible count in a direction tier, since each would otherwise be invisible
@@ -698,16 +702,34 @@ export function InvitationTerms({
       ? (summary.payload?.send ?? [])
       : (outboundColumns ?? []);
   // The count-only block states a precondition of the algorithm rather than a set
-  // this component read: psi-c refuses payload in either direction where the terms
-  // are authored, at the local prepare step, and at the agreed-terms run boundary
-  // (docs/spec/PROTOCOL.md, PSI-C). A viewer's set carrying a column means none of
-  // those refusals held, and rendering "no columns are sent to your partner" over it
-  // would take the operator's consent to a disclosure that happens. The message
-  // states the fact and names no column.
+  // this component read: psi-c admits no payload in either direction, and a document
+  // or input metadata declaring one is refused where the terms are authored, at the
+  // local prepare step, and at the agreed-terms run boundary (docs/spec/PROTOCOL.md,
+  // PSI-C). What this set holds is the viewer's own side of that -- the inviter's
+  // authored send under "proposing", the acceptor's resolved metadata otherwise --
+  // so this throw is the render-side backstop for the accept-path refusals the
+  // count-only run path must land, unreachable once they refuse ahead of it. Until
+  // then, rendering "no data columns in either direction" over a column would take
+  // the operator's consent to a disclosure that happens. The message states the fact
+  // and names no column.
   if (countOnlyApplied && viewerOutboundSend.length > 0)
     throw new Error(
       "count-only terms carry a non-empty outbound column set: a psi-c " +
         "exchange sends no data column in either direction",
+    );
+  // The mirror of that check on what the INVITATION declares, which this screen
+  // renders beside the tier as the ingress and egress notices: a psi-c document
+  // declaring a send or a receive asks for exactly the column movement the algorithm
+  // refuses, and the no-payload sentence rendered above "Your partner requests 1 data
+  // column from you" would state a guarantee the same screen contradicts. The
+  // invitation is partner-controlled, so this side cannot assume the authoring
+  // refusal ran; the same backstop reading applies. Read off the two counts those
+  // notices are composed from, so no declaration can reach a notice this check did
+  // not see.
+  if (countOnlyApplied && (sendCount > 0 || receiveCount > 0))
+    throw new Error(
+      "count-only terms declare a payload column: a psi-c exchange moves no " +
+        "data column in either direction",
     );
   const outboundNoPayloadRenders = !countOnlyApplied && !partnerReceivesResult;
   const proposingSendChipsRender =

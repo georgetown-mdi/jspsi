@@ -2051,6 +2051,7 @@ function renderAppliedCountOnlyFacts(
     shareWithPartner: true,
   },
   ownOutboundSend: ReadonlyArray<string> = [],
+  payload: LinkageTerms["payload"] = COUNT_ONLY_PROBE_TERMS.payload,
 ): string {
   const block: Array<string> = [];
   logDecisionFacts(
@@ -2060,7 +2061,7 @@ function renderAppliedCountOnlyFacts(
     {
       ...summarizeInvitation({
         ...sampleToken(FUTURE()),
-        linkageTerms: { ...COUNT_ONLY_PROBE_TERMS, output },
+        linkageTerms: { ...COUNT_ONLY_PROBE_TERMS, output, payload },
       }),
       psiCApplied: true,
     },
@@ -2149,13 +2150,14 @@ test("an applied count-only exchange states its disclosure tier on the register 
 });
 
 test("a count-only rendering refuses a resolved outbound set rather than state (none) over it", () => {
-  // The "(none)" line states a precondition -- psi-c refuses payload in either
-  // direction when the terms are authored, at the local prepare step, and at the
-  // agreed-terms run boundary -- rather than a set the renderer read. A set carrying
-  // a column means none of those refusals held, and printing "(none)" over it would
-  // take the operator's consent to a disclosure that happens, on the one screen
-  // where the disclosure IS the decision. Driven with the flag forced on and a
-  // column in the set, so the check is measured firing rather than assumed.
+  // The "(none)" line states a precondition -- psi-c admits no payload in either
+  // direction -- rather than a set the renderer read. This set is this party's own
+  // resolved metadata, so a column in it is one the accept-path refusals the
+  // count-only run path must land would have stopped; until they do, printing
+  // "(none)" over it would take the operator's consent to a disclosure that happens,
+  // on the one screen where the disclosure IS the decision. Driven with the flag
+  // forced on and a column in the set, so the check is measured firing rather than
+  // assumed.
   expect(() => renderAppliedCountOnlyFacts(undefined, ["risk_score"])).toThrow(
     /no payload in either direction/,
   );
@@ -2175,6 +2177,47 @@ test("a count-only rendering refuses a resolved outbound set rather than state (
       ["risk_score"],
     ),
   ).toContain("  columns you will send (enforced):\n    - risk_score");
+});
+
+test("a count-only rendering refuses terms that declare a payload column", () => {
+  // The mirror of the check above, on the partner's side of it: the invitation is
+  // partner-controlled, and a psi-c document declaring a send or a receive is one
+  // the spec refuses (docs/spec/PROTOCOL.md, PSI-C). Printed, the tier's no-payload
+  // sentence would stand above this same prompt's blocks listing the columns that
+  // invitation will send or asks for -- a guarantee stated over the declaration
+  // contradicting it. Driven on each direction with the flag forced on, so the check
+  // is measured firing rather than assumed.
+  expect(() =>
+    renderAppliedCountOnlyFacts(undefined, [], {
+      send: [{ name: "risk_score" }],
+      receive: [],
+    }),
+  ).toThrow(/declare a payload column/);
+  expect(() =>
+    renderAppliedCountOnlyFacts(undefined, [], {
+      send: [],
+      receive: [{ name: "risk_score" }],
+    }),
+  ).toThrow(/declare a payload column/);
+  // Non-vacuous the other way: the conforming document -- the empty pair psi-c
+  // requires -- renders the sentence, so the throws above are the declaration's
+  // doing and not the flag's.
+  expect(renderAppliedCountOnlyFacts()).toContain(
+    `    ${CONSENT_FACTS.countOnlyNoPayload.note}`,
+  );
+  // And the check is the count-only branch's alone: a psi invitation declaring the
+  // same columns prints them.
+  const log = getLogger("accept-display-count-only-declared-payload-test");
+  log.setLevel("silent");
+  expect(
+    renderDisplayInvitation(log, {
+      ...sampleToken(FUTURE()),
+      linkageTerms: {
+        ...CONSENT_PROBE_TERMS,
+        payload: { send: [], receive: [{ name: "risk_score" }] },
+      },
+    }),
+  ).toContain("    - risk_score");
 });
 
 test("the count a party did not compute is caveated only where both parties are entitled to one", () => {

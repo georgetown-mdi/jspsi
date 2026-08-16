@@ -23,16 +23,18 @@ import type { ComponentProps, ReactNode } from "react";
 import type * as PsilinkCore from "@psilink/core";
 import type { LinkageTerms } from "@psilink/core";
 
-// The consent screen renders the count-only tier behind the summary's
-// `psiCApplied`, which `APPLIED_SETTINGS.psiC` holds false until the count-only run
-// path lands -- so the tier the acceptance surfaces will show is unreachable from
-// the terms alone. The flag is moved where the component reads it, by wrapping the
-// summarizer it renders from: core's own binding is internal to the built bundle
-// this app consumes, so overriding an export would not reach the read.
+// The consent screen renders the count-only tier's five gated notes behind the
+// summary's `psiCApplied`, which `APPLIED_SETTINGS.psiC` holds false until the
+// count-only run path lands -- so those sentences are unreachable from the terms
+// alone. The tier's headline is not gated here: this screen renders it for any psi-c
+// invitation, beside the refusal caveat, which invitationTerms.test.ts pins. The flag
+// is moved where the component reads it, by wrapping the summarizer it renders from:
+// core's own binding is internal to the built bundle this app consumes, so overriding
+// an export would not reach the read.
 //
 // What that leaves this file measuring is the renderer: which sentences it shows,
-// in which tier, for which entitlements. That the gate itself holds -- that none of
-// this reaches an operator while the exchange refuses a psi-c invitation -- is
+// in which tier, for which entitlements. That the gate itself holds -- that no gated
+// note reaches an operator while the exchange refuses a psi-c invitation -- is
 // pinned in invitationTerms.test.ts, on the unmocked path.
 vi.mock("@psilink/core", async (importOriginal) => {
   const actual = await importOriginal<typeof PsilinkCore>();
@@ -220,6 +222,46 @@ describe("InvitationTerms: the count-only tier a run that honors psi-c renders",
       await expect.element(refusal()).toBeInTheDocument();
       expect(refusal().element().textContent).toContain(
         "sends no data column in either direction",
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  test("refuses terms that declare a payload column rather than state the tier's guarantee beside them", async () => {
+    // The invitation is partner-controlled, and a psi-c document declaring a send or
+    // a receive is one the spec refuses (docs/spec/PROTOCOL.md, PSI-C). Rendered, it
+    // puts "A count-only exchange carries no data columns in either direction"
+    // directly beside this screen's own "You will receive 1 data column from your
+    // partner" / "Your partner requests 1 data column from you" -- a guarantee stated
+    // over the declaration contradicting it. Driven on each direction with the flag
+    // forced on, so the check is measured firing rather than assumed; the conforming
+    // document below is the positive control.
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    try {
+      renderCountOnlyUnderBoundary({
+        linkageTerms: {
+          ...COUNT_ONLY_PROBE_TERMS,
+          payload: { send: [{ name: "risk_score" }], receive: [] },
+        },
+      });
+      await expect.element(refusal()).toBeInTheDocument();
+      expect(refusal().element().textContent).toContain(
+        "declare a payload column",
+      );
+
+      app.unmount();
+      renderCountOnlyUnderBoundary({
+        linkageTerms: {
+          ...COUNT_ONLY_PROBE_TERMS,
+          payload: { send: [], receive: [{ name: "risk_score" }] },
+        },
+      });
+      await expect.element(refusal()).toBeInTheDocument();
+      expect(refusal().element().textContent).toContain(
+        "declare a payload column",
       );
     } finally {
       consoleError.mockRestore();
