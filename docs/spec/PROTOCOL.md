@@ -186,9 +186,76 @@ This marker is distinct from three neighbouring identifiers. The operator-author
 
 ### PSI-C
 
-> **Not yet implemented:** PSI-C is not yet fully implemented. It is targeted for a release after 1.0; see [ROADMAP.md](../ROADMAP.md). The description below is the intended design.
+> **Not yet implemented:** the specification below is normative, but no count-only run path exists yet. An exchange whose linkage terms set `algorithm: psi-c` is refused before it runs -- at the local prepare step and again at the agreed-terms run boundary (`assertAlgorithmImplemented`, `packages/core/src/exchange.ts`) -- rather than revealing matched identifiers under terms that asked for a count. Targeted for a release after 1.0; see [ROADMAP.md](../ROADMAP.md).
 
-PSI-C is also executed by sequentially executing deterministic linkages. Membership anonymity is granted by the sender permuting the receiver's doubly-encrypted data before returning it to them. The results of multiple linkage keys can be combined so long as the sender uses a consistent permutation algorithm for each round. The association map in the permuted space has the same size as one in the original space. This allows the cardinality to be measured without revealing which specific members are in common.
+PSI-C ([`linkage_terms.algorithm: psi-c`](../EXCHANGE_REFERENCE.md#linkage_termsalgorithm)) reports the SIZE of the intersection and nothing else: no identifier, no matched pairing, no payload, no per-record result. It is the pre-agreement feasibility instrument -- the exchange two parties run to find out whether a linkage is worth negotiating at all -- so it runs at the point in a partnership where the least trust has been established, which is what fixes the scope of the claim it makes (see [Threat-model scope of the count-only claim](#threat-model-scope-of-the-count-only-claim) below).
+
+**One key, one round, cascade only.** A count-only exchange is EXACTLY ONE [PSI base function](#psi-base-function) round over EXACTLY ONE linkage key, under [`linkage_strategy: cascade`](#linkage-strategies-cascade-and-single-pass). There is no count-only cascade over several keys and no count-only single-pass: a multi-key count is not specified here, and terms declaring one are refused rather than narrowed to the first key. Why a round-consistent multi-key count is not offered is recorded in [psi-c-count-only.md](../notes/psi-c-count-only.md).
+
+**Refusals.** A psi-c terms document declaring any of the following MUST be refused:
+
+- more than one entry in [`linkage_keys`](../EXCHANGE_REFERENCE.md#linkage-terms);
+- [`linkage_strategy: single-pass`](../EXCHANGE_REFERENCE.md#linkage_termslinkage_strategy);
+- [`deduplicate: true`](../EXCHANGE_REFERENCE.md#linkage_termsdeduplicate) on either party;
+- payload in either direction -- a non-empty [`payload.send`](../EXCHANGE_REFERENCE.md#linkage_termspayload) or `payload.receive`, or [input metadata](../EXCHANGE_REFERENCE.md#input-metadata) that would transmit a column (`is_payload: true` on a column whose `role` is not `ignored`).
+
+Each MUST be refused at three points, so that no combination of authoring path and partner reaches a run: when the terms are authored or an invitation over them is minted; at the local prepare step, before any credential, terms, or data are sent; and at the agreed-terms run boundary once the terms exchange has completed, which is the first point at which both parties' values are known. The run-boundary check is a symmetric function of the agreed pair, computed identically on both parties, so the lockstep round cannot begin on one side and be refused on the other.
+
+The refusal is fail-closed at all three: an over-broad psi-c term is never silently narrowed to the specified shape, never derived and then discarded, and never downgraded to a `psi` run. Narrowing would deliver a disclosure the operator did not agree to; downgrading would reveal matched identifiers under terms that asked for a count -- the exact substitution the count-only algorithm exists to prevent.
+
+**The round.** The wire shape is the cascade round's, unchanged. The sender is the base function's server and the receiver its client, assigned by the ordinary rule ([Role resolution and work minimization](#role-resolution-and-work-minimization)): when exactly one party expects output that party is the receiver, and when both do the smaller row count is. Three frames:
+
+1. **sender -> receiver** -- the sender's setup message over the values it contributes, each encrypted once under the sender's key, as a `Raw` data structure.
+2. **receiver -> sender** -- the receiver's request over the values it contributes, each encrypted once under the receiver's key.
+3. **sender -> receiver** -- the response: the receiver's request re-encrypted under the sender's key.
+
+The sender does not need the setup message's internal sorting permutation, because there is no pairing to map back to rows.
+
+**The reveal flag is cleared, and it is not a local preference.** Both parties MUST construct their base-function objects with the library's reveal-intersection flag CLEARED, where a `psi` run sets it. Three properties follow, and together they are what makes the mode count-only rather than a convention:
+
+- **The flag rides the receiver's request.** Of the three messages only the request carries it, as a field of its own; the setup and the response carry no mode marker. So the mode the receiver ran under is on the wire rather than asserted, and it is the sender that reads it.
+- **Mismatched parties cannot complete the round.** The sender enforces agreement when it processes the request: a request whose flag differs from the sender's own throws rather than producing a response, in both orientations. A count-only sender therefore refuses to serve a revealing receiver, and a revealing sender refuses to serve a count-only one, so a completed round implies the two flags agreed. The mismatch fails; it never resolves silently to either mode.
+- **The identifier-revealing operations are unavailable.** With the flag cleared, the client operations that return the matched positions or the association table throw instead of returning. The receiver's own software cannot produce a pairing out of a count-only round even if it asks for one.
+
+The response also does not positionally name the matches: its encrypted elements are emitted in an order the library fixes from the ciphertext bytes rather than in the request's order, and the receiver cannot re-derive the correspondence, since doing so would require encrypting its own value under the sender's key. What that does NOT do is make the attribution unavailable to a receiver that chooses its input set -- see the threat-model scope below.
+
+**Computing the count.** The receiver computes the count locally from the setup and the response, with the library's cardinality operation over the two. The sender computes nothing and learns nothing about the count from the round itself.
+
+**`Raw` is required.** The setup message MUST use the `Raw` data structure, as every round of this protocol already does (a received setup that is not `Raw` is refused as a protocol error). It is what makes the count exact. The probabilistic structures the library also offers -- a Bloom filter and a Golomb-coded set -- admit false positives, so the figure they yield is an upper bound on the cardinality rather than the cardinality. Under `psi` such a false positive would surface as a spurious pair an operator could notice; a count-only run surfaces no identifiers at all, so neither party can detect an inflated count, let alone correct it. The exactness requirement is therefore stricter for psi-c than for psi, not weaker.
+
+**Within-dataset value handling, and comparability with `psi`.** A count-only round applies the same rule every cascade round applies ([Key input data](#key-input-data)): a record with no value for the key is omitted from the round, and a record whose key value is duplicated within its own party's dataset is omitted too, since an ambiguous match cannot be attributed to a single record. Each party therefore contributes exactly the key values that occur exactly ONCE in its own dataset.
+
+Applying that filter is normative, not an optimization carried over from the cascade, because the library's cardinality operation does not reproduce it. That operation reports the size of the MULTISET intersection: a value repeated on both sides contributes the smaller of the two multiplicities, where the cascade rule drops such a value from the round entirely. A party that passed its raw column through would therefore report a figure that can exceed the number of records that actually match -- and a count-only run surfaces no identifier that would contradict it.
+
+With the filter applied on both sides every contributed value is unique within its own dataset, so the multiset question does not arise and the psi-c count equals the size of the association table a single-key `psi` run over the same key and the same data would produce. That equality is what makes a count-only feasibility run comparable to the linkage it is used to justify. It is not comparable to a multi-key `psi` run, which matches records a single key alone misses.
+
+**Count reporting and entitlement.** The receiver alone computes the count. Whether it travels back is decided by the agreed terms' [`output`](../EXCHANGE_REFERENCE.md#linkage_termsoutput) entitlement, derived identically on both parties before the round runs:
+
+- **Both parties entitled** (`expects_output` true on both). After the round the receiver sends a single **count-report** frame carrying its tally to the sender over the authenticated channel. Only the receiver sends; the sender receives it and sends nothing back.
+- **Exactly one party entitled.** By the role rule the entitled party IS the receiver, so it already holds the count and there is no count-report frame at all. The non-receiving sender receives nothing -- not the count, not an empty frame. Suppressing the frame entirely, rather than sending a placeholder, is the same discipline the single-pass table withholding follows: a frame that is present but empty would still mark, by its presence, that a count existed to report.
+
+Both parties derive that decision from the same agreed terms, so the receiver never sends a frame the sender will not read and the sender never blocks awaiting one the receiver will not send.
+
+**What each party learns, and on what basis.** Stated in the vocabulary the consent surfaces use -- `enforced` is a claim about the run (either it holds or the exchange aborts), `trust-contingent` is a claim about the partner, whom psilink does not stop (`CONSENT_BASIS_MARKERS`, `packages/core/src/consentFacts.ts`):
+
+- **A party's own count-only outcome is enforced.** With its flag cleared its software cannot produce a pairing, and a round that completes at all is one both parties ran with the flag cleared. Neither the partner's cooperation nor its honesty is required for this.
+- **A party's view of what its PARTNER receives is enforced at the wire, and bounded by the model.** A partner cannot run a revealing round against a count-only one: the flag mismatch refuses it. What that does not bound is a partner that runs the count-only round faithfully and recovers membership from its own choice of inputs, below.
+- **The sender's knowledge of the count is trust-contingent.** In the both-entitled case the number the sender holds is the receiver's report; a receiver that reports a different one is not stopped by psilink. This is the same posture as the `psi` association-table return leg, where the sender's half of the pairing likewise arrives as the receiver's word. A sender that needs the figure to be independently checkable does not get that from psi-c.
+
+**What the rounds still disclose.** Each party's setup or request carries one encrypted element per value it contributed, so the frame's element count is that party's number of distinct, non-repeating values for the key. Set beside the raw row count the terms exchange already carries ([Role resolution and work minimization](#role-resolution-and-work-minimization)), that tells the partner how well the key covers the dataset -- a materially smaller figure for a sparsely populated key. Neither number is the intersection, and neither is hidden by the count-only mode.
+
+#### Threat-model scope of the count-only claim
+
+The count-only claim holds in the semi-honest (honest-but-curious) model this project adopts; see [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#threat-model). It protects the sender against a receiver that contributes a genuine dataset. It does not protect the sender against a receiver that chooses its input set, and the choice is enough on its own:
+
+- **A crafted set.** A receiver whose input is one live candidate padded with values it knows the sender cannot hold reads that candidate's membership straight off a count of 0 or 1. Nothing distinguishes a crafted set from a genuine one on the wire: both are opaque encrypted elements, and only their number is visible.
+- **Differencing across runs.** Two count-only runs whose input sets differ in one value name that value's membership by the difference of their counts. This is the differencing attack SECURITY_DESIGN.md already names for linkage keys, applied to the count, and psi-c's one-round shape makes it cheap to repeat.
+
+Both routes tamper with an input rather than merely observing one, so both sit a step beyond honest-but-curious -- the same category as the record-count manipulation SECURITY_DESIGN.md records for role assignment -- and both are accepted rather than prevented. Preventing them would require binding a party's contributed set to a dataset it cannot choose per run, which nothing in this protocol does.
+
+Neither route is a wire deviation, and that asymmetry is worth naming. A receiver cannot weaken the round from its own side: it cannot make the sender return a response in request order, and the flag mismatch stops it from running a revealing round. The only party positioned to waive the count-only property on the wire is the SENDER -- the party the property protects -- by returning a response whose element order the receiver can attribute. A deviating sender therefore reduces only its own protection, which is why the enforcement above is stated as holding without the partner's cooperation.
+
+Two consequences are worth stating plainly rather than leaving to be derived. First, the count-only property is a property of the algorithm, not of the partner: it says the protocol hands the receiver only a number, not that the receiver cannot arrange for that number to be an answer about one record. Second, psi-c carries this scope where it bites hardest. It is the algorithm run to decide whether a data-sharing agreement is worth having -- which is exactly when the signed agreement the honest-but-curious premise leans on does not yet exist. A count-only run is a disclosure to be weighed on its own terms, not a free look before the real decision.
 
 # Datasets
 
