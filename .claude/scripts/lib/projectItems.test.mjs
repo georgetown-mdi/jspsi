@@ -295,6 +295,39 @@ describe("graphql request bounds", () => {
     expect(err.message).toMatch(/no response within 25 ms/);
   });
 
+  it("leaves no unhandled rejection when the transport rejects after the deadline", async () => {
+    // The deadline wins the race, so the transport's own rejection arrives at a
+    // promise that already lost it. Promise.race attaches a handler to every
+    // input, so that late rejection is handled -- asserted rather than asserted
+    // in prose, because the failure mode is a process-level crash far from here.
+    const unhandled = [];
+    const record = (reason) => unhandled.push(reason);
+    process.on("unhandledRejection", record);
+    vi.stubGlobal(
+      "fetch",
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () =>
+            setTimeout(() => reject(new Error("late transport failure")), 20),
+          );
+        }),
+    );
+
+    try {
+      const err = await graphql("{ q }", undefined, {
+        ...FAST,
+        maxAttempts: 1,
+      }).catch((e) => e);
+
+      expect(err.message).toMatch(/no response within 25 ms/);
+      // Past the late rejection, and past the drain on which Node reports one.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", record);
+    }
+  });
+
   it("returns the success that follows a stalled attempt", async () => {
     let calls = 0;
     const fetchStub = vi.fn(() => {

@@ -177,9 +177,6 @@ async function requestWithinTimeout(query, variables, token, timeoutMs) {
     token,
     controller.signal,
   );
-  // The abort below rejects `inFlight` after the race has settled; with no
-  // handler attached that late rejection surfaces as an unhandled rejection.
-  inFlight.catch(() => {});
   const deadline = new Promise((_resolve, reject) => {
     timer = setTimeout(() => {
       timedOut = true;
