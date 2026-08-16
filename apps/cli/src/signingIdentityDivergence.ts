@@ -2,8 +2,10 @@ import { certificateAuthorizesIdentity } from "@psilink/core";
 import type { CertificateBody } from "@psilink/core";
 
 // The one place the CLI compares the identity a signing certificate is bound to
-// against the party's `linkage_terms.identity`, shared by every command that
-// resolves an identity so the two cannot drift apart in wording or in rule.
+// against the party's `linkage_terms.identity`, shared by the commands that
+// resolve an identity for an exchange (fingerprint and exchange; verify-receipt
+// checks against the record, not the run's terms) so the two cannot drift apart
+// in wording or in rule.
 //
 // Why the comparison matters: a partner verifies a receipt against the identity
 // in the AGREED TERMS, not the one the presented certificate carries
