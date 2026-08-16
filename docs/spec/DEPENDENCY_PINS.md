@@ -24,9 +24,11 @@ freeze, pin, and install on top of that tree is in
   `apps/cli/package.json`. Every bump -- including a security patch -- is then a
   deliberate edit rather than an `npm audit fix` that slips in unreviewed.
 - **WebRTC stack (`peerjs` / `peerjs-js-binarypack`).** The web data-channel
-  inbound bound (`apps/web/src/psi/boundedReassembly.ts`) reaches into PeerJS
-  reassembly/unpack internals and parses the `peerjs-js-binarypack` wire format
-  directly. Both are exact-pinned in `apps/web/package.json` --
+  inbound bound reaches into PeerJS reassembly/unpack internals
+  (`apps/web/src/psi/boundedReassembly.ts`) and parses the
+  `peerjs-js-binarypack` wire format directly
+  (`packages/core/src/connection/binaryPackBounds.ts`). Both are exact-pinned in
+  `apps/web/package.json` --
   `peerjs-js-binarypack` declared directly, not left a floating transitive,
   precisely because the bound parses its wire format -- and pulled out of the
   routine Dependabot batch into a reviewed `webrtc-stack` group
@@ -505,7 +507,7 @@ Then run `npm run test:integration -w apps/cli` against the new version. The con
 
 ## Upgrading the PeerJS Stack (peerjs / peerjs-js-binarypack)
 
-The web WebRTC data-channel inbound bound specified in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md) reaches past the public `DataConnection` API into PeerJS reassembly/unpack internals and parses the `peerjs-js-binarypack` wire format directly (`apps/web/src/psi/boundedReassembly.ts`), so it rests on premises about both packages' internal behavior that an upgrade can silently break. Re-verify the following on any `peerjs` or `peerjs-js-binarypack` version bump, before the bump merges.
+The web WebRTC data-channel inbound bound specified in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md) reaches past the public `DataConnection` API into PeerJS reassembly/unpack internals (`apps/web/src/psi/boundedReassembly.ts`) and parses the `peerjs-js-binarypack` wire format directly (`packages/core/src/connection/binaryPackBounds.ts`), so it rests on premises about both packages' internal behavior that an upgrade can silently break. Re-verify the following on any `peerjs` or `peerjs-js-binarypack` version bump, before the bump merges.
 
 The internal assumptions the bound relies on:
 
@@ -518,6 +520,7 @@ Dependency source files to re-read on an upgrade:
 
 - `node_modules/peerjs/dist/bundler.mjs` (the bundled binary/chunked `DataConnection`): confirm `_handleChunk` still reassembles into `_chunkedData` keyed by `__peerData` and recurses into `_handleDataMessage` on completion; that `_handleDataMessage` is still the sole `unpack` point both the unchunked and reassembled paths flow through; that `peer.connect`'s default serializer is still the binarypack Binary class (and that `_chunkedData`/`_handleChunk` remain specific to it); and that the chunk envelope still carries `__peerData`/`n`/`total`/`data`.
 - `node_modules/peerjs-js-binarypack/dist/binarypack.mjs` (`Unpacker.unpack`): confirm the marker table above, and that `unpack_string`/`unpack_raw` advance the cursor by exactly the declared `size`.
-- `apps/web/src/psi/boundedReassembly.ts`: re-confirm `readValueHeader`/`structureOverBudget` still mirror that marker table and that `assertChunkReassemblySupported` still probes the three internals; update the cost weights only with the security-review judgment noted in the spec.
+- `packages/core/src/connection/binaryPackBounds.ts`: re-confirm `readValueHeader`/`structureOverBudget` still mirror that marker table; update the cost weights only with the security-review judgment noted in the spec.
+- `apps/web/src/psi/boundedReassembly.ts`: re-confirm `assertChunkReassemblySupported` still probes the three internals and that the wrap still applies the core constants at both of them.
 
-`assertChunkReassemblySupported` runs at install time on every connection in `openPeerMessageConnection`, and the live browser exchange test (`apps/web/test/browser/invitedPSI.test.ts`, run in CI) installs the guard on a real `DataConnection`, so a renamed or removed internal fails the install loud rather than running with no inbound bound. The unit tests (`apps/web/test/unit/boundedReassembly.test.ts`) pin the marker table, the per-kind cost weights, and the fail-closed bounds. A purely BEHAVIORAL change that keeps the names -- a different chunking serializer, a renamed chunk field, a marker-format change -- is not caught by the assert or the happy-path browser test, so the by-hand premises above must be re-verified against the source files on any bump.
+`assertChunkReassemblySupported` runs at install time on every connection in `openPeerMessageConnection`, and the live browser exchange test (`apps/web/test/browser/invitedPSI.test.ts`, run in CI) installs the guard on a real `DataConnection`, so a renamed or removed internal fails the install loud rather than running with no inbound bound. The unit tests pin the marker table and the per-kind cost weights (`packages/core/test/binaryPackBounds.test.ts`), the fail-closed wrap bounds (`apps/web/test/unit/boundedReassembly.test.ts`), and the scan's agreement with the real packer/unpacker (`apps/web/test/unit/boundedReassemblyDifferential.test.ts`, which lives in the workspace that declares `peerjs-js-binarypack`). A purely BEHAVIORAL change that keeps the names -- a different chunking serializer, a renamed chunk field, a marker-format change -- is not caught by the assert or the happy-path browser test, so the by-hand premises above must be re-verified against the source files on any bump.

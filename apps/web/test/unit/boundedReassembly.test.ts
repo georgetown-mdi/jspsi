@@ -1,13 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { ConnectionError } from "@psilink/core";
+import { ConnectionError, WEBRTC_VALUE_WEIGHTS } from "@psilink/core";
 
 import {
-  MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
-  WEBRTC_VALUE_WEIGHTS,
   boundChunkReassembly,
   checkDeliveredFrameBound,
-  structureOverBudget,
 } from "../../src/psi/boundedReassembly.js";
 
 import type { DataConnection } from "peerjs";
@@ -533,117 +530,6 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
       "structure limit",
     );
     expect(conn.delivered).toEqual([]);
-  });
-});
-
-describe("structureOverBudget", () => {
-  test("flags a flat array over the byte budget", () => {
-    // 40 + 50*8 = 440 retained bytes, over a 100-byte budget.
-    expect(structureOverBudget(arrayOfFixints(50), 100, 256)).toBe(true);
-  });
-
-  test("passes a flat array under the byte budget", () => {
-    expect(structureOverBudget(arrayOfFixints(50), 1000, 256)).toBe(false);
-  });
-
-  test("flags an array declaring more than the bytes that follow", () => {
-    expect(structureOverBudget(array32Header(1000), 1_000_000, 256)).toBe(true);
-  });
-
-  test("flags a string longer than the per-string byte cap", () => {
-    expect(structureOverBudget(str32Header(1000), 1_000_000, 256, 100)).toBe(
-      true,
-    );
-  });
-
-  test("passes a short fixstr under the per-string cap", () => {
-    // fixstr "abc" (0xb3 + 3 bytes) is one value and well under any string cap.
-    expect(
-      structureOverBudget(
-        new Uint8Array([0xb3, 0x61, 0x62, 0x63]),
-        100,
-        256,
-        100,
-      ),
-    ).toBe(false);
-  });
-
-  test("flags a fixstr over the per-string cap, uniformly with the wide markers", () => {
-    // fixstr "abcd" (4 bytes) against a 2-byte cap: the cap fires on fixstr too,
-    // not only str16/str32, so the marker dispatch is one rule.
-    expect(
-      structureOverBudget(new Uint8Array(fixstr("abcd")), 1000, 256, 2),
-    ).toBe(true);
-  });
-
-  test("flags excessive nesting depth", () => {
-    // Each level is one byte-backed array of one element; deeper than the cap.
-    const out: Array<number> = [];
-    for (let d = 0; d < 10; d++) out.push(0x91); // fixarray(1)
-    out.push(0x01); // a fixint leaf
-    expect(structureOverBudget(new Uint8Array(out), 1000, 4)).toBe(true);
-  });
-});
-
-describe("structureOverBudget: the per-value cost model", () => {
-  // Each value kind is a single-value frame charged exactly its documented weight:
-  // a budget one byte below the weight rejects, a budget at the weight accepts. The
-  // string cap is left wide so only the structural weight is under test.
-  const atBoundary = (frame: Uint8Array, weight: number): void => {
-    expect(structureOverBudget(frame, weight - 1, 256, 1 << 20)).toBe(true);
-    expect(structureOverBudget(frame, weight, 256, 1 << 20)).toBe(false);
-  };
-
-  test("charges an empty object the object weight", () => {
-    atBoundary(new Uint8Array([0x80]), WEBRTC_VALUE_WEIGHTS.object); // fixmap(0)
-  });
-
-  test("charges an empty array the array weight", () => {
-    atBoundary(new Uint8Array([0x90]), WEBRTC_VALUE_WEIGHTS.array); // fixarray(0)
-  });
-
-  test("charges an integer the scalar weight", () => {
-    atBoundary(new Uint8Array([0x01]), WEBRTC_VALUE_WEIGHTS.scalar); // fixint
-  });
-
-  test("charges a wide number marker (double) the scalar weight", () => {
-    // double (0xcb + 8 payload bytes) is a HeapNumber at runtime but is charged
-    // the scalar slot here; this pins the documented under-count -- the wire-byte
-    // cap, not the structure budget, is the backstop for a number-heavy frame.
-    atBoundary(
-      new Uint8Array([0xcb, 0, 0, 0, 0, 0, 0, 0, 0]),
-      WEBRTC_VALUE_WEIGHTS.scalar,
-    );
-  });
-
-  test("charges a string its header plus per-byte weight", () => {
-    // fixstr "abcd": stringBase + 4 * stringPerByte.
-    atBoundary(new Uint8Array(fixstr("abcd")), stringWeightOf(4));
-  });
-
-  test("the cost is additive across a mapped-element record", () => {
-    // One record charges object + two key strings + two scalars; the array root
-    // adds the array weight. Pinned against the real BinaryPack-encoded shape.
-    expect(
-      structureOverBudget(mappedElementFrame(1), expectedMappedCost(1), 256),
-    ).toBe(false);
-    expect(
-      structureOverBudget(
-        mappedElementFrame(1),
-        expectedMappedCost(1) - 1,
-        256,
-      ),
-    ).toBe(true);
-  });
-
-  test("the mapped cost of 2^22 records stays under the structure budget", () => {
-    // The wire-byte cap and the structure budget are independent, with no
-    // headroom relation between them -- this pins the mapped cost of a
-    // 4.19M-record (2^22) frame against the structure budget alone, at the
-    // conservative per-record weight.
-    expect(expectedMappedCost(4_194_304)).toBeLessThan(
-      MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
-    );
   });
 });
 

@@ -15,6 +15,7 @@ import {
   encodeSinglePassReply,
   decodeSinglePassReply,
 } from "../src/link";
+import { MAX_WEBRTC_FRAME_BYTES } from "../src/connection/binaryPackBounds";
 import {
   MAX_FRAME_SIZE_BYTES,
   MAX_SINGLE_PASS_CELLS,
@@ -586,13 +587,9 @@ test("singlePassReplyByteCap weights the sender heavier and stays below both tra
   // The file-sync backstop, a core constant.
   expect(atCeiling).toBeLessThan(MAX_FRAME_SIZE_BYTES);
   // The nearer constraint on the raised cap: the WebRTC data channel's fixed
-  // browser-tab envelope. It is a web constant (MAX_WEBRTC_FRAME_BYTES in
-  // apps/web/src/psi/boundedReassembly.ts), not importable into core, so it is
-  // mirrored here as a literal -- a core-only cap or byte-weight change must not
-  // silently outgrow it. The coupling is bidirectional:
-  // lowering the web constant below this ceiling cap would pass here yet reject
-  // legitimate WebRTC replies, so the two must move together.
-  const MAX_WEBRTC_FRAME_BYTES = 256 * 1024 * 1024;
+  // browser-tab envelope. The coupling is bidirectional -- lowering
+  // MAX_WEBRTC_FRAME_BYTES below this ceiling cap would pass every bound's own
+  // test yet reject legitimate WebRTC replies, so the two must move together.
   expect(atCeiling).toBeLessThan(MAX_WEBRTC_FRAME_BYTES);
 });
 

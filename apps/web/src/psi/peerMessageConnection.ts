@@ -1,11 +1,11 @@
 import {
   ConnectionError,
+  MAX_WEBRTC_FRAME_BYTES,
   QueuedMessageConnection,
   asConnectionError,
 } from "@psilink/core";
 
 import {
-  MAX_WEBRTC_FRAME_BYTES,
   assertChunkReassemblySupported,
   boundChunkReassembly,
   checkDeliveredFrameBound,

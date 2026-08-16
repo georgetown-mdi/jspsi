@@ -6,8 +6,8 @@
 // memory amplification: a minimal ~2-byte repeated entry deserializes to ~211
 // resident bytes (~105x), so a within-frame-cap frame packed with empty entries
 // would otherwise exhaust memory (tens of GiB) before any post-deserialize count
-// could read it. It is the raw-protobuf analogue of the web path's BinaryPack
-// structure scan (apps/web/src/psi/boundedReassembly.ts).
+// could read it. It is the raw-protobuf analogue of the WebRTC path's BinaryPack
+// structure scan (connection/binaryPackBounds.ts).
 //
 // The scan reads only the protobuf WIRE FORMAT -- a stable, public specification:
 // varint tags, wire types, length-delimited fields -- never the @openmined/psi.js
