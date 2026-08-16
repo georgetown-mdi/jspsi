@@ -235,26 +235,32 @@ given what `bufferedAmount` reports (below).
 
 ## Constraints the transport inherits
 
-**The default STUN server must be resolved before shipping.** `iceServers: []`
-does not suppress werift's built-in `stun.l.google.com:19302` default:
-`getConfiguration()` faithfully reports an empty list while the library gathers
-server-reflexive candidates anyway, publishing the host's public IP. An empty
-array supplies no server and the ICE layer reads that as "use the default"
-rather than "use none". Neither `iceUseIpv6: false`, nor an `iceServers` entry
-with an empty `urls` list, nor `iceTransportPolicy: "relay"` changes it; only
-`iceLite: true` suppresses it, and that is not a usable workaround, since it
-forces the controlled role and gathers no reflexive candidates at all, suiting
-only a publicly reachable peer -- which a NAT'd CLI is not.
+**The default STUN server is accepted; a configured list must still win.**
+`iceServers: []` does not suppress werift's built-in `stun.l.google.com:19302`
+default: `getConfiguration()` faithfully reports an empty list while the
+library gathers server-reflexive candidates anyway, publishing the host's
+public IP. An empty array supplies no server and the ICE layer reads that as
+"use the default" rather than "use none". Neither `iceUseIpv6: false`, nor an
+`iceServers` entry with an empty `urls` list, nor `iceTransportPolicy:
+"relay"` changes it; only `iceLite: true` suppresses it, and that is not a
+usable workaround, since it forces the controlled role and gathers no
+reflexive candidates at all, suiting only a publicly reachable peer -- which a
+NAT'd CLI is not.
 
-This is a confidentiality-relevant default for a privacy tool whose stance is
-not to route through third parties by default, and it is a blocker on the
-transport rather than a footnote. The spike did not test a *non-empty*
-`iceServers` list, so the first thing the transport work owes is that
-measurement: whether an explicit server list replaces the built-in default or
-merely adds to it. If it replaces it, configuring the operator's own STUN
-servers is the whole remedy. If it does not, the remedies are a vendored patch
-or an upstream fix, and one of them has to land before a CLI WebRTC exchange
-ships.
+The maintainer has ruled the default acceptable as the fallback for an
+operator who configures no servers of their own: it is what lets an exchange
+traverse NAT for operators without the means to run their own STUN server, and
+what it discloses is connection metadata -- the host's public IP and the fact
+of a WebRTC session -- never exchange content. What the transport still owes
+is the narrower property that a deliberately configured server list is the
+list actually used. The spike did not test a *non-empty* `iceServers` list, so
+the transport work's first measurement is whether an explicit list replaces
+the built-in default or merely adds to it. If it replaces it, nothing more is
+needed; if it adds, a vendored patch or an upstream fix covers the
+configured-servers case. Separately and optionally, an upstream issue
+proposing that an empty or undefined list mean "no STUN" (an honest
+host-candidates-only mode for VPN or LAN deployments) is worth opening only if
+a compelling case for that mode emerges.
 
 **ICE candidates must be queued until the local description is on the broker.**
 werift begins firing candidate events during `setLocalDescription`, before the
