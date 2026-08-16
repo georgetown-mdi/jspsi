@@ -345,9 +345,9 @@ placement. The web screen carries it as the matching-method headline for any
 `psi-c` invitation, qualified in place by the refusal caveat directly beneath it;
 the CLI accept prompt names the algorithm there and prints the statement only
 where the flag says the run honors it. Each surface's render test pins both sides
-of the gate it holds: the caveat present and the tier's sentences absent under a
-refused invitation, the tier's own wording and placement measured with the flag
-moved.
+of the gate it holds: the caveat present and the five gated notes absent under a
+refused invitation (the web additionally pins the headline present there), the
+tier's own wording and placement measured with the flag moved.
 
 Count-only is the mildest disclosure psilink offers and it is not zero disclosure,
 which is why the tier is more than one replacement sentence. The intersection
@@ -406,6 +406,17 @@ puts one item on the ungate checklist ahead of the flag: the count-only run path
 must refuse an input-metadata payload column and a payload-declaring `psi-c`
 document actionably, at accept and at parse, BEFORE `APPLIED_SETTINGS.psiC` flips,
 or an operator meets a raw render error where an actionable refusal belongs.
+
+The payload refusal is not the only one the tier's copy presupposes. Of the
+spec's remaining `psi-c` shape refusals, `deduplicate` already fails closed
+today (`assertDeduplicateImplemented`, at invite and in core's exchange
+boundary), but more than one linkage key and `linkage_strategy: single-pass`
+have no check anywhere -- and the round-disclosure note speaks of one key's
+exactly-once values while the result note denies any record-by-record pairing,
+both of which a multi-key or single-pass document would falsify. Those two
+refusals are owed at accept and at parse by the run-path item, ahead of the
+flag, on the same footing as the payload one; no render backstop for them
+exists on this branch, by decision rather than omission.
 
 That the CLI puts the whole tier in its twice-printed decision block, where it
 prints the algorithm and its caveat today, is the same judgment read from the
