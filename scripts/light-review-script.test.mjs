@@ -172,12 +172,11 @@ describe.each(SHAPES)("light-review role mode ($shape args)", ({ deliver }) => {
     expect(result.claims[0].echoInexact).toBeUndefined();
   });
 
-  it("restores the contract's text over a truncated, extended, or re-wrapped echo", async () => {
+  it("restores the contract's text over a truncated or re-wrapped echo", async () => {
     const claim =
       "the module's surface is bounded (its export list plus its module-private helpers); the web-remaining half is claimed separately.";
     for (const echo of [
       "the module's surface is bounded (its export list plus its module-private helpers).",
-      `${claim} Nothing else was read.`,
       claim.replace("bounded (its", "bounded\n  (its"),
     ]) {
       const result = await run(roleArgs([claim]), () =>
@@ -187,6 +186,15 @@ describe.each(SHAPES)("light-review role mode ($shape args)", ({ deliver }) => {
       expect(result.claims[0].claim, echo).toBe(claim);
       expect(result.claims[0].evidence, echo).toBe("ran it");
     }
+  });
+
+  it("leaves an echo that extends the claim with a further clause unpaired", async () => {
+    const claim = "the bound holds for every measured delivery";
+    await expect(
+      run(roleArgs([claim]), () =>
+        roleReply([verdict(`${claim}, and on the unmeasured ones too`)]),
+      ),
+    ).rejects.toThrow(/returned 0 verdicts for the claim "the bound holds/);
   });
 
   it("marks the claim whose echo it had to restore, and only that one", async () => {

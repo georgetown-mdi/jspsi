@@ -268,16 +268,17 @@ Anything else you find in this diff that is worth the caller knowing goes in fin
 
   // A role agent echoing a long claim back drops its trailing clause -- and closes the
   // sentence where it cut -- often enough to cost whole rounds at this step, so an echo
-  // that only truncates or extends a single unmatched claim pairs with it once the
-  // shorter side's tail punctuation is off. The contract's own text then replaces the
-  // lossy echo, and echoInexact tells the caller the substitution happened.
+  // that is the contract claim with a trailing clause dropped pairs with it once tail
+  // punctuation is off both sides. Truncation only, not extension: an echo that dropped
+  // the claim's limit clause verified a BROADER assertion, whose HOLDS implies the
+  // narrower contract claim, so restoring the contract text is sound; an echo that ADDED
+  // text verified a different, more specific assertion whose verdict does not transfer,
+  // so it is left to fail as unpaired. The contract's own text then replaces the lossy
+  // echo, and echoInexact tells the caller the substitution happened.
   const withoutTail = (text) => text.replace(/[\s.,;:!?]+$/, "");
-  const truncatesOrExtends = (echo, key) => {
-    const echoIsShorter = echo.length <= key.length;
-    const shorter = withoutTail(echoIsShorter ? echo : key);
-    return (
-      shorter.length > 0 && (echoIsShorter ? key : echo).startsWith(shorter)
-    );
+  const truncates = (echo, key) => {
+    const stem = withoutTail(echo);
+    return stem.length > 0 && withoutTail(key).startsWith(stem);
   };
   const keys = claims.map(pairingKey);
   const paired = new Array(claims.length);
@@ -302,9 +303,7 @@ Anything else you find in this diff that is worth the caller knowing goes in fin
 
   claims.forEach((claim, index) => {
     if (paired[index]) return;
-    const near = candidates((entry) =>
-      truncatesOrExtends(answered[entry], keys[index]),
-    );
+    const near = candidates((entry) => truncates(answered[entry], keys[index]));
     if (near.length !== 1) {
       throw unpairable(
         `returned ${count(near.length, "verdict")} for the claim "${claim}"; the contract needs exactly one per claim.`,
@@ -312,9 +311,7 @@ Anything else you find in this diff that is worth the caller knowing goes in fin
     }
     const rival = claims.findIndex(
       (_, i) =>
-        i !== index &&
-        !paired[i] &&
-        truncatesOrExtends(answered[near[0]], keys[i]),
+        i !== index && !paired[i] && truncates(answered[near[0]], keys[i]),
     );
     if (rival !== -1) {
       throw unpairable(
