@@ -1,7 +1,7 @@
 ---
 title: "Security Policy"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-07"
+last_reviewed: "2026-08-15"
 ---
 
 # Security Policy
@@ -40,6 +40,8 @@ When reporting, please include:
 | Fix or advisory published | 90 days from confirmation |
 
 Critical vulnerabilities affecting data privacy or cryptographic integrity are prioritized. We will keep you informed of progress throughout.
+
+The responder-side procedure behind these targets -- triage and the severity call, which released versions a fix must cover, the hotfix release, advisory publication and CVE assignment, and the message you receive at each milestone -- is documented in [docs/INCIDENT_RESPONSE.md](docs/INCIDENT_RESPONSE.md), along with what happens if the maintainer is unavailable when your report arrives.
 
 ## Disclosure Policy
 

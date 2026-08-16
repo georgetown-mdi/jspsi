@@ -36,6 +36,7 @@ The documentation is organized in three tiers: this **overview** tier (`docs/`) 
 - [DEPLOYMENT.md](DEPLOYMENT.md) - operating supporting services and Docker deployment of the CLI
 - [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md) - the SFTP deployment profile for agencies required to use FIPS-approved cryptography: the algorithm settings, what they exclude, and the host-key gap
 - [RELEASES.md](RELEASES.md) - versioning policy, release checklist, and artifact publication
+- [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md) - the responder's runbook behind [SECURITY.md](../SECURITY.md): triage and severity, affected versions, the private fix and hotfix release, advisory and CVE publication, reporter communication, the maintainer-unavailable path, and the tabletop exercise record
 - [TESTING.md](TESTING.md) - test-suite reference: integration backends and profiles, the console sentinel, the browser suite, and the coverage rationale
 - [ROADMAP.md](ROADMAP.md) - roadmap of planned functionality
 
