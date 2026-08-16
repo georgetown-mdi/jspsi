@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
 import { beforeAll, describe, expect, it } from "vitest";
+import repoConfig from "../eslint.config.mjs";
 
 // Coverage of the seat warning-sink ban in apps/web/eslint.config.js: a console
 // run surface that offers the exchange driver an `onWarning` slot must fold the
@@ -19,14 +20,95 @@ import { beforeAll, describe, expect, it } from "vitest";
 //
 // Each case is linted through the real repo config against a path inside
 // apps/web/src, so the scope, the selector, and the rule wiring are exercised as
-// CI runs them rather than restated here.
+// CI runs them rather than restated here -- with one transform: the type-aware
+// layer is stripped off the real config before it is used (withoutTypeAwareLayer
+// below). The blocks that carry the ban are transformed by nothing, so the
+// selector, the `files` scoping, and flat config's replace-semantics across the
+// broad src block and the rawRows allowlist block are the real ones.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 
+// The parser options that put a TypeScript program behind the lint.
+const PROJECT_PARSER_OPTIONS = [
+  "project",
+  "projectService",
+  "EXPERIMENTAL_useProjectService",
+];
+
+/** The first plugin registered under each prefix across a flat config array. */
+function pluginsByPrefix(configs) {
+  const plugins = new Map();
+  for (const entry of configs) {
+    for (const [prefix, plugin] of Object.entries(entry.plugins ?? {})) {
+      if (!plugins.has(prefix)) plugins.set(prefix, plugin);
+    }
+  }
+  return plugins;
+}
+
+/**
+ * The names in `rules` whose rule declares `requiresTypeChecking`, resolved
+ * through `pluginFor(prefix)`. Asking the plugin keeps this off a hand-kept list
+ * that a config or dependency change would silently outdate.
+ */
+function typeAwareRuleNames(rules, pluginFor) {
+  return Object.keys(rules).filter((name) => {
+    const separator = name.lastIndexOf("/");
+    if (separator === -1) return false;
+    const rule = pluginFor(name.slice(0, separator))?.rules?.[
+      name.slice(separator + 1)
+    ];
+    return rule?.meta?.docs?.requiresTypeChecking === true;
+  });
+}
+
+/**
+ * The repo's flat config with type-aware linting removed: no parser option that
+ * builds a TypeScript program, and no rule that needs one.
+ *
+ * The ban is `no-restricted-syntax` -- a parser and an esquery selector, and
+ * nothing a type checker knows -- so every type-aware rule the web config
+ * enables is dead weight here, and dead weight with a failure mode: a rule
+ * reading types can crash inside TypeScript's module-specifier computation on a
+ * real seat, which is sensitive to the absolute path the tree sits at and so
+ * fails under CI's layout while passing here, over a rule this file does not
+ * test. Deriving from the real config rather than hand-authoring a minimal one
+ * keeps the ban's own blocks exact; dropping the type-aware layer leaves what
+ * this file reports resting on the text it hands in and nothing else. A
+ * type-aware rule that survived the strip cannot lint silently: with no project
+ * configured ESLint refuses to load it and the lint throws.
+ */
+function withoutTypeAwareLayer(configs) {
+  const plugins = pluginsByPrefix(configs);
+  return configs.map((entry) => {
+    const transformed = { ...entry };
+    if (entry.languageOptions?.parserOptions) {
+      transformed.languageOptions = {
+        ...entry.languageOptions,
+        parserOptions: Object.fromEntries(
+          Object.entries(entry.languageOptions.parserOptions).filter(
+            ([option]) => !PROJECT_PARSER_OPTIONS.includes(option),
+          ),
+        ),
+      };
+    }
+    if (entry.rules) {
+      const typeAware = new Set(
+        typeAwareRuleNames(entry.rules, (prefix) => plugins.get(prefix)),
+      );
+      transformed.rules = Object.fromEntries(
+        Object.entries(entry.rules).filter(([name]) => !typeAware.has(name)),
+      );
+    }
+    return transformed;
+  });
+}
+
 const eslint = new ESLint({
   cwd: repoRoot,
-  overrideConfigFile: resolve(repoRoot, "eslint.config.mjs"),
+  overrideConfigFile: true,
+  baseConfig: withoutTypeAwareLayer(repoConfig),
 });
 
 /**
@@ -46,10 +128,10 @@ async function banHits(filePath, source) {
   );
 }
 
-// A real path inside the guarded tree. It has to be one: apps/web's tsconfig uses
-// project references, and typescript-eslint refuses to parse a path that TSConfig
-// does not include. Only the path is borrowed -- every case below lints the text it
-// hands in, which the canary proves.
+// A path inside the guarded tree, which is what selects the config blocks that
+// carry the ban -- a path outside apps/web/src matches none of them and reports
+// zero however the text is written. Only the path is borrowed: every case below
+// lints the text it hands in, which the canary proves.
 const SEAT_FILE = resolve(repoRoot, "apps/web/src/bench/runWarnings.ts");
 
 // A real seat that also sits in the rawRows allowlist block, whose separate
@@ -88,7 +170,7 @@ const APP_SEAT_FILES = [
   "apps/web/src/bench/RecoveredExchangePanel.tsx",
 ].map((seat) => resolve(repoRoot, seat));
 
-// Linting those from disk is a second real pass over type-checked sources, so it
+// Linting those from disk is a second real pass over the app's sources, so it
 // gets its own explicit budget rather than vitest's 5s default.
 const SEAT_LINT_TIMEOUT_MS = 30_000;
 
@@ -186,6 +268,33 @@ describe("the seat warning-sink ban", () => {
   beforeAll(async () => {
     await banHits(SEAT_FILE, fixture("run({});"));
   }, LINTER_WARM_UP_TIMEOUT_MS);
+
+  it("carries the ban to every path it lints, with no type-aware rule", async () => {
+    for (const path of [
+      SEAT_FILE,
+      RAW_ROWS_SEAT_FILE,
+      SEAT_FILE_FIRST_PARSE,
+      ...APP_SEAT_FILES,
+    ]) {
+      const config = await eslint.calculateConfigForFile(path);
+      const parserOptions = config.languageOptions?.parserOptions ?? {};
+      expect(
+        Object.keys(parserOptions).filter((option) =>
+          PROJECT_PARSER_OPTIONS.includes(option),
+        ),
+        `${path}: a TypeScript program is configured, so a type-aware rule can run -- and crash -- on ground this file does not test`,
+      ).toEqual([]);
+      expect(
+        typeAwareRuleNames(config.rules, (prefix) => config.plugins?.[prefix]),
+        `${path}: a type-aware rule survived the strip`,
+      ).toEqual([]);
+      const [, ...restricted] = config.rules["no-restricted-syntax"] ?? [];
+      expect(
+        restricted.map((option) => option.message),
+        `${path}: the seat ban is not among the no-restricted-syntax options here, so linting it reports zero whatever the source says`,
+      ).toContainEqual(expect.stringMatching(/^Fold an onWarning message/));
+    }
+  });
 
   it("lints the text it is handed, not the file on disk", async () => {
     expect(
