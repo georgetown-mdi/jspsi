@@ -28,24 +28,24 @@
 import net from "node:net";
 
 import { chainDetailCauses, redactPrivateKeyMaterial } from "@psilink/core";
-import type { SFTPConnectionConfig } from "@psilink/core";
 
 /**
  * The port ssh2 dials when connect options carry none. Core omits `port` from
  * the connect options when the config sets none, so the diagnosis has to
  * reproduce that default to reach the same endpoint the failed dial did -- see
- * {@link peerProbeTarget}, whose agreement with the pinned stack is a check
- * rather than prose.
+ * {@link peerProbeTargetFromConnectOptions}, whose agreement with the pinned
+ * stack is a check rather than prose.
  */
 const SSH2_DEFAULT_PORT = 22;
 
 /**
  * Ceiling on how long {@link observePeerAnswer} spends on the whole read --
  * connect and bytes together -- before settling on what it has. Small and
- * additionally clamped to the dial's own `serverConnectTimeoutMs` by
- * {@link withPeerIdentificationDiagnosis}, so the diagnosis stays inside the
- * budget the operator already granted the connect rather than adding an
- * unbounded wait to a run that has just failed.
+ * additionally clamped by {@link diagnosePeerAnswer} to the connect budget the
+ * failed dial ran under (`serverConnectTimeoutMs`, which core enforces as ssh2's
+ * `readyTimeout`), so the diagnosis stays inside the budget the operator already
+ * granted the connect rather than adding an unbounded wait to a run that has
+ * just failed.
  */
 export const PEER_ANSWER_READ_BUDGET_MS = 2_000;
 
@@ -122,9 +122,11 @@ const PRE_IDENTIFICATION_FAILURE_FRAGMENTS = [
 
 /**
  * Whether `error` is a dial rejection raised before the peer identified itself,
- * and so worth reading the peer's first bytes over. Walks the cause chain,
- * because the rejection reaches a probe caller wrapped in core's own
- * host-key-probe message.
+ * and so worth reading the peer's first bytes over. Walks the cause chain rather
+ * than reading one message, so the gate does not rest on the stack's own
+ * rejection being the link it is handed: a re-raise that replaces the message
+ * and keeps that rejection as its cause -- the shape the dial paths' own
+ * diagnostics compose -- stays matched.
  *
  * @internal
  */
@@ -183,9 +185,10 @@ function classifyPeerAnswer(bytes: Uint8Array): PeerAnswer {
 /**
  * Open one TCP connection to `host:port`, read whatever the peer sends within
  * `budgetMs`, and report what it establishes. Writes NOTHING: no credential, no
- * identification string, no SSH traffic at all -- the whole point of the
- * host-key probe this backs is that nothing is presented to an unverified
- * server, and a socket that only reads presents nothing at all.
+ * identification string, no SSH traffic at all -- the host-key probe this backs
+ * rests on nothing being presented to an unverified server, and the dial paths
+ * reach here having just failed against a peer that answered the port wrongly;
+ * a socket that only reads presents nothing at all to either.
  *
  * Best-effort by construction. It runs after the dial has already failed and
  * against a peer that may answer a second connection differently (a load
@@ -369,55 +372,65 @@ export function explainPeerIdentificationFailure(
 /**
  * The endpoint the diagnosis reads, which has to be the endpoint the dial it
  * diagnoses used -- a read of a different port would report about a peer the
- * dial never spoke to. Config-supplied where the config sets a port, and ssh2's
- * own default where it does not; that the two agree is a check rather than
- * prose (`apps/cli/test/integration/sftpStackPremises.test.ts` reads the port
- * the pinned stack dials portlessly off its own rejection and holds this to it).
+ * dial never spoke to. Derived from ssh2's connect options rather than the
+ * psilink config they were built from, because that is what the transport
+ * adapter's dial sequence holds: the cycle-start and recovery re-dials enter it
+ * with the retained options and never with the config behind them. Reads `host`
+ * and `port` because those are the fields core assigns from the config after its
+ * default-deny `providerOptions` filter, so no operator-supplied key can move
+ * the endpoint out from under this. Options carrying no port take the port ssh2
+ * itself defaults to, and that this default and the pinned stack's agree is a
+ * check rather than prose (`apps/cli/test/integration/sftpStackPremises.test.ts`
+ * reads the port the stack dials portlessly off its own rejection and holds this
+ * to it).
+ *
+ * `undefined` when the options carry no host, or a port of a type ssh2 would
+ * coerce rather than use as given: the endpoint the dial reached cannot then be
+ * reproduced, and a dial this cannot follow keeps the rejection it already had.
  *
  * @internal
  */
-export function peerProbeTarget(config: SFTPConnectionConfig): {
-  host: string;
-  port: number;
-} {
-  return {
-    host: config.server.host,
-    port: config.server.port ?? SSH2_DEFAULT_PORT,
-  };
+export function peerProbeTargetFromConnectOptions(options: {
+  host?: unknown;
+  port?: unknown;
+}): { host: string; port: number } | undefined {
+  const { host, port } = options;
+  if (typeof host !== "string" || host === "") return undefined;
+  if (port !== undefined && typeof port !== "number") return undefined;
+  return { host, port: port ?? SSH2_DEFAULT_PORT };
 }
 
 /**
- * Run `probe` and, when it fails before the peer identified itself as an SSH
- * server, re-raise the rejection with what a bounded credential-free read of the
- * peer's first bytes says about it. Every other failure -- and every success --
- * passes through untouched.
+ * Read the peer's first bytes and compose what they say about `error`, for a
+ * rejection the caller has already put to {@link isPreIdentificationDialFailure}.
+ * One bounded, credential-free connection and one classification of what came
+ * back, called from the transport adapter's dial sequence and nowhere else --
+ * the single point every dial psilink makes passes through, the host-key probe's
+ * included, so no entry point can grow a second read of the same peer or a
+ * second matcher that disagrees about the same rejection.
  *
- * This is the one place the classification lives; the host-key probe's two
- * entry points (`probe-host-key` and the first-use trust flow) both run their
- * probe through it, and the dial paths can consume the same three parts rather
- * than growing a second matcher that could disagree with this one.
+ * The gate is the CALLER's rather than this function's because the caller spends
+ * a per-connection budget on the read (see the adapter's once-per-connection
+ * latch) and has to know whether the read will run before it spends it.
+ *
+ * `connectBudgetMs` is the per-attempt connect budget the failed dial ran under;
+ * the read is clamped to it, so a run that shortened the connect does not get a
+ * longer diagnosis than the dial it diagnoses.
  *
  * @internal
  */
-export async function withPeerIdentificationDiagnosis<T>(
-  config: SFTPConnectionConfig,
-  probe: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await probe();
-  } catch (err) {
-    if (!isPreIdentificationDialFailure(err)) throw err;
-    const endpoint = peerProbeTarget(config);
-    // Clamped to the connect budget the operator configured, so a run that
-    // shortened it does not get a longer diagnosis than the dial it diagnoses.
-    const budgetMs = Math.min(
-      PEER_ANSWER_READ_BUDGET_MS,
-      config.options?.serverConnectTimeoutMs ?? PEER_ANSWER_READ_BUDGET_MS,
-    );
-    throw explainPeerIdentificationFailure(
-      err,
-      await observePeerAnswer(endpoint, budgetMs),
-      endpoint,
-    );
-  }
+export async function diagnosePeerAnswer(
+  error: unknown,
+  endpoint: { host: string; port: number },
+  connectBudgetMs: number | undefined,
+): Promise<unknown> {
+  const budgetMs = Math.min(
+    PEER_ANSWER_READ_BUDGET_MS,
+    connectBudgetMs ?? PEER_ANSWER_READ_BUDGET_MS,
+  );
+  return explainPeerIdentificationFailure(
+    error,
+    await observePeerAnswer(endpoint, budgetMs),
+    endpoint,
+  );
 }

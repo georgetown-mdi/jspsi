@@ -7,7 +7,7 @@ import type { SFTPWrapper } from "ssh2";
 
 import {
   isPreIdentificationDialFailure,
-  peerProbeTarget,
+  peerProbeTargetFromConnectOptions,
 } from "../../src/connection/sftpPeerIdentification";
 import { createRawSftpClient } from "../rawSftpClient";
 import {
@@ -761,7 +761,7 @@ async function portlessDialTarget(): Promise<
 // is whatever the pinned stack dialed, and the diagnosis's resolved target is
 // held to that.
 test(
-  "the diagnosis resolves a portless config to the endpoint the pinned stack dialed",
+  "the diagnosis resolves portless connect options to the endpoint the pinned stack dialed",
   async (ctx) => {
     const dialed = await portlessDialTarget();
     if (dialed === undefined)
@@ -769,12 +769,9 @@ test(
         `a portless dial of ${LOOPBACK_HOST} was not refused, so the stack ` +
           `named no address to read its default port from`,
       );
-    expect(
-      peerProbeTarget({
-        channel: "sftp",
-        server: { host: LOOPBACK_HOST, username: "unused" },
-      }),
-    ).toEqual(dialed);
+    expect(peerProbeTargetFromConnectOptions({ host: LOOPBACK_HOST })).toEqual(
+      dialed,
+    );
   },
   TEST_TIMEOUT_MS,
 );

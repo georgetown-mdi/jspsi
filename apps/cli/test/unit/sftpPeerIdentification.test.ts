@@ -7,15 +7,15 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
-import type { SFTPConnectionConfig } from "@psilink/core";
 
 import {
   PEER_ANSWER_READ_MAX_BYTES,
   PEER_EXCERPT_MAX_BYTES,
+  diagnosePeerAnswer,
   explainPeerIdentificationFailure,
   isPreIdentificationDialFailure,
   observePeerAnswer,
-  withPeerIdentificationDiagnosis,
+  peerProbeTargetFromConnectOptions,
 } from "../../src/connection/sftpPeerIdentification";
 import type { PeerAnswer } from "../../src/connection/sftpPeerIdentification";
 
@@ -81,14 +81,6 @@ const TLS_ALERT_RECORD = Buffer.from([
 ]);
 
 const BUDGET_MS = 2_000;
-
-const configFor = (endpoint: {
-  host: string;
-  port: number;
-}): SFTPConnectionConfig => ({
-  channel: "sftp",
-  server: { host: endpoint.host, port: endpoint.port, username: "probe" },
-});
 
 const rendered = (error: unknown): string => sanitizeErrorForDisplay(error);
 
@@ -230,14 +222,14 @@ describe("observePeerAnswer reads what answered the port", () => {
 });
 
 describe("isPreIdentificationDialFailure gates on the stack's own wording", () => {
-  test("recognizes the rejection through core's host-key-probe wrapper", () => {
+  test("recognizes a rejection a re-raise kept as its cause", () => {
+    // The gate reads a chain rather than one message, so a diagnostic that
+    // replaced the message and kept the stack's own rejection behind it -- the
+    // shape every re-raise on the dial paths composes -- stays matched.
     const rejection = new Error(
       "getConnection: Connection lost before handshake",
     );
-    const wrapped = new Error(
-      `could not read the server's host key: ${rejection.message}`,
-      { cause: rejection },
-    );
+    const wrapped = new Error("the SFTP dial failed", { cause: rejection });
     expect(isPreIdentificationDialFailure(wrapped)).toBe(true);
   });
 
@@ -413,60 +405,78 @@ describe("explainPeerIdentificationFailure partitions the peer's bytes", () => {
   });
 });
 
-describe("withPeerIdentificationDiagnosis wraps only what it can diagnose", () => {
-  test("returns the probe's result untouched", async () => {
-    const endpoint = await peerAnswering(() => {});
+describe("peerProbeTargetFromConnectOptions follows the dial it diagnoses", () => {
+  // Every dial enters the dial sequence with ssh2's connect options and never
+  // with the config behind them, so this is the one derivation of the endpoint.
+  // The port a portless dial reaches is not written here: it is whatever the
+  // pinned stack dials, and the integration premise reads that off a portless
+  // dial's own rejection and holds this to it, where a number written here would
+  // be a second premise nothing checks.
+  test("reads the endpoint the connect options carry", () => {
     expect(
-      await withPeerIdentificationDiagnosis(configFor(endpoint), () =>
-        Promise.resolve("fingerprint"),
-      ),
-    ).toBe("fingerprint");
+      peerProbeTargetFromConnectOptions({
+        host: "sftp.example.test",
+        port: 2222,
+      }),
+    ).toEqual({ host: "sftp.example.test", port: 2222 });
   });
 
-  test("diagnoses a pre-identification rejection against the live peer", async () => {
+  test("reproduces no endpoint from options that name none", () => {
+    // A dial this cannot follow: reading some other endpoint would report about
+    // a peer it never spoke to, so the caller keeps the rejection it had.
+    expect(peerProbeTargetFromConnectOptions({})).toBeUndefined();
+    expect(peerProbeTargetFromConnectOptions({ host: "" })).toBeUndefined();
+    expect(
+      peerProbeTargetFromConnectOptions({
+        host: "sftp.example.test",
+        port: "2222",
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe("diagnosePeerAnswer says what it read, or nothing", () => {
+  // The read and the composition together, as the adapter's dial sequence calls
+  // them once its gate has admitted a rejection. The gate itself is above; that
+  // the adapter is the only caller, and reads the peer once per diagnosed
+  // failure however the dial was entered, is driven over real dials in
+  // test/integration/dialPeerIdentification.test.ts.
+  const rejection = (): Error =>
+    new Error("getConnection: Connection lost before handshake");
+
+  test("names what the live peer answered with, on the endpoint it read", async () => {
     const endpoint = await peerAnswering((socket) =>
       socket.end(HTTP_ERROR_PAGE),
     );
-    const rejection = new Error(
-      "could not read the server's host key: getConnection: Connection lost " +
-        "before handshake",
+    const text = rendered(
+      await diagnosePeerAnswer(rejection(), endpoint, undefined),
     );
-    const raised = await withPeerIdentificationDiagnosis(
-      configFor(endpoint),
-      () => Promise.reject(rejection),
-    ).catch((err: unknown) => err);
-    const text = rendered(raised);
     expect(text).toContain("an HTTP response");
     expect(text).toContain("403 Forbidden");
     expect(text).toContain(`configured endpoint: 127.0.0.1:${endpoint.port}`);
   });
 
-  test("re-raises a rejection it does not recognize without opening a connection", async () => {
-    const endpoint = await peerAnswering(() => {
-      throw new Error("the diagnosis must not connect for this rejection");
-    });
-    const rejection = new Error(
-      "getConnection: All configured authentication methods failed",
-    );
-    await expect(
-      withPeerIdentificationDiagnosis(configFor(endpoint), () =>
-        Promise.reject(rejection),
-      ),
-    ).rejects.toBe(rejection);
-  });
-
-  test("re-raises the rejection when the peer turns out to be an SSH server", async () => {
+  test("returns the rejection when the peer turns out to be an SSH server", async () => {
     const endpoint = await peerAnswering((socket) =>
       socket.end("SSH-2.0-OpenSSH_9.6p1\r\n"),
     );
-    const rejection = new Error(
-      "could not read the server's host key: getConnection: Connection lost " +
-        "before handshake",
+    const dialFailure = rejection();
+    expect(await diagnosePeerAnswer(dialFailure, endpoint, undefined)).toBe(
+      dialFailure,
     );
-    await expect(
-      withPeerIdentificationDiagnosis(configFor(endpoint), () =>
-        Promise.reject(rejection),
-      ),
-    ).rejects.toBe(rejection);
+  });
+
+  test("clamps the read to the connect budget the dial ran under", async () => {
+    // A peer that accepts and holds the connection open with nothing on it, so
+    // only a deadline ends the read: a run that shortened its connect gets the
+    // shorter deadline, not the read's own default. The margin is wide because
+    // what is asserted is which of the two budgets bounded it.
+    const endpoint = await peerAnswering(() => {});
+    const started = Date.now();
+    const dialFailure = rejection();
+    expect(await diagnosePeerAnswer(dialFailure, endpoint, 200)).toBe(
+      dialFailure,
+    );
+    expect(Date.now() - started).toBeLessThan(BUDGET_MS / 2);
   });
 });

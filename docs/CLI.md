@@ -317,7 +317,15 @@ psilink probe-host-key SFTP_URL [--json] [--connect-timeout <duration>]
 
 `SFTP_URL` is an `sftp://host[:port]` address; you supply no username, path, or credential, and none is sent to the server (the probe refuses before authenticating). A non-sftp scheme is a usage error. `--connect-timeout` bounds the connection attempt (e.g. `10s`), enforced as the SSH ready timeout. By default the command prints a human-readable summary; `--json` instead prints one line of machine-readable JSON -- `{"fingerprint":"SHA256:...","key_type":"..."}` -- on stdout for a script to consume. A transport failure (unreachable, refused, or timed out) exits 69; a usage error exits 64. The console's "read the fingerprint from the server" affordance runs this command for the operator.
 
-When the peer answering the address never identifies itself as an SSH server, the failure says so rather than reading as an unreachable host. A peer whose first bytes are a web page, TLS, or any other non-SSH data is reported as such, with a short excerpt of what it sent -- most often a proxy or gateway intercepting the port. A peer that accepts the connection and then closes it without sending anything is reported separately, since an SSH server identifies itself first: that is most often a firewall or IP allowlist standing in front of the server rather than the server itself, though a connection throttle reads the same way. The verdict rests on the peer's first bytes alone, read within a short budget, so a genuine SSH server that sends a long banner ahead of its identification string -- or sends that string late -- is reported the same way; the message names that bound. The same diagnosis applies to the first-use host-key prompt, which runs the same probe.
+### When something other than an SSH server answers the port
+
+An SSH server announces itself before anything else, so a connection that ends before that announcement met something that is not one. Rather than reading as an unreachable host, the failure names what answered:
+
+- A peer whose first bytes are a web page, TLS, or any other non-SSH data is reported as such, with a short excerpt of what it sent -- most often a proxy or gateway intercepting the port.
+- A peer that accepts the connection and then closes it without sending anything is reported separately: most often a firewall or IP allowlist standing in front of the server rather than the server itself, though a connection throttle reads the same way.
+- The verdict rests on the peer's first bytes alone, read within a short budget, so a genuine SSH server that sends a long banner ahead of its announcement -- or sends it late -- is reported the same way. The message names that bound.
+
+This covers every SFTP connection psilink makes: `probe-host-key`, the first-use host-key prompt, and an `exchange` run's own connection, including a mid-run reconnection in connection-per-poll mode -- the case a scheduled, unattended run behind a proxy that starts intercepting the port lands in. Each SFTP connection looks once -- and today's flows open one connection per run, so in practice a run looks once: a peer answering a later reconnection the same way is reported as the plain connection failure, with no second look.
 
 ## Checking a network file drop
 
