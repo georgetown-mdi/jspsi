@@ -67,6 +67,16 @@ jobs:
       # overview enumerations silently stale.
       - name: Command inventory
         run: npm run check:command-inventory
+      # Encodes what the file-drop support scripts ask of the container image as
+      # a check: every psilink argument vector and helper script derived from
+      # those scripts has something in image_smoke.yaml's capability gate that
+      # exercises it against a real image. Here as well as there because this
+      # workflow carries no path filter -- a call site added in a pull request
+      # that touches nothing an image build reads would otherwise reach an
+      # operator with no run having looked at it. This half needs no daemon and
+      # asserts nothing about any image.
+      - name: Image capability coverage
+        run: npm run check:image-capabilities
       # Encodes CLAUDE.md's agent-enforcement prose as a check: every "Enforced
       # by <hook>" claim must name a hook that exists, is registered in
       # .claude/settings.json, and names the tool its matcher actually gates,
