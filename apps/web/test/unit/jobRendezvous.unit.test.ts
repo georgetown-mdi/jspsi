@@ -38,6 +38,12 @@ function tempDir(label: string): string {
   return dir;
 }
 
+/** Cyrillic small a: one character of a path that the display boundary escapes six
+ * characters wide, so a fragment built from it costs six times what its own length
+ * says. Written as an escape because the point of it is that a reader cannot tell it
+ * from the Latin letter. */
+const WIDE_ESCAPING_CHAR = "\u0430";
+
 /** A nested (existing, writable) subdirectory of `parent`. */
 function subDir(parent: string, name: string): string {
   const dir = path.join(parent, name);
@@ -429,6 +435,21 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     expect(sanitizeForDisplay(lead)).not.toContain(DISPLAY_TRUNCATION_MARKER);
   });
 
+  test("a mount path only its escapes make too long is left out too", () => {
+    // Two mounts of the same raw length, one of confusables: only the escaped one
+    // costs the lead its budget, and only a fit measuring what the sink will RENDER
+    // can tell them apart. A fit done on the composition's own length keeps both --
+    // and shows the operator a lead the sink then cuts mid-recovery.
+    const escapedMount = `/mnt/${WIDE_ESCAPING_CHAR.repeat(35)}`;
+    const asciiMount = `/mnt/${"d".repeat(35)}`;
+    expect(escapedMount.length).toBe(asciiMount.length);
+    expect(notEmptyLead(asciiMount)).toContain(asciiMount);
+    expect(notEmptyLead(escapedMount)).not.toContain(escapedMount);
+    expect(sanitizeForDisplay(notEmptyLead(escapedMount))).not.toContain(
+      DISPLAY_TRUNCATION_MARKER,
+    );
+  });
+
   test("files the exchange has no claim on are reported the same way", () => {
     // Sorting protocol files from foreign ones is the exchange's grammar, not the
     // console's: the listing names what is there and the operator judges it.
@@ -779,9 +800,18 @@ describe("every preflight notice fits its budget once rendered", () => {
       expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
     });
 
-    for (const [pathLabel, segment] of [
-      ["past the budget on its own length", "d".repeat(200)],
-      ["past the budget once escaped", "é".repeat(100)],
+    // The two ways a mount runs a notice past the budget. The second is a segment
+    // of confusables at a length whose RAW form still fits: what carries it over is
+    // the escape expansion alone, so a fit measuring raw lengths would keep the
+    // path there. Which arithmetic the fit does is the whole of the difference
+    // between the two classes, and the raw-length premise below is what says so.
+    for (const [pathLabel, segment, rawLengthFitsBudget] of [
+      ["past the budget on its own length", "d".repeat(200), false],
+      [
+        "past the budget only once escaped",
+        WIDE_ESCAPING_CHAR.repeat(20),
+        true,
+      ],
     ] as const) {
       run(
         `${shape.label} keeps its closing clause at a mount ${pathLabel}`,
@@ -794,6 +824,10 @@ describe("every preflight notice fits its budget once rendered", () => {
           expect(renderedDisplayCost(mount)).toBeGreaterThan(
             RENDEZVOUS_NOTICE_BUDGET,
           );
+          expect(
+            mount.length <= RENDEZVOUS_NOTICE_BUDGET,
+            `${pathLabel}: the mount's raw length is what separates the two classes`,
+          ).toBe(rawLengthFitsBudget);
 
           expect(renderedDisplayCost(raw)).toBeLessThanOrEqual(
             RENDEZVOUS_NOTICE_BUDGET,

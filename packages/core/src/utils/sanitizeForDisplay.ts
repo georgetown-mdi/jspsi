@@ -167,6 +167,11 @@ export function sanitizeForDisplay(
  * is not escaping -- the caller keeps the raw fragment -- and it lives beside the
  * escape it measures so a change to the escape policy cannot leave a fitting
  * caller counting the old one.
+ *
+ * Counting the cost means materializing the escaped form, which is roughly ten
+ * times the input at worst, so the fragment is bounded BEFORE it is measured. A
+ * path, an entry name, or a composed notice is the size this is for; a span of
+ * remote content nothing has capped yet is not an acceptable input.
  */
 export function renderedDisplayCost(fragment: string): number {
   return sanitizeForDisplay(fragment, { maxLength: Infinity }).length;

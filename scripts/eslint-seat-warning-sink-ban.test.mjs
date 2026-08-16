@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
@@ -75,6 +75,23 @@ const SEAT_FILE_FIRST_PARSE = resolve(
   "apps/web/src/bench/runOutputs.ts",
 );
 
+// Every seat the app actually offers the driver, linted as it stands on disk. The
+// synthesized cases below say what the selector catches; these say what it costs on
+// the real sources, a selector reaching past function literals to bare references
+// being the kind that catches a seat it should not. A seat renamed away, or one
+// that stops offering the slot, fails here rather than leaving a short list
+// reporting zero.
+const APP_SEAT_FILES = [
+  "apps/web/src/bench/useDirectExchange.ts",
+  "apps/web/src/bench/useAcceptorExchange.ts",
+  "apps/web/src/bench/useInviterExchange.ts",
+  "apps/web/src/bench/RecoveredExchangePanel.tsx",
+].map((seat) => resolve(repoRoot, seat));
+
+// Linting those from disk is a second real pass over type-checked sources, so it
+// gets its own explicit budget rather than vitest's 5s default.
+const SEAT_LINT_TIMEOUT_MS = 30_000;
+
 const BANNED = [
   [
     "a seat that stores the message unescaped",
@@ -96,6 +113,26 @@ const BANNED = [
     "a seat that drops the message entirely",
     "run({ onWarning: () => setWarnings((current) => current) });",
   ],
+  [
+    "a seat written as an object method",
+    "run({ onWarning(message) { setWarnings((current) => [...current, message]); } });",
+  ],
+  [
+    "a seat that hands over a handler defined elsewhere",
+    "run({ onWarning: handleWarning });",
+  ],
+  [
+    "a seat that hands over a handler read off another object",
+    "run({ onWarning: handlers.onWarning });",
+  ],
+  [
+    "a seat whose key is a string literal",
+    'run({ "onWarning": (message) => setWarnings((current) => [...current, message]) });',
+  ],
+  [
+    "a seat whose key is computed from a string literal",
+    'run({ ["onWarning"]: handleWarning });',
+  ],
 ];
 
 const ALLOWED = [
@@ -111,6 +148,18 @@ const ALLOWED = [
     "an onWarning handler forwarded from a prop",
     "run({ onWarning: (message) => onWarning(appendSanitizedRunWarning([], message)[0]) });",
   ],
+  [
+    "the shared boundary under a string-literal key",
+    'run({ "onWarning": (message) => setWarnings((current) => appendSanitizedRunWarning(current, message)) });',
+  ],
+  [
+    "the shared boundary in an object method",
+    "run({ onWarning(message) { setWarnings((current) => appendSanitizedRunWarning(current, message)); } });",
+  ],
+  [
+    "a renamed destructure of the slot the driver owns",
+    "const { onWarning: slot } = handlers; void slot;",
+  ],
 ];
 
 const PREAMBLE = `
@@ -124,6 +173,8 @@ declare function appendSanitizedRunWarning(
 ): Array<string>;
 declare function sanitizeForDisplay(value: string): string;
 declare const onWarning: (message: string) => void;
+declare const handleWarning: (message: string) => void;
+declare const handlers: { onWarning: (message: string) => void };
 export function fixture(): void {
 `;
 
@@ -163,9 +214,11 @@ describe("the seat warning-sink ban", () => {
   }
 
   it("leaves a shorthand property and a type declaration alone", async () => {
-    // Neither is a handler: the shorthand passes a slot the driver already owns
-    // (serverJobExchangeDriver destructures one), and the declaration is the
-    // driver's own interface.
+    // The declaration is the driver's own interface. The shorthand is the bypass
+    // the ban knowingly leaves open: it is how a seat forwards a slot its caller
+    // owns (serverJobExchangeDriver destructures one), and separating that from a
+    // locally-defined handler of the same name takes scope a selector has not got.
+    // Pinned so the exemption is a decision on the record rather than a gap.
     expect(
       await banHits(
         SEAT_FILE,
@@ -185,4 +238,29 @@ describe("the seat warning-sink ban", () => {
       ),
     ).not.toHaveLength(0);
   });
+
+  it(
+    "leaves every seat the app offers clean",
+    async () => {
+      for (const seat of APP_SEAT_FILES) {
+        expect(existsSync(seat), `${seat} no longer exists`).toBe(true);
+        expect(
+          readFileSync(seat, "utf8"),
+          `${seat} no longer offers an onWarning slot, so linting it clean says nothing`,
+        ).toMatch(/onWarning:/);
+      }
+      const results = await eslint.lintFiles(APP_SEAT_FILES);
+      const reported = results.flatMap((result) =>
+        result.messages
+          .filter(
+            (message) =>
+              message.ruleId === "no-restricted-syntax" &&
+              message.message.startsWith("Fold an onWarning message"),
+          )
+          .map((message) => `${result.filePath}:${message.line}`),
+      );
+      expect(reported).toEqual([]);
+    },
+    SEAT_LINT_TIMEOUT_MS,
+  );
 });

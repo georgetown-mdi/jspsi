@@ -37,15 +37,26 @@ const rawRowsAccessBan = {
 // unit test of the boundary itself -- both are a seat routing AROUND it -- so this is
 // the executable form of that routing, which was prose until it was a rule.
 //
-// The bound is the call shape: it matches an `onWarning` property whose value is a
-// function literal and whose body names the boundary somewhere. A seat that reaches
-// the boundary through an intermediate helper reads as a violation (add the helper's
-// own site, do not silence it), and one that merely mentions the name without folding
-// through it reads as clean. A `onWarning` shorthand or a type declaration is not a
-// handler and is not matched.
+// The bound is the call shape: an `onWarning` property of an object LITERAL --
+// keyed plainly, quoted, or computed -- whose value is a function literal or a
+// named reference. A function literal has to name the boundary somewhere in its
+// body, so a seat that reaches the boundary through an intermediate helper reads as
+// a violation (add the helper's own site, do not silence it) and one that merely
+// mentions the name without folding through it reads as clean; a named reference
+// reads as a violation on sight, since a selector cannot follow it to the body. A
+// type declaration and a destructuring pattern are not seats and are not matched.
+//
+// One bypass shape stays open: a bare shorthand `{ onWarning }`. A seat forwarding a
+// slot its own caller owns -- a prop, or the handler the driver destructured -- is
+// written exactly that way, and telling it from a locally-defined handler needs
+// scope, which a selector does not have. Every shape that IS matched is pinned case
+// by case in scripts/eslint-seat-warning-sink-ban.test.mjs.
 const seatWarningSinkBan = {
   selector:
-    "Property[key.name='onWarning'][value.type=/^(Arrow)?FunctionExpression$/]" +
+    "ObjectExpression > Property" +
+    ":matches([key.name='onWarning'],[key.value='onWarning'])" +
+    ":not([shorthand=true])" +
+    "[value.type=/^(ArrowFunctionExpression|FunctionExpression|Identifier|MemberExpression)$/]" +
     ":not(:has(CallExpression[callee.name='appendSanitizedRunWarning']))",
   message:
     "Fold an onWarning message through appendSanitizedRunWarning (src/bench/runWarnings.ts): it is the one display boundary the run surfaces share, and the manager composes its warnings raw because that boundary escapes them exactly once.",
