@@ -53,11 +53,12 @@ import type {
  * re-derived here: this model supplies what the verifier holds and renders the
  * report core returns.
  *
- * No private signing key is accepted, required, or read on any path here. The
- * verifier's own slot is anchored by the fingerprint of a dropped EXPORTED
- * certificate (the public half), and the signing identity file that holds the
- * private key is refused by {@link parseCertificateDocument} on its version alone,
- * before any field of it is read.
+ * No private signing key is accepted, required, imported, or used on any path
+ * here. The verifier's own slot is anchored by the fingerprint of a dropped
+ * EXPORTED certificate (the public half), and the signing identity file that
+ * holds the private key is refused by {@link parseCertificateDocument} on its
+ * version alone. A dropped document is read and parsed whichever it turns out to
+ * be, so this is a narrower USE of the identity file, not a narrower read of it.
  *
  * Every embedded error string is routed through core's display-boundary
  * sanitizers before it reaches this model's output: a malformed document's parse
@@ -130,13 +131,13 @@ const MALFORMED_CERTIFICATE_MESSAGE =
   "certificate you exported with 'psilink fingerprint --export-certificate', " +
   "and that it has not been edited since -- its own self-signature must verify.";
 
-// The identity file is refused rather than read for the certificate beside the
+// The identity file is refused rather than mined for the certificate beside the
 // key: the key is what makes the file worth protecting, and nothing this page
 // does needs it. The message names the export that replaces it, so the refusal
 // leaves the operator somewhere to go.
 const SIGNING_IDENTITY_MESSAGE =
   "This is a signing identity file, which holds your private signing key. " +
-  "Nothing here needs it and this page never reads one: export your public " +
+  "Nothing here needs it and this page never uses one: export your public " +
   "certificate with 'psilink fingerprint --export-certificate <path>' and load " +
   "that instead.";
 
@@ -247,10 +248,10 @@ export function parseSignedRecordDocument(
 /**
  * Parse the verifier's own EXPORTED certificate -- the public half -- and
  * recompute its fingerprint, which is what anchors the slot holding it. The
- * private-key-bearing signing identity file is refused on its version alone,
- * before any field of it is read, so no private key is parsed, imported, or
- * compared on this path; a document of any other version is refused as well
- * rather than searched for a certificate to use.
+ * private-key-bearing signing identity file is refused on its version alone: the
+ * document is read and parsed to reach that version, but no key material is
+ * imported, compared, or used on this path, and a document of any other version
+ * is refused as well rather than searched for a certificate to use.
  *
  * The returned certificate is core's parsed shape, whose schema keeps only the
  * public coordinates: private key material in a supplied document does not

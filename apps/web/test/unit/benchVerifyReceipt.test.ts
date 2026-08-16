@@ -419,7 +419,7 @@ describe("parseCertificateDocument", () => {
   test("a signing identity file is refused, and points at the certificate export", async () => {
     // The private-key-bearing file is refused on its version alone rather than
     // mined for the certificate beside the key: no private key is accepted,
-    // required, or read on any path this page runs.
+    // required, imported, or used on any path this page runs.
     const identity = await generateSigningIdentity("Party A");
     const parsed = await parseCertificateDocument(
       serializeSigningIdentity(identity),
@@ -437,7 +437,7 @@ describe("parseCertificateDocument", () => {
   test("private key material in a supplied document does not survive the parse", async () => {
     // The certificate schema keeps only the public coordinates, so a document
     // carrying a private scalar beside them yields a certificate that does not:
-    // the model-level half of "no private key is read here", pinned as a check
+    // the model-level half of "no private key is used here", pinned as a check
     // rather than asserted in prose.
     const identity = await generateSigningIdentity("Party A");
     const parsed = await parseCertificateDocument(

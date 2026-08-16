@@ -40,6 +40,7 @@ import type {
   DualSignedRecord,
   ExchangeRecord,
   LinkageTerms,
+  RecordVerificationReport,
   VerificationKeys,
 } from "@psilink/core";
 import type {
@@ -58,7 +59,7 @@ import type { ReactNode } from "react";
  * linkage terms to open the commitments and re-derive the agreed-terms hash. When
  * the exchange was signed, the dual-signed record is checked in the same run,
  * anchored by the partner's pinned fingerprint and by this party's own EXPORTED
- * certificate -- no private signing key is accepted, required, or read here. The
+ * certificate -- no private signing key is accepted, required, or used here. The
  * verdicts are honest -- a mismatch is stated as "altered or the wrong file",
  * never as tamper alone, and an unanchored certificate holds the signed verdict
  * short of verified (see {@link verifyReceiptModel}) -- and nothing is uploaded.
@@ -78,10 +79,14 @@ const JSON_MAX_MB = MAX_JSON_FILE_BYTES / 1024 ** 2;
 // The re-supplied input/result CSVs share the app-wide browser-memory bound.
 const CSV_MAX_MB = MAX_CSV_FILE_BYTES / 1024 ** 2;
 
+// What a dropzone shows for the file it holds.
+interface ChosenFile {
+  name: string;
+}
+
 // The reconstruction and terms re-supply are optional; each holds its own parse
 // state and a possible alert.
-interface SuppliedFile {
-  name: string;
+interface SuppliedFile extends ChosenFile {
   text: string;
 }
 
@@ -104,10 +109,13 @@ interface ParsedSignedRecordState {
 }
 
 // Only the fingerprint recomputed from the certificate is retained: it is the
-// whole of what anchors the verifier's own slot, so the parsed certificate
-// itself is not held past the parse.
+// whole of what anchors the verifier's own slot, so neither the parsed
+// certificate nor the document it came from is held past the parse. The file
+// dropped here can be a signing identity file, which carries a private key
+// beside the certificate and is refused -- keeping only the name means a
+// refused one leaves no key material in component state.
 interface ParsedCertificateState {
-  file: SuppliedFile;
+  file: ChosenFile;
   fingerprint?: string;
   alert?: string;
 }
@@ -145,7 +153,7 @@ function JsonDropzone({
 }: {
   label: string;
   hint: string;
-  chosen: SuppliedFile | undefined;
+  chosen: ChosenFile | undefined;
   onFile: (file: File) => void;
 }) {
   const [rejectionMessage, setRejectionMessage] = useState<string>();
@@ -343,8 +351,13 @@ export function VerifyReceiptBench() {
   }, [verdict, signedVerdict, verifyError]);
 
   // A newly loaded record or keys file starts a possibly different exchange, so
-  // any re-supplied files, pasted terms, and verdict from the previous one must
-  // not carry forward into the next verify.
+  // the re-supplied files and pasted terms from the previous one must not carry
+  // forward into the next verify: they open that record's commitments, and the
+  // wrong ones would be reported as a record that fails to open. The signed
+  // leg's inputs deliberately stay -- a receipt held against a different
+  // record's identities and terms hash fails loudly rather than passing, and
+  // the partner's pinned fingerprint is a value the operator reuses across that
+  // partner's exchanges. Both verdicts are cleared by the callers either way.
   function clearResupply() {
     setInputCsv(undefined);
     setResultCsv(undefined);
@@ -397,9 +410,10 @@ export function VerifyReceiptBench() {
     setVerdict(undefined);
     setSignedVerdict(undefined);
     setVerifyError(undefined);
+    const chosen = { name: supplied.name };
     if (parsed.kind === "ok")
-      setCertificate({ file: supplied, fingerprint: parsed.fingerprint });
-    else setCertificate({ file: supplied, alert: parsed.message });
+      setCertificate({ file: chosen, fingerprint: parsed.fingerprint });
+    else setCertificate({ file: chosen, alert: parsed.message });
   }
 
   function onPinnedFingerprint(value: string) {
@@ -447,10 +461,11 @@ export function VerifyReceiptBench() {
     setVerifyError(undefined);
     try {
       const parsedRecord = record?.record;
+      let recordReport: RecordVerificationReport | undefined;
+      let recordWarnings: Array<string> = [];
       if (parsedRecord !== undefined && keys?.keys !== undefined) {
         let data: Awaited<ReturnType<typeof reconstructCommittedData>>["data"] =
           {};
-        let warnings: Array<string> = [];
         if (inputCsv !== undefined && resultCsv !== undefined) {
           const inputParse = await loadCSVFileOffMainThread(inputCsv);
           const resultParse = await loadCSVFileOffMainThread(resultCsv);
@@ -466,21 +481,15 @@ export function VerifyReceiptBench() {
             ourIdColumn,
           });
           data = reconstructed.data;
-          warnings = reconstructed.warnings;
+          recordWarnings = reconstructed.warnings;
         }
-        const report = await verifyExchangeRecord(parsedRecord, keys.keys, {
+        recordReport = await verifyExchangeRecord(parsedRecord, keys.keys, {
           data,
           localTerms,
           partnerTerms,
         });
-        setVerdict(
-          verdictViewModel(
-            report,
-            warnings,
-            signedRecord?.record !== undefined,
-          ),
-        );
       }
+      let signedView: SignedVerdictViewModel | undefined;
       if (signedRecord?.record !== undefined) {
         const report = await verifySignedRecord(
           signedRecord.record,
@@ -490,8 +499,20 @@ export function VerifyReceiptBench() {
           },
           { record: parsedRecord, localTerms, partnerTerms },
         );
-        setSignedVerdict(signedVerdictViewModel(report));
+        signedView = signedVerdictViewModel(report);
       }
+      // Both verdicts are set once both legs have run: the record verdict's
+      // standing note points at the signed panel on the strength of the verdict
+      // rendered beside it, never of the input supplied to produce it.
+      if (recordReport !== undefined)
+        setVerdict(
+          verdictViewModel(
+            recordReport,
+            recordWarnings,
+            signedView !== undefined,
+          ),
+        );
+      if (signedView !== undefined) setSignedVerdict(signedView);
     } catch (error) {
       // The verify path is fail-safe in core (every check yields a status), so a
       // throw here is an unexpected fault -- surface it sanitized, never raw.
@@ -748,7 +769,7 @@ export function VerifyReceiptBench() {
             />
             <JsonDropzone
               label="Your exported certificate"
-              hint="The public certificate from 'psilink fingerprint --export-certificate'. Not your signing identity file: this page never reads a private key."
+              hint="The public certificate from 'psilink fingerprint --export-certificate'. Not your signing identity file: nothing here signs, so this page never imports or uses a private key."
               chosen={certificate?.file}
               onFile={(file) => void onCertificateFile(file)}
             />
