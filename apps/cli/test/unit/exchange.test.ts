@@ -7,12 +7,14 @@ import YAML from "yaml";
 import { UsageError } from "@psilink/core";
 import {
   encodeInvitation,
+  generateSigningIdentity,
   getDefaultLinkageTerms,
   getLogger,
   prepareForExchange,
 } from "@psilink/core";
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
+import { saveSigningIdentity } from "../../src/signingIdentityFile";
 import { runProtocol } from "../../src/protocol";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 import { confirmOutboundPayloadConsent } from "../../src/outboundPayloadConsent";
@@ -961,6 +963,81 @@ test("handler suppresses the advisory when a successful exchange refreshes the t
   } finally {
     exitSpy.mockRestore();
   }
+});
+
+// --- handler: signing-identity divergence (wiring) ---------------------------
+// The comparison itself is unit-tested in exchangeSigning.test.ts; these cover
+// the wiring -- that the handler hands the run's terms identity to the signing
+// resolver, and that a divergence is reported and the exchange still runs.
+
+// Seed a certificate-mode config whose identity file is bound to `bound`, and
+// return the argv a run of it takes. The config's terms identity is "Test Party".
+async function signedExchangeRun(bound: string): Promise<Arguments> {
+  const identityFile = path.join(dir, "signing-identity.json");
+  saveSigningIdentity(identityFile, await generateSigningIdentity(bound));
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalFiledropConfig,
+      signing: { mode: "certificate", identity_file: identityFile },
+    }),
+  );
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: new Date(Date.now() + 365 * 86_400_000).toISOString(),
+  });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  return {
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+  } as unknown as Arguments;
+}
+
+test("handler warns on a divergent signing identity and runs the exchange anyway", async () => {
+  const argv = await signedExchangeRun("Someone Else");
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler(argv);
+  const warning = mockState.warnings.find((m) =>
+    m.includes("linkage_terms.identity"),
+  );
+  expect(warning).toBeDefined();
+  expect(warning).toContain('"Someone Else"');
+  expect(warning).toContain('"Test Party"');
+  expect(warning).toContain("reject");
+  // Warned, not refused: the run reaches the exchange.
+  expect(runProtocol).toHaveBeenCalledOnce();
+});
+
+test("handler stays silent when the signing identity matches the terms identity", async () => {
+  const argv = await signedExchangeRun("Test Party");
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler(argv);
+  expect(
+    mockState.warnings.some((m) => m.includes("linkage_terms.identity")),
+  ).toBe(false);
+  expect(runProtocol).toHaveBeenCalledOnce();
+});
+
+test("handler compares the signing identity against --identity when it is given", async () => {
+  // --identity replaces the config's terms identity for the run, so it is the
+  // value the partner will verify the certificate against.
+  const argv = await signedExchangeRun("Test Party");
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler({ ...argv, identity: "Overridden Party" } as Arguments);
+  const warning = mockState.warnings.find((m) =>
+    m.includes("linkage_terms.identity"),
+  );
+  expect(warning).toBeDefined();
+  expect(warning).toContain('"Test Party"');
+  expect(warning).toContain('"Overridden Party"');
 });
 
 // --- handler: --invitation provisioning --------------------------------------
