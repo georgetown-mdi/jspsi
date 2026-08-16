@@ -8,6 +8,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   inferMetadata,
+  overlongDisclosedColumnPositions,
 } from "@psilink/core";
 
 import { emptyColumnPositions } from "./columnNames";
@@ -159,10 +160,11 @@ export interface GeneratedInvitation {
 }
 
 /** Why {@link generateInvitation} refused to mint an invitation for the given
- * file. Both variants are user-actionable -- the inviter can choose another file
- * -- and both are thrown BEFORE any shared secret is generated, so a rejected
- * file never yields a token. Anything else {@link generateInvitation} throws (a
- * schema/encoding error, an SSR misuse) is an internal fault, not one of these. */
+ * file. Every variant is user-actionable -- the inviter can choose another file, or
+ * change which columns it sends -- and every one is thrown BEFORE any shared secret
+ * is generated, so a rejected file never yields a token. Anything else
+ * {@link generateInvitation} throws (a schema/encoding error, an SSR misuse) is an
+ * internal fault, not one of these. */
 export type InvitationFileFailure =
   | {
       /** The CSV could not be read or parsed. */
@@ -191,6 +193,20 @@ export type InvitationFileFailure =
       /** The 1-based positions of the empty-named columns, for the operator-facing
        * message (see {@link unnameableColumnsAlert}). */
       positions: Array<number>;
+    }
+  | {
+      /** A column marked to send carries a name longer than `MAX_NAME_LENGTH`.
+       * The name rides the payload frame to the partner, whose parse refuses it,
+       * and `PayloadColumnSchema.name` would otherwise reject it here only as a raw
+       * ZodError at encode (the generic retry dead-end); refused with a typed
+       * failure so the caller can show a clear, actionable error. Scoped to the
+       * disclosed set: an oversized name on a column that is not sent is carried
+       * nowhere and blocks nothing. */
+      kind: "overlong";
+      /** The 1-based positions of the offending columns, for the operator-facing
+       * message (see {@link overlongColumnsAlert}). The offending NAME is never
+       * carried: it is longer than the message that would show it. */
+      positions: Array<number>;
     };
 
 /**
@@ -207,7 +223,9 @@ export class InvitationFileError extends Error {
         ? "invitation file could not be read"
         : failure.kind === "unlinkable"
           ? "invitation file satisfies no linkage keys"
-          : "invitation file has an empty column name",
+          : failure.kind === "overlong"
+            ? "invitation file sends an over-long column name"
+            : "invitation file has an empty column name",
     );
     this.name = "InvitationFileError";
     this.failure = failure;
@@ -311,8 +329,9 @@ function resolveConnectionEndpoint(
  * Fails closed BEFORE minting the secret (see the @throws below), so no token is
  * ever produced for an unreadable or unlinkable file.
  *
- * @throws {InvitationFileError} when the file is unreadable or unlinkable (before
- *                               any secret is minted).
+ * @throws {InvitationFileError} when the file is unreadable, unlinkable, carries an
+ *                               unnamed column, or sends one whose name is too long
+ *                               to carry (all before any secret is minted).
  * @throws {UsageError} (from core) when authored terms declare a `payload.send`
  *                      that does not match the edited metadata's disclosed set, so
  *                      the token and the partner's consent screen cannot misstate
@@ -469,6 +488,9 @@ export async function generateInvitation(params: {
   // (it locks the acceptor in to "receive nothing"), not the absent/lazy case.
   let disclosedPayloadColumns: Array<string>;
   let linkageTerms: LinkageTerms;
+  // The metadata whose marks decide what is disclosed, kept beside the derived set
+  // so the mint-boundary bound below reads the same columns the send does.
+  let disclosureMetadata: Metadata;
   if (params.linkageTerms !== undefined) {
     linkageTerms = params.linkageTerms;
     // The mint boundary stays fail-closed even though the editor already gates on
@@ -501,11 +523,11 @@ export async function generateInvitation(params: {
         params.metadata,
         linkageTerms.output,
       );
-    disclosedPayloadColumns = disclosedColumnNames(
-      params.metadata ?? inferMetadata(columns),
-    );
+    disclosureMetadata = params.metadata ?? inferMetadata(columns);
+    disclosedPayloadColumns = disclosedColumnNames(disclosureMetadata);
   } else {
     const metadata = inferMetadata(columns);
+    disclosureMetadata = metadata;
     linkageTerms = getDefaultLinkageTerms(inviterName, metadata);
 
     // Block a file that satisfies no linkage key, mirroring the acceptor pre-flight
@@ -542,6 +564,21 @@ export async function generateInvitation(params: {
       linkageTerms.output,
     );
   }
+
+  // Refuse a disclosed column whose name is too long to carry, before the secret is
+  // minted. The quick path infers its metadata from the CSV header, which no schema
+  // bounds, so the name would otherwise reach PayloadColumnSchema's `.max` at encode
+  // as a raw ZodError the UI flattens into its generic retry dead-end -- and a
+  // caller authoring its own terms without the editor's gate would mint a token
+  // naming a column the exchange cannot carry. Surface the typed, user-actionable
+  // failure here, as the empty-name gate above does.
+  const overlongPositions =
+    overlongDisclosedColumnPositions(disclosureMetadata);
+  if (overlongPositions.length > 0)
+    throw new InvitationFileError({
+      kind: "overlong",
+      positions: overlongPositions,
+    });
 
   // Bound the token's lifetime so an intercepted invitation cannot be accepted
   // indefinitely. Measured from the current instant, so the lifetime clock starts

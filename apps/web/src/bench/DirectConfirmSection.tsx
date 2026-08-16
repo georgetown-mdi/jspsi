@@ -17,6 +17,7 @@ import { InvitationTerms } from "@components/InvitationTerms";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
 import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
+import { overlongColumnsAlert } from "@psi/columnNames";
 
 import {
   DEFAULT_PREVIEW_IDENTITY,
@@ -82,6 +83,17 @@ export function DirectConfirmSection({
   const linkable = preview.satisfiableKeyCount > 0;
   const unlinkable = unlinkableFileAlert(preview.unsatisfied);
 
+  // A column this file sends whose name is too long to carry. The appliance would
+  // refuse the run at data preparation, so it is refused here where the operator can
+  // still act on it, in the same words the invitation seats use. This spine has no
+  // disclosure control -- every non-linkage column is sent -- so the remedy it
+  // offers is a shorter header; the copy below already points at the invitation
+  // flow for choosing which columns are shared.
+  const overlongAlert =
+    preview.overlongDisclosedColumns.length > 0
+      ? overlongColumnsAlert(preview.overlongDisclosedColumns)
+      : undefined;
+
   // Client-side guard mirroring the intent schema's identity contract, validated on
   // the value the run actually sends (the trimmed label; a blank field omits identity
   // and runs as the appliance user, so it is not an error). Naming the fault at the
@@ -121,6 +133,16 @@ export function DirectConfirmSection({
         onChange={(event) => onIdentity(event.currentTarget.value)}
         error={identityError}
       />
+
+      {overlongAlert !== undefined && (
+        <Alert
+          color="red"
+          icon={<IconAlertCircle aria-hidden />}
+          title={overlongAlert.title}
+        >
+          {overlongAlert.message}
+        </Alert>
+      )}
 
       <section aria-label="Inferred terms">
         {linkable ? (
@@ -191,7 +213,11 @@ export function DirectConfirmSection({
         <Button
           onClick={onRun}
           disabled={
-            !affirmed || !linkable || running || identityError !== undefined
+            !affirmed ||
+            !linkable ||
+            overlongAlert !== undefined ||
+            running ||
+            identityError !== undefined
           }
         >
           Run the exchange

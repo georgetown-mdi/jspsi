@@ -14,7 +14,11 @@ import {
   generateInvitation,
   webrtcEndpointFromLocation,
 } from "@psi/invitation";
-import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
+import {
+  emptyColumnPositions,
+  overlongColumnsAlert,
+  unnameableColumnsAlert,
+} from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managedInputHandle";
 import { columnSamplesFromRows } from "@psi/columnSamples";
 import { createManagedExchange } from "@psi/managedExchangeStore";
@@ -119,6 +123,7 @@ import type { CliTransport, SaveExchangeFields } from "./saveExchangeModel";
 import type {
   ConnectionEndpointRequest,
   GeneratedInvitation,
+  InvitationFileFailure,
 } from "@psi/invitation";
 import type {
   JobInputSource,
@@ -166,6 +171,30 @@ const SPINE_LABELS: Record<SpineStep, string> = {
 };
 
 const SPINE_ORDER: ReadonlyArray<SpineStep> = ["file", "columns", "review"];
+
+/**
+ * The alert for a mint that refused this file. The mint re-parses the retained file
+ * and re-checks it, so it fails in the same user-actionable ways the file step gates
+ * on; both mint surfaces (create and save) render this one composition, so they
+ * cannot state the same refusal in different words. Exhaustive over
+ * {@link InvitationFileFailure}, so a new refusal reason cannot reach either surface
+ * as the generic "something went wrong".
+ */
+function invitationFileAlert(failure: InvitationFileFailure): AlertContent {
+  switch (failure.kind) {
+    case "unreadable":
+      return {
+        title: "Could not read your file",
+        message: sanitizeErrorForDisplay(failure.cause),
+      };
+    case "unnameable":
+      return unnameableColumnsAlert(failure.positions);
+    case "overlong":
+      return overlongColumnsAlert(failure.positions);
+    case "unlinkable":
+      return unlinkableFileAlert(failure.unsatisfied);
+  }
+}
 
 function isSpineStep(section: Section): section is SpineStep {
   return (SPINE_ORDER as ReadonlyArray<Section>).includes(section);
@@ -891,16 +920,7 @@ export function InviterBench() {
         // user-actionable ways step 1 gates on (the file changed on disk, or
         // its satisfiability shifted with the edited terms); surface the same
         // shared alerts rather than a generic failure.
-        setCreateAlert(
-          error.failure.kind === "unreadable"
-            ? {
-                title: "Could not read your file",
-                message: sanitizeErrorForDisplay(error.failure.cause),
-              }
-            : error.failure.kind === "unnameable"
-              ? unnameableColumnsAlert(error.failure.positions)
-              : unlinkableFileAlert(error.failure.unsatisfied),
-        );
+        setCreateAlert(invitationFileAlert(error.failure));
       } else {
         // Internal and non-user-actionable: a fixed message avoids echoing
         // internals into a secret-bearing flow, the default log carries only
@@ -962,16 +982,7 @@ export function InviterBench() {
       setSavedExchange({ invitation: minted, fileName });
     } catch (error) {
       if (error instanceof InvitationFileError) {
-        setSaveAlert(
-          error.failure.kind === "unreadable"
-            ? {
-                title: "Could not read your file",
-                message: sanitizeErrorForDisplay(error.failure.cause),
-              }
-            : error.failure.kind === "unnameable"
-              ? unnameableColumnsAlert(error.failure.positions)
-              : unlinkableFileAlert(error.failure.unsatisfied),
-        );
+        setSaveAlert(invitationFileAlert(error.failure));
       } else {
         // Internal and non-user-actionable (a schema/encoding fault): a fixed
         // message keeps internals out of a secret-bearing flow, the default

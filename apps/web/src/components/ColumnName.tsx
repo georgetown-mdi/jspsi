@@ -33,11 +33,12 @@ import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
  * alike here, and escaping is what would tell them apart. One such pair no treatment
  * tells apart: two headers past {@link MAX_NAME_LENGTH} code points sharing their
  * first {@link MAX_NAME_LENGTH} render as the same cut string in every sink on this
- * screen. The names are the operator's own file's, so the usual cost of that is the
- * legibility of their own header -- but this screen is where the disclosure is set,
- * one mark per grid row, so a crafted twin pair costs a row marked for the column
- * the operator did not mean: a mis-directed disclosure, not legibility alone.
- * Nothing here decides what is sent; it decides only how the name reads.
+ * screen. The names are the operator's own file's, so the cost of that is the
+ * legibility of their own header, and no longer a mis-directed disclosure: a name
+ * long enough to be cut here is past the ceiling on the UTF-16 count too, so marking
+ * either twin to send closes the launch gate rather than sending the column the
+ * operator did not mean. Nothing here decides what is sent; it decides only how the
+ * name reads.
  */
 
 /**
@@ -50,8 +51,11 @@ import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
  * cut can never reach a name an exchange completes on, and two carryable headers
  * sharing a prefix stay distinct. It does reach longer ones: this screen's metadata
  * comes from `inferMetadata` over the file's own header, which no schema bounds, so
- * an oversized header renders cut here and is refused only by the partner, after the
- * frame is sent.
+ * an oversized header renders cut here. What such a header cannot do is leave the
+ * machine: marking it to send closes the launch gate
+ * (`acceptorOverlongDisclosedColumns`, over the same predicate core's prepare-time
+ * `assertDisclosedNamesCarriable` reads), so the cut bounds what paints on a name
+ * the run refuses to carry.
  *
  * The cut counts code points -- so it never splits a surrogate pair, and an override
  * it leaves open is closed by the isolate around it -- while both of those ceilings

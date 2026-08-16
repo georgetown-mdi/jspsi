@@ -23,9 +23,12 @@ import { ColumnName, isolatedColumnName } from "@components/ColumnName";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
+import { overlongColumnsAlert } from "@psi/columnNames";
+
 import {
   acceptorDisclosedColumns,
   acceptorLaunchBlockedReason,
+  acceptorOverlongDisclosedColumns,
   acceptorPayloadDeclarationConflict,
   acceptorStandardizationValid,
   acceptorUnsatisfiedTypes,
@@ -179,6 +182,14 @@ export function AcceptorColumnsStep({
     declarationConflict?.declaredButNotSent.filter((gap) => gap.inFile) ?? [];
   const expectedMissingFromFile =
     declarationConflict?.declaredButNotSent.filter((gap) => !gap.inFile) ?? [];
+  const overlongDisclosed = acceptorOverlongDisclosedColumns(
+    linkageTerms,
+    editorState.metadata,
+  );
+  const overlongAlert =
+    overlongDisclosed.length > 0
+      ? overlongColumnsAlert(overlongDisclosed)
+      : undefined;
   const standardizationValid = acceptorStandardizationValid(
     editorState.standardization,
   );
@@ -484,6 +495,25 @@ export function AcceptorColumnsStep({
                 )}
               </>
             )}
+          </Alert>
+        )}
+
+        {/* A marked column whose name is too long to carry: the exchange refuses
+            it before any data moves, so it is stated beside the marks that decide
+            it and directly above the grid whose rows are the file's columns in the
+            order these positions count. Located by position rather than named --
+            an offending name is longer than a notice can show -- and worded by the
+            shared alert every seat that gates on this ceiling uses. Not a live
+            region, for the reason the declaration conflict above is not: the
+            blocked-reason line beside the launch button speaks for the gate. */}
+        {overlongAlert !== undefined && (
+          <Alert
+            role="note"
+            color="red"
+            icon={<IconAlertCircle aria-hidden />}
+            title={overlongAlert.title}
+          >
+            {overlongAlert.message}
           </Alert>
         )}
 
