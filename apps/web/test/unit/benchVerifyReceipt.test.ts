@@ -1,26 +1,43 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  SIGNED_RECEIPT_VERSION,
   buildExchangeRecord,
+  computeCertificateFingerprint,
   deriveOurIdColumn,
+  generateSigningIdentity,
   reconstructCommittedData,
+  serializeCertificate,
+  serializeDualSignedRecord,
   serializeExchangeRecord,
+  serializeSigningIdentity,
   serializeVerificationKeys,
+  signReceiptContent,
   toRetainedResult,
   verifyExchangeRecord,
 } from "@psilink/core";
 
 import {
+  parseCertificateDocument,
   parseKeysDocument,
   parseRecordDocument,
+  parseSignedRecordDocument,
+  pinnedFingerprintProblem,
+  signedVerdictViewModel,
   verdictViewModel,
+  verifySignedRecord,
 } from "@bench/verifyReceiptModel";
 
 import type {
   AssociationTable,
   CommittedPayload,
+  DualSignedRecord,
+  DualSignedRecordVerificationReport,
   ExchangeRecord,
   LinkageTerms,
+  ReceiptContent,
+  SignedReceiptPartyReport,
+  SigningIdentity,
   VerificationKeys,
 } from "@psilink/core";
 
@@ -299,5 +316,548 @@ describe("verdictViewModel: warnings are sanitized", () => {
     ]);
     expect(view.warnings).toHaveLength(1);
     expect(view.warnings[0]).not.toContain(esc);
+  });
+});
+
+// --- The signed leg ----------------------------------------------------------
+
+// A dual-signed record over the same exchange the fixtures above describe: the
+// receipt content carries that record's agreed-terms hash and each certificate
+// carries the identity the record names, so a run supplying the record reaches
+// every check rather than stalling on an expectation it cannot state. Keys are
+// generated per fixture: nothing asserted here turns on a particular key.
+async function signedFixture(record: ExchangeRecord): Promise<{
+  us: SigningIdentity;
+  partner: SigningIdentity;
+  signed: DualSignedRecord;
+  ourFingerprint: string;
+  partnerFingerprint: string;
+}> {
+  const us = await generateSigningIdentity(LOCAL_TERMS.identity);
+  const partner = await generateSigningIdentity(PARTNER_TERMS.identity);
+  const content: ReceiptContent = {
+    termsHash: record.termsHash,
+    initiatorToResponderPayload: "aTJyUGF5bG9hZA",
+    responderToInitiatorPayload: "cjJpUGF5bG9hZA",
+    binder: "YmluZGVy",
+  };
+  return {
+    us,
+    partner,
+    signed: {
+      version: SIGNED_RECEIPT_VERSION,
+      content,
+      // We hold the initiator's slot; the partner holds the responder's.
+      initiator: {
+        certificate: us.certificate,
+        signature: await signReceiptContent(us, content, "initiator"),
+      },
+      responder: {
+        certificate: partner.certificate,
+        signature: await signReceiptContent(partner, content, "responder"),
+      },
+    },
+    ourFingerprint: await computeCertificateFingerprint(us.certificate),
+    partnerFingerprint: await computeCertificateFingerprint(
+      partner.certificate,
+    ),
+  };
+}
+
+describe("parseSignedRecordDocument", () => {
+  test("a valid dual-signed record parses to the ok outcome", async () => {
+    const { record } = await fixtures();
+    const { signed } = await signedFixture(record);
+    const parsed = parseSignedRecordDocument(serializeDualSignedRecord(signed));
+    expect(parsed.kind).toBe("ok");
+    if (parsed.kind === "ok")
+      expect(parsed.record.content.binder).toBe(signed.content.binder);
+  });
+
+  test("the exchange record loaded here is an unrecognized version, not a shape error", async () => {
+    const { record } = await fixtures();
+    const parsed = parseSignedRecordDocument(serializeExchangeRecord(record));
+    expect(parsed.kind).toBe("unrecognized-version");
+    if (parsed.kind === "unrecognized-version")
+      expect(parsed.message).toContain("does not recognize");
+  });
+
+  test("a right-version wrong-shape document is malformed", () => {
+    const parsed = parseSignedRecordDocument(
+      JSON.stringify({ version: SIGNED_RECEIPT_VERSION, content: "nope" }),
+    );
+    expect(parsed.kind).toBe("malformed");
+    if (parsed.kind === "malformed")
+      expect(parsed.message).toContain("psilink-receipt-<stamp>.json");
+  });
+
+  test("an error-bearing malformed input never echoes control bytes", () => {
+    const esc = String.fromCharCode(0x1b);
+    const bel = String.fromCharCode(0x07);
+    const parsed = parseSignedRecordDocument(`{"x": ${esc}[31m${bel}`);
+    expect(parsed.kind).toBe("malformed");
+    if (parsed.kind === "malformed") {
+      expect(parsed.message).not.toContain(esc);
+      expect(parsed.message).not.toContain(bel);
+    }
+  });
+});
+
+describe("parseCertificateDocument", () => {
+  test("an exported certificate parses, with the fingerprint recomputed from it", async () => {
+    const identity = await generateSigningIdentity("Party A");
+    const parsed = await parseCertificateDocument(
+      serializeCertificate(identity.certificate),
+    );
+    expect(parsed.kind).toBe("ok");
+    if (parsed.kind === "ok")
+      expect(parsed.fingerprint).toBe(
+        await computeCertificateFingerprint(identity.certificate),
+      );
+  });
+
+  test("a signing identity file is refused, and points at the certificate export", async () => {
+    // The private-key-bearing file is refused on its version alone rather than
+    // mined for the certificate beside the key: no private key is accepted,
+    // required, imported, or used on any path this page runs.
+    const identity = await generateSigningIdentity("Party A");
+    const parsed = await parseCertificateDocument(
+      serializeSigningIdentity(identity),
+    );
+    expect(parsed.kind).toBe("signing-identity");
+    if (parsed.kind === "signing-identity") {
+      expect(parsed.message).toContain("private signing key");
+      expect(parsed.message).toContain(
+        "psilink fingerprint --export-certificate",
+      );
+      expect(parsed.message).not.toContain(identity.privateKey.d);
+    }
+  });
+
+  test("private key material in a supplied document does not survive the parse", async () => {
+    // The certificate schema keeps only the public coordinates, so a document
+    // carrying a private scalar beside them yields a certificate that does not:
+    // the model-level half of "no private key is used here", pinned as a check
+    // rather than asserted in prose.
+    const identity = await generateSigningIdentity("Party A");
+    const parsed = await parseCertificateDocument(
+      JSON.stringify({
+        ...identity.certificate,
+        publicKey: {
+          ...identity.certificate.publicKey,
+          d: identity.privateKey.d,
+        },
+      }),
+    );
+    expect(parsed.kind).toBe("ok");
+    if (parsed.kind === "ok") {
+      expect(JSON.stringify(parsed.certificate)).not.toContain(
+        identity.privateKey.d,
+      );
+      expect(parsed.certificate.publicKey).not.toHaveProperty("d");
+    }
+  });
+
+  test("a document that is not a certificate at all is an unrecognized version", async () => {
+    const { record } = await fixtures();
+    const parsed = await parseCertificateDocument(
+      serializeExchangeRecord(record),
+    );
+    expect(parsed.kind).toBe("unrecognized-version");
+    if (parsed.kind === "unrecognized-version")
+      expect(parsed.message).toContain("psilink-signing-cert/v2");
+  });
+
+  test("a certificate whose self-signature does not verify is malformed", async () => {
+    // An edited identity: the body no longer matches the signature over it, so
+    // the certificate binds nothing and is refused before it can anchor a slot.
+    const identity = await generateSigningIdentity("Party A");
+    const parsed = await parseCertificateDocument(
+      JSON.stringify({ ...identity.certificate, identity: "Party Z" }),
+    );
+    expect(parsed.kind).toBe("malformed");
+    if (parsed.kind === "malformed")
+      expect(parsed.message).toContain("self-signature must verify");
+  });
+
+  test("a syntactically broken document never echoes control bytes", async () => {
+    const esc = String.fromCharCode(0x1b);
+    const parsed = await parseCertificateDocument(`{"x": ${esc}[31m`);
+    expect(parsed.kind).toBe("malformed");
+    if (parsed.kind === "malformed") expect(parsed.message).not.toContain(esc);
+  });
+});
+
+describe("pinnedFingerprintProblem", () => {
+  test("an empty value is simply not supplied", () => {
+    expect(pinnedFingerprintProblem("")).toBeUndefined();
+    expect(pinnedFingerprintProblem("   ")).toBeUndefined();
+  });
+
+  test("a fingerprint is accepted", async () => {
+    const identity = await generateSigningIdentity("Party A");
+    const fingerprint = await computeCertificateFingerprint(
+      identity.certificate,
+    );
+    expect(pinnedFingerprintProblem(fingerprint)).toBeUndefined();
+    expect(pinnedFingerprintProblem(` ${fingerprint} `)).toBeUndefined();
+  });
+
+  test("a malformed pin is its own error, not a certificate that does not match", () => {
+    const problem = pinnedFingerprintProblem("not-a-fingerprint");
+    expect(problem).toContain("43 characters");
+    expect(problem).toContain("psilink fingerprint");
+  });
+});
+
+describe("verifySignedRecord: both certificates anchored", () => {
+  test("a pinned partner and our own certificate reach the verified verdict, naming both anchors", async () => {
+    const { record } = await fixtures();
+    const { signed, ourFingerprint, partnerFingerprint } =
+      await signedFixture(record);
+    const report = await verifySignedRecord(
+      signed,
+      {
+        pinnedFingerprint: partnerFingerprint,
+        ownCertificateFingerprint: ourFingerprint,
+      },
+      { record },
+    );
+    expect(report.outcome).toBe("verified");
+
+    const view = signedVerdictViewModel(report);
+    expect(view.headline.title).toBe("Signed receipt verified");
+    // The verdict speaks for both slots, so it states what anchored each.
+    expect(view.headline.detail).toContain(
+      "the initiator's by the certificate you supplied as your own",
+    );
+    expect(view.headline.detail).toContain(
+      "the responder's by a fingerprint you pinned out-of-band",
+    );
+    expect(view.guidance).toEqual([]);
+    for (const party of view.parties)
+      for (const row of party.rows) expect(row.tone).toBe("verified");
+    expect(view.termsHash.status).toBe(
+      "Matches the terms this exchange agreed",
+    );
+    // The binder is reported, never recomputed: only the two parties held the
+    // session key it derives from.
+    expect(view.binderNote).toContain("not recomputed here");
+  });
+
+  test("both parties' linkage terms stand in for the record", async () => {
+    // The auditor's route to the same expectations: no exchange record, both
+    // parties' terms restated instead.
+    const { record } = await fixtures();
+    const { signed, ourFingerprint, partnerFingerprint } =
+      await signedFixture(record);
+    const report = await verifySignedRecord(
+      signed,
+      {
+        pinnedFingerprint: partnerFingerprint,
+        ownCertificateFingerprint: ourFingerprint,
+      },
+      { localTerms: LOCAL_TERMS, partnerTerms: PARTNER_TERMS },
+    );
+    expect(report.outcome).toBe("verified");
+  });
+});
+
+describe("verifySignedRecord: one certificate anchored", () => {
+  test("a pinned partner alone is incomplete, and the wording names the unanchored slot", async () => {
+    const { record } = await fixtures();
+    const { signed, partnerFingerprint } = await signedFixture(record);
+    const report = await verifySignedRecord(
+      signed,
+      { pinnedFingerprint: partnerFingerprint },
+      { record },
+    );
+    expect(report.outcome).toBe("incomplete");
+
+    const view = signedVerdictViewModel(report);
+    expect(view.headline.title).toBe("Signed receipt incomplete");
+    expect(view.headline.detail).toContain(
+      "Nothing outside the record anchors the initiator's certificate.",
+    );
+    expect(view.headline.detail).not.toContain("responder's certificate");
+
+    const [initiator, responder] = view.parties;
+    const anchorRow = initiator.rows[0];
+    expect(anchorRow.label).toBe("What anchors this certificate");
+    expect(anchorRow.status).toBe("Not anchored");
+    expect(anchorRow.tone).toBe("incomplete");
+    // A pin was supplied and matched the other certificate, so the report does
+    // support saying no pinned value matches this one -- and says nothing about
+    // an own-certificate check that never ran.
+    expect(anchorRow.explanation).toContain(
+      "no fingerprint you pinned matches it",
+    );
+    expect(anchorRow.explanation).not.toContain(
+      "the certificate you supplied as your own",
+    );
+    expect(responder.rows[0].status).toBe(
+      "Matches the fingerprint you pinned out-of-band",
+    );
+
+    expect(view.guidance).toHaveLength(1);
+    expect(view.guidance[0]).toContain(
+      "The initiator's certificate is anchored by nothing outside this record",
+    );
+    expect(view.guidance[0]).toContain("holds the verdict short of verified");
+  });
+});
+
+describe("verifySignedRecord: neither certificate anchored", () => {
+  test("signatures alone are incomplete, and no unanchored slot is narrated as a check it failed", async () => {
+    const { record } = await fixtures();
+    const { signed } = await signedFixture(record);
+    const report = await verifySignedRecord(signed, {}, { record });
+    expect(report.outcome).toBe("incomplete");
+
+    const view = signedVerdictViewModel(report);
+    expect(view.headline.title).toBe("Signed receipt incomplete");
+    expect(view.headline.detail).toContain(
+      "Nothing outside the record anchors the initiator's certificate.",
+    );
+    expect(view.headline.detail).toContain(
+      "Nothing outside the record anchors the responder's certificate.",
+    );
+    for (const party of view.parties) {
+      const anchorRow = party.rows[0];
+      expect(anchorRow.status).toBe("Not anchored");
+      // Nothing was supplied, so neither clause is supported: an unanchored
+      // slot must not read as a check this certificate was put to and failed.
+      expect(anchorRow.explanation).not.toContain("pinned");
+      expect(anchorRow.explanation).not.toContain("your own");
+      expect(anchorRow.explanation).toContain("could have minted");
+      // Everything the record can attest to itself still passes.
+      expect(party.rows[1].tone).toBe("verified");
+      expect(party.rows[2].tone).toBe("verified");
+    }
+    expect(view.guidance).toHaveLength(1);
+    expect(view.guidance[0]).toContain(
+      "Certificate fingerprint trust is not established",
+    );
+  });
+});
+
+describe("verifySignedRecord: an anchoring value matching neither certificate", () => {
+  test("a pinned fingerprint that reaches neither certificate fails, attributed to the pin", async () => {
+    const { record } = await fixtures();
+    const { signed, ourFingerprint } = await signedFixture(record);
+    const stranger = await generateSigningIdentity("Party Z");
+    const report = await verifySignedRecord(
+      signed,
+      {
+        pinnedFingerprint: await computeCertificateFingerprint(
+          stranger.certificate,
+        ),
+        ownCertificateFingerprint: ourFingerprint,
+      },
+      { record },
+    );
+    expect(report.outcome).toBe("failed");
+
+    const view = signedVerdictViewModel(report);
+    expect(view.headline.title).toBe("Signed receipt verification failed");
+    expect(view.guidance[0]).toBe(
+      "The fingerprint you pinned matches neither certificate in this record: " +
+        "this is not the record of the party you pinned.",
+    );
+  });
+
+  test("a rotated own certificate fails without recasting the correctly anchored partner slot", async () => {
+    const { record } = await fixtures();
+    const { signed, partnerFingerprint } = await signedFixture(record);
+    // The same party, re-keyed since the exchange: the certificate it holds
+    // today is neither certificate in this record.
+    const rotated = await generateSigningIdentity(LOCAL_TERMS.identity);
+    const report = await verifySignedRecord(
+      signed,
+      {
+        pinnedFingerprint: partnerFingerprint,
+        ownCertificateFingerprint: await computeCertificateFingerprint(
+          rotated.certificate,
+        ),
+      },
+      { record },
+    );
+    expect(report.outcome).toBe("failed");
+    // The pin still anchored the partner: what failed is the claim that this
+    // record is one we signed, and it is attributed there.
+    expect(report.responder.certificateAnchor).toBe("partner-pin");
+
+    const view = signedVerdictViewModel(report);
+    expect(view.parties[1]?.rows[0]?.status).toBe(
+      "Matches the fingerprint you pinned out-of-band",
+    );
+    expect(view.guidance).toEqual([
+      "The certificate you supplied as your own is neither certificate in " +
+        "this record: this is not a receipt you signed.",
+    ]);
+  });
+
+  test("a pin that is not a fingerprint is refused rather than verified with", async () => {
+    // core compares a malformed pin as a non-match, which would be reported as
+    // a partner certificate that does not match -- a diagnosis of the record
+    // for a fault in the typed value. The surface gates it; this refuses it.
+    const { record } = await fixtures();
+    const { signed } = await signedFixture(record);
+    await expect(
+      verifySignedRecord(signed, { pinnedFingerprint: "nope" }, { record }),
+    ).rejects.toThrow(/not a fingerprint/);
+  });
+});
+
+describe("verifySignedRecord: what the record cannot attest to itself", () => {
+  test("without the record or both terms, the identities and terms hash are not checked", async () => {
+    const { record } = await fixtures();
+    const { signed, ourFingerprint, partnerFingerprint } =
+      await signedFixture(record);
+    const report = await verifySignedRecord(
+      signed,
+      {
+        pinnedFingerprint: partnerFingerprint,
+        ownCertificateFingerprint: ourFingerprint,
+      },
+      {},
+    );
+    // Both slots anchored, both signatures good -- and still not verified: the
+    // record states who it is between only through the certificates in it.
+    expect(report.outcome).toBe("incomplete");
+
+    const view = signedVerdictViewModel(report);
+    expect(view.termsHash.status).toBe("Not checked");
+    expect(view.termsHash.explanation).toContain("Load the exchange record");
+    for (const party of view.parties) {
+      expect(party.rows[3]?.status).toBe("Not checked");
+      expect(party.rows[3]?.explanation).toContain(
+        "paste both parties' linkage terms",
+      );
+    }
+    expect(view.guidance).toEqual([]);
+  });
+
+  test("an altered receipt content fails the signature it no longer matches", async () => {
+    const { record } = await fixtures();
+    const { signed, ourFingerprint, partnerFingerprint } =
+      await signedFixture(record);
+    const altered: DualSignedRecord = {
+      ...signed,
+      content: { ...signed.content, binder: "YmluZGVyMg" },
+    };
+    const report = await verifySignedRecord(
+      altered,
+      {
+        pinnedFingerprint: partnerFingerprint,
+        ownCertificateFingerprint: ourFingerprint,
+      },
+      { record },
+    );
+    expect(report.outcome).toBe("failed");
+
+    const view = signedVerdictViewModel(report);
+    // The failed headline states the ambiguity: an altered record and the wrong
+    // exchange or partner cannot be told apart here.
+    expect(view.headline.detail).toContain("was altered");
+    expect(view.headline.detail).toContain(
+      "not the exchange or the partner you are checking it against",
+    );
+    for (const party of view.parties) {
+      expect(party.rows[2]?.status).toBe("Does not verify");
+      expect(party.rows[2]?.tone).toBe("failed");
+    }
+  });
+});
+
+// A hand-built report, for the states a signable record cannot be made to
+// produce on demand: a certificate whose canonical bytes do not encode, and a
+// verified verdict that leaves a slot unanchored.
+function signedParty(
+  role: SignedReceiptPartyReport["role"],
+  overrides: Partial<SignedReceiptPartyReport> = {},
+): SignedReceiptPartyReport {
+  return {
+    role,
+    identity: role === "initiator" ? "Party A" : "Party B",
+    fingerprint:
+      role === "initiator" ? "Zm9vZmluZ2VycHJpbnQ" : "YmFyZmluZ2VycHJpbnQ",
+    certificateBinding: "verified",
+    signature: "verified",
+    certificateAnchor: role === "initiator" ? "local-identity" : "partner-pin",
+    assertedIdentity: "verified",
+    ...overrides,
+  };
+}
+
+function signedReport(
+  overrides: Partial<DualSignedRecordVerificationReport> = {},
+): DualSignedRecordVerificationReport {
+  return {
+    outcome: "verified",
+    initiator: signedParty("initiator"),
+    responder: signedParty("responder"),
+    pinnedFingerprints: "matched",
+    localIdentity: "matched",
+    termsHash: "verified",
+    binder: "YmluZGVy",
+    ...overrides,
+  };
+}
+
+describe("signedVerdictViewModel: over a report built by hand", () => {
+  test("a certificate with no computable fingerprint says so rather than showing a blank", () => {
+    const view = signedVerdictViewModel(
+      signedReport({
+        outcome: "failed",
+        initiator: signedParty("initiator", {
+          fingerprint: "",
+          certificateBinding: "failed",
+        }),
+      }),
+    );
+    expect(view.parties[0]?.fingerprint).toBe("could not be computed");
+  });
+
+  test("a verified verdict with an unanchored slot is refused rather than phrased", () => {
+    // The sentence would claim both certificates were anchored when one was
+    // not. core withholds `verified` in that case, and this refuses to render
+    // the overstatement if it ever does not.
+    expect(() =>
+      signedVerdictViewModel(
+        signedReport({
+          responder: signedParty("responder", {
+            certificateAnchor: "unanchored",
+          }),
+        }),
+      ),
+    ).toThrow(/unanchored/);
+  });
+
+  test("the identity a certificate carries is escaped at this display sink", () => {
+    const esc = String.fromCharCode(0x1b);
+    const view = signedVerdictViewModel(
+      signedReport({
+        initiator: signedParty("initiator", { identity: `Party A${esc}[31m` }),
+      }),
+    );
+    expect(view.parties[0]?.identity).not.toContain(esc);
+  });
+});
+
+describe("verdictViewModel: the unsigned record's standing caveat", () => {
+  test("a run that also verified a dual-signed record points at that verdict", async () => {
+    const { record, keys } = await fixtures();
+    const report = await verifyExchangeRecord(record, keys, {});
+    // The note names the loaded document: nothing on this page ties a receipt
+    // to the record beside it, so the sentence may not imply it did.
+    expect(verdictViewModel(report, [], true).signatureNote).toBe(
+      "Partner receipt signatures are checked separately below, against the " +
+        "dual-signed record you loaded.",
+    );
+    // Unchanged for the record-only run: the default is today's copy.
+    expect(verdictViewModel(report, []).signatureNote).toContain(
+      "Partner receipt signatures are not checked",
+    );
   });
 });
