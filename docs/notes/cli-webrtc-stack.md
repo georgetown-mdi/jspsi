@@ -1,87 +1,350 @@
 ---
-title: "CLI WebRTC Stack Selection"
+title: "The CLI WebRTC Stack"
 ---
 
-# Choosing a Node WebRTC stack for the CLI transport: candidates, the werift leaning, and what stays open
+# The CLI WebRTC stack: werift, driven directly
 
-*Status: exploratory design note - no decision has been made. This records the reasoning and options from a deferred spike (board item 196971324) so the question does not have to be reworked from scratch when the CLI WebRTC transport is picked back up. No prototype has been run; nothing here is binding. See [docs/notes/README.md](README.md).*
+*Status: decided, not built. This note records the Node WebRTC library and the
+integration architecture chosen for the CLI's WebRTC transport, the validation
+spike that settled them, the alternatives weighed and declined, and the
+constraints and known costs the transport implementation inherits. Nothing here
+is normative: the rendezvous derivation the CLI must reproduce is specified in
+[PROTOCOL.md](../spec/PROTOCOL.md#webrtc-rendezvous-peer-id-derivation), and the
+delivery guarantee its close must honor is in
+[COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown). No run
+path implements a CLI WebRTC exchange: the CLI refuses a `ws`/`wss` URL as a
+usage error and its protocol runner is type-narrowed to the `sftp` and
+`filedrop` channels. See [docs/notes/README.md](README.md).*
 
-The web application already conducts peer-to-peer WebRTC exchanges through PeerJS. Letting the CLI take part in those exchanges needs a Node WebRTC library, and the choice of library and how it is wired turns out to be load-bearing enough that a hands-on spike was scoped to settle it. That spike was deferred before any prototype ran. This note captures where the analysis got to: the problem shape, the candidate libraries, the leaning toward werift and the caveats on it, and - in the most detail, because it is where the cost actually lives - what choosing werift implies for the PeerJS integration.
+The web application conducts peer-to-peer WebRTC exchanges through PeerJS.
+Letting the CLI take part in those exchanges needs a Node WebRTC library, and
+both the library and the way it is wired underneath PeerJS are load-bearing
+enough that a hands-on spike was scoped to settle them rather than research
+alone. That spike ran. This note is its decision record: what was chosen, what
+the evidence showed, and what the transport work has to carry.
 
-## The problem
+## The decision
 
-To let the CLI take part in WebRTC exchanges (the CLI<->web case; CLI<->CLI is only an internal stepping stone, never a shipped feature with its own signaling), the CLI needs WebRTC - but Node has no built-in WebRTC, so a library has to supply it. The web stays on PeerJS for the foreseeable future (web item 196035727 derives the *PeerJS* rendezvous id from the shared secret but keeps the PeerJS broker), so "CLI<->web" necessarily means the CLI speaks the PeerJS broker's signaling.
+- **Library: werift, exact-pinned, as the published package.** Version 0.24.4
+  was current when the decision was taken. Installs run with
+  `--ignore-scripts`; nothing in werift's tree needs an install script, and the
+  tree carries no native or compiled content at all. The exact pin and its
+  internal premises join the other reached-past-their-API stacks in
+  [DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#why-these-are-exact-pinned)
+  when the transport lands.
+- **Architecture: drive werift's native API directly.** No PeerJS runs in Node.
+  The CLI speaks the PeerJS broker's WebSocket protocol through a hand-written
+  signaling client, and speaks PeerJS-compatible DataConnection framing on the
+  raw data channel: BinaryPack through the published, zero-dependency
+  `peerjs-js-binarypack`, PeerJS's chunk envelope, and PeerJS's in-band close
+  sentinel for the clean close.
+- **Signaling: the vendored PeerServer, reused as-is.** The broker already runs
+  in Node (`apps/web/src/peerServer.ts`). The CLI adopts the web's
+  `HKDF(secret, role)` rendezvous peer-id derivation rather than defining its
+  own, which is what puts the two parties on the same connection with no
+  coordination backend.
+- **Serialization: `binary` (BinaryPack).** Not `json`, and not a simpler
+  scheme chosen for our own convenience -- see below.
 
-The dead-end risk is in the signaling layer, not the data channel. Every candidate library is browser-interoperable at DTLS/ICE/SCTP, so any of them can move bytes to a browser once a connection is up. What would lock the CLI out of CLI<->web is non-PeerJS signaling. The binding constraint on whatever is chosen is therefore that signaling stays PeerJS-broker-compatible, or sits behind a swappable interface a PeerJS client drops into.
+**Rejected: PeerJS-in-Node.** Shimming the global WebSocket and RTC classes and
+running the real PeerJS library in Node was reconsidered on the spike's
+evidence, because werift 0.24.4 ships a real W3C compatibility layer (assignable
+`onicecandidate` / `ondatachannel` / `onconnectionstatechange` handlers,
+`pc.sctp`, `canTrickleIceCandidates`, current and pending descriptions,
+`RTCConfiguration` round-tripping, rollback, and a Web Platform Tests runner),
+which is what makes the shim route worth weighing at all. It was nonetheless
+declined, on two grounds. It reintroduces the polyfill brittleness the direct
+route avoids -- a compatibility layer chased across a fast-moving library, in
+a stack where a silent behavioral gap costs an exchange. And it un-moots
+peers/peerjs#979 (below), which is moot under the direct route purely by
+architecture. Against those, driving werift directly is already validated end to
+end. The saving PeerJS-in-Node offers is real but small next to what it takes
+back.
 
-Research alone could not de-risk the pick, which is why the spike existed. It produces a decision and a minimal proven connection, not shippable transport code; its acceptance criteria (a docs decision record, a Node<->Node frame, a Node<->browser interop proof, the flush-close confirmation, and the peers/peerjs#979 repro status) still stand for when the work resumes.
+**Rejected: the `json` serialization as a way to skip BinaryPack.** It
+negotiates and round-trips small frames, so it is genuinely available for
+control messages -- but PeerJS's JSON DataConnection refuses to send past
+16300 bytes rather than chunking it, in both directions, so it cannot carry a
+PSI frame at all. The cost it was meant to avoid turned out not to exist:
+`peerjs-js-binarypack` is published standalone, MIT, with zero dependencies, and
+runs unmodified in Node, where `pack` and `unpack` are synchronous for the
+`Buffer` and `Uint8Array` payloads Node produces. Only the chunk envelope around
+it had to be written. The web app also depends on the `binary` default
+concretely: its inbound reassembly bound reaches into PeerJS's internal chunk
+map (`apps/web/src/psi/boundedReassembly.ts`,
+[CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#webrtc-data-channel-inbound-bound)),
+so BinaryPack chunking is wired into a security control, not merely a default.
 
-## Two decisions, not one
+**Rejected: a media-stripped vendored fork, for install weight.** Vendoring
+stays prepared as a fallback for a patch upstream will not take, but stripping
+werift's media stack to save install weight is not worth its maintenance. See
+[Supply chain and the vendoring fallback](#supply-chain-and-the-vendoring-fallback).
 
-The library and the architecture are separable axes, and conflating them obscures the real tradeoff.
+## The problem, and where its risk sits
 
-- **Path A - PeerJS-in-Node.** Shim the global WebSocket and RTC classes, and run the real PeerJS library in Node. This inherits PeerJS's data framing, its chunking of large messages, and the flush-on-clean-close the transport contract depends on (see [COMMUNICATION.md](../COMMUNICATION.md), "Message delivery and teardown"). The cost is the polyfill frictions: the open peers/peerjs#979 `defineProperty` crash (which hits any native lib used this way) plus whatever quirks a given library's polyfill carries.
-- **Path B - drive the library directly.** Use the library's own API and hand-write the two PeerJS-shaped pieces the CLI needs: a signaling client that speaks the broker's WebSocket protocol, and a PeerJS-compatible data framing on top of the raw data channel. More code that we own, but it sidesteps every polyfill quirk and gives the clean separation of signaling from data transport that COMMUNICATION.md notes the current design lacks.
+Node has no built-in WebRTC, so a library has to supply it. The web stays on
+PeerJS for the foreseeable future -- the rendezvous derivation replaced a
+backend coordination service but kept the PeerJS broker -- so "CLI to web"
+necessarily means the CLI speaks PeerJS broker signaling. CLI-to-CLI is an
+internal stepping stone only, never a shipped feature with its own signaling.
 
-Which path is right depends on the library, because the libraries differ in how cleanly they slot under PeerJS.
+The dead-end risk is in the signaling layer, not the data channel. Every
+candidate library is browser-interoperable at DTLS/ICE/SCTP, so any of them can
+move bytes to a browser once a connection is up. What would lock the CLI out of
+the CLI-to-web case is non-PeerJS signaling. The binding constraint on the pick
+is therefore that signaling stays PeerJS-broker-compatible, or sits behind a
+swappable interface a PeerJS client drops into.
 
-## The candidates
+## Why werift
 
-| Library | Browser interop | TURN / relay | PeerJS-in-Node (Path A) | Install / ABI | Security surface |
-|---|---|---|---|---|---|
-| **@roamhq/wrtc** (Chromium libwebrtc) | Highest - it *is* Chrome's stack | Full: UDP + TCP + TLS | #979 to work around | glibc-only prebuilts; no musl, no win-arm64; source build infeasible | Smallest - the most-audited WebRTC anywhere |
-| **node-datachannel** (libdatachannel) | High - mature, widely deployed | UDP only in the default prebuilt (libjuice); TCP/TLS only via a libnice source build | read-only `RTCSessionDescription` friction (bridgeable with a wrapper, not a fork) + #979 | Best: N-API (ABI-stable across Node majors) + musl prebuilts (Alpine as-is) | Moderate - C++, conventional DTLS |
-| **werift** (pure TypeScript) | Good but youngest | UDP only today; TCP claimed but unverified (roadmap lists it under 2.0) | partial `RTCPeerConnection` compat - the most shimming | Most portable - zero native code | Largest - DTLS/SRTP reimplemented in JS, effectively one author |
+| Library | Browser interop | TURN / relay | Install / ABI | Security surface |
+|---|---|---|---|---|
+| **@roamhq/wrtc** (Chromium libwebrtc) | Highest -- it *is* Chrome's stack | Full: UDP, TCP, TLS | glibc-only prebuilts; no musl, no win-arm64; source build infeasible | Smallest -- the most-audited WebRTC anywhere |
+| **node-datachannel** (libdatachannel) | High -- mature, widely deployed | UDP only in the default prebuilt (libjuice); TCP/TLS need a libnice source build | Best: N-API (ABI-stable across Node majors) plus musl prebuilts | Moderate -- C++, conventional DTLS |
+| **werift** (pure TypeScript) | Good, and proven against a stock browser peer for this use | UDP, TCP, and TLS relay transports shipped | Most portable -- zero native content, nothing compiles at install | Largest -- DTLS/SRTP reimplemented in JavaScript, effectively one author |
 
-In short: @roamhq/wrtc buys the safest interop and complete TURN at the cost of a heavy, platform-tied native dependency; node-datachannel buys the smoothest, most durable install at the cost of a UDP-only default relay and a small PeerJS shim; werift buys maximum portability at the cost of being the youngest, the most solo-maintained, and the one that reimplements the security-critical encryption layer in JavaScript.
+werift wins on portability and on being sufficient rather than best: the CLI
+ships as a container image on musl (`node:26-alpine`, `linux/amd64,linux/arm64`)
+alongside a glibc FIPS variant, and a dependency that compiles nothing at
+install removes a whole class of build accommodation from that matrix. The two
+caveats that weigh against it -- what one author's velocity is worth, and how
+far its relay transports reach -- are examined below against the shipped
+library rather than against its reputation.
 
-## Packaging is not the gate
+**Packaging is not the gate.** A per-client *build* accommodation -- a native
+build for an extra architecture, a different container base -- is acceptable as
+long as it changes only the build and not the code, and the glibc FIPS variant
+is already that precedent. Distribution facts that would otherwise rule a
+library out are therefore not the deciding axis; packaging adapts to the chosen
+library. werift's install portability is a convenience, not the reason it wins.
 
-The CLI ships as a Docker image (`node:26-alpine`, i.e. musl, built `linux/amd64,linux/arm64`), alongside a FIPS variant on a glibc base (`amazonlinux:2023`); end users run the container, including on Windows and macOS via Docker. The maintainer's standing position is that a per-client *build* accommodation - a native build for an extra architecture, a different container base - is acceptable as long as it changes only the build, not the code, and the glibc variant is already that precedent in the tree. So distribution facts that would otherwise rule a library in or out (for example @roamhq/wrtc's glibc-only prebuilts, with no musl and no win-arm64) are not the deciding axis. The pick is made on interop, correctness, and code-brittleness grounds; packaging adapts to the chosen library rather than constraining it.
+**Velocity and backlog.** werift is one author's project by a factor of roughly
+27 to the next human contributor, and that is the risk that does not go away.
+The activity numbers around it are healthy: eight releases in the last twelve
+months, three open pull requests against fifty-two merged in ninety days, and
+the current release carrying real new capability. High velocity from a single
+author is not the same risk profile as a maintained project, though, and a
+cleared backlog is a property of solo maintenance rather than a mitigation of
+it. The posture that follows is pin-a-version-and-be-ready-to-vendor, for
+bus-factor reasons.
 
-## Current leaning: werift, with caveats
+**Relay transports.** werift's TURN relay control transport over TCP shipped no
+later than 0.20.0, reachable through a `forceTurnTCP` boolean. TURNS over
+TLS -- the port-443 lifeline for a peer behind a firewall that blocks UDP
+outright, which is precisely a CLI-to-web scenario -- landed in 0.24.0, together
+with a full `stun` / `stuns` / `turn` / `turns` URL parser, a `node:tls`
+transport, and ICE-TCP host candidates; `forceTurnTCP` is deprecated in favor of
+the URL transport parameter in the same release. `turns:relay.example:443?transport=tcp`
+parses to a TLS relay, so the port-443 case is expressible. What the spike did
+*not* do is drive a real relay: this is the published API surface, the parsing
+logic, and upstream's own claims, not a run against a TURN server. See
+[Constraints the transport inherits](#constraints-the-transport-inherits).
 
-The current leaning is **werift**, on three grounds: it is claimed to have added TCP for TURN, it is under very active development, and it has the fewest platform dependencies (pure TypeScript, no native build). The first two warrant scrutiny, and examining them tempers - without overturning - the leaning.
+**What would still change the pick.** If the hand-rolled JavaScript DTLS surface
+under one author is judged unacceptable for a security tool, node-datachannel is
+the middle option: an N-API-plus-musl install and libdatachannel's more
+conventional C++ DTLS, at the cost of a read-only `RTCSessionDescription`
+friction and a UDP-only default relay. If throughput is ever elevated to a
+requirement, node-datachannel is also the comparison point to measure against
+(below). @roamhq/wrtc remains the choice if the most-audited stack is wanted
+regardless of platform cost.
 
-**Velocity, examined.** werift is alive and genuinely used: on the order of 160k npm downloads per month, ~600 stars, six years old, pushed within the last few days. But the activity is essentially one person's - the lead author has roughly 2,360 commits to the next human contributor's ~90 - and it is bursty rather than sustained (a spike of ~160 commits in a single recent month, near-silent on either side of it). The recent burst is media-focused (h264/opus, mp4/webm, RTP) and largely unreleased: one npm release in the last 90 days, and the pinnable 0.23.0 predates the burst. The contribution backlog is the clearest flag - on the order of 50 open PRs with one merged in 90 days, and a quiet issue tracker. Read together, the practical implication is: do not count on upstream to fix something on our path. Plan to pin a specific version and to vendor-and-patch when needed, and weight the hand-rolled-in-JS DTLS surface accordingly - for a security tool that is the part that matters most, and it is maintained by effectively one author.
+## What the spike established
 
-**The TCP-TURN claim needs verification.** The public roadmap still lists "TURN - TCP" as a 2.0 item, and the only recent TCP-adjacent work is an ICE-candidate test fix, so TCP TURN - if it exists - is most likely unreleased master code rather than a shipped feature in 0.23.0. Before relying on it, pin the exact version or PR where it landed, and check whether it covers TURNS over TLS (the port-443 case is the actual relay lifeline for a peer behind a firewall that blocks UDP outright, which is precisely a CLI<->web scenario).
+The spike ran the real libraries end to end against the repository's own
+vendored PeerServer, with a stock browser `peerjs@1.5.5` peer -- the exact pin
+the web app carries -- driven headless in Chromium, and werift in Node on the
+other side. Every third-party package involved was installed with
+`--ignore-scripts`, and every milestone ran against that tree.
 
-## What werift implies for PeerJS integration
+- **Interop.** A stock browser PeerJS peer completed a DataConnection with
+  werift-in-Node through the vendored broker and exchanged hash-verified frames
+  in both directions, in both roles -- browser dialing and werift dialing --
+  with `label`, `metadata`, and `reliable` all carried across the negotiation.
+- **Chunking past the SCTP ceiling.** Both peers advertised a 65536-byte maximum
+  message size, so chunking is mandatory rather than optional. 512 KiB, 4 MiB,
+  and 32 MiB frames moved in each direction with SHA-256-identical results, the
+  32 MiB frames as 2059 chunks. PeerJS's own reassembly engaged on the browser
+  side on every large inbound frame -- the same internal map the web app's
+  inbound bound reads.
+- **Flushing close.** werift handed a 4 MiB final frame to the channel and
+  immediately initiated a clean close with no drain wait of any kind. The
+  browser received the frame intact and its `close` event landed 3.2 ms after
+  the `data` event: data before close, as the transport contract requires.
+- **peers/peerjs#979.** Still open upstream -- opened 2022-06-17, last activity
+  2024-02-24, no linked fix pull request, no fix version. The crash is a
+  `TypeError: Cannot redefine property: candidate` thrown from `webrtc-adapter`'s
+  `wrapPeerConnectionEvent` shim, and peerjs 1.5.5 hard-depends on
+  `webrtc-adapter@^9.0.0`, so it is unavoidable for any PeerJS-in-Node
+  arrangement. Under the chosen architecture it is moot structurally rather than
+  by workaround: no PeerJS runs in Node, so nothing constructs the
+  adapter-wrapped peer connection and the `defineProperty` path is never
+  entered. Importing `peerjs` in Node succeeds on its own -- the adapter no-ops
+  without a `window` -- and firing the crash requires a shimmed global
+  `RTCPeerConnection`, which is exactly what PeerJS-in-Node would supply.
 
-This is where werift's cost lives, and it is the main reason this note exists.
+The framing and signaling the spike hand-wrote came to 456 non-comment lines
+across a broker client, a wire/framing module, and the peer negotiation. That is
+an honest measure of the shape, not of the work: it omits reconnection,
+`LEAVE`/`EXPIRE` handling, the `peer-unavailable` dial retry the web rendezvous
+implements, peer-id redaction in logs, and any error taxonomy. Budget the
+production implementation at a multiple of it.
 
-PeerJS drives the *browser* W3C WebRTC API: assignable DOM handlers (`pc.onicecandidate = fn`, `pc.ondatachannel = fn`), the `RTCSessionDescription` and `RTCIceCandidate` constructors, and a DOM `RTCDataChannel`. werift exposes its *own* Node-native API with a different, subscription-style event model; browser-`RTCPeerConnection` compatibility is on werift's 2.0 roadmap, not shipped. So unlike @roamhq/wrtc - which *is* the DOM API, making the "swap the global RTC classes" route cheap - werift cannot simply be dropped under PeerJS via global shims. The route that is cheapest for the native libraries is the expensive one for werift.
+## The PeerJS wire the CLI speaks
 
-That leaves two shapes, and werift pushes toward the second:
+These are properties of PeerJS 1.5.5 and the vendored broker, measured on the
+wire, recorded here because the transport implementation has to match them
+exactly and they are not psilink's own protocol to specify.
 
-- **(a) Adapter under PeerJS.** Wrap werift's classes to present the W3C surface so stock PeerJS runs in Node unchanged - translating handler-property assignment into werift's subscribe model, wrapping the description/candidate objects, and exposing a DOM-shaped data channel. This keeps PeerJS's framing, chunking, and flush for free, but it amounts to writing the W3C compatibility layer werift has not shipped yet, and chasing that across a fast-moving library is brittle.
-- **(b) Drive werift directly.** Do not run PeerJS in Node at all. Use werift's native API and hand-write a PeerJS-broker signaling client (the broker's WebSocket protocol: OFFER / ANSWER / CANDIDATE / ID / HEARTBEAT) plus PeerJS-compatible DataConnection framing, with the browser staying on stock PeerJS. This is the recommended shape for werift.
+**Broker socket.** The client connects to
+`<ws-or-wss>://<host>:<port><path>peerjs?key=<key>&id=<id>&token=<token>&version=1.5.5`.
+The server stamps `src` itself from the connecting client's id, so an outbound
+frame carries only `type`, `payload`, and `dst`. Heartbeats go up every five
+seconds, the cadence the web rendezvous already pins.
 
-**The load-bearing cost of (b) is matching PeerJS's wire format, not just DTLS/SCTP.** Two parts: the DataConnection negotiation envelope (the connection id, label, serialization, and reliability that PeerJS carries in its offer payload, and that the browser peer expects), and the serialization plus chunking. PeerJS's default is BinaryPack with chunking of large messages. Because we control the web app, both ends could be set to `json` or `none` to avoid reimplementing BinaryPack - but chunking cannot be skipped: PSI frames can exceed the SCTP maximum message size, and whatever the CLI sends, the browser PeerJS peer has to reassemble it, so the chunking must be PeerJS-compatible. Flush-on-close becomes ours to implement; werift's data channel exposes `bufferedAmount`, so "drain, then close" is feasible (confirm a low-watermark signal exists so it is not a busy-poll).
+**Negotiation envelope.** The dialer's `OFFER` payload carries the SDP, a
+`type` of `data`, a `connectionId`, and the `metadata`, `label`, `reliable`, and
+`serialization` of the DataConnection. The `ANSWER` payload carries the SDP,
+`type`, and `connectionId` only -- no `label`, `reliable`, or `serialization`.
+A `CANDIDATE` payload carries the candidate object, `type`, and `connectionId`.
+The `serialization` field on the offer is load-bearing: the receiving PeerJS
+peer uses it to select the DataConnection subclass, so a mismatch there is a
+protocol break rather than a preference.
 
-Two consequences are worth recording:
+**Framing.** PeerJS's chunking is a convention inside BinaryPack messages rather
+than a protocol of its own. Each chunk is a BinaryPack-packed object carrying a
+`__peerData` message id, the chunk index, the chunk bytes, and the total count,
+with the id starting at 1 and incrementing per logical message; the chunking
+threshold is 16300 bytes, well under the SCTP ceiling. On receive, a truthy
+`__peerData` means either a chunk or the close sentinel, and chunks accumulate
+by id until the count matches the total. The browser delivers an assembled
+chunked frame as a `Uint8Array` and an unchunked one as an `ArrayBuffer`, so
+anything consuming this must normalize both.
 
-- The peers/peerjs#979 crash becomes moot under (b): there is no PeerJS running in Node, so the polyfill `defineProperty` problem cannot arise.
-- The interop proof moves to the front. With the native-library Path A, Node<->browser interop is nearly free once PeerJS runs, because it is PeerJS on both ends. With werift via (b), the hand-written signaling and framing are the entire risk, so the first milestone when work resumes is "a stock browser PeerJS peer completes a DataConnection with werift-in-Node and exchanges a frame" - a Node<->Node test would only exercise our own code talking to itself and prove much less.
+**The clean close is a sentinel, not a buffer flush.** This is the mechanism by
+which the CLI meets the flushing-close half of the delivery contract in
+[COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown), and it is
+worth stating precisely because the contract's wording invites a drain loop.
+PeerJS's clean close sends a `__peerData` close object through the same reliable
+ordered channel and returns without tearing anything down; the *peer* closes on
+receipt, which SCTP ordering necessarily places behind every frame already
+handed to `send()`. The web app's close is exactly that call. A direct-werift
+implementation therefore gets the flushing close by emitting the same sentinel,
+and does not need to consult `bufferedAmount` at all -- which is fortunate,
+given what `bufferedAmount` reports (below).
 
-## Signaling and discovery
+## Constraints the transport inherits
 
-Independent of the library choice: the broker is reusable as-is - the vendored PeerServer already runs in Node (apps/web/src/peerServer.ts). Peer *discovery* is the moving piece the CLI must match. The web derives the rendezvous peer id from the shared secret (a token-derived `HKDF(secret, role)` id; this landed with web item 196035727, replacing an earlier backend SSE rendezvous, so there is no backend left to mirror). The CLI must adopt that same derivation rather than defining its own.
+**The default STUN server must be resolved before shipping.** `iceServers: []`
+does not suppress werift's built-in `stun.l.google.com:19302` default:
+`getConfiguration()` faithfully reports an empty list while the library gathers
+server-reflexive candidates anyway, publishing the host's public IP. An empty
+array supplies no server and the ICE layer reads that as "use the default"
+rather than "use none". Neither `iceUseIpv6: false`, nor an `iceServers` entry
+with an empty `urls` list, nor `iceTransportPolicy: "relay"` changes it; only
+`iceLite: true` suppresses it, and that is not a usable workaround, since it
+forces the controlled role and gathers no reflexive candidates at all, suiting
+only a publicly reachable peer -- which a NAT'd CLI is not.
 
-## What would change the pick
+This is a confidentiality-relevant default for a privacy tool whose stance is
+not to route through third parties by default, and it is a blocker on the
+transport rather than a footnote. The spike did not test a *non-empty*
+`iceServers` list, so the first thing the transport work owes is that
+measurement: whether an explicit server list replaces the built-in default or
+merely adds to it. If it replaces it, configuring the operator's own STUN
+servers is the whole remedy. If it does not, the remedies are a vendored patch
+or an upstream fix, and one of them has to land before a CLI WebRTC exchange
+ships.
 
-- A near-term deployment behind a firewall that blocks UDP makes full TURN over TCP/TLS a must-ship requirement rather than future work. That favors @roamhq/wrtc - the only candidate with complete TURN out of the box - over werift's UDP-only (or unverified-TCP) relay.
-- If werift's solo-maintainer and hand-rolled-JS-DTLS risk is judged unacceptable for a security tool, node-datachannel is the middle option: an N-API-plus-musl install and libdatachannel's more conventional C++ DTLS, at the cost of its read-only `RTCSessionDescription` PeerJS friction (bridgeable with a wrapper) and a UDP-only default TURN (libjuice; TCP/TLS needs a libnice build).
+**ICE candidates must be queued until the local description is on the broker.**
+werift begins firing candidate events during `setLocalDescription`, before the
+offer or answer can have been put on the broker. Browser PeerJS has no
+pre-remote-description candidate queue of its own -- it hands a `CANDIDATE`
+straight to `addIceCandidate` whenever the connection object exists, which on
+the dialing side it already does -- so early candidates are rejected and lost,
+silently from the sender's point of view. The spike's first run lost six
+candidates this way and connected anyway *only* because werift also inlines its
+candidates in the SDP, masking the trickle loss entirely. Queue locally until
+the description is sent; the failure mode otherwise is a connection that works
+until the day the inlined candidates are not enough.
 
-## Open questions for when this resumes
+**Throughput is modest and asymmetric.** On loopback, against a real browser
+peer, werift's send path measured 1.42 MiB/s and its receive path 5.27 MiB/s,
+over 32 MiB in each direction. The gap has a visible cause:
+`bufferedAmount` is a completion edge rather than a progressive gauge. It stays
+pinned at its peak for an entire transfer and collapses to zero at the end, and
+the low-threshold event fires exactly once, about a millisecond before
+completion. PeerJS's own sender pattern -- pause above a buffered ceiling, retry
+on a timer -- therefore degenerates on werift into serialized batches: push,
+wait for the whole queue, push again. Correctness is unaffected; ordering held
+across 2059 chunks in both directions. For unattended scheduled exchanges this
+is acceptable, and it is the kind of number a pure-JavaScript DTLS/SCTP stack
+pays and a native one does not. A party's set frame near the top of what the
+WebRTC frame envelope admits would spend minutes on the wire from the CLI side.
+If throughput is ever elevated from a cost to a requirement, node-datachannel is
+the comparison point to measure against before the pick is revisited.
 
-- Pin werift's TURN-over-TCP status: the exact version or PR, and whether it covers TURNS over TLS on port 443.
-- Decide the serialization and chunking approach against a real browser PeerJS peer (reproduce BinaryPack plus PeerJS chunking, or configure a simpler serialization and supply PeerJS-compatible chunking ourselves).
-- Confirm werift's data channel exposes a `bufferedamountlow`-style signal for an efficient flushing close.
-- Re-confirm the architecture choice (Path B is assumed for werift) once a prototype exists, against the spike's acceptance criteria.
+**TURN is not verified against a real relay.** The relay transports are present
+in the published API and the URL parser resolves the port-443 TLS case, but no
+relay was driven. If TURN over TLS is load-bearing for a deployment, drive it
+first; upstream ships a TURN loopback example as a starting point.
+
+## Supply chain and the vendoring fallback
+
+The posture is the fork-and-pin one the project already takes for
+`@openmined/psi.js`: depend on the published package at an exact pin, keep
+vendoring prepared, and do not vendor speculatively.
+
+What a werift-only install carries: 43 packages, 26 MB on disk, no
+`preinstall`/`install`/`postinstall` script anywhere in the tree, and no `.node`,
+`.wasm`, `.so`, `.dylib`, `.dll`, or `binding.gyp` -- nothing compiles at
+install. `npm audit` on that runtime tree reports no vulnerability at any
+severity. Licenses are permissive throughout: MIT for werift itself and most of
+the tree, with `mediabunny` (MPL-2.0, weak file-level copyleft) the one entry
+needing a judgment. It is installed but never loaded by a datachannel-only
+peer -- importing werift loads none of it -- so the MPL-2.0 code is not
+linked into anything the CLI runs. werift's own development tree reports audit
+findings that no consumer installs; under the
+[dependency policy](../../CONTRIBUTING.md#dependency-policy) those bear on
+vendoring-and-building werift, not on depending on the published package.
+
+Vendoring is cheaper than expected, which is what makes it a credible fallback:
+a shallow clone at the pin is a 21 MB working tree, the build is plain `tsc` per
+workspace package with no native toolchain or codegen, and it compiles clean in
+about 2.5 seconds. The datachannel-relevant source is roughly 18,400 lines of
+TypeScript. MIT throughout, so a fork is unencumbered.
+
+What is *not* worth doing is stripping the media stack. There is no narrower
+published entry point -- werift publishes only its root and a `nonstandard`
+entry, and the sibling packages on npm are the protocol layers, with the peer
+connection and data channel living in werift itself. The media stack is not
+separable either: `webrtc/src/media` is imported by roughly ten core files
+including the peer connection, the SDP machinery, and both transports, so
+dropping it means maintaining edits to those across upstream's release cadence.
+The entire saving is `mediabunny`'s install weight and its MPL-2.0 entry, and
+capturing even that requires the fork, because `mediabunny` is a hard dependency
+of two workspace packages and installs whether or not it is imported. What a
+datachannel-only peer actually loads is dominated by the X.509 stack DTLS
+certificate handling drags in, not by media.
+
+## What stays open
+
+- Whether a non-empty `iceServers` list replaces werift's built-in STUN default.
+  This gates shipping, and it is the first measurement the transport work owes.
+- TURN over TCP and TLS driven against a real relay, before any deployment
+  relies on relayed connectivity.
+- A throughput comparison against node-datachannel, if and only if throughput is
+  promoted from an accepted cost to a requirement.
 
 ## See also
 
-- Board item 196971324 - the deferred spike this note preserves; 196962105 - the CLI WebRTC transport implementation it feeds; 196035727 - the web rendezvous-id work whose `HKDF(secret, role)` derivation the CLI must mirror.
-- [COMMUNICATION.md](../COMMUNICATION.md) - channels, peer coordination, and the message-delivery and flush-close contract the transport must honor.
+- [COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown) -- the
+  message-delivery and flushing-close contract the transport must honor.
+- [PROTOCOL.md](../spec/PROTOCOL.md#webrtc-rendezvous-peer-id-derivation) -- the
+  normative rendezvous peer-id derivation the CLI must reproduce to meet a web
+  peer.
+- [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#webrtc-data-channel-inbound-bound)
+  -- the web app's inbound reassembly bound, which rests on PeerJS's BinaryPack
+  chunking.
+- [DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#upgrading-the-peerjs-stack-peerjs--peerjs-js-binarypack)
+  -- why the PeerJS stack is exact-pinned and what an upgrade must re-verify.
