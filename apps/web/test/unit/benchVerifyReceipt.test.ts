@@ -849,9 +849,11 @@ describe("verdictViewModel: the unsigned record's standing caveat", () => {
   test("a run that also verified a dual-signed record points at that verdict", async () => {
     const { record, keys } = await fixtures();
     const report = await verifyExchangeRecord(record, keys, {});
+    // The note names the loaded document: nothing on this page ties a receipt
+    // to the record beside it, so the sentence may not imply it did.
     expect(verdictViewModel(report, [], true).signatureNote).toBe(
       "Partner receipt signatures are checked separately below, against the " +
-        "dual-signed record.",
+        "dual-signed record you loaded.",
     );
     // Unchanged for the record-only run: the default is today's copy.
     expect(verdictViewModel(report, []).signatureNote).toContain(

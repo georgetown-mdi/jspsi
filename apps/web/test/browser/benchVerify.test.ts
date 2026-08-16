@@ -577,6 +577,111 @@ describe("verify receipt bench", () => {
     await expect.element(page.getByText("result.csv")).not.toBeInTheDocument();
   });
 
+  test("loading a new record file empties the terms paste buffers", async () => {
+    const { record, keys } = await buildFixture();
+    await mountVerifyBench();
+
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec.json", serializeExchangeRecord(record)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(1)),
+      jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Re-supply your files to open the commitments",
+      }),
+    );
+    await userEvent.fill(
+      page.getByLabelText("Your partner's linkage terms"),
+      JSON.stringify(PARTNER_TERMS),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Load these terms" }).nth(1),
+    );
+    await expect
+      .element(page.getByText("Loaded.", { exact: true }))
+      .toBeInTheDocument();
+
+    // The parsed terms are dropped with the rest of the previous exchange's
+    // re-supply, so the text they were parsed from must go with them: left
+    // behind, it invites re-importing the previous partnership's terms against
+    // this record.
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec2.json", serializeExchangeRecord(record)),
+    );
+    await expect
+      .element(page.getByLabelText("Your partner's linkage terms"))
+      .toHaveValue("");
+    await expect
+      .element(page.getByText("Loaded.", { exact: true }))
+      .not.toBeInTheDocument();
+  });
+
+  test("editing a terms buffer after a verdict withdraws that parse and the verdict", async () => {
+    const { record, keys } = await buildFixture();
+    await mountVerifyBench();
+
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec.json", serializeExchangeRecord(record)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(1)),
+      jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Re-supply your files to open the commitments",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(2)),
+      csvFile("input.csv", INPUT_CSV),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(3)),
+      csvFile("result.csv", RESULT_CSV),
+    );
+    await userEvent.fill(
+      page.getByLabelText("Your linkage terms"),
+      JSON.stringify(LOCAL_TERMS),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Load these terms" }).first(),
+    );
+    await userEvent.fill(
+      page.getByLabelText("Your partner's linkage terms"),
+      JSON.stringify(PARTNER_TERMS),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Load these terms" }).nth(1),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Verify with these files" }),
+    );
+    await expect.element(page.getByText("Verified")).toBeInTheDocument();
+    const loadedBadges = page.getByText("Loaded.", { exact: true });
+    await expect.element(loadedBadges.nth(1)).toBeInTheDocument();
+
+    // Typing over the imported document leaves a value on screen that was never
+    // imported: the badge and the verdict computed from the previous parse must
+    // not describe it.
+    await userEvent.fill(
+      page.getByLabelText("Your partner's linkage terms"),
+      JSON.stringify({ ...PARTNER_TERMS, identity: "Party C" }),
+    );
+    await expect.element(loadedBadges.nth(1)).not.toBeInTheDocument();
+    await expect.element(loadedBadges.first()).toBeInTheDocument();
+    await expect.element(page.getByText("Verified")).not.toBeInTheDocument();
+    await expect
+      .element(page.getByText("What was checked"))
+      .not.toBeInTheDocument();
+  });
+
   test("a dual-signed record with both certificates anchored reaches the signed verified verdict", async () => {
     const { record, keys } = await buildFixture();
     const { signed, ourCertificate, partnerFingerprint } =
@@ -775,6 +880,47 @@ describe("verify receipt bench", () => {
     );
 
     await expectBothVerdictsGone();
+  });
+
+  // The recurring case: the same two parties run the same exchange again. Every
+  // value the receipt is checked against -- both identities and the agreed-terms
+  // hash -- is byte-identical across those runs, and the values that differ (the
+  // binder and the two payload MACs) are reported rather than compared, so the
+  // previous run's receipt would be consumed beside this run's record with
+  // nothing on the page to contradict it. It is dropped instead.
+  test("a record from the next run of the same exchange drops the previous receipt", async () => {
+    await verifyRecordAndSignedRecord();
+    const { record: nextRecord, keys: nextKeys } = await buildFixture();
+
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec2.json", serializeExchangeRecord(nextRecord)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(1)),
+      jsonFile("rec2.keys.json", serializeVerificationKeys(nextKeys)),
+    );
+    await expect
+      .element(page.getByText("psilink-receipt-x.json"))
+      .not.toBeInTheDocument();
+
+    await userEvent.click(
+      page.getByRole("button", { name: "Verify", exact: true }),
+    );
+
+    await expect
+      .element(page.getByText("What was checked"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Signed receipt verified"))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("Partner receipt signatures are not checked", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
   });
 
   test("one re-supplied CSV does not gate a run that only checks the signed record", async () => {

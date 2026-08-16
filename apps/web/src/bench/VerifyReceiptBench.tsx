@@ -79,31 +79,30 @@ const JSON_MAX_MB = MAX_JSON_FILE_BYTES / 1024 ** 2;
 // The re-supplied input/result CSVs share the app-wide browser-memory bound.
 const CSV_MAX_MB = MAX_CSV_FILE_BYTES / 1024 ** 2;
 
-// What a dropzone shows for the file it holds.
+// What a dropzone shows for the file it holds: its name, and nothing else. The
+// impossible `text` member is the enforcement -- a document's own text is read,
+// parsed, and dropped inside the handler, and this makes the shape that carried
+// it alongside the name unassignable to any slot on this page rather than
+// merely unused. It does not stop a future author declaring a new member.
 interface ChosenFile {
   name: string;
-}
-
-// The reconstruction and terms re-supply are optional; each holds its own parse
-// state and a possible alert.
-interface SuppliedFile extends ChosenFile {
-  text: string;
+  text?: never;
 }
 
 interface ParsedRecordState {
-  file: SuppliedFile;
+  file: ChosenFile;
   record?: ExchangeRecord;
   alert?: string;
 }
 
 interface ParsedKeysState {
-  file: SuppliedFile;
+  file: ChosenFile;
   keys?: VerificationKeys;
   alert?: string;
 }
 
 interface ParsedSignedRecordState {
-  file: SuppliedFile;
+  file: ChosenFile;
   record?: DualSignedRecord;
   alert?: string;
 }
@@ -240,11 +239,6 @@ function ParseAlert({ title, message }: { title: string; message: string }) {
   );
 }
 
-/** Read a supplied text file. The browser File API; nothing leaves the tab. */
-async function readSupplied(file: File): Promise<SuppliedFile> {
-  return { name: file.name, text: await file.text() };
-}
-
 /** The linkage-terms re-supply idiom, paste-based, mirroring TermsImportExport:
  * a textarea whose Import validates through importLinkageTerms and reports a
  * value-free error inline. */
@@ -285,6 +279,10 @@ function TermsInput({
         onChange={(event) => {
           setText(event.currentTarget.value);
           setError(undefined);
+          // The parse belongs to the text it was made from: editing the buffer
+          // withdraws it, so neither the "Loaded." badge nor a verdict computed
+          // from it can describe a document that was never imported.
+          if (terms !== undefined) onTerms(undefined);
         }}
         rows={4}
         style={{ fontFamily: "monospace", width: "100%" }}
@@ -316,11 +314,12 @@ export function VerifyReceiptBench() {
   // Re-supply (optional): the retained input and result files, and both parties'
   // linkage terms.
   const [resupplyOpen, setResupplyOpen] = useState(false);
-  // The original File, not a SuppliedFile: unlike the JSON record/keys (parsed
-  // eagerly, so their text is needed immediately), a re-supplied CSV is only
-  // parsed at verify time and the run can repeat, so holding the File itself
-  // -- rather than reading it to text now and re-wrapping it into a fresh File
-  // at each run -- avoids reading its content twice for no benefit.
+  // The original File, never its contents: unlike the JSON record and keys
+  // (parsed on load, so their text is read at that moment and dropped there), a
+  // re-supplied CSV is only parsed at verify time and the run can repeat, so
+  // holding the File itself -- rather than reading it to text now and
+  // re-wrapping it into a fresh File at each run -- avoids reading its content
+  // twice for no benefit.
   const [inputCsv, setInputCsv] = useState<File>();
   const [resultCsv, setResultCsv] = useState<File>();
   const [localTerms, setLocalTerms] = useState<LinkageTerms>();
@@ -339,6 +338,14 @@ export function VerifyReceiptBench() {
   const [verifyError, setVerifyError] = useState<string>();
   const [verifying, setVerifying] = useState(false);
 
+  // Which exchange the loaded inputs belong to: bumped when the record or keys
+  // change, and used as the terms inputs' key so their paste buffers are the
+  // previous exchange's no more than the parsed terms are.
+  const [exchangeGeneration, setExchangeGeneration] = useState(0);
+  // Which set of inputs a verdict may be written from: bumped by every input
+  // event, and read by a run to decide whether its own inputs still stand.
+  const runToken = useRef(0);
+
   const headingRef = useRef<HTMLHeadingElement>(null);
   const verdictRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -350,101 +357,93 @@ export function VerifyReceiptBench() {
       verdictRef.current?.focus();
   }, [verdict, signedVerdict, verifyError]);
 
+  // Every input event withdraws both verdicts and any fault alert, so nothing
+  // rendered is derived from an input the page no longer holds. Both verdicts
+  // go on any edit: the record verdict's standing note points at the signed
+  // panel beside it, so it must not outlive the panel a signed-leg edit
+  // removes. The bump supersedes any run already in flight.
+  function invalidateVerdicts() {
+    runToken.current += 1;
+    setVerdict(undefined);
+    setSignedVerdict(undefined);
+    setVerifyError(undefined);
+  }
+
   // A newly loaded record or keys file starts a possibly different exchange, so
-  // the re-supplied files and pasted terms from the previous one must not carry
-  // forward into the next verify: they open that record's commitments, and the
-  // wrong ones would be reported as a record that fails to open. The signed
-  // leg's inputs deliberately stay -- a receipt held against a different
-  // record's identities and terms hash fails loudly rather than passing, and
-  // the partner's pinned fingerprint is a value the operator reuses across that
-  // partner's exchanges. Both verdicts are cleared by the callers either way.
-  function clearResupply() {
+  // every input belonging to the previous one goes: the re-supplied files and
+  // pasted terms, which open that record's commitments, and the dual-signed
+  // record. The receipt is the case that needs stating -- everything its
+  // verification consults (both identities, the agreed-terms hash) repeats
+  // across every run of the same partnership, and the values that do not repeat
+  // are reported rather than compared, so a carried-over receipt is the one that
+  // would be consumed beside the wrong record without saying so. The two
+  // anchoring values stay: the operator reuses them across a partner's
+  // exchanges, and one belonging elsewhere reaches neither certificate in the
+  // record, which the verdict states as an unmatched anchor.
+  function clearExchangeScopedInputs() {
     setInputCsv(undefined);
     setResultCsv(undefined);
     setLocalTerms(undefined);
     setPartnerTerms(undefined);
+    setSignedRecord(undefined);
+    setExchangeGeneration((generation) => generation + 1);
   }
 
   async function onRecordFile(file: File) {
-    const supplied = await readSupplied(file);
-    const parsed = parseRecordDocument(supplied.text);
-    setVerdict(undefined);
-    // The record supplies the identities and agreed-terms hash the signature
-    // checks are held against, so a different one invalidates that verdict too.
-    setSignedVerdict(undefined);
-    setVerifyError(undefined);
-    clearResupply();
+    invalidateVerdicts();
+    const parsed = parseRecordDocument(await file.text());
+    clearExchangeScopedInputs();
+    const chosen = { name: file.name };
     if (parsed.kind === "ok")
-      setRecord({ file: supplied, record: parsed.record });
-    else setRecord({ file: supplied, alert: parsed.message });
+      setRecord({ file: chosen, record: parsed.record });
+    else setRecord({ file: chosen, alert: parsed.message });
   }
 
   async function onKeysFile(file: File) {
-    const supplied = await readSupplied(file);
-    const parsed = parseKeysDocument(supplied.text);
-    setVerdict(undefined);
-    setSignedVerdict(undefined);
-    setVerifyError(undefined);
-    clearResupply();
-    if (parsed.kind === "ok") setKeys({ file: supplied, keys: parsed.keys });
-    else setKeys({ file: supplied, alert: parsed.message });
+    invalidateVerdicts();
+    const parsed = parseKeysDocument(await file.text());
+    clearExchangeScopedInputs();
+    const chosen = { name: file.name };
+    if (parsed.kind === "ok") setKeys({ file: chosen, keys: parsed.keys });
+    else setKeys({ file: chosen, alert: parsed.message });
   }
 
-  // Each of the three signed-leg inputs clears the record verdict alongside the
-  // signed one: that verdict's standing note points the reader at the signed
-  // panel beside it, so it must not outlive the panel the edit removes.
   async function onSignedRecordFile(file: File) {
-    const supplied = await readSupplied(file);
-    const parsed = parseSignedRecordDocument(supplied.text);
-    setVerdict(undefined);
-    setSignedVerdict(undefined);
-    setVerifyError(undefined);
+    invalidateVerdicts();
+    const parsed = parseSignedRecordDocument(await file.text());
+    const chosen = { name: file.name };
     if (parsed.kind === "ok")
-      setSignedRecord({ file: supplied, record: parsed.record });
-    else setSignedRecord({ file: supplied, alert: parsed.message });
+      setSignedRecord({ file: chosen, record: parsed.record });
+    else setSignedRecord({ file: chosen, alert: parsed.message });
   }
 
   async function onCertificateFile(file: File) {
-    const supplied = await readSupplied(file);
-    const parsed = await parseCertificateDocument(supplied.text);
-    setVerdict(undefined);
-    setSignedVerdict(undefined);
-    setVerifyError(undefined);
-    const chosen = { name: supplied.name };
+    invalidateVerdicts();
+    const parsed = await parseCertificateDocument(await file.text());
+    const chosen = { name: file.name };
     if (parsed.kind === "ok")
       setCertificate({ file: chosen, fingerprint: parsed.fingerprint });
     else setCertificate({ file: chosen, alert: parsed.message });
   }
 
   function onPinnedFingerprint(value: string) {
+    invalidateVerdicts();
     setPinnedFingerprint(value);
-    setVerdict(undefined);
-    setSignedVerdict(undefined);
-    setVerifyError(undefined);
   }
 
   function onCsvFile(file: File, set: (value: File) => void): void {
+    invalidateVerdicts();
     set(file);
-    // A changed re-supply file invalidates the last verdict; the user re-runs.
-    setVerdict(undefined);
-    setVerifyError(undefined);
   }
 
   function onLocalTerms(terms: LinkageTerms | undefined) {
+    invalidateVerdicts();
     setLocalTerms(terms);
-    // Changed terms invalidate the last verdict, same as a changed CSV -- and
-    // the signed one too, which holds the signatures against these identities
-    // and this agreed-terms hash when no record is loaded.
-    setVerdict(undefined);
-    setSignedVerdict(undefined);
-    setVerifyError(undefined);
   }
 
   function onPartnerTerms(terms: LinkageTerms | undefined) {
+    invalidateVerdicts();
     setPartnerTerms(terms);
-    setVerdict(undefined);
-    setSignedVerdict(undefined);
-    setVerifyError(undefined);
   }
 
   const pinProblem = pinnedFingerprintProblem(pinnedFingerprint);
@@ -458,6 +457,9 @@ export function VerifyReceiptBench() {
   async function runVerify() {
     if (!recordReady && !signedReady) return;
     setVerifying(true);
+    // The inputs this run reads are the ones loaded now; nothing on the page is
+    // disabled while it runs, and it writes its verdicts several awaits later.
+    const token = runToken.current;
     setVerifyError(undefined);
     try {
       const parsedRecord = record?.record;
@@ -501,6 +503,10 @@ export function VerifyReceiptBench() {
         );
         signedView = signedVerdictViewModel(report);
       }
+      // An input changed while this run was reading files and computing, so its
+      // result describes inputs the page no longer holds: the edit already
+      // withdrew the verdicts, and this run adds none back.
+      if (token !== runToken.current) return;
       // Both verdicts are set once both legs have run: the record verdict's
       // standing note points at the signed panel on the strength of the verdict
       // rendered beside it, never of the input supplied to produce it.
@@ -515,8 +521,10 @@ export function VerifyReceiptBench() {
       if (signedView !== undefined) setSignedVerdict(signedView);
     } catch (error) {
       // The verify path is fail-safe in core (every check yields a status), so a
-      // throw here is an unexpected fault -- surface it sanitized, never raw.
-      setVerifyError(sanitizeErrorForDisplay(error));
+      // throw here is an unexpected fault -- surface it sanitized, never raw,
+      // and only while it is still this run's inputs that faulted.
+      if (token === runToken.current)
+        setVerifyError(sanitizeErrorForDisplay(error));
     } finally {
       setVerifying(false);
     }
@@ -697,13 +705,17 @@ export function VerifyReceiptBench() {
               onFile={(file) => onCsvFile(file, setResultCsv)}
             />
             {oneCsvSupplied && <OneCsvWarning />}
+            {/* Keyed by the exchange: a new record or keys file remounts these,
+                dropping the pasted text with the terms parsed from it. */}
             <TermsInput
+              key={`local-terms-${exchangeGeneration}`}
               label="Your linkage terms"
               description="Paste your exchange config or exported linkage-terms document."
               terms={localTerms}
               onTerms={onLocalTerms}
             />
             <TermsInput
+              key={`partner-terms-${exchangeGeneration}`}
               label="Your partner's linkage terms"
               description="Paste your partner's config or exported terms. The partner's terms are not retained by default; both sides are needed to check the hash."
               terms={partnerTerms}

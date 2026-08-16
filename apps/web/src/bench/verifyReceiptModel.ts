@@ -438,9 +438,12 @@ const SIGNATURE_NOTE =
 // The record is self-attested either way, so this section says nothing about the
 // partner; what changes when a dual-signed record was verified in the same run is
 // where the evidence against the partner is, not whether this section carries it.
+// The note names the document the reader supplied rather than "this exchange's
+// receipt": nothing available on this page ties a receipt to a record, so the
+// sentence must not imply a provenance no check here established.
 const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
   "Partner receipt signatures are checked separately below, against the " +
-  "dual-signed record.";
+  "dual-signed record you loaded.";
 
 /**
  * Build the verdict view-model from a {@link RecordVerificationReport} and any
@@ -450,14 +453,14 @@ const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
  * shown; the mandatory pair is always present in a parsed record, and the
  * association table appears only when the record holds it.
  *
- * Pass `signedRecordSupplied` when the same run also verified a dual-signed
+ * Pass `signedRecordVerified` when the same run also verified a dual-signed
  * record, so the standing caveat points at that verdict rather than telling the
  * reader signatures went unchecked beside a verdict that checked them.
  */
 export function verdictViewModel(
   report: RecordVerificationReport,
   warnings: ReadonlyArray<string>,
-  signedRecordSupplied = false,
+  signedRecordVerified = false,
 ): VerdictViewModel {
   const commitments: Array<VerdictRow> = [];
   for (const name of COMMITMENT_ORDER) {
@@ -482,7 +485,7 @@ export function verdictViewModel(
       explanation: termsRow.explanation,
     },
     warnings: warnings.map((warning) => sanitizeForDisplay(warning)),
-    signatureNote: signedRecordSupplied
+    signatureNote: signedRecordVerified
       ? SIGNATURE_NOTE_WITH_SIGNED_RECORD
       : SIGNATURE_NOTE,
   };
