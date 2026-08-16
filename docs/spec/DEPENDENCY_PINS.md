@@ -32,7 +32,12 @@ freeze, pin, and install on top of that tree is in
   `peerjs-js-binarypack` declared directly, not left a floating transitive,
   precisely because the bound parses its wire format -- and pulled out of the
   routine Dependabot batch into a reviewed `webrtc-stack` group
-  (`.github/dependabot.yml`).
+  (`.github/dependabot.yml`). `apps/cli` declares `peerjs-js-binarypack` at the
+  same exact version for the same reason: its WebRTC transport writes the PeerJS
+  DataConnection wire by hand (`apps/cli/src/connection/webrtc/peerjsWire.ts`),
+  so the encoding is a contract, not an implementation detail. The two
+  declarations must move together -- a browser peer and a CLI peer that pack
+  differently cannot exchange a frame.
 - **PSI crypto addon (`@openmined/psi.js`).** Pinned by construction: a psilink
   fork vendored as a local `file:` tarball
   (`lib/openmined-psi.js-<version>.tgz`), whose path resolves to exactly the
@@ -524,3 +529,4 @@ Dependency source files to re-read on an upgrade:
 - `apps/web/src/psi/boundedReassembly.ts`: re-confirm `assertChunkReassemblySupported` still probes the three internals and that the wrap still applies the core constants at both of them.
 
 `assertChunkReassemblySupported` runs at install time on every connection in `openPeerMessageConnection`, and the live browser exchange test (`apps/web/test/browser/invitedPSI.test.ts`, run in CI) installs the guard on a real `DataConnection`, so a renamed or removed internal fails the install loud rather than running with no inbound bound. The unit tests pin the marker table and the per-kind cost weights (`packages/core/test/binaryPackBounds.test.ts`), the fail-closed wrap bounds (`apps/web/test/unit/boundedReassembly.test.ts`), and the scan's agreement with the real packer/unpacker (`apps/web/test/unit/boundedReassemblyDifferential.test.ts`, which lives in the workspace that declares `peerjs-js-binarypack`). A purely BEHAVIORAL change that keeps the names -- a different chunking serializer, a renamed chunk field, a marker-format change -- is not caught by the assert or the happy-path browser test, so the by-hand premises above must be re-verified against the source files on any bump.
+
