@@ -20,6 +20,7 @@ import {
   coverageGaps,
   CLI_RECIPES,
   FIXTURE_ENVIRONMENT,
+  GENERATED_ENVIRONMENT,
   HELPER_EXPECTATIONS,
   readVerdict,
   recipeKey,
@@ -110,8 +111,7 @@ describe("recipe coverage of the derived set", () => {
     for (const helper of derived.helpers) {
       for (const name of helper.env) {
         expect(
-          name in FIXTURE_ENVIRONMENT ||
-            ["SMB_SERVER", "SMB_TOKEN", "TOKEN"].includes(name),
+          name in FIXTURE_ENVIRONMENT || GENERATED_ENVIRONMENT.includes(name),
         ).toBe(true);
       }
     }

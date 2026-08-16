@@ -237,6 +237,13 @@ const MODE_TOKEN = /^[a-z][a-z0-9-]*$/;
  * scripts/assert-image-capabilities.mjs, which a run reports; a vector read one
  * token short would be exercised as something other than what the script runs,
  * and nothing would say so.
+ *
+ * One measured consequence of the over-read: a logical line that merely echoes
+ * or returns a sample command for the operator (cmd_Setup-PsilinkFileDrop.cmd's
+ * closing help text; Get-ConsoleCommandLines' read-back strings) derives like a
+ * real call site. A capability introduced by such a line alone fails for want
+ * of a recipe, and its coverage-gap message then cites the print site -- read
+ * the cited line before writing a recipe for it.
  */
 export function argvOnLine(text, commands) {
   const tokens = tokenize(text);
