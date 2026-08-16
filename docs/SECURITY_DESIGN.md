@@ -1,7 +1,7 @@
 ---
 title: "PSI-Link Security Design"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-15"
+last_reviewed: "2026-08-16"
 ---
 
 # PSI-Link security
@@ -284,6 +284,8 @@ The secret is not the only thing the record persists. A managed record also hold
 A persisted input-file handle broadens the reach. Where the record holds a `FileSystemFileHandle` with persistent read permission (the unattended path), it discloses the input file's name, and the granted permission lets an in-origin script read the file's current contents through the handle without the operator present. That read path has content only while a file dwells at the path, so removing or moving the file after a run leaves the handle pointing at nothing readable; combined with the refresh workflow, the input file need exist only around the run window (see [The input file each run](MANAGED_EXCHANGE.md#the-input-file-each-run)). That practice is optional operator hygiene; the app neither enforces nor automates it. The primary control against the in-origin adversary remains preventing script injection, alongside deleting the exchange, which drops the handle with the record.
 
 Two constraints keep the record shape bounded: the operator label is length-capped and should not carry sensitive counterparty detail beyond naming the partnership, and the run and schedule bookkeeping is structured enums, timestamps, and durations rather than free text. The persisted exchange-file document does carry other operator-authored free text (a column description, a standardization step's parameters, a retention note, and the agreed terms' description and purpose strings), authored locally with no partner-controlled value in them. The content guidance is the label's: keep row values and sensitive counterparty detail out of authored descriptions and cleaning parameters. The field names and bounds are in [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md).
+
+What this section enumerates is what the record persists; the origin's ambient runtime surfaces are out of scope here. The IndexedDB database name is a fixed constant, and the Web Locks name a run holds carries the record's local UUID and so reveals that a run and its rotation are in flight right now, but both sit below the in-origin ceiling already stated: they are visible only to a script that can read the whole record outright.
 
 ### Egress hardening and its limits
 
