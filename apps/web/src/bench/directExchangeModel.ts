@@ -2,6 +2,7 @@ import {
   assessLinkageSatisfiability,
   getDefaultLinkageTerms,
   inferMetadata,
+  overlongDisclosedColumnPositions,
 } from "@psilink/core";
 
 import {
@@ -73,6 +74,12 @@ export interface DirectTermsPreview {
   /** The columns the inferred metadata discloses to the partner for matched
    * records -- what this file contributes on the wire. */
   disclosedPayloadColumns: Array<string>;
+  /** The 1-based positions of the disclosed columns whose name is too long to
+   * carry ({@link overlongDisclosedColumnPositions}); non-empty means the run
+   * would be refused at prepare time, so the confirm screen refuses it here
+   * instead. This spine has no disclosure control -- the inferred metadata sends
+   * every non-linkage column -- so the remedy is a shorter header. */
+  overlongDisclosedColumns: Array<number>;
   /** The count of default linkage keys the columns can satisfy; zero means the
    * file backs no match and the exchange would run to a silent empty result. */
   satisfiableKeyCount: number;
@@ -109,6 +116,7 @@ export function previewInferredTerms(
     linkageTerms,
     metadata,
     disclosedPayloadColumns: disclosedColumnNames(metadata),
+    overlongDisclosedColumns: overlongDisclosedColumnPositions(metadata),
     satisfiableKeyCount,
     unsatisfied,
   };

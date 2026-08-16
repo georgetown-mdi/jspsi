@@ -5,6 +5,7 @@ import type { Metadata } from "./config/metadata.js";
 import {
   isDisclosedToPartner,
   disclosedColumnNames,
+  overlongDisclosedColumnPositions,
 } from "./config/metadata.js";
 import type { Output, Payload } from "./config/linkageTerms.js";
 import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
@@ -313,6 +314,65 @@ export function assertPayloadSendDisclosed(
       `recurring partner's received-payload lock-in, so a dictionary that does ` +
       `not match the disclosed set mis-states what is actually sent. ` +
       `${remedies.join(" ")}`,
+  );
+}
+
+/**
+ * Reject a disclosed column whose NAME is longer than {@link MAX_NAME_LENGTH},
+ * before any credential, terms, or data are sent.
+ *
+ * The name of a transmitted column is carried, not just used: it rides the payload
+ * frame's `columns` list to the partner, whose parse refuses a longer one, and it
+ * is written into this party's own exchange record, whose `name` bound refuses it
+ * too. Metadata inferred from a CSV header (`inferMetadata`) passes through no
+ * schema, so an oversized header reaches here unbounded -- and without this the
+ * partner's parse is the FIRST enforcement, reached only after the frame has been
+ * sent. Refusing at prepare time makes the refusal local, early, and attributable
+ * to this party's own file.
+ *
+ * Scoped to the disclosed set ({@link overlongDisclosedColumnPositions}): a column
+ * that is never sent carries its name nowhere, so an oversized header on it is no
+ * obstacle to matching or ignoring.
+ *
+ * Gated on `output` for the same reason, one step further out: `runExchange` builds
+ * this party's payload only when the PARTNER is entitled to the result, so with
+ * `output.shareWithPartner` false no column leaves the machine whatever the metadata
+ * discloses, nothing is recorded as sent, and there is no carried name to bound.
+ * `validateCompatibility` holds this party's `shareWithPartner` equal to the
+ * partner's `expectsOutput`, so the transmission gate cannot disagree with the
+ * declaration read here. This is the same output gate
+ * {@link assertPayloadSendDisclosed} applies to its empty case.
+ *
+ * The offending name is not echoed -- it is by construction longer than a readable
+ * message -- so the error names the input column positions, as
+ * {@link inferMetadata}'s empty-name refusal does.
+ *
+ * @param output This party's own output declaration, from the same
+ *   {@link LinkageTerms} the metadata is prepared against. Required rather than
+ *   optional so every call site states the direction.
+ * @throws {UsageError} when a disclosed column's name exceeds
+ *   {@link MAX_NAME_LENGTH} UTF-16 code units. A {@link UsageError} so the CLI
+ *   classifies it as a configuration error (exit 64), not a transport failure.
+ */
+export function assertDisclosedNamesCarriable(
+  metadata: Metadata,
+  output: Output,
+): void {
+  if (!output.shareWithPartner) return;
+  const positions = overlongDisclosedColumnPositions(metadata);
+  if (positions.length === 0) return;
+  const plural = positions.length > 1;
+  throw new UsageError(
+    `input column${plural ? "s" : ""} ${positions.join(", ")} ` +
+      `${plural ? "are" : "is"} sent to the partner, but ` +
+      `${plural ? "their names are" : "its name is"} longer than the ` +
+      `${MAX_NAME_LENGTH}-character limit on a column name (counted in UTF-16 ` +
+      `code units, so a character outside the Basic Multilingual Plane counts as ` +
+      `two). A payload column's name travels with its values: the partner's parse ` +
+      `of the payload frame refuses a longer name, as does the exchange record ` +
+      `this party writes, so the exchange could not complete. Shorten the ` +
+      `column name${plural ? "s" : ""}, or set the metadata not to transmit ` +
+      `${plural ? "them" : "it"} (is_payload: false or role ignored).`,
   );
 }
 

@@ -36,6 +36,7 @@ import {
   exchangePayloads,
   toCommittedPayload,
   assertPayloadSendDisclosed,
+  assertDisclosedNamesCarriable,
   assertDisclosureMatchesCommitment,
   assertOutboundPayloadConsented,
   reconcileReceivedPayload,
@@ -379,6 +380,14 @@ export function prepareForExchange(
     metadata,
     linkageTerms.output,
   );
+
+  // Reject a disclosed column whose name is too long to carry. A transmitted
+  // column's name rides the payload frame to the partner and is written into this
+  // party's own exchange record, and both bound it; metadata inferred from a CSV
+  // header passes through no schema, so without this the partner's parse is the
+  // first enforcement -- reached only after the frame is sent. See
+  // assertDisclosedNamesCarriable.
+  assertDisclosedNamesCarriable(metadata, linkageTerms.output);
 
   // Fail fast when this party can no longer produce a payload disclosure it
   // committed to on a prior invitation. disclosedPayloadColumns is the send-side

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  MAX_NAME_LENGTH,
+  assertDisclosedNamesCarriable,
   assertPayloadSendDisclosed,
   deriveAcceptedLinkageTerms,
   safeParseLinkageTerms,
@@ -15,6 +17,7 @@ import {
   acceptorInitialColumnsState,
   acceptorLaunchBlockedReason,
   acceptorLaunchPayload,
+  acceptorOverlongDisclosedColumns,
   acceptorPayloadDeclarationConflict,
   acceptorUnsatisfiedTypes,
   acceptorVerdict,
@@ -391,6 +394,139 @@ describe("acceptor launch gates", () => {
     ).toBe(
       "Set your columns to the missing field types above before you can start.",
     );
+  });
+});
+
+describe("a marked column whose name is too long to carry", () => {
+  // The gap this closes: the seed metadata comes from inferMetadata over the
+  // acceptor's own header, which no schema bounds, so an oversized name is markable
+  // here and refused only by the partner's parse of the payload frame -- after the
+  // frame is sent.
+  const atCeiling = "a".repeat(MAX_NAME_LENGTH);
+  const pastCeiling = atCeiling + "a";
+  // One code POINT, two UTF-16 code units: MAX_NAME_LENGTH of them is under the
+  // ceiling on the count ColumnName's display cut uses and over it on the count
+  // every carrying bound uses.
+  const astralPastCeiling = "\u{1D54F}".repeat(MAX_NAME_LENGTH);
+
+  /** The columns step for a file covering both keys plus one payload column of
+   * the given name (inferred `other`, so it is marked to send). */
+  function stepFor(name: string) {
+    const columns = ["first_name", "last_name", name];
+    const { editorState } = editorFor(columns, nameTerms);
+    return {
+      editorState,
+      verdict: acceptorVerdict(columns, nameTerms, editorState),
+    };
+  }
+
+  test("a name at the ceiling is carryable and does not block launch", () => {
+    const { editorState, verdict } = stepFor(atCeiling);
+    expect(acceptorDisclosedColumns(editorState.metadata)).toEqual([atCeiling]);
+    expect(
+      acceptorOverlongDisclosedColumns(nameTerms, editorState.metadata),
+    ).toEqual([]);
+    expect(
+      acceptorLaunchBlockedReason(verdict, editorState, nameTerms),
+    ).toBeUndefined();
+  });
+
+  test("one code unit past the ceiling blocks launch, naming the notice above", () => {
+    const { editorState, verdict } = stepFor(pastCeiling);
+    expect(
+      acceptorOverlongDisclosedColumns(nameTerms, editorState.metadata),
+    ).toEqual([3]);
+    expect(acceptorLaunchBlockedReason(verdict, editorState, nameTerms)).toBe(
+      "Resolve the column name that is too long to send above before you can start.",
+    );
+  });
+
+  test("the bound counts UTF-16 code units, not the code points the display cut counts", () => {
+    expect([...astralPastCeiling].length).toBe(MAX_NAME_LENGTH);
+    expect(astralPastCeiling.length).toBe(MAX_NAME_LENGTH * 2);
+    const { editorState, verdict } = stepFor(astralPastCeiling);
+    expect(
+      acceptorOverlongDisclosedColumns(nameTerms, editorState.metadata),
+    ).toEqual([3]);
+    expect(
+      acceptorLaunchBlockedReason(verdict, editorState, nameTerms),
+    ).toBeDefined();
+  });
+
+  test("unmarking the column clears the block -- the file itself is not refused", () => {
+    // An oversized name is fully usable for matching and ignoring: the bound is on
+    // what is CARRIED, so it clears on this screen without another file.
+    const { editorState, verdict } = stepFor(pastCeiling);
+    const unmarked = {
+      ...editorState,
+      metadata: setColumnDisclosure(
+        editorState.metadata,
+        pastCeiling,
+        "ignored",
+      ).metadata,
+    };
+    expect(acceptorDisclosedColumns(unmarked.metadata)).toEqual([]);
+    expect(
+      acceptorOverlongDisclosedColumns(nameTerms, unmarked.metadata),
+    ).toEqual([]);
+    expect(
+      acceptorLaunchBlockedReason(verdict, unmarked, nameTerms),
+    ).toBeUndefined();
+  });
+
+  test("several offending columns pluralize the sentence", () => {
+    const columns = ["first_name", "last_name", pastCeiling, pastCeiling + "b"];
+    const { editorState } = editorFor(columns, nameTerms);
+    const verdict = acceptorVerdict(columns, nameTerms, editorState);
+    expect(
+      acceptorOverlongDisclosedColumns(nameTerms, editorState.metadata),
+    ).toEqual([3, 4]);
+    expect(acceptorLaunchBlockedReason(verdict, editorState, nameTerms)).toBe(
+      "Resolve the column names that are too long to send above before you can start.",
+    );
+  });
+
+  test("says nothing when the inviting party is entitled to no result", () => {
+    // Nothing is transmitted to a party that receives no result, so no name is
+    // carried and the run does not refuse this pair -- and the panel beside the
+    // grid already states that no column leaves whatever these marks say.
+    const noResultTerms: LinkageTerms = {
+      ...nameTerms,
+      output: { expectsOutput: false, shareWithPartner: true },
+    };
+    const columns = ["first_name", "last_name", pastCeiling];
+    const { editorState } = editorFor(columns, noResultTerms);
+    const verdict = acceptorVerdict(columns, noResultTerms, editorState);
+    expect(acceptorDisclosedColumns(editorState.metadata)).toEqual([
+      pastCeiling,
+    ]);
+    expect(
+      acceptorOverlongDisclosedColumns(noResultTerms, editorState.metadata),
+    ).toEqual([]);
+    expect(
+      acceptorLaunchBlockedReason(verdict, editorState, noResultTerms),
+    ).toBeUndefined();
+  });
+
+  test("the gate refuses exactly what core's prepare-time refusal does", () => {
+    // Driven through core's own function rather than a second model of it: the
+    // screen and the run must not disagree about which names are carryable. The
+    // acceptor's own output is the invitation's mirrored onto it, which is what
+    // core reads.
+    const accepted = deriveAcceptedLinkageTerms(nameTerms, "Sam Alvarez");
+    for (const name of [atCeiling, pastCeiling, astralPastCeiling]) {
+      const { editorState } = stepFor(name);
+      let coreRefused = false;
+      try {
+        assertDisclosedNamesCarriable(editorState.metadata, accepted.output);
+      } catch {
+        coreRefused = true;
+      }
+      expect(
+        acceptorOverlongDisclosedColumns(nameTerms, editorState.metadata)
+          .length > 0,
+      ).toBe(coreRefused);
+    }
   });
 });
 

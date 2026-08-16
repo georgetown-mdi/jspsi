@@ -97,6 +97,41 @@ export function disclosedColumnNames(metadata: Metadata): Array<string> {
   return metadata.filter(isDisclosedToPartner).map((column) => column.name);
 }
 
+/**
+ * The 1-based metadata positions of the DISCLOSED columns whose name is longer
+ * than {@link MAX_NAME_LENGTH}, in metadata order -- empty when every disclosed
+ * name fits. The single predicate behind every gate on that ceiling, so a front
+ * end that refuses before it transmits and the {@link assertDisclosedNamesCarriable}
+ * backstop that refuses at prepare time cannot disagree about which names are
+ * carryable.
+ *
+ * Scoped to {@link isDisclosedToPartner} rather than to every column: an oversized
+ * name on a column that is never sent costs nothing, is fully usable for matching
+ * and ignoring, and belongs to a vendor export the operator often cannot rewrite.
+ *
+ * Counted in UTF-16 code units (`name.length`), which is the unit both ceilings on
+ * a carried name count: the payload frame's per-element `columns` predicate and the
+ * `name` bounds of the exchange record and the linkage terms are all Zod
+ * `.max(MAX_NAME_LENGTH)` over a string. A code-POINT count would pass a name of
+ * astral characters that those bounds refuse.
+ *
+ * Positions rather than names: an offending name is by construction longer than
+ * any message wants to carry, and the operator locates the column by its position
+ * in their own header -- the same treatment {@link inferMetadata} gives an unnamed
+ * column.
+ */
+export function overlongDisclosedColumnPositions(
+  metadata: Metadata,
+): Array<number> {
+  return metadata
+    .map((column, index) =>
+      isDisclosedToPartner(column) && column.name.length > MAX_NAME_LENGTH
+        ? index + 1
+        : 0,
+    )
+    .filter((position) => position > 0);
+}
+
 // Column names must be unique. Every consumer treats metadata as keyed by name
 // (`metadata.find((c) => c.name === ...)`), so a duplicate name makes "the
 // metadata for column X" position-dependent -- e.g. a `role: ignored` entry and a

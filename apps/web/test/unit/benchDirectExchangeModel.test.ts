@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-import { getDefaultLinkageTerms, inferMetadata } from "@psilink/core";
+import {
+  MAX_NAME_LENGTH,
+  getDefaultLinkageTerms,
+  inferMetadata,
+} from "@psilink/core";
 
 import { disclosedColumnNames } from "@psi/metadataEditing";
 
@@ -51,6 +55,32 @@ describe("previewInferredTerms", () => {
     expect(
       preview.linkageTerms.payload?.send?.map((entry) => entry.name),
     ).toEqual(preview.disclosedPayloadColumns);
+  });
+
+  test("a sent column name past the ceiling is reported so the confirm screen can refuse the run", () => {
+    // This spine has no disclosure control -- every non-linkage column is inferred
+    // as sent -- so an oversized header would reach prepareForExchange on the
+    // appliance and be refused there, after the operator pressed Run.
+    const past = "a".repeat(MAX_NAME_LENGTH + 1);
+    const preview = previewInferredTerms([...LINKABLE_COLUMNS, past], "x");
+    expect(preview.overlongDisclosedColumns).toEqual([6]);
+    expect(preview.disclosedPayloadColumns).toContain(past);
+  });
+
+  test("a sent column name at the ceiling is carryable and leaves the run gate open", () => {
+    const atCeiling = "a".repeat(MAX_NAME_LENGTH);
+    const preview = previewInferredTerms([...LINKABLE_COLUMNS, atCeiling], "x");
+    expect(preview.disclosedPayloadColumns).toContain(atCeiling);
+    expect(preview.overlongDisclosedColumns).toEqual([]);
+  });
+
+  test("the ceiling counts UTF-16 code units, as the wire and record bounds do", () => {
+    // MAX_NAME_LENGTH astral characters: under the ceiling on a code-point count,
+    // over it on the count every carrying bound uses.
+    const astral = "\u{1D54F}".repeat(MAX_NAME_LENGTH);
+    expect([...astral].length).toBe(MAX_NAME_LENGTH);
+    const preview = previewInferredTerms([...LINKABLE_COLUMNS, astral], "x");
+    expect(preview.overlongDisclosedColumns).toEqual([6]);
   });
 
   test("a file with no matchable columns is unlinkable and names the missing fields", () => {

@@ -1,6 +1,7 @@
 import {
   assessLinkageSatisfiability,
   inferMetadata,
+  overlongDisclosedColumnPositions,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -294,9 +295,11 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  * predicate: no key can match (`satisfiableKeyCount === 0`), OR the marked columns
  * disagree with the payload set the invitation declares for this party
  * ({@link acceptorPayloadDeclarationConflict}) -- a pair the exchange refuses to run
- * on -- OR the metadata carries more than one identifier column, OR an authored
- * cleaning step is invalid/mid-edit, OR one of the step's own blocks. Partial
- * coverage does NOT gate -- it threads a warning instead.
+ * on -- OR a marked column's name is too long to carry
+ * ({@link acceptorOverlongDisclosedColumns}) -- a name the partner's parse refuses
+ * once the frame is already sent -- OR the metadata carries more than one identifier
+ * column, OR an authored cleaning step is invalid/mid-edit, OR one of the step's own
+ * blocks. Partial coverage does NOT gate -- it threads a warning instead.
  *
  * The gate and the explanation are ONE derivation rather than two that agree, so a
  * state that disables the button while telling a screen-reader operator nothing is
@@ -307,10 +310,10 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  *
  * The chain follows the step's own reading order, so the sentence names the topmost
  * unresolved surface and an operator working down the screen is sent to the first
- * thing they meet: the verdict, then the declaration conflict, then the grid's
- * identifier rule, then the cleaning steps, then the connection and file-handling
- * cards below them. Each names what to fix on this screen, in the words of the
- * notice it points at.
+ * thing they meet: the verdict, then the declaration conflict, then the over-long
+ * name notice, then the grid's identifier rule, then the cleaning steps, then the
+ * connection and file-handling cards below them. Each names what to fix on this
+ * screen, in the words of the notice it points at.
  */
 export function acceptorLaunchBlockedReason(
   verdict: AcceptorVerdictViewModel,
@@ -326,6 +329,14 @@ export function acceptorLaunchBlockedReason(
   );
   if (declarationConflict !== undefined)
     return declarationConflict.launchBlockedReason;
+  const overlong = acceptorOverlongDisclosedColumns(
+    invitationTerms,
+    editorState.metadata,
+  );
+  if (overlong.length > 0)
+    return overlong.length === 1
+      ? "Resolve the column name that is too long to send above before you can start."
+      : "Resolve the column names that are too long to send above before you can start.";
   if (hasMultipleIdentifiers(editorState.metadata))
     return "Choose a single record identifier column above before you can start.";
   if (!acceptorStandardizationValid(editorState.standardization))
@@ -381,6 +392,29 @@ export function acceptorLaunchPayload(
  * the run transmits on. */
 export function acceptorDisclosedColumns(metadata: Metadata): Array<string> {
   return disclosedColumnNames(metadata);
+}
+
+/**
+ * The 1-based positions of the marked columns whose name is too long to carry to
+ * the partner, gated on at launch and named in its own notice. Re-surfaces
+ * {@link overlongDisclosedColumnPositions}, the same predicate core's prepare-time
+ * refusal reads, so this screen refuses exactly the names the run would -- the
+ * acceptor's metadata is seeded by {@link inferMetadata} over its own header, which
+ * no schema bounds, so without this gate an oversized marked header would reach the
+ * partner's parse and be refused only after the frame was sent.
+ *
+ * Empty when the inviting party is entitled to no result: the payload step then
+ * transmits nothing whatever the operator marks, so there is no carried name to
+ * bound -- and a refusal here would contradict the panel beside it, which states
+ * that nothing is sent. The same gate {@link acceptorPayloadDeclarationConflict}
+ * applies to the empty declaration, and core's own refusal applies to this bound.
+ */
+export function acceptorOverlongDisclosedColumns(
+  invitationTerms: LinkageTerms,
+  metadata: Metadata,
+): Array<number> {
+  if (!invitationTerms.output.expectsOutput) return [];
+  return overlongDisclosedColumnPositions(metadata);
 }
 
 /**

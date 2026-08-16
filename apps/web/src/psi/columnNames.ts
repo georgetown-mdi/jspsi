@@ -1,3 +1,5 @@
+import { MAX_NAME_LENGTH } from "@psilink/core";
+
 /**
  * The 1-based positions of columns with an empty (zero-length) name, in column
  * order. Under PapaParse `header: true` a trailing comma, a blank cell, or a
@@ -44,5 +46,42 @@ export function unnameableColumnsAlert(positions: ReadonlyArray<number>): {
       `leading delimiter in the header row produces an unnamed column, which ` +
       `cannot be used for matching or sent to your partner. Fix the header row -- ` +
       `name the column${plural ? "s" : ""} or remove the empty field${plural ? "s" : ""} -- and choose the file again.`,
+  };
+}
+
+/**
+ * The operator-facing alert for a file marked to send a column whose name is
+ * longer than {@link MAX_NAME_LENGTH}, shared by every seat that gates on it -- the
+ * acceptor's confirm-columns notice, the inviter's create/save surfaces (rendered
+ * from an {@link InvitationFileError} `overlong` failure raised at the mint
+ * boundary), and the direct-exchange confirm screen -- so the wording cannot drift.
+ * `positions` are the 1-based column positions from core's
+ * `overlongDisclosedColumnPositions`; like {@link unnameableColumnsAlert}'s, they
+ * are not operator-controlled content and are surfaced directly, while the
+ * offending NAME never is (it is longer than the message that would carry it).
+ *
+ * Both remedies are named because the seats differ in which they offer: a seat
+ * with a disclosure control clears it by unmarking the column, one without it by
+ * shortening the header. Neither remedy is the file's rejection -- an oversized
+ * name still matches, identifies, and is ignorable.
+ */
+export function overlongColumnsAlert(positions: ReadonlyArray<number>): {
+  title: string;
+  message: string;
+} {
+  const plural = positions.length > 1;
+  return {
+    title: plural
+      ? "These column names are too long to send"
+      : "This column name is too long to send",
+    message:
+      `Column${plural ? "s" : ""} ${positions.join(", ")} in your CSV ` +
+      `${plural ? "are" : "is"} set to be sent to your partner, but ` +
+      `${plural ? "their names are" : "its name is"} longer than ` +
+      `${MAX_NAME_LENGTH} characters (a character outside the basic set, such as ` +
+      `an emoji, counts as two). A column's name travels with its values, and ` +
+      `your partner's copy of psilink refuses a name that long, so the exchange ` +
+      `cannot start. Shorten the header${plural ? "s" : ""} in your file, or set ` +
+      `${plural ? "those columns" : "that column"} so ${plural ? "they are" : "it is"} not sent.`,
   };
 }

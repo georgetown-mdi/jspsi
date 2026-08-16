@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
+  MAX_NAME_LENGTH,
   assertPayloadSendDisclosed,
   decodeInvitation,
   disclosedColumnNames,
@@ -327,6 +328,92 @@ describe("generateInvitation", () => {
       kind: "unnameable",
       positions: [5],
     });
+  });
+
+  // A name at the ceiling is legitimate and must mint; one code unit past it
+  // cannot be carried -- the payload frame and the exchange record both refuse it.
+  const AT_CEILING = "a".repeat(MAX_NAME_LENGTH);
+  const PAST_CEILING = AT_CEILING + "a";
+
+  /** A linkable CSV whose last column carries `name`, which the quick path infers
+   * as an `other` column and therefore sends. */
+  function csvSending(name: string): string {
+    return (
+      `ssn,first_name,last_name,dob,${name}\n` +
+      "123456789,Alice,Smith,1990-01-02,vip\n"
+    );
+  }
+
+  test("rejects a sent column name past the length ceiling as an overlong InvitationFileError", async () => {
+    // The mint boundary is where an oversized header is caught: the quick path
+    // infers metadata from the CSV, which no schema bounds, so without this the
+    // name reaches PayloadColumnSchema's .max at encode as a raw ZodError the UI
+    // flattens into its generic retry dead-end -- and the partner's parse would be
+    // the first real enforcement, after the frame was sent.
+    const error = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream(csvSending(PAST_CEILING)),
+      location,
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvitationFileError);
+    expect((error as InvitationFileError).failure).toEqual({
+      kind: "overlong",
+      positions: [5],
+    });
+  });
+
+  test("mints a sent column name exactly at the length ceiling", async () => {
+    const { encoded } = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream(csvSending(AT_CEILING)),
+      location,
+    });
+    const token = await decodeInvitation(encoded);
+    expect(token.disclosedPayloadColumns).toEqual([AT_CEILING]);
+  });
+
+  test("counts the ceiling in UTF-16 code units, as the wire and record bounds do", async () => {
+    // A name of MAX_NAME_LENGTH astral characters is under the ceiling on a
+    // code-point count (the count ColumnName's display cut uses) and over it on the
+    // count every carrying bound uses. The mint refuses it, so nothing this gate
+    // passes is refused later by the partner.
+    const astral = "\u{1D54F}".repeat(MAX_NAME_LENGTH);
+    expect([...astral].length).toBe(MAX_NAME_LENGTH);
+    expect(astral.length).toBe(MAX_NAME_LENGTH * 2);
+    const error = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream(csvSending(astral)),
+      location,
+    }).catch((e: unknown) => e);
+    expect((error as InvitationFileError).failure).toEqual({
+      kind: "overlong",
+      positions: [5],
+    });
+  });
+
+  test("mints an over-long column name the metadata does not send", async () => {
+    // The scope of the bound: an oversized header is fully usable for matching and
+    // ignoring, so only a name that is actually carried refuses the mint.
+    const metadata = inferMetadata([
+      "ssn",
+      "first_name",
+      "last_name",
+      "dob",
+      PAST_CEILING,
+    ]).map((column) =>
+      column.name === PAST_CEILING
+        ? { ...column, role: "ignored" as const, isPayload: false }
+        : column,
+    );
+    const { encoded } = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream(csvSending(PAST_CEILING)),
+      location,
+      linkageTerms: getDefaultLinkageTerms("Org", metadata),
+      metadata,
+    });
+    const token = await decodeInvitation(encoded);
+    expect(token.disclosedPayloadColumns).toEqual([]);
   });
 
   test("fails closed when authored terms over-declare payload.send at the mint", async () => {
