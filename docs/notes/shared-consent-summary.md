@@ -321,14 +321,112 @@ marker says only that the expansion is proposed, and a refusal claim there would
 the same error facing the other way.
 
 That the count-only caveat is a moving target is the reason it is pinned by a
-render test on both surfaces: when the count-only run path lands, both flip to the
-count-only disclosure statement together, as a deliberate edit rather than a silent
-divergence.
+render test on both surfaces: when the count-only run path lands the caveat goes
+from both of them, as a deliberate edit rather than a silent divergence. What each
+surface shows in its place is the count-only tier below -- whose gated facts the
+two render alike, and whose headline they place differently.
 
 The caveat copy is carried once, beside the classification, and rendered twice --
 for the same reason the classification is. Two surfaces authoring their own
 account of the same unimplemented setting is how they came to say opposite things
 about a proposed count-only exchange in the first place.
+
+## The count-only tier, authored behind the flag it waits on
+
+What that caveat gives way to is authored and wired already, behind the same
+`psiCApplied` the caveat reads. Both surfaces render the tier's facts where the
+summary says the run honors the algorithm, and the gate keeps every one of those
+sentences off both surfaces while the exchange refuses a `psi-c` invitation
+outright -- so landing the count-only run path flips the copy by flipping one
+flag, rather than by a copy edit made at the same time and hoped to match.
+
+The count-only disclosure statement itself is shared wording rather than a shared
+placement. The web screen carries it as the matching-method headline for any
+`psi-c` invitation, qualified in place by the refusal caveat directly beneath it;
+the CLI accept prompt names the algorithm there and prints the statement only
+where the flag says the run honors it. Each surface's render test pins both sides
+of the gate it holds: the caveat present and the five gated notes absent under a
+refused invitation (the web additionally pins the headline present there), the
+tier's own wording and placement measured with the flag moved.
+
+Count-only is the mildest disclosure psilink offers and it is not zero disclosure,
+which is why the tier is more than one replacement sentence. The intersection
+count is itself a disclosure; each party's record count rides the terms exchange;
+each round frame's element count says how well the key covers the dataset; and
+where both parties are entitled to the count, one of them holds a number it did
+not compute.
+
+### The bases are the specification's, not this display's
+
+[PROTOCOL.md](../spec/PROTOCOL.md#psi-c) assigns, per party, which halves of the
+count-only claim the run holds and which rest on the partner, in this display's own
+`enforced` / `trust-contingent` vocabulary. Each fact takes the row it belongs to
+rather than a judgment made here, so a row reclassified in the specification and
+not in the table is a divergence between what an implementation is specified to
+guarantee and what an acceptor is told it guarantees.
+
+- **What the run reveals** -- enforced. A party's own outcome is held by the
+  cleared reveal flag, and its view of what the partner receives by the wire
+  refusing a mismatched round; neither asks for the partner's cooperation.
+- **What the rounds still disclose** -- enforced. The record and element counts
+  above are disclosed however either party behaves, the same register as the
+  membership a non-receiving partner learns.
+- **How the count reaches a party that did not compute it** -- trust-contingent.
+  It arrives as the receiver's report, and psilink does not check it, exactly as
+  the `psi` association-table return leg does not.
+- **What a chosen input set defeats** -- trust-contingent. The claim protects a
+  party against a partner contributing a genuine dataset; a crafted or differenced
+  input set is accepted rather than prevented, so the protection rests on the
+  partner's conduct even where the round itself is enforced.
+
+The last of those is the one an acceptor could act on wrongly, so it is never
+separated from the guarantee it bounds: a reader who takes "only a number" for the
+safe option must not be able to reach that reading without meeting it. This is the
+same placement rule the not-applied caveats follow, applied to a caveat on an
+applied setting.
+
+### Why the payload sentence names the algorithm
+
+The outbound-send slot's existing sentence reasons from output entitlement -- the
+partner receives no result, so nothing is transmitted to it. Under `psi-c` that
+reasoning does not reach the fact: the algorithm carries no payload in either
+direction whichever party the terms entitle to the count, and the refusal of a
+terms document declaring one is fail-closed at three points
+([PROTOCOL.md](../spec/PROTOCOL.md#psi-c)). So the slot states the algorithm as
+the reason, and the sentence is a fact of the tier rather than a second reading of
+the entitlement one. Stating the refusal where the operator is deciding what
+leaves their machine is also where the specification puts it -- at the choice, not
+as a surprise once the run aborts.
+
+Each surface backs that sentence with a render-side refusal rather than printing
+it over a contradiction: an applied `psi-c` whose viewer-side outbound set carries
+a column, or whose invitation declares payload in either direction, throws instead
+of rendering the guarantee. Those throws are a backstop and not the remedy, which
+puts one item on the ungate checklist ahead of the flag: the count-only run path
+must refuse an input-metadata payload column and a payload-declaring `psi-c`
+document actionably, at accept and at parse, BEFORE `APPLIED_SETTINGS.psiC` flips,
+or an operator meets a raw render error where an actionable refusal belongs.
+
+The payload refusal is not the only one the tier's copy presupposes. Of the
+spec's remaining `psi-c` shape refusals, `deduplicate` already fails closed
+today (`assertDeduplicateImplemented`, at invite and in core's exchange
+boundary), but more than one linkage key and `linkage_strategy: single-pass`
+have no check anywhere -- and the round-disclosure note speaks of one key's
+exactly-once values while the result note denies any record-by-record pairing,
+both of which a multi-key or single-pass document would falsify. Those two
+refusals are owed at accept and at parse by the run-path item, ahead of the
+flag, on the same footing as the payload one; no render backstop for them
+exists on this branch, by decision rather than omission.
+
+That the CLI puts the whole tier in its twice-printed decision block, where it
+prints the algorithm and its caveat today, is the same judgment read from the
+other end: under `psi-c` what the run discloses IS the decision, so these are the
+facts an operator answering the prompt has to have in front of them rather than
+the terms they qualify. It costs length -- the block below carries a fixed budget
+of four lines plus the acceptor's own columns, and a count-only exchange adds its
+tier to that -- and the trade is taken here and not for the single-pass note,
+because these facts ARE what the count-only decision turns on rather than a
+qualification of a term the block already names.
 
 ## Alternatives weighed
 

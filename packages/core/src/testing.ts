@@ -4,6 +4,7 @@ import type { AssociationTable } from "./types";
 
 export {
   CONSENT_PROBE_TERMS,
+  COUNT_ONLY_PROBE_TERMS,
   LINKAGE_TERM_CONSENT_CLASSIFICATION,
   consentRepresentationProbes,
 } from "./linkageTermConsentCoverage.js";

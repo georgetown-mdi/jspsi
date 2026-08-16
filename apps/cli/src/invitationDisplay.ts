@@ -3,6 +3,7 @@ import logLibrary from "loglevel";
 import {
   CONSENT_BASIS_MARKERS,
   CONSENT_FACTS,
+  COUNT_ONLY_DISCLOSURE_STATEMENT,
   PROPOSED_NOT_APPLIED_NOTES,
   redactAndSanitizeForDisplay,
   summarizeInvitation,
@@ -295,6 +296,11 @@ function displayLinkageFields(
  * agreeing. Composing a separate summary here instead would reintroduce exactly
  * that gap.
  *
+ * A count-only exchange puts its whole disclosure tier in this block rather than in
+ * the body below, and that is the selection rather than an overflow: under `psi-c`
+ * what the run discloses IS the decision, so the facts an operator answering the
+ * prompt must have in front of them are the tier's, not the terms they qualify.
+ *
  * Every partner-controlled value keeps the treatment it has above -- preceded on
  * its own line by a fixed first-party label -- so none of them can begin a line or
  * manufacture one.
@@ -313,7 +319,49 @@ export function logDecisionFacts(
   // name what settles it, rather than assert a count. An empty set is a truthful
   // "(none)", not a presupposed non-empty disclosure.
   const outboundLabel = marked("columns you will send", "outboundSend");
-  if (!summary.inviterReceivesOutput)
+  const countOnlyApplied = summary.algorithm === "psi-c" && summary.psiCApplied;
+  // The count-only "(none)" below states a precondition of the algorithm rather than
+  // a set this renderer read: psi-c admits no payload in either direction, and a
+  // terms document or input metadata declaring one is refused where the terms are
+  // authored, at the local prepare step, and at the agreed-terms run boundary
+  // (docs/spec/PROTOCOL.md, PSI-C). This set is not the terms -- it is this party's
+  // OWN resolved metadata -- so the throw is the render-side backstop for the
+  // accept-path refusals the count-only run path must land, unreachable once they
+  // refuse ahead of it. Until then, printing "(none)" over a column would take the
+  // operator's consent to a disclosure that happens. The message states the fact and
+  // names no column.
+  if (countOnlyApplied && (ownOutboundSend?.length ?? 0) > 0)
+    throw new Error(
+      "count-only exchange resolved a non-empty outbound column set: a psi-c " +
+        "run carries no payload in either direction",
+    );
+  // The mirror of that check on what the INVITATION declares, which this prompt
+  // prints below as the received and requested column blocks: a psi-c document
+  // declaring a send or a receive asks for exactly the column movement the algorithm
+  // refuses, and the tier's no-payload sentence printed above a block listing the
+  // columns the inviting party requests from this one would state a guarantee the
+  // same prompt contradicts. The invitation is partner-controlled, so this side
+  // cannot assume the authoring refusal ran. Both directions, since the sentence
+  // covers both.
+  if (
+    countOnlyApplied &&
+    ((summary.payload?.send.length ?? 0) > 0 ||
+      (summary.payload?.receive.length ?? 0) > 0)
+  )
+    throw new Error(
+      "count-only terms declare a payload column: a psi-c run moves no " +
+        "payload in either direction",
+    );
+  if (countOnlyApplied) {
+    // The algorithm answers this slot ahead of the entitlement the other cases read:
+    // a count-only exchange carries no payload in either direction whoever receives
+    // the count, so the reason no column leaves is one the shared sentence states
+    // and OUTBOUND_SEND_NO_PAYLOAD cannot. The value stays the bare "(none)" the
+    // empty cases use, with the reason on its own line, so the sentence is read
+    // rather than restated in this outline's value shape.
+    emit(`  ${outboundLabel}: (none)`);
+    emit(`    ${CONSENT_FACTS.countOnlyNoPayload.note}`);
+  } else if (!summary.inviterReceivesOutput)
     emit(`  ${outboundLabel}: ${OUTBOUND_SEND_NO_PAYLOAD}`);
   else if (ownOutboundSend === undefined) {
     emit(`  ${outboundLabel}: ${OUTBOUND_SEND_FORWARD_REFERENCE.value}`);
@@ -334,12 +382,43 @@ export function logDecisionFacts(
   );
   emit(`    ${CONSENT_FACTS.invitingParty.note}`);
   emit(`  ${marked("PSI algorithm", "algorithm")}: ${summary.algorithm}`);
-  // A proposed count-only algorithm states a DISCLOSURE guarantee, so the caveat
-  // sits with the headline it contradicts rather than further down. Its wording is
-  // the shared one the web consent screen renders, so the two surfaces cannot say
-  // different things about what a psi-c invitation does here.
+  // A count-only algorithm states a DISCLOSURE guarantee, so what qualifies it sits
+  // with the headline it bears on rather than further down -- the caveat while the
+  // exchange refuses to run on those terms, and the tier's own facts once it does.
+  // Both are read from the shared table, and the gate is what the two surfaces hold
+  // in common: while the exchange refuses psi-c, not one of the five tier sentences
+  // is reachable on either of them. COUNT_ONLY_DISCLOSURE_STATEMENT is shared wording
+  // rather than a shared placement -- the web screen carries it as its matching-method
+  // headline for any psi-c invitation, qualified in place by the refusal caveat, where
+  // this prompt names the algorithm and prints the statement only once the run honors
+  // it.
   if (summary.algorithm === "psi-c" && !summary.psiCApplied)
     emit(`    ${PROPOSED_NOT_APPLIED_NOTES.psiC}`);
+  if (countOnlyApplied) {
+    emit(`    ${COUNT_ONLY_DISCLOSURE_STATEMENT}`);
+    emit(`    ${CONSENT_FACTS.countOnlyResult.note}`);
+    emit(
+      `  ${marked("what a count-only exchange still discloses", "countOnlyRoundDisclosures")}:`,
+    );
+    emit(`    ${CONSENT_FACTS.countOnlyRoundDisclosures.note}`);
+    // Only where both parties are entitled to the count does one of them hold a
+    // number it did not compute: where exactly one is entitled, that party is the
+    // receiver by the role rule and computes its own, so the line would name a
+    // report no run makes.
+    if (summary.inviterReceivesOutput && summary.inviterSharesResult) {
+      emit(
+        `  ${marked("how the count reaches each of you", "countOnlyReportedCount")}:`,
+      );
+      emit(`    ${CONSENT_FACTS.countOnlyReportedCount.note}`);
+    }
+    // Last of the tier and never omitted: it is the bound on the guarantee the
+    // headline states, and a reader who takes "only a number" for the safe option
+    // is the reader this line is for.
+    emit(
+      `  ${marked("what a count-only exchange does not bound", "countOnlyInputChoice")}:`,
+    );
+    emit(`    ${CONSENT_FACTS.countOnlyInputChoice.note}`);
+  }
 }
 
 /**

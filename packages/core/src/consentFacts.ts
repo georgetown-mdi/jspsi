@@ -17,6 +17,13 @@
 // partner's non-receipt, off the same `output` pair, rests on the partner's word).
 // `linkageTermConsentCoverage.ts` is the repo's precedent for the shape.
 //
+// One tier here states facts about a run no version conducts yet: the count-only
+// (`psi-c`) facts, which both surfaces render only where `psiCApplied` says the
+// exchange honors the algorithm. Their bases are the per-party learn-basis rows
+// of docs/spec/PROTOCOL.md's PSI-C section rather than a judgment made here, so
+// a row reclassified there and not here is a divergence between a specification
+// and the sentence an acceptor consents on.
+//
 // Rationale and the decisions taken: docs/notes/shared-consent-summary.md.
 
 /**
@@ -85,6 +92,92 @@ export const CONSENT_FACTS = {
     reason:
       "A mandatory-consistency term both parties adopt, asserted on every run " +
       "path: an algorithm this version does not implement aborts the exchange.",
+  },
+  countOnlyResult: {
+    basis: "enforced",
+    reason:
+      "The two halves docs/spec/PROTOCOL.md assigns to the run rather than to " +
+      "the partner. A party's own count-only outcome: its base function is " +
+      "constructed with the library's reveal-intersection flag cleared, and the " +
+      "operations returning the matched positions or the association table throw " +
+      "with it cleared, so its own software cannot produce a pairing. And its " +
+      "view of what the PARTNER receives: a request whose flag disagrees with " +
+      "the sender's is refused rather than served, in both orientations, so a " +
+      "round that completes at all is one both parties ran count-only. Neither " +
+      "half asks for the partner's cooperation or its honesty. What this basis " +
+      "does not reach is the partner's choice of contributed values, which is a " +
+      "fact of its own below.",
+    note:
+      "Enforced: neither party is handed a matched identifier or a " +
+      "record-by-record pairing -- a partner asking for a revealing round is " +
+      "refused rather than served, whatever software it runs.",
+  },
+  countOnlyRoundDisclosures: {
+    basis: "enforced",
+    reason:
+      "What a count-only run discloses beside the count, and it discloses both " +
+      "however either party behaves. Each party's raw record count rides the " +
+      "terms exchange that opens every exchange, and each party's round frame " +
+      "carries one encrypted element per value it contributes, which is its " +
+      "number of distinct, non-repeating values for the key being matched on. " +
+      "Neither figure is the intersection and the count-only mode hides " +
+      "neither, so this sits in the run's register rather than the partner's -- " +
+      "the same one as the membership a non-receiving partner learns.",
+    note:
+      "Your partner also learns how many records you hold, and how many values " +
+      "you contribute for the key being matched on -- the values that appear " +
+      "exactly once in your file. Neither number is your overlap, and a " +
+      "count-only exchange hides neither.",
+  },
+  countOnlyReportedCount: {
+    basis: "trust-contingent",
+    reason:
+      "Only the receiver computes the count. Where both parties are entitled to " +
+      "it the other party's copy arrives as the receiver's report, and psilink " +
+      "does not stop a receiver that reports a different number -- the same " +
+      "posture as the `psi` association-table return leg, where the sender's " +
+      "half of the pairing likewise arrives as the receiver's word. Which party " +
+      "computes follows from the record counts the run exchanges, so acceptance " +
+      "cannot tell either side which of the two it will be, and the fact is " +
+      "stated for both.",
+    note:
+      "Only one of you computes the count and sends it to the other; which one " +
+      "follows from the record counts you exchange when the run starts. psilink " +
+      "does not check a count it is sent against a run of its own.",
+  },
+  countOnlyInputChoice: {
+    basis: "trust-contingent",
+    reason:
+      "The count-only claim holds against a partner that contributes a genuine " +
+      "dataset, and psilink checks no such thing. A partner that chooses its " +
+      "contributed values -- one live candidate padded with values it knows this " +
+      "party cannot hold, or two runs differing in a single value -- reads that " +
+      "value's membership off the count, and nothing on the wire distinguishes a " +
+      "crafted set from a genuine one. Both routes are accepted rather than " +
+      "prevented, so the protection they bound rests on the partner's conduct " +
+      "even though the round itself is enforced. It bites hardest here: a " +
+      "count-only exchange is the one run before the agreement the " +
+      "honest-but-curious model leans on exists.",
+    note:
+      "Not enforced against your partner's choice of input: a count-only " +
+      "exchange bounds what psilink hands your partner, not what they can learn " +
+      "by choosing which records to ask about. A crafted list, or a second run " +
+      "differing by one record, turns a count into an answer about one person.",
+  },
+  countOnlyNoPayload: {
+    basis: "enforced",
+    reason:
+      "A count-only exchange carries no payload in either direction: a psi-c " +
+      "terms document declaring a non-empty payload send or receive, or input " +
+      "metadata that would transmit a column, is refused when the terms are " +
+      "authored, again at the local prepare step, and again at the agreed-terms " +
+      "run boundary, fail-closed at all three. The reason no column leaves the " +
+      "machine is therefore the algorithm rather than this exchange's output " +
+      "entitlements, which is what OUTBOUND_SEND_NO_PAYLOAD_SENTENCE reasons " +
+      "from and so cannot state here.",
+    note:
+      "A count-only exchange carries no data columns in either direction, so no " +
+      "columns are sent to your partner -- whatever your file contains.",
   },
   linkageStrategy: {
     basis: "enforced",
@@ -262,6 +355,32 @@ export const OUTBOUND_SEND_NO_PAYLOAD_SENTENCE =
   "to them -- whatever your file contains.";
 
 /**
+ * The disclosure statement a surface renders beside the algorithm for a
+ * count-only (`psi-c`) exchange: what such a run reveals, in one line.
+ *
+ * The headline of the count-only tier, whose remaining facts are the
+ * `countOnly*` entries of {@link CONSENT_FACTS} -- the enforced half this line
+ * states, what the rounds disclose beside the count, who takes whose word for
+ * the number, and the bound a partner's choice of input puts on all of it. Read
+ * from here by both surfaces so neither states the guarantee in words of its
+ * own; the count-only tier is exactly where a second account would cost most,
+ * since a reader takes "only a number" for the safe option.
+ *
+ * Shared wording, not a shared placement, and this line alone of the tier: the
+ * web consent screen renders it as its matching-method headline for ANY `psi-c`
+ * invitation, qualified in place by {@link PROPOSED_NOT_APPLIED_NOTES.psiC}
+ * while the exchange refuses to run on those terms, where the CLI accept prompt
+ * names the algorithm there and prints this line only where `psiCApplied` says
+ * the run honors it. The `countOnly*` facts have no such split -- both surfaces
+ * hold every one of them behind that same flag.
+ *
+ * Fixed first-party copy naming no value, so a surface may render it verbatim.
+ */
+export const COUNT_ONLY_DISCLOSURE_STATEMENT =
+  "Only the number of records you have in common is revealed, not which " +
+  "records match.";
+
+/**
  * The caveat copy for a term an inviter may declare that today's exchange does
  * not apply, keyed by the {@link APPLIED_SETTINGS} flag that gates it.
  *
@@ -276,10 +395,15 @@ export const OUTBOUND_SEND_NO_PAYLOAD_SENTENCE =
  * match, so its marker says only that the expansion is proposed, and claiming a
  * refusal there would be the same error in the other direction.
  *
- * Shared for the same reason the classification is. The count-only entry is a
- * moving target -- when the count-only run path lands, both surfaces flip to the
- * count-only disclosure statement together, which the render tests pinning it
- * make a deliberate edit.
+ * Shared for the same reason the classification is. The count-only entry is the
+ * one that moves: what it flips TO is authored already, as
+ * {@link COUNT_ONLY_DISCLOSURE_STATEMENT} and the `countOnly*` facts above. The
+ * facts are what both surfaces hold behind `psiCApplied`, so the flip is
+ * `APPLIED_SETTINGS.psiC` landing with the run path rather than a copy edit; the
+ * statement is shared wording each surface places for itself, and on the web
+ * consent screen it renders beside this very entry (see its own docblock). This
+ * entry is what the same change deletes; the render tests pinning both sides of
+ * the gate make that a deliberate edit on each surface.
  */
 export const PROPOSED_NOT_APPLIED_NOTES = {
   psiC:

@@ -202,6 +202,25 @@ export const CONSENT_PROBE_TERMS: LinkageTerms = {
 /**
  * @internal
  *
+ * {@link CONSENT_PROBE_TERMS} in the shape a count-only exchange accepts: the
+ * `psi-c` algorithm over the probe's single cascade key, with no payload in
+ * either direction and no deduplication, which is what
+ * docs/spec/PROTOCOL.md's PSI-C section admits.
+ *
+ * It is the `algorithm` entry's variant document below, exported so each
+ * surface's render test pins the count-only tier against the same terms the
+ * coverage probe measures it on -- the arrangement the psi-c caveat pins
+ * already use, one document read by both suites.
+ */
+export const COUNT_ONLY_PROBE_TERMS: LinkageTerms = {
+  ...CONSENT_PROBE_TERMS,
+  algorithm: "psi-c",
+  payload: { send: [], receive: [] },
+};
+
+/**
+ * @internal
+ *
  * Every field path the `LinkageTerms` declaration reaches, classified as one an
  * acceptor's consent turns on or one it does not. Keyed by the paths derived from
  * that declaration, with array and tuple indices collapsed to `[]`, so a field
@@ -246,7 +265,18 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     classification: "consent-relevant",
     reason:
       "Decides whether the exchange reveals the matched identifiers (`psi`) or " +
-      "only their count (`psi-c`).",
+      "only their count (`psi-c`) -- and with the count, each party's record " +
+      "count and the number of its records carrying the matched key, which the " +
+      "count-only tier states and a surface omitting the tier does not.",
+    // A count-only exchange accepts no payload in either direction, so the pair
+    // is built on a base declaring none: varied against the probe's own payload
+    // the psi-c side would be a document psi-c refuses, and what the surfaces
+    // were measured on would not be the count-only tier. Both sides carry the
+    // same empty pair, so they still differ at the algorithm alone.
+    prepare: (terms) =>
+      edited(terms, (draft) => {
+        draft.payload = { send: [], receive: [] };
+      }),
     vary: (terms) =>
       edited(terms, (draft) => {
         draft.algorithm = "psi-c";
