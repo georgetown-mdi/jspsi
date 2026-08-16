@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 //
-// List every item on a GitHub Projects v2 board with its triage fields, fully
-// paginated. Companion to fetch-issues.mjs (read one item by ID), list-epic.mjs
-// (this listing filtered to one Epic), and edit-issue.mjs (write).
+// List a GitHub Projects v2 board's items -- non-Done by default, everything
+// under --all -- with their triage fields, fully paginated. Companion to
+// fetch-issues.mjs (read one item by ID), list-epic.mjs (this listing filtered
+// to one Epic), and edit-issue.mjs (write).
 //
 // A board-hygiene pass needs the whole inventory in one round-trip: every item
 // with its numeric `?itemId=N` id, its `PVTI_` node id, status, Epic, and
@@ -84,7 +85,7 @@ export function parseArgs(argv) {
     return {
       ok: false,
       message:
-        "error: --all cannot be combined with --open or --status -- --all means no filter, so pass the statuses alone\n",
+        "error: --all cannot be combined with --open or --status -- pick one view: --all (everything), --status NAME (a subset), or no flag (non-Done, the default)\n",
     };
   }
   if (open && statuses.length > 0) {
