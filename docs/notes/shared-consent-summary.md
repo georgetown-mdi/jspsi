@@ -370,7 +370,7 @@ guarantee and what an acceptor is told it guarantees.
   refusing a mismatched round; neither asks for the partner's cooperation.
 - **What the rounds still disclose** -- enforced. The record and element counts
   above are disclosed however either party behaves, the same register as the
-  membership a non-receiving partner learns.
+  own-membership disclosure a one-sided `psi` exchange carries.
 - **How the count reaches a party that did not compute it** -- trust-contingent.
   It arrives as the receiver's report, and psilink does not check it, exactly as
   the `psi` association-table return leg does not.
@@ -427,6 +427,35 @@ of four lines plus the acceptor's own columns, and a count-only exchange adds it
 tier to that -- and the trade is taken here and not for the single-pass note,
 because these facts ARE what the count-only decision turns on rather than a
 qualification of a term the block already names.
+
+### Why the own-membership fact names the algorithm too
+
+The honest-helper membership fact is the same error facing the other way, and it
+is the one the tier does not merely qualify but contradicts. A one-sided `psi`
+exchange discloses to the non-receiving partner which of its own records the
+viewer also holds, however honestly that partner behaves, which is what puts the
+fact in the run's register and on both surfaces wherever the partner receives no
+result. A one-sided `psi-c` exchange discloses nothing of the kind: by the role
+rule the entitled party IS the receiver, so the non-receiving partner is the
+sender, and a count-only sender computes nothing from the round and is sent no
+count-report frame ([PROTOCOL.md](../spec/PROTOCOL.md#psi-c)). Stated there, the
+fact would tell an acceptor that a disclosure happens which the algorithm
+forecloses -- directly under a headline saying only the count is revealed.
+
+So the fact is scoped by the ALGORITHM and not by the linkage strategy: it holds
+for a one-sided `psi` exchange under both strategies and for no `psi-c` exchange
+at all. Both surfaces withhold it for ANY `psi-c` invitation rather than for an
+applied one, which is the difference from the tier's own five sentences. Those
+are gated on `psiCApplied` because they state what a count-only run holds, and
+while the exchange refuses those terms there is no such run to state anything
+about; this one is a claim about a disclosure, and a refused invitation makes no
+disclosure either. Gating it on the applied flag would put the claim back on both
+surfaces the moment `APPLIED_SETTINGS.psiC` flips -- the one moment there is a
+live count-only run for it to be wrong about -- so the gate that reads the
+algorithm alone is what makes the ungate a flag flip here as well. What a
+count-only run does disclose is the tier's to state, and it already does: the
+round disclosures beside the count, and the enforced half that hands neither
+party a pairing.
 
 ## Alternatives weighed
 

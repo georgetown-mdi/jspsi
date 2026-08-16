@@ -122,7 +122,8 @@ export const CONSENT_FACTS = {
       "number of distinct, non-repeating values for the key being matched on. " +
       "Neither figure is the intersection and the count-only mode hides " +
       "neither, so this sits in the run's register rather than the partner's -- " +
-      "the same one as the membership a non-receiving partner learns.",
+      "the same one as the own-membership disclosure a one-sided `psi` " +
+      "exchange carries.",
     note:
       "Your partner also learns how many records you hold, and how many values " +
       "you contribute for the key being matched on -- the values that appear " +
@@ -221,13 +222,22 @@ export const CONSENT_FACTS = {
   partnerLearnsOwnMembership: {
     basis: "enforced",
     reason:
-      "An intrinsic property of the match rather than a matter of conduct: a " +
-      "non-receiving partner learns its own records' membership however " +
-      "honestly it behaves. Bounded to that -- never which of the viewer's " +
-      "records they met, nor anything about the rest of the set beyond its size.",
+      "An intrinsic property of an identifier-revealing match rather than a " +
+      "matter of conduct: under `psi` a non-receiving partner learns its own " +
+      "records' membership however honestly it behaves. Bounded to that -- " +
+      "never which of the viewer's records they met, nor anything about the " +
+      "rest of the set beyond its size. Scoped by the ALGORITHM and not by the " +
+      "linkage strategy: it holds for a one-sided `psi` exchange under both " +
+      "strategies, and for no `psi-c` exchange at all, since the role rule " +
+      "makes the non-receiving party of a count-only run the sender -- which " +
+      "computes nothing from the round and is sent no count-report frame " +
+      "(docs/spec/PROTOCOL.md, PSI-C), so it learns no membership to state. " +
+      "Both surfaces therefore render this for `psi` alone, and what a " +
+      "count-only run does disclose is the `countOnly*` tier's to state.",
     note:
       "Even when honored, your partner learns which of its own records are in " +
-      "your data (not which of yours). This is inherent to the match, not a breach.",
+      "your data (not which of yours). This is inherent to a match that " +
+      "reveals identifiers, not a breach.",
   },
   duplicateMatches: {
     basis: "enforced",
