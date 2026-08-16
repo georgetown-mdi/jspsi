@@ -33,7 +33,7 @@ Read and edit drafts by numeric ID (the `?itemId=N` URL value) or a `PVTI_` node
 - `node .claude/scripts/fetch-issues.mjs <project> <itemId> ...` -- read; shows custom fields
 - `node .claude/scripts/edit-issue.mjs <project> <itemId> ...` -- edit status/title/body/fields
 - `node .claude/scripts/list-epic.mjs <project> "<Epic>"` -- list an epic's items by Order
-- `node .claude/scripts/list-issues.mjs <project>` -- list every item on a board, fully paginated; `--status NAME` filters, `--open` excludes Done, `--json` for a machine array -- a backlog or orchestration session should list with `--open` (or explicit `--status` filters) rather than pulling every Done row
+- `node .claude/scripts/list-issues.mjs <project>` -- list a board's non-Done items, fully paginated; `--all` includes Done, `--status NAME` filters, `--json` for a machine array, flags in any order -- a session choosing what to work on next should prefer the `shortlist-backlog` skill (one Sonnet agent returns a candidate shortlist) over reading listings and bodies itself
 
 Create a draft (the one board op still on `gh`): `gh project item-create <project> --owner georgetown-mdi --title "..." --body "..."`.
 

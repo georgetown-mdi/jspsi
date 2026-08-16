@@ -169,7 +169,7 @@ Before filing, list every item on the chosen project and skim for an existing
 task that already covers the work:
 
 ```sh
-node .claude/scripts/list-issues.mjs <PROJECT_NUMBER>
+node .claude/scripts/list-issues.mjs --all <PROJECT_NUMBER>
 ```
 
 This pages through the whole board with no silent truncation -- one line per
@@ -177,8 +177,9 @@ item with its numeric id, node id, status, Order, Epic, and
 title. A raw `gh project item-list --limit N` would instead cap at N and drop
 the rest without warning (board 9 already exceeds one 100-item page), and its
 JSON omits the numeric id and the custom fields. Add `--json` for a
-machine-readable array, or `--status Todo --status "In Progress"` to skip Done
-items. If the request straddles both boards, check both.
+machine-readable array. `--all` matters here: the default listing omits Done
+rows, and a Done item that already covers the work is exactly what this check
+is looking for. If the request straddles both boards, check both.
 When a specific item is referenced by its numeric ID (the `?itemId=N` value from
 the URL), fetch just that item with `node .claude/scripts/fetch-issues.mjs
 <PROJECT_NUMBER> <itemId>` instead of pulling the whole list.
@@ -252,7 +253,7 @@ for the duplicate check -- its Epic column already carries them, so take the
 distinct non-empty values, no extra round-trip:
 
 ```sh
-node .claude/scripts/list-issues.mjs --json 9   # the `epic` field on each item
+node .claude/scripts/list-issues.mjs --json --all 9   # the `epic` field on each item
 ```
 
 If one fits, create the draft with `--format json` to capture the new item's id

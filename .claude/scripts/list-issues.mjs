@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 //
-// List every item on a GitHub Projects v2 board with its triage fields, fully
-// paginated. Companion to fetch-issues.mjs (read one item by ID), list-epic.mjs
-// (this listing filtered to one Epic), and edit-issue.mjs (write).
+// List a GitHub Projects v2 board's items -- non-Done by default, everything
+// under --all -- with their triage fields, fully paginated. Companion to
+// fetch-issues.mjs (read one item by ID), list-epic.mjs (this listing filtered
+// to one Epic), and edit-issue.mjs (write).
 //
 // A board-hygiene pass needs the whole inventory in one round-trip: every item
 // with its numeric `?itemId=N` id, its `PVTI_` node id, status, Epic, and
@@ -14,94 +15,112 @@
 // exhausted, so no item is ever dropped.
 //
 // Usage:
-//   node list-issues.mjs [--json] [--status NAME]... <project-number>
-//   node list-issues.mjs [--json] --open <project-number>
+//   node list-issues.mjs [--json] [--all | --status NAME...] <project-number>
+//
+// Flags and the project number may appear in any order.
 //
 // Default output is human-readable: one tab-separated line per item with numeric
 // id, node id, status, [Order], Epic, and title, in board order.
 // --json emits a compact array of { id, nodeId, status, epic, order, title } for
 // programmatic consumers, consistent with fetch-issues.mjs and list-epic.mjs.
 //
-// With neither --status nor --open, every item is listed. Each --status NAME
-// (repeatable) keeps only items whose Status equals NAME (case-insensitive);
-// e.g. `--status Todo --status "In Progress"` is the common non-Done hygiene
-// view. --open is shorthand for "every item whose Status is not Done" -- the
-// cheap default for a backlog or orchestration session that does not need Done
-// rows -- and is rejected together with --status rather than combined; pass the
-// non-Done statuses you want explicitly instead.
+// By default every item whose Status is not Done is listed -- what a backlog or
+// orchestration session needs, without paying for the board's Done history.
+// --all lists every item including Done (the dedupe/hygiene view, where a Done
+// item covering the work is itself the answer). Each --status NAME (repeatable)
+// keeps only items whose Status equals NAME (case-insensitive); e.g.
+// `--status Done` reads the history the default omits. --all and --status are
+// rejected together: --all means "no filter", so pass the statuses alone.
+// --open (the historical name for the default) is still accepted.
 
 import { fileURLToPath } from "node:url";
 import { fetchAllItems } from "./lib/projectItems.mjs";
 
 const USAGE =
-  "Usage: node list-issues.mjs [--json] [--status NAME]... <project-number>\n" +
-  "       node list-issues.mjs [--json] --open <project-number>\n";
+  "Usage: node list-issues.mjs [--json] [--all | --status NAME...] <project-number>\n" +
+  "       (lists non-Done items by default; flags may appear in any order)\n";
 
 /**
- * Parse the leading option flags (--json, --status NAME repeatable, --open) plus
- * the trailing project-number positional. Returns { ok: true, asJson, open,
+ * Parse the option flags (--json, --all, --status NAME repeatable, --open) and
+ * the project-number positional, in any order. Returns { ok: true, asJson, all,
  * statuses, projectNumber } on success or { ok: false, message } (a
  * newline-terminated string ready to write straight to stderr) on any malformed
- * input, including --open combined with --status. Pure, so a test can drive it
+ * input, including contradictory filter flags. Pure, so a test can drive it
  * without touching argv or the network.
  */
 export function parseArgs(argv) {
   let asJson = false;
   let open = false;
+  let all = false;
   const statuses = [];
+  const positionals = [];
   let i = 0;
-  while (argv[i] !== undefined && argv[i].startsWith("--")) {
-    if (argv[i] === "--json") {
+  while (i < argv.length) {
+    const arg = argv[i];
+    if (arg === "--json") {
       asJson = true;
       i += 1;
-    } else if (argv[i] === "--open") {
+    } else if (arg === "--open") {
       open = true;
       i += 1;
-    } else if (argv[i] === "--status") {
+    } else if (arg === "--all") {
+      all = true;
+      i += 1;
+    } else if (arg === "--status") {
       const value = argv[i + 1];
       if (value === undefined) {
         return { ok: false, message: "error: --status requires a value\n" };
       }
       statuses.push(value.toLowerCase());
       i += 2;
+    } else if (arg.startsWith("--")) {
+      return { ok: false, message: USAGE };
     } else {
-      break;
+      positionals.push(arg);
+      i += 1;
     }
   }
-  const rest = argv.slice(i);
 
+  if (all && (open || statuses.length > 0)) {
+    return {
+      ok: false,
+      message:
+        "error: --all cannot be combined with --open or --status -- pick one view: --all (everything), --status NAME (a subset), or no flag (non-Done, the default)\n",
+    };
+  }
   if (open && statuses.length > 0) {
     return {
       ok: false,
       message:
-        "error: --open cannot be combined with --status -- list the non-Done statuses you want explicitly instead\n",
+        "error: --open cannot be combined with --status -- non-Done is already the default, so pass the statuses alone\n",
     };
   }
 
-  const projectNumber = Number(rest[0]);
-  if (!Number.isInteger(projectNumber) || rest.length !== 1) {
+  const projectNumber = Number(positionals[0]);
+  if (!Number.isInteger(projectNumber) || positionals.length !== 1) {
     return { ok: false, message: USAGE };
   }
 
-  return { ok: true, asJson, open, statuses, projectNumber };
+  return { ok: true, asJson, all, statuses, projectNumber };
 }
 
 /**
  * Filter mapped items ({ id, nodeId, status, epic, order, title }) by the parsed
- * --status / --open options. With neither given, every item passes. --open keeps
- * every item whose Status is not Done (case-insensitive), including one with no
+ * --status / --all options. --status keeps only matching Statuses
+ * (case-insensitive). --all passes every item through. The default keeps every
+ * item whose Status is not Done (case-insensitive), including one with no
  * Status at all. Pure, so a test can drive it with synthetic items.
  */
-export function filterItems(items, { statuses, open }) {
-  if (open) {
+export function filterItems(items, { statuses, all }) {
+  const wanted = new Set(statuses);
+  if (wanted.size > 0) {
     return items.filter(
-      (item) => item.status === null || item.status.toLowerCase() !== "done",
+      (item) => item.status !== null && wanted.has(item.status.toLowerCase()),
     );
   }
-  const wanted = new Set(statuses);
-  if (wanted.size === 0) return items;
+  if (all) return items;
   return items.filter(
-    (item) => item.status !== null && wanted.has(item.status.toLowerCase()),
+    (item) => item.status === null || item.status.toLowerCase() !== "done",
   );
 }
 
@@ -118,7 +137,7 @@ async function main() {
     process.stderr.write(parsed.message);
     process.exit(2);
   }
-  const { asJson, open, statuses, projectNumber } = parsed;
+  const { asJson, all, statuses, projectNumber } = parsed;
 
   const items = filterItems(
     (await fetchAllItems(projectNumber)).map((item) => ({
@@ -129,7 +148,7 @@ async function main() {
       order: item.fields["Order"],
       title: item.title,
     })),
-    { statuses, open },
+    { statuses, all },
   );
 
   if (asJson) {
@@ -140,11 +159,12 @@ async function main() {
   }
 
   if (items.length === 0) {
-    const filter = open
-      ? " matching --open (Status != Done)"
-      : statuses.length === 0
-        ? ""
-        : ` matching status ${[...new Set(statuses)].join(", ")}`;
+    const filter =
+      statuses.length > 0
+        ? ` matching status ${[...new Set(statuses)].join(", ")}`
+        : all
+          ? ""
+          : " with Status != Done (--all includes Done)";
     process.stdout.write(`no items on project ${projectNumber}${filter}\n`);
     return;
   }
