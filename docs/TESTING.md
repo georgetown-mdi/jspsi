@@ -7,7 +7,8 @@ title: "Testing Reference"
 The commands to run each suite are in
 [CONTRIBUTING.md](../CONTRIBUTING.md#testing). This document is the reference
 behind them: the integration-test backends and profiles, the console sentinel,
-the browser-suite plumbing, and the coverage rationale.
+the browser-suite plumbing, where shared test material lives, and the coverage
+rationale.
 
 ## Integration tests
 
@@ -185,6 +186,33 @@ against a cold optimizer cache: remove `apps/web/node_modules/.vite` first -- a
 warm cache passes even when the configuration is wrong. Inline vitest projects
 do not inherit the root `optimizeDeps`/`resolve` configuration; each project
 that needs it carries its own.
+
+## Shared test material
+
+A helper that only tests use lives in the test tree that uses it --
+`packages/core/test/utils/`, `apps/cli/test/`, `apps/web/test/utils/`. It may
+import anything the repository declares, root devDependencies (`typescript`)
+included, for as long as no workspace outside its own imports it.
+
+A helper that more than one workspace's test tree needs has one channel:
+`@psilink/core/testing`, whose subjects live in `packages/core/src`. Two
+properties constrain what may go there. Everything it holds is built into
+`dist/testing.*` and published with `@psilink/core`, so a fixture put there
+ships to consumers. And it cannot import a dependency `packages/core` does not
+declare in its own `dependencies`, so a helper needing a root devDependency
+cannot use it at all -- the core build fails rather than the import resolving.
+Reach for the channel only when a second workspace genuinely needs the helper,
+and keep it in its own test tree otherwise.
+
+There is deliberately no dedicated cross-workspace testkit package: reopen that
+question when a third piece of test-only material would move into
+`packages/core/src` purely for reach, when a helper two workspaces need must
+import a dependency `packages/core` does not declare, when the shipped
+`dist/testing.*` surface starts costing something a consumer or a review can
+name, or when `apps/cli` and `apps/web` grow a second copy of the same helper.
+The decision, the alternatives measured against it, and where each current
+`@psilink/core/testing` subject stands are in
+[cross-workspace-test-material.md](notes/cross-workspace-test-material.md).
 
 ## Verifying Windows owner-only file protections
 
