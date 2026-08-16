@@ -260,6 +260,21 @@ redirected standard input, which the suite holds as a case of its own. Nothing
 else is stubbed, and the `param()` block whose collision the run is there to
 catch is the real one.
 
+**What every stub above cannot reach is the image, and that is measured
+separately.** Each of these scripts delegates its checks to a capability of
+`vdorie/psi-link`, and a stub engine answers for the image whatever the image
+would really have said. `image_smoke.yaml`'s capability gate closes that: it
+derives the set from the scripts -- the psilink argument vectors they hand a
+container, and the helper scripts the `.cmd` pipes into a shell in it -- and runs
+each against a real image, once against the one the job just built and once a
+week against the published `vdorie/psi-link:latest` the setup script actually
+pulls. A helper's in-image tools are resolved by its own run rather than listed,
+and a call site added to any of these scripts fails
+`npm run check:image-capabilities` until something exercises it. What that leaves
+unmeasured is the same as everywhere else here: Windows, a real share, and the
+`.cmd` path's own batch flow around the helpers it pipes in. Detail:
+[docs/spec/CONTAINER_IMAGES.md](../../docs/spec/CONTAINER_IMAGES.md).
+
 Still unexecuted anywhere: the folder picker and its typed fallback, the DFS
 offer, the constrained-language branch, the credential prompt itself, and every
 path that needs a real engine or a real share. A first real-Windows pass should

@@ -41,6 +41,14 @@ on:
       - "package.json"
       # The FIPS leg runs both harnesses out of this directory.
       - "support/fips-probe/**"
+      # The file-drop setup and launcher scripts delegate every check they make
+      # to a capability of the image, and the capability step below exercises
+      # what they invoke against the image this job builds. The edit that can
+      # break that gate is a support-script edit, so it has to be inside the
+      # trigger; the two scripts beside it derive the set and drive the runs.
+      - "support/windows-network-filedrop/**"
+      - "scripts/derive-image-dependencies.mjs"
+      - "scripts/assert-image-capabilities.mjs"
       # Both legs run a real exchange over these two synthetic inputs, so a
       # change to their schema breaks it here rather than in a release build.
       - "test_data/**"
@@ -411,6 +419,29 @@ jobs:
       - name: Smoke the file-drop probe tooling
         run: docker run --rm --entrypoint sh ${{ matrix.tag }} -c 'command -v smbclient'
 
+      # Everything else those setup scripts ask of the image, read out of the
+      # scripts rather than listed beside them: the psilink argument vectors they
+      # hand a container, and the helper scripts they pipe into a shell in it.
+      # Each is exercised -- the vector is run and its verdict read back, the
+      # helper is piped in as the `.cmd` pipes it -- so the in-image tools a
+      # helper needs are resolved by the run rather than enumerated anywhere, and
+      # a derived dependency with nothing to exercise it fails the run.
+      #
+      # Against the image this job just built, which is the right subject for the
+      # launchers: they ship stamped with a release's manifest digest, so their
+      # image is locked to the commit they were built from and a script that
+      # outruns the source tree in the same pull request is caught here. It is
+      # the wrong subject for Setup-PsilinkFileDrop.ps1, which is fetched off the
+      # default branch on its own and runs the floating tag -- the published job
+      # below is that half.
+      #
+      # Scoped to the default image: it is the one published as
+      # `vdorie/psi-link`, the only one the scripts name, and the only one whose
+      # package closure their helper scripts were written against.
+      - name: Assert the built image answers what the setup scripts invoke
+        if: matrix.fips == 'false'
+        run: node scripts/assert-image-capabilities.mjs ${{ matrix.tag }}
+
       # The variant's entrypoint preamble runs the engagement probe and reports
       # the host kernel's FIPS mode on every run. An operator's only cheap
       # window into what their deployment is actually running, so a preamble
@@ -707,3 +738,56 @@ jobs:
           && steps.vulnerability_scan.outcome != 'skipped'
           && steps.image_scan_upload.outcome != 'success' }}
         run: cat trivy-image.sarif
+
+  # The other half of the capability gate, and the only one that observes what an
+  # operator's setup run really reaches. Setup-PsilinkFileDrop.ps1 is fetched off
+  # the default branch on its own and runs the floating `vdorie/psi-link:latest`,
+  # which is published only from a version tag: nothing locks the script to any
+  # image, so a capability can be on the default branch and absent from the tag
+  # the script pulls for as long as no release has been cut.
+  #
+  # Deliberately off the pull-request trigger, and therefore never a merge gate:
+  # the remedy for the commonest red here is a release, which is the maintainer's
+  # to cut and no reason to hold a merge. It shares the weekly schedule with the
+  # vulnerability scan above, which re-runs against a moving world for the same
+  # reason -- the subject changes with nothing in this repository changing.
+  published_image:
+    name: Assert the published image answers what the setup scripts invoke
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # The pull is separate from the assertion so a registry that could not be
+      # reached is not read as a capability the image does not carry. The step
+      # after it prints the digest the tag resolved to, which is the only thing a
+      # green run here may be read as a claim about: the tag moves.
+      - name: Pull the published image
+        run: docker pull vdorie/psi-link:latest
+
+      - name: Assert the published image answers what the setup scripts invoke
+        id: published_capabilities
+        run: node scripts/assert-image-capabilities.mjs vdorie/psi-link:latest
+
+      - name: Say what an unanswered dependency here means
+        if: failure() && steps.published_capabilities.outcome == 'failure'
+        run: |
+          {
+            echo "## The published image did not answer every dependency"
+            echo
+            echo "The step above ran against \`vdorie/psi-link:latest\`, which is"
+            echo "published only from a version tag. A gap has two readings and the"
+            echo "log does not distinguish them:"
+            echo
+            echo "- a support script asks the image for something no build of it"
+            echo "  provides, which is a defect in the script or in the image; or"
+            echo "- the capability is on the default branch and no release has been"
+            echo "  cut since, so the published tag has not caught up yet."
+            echo
+            echo "The second is the reading to check first, and cutting a release is"
+            echo "its remedy (docs/RELEASES.md). This leg runs on the schedule and on"
+            echo "demand only, never on a pull request, so it gates no merge either way."
+          } >> "$GITHUB_STEP_SUMMARY"

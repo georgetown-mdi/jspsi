@@ -475,6 +475,60 @@ either kind -- a sentinel awaiting its first measurement, or an inventory that
 has drifted -- skips no step that matters more, the variant's provider
 assertions and its end-to-end exchange among them.
 
+## What the shipped setup scripts ask of the image
+
+The Windows and POSIX file-drop scripts in `support/windows-network-filedrop/`
+delegate every check they make to a capability of the image: they hand a
+container a psilink argument vector, or they pipe one of their helper scripts
+into a shell in it and depend on the tools that shell resolves. That is a
+contract between two things nothing else in the repository connects, so
+`image_smoke.yaml` exercises it on both sides of publication.
+
+**The set is derived, not listed.** `scripts/derive-image-dependencies.mjs`
+reads it out of the scripts: an argument vector is a run of literal tokens
+beginning with a word the image's own dispatchers answer to -- the words
+`docker-entrypoint.sh` routes on, and the commands `apps/cli/src/cliParser.ts`
+registers -- on a line that also names the image or an argument-vector
+parameter; a helper script is one `cmd_Setup-PsilinkFileDrop.cmd` redirects into
+a shell in the image, with the environment and mounts that call site gives it. A
+call site added to a script changes the derived set, and a derived dependency
+with nothing to exercise it fails `npm run check:image-capabilities`, which
+`static_checks.yaml` runs on every pull request whatever it touched.
+
+**Each is exercised rather than matched.** `scripts/assert-image-capabilities.mjs`
+runs the argument vector and reads back the machine-readable verdict, and pipes
+each helper script in as the `.cmd` pipes it -- so a helper's in-image tools are
+resolved by the run and are enumerated nowhere. Two fixtures decide whether a red
+result is about the image at all, and the script sets up both: a rendezvous
+directory the account the image runs as can write, because a fresh named volume
+belongs to root and the default image runs as uid 1000, and a stub peer that
+accepts and drops each connection on port 445, because both probe paths stop at
+their reachability check when nothing answers and leave `smbclient` unreached.
+
+**What a run may claim is bounded by what it treats as evidence.** A doctor
+battery that refuses its input exits 64 having run no check, and an image whose
+CLI carries no `doctor` command answers the same way, so 64 proves nothing; 69 is
+a dependency the battery could not reach and fails the gate. The evidence is the
+verdict document, whose `version` must be the one the shipped launchers read and
+stop past.
+
+**Two legs, asserting different things.** The build-time leg runs against the
+image the job just built. That is the right subject for `Start-Psilink.ps1` and
+`start-psilink.sh`, which ship stamped with a release's manifest digest and are
+therefore locked to the commit they were built from, and it catches a support
+script that outran the source tree in the same pull request. It is the wrong
+subject for `Setup-PsilinkFileDrop.ps1`, which is fetched on its own and runs the
+floating tag, so a second leg runs against `vdorie/psi-link:latest` on the weekly
+schedule and on demand. That leg is deliberately not a merge gate: the commonest
+reading of a gap there is that the capability is on the default branch and no
+release has been cut since, whose remedy is a release rather than a held merge.
+Both legs print the digest the reference resolved to rather than the reference
+they asked for, because the floating tag moves.
+
+Both legs are scoped to the default image. It is the one published as
+`vdorie/psi-link`, the only one the scripts name, and the only one whose package
+closure their helper scripts were written against.
+
 ## Measured inventories
 
 > **Non-normative.** What follows measures images that were built, kept as the
