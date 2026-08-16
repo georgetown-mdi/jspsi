@@ -2119,6 +2119,51 @@ test("the psi-c caveat states the refusal, on both surfaces, from one terms docu
   expect(shaped).not.toContain(COUNT_ONLY_STATEMENT);
 });
 
+test("a one-sided count-only invitation states no honest-helper membership disclosure", () => {
+  // The membership fact is scoped by the ALGORITHM, so it is withheld from a psi-c
+  // invitation through the real APPLIED_SETTINGS.psiC as well as behind a forced one
+  // (acceptCountOnlyMembership.test.ts holds that half): a run the exchange refuses
+  // discloses nothing either, and a claim gated on the applied flag would return the
+  // moment the flag flips. The web consent screen pins the same pair.
+  const log = getLogger("accept-display-count-only-membership-test");
+  log.setLevel("silent");
+  const partnerWithheld: LinkageTerms["output"] = {
+    expectsOutput: false,
+    shareWithPartner: true,
+  };
+  const countOnly = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    linkageTerms: { ...COUNT_ONLY_PROBE_TERMS, output: partnerWithheld },
+  });
+  expect(countOnly).toContain("does not yet apply it");
+  expect(countOnly).not.toContain("what your partner learns either way");
+  expect(countOnly).not.toContain(
+    CONSENT_FACTS.partnerLearnsOwnMembership.note,
+  );
+  // Not the whole block going missing: the line the membership fact sits beneath is
+  // still stated, on the register it belongs to.
+  expect(countOnly).toContain(
+    "  the inviting party will receive the result (your partner's word): no",
+  );
+  // Non-vacuous the other way: the same one-sided pair under `psi` -- the algorithm
+  // the fact is true of -- carries it in full, so the absence above is the
+  // algorithm's doing and not the output pair's.
+  const revealing = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    linkageTerms: {
+      ...CONSENT_PROBE_TERMS,
+      output: partnerWithheld,
+      payload: { ...CONSENT_PROBE_TERMS.payload, receive: [] },
+    },
+  });
+  expect(revealing).toContain(
+    "  what your partner learns either way (enforced):",
+  );
+  expect(revealing).toContain(
+    `    ${CONSENT_FACTS.partnerLearnsOwnMembership.note}`,
+  );
+});
+
 test("an applied count-only exchange states its disclosure tier on the register the protocol assigns each half", () => {
   // What the psi-c caveat above flips to. Each line's marker is the one
   // docs/spec/PROTOCOL.md's PSI-C section assigns that row: a party's own

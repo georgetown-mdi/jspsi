@@ -527,7 +527,16 @@ export function displayInvitation(params: {
   // above rather than folded under it: that caveat is about a partner that does not
   // honor the terms, while this holds however honestly the partner behaves -- so it
   // is a fact of its own, and carries the opposite basis.
-  if (!summary.inviterReceivesOutput) {
+  //
+  // Gated on the algorithm, because that is what decides whether the disclosure
+  // happens at all: by the role rule the non-receiving party of a count-only run is
+  // the SENDER, which computes nothing from the round and is sent no count-report
+  // frame (docs/spec/PROTOCOL.md, PSI-C), so it learns no membership of its own
+  // records. Withheld for ANY psi-c invitation rather than for an applied one alone
+  // -- while the exchange refuses those terms no run happens to disclose anything
+  // either -- so the claim cannot return when APPLIED_SETTINGS.psiC flips. What a
+  // count-only run does disclose is the tier logDecisionFacts prints above.
+  if (!summary.inviterReceivesOutput && summary.algorithm !== "psi-c") {
     emit(
       `  ${marked("what your partner learns either way", "partnerLearnsOwnMembership")}:`,
     );

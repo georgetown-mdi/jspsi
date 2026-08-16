@@ -188,6 +188,33 @@ describe("InvitationTerms: the count-only tier a run that honors psi-c renders",
     );
   });
 
+  test("tells no operator that a partner receiving no count learns its own records' membership", async () => {
+    // The honest-helper membership fact is true of a one-sided `psi` exchange and
+    // false here: by the role rule the entitled party IS the receiver, so the
+    // partner receiving no count is the SENDER, which computes nothing from the
+    // round and is sent no count-report frame (docs/spec/PROTOCOL.md, PSI-C).
+    // Measured with the flag forced on, which is the state the ungate produces --
+    // the moment the refusal caveat that blunts the claim today is gone and a live
+    // count-only run is what the screen describes.
+    renderCountOnly({
+      output: { expectsOutput: false, shareWithPartner: true },
+    });
+    await expect
+      .element(tier("What the exchange produces"))
+      .toBeInTheDocument();
+    const produces = tier("What the exchange produces").element().textContent;
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.partnerLearnsOwnMembership.note,
+    );
+    // Not the whole branch going missing: the cooperative caveat the membership
+    // sentence renders beside is still stated.
+    expect(produces).toContain(CONSENT_FACTS.partnerReceivesNoResult.note);
+    // And what a count-only round DOES disclose is stated in its place, from the
+    // tier rather than from a softened version of the claim.
+    expect(produces).toContain(CONSENT_FACTS.countOnlyResult.note);
+    expect(produces).toContain(CONSENT_FACTS.countOnlyRoundDisclosures.note);
+  });
+
   test("refuses a viewer's non-empty outbound set rather than state no columns are sent over it", async () => {
     // The slot states a precondition of the algorithm -- psi-c refuses payload in
     // either direction when the terms are authored, at the local prepare step, and

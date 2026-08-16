@@ -800,6 +800,32 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
       .toHaveTextContent("learns which of its own records are in your data");
   });
 
+  test("a one-sided count-only invitation states no membership disclosure", async () => {
+    // The membership fact is scoped by the ALGORITHM: by the role rule a count-only
+    // run's non-receiving party is the SENDER, which computes nothing from the round
+    // and is sent no count-report frame (docs/spec/PROTOCOL.md, PSI-C). The same
+    // output pair as the test above, so the difference measured is the algorithm's
+    // alone. Withheld for ANY psi-c invitation rather than for an applied one --
+    // invitationTermsCountOnly.test.ts holds the other side of that flag -- so the
+    // claim cannot return when APPLIED_SETTINGS.psiC flips.
+    renderTerms({
+      ...COUNT_ONLY_PROBE_TERMS,
+      output: { expectsOutput: false, shareWithPartner: true },
+    });
+    await expect.element(page.getByText("Result sharing")).toBeInTheDocument();
+    // The screen states the count-only headline for any psi-c invitation, so the
+    // membership line would contradict it in the same tier.
+    expect(app.container.textContent).toContain(
+      "Only the number of records you have in common is revealed",
+    );
+    expect(app.container.textContent).not.toContain(
+      "learns which of its own records are in your data",
+    );
+    // Not the whole branch going missing: the cooperative caveat the membership line
+    // sits beneath is still rendered.
+    expect(app.container.textContent).toContain("By agreement, not enforced");
+  });
+
   test("the inviter's own preview frames the outcome for the proposer", async () => {
     // proposing: the viewer IS the inviter, so "you" is the inviter and "your
     // partner" the acceptor. inviter-only here: the inviter receives, the partner
