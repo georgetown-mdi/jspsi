@@ -297,9 +297,12 @@ first; upstream ships a TURN loopback example as a starting point.
 
 ## Supply chain and the vendoring fallback
 
-The posture is the fork-and-pin one the project already takes for
-`@openmined/psi.js`: depend on the published package at an exact pin, keep
-vendoring prepared, and do not vendor speculatively.
+The posture: depend on the published package at an exact pin, keep vendoring
+prepared, and do not vendor speculatively. Vendoring is a practiced fallback
+here rather than a novel one -- the project already maintains
+`@openmined/psi.js` as a fully vendored fork -- but werift starts one step
+earlier on that road: psi.js needed local patches from day one, while werift
+has no known defect that a pin does not cover.
 
 What a werift-only install carries: 43 packages, 26 MB on disk, no
 `preinstall`/`install`/`postinstall` script anywhere in the tree, and no `.node`,
