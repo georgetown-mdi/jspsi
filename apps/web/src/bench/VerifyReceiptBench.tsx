@@ -361,7 +361,9 @@ export function VerifyReceiptBench() {
   // rendered is derived from an input the page no longer holds. Both verdicts
   // go on any edit: the record verdict's standing note points at the signed
   // panel beside it, so it must not outlive the panel a signed-leg edit
-  // removes. The bump supersedes any run already in flight.
+  // removes. The bump supersedes any run already in flight; the async
+  // handlers bump again after their state writes land, so a run captured
+  // between a handler's first bump and its awaited parse is superseded too.
   function invalidateVerdicts() {
     runToken.current += 1;
     setVerdict(undefined);
@@ -397,6 +399,7 @@ export function VerifyReceiptBench() {
     if (parsed.kind === "ok")
       setRecord({ file: chosen, record: parsed.record });
     else setRecord({ file: chosen, alert: parsed.message });
+    invalidateVerdicts();
   }
 
   async function onKeysFile(file: File) {
@@ -406,6 +409,7 @@ export function VerifyReceiptBench() {
     const chosen = { name: file.name };
     if (parsed.kind === "ok") setKeys({ file: chosen, keys: parsed.keys });
     else setKeys({ file: chosen, alert: parsed.message });
+    invalidateVerdicts();
   }
 
   async function onSignedRecordFile(file: File) {
@@ -415,6 +419,7 @@ export function VerifyReceiptBench() {
     if (parsed.kind === "ok")
       setSignedRecord({ file: chosen, record: parsed.record });
     else setSignedRecord({ file: chosen, alert: parsed.message });
+    invalidateVerdicts();
   }
 
   async function onCertificateFile(file: File) {
@@ -424,6 +429,7 @@ export function VerifyReceiptBench() {
     if (parsed.kind === "ok")
       setCertificate({ file: chosen, fingerprint: parsed.fingerprint });
     else setCertificate({ file: chosen, alert: parsed.message });
+    invalidateVerdicts();
   }
 
   function onPinnedFingerprint(value: string) {
@@ -545,10 +551,10 @@ export function VerifyReceiptBench() {
       <p className={`${styles.small} ${styles.sub}`}>
         Check that an exchange record you kept is internally consistent: its
         commitments open against the files you re-supply, and its agreed-terms
-        hash re-derives. If the exchange was signed, check its dual-signed
-        record too: both parties&apos; signatures, and what anchors each
-        certificate outside the record. This is read-only and runs entirely in
-        your browser -- nothing is uploaded.
+        hash re-derives. If the exchange was signed, check a dual-signed record
+        too: both parties&apos; signatures, and what anchors each certificate
+        outside the record. This is read-only and runs entirely in your browser
+        -- nothing is uploaded.
       </p>
 
       <Stack gap="lg" mt="md">
