@@ -1,7 +1,7 @@
 ---
 title: "PSI-Link Security Design"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-13"
+last_reviewed: "2026-08-15"
 ---
 
 # PSI-Link security
@@ -39,7 +39,7 @@ Private set intersection (PSI) is the primitive the privacy guarantee rests on. 
 
 The intuition is a layered, order-independent ("commutative") encryption. Each party holds an ephemeral key, generated for the exchange and never shared. Each side encrypts its own linkage keys under its own key, and the protocol applies the other party's key as a second layer, so a record is only ever seen by the other party in a form that party cannot decrypt. Because the scheme is commutative, two values that started equal stay equal once both keys are applied, which lets the parties recognize shared records by comparing encrypted forms alone. Neither side can strip the other's key to recover a plaintext value, and records outside the intersection are never revealed.
 
-PSI-Link uses a lightly modified build of OpenMined's [PSI](https://github.com/OpenMined/PSI), which layers over Google's Private Join and Compute. The base function runs repeatedly over a sequence of linkage keys to build the association map between matched records. A cardinality-only variant, PSI-C, reveals the size of the overlap without revealing which members are shared; it is designed but not yet implemented.
+PSI-Link uses a lightly modified build of OpenMined's [PSI](https://github.com/OpenMined/PSI), which layers over Google's Private Join and Compute. The base function runs repeatedly over a sequence of linkage keys to build the association map between matched records. A cardinality-only variant, PSI-C, reports the size of the overlap and no identifier; it is specified but not yet implemented, and what that claim covers is scoped under [Count-only exchanges and the pre-agreement premise](#count-only-exchanges-and-the-pre-agreement-premise) below.
 
 Two properties of the primitive are not hidden, and both matter for the threat model that follows:
 
@@ -63,6 +63,14 @@ One further property follows from how PSI roles are assigned. When both parties 
 Its effect is bounded. Single-pass is a strategy both parties agree to before any data is exchanged, and that agreement consents to its disclosure, so the manipulation only shifts which consenting party bears the sender-side disclosure, never whether it happens. A both-output cascade has no such asymmetry, and a one-sided-output exchange is unaffected because the receiver is fixed by entitlement. It is also not cheaply checkable: the manipulator becomes the receiver, whose true row count never appears in verifiable form (its traffic exposes only its distinct-value union), so the partner's only consistency bound is loose. Preventing it would mean discarding the work-minimizing role assignment or making single-pass disclosure symmetric, both of which cost more than a bounded shift in who bears an already-consented disclosure.
 
 When public services facilitate scheduled exchanges, some metadata is leaked, such as who is conducting the exchange and when. Parties are encouraged to stand up their own services where necessary.
+
+### Count-only exchanges and the pre-agreement premise
+
+The count-only algorithm (PSI-C) reports the size of the overlap and no identifier. Two qualifications belong in the threat model rather than in the algorithm's description.
+
+**The property is bounded by the honest-but-curious model, and the bound is cheap to reach.** A party that receives the count also chooses what goes into its own side of the exchange. A set built as one live candidate padded with values the partner cannot hold turns the count into a yes-or-no answer about that candidate, and two runs whose sets differ in one value do the same by subtraction. Nothing on the wire distinguishes a crafted set from a genuine one. This tampers with an input rather than only observing one, so it sits a step beyond honest-but-curious -- the same category as the record-count manipulation above -- and it is accepted rather than prevented: preventing it would mean binding a party's contributed set to a dataset it cannot choose per run, which the protocol does not do. The mechanism, and what each party may and may not claim as a result, are specified in [PROTOCOL.md](spec/PROTOCOL.md#threat-model-scope-of-the-count-only-claim).
+
+**PSI-C runs before the agreement this model assumes.** It is the algorithm used to establish the business case for a data-sharing agreement, so it runs where the premise this section opens with -- partner agencies operating under signed agreements -- is weakest. Weigh a count-only exchange as a disclosure in its own right, against the partner's incentives as they stand at that point, rather than as a free look preceding the decision that matters.
 
 ### Configuration-file trust boundary
 
