@@ -2791,16 +2791,22 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // firewall closing the connection in front of the server all as the same
   // `Connection lost before handshake`, which reads exactly like an unreachable
   // host; the diagnosis names what answered. See ./sftpPeerIdentification, which
-  // owns the gate, the read, and the copy -- consumed here rather than restated,
-  // so the dial paths and the host-key probe cannot disagree about one rejection.
+  // owns the gate, the read, and the copy.
   //
-  // Seated in connectLocked because that is the one path to ssh2's connect: the
-  // first dial, the connection-per-poll cycle-start re-dial, the recovery re-dial
-  // and the teardown's all reach it here rather than at four call sites. It
-  // therefore runs inside the session transition the dial holds, adding the read
-  // budget -- 2 s, clamped to the connect's own -- to a dial that has already
-  // failed, which is a fifth of what a transition waiting behind it is allowed to
-  // wait (TRANSITION_ACQUIRE_TIMEOUT_MS) and is spent once for the connection.
+  // Seated in connectLocked because that is the one path to ssh2's connect, and
+  // it is the ONLY layer that diagnoses: the first dial, the connection-per-poll
+  // cycle-start re-dial, the recovery re-dial, the teardown's, and core's
+  // credential-free host-key probe -- which dials this adapter as its raw client
+  // -- all reach it here. A wrapper around one of those callers would diagnose a
+  // rejection this has already diagnosed, opening a second read of the same peer
+  // (the gate walks the cause chain, so the buried rejection still matches);
+  // the probe's two entry points therefore add no diagnosis of their own, and
+  // the read count per diagnosed failure is a check in
+  // test/integration/dialPeerIdentification.test.ts. It runs inside the session
+  // transition the dial holds, adding the read budget -- 2 s, clamped to the
+  // connect's own -- to a dial that has already failed, which is a fifth of what
+  // a transition waiting behind it is allowed to wait
+  // (TRANSITION_ACQUIRE_TIMEOUT_MS) and is spent once for the connection.
   //
   // Four conditions have to hold before the read is opened, and each is a check
   // rather than a note because each is a way this could be wrong:

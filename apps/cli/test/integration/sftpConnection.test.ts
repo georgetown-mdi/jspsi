@@ -14,7 +14,6 @@ import {
 import type { SFTPConnectionConfig } from "@psilink/core";
 import Ssh2SftpClient from "ssh2-sftp-client";
 
-import { withPeerIdentificationDiagnosis } from "../../src/connection/sftpPeerIdentification";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { selectedBackend } from "../sftpServer";
 import {
@@ -774,8 +773,10 @@ test("probeHostKeyFingerprint returns the server's real fingerprint without auth
 
 test("the peer-identification diagnosis leaves a real SSH server's probe alone", async () => {
   // The control for the non-SSH peers the unit suite drives with bare listeners:
-  // the wrapper both probe entry points run their probe through, against a
-  // server that really does speak SSH, returns the fingerprint and adds nothing.
+  // the probe dials through the adapter that diagnoses every dial, and against a
+  // server that really does speak SSH it returns the fingerprint and adds
+  // nothing -- the deliberate verify(false) refusal the probe rests on is not
+  // read as a peer that failed to identify itself.
   const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
     verbose: -1,
     pollingFrequency: 10,
@@ -788,9 +789,7 @@ test("the peer-identification diagnosis leaves a real SSH server's probe alone",
       username: srv.usera.username,
     },
   };
-  const presented = await withPeerIdentificationDiagnosis(config, () =>
-    conn.probeHostKeyFingerprint(config),
-  );
+  const presented = await conn.probeHostKeyFingerprint(config);
   expect(presented.fingerprint).toBe(srv.hostKeyFingerprint);
 });
 

@@ -9,7 +9,6 @@ import {
 import type { PresentedHostKey, SFTPConnectionConfig } from "@psilink/core";
 
 import { channelFromURL } from "../connectionFromUrl";
-import { withPeerIdentificationDiagnosis } from "../connection/sftpPeerIdentification";
 import { SSH2SFTPClientAdapter } from "../connection/ssh2SftpAdapter";
 import {
   decodeUrlComponent,
@@ -49,12 +48,13 @@ export interface ProbeHostKeyDeps {
 }
 
 const REAL_DEPS: ProbeHostKeyDeps = {
+  // A dial that dies before the peer identifies itself as an SSH server is
+  // diagnosed by the adapter this probe dials through, which is the single point
+  // every dial passes -- see connection/sftpPeerIdentification.
   probe: (config, verbosity) =>
-    withPeerIdentificationDiagnosis(config, () =>
-      new FileSyncConnection(new SSH2SFTPClientAdapter({ verbosity }), {
-        verbose: verbosity,
-      }).probeHostKeyFingerprint(config),
-    ),
+    new FileSyncConnection(new SSH2SFTPClientAdapter({ verbosity }), {
+      verbose: verbosity,
+    }).probeHostKeyFingerprint(config),
 };
 
 export function builder(cmd: Argv): Argv {

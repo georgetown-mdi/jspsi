@@ -6,7 +6,9 @@ import { FileSyncConnection, sanitizeErrorForDisplay } from "@psilink/core";
 import type { SFTPConnectionConfig } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
+import { probeHostKeyLines } from "../../src/commands/probeHostKey";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
+import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 import {
   ensureNamespace,
   remotePath,
@@ -14,12 +16,21 @@ import {
   sftpServer,
 } from "../sftpServer/testContext";
 
-// The non-SSH-answer diagnosis on the ORDINARY dial, as opposed to the host-key
-// probe the unit suite covers: the connect loop, and the connection-per-poll
-// cycle-start re-dial. Both are driven against peers that are not SSH servers --
-// one answering with a proxy's error page, one accepting and closing having sent
-// nothing -- with the real test SFTP server as the control, since what the
-// diagnosis must not do is disturb a dial that reaches a server.
+// The non-SSH-answer diagnosis on every dial psilink makes: the connect loop,
+// the connection-per-poll cycle-start re-dial, and the two host-key probe entry
+// points (`probe-host-key` and the first-use trust prompt), which reach the same
+// adapter as core's raw client. They are driven against peers that are not SSH
+// servers -- one answering with a proxy's error page, one accepting and closing
+// having sent nothing -- with the real test SFTP server as the control, since
+// what the diagnosis must not do is disturb a dial that reaches a server.
+//
+// The probe cases additionally COUNT what the endpoint saw, because the
+// diagnosis is a TCP connection of its own: the adapter is the only layer that
+// runs it, so a diagnosed probe opens exactly one connection that sends nothing
+// and the operator is told once. A second diagnosis wrapped around a probe
+// caller would read the peer twice over -- the gate walks the cause chain, so it
+// matches the rejection core keeps under its own host-key message -- which is
+// invisible in the copy but plain in the connection count.
 //
 // The peers are real listeners rather than stubs because what is asserted is
 // what arrives on a socket. The cycle-start case additionally needs a peer that
@@ -121,6 +132,62 @@ function interceptableEndpoint(upstream: {
     });
   });
 }
+
+interface CountedPeer {
+  host: string;
+  port: number;
+  /** Connections this endpoint accepted, and how many of them sent nothing at
+   * all. A dial announces itself with an SSH identification string the moment it
+   * connects, and the diagnosis writes nothing on the connection it opens, so
+   * the silent count is the number of diagnostic reads the endpoint saw. */
+  accepted(): { total: number; silent: number };
+  stop(): Promise<void>;
+}
+
+/** A peer that is not an SSH server, answering every connection the same way and
+ * keeping count of what reached it. */
+function countingPeer(answer: PeerAnswer): Promise<CountedPeer> {
+  return new Promise((resolve) => {
+    const open: Socket[] = [];
+    let total = 0;
+    let spoke = 0;
+    const server = net.createServer((accepted) => {
+      total += 1;
+      open.push(accepted);
+      // A peer that answers and closes errors the write side of whatever is
+      // still writing to it; an unhandled 'error' would fail the file.
+      accepted.on("error", () => {});
+      accepted.once("data", () => {
+        spoke += 1;
+      });
+      answer(accepted);
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as AddressInfo;
+      resolve({
+        host: "127.0.0.1",
+        port,
+        accepted: () => ({ total, silent: total - spoke }),
+        stop: async () => {
+          for (const socket of open) socket.destroy();
+          await new Promise<void>((closed) => server.close(() => closed()));
+        },
+      });
+    });
+  });
+}
+
+/**
+ * How many times one failure was diagnosed, counted by the recovery step the
+ * diagnosis composes. That link rather than the peer's excerpt: a chain carrying
+ * two diagnoses outruns the display boundary's cause-depth cap, which drops the
+ * second excerpt while both recovery steps still render (measured -- a wrapper
+ * re-applied around the probe leaves one excerpt link and two recovery steps).
+ */
+const diagnosisCount = (links: string[]): number =>
+  links.filter((link) =>
+    link.startsWith("Check that the configured host and port"),
+  ).length;
 
 const configFor = (
   endpoint: { host: string; port: number },
@@ -427,6 +494,74 @@ test(
       expect(rendered).not.toContain("identify itself");
     } finally {
       await retireQuietly(unreachable, endpoint);
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
+  "probe-host-key names what answered the port, reading it once",
+  async () => {
+    // The command's own path, deps and all: it builds the probe connection from
+    // the URL and dials it through the adapter, which is where the diagnosis
+    // lives. Core keeps the diagnosed rejection under its host-key message, so
+    // the operator reads what answered on the line the command fails with.
+    const peer = await countingPeer((socket) => socket.end(HTTP_ERROR_PAGE));
+    try {
+      const raised = await probeHostKeyLines({
+        sftpUrl: `sftp://${peer.host}:${peer.port}`,
+        connectTimeoutSeconds: 10,
+        json: true,
+        verbosity: -1,
+      }).then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+      const links = displayLinks(raised);
+      expect(links[0]).toContain("could not read the server's host key");
+      expectNonSshAnswerDiagnosis(links, peer);
+      // One diagnosis, and one connection carrying no bytes at all: the peer
+      // was read once, whatever the dial itself spent on retries.
+      expect(diagnosisCount(links)).toBe(1);
+      expect(peer.accepted().silent).toBe(1);
+    } finally {
+      await peer.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
+  "the first-use trust prompt names what answered the port, reading it once",
+  async () => {
+    // The other probe entry point: the interactive first-use flow, which probes
+    // before it prompts. The prompt is never reached -- the probe fails -- so the
+    // TTY gate is all this needs of a terminal.
+    const peer = await countingPeer((socket) => socket.end(HTTP_ERROR_PAGE));
+    const wasTTY = process.stdin.isTTY;
+    process.stdin.isTTY = true;
+    try {
+      const raised = await establishHostKeyTrust(
+        {
+          channel: "sftp",
+          server: { host: peer.host, port: peer.port, username: "unused" },
+        },
+        {
+          verbosity: -1,
+          loggerName: "dial-peer-identification",
+          persistence: { mode: "ephemeral" },
+        },
+      ).then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+      const links = displayLinks(raised);
+      expectNonSshAnswerDiagnosis(links, peer);
+      expect(diagnosisCount(links)).toBe(1);
+      expect(peer.accepted().silent).toBe(1);
+    } finally {
+      process.stdin.isTTY = wasTTY;
+      await peer.stop();
     }
   },
   TEST_TIMEOUT_MS,
