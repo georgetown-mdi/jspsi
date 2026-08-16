@@ -506,7 +506,8 @@ class Negotiation {
       () =>
         this.fail(
           new ConnectionError(
-            `the exchange partner did not answer within ` +
+            `the exchange partner did not ` +
+              `${role === "acceptor" ? "answer" : "offer"} within ` +
               `${this.options.rendezvousTimeoutMs}ms`,
             "transport",
           ),
