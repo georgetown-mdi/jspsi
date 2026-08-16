@@ -150,7 +150,7 @@ Two GitHub Projects under the `georgetown-mdi` org; pick one per task:
 **Release & Operations (10)** -- work on how the project is built, tested, released, and maintained:
 
 - CI/CD workflows (`.github/workflows/`), dependabot, branch protection.
-- Build, packaging, and release tooling (`Dockerfile`, `CHANGELOG.md`, `docs/RELEASES.md`, release signing -- `cosign.pub`, `allowed_signers`).
+- Build, packaging, and release tooling (`Dockerfile`, `CHANGELOG.md`, `docs/RELEASES.md`, release signing -- `allowed_signers`, the Cosign step in `.github/workflows/release.yaml`).
 - Repo hygiene: contribution flow, security policy, license/notice files (`CONTRIBUTING.md`, `SECURITY.md`, `NOTICE`).
 - Dependency upgrades that are not user-visible.
 - Integration test infrastructure (e.g. `apps/cli/test/sftpServer/`).

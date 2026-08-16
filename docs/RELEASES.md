@@ -60,10 +60,13 @@ The value substituted is `steps.build.outputs.digest` from the image build -- th
 
 ```sh
 grep PSILINK_IMAGE_DIGEST start-psilink.sh
-cosign verify --key cosign.pub docker.io/vdorie/psi-link@sha256:...
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  docker.io/vdorie/psi-link@sha256:...
 ```
 
-A digest that verifies is the image the maintainer signed. `cosign.pub` is the public signing key at the repository root. Verify by digest when the reference comes from a launcher, as here; verify by tag when it comes from the release notes (see [Verifying a Release](#verifying-a-release)).
+A digest that verifies is the image the official release workflow published. The two `--certificate-` arguments are what make that specific, and both are required; [Verifying a Release](#verifying-a-release) explains what they pin. Verify by digest when the reference comes from a launcher, as here; verify by tag when it comes from the release notes.
 
 ## Image vulnerability scan
 
@@ -200,17 +203,29 @@ docker inspect --format '{{index .RepoDigests 0}}' vdorie/psi-link:X.Y.Z
 
 Compare the digest against the value in the release notes.
 
-Each release image is also signed with Cosign using a key-based signature. This verifies by tag, which is the right form when the reference comes from the release notes; a reference read out of a stamped launcher is verified by digest instead (see [Stamped launchers](#stamped-launchers)). To verify:
+Each release image is also signed with Cosign, keylessly through Sigstore. The signature carries a short-lived certificate Fulcio issued against the release workflow's OIDC identity, and it is recorded in Rekor's public transparency log. There is no project-held signing key and no public key to fetch: what a verifier pins is the workflow that produced the signature. Why the signature is arranged that way, and what it does not settle, are in [cosign-keyless-signing.md](notes/cosign-keyless-signing.md).
+
+This verifies by tag, which is the right form when the reference comes from the release notes; a reference read out of a stamped launcher is verified by digest instead (see [Stamped launchers](#stamped-launchers)). To verify:
 
 ```sh
-cosign verify --key cosign.pub vdorie/psi-link:X.Y.Z
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  vdorie/psi-link:X.Y.Z
 ```
 
-`cosign.pub` is the public signing key at the repository root. Install Cosign before running this command (see the Cosign documentation for your platform).
+Both `--certificate-` arguments are required, and each carries its own weight:
+
+- `--certificate-identity-regexp` pins the signer. The certificate's identity is the workflow file's path in this repository plus the ref it ran from, so an anchored pattern refuses a signature produced by a different workflow here, by a branch run of this one, or by a fork.
+- `--certificate-oidc-issuer` pins who vouched for that identity to GitHub Actions: verification compares the certificate's issuer for equality and refuses any mismatch, so a certificate from another issuer does not satisfy the check.
+
+Omitting either, or loosening the pattern to something unanchored, accepts signatures a release did not produce.
+
+Install Cosign before running this command (see the Cosign documentation for your platform). Behind a signature that verifies there is also a public Rekor transparency-log entry, which anyone can inspect independently of this project.
 
 ### Build provenance
 
-The Cosign signature answers who published the image; the SLSA build provenance attestation answers how it was built -- which source repository and commit the build ran from, and which workflow produced it. They are complementary rather than alternatives, so verify both.
+The Cosign signature and the SLSA build provenance attestation are complementary rather than alternatives, so verify both. The signature establishes that the release workflow published this exact manifest, and travels with the image in the registry. The attestation establishes what the build consumed -- which source repository and commit it ran from, and which workflow produced it -- and is held by GitHub rather than by the registry.
 
 The release workflow attests the manifest-list digest, the same digest Cosign signs and the launchers carry, and stores the attestation against this repository. Verify by digest:
 
