@@ -435,6 +435,9 @@ class Negotiation {
   private remoteDescriptionSet = false;
   private answered = false;
   private channel: RTCDataChannel | undefined;
+  private channelOpenTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Set once the run has settled, after which nothing is left to time out. */
+  private finished = false;
   private settle:
     | {
         resolve: (channel: RTCDataChannel) => void;
@@ -514,7 +517,9 @@ class Negotiation {
     try {
       return await opened;
     } finally {
+      this.finished = true;
       clearTimeout(rendezvousTimer);
+      this.stopChannelOpenDeadline();
       this.stopOfferRetries();
       signal?.removeEventListener("abort", abort);
     }
@@ -583,7 +588,7 @@ class Negotiation {
     if (typeof offeredId === "string") this.connectionId = offeredId;
     const { peer } = this.options;
     await peer.setRemoteDescription({ type: "offer", sdp: description.sdp });
-    this.remoteDescriptionSet = true;
+    this.markRemoteDescriptionSet();
     await this.applyPendingRemoteCandidates();
     const answer = await peer.createAnswer();
     await peer.setLocalDescription(answer);
@@ -599,8 +604,17 @@ class Negotiation {
       type: "answer",
       sdp: description.sdp,
     });
-    this.remoteDescriptionSet = true;
+    this.markRemoteDescriptionSet();
     await this.applyPendingRemoteCandidates();
+  }
+
+  /**
+   * Record that the peer's description is applied. Routed through one method so
+   * the flag cannot be set without arming what waits on it.
+   */
+  private markRemoteDescriptionSet(): void {
+    this.remoteDescriptionSet = true;
+    this.armChannelOpenDeadline();
   }
 
   private async onCandidate(message: BrokerMessage): Promise<void> {
@@ -762,20 +776,8 @@ class Negotiation {
   private watchChannel(channel: RTCDataChannel): void {
     if (this.channel !== undefined) return;
     this.channel = channel;
-    const openTimer = setTimeout(
-      () =>
-        this.fail(
-          new ConnectionError(
-            `the data channel did not open within ` +
-              `${this.options.channelOpenTimeoutMs}ms after the exchange ` +
-              "partner answered",
-            "transport",
-          ),
-        ),
-      this.options.channelOpenTimeoutMs,
-    );
     const settleOpen = (): void => {
-      clearTimeout(openTimer);
+      this.stopChannelOpenDeadline();
       this.stopOfferRetries();
       this.settle?.resolve(channel);
     };
@@ -785,7 +787,7 @@ class Negotiation {
     }
     channel.onopen = settleOpen;
     channel.onclose = () => {
-      clearTimeout(openTimer);
+      this.stopChannelOpenDeadline();
       this.fail(
         new ConnectionError(
           "the data channel closed before it opened",
@@ -793,5 +795,40 @@ class Negotiation {
         ),
       );
     };
+    this.armChannelOpenDeadline();
+  }
+
+  /**
+   * Start the ceiling on the channel opening, at whichever comes last of the
+   * channel existing and the peer's description being applied -- the point the
+   * ceiling's premise holds, that the peer is present and negotiating.
+   *
+   * The dialer creates its channel before it has even offered, so arming there
+   * would spend a network-path ceiling waiting for a partner who has not
+   * started yet. That wait belongs to the far larger rendezvous budget, and
+   * ending it early would both cut the rendezvous short and blame a network
+   * path for an operator who is running late.
+   */
+  private armChannelOpenDeadline(): void {
+    if (this.finished || this.channelOpenTimer !== undefined) return;
+    if (this.channel === undefined || !this.remoteDescriptionSet) return;
+    this.channelOpenTimer = setTimeout(
+      () =>
+        this.fail(
+          new ConnectionError(
+            `the data channel did not open within ` +
+              `${this.options.channelOpenTimeoutMs}ms after the exchange ` +
+              "partner's session description arrived",
+            "transport",
+          ),
+        ),
+      this.options.channelOpenTimeoutMs,
+    );
+  }
+
+  private stopChannelOpenDeadline(): void {
+    if (this.channelOpenTimer === undefined) return;
+    clearTimeout(this.channelOpenTimer);
+    this.channelOpenTimer = undefined;
   }
 }

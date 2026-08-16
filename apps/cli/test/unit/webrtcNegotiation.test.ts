@@ -188,6 +188,8 @@ async function startRendezvous(options: {
   role: "inviter" | "acceptor";
   candidatesDuringSetLocal?: Array<Record<string, unknown>>;
   offerRetryIntervalMs?: number;
+  rendezvousTimeoutMs?: number;
+  channelOpenTimeoutMs?: number;
 }): Promise<{
   socket: ScriptedSocket;
   peer: ScriptedPeer;
@@ -215,8 +217,8 @@ async function startRendezvous(options: {
     sharedSecret,
     iceServers: [{ urls: "stun:127.0.0.1:3478" }],
     offerRetryIntervalMs: options.offerRetryIntervalMs ?? 60_000,
-    rendezvousTimeoutMs: 10_000,
-    channelOpenTimeoutMs: 10_000,
+    rendezvousTimeoutMs: options.rendezvousTimeoutMs ?? 10_000,
+    channelOpenTimeoutMs: options.channelOpenTimeoutMs ?? 10_000,
     peerConnectionFactory: () => peer as unknown as RTCPeerConnection,
     socketFactory: () => socket as unknown as WebSocket,
   });
@@ -234,6 +236,25 @@ async function startRendezvous(options: {
   socket.register();
   await new Promise((resolve) => setTimeout(resolve, 10));
   return { socket, peer, session, inviterId, acceptorId };
+}
+
+/**
+ * Whether a rendezvous has settled yet. A rendezvous still waiting is the
+ * assertion in the tests below, so the answer has to come back rather than
+ * block on a promise that is not meant to settle at all.
+ */
+async function settlementOf(
+  session: Promise<WebRtcPeerSession>,
+): Promise<"waiting" | "resolved" | "rejected"> {
+  return await Promise.race([
+    session.then(
+      () => "resolved" as const,
+      () => "rejected" as const,
+    ),
+    new Promise<"waiting">((resolve) =>
+      setTimeout(() => resolve("waiting"), 20),
+    ),
+  ]);
 }
 
 // --- the dialer's offer -----------------------------------------------------
@@ -348,6 +369,60 @@ test("the retry stops once the answer lands", async () => {
   ]);
   peer.channels[0].open();
   await session;
+});
+
+// --- which ceiling governs which wait ---------------------------------------
+
+/**
+ * The two ceilings measure different things, and only unequal values tell them
+ * apart: the rendezvous budget covers a partner who has not arrived (human
+ * timescale, ten minutes), the channel-open ceiling a partner who is present
+ * and negotiating but whose channel never comes up (thirty seconds). The dialer
+ * creates its channel before it has offered, so the two are trivially confused
+ * there -- and confusing them cuts a ten-minute rendezvous to thirty seconds and
+ * blames a network path for an operator who started late.
+ */
+
+test("the dialer's channel-open ceiling does not run before it is answered", async () => {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    channelOpenTimeoutMs: 100,
+    rendezvousTimeoutMs: 30_000,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(await settlementOf(session)).toBe("waiting");
+
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  peer.channels[0].open();
+  await expect(session).resolves.toBeDefined();
+});
+
+test("an unanswered dialer fails on the rendezvous budget, and says so", async () => {
+  const { session } = await startRendezvous({
+    role: "acceptor",
+    channelOpenTimeoutMs: 100,
+    rendezvousTimeoutMs: 150,
+  });
+  await expect(session).rejects.toThrow(/did not answer within 150ms/);
+});
+
+test("a channel that never opens after the answer fails at the open ceiling", async () => {
+  const { socket, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    channelOpenTimeoutMs: 100,
+    rendezvousTimeoutMs: 30_000,
+  });
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  });
+  await expect(session).rejects.toThrow(/did not open within 100ms/);
 });
 
 // --- the listener's answer --------------------------------------------------
