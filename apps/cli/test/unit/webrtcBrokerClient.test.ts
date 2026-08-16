@@ -451,6 +451,27 @@ test("an abort before registration rejects and closes the socket", async () => {
   expect(sockets[0].closed).toBe(true);
 });
 
+test("a host that does not form a valid URL is a usage error, not a raw DOMException", async () => {
+  // No socketFactory: the real `new WebSocket` throws a DOMException synchronously
+  // on this host, which without wrapping would escape the ConnectionError
+  // taxonomy the rest of the module maintains.
+  const error = await connectToBroker({
+    location: { ...LOCATION, host: "bad host" },
+    id: LOCAL_ID,
+    handlers: { onMessage: () => {}, onClose: () => {} },
+  }).then(
+    () => undefined,
+    (err: unknown) => err as ConnectionError,
+  );
+  expect(error).toBeInstanceOf(ConnectionError);
+  expect(error?.kind).toBe("usage");
+  // The surfaced error names the operator's own fields and leaks neither the
+  // derived id nor the URL that carries it.
+  const rendered = `${error?.message} ${error?.stack ?? ""}`;
+  expect(rendered).not.toContain(LOCAL_ID);
+  expect(rendered).not.toContain("bad host");
+});
+
 test("a registration that is never confirmed times out", async () => {
   vi.useFakeTimers();
   sockets = [];

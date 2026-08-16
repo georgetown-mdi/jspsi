@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import dns from "node:dns";
 
 import { RTCPeerConnection } from "werift";
 import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
@@ -197,6 +198,69 @@ test("a configured iceServers list is the list the peer connection is built with
   await expect(attempt).rejects.toThrow(ConnectionError);
   expect(seen[0]).toEqual(configured);
   expect(seen[1]).toEqual(configured);
+}, 60_000);
+
+/**
+ * Gather ICE on a real werift peer built with `config`, recording every hostname
+ * werift resolves through DNS while it does so. The lookups are short-circuited
+ * to fail fast, so nothing reaches the network and the built-in default's own
+ * STUN resolution never completes; only the fact that it was attempted matters.
+ * werift resolves through `dns.promises.lookup` (measured); the callback form is
+ * hooked too so a future switch does not silently blind this check.
+ */
+async function stunHostsLookedUp(
+  config: ConstructorParameters<typeof RTCPeerConnection>[0],
+): Promise<Set<string>> {
+  const lookedUp = new Set<string>();
+  const realPromiseLookup = dns.promises.lookup;
+  const realCallbackLookup = dns.lookup;
+  (dns.promises as { lookup: unknown }).lookup = async (
+    hostname: string,
+  ): Promise<never> => {
+    lookedUp.add(hostname);
+    throw new Error("suppressed by the STUN-suppression check");
+  };
+  (dns as { lookup: unknown }).lookup = (
+    hostname: string,
+    options: unknown,
+    callback: unknown,
+  ): void => {
+    lookedUp.add(hostname);
+    const cb = (typeof options === "function" ? options : callback) as (
+      err: Error,
+    ) => void;
+    cb(new Error("suppressed by the STUN-suppression check"));
+  };
+  const peer = new RTCPeerConnection(config);
+  try {
+    peer.createDataChannel("dc_suppression", { ordered: true });
+    await peer.setLocalDescription(await peer.createOffer());
+    // The default's lookup fires within milliseconds of gathering starting; this
+    // window is orders of magnitude above that, so its absence is suppression,
+    // not a race.
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+  } finally {
+    (dns.promises as { lookup: unknown }).lookup = realPromiseLookup;
+    (dns as { lookup: unknown }).lookup = realCallbackLookup;
+    await peer.close();
+  }
+  return lookedUp;
+}
+
+test("a configured iceServers list suppresses werift's built-in Google STUN default", async () => {
+  // The privacy-relevant half of the replace-not-add premise, which
+  // `getConfiguration()` cannot show: an operator who configures their own STUN
+  // is not also silently disclosing their public IP to Google's default. Held by
+  // werift's own DNS resolution -- the default resolves stun.l.google.com, a
+  // configured list does not.
+  const GOOGLE_STUN_HOST = "stun.l.google.com";
+  const withDefault = await stunHostsLookedUp({});
+  expect([...withDefault]).toContain(GOOGLE_STUN_HOST);
+
+  const withConfigured = await stunHostsLookedUp({
+    iceServers: [{ urls: "stun:127.0.0.1:3478" }],
+  });
+  expect([...withConfigured]).not.toContain(GOOGLE_STUN_HOST);
 }, 60_000);
 
 test("an over-cap inbound frame fails the connection closed", async () => {

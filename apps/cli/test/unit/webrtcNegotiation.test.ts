@@ -3,7 +3,11 @@ import { afterEach, expect, test } from "vitest";
 import { deriveRendezvousPeerId, generateSharedSecret } from "@psilink/core";
 
 import { BROKER_MESSAGE } from "../../src/connection/webrtc/brokerClient";
-import { openWebRtcPeerSession } from "../../src/connection/webrtc/weriftPeer";
+import {
+  MAX_CONNECTION_ID_LENGTH,
+  MAX_PENDING_REMOTE_CANDIDATES,
+  openWebRtcPeerSession,
+} from "../../src/connection/webrtc/weriftPeer";
 
 import type { WebRtcPeerSession } from "../../src/connection/webrtc/weriftPeer";
 import type { RTCPeerConnection } from "werift";
@@ -459,6 +463,38 @@ test("the inviter answers an offer and adopts its connection id", async () => {
   await session;
 });
 
+test("an over-long connection id in an offer is neither adopted nor echoed", async () => {
+  const { socket, peer, session, acceptorId } = await startRendezvous({
+    role: "inviter",
+  });
+  // Larger than the bound but still inside the broker's 256 KiB frame, so it
+  // reaches onOffer; adopting it would push every outbound answer/candidate past
+  // the broker's inbound limit.
+  const oversized = `dc_${"x".repeat(MAX_CONNECTION_ID_LENGTH * 4)}`;
+  socket.deliver({
+    type: BROKER_MESSAGE.offer,
+    src: acceptorId,
+    payload: {
+      sdp: { type: "offer", sdp: "v=0\r\noffer\r\n" },
+      type: "data",
+      connectionId: oversized,
+      serialization: "binary",
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const [answer] = socket.ofType(BROKER_MESSAGE.answer);
+  const echoed = (answer.payload as { connectionId: string }).connectionId;
+  // The over-long id is refused; this side keeps its own short generated id.
+  expect(echoed).not.toBe(oversized);
+  expect(echoed.length).toBeLessThanOrEqual(MAX_CONNECTION_ID_LENGTH);
+  expect(echoed).toMatch(/^dc_/);
+  // And the rendezvous still completes on the channel the remote created.
+  const channel = new FakeChannel("dc_ok");
+  peer.ondatachannel?.({ channel });
+  channel.open();
+  await session;
+});
+
 test("a repeated offer is re-answered rather than renegotiated", async () => {
   const { socket, peer, session, acceptorId } = await startRendezvous({
     role: "inviter",
@@ -507,6 +543,27 @@ test("a signaling frame from any id but the derived partner is ignored", async (
   await session;
 });
 
+test("a signaling frame carrying no src is dropped", async () => {
+  // The honest broker stamps src on every relayed frame, so a src-less frame is
+  // not peer traffic; the one party that can plant one is a hostile signaling
+  // server, and it must not be able to apply an offer.
+  const { socket, peer, session } = await startRendezvous({ role: "inviter" });
+  socket.deliver({
+    type: BROKER_MESSAGE.offer,
+    payload: {
+      sdp: { type: "offer", sdp: "v=0\r\nnosrc\r\n" },
+      connectionId: "dc_nosrc",
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(socket.ofType(BROKER_MESSAGE.answer)).toHaveLength(0);
+  expect(peer.remoteDescriptions).toHaveLength(0);
+  const channel = new FakeChannel("dc_ok");
+  peer.ondatachannel?.({ channel });
+  channel.open();
+  await session;
+});
+
 test("a remote candidate is held until a remote description can apply it", async () => {
   const { socket, peer, session, inviterId } = await startRendezvous({
     role: "acceptor",
@@ -530,10 +587,94 @@ test("a remote candidate is held until a remote description can apply it", async
   await session;
 });
 
+test("a flood of remote candidates before the description is capped, and a late description still applies the ones held", async () => {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+  });
+  // A partner (or hostile broker) that never answers could stream candidates for
+  // the whole rendezvous budget; the queue that holds them is capped.
+  for (let i = 0; i < MAX_PENDING_REMOTE_CANDIDATES + 25; i += 1) {
+    socket.deliver({
+      type: BROKER_MESSAGE.candidate,
+      src: inviterId,
+      payload: { candidate: CANDIDATE_A },
+    });
+  }
+  // None is applied while the description has not arrived.
+  expect(peer.remoteCandidates).toHaveLength(0);
+
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  // Exactly the cap was retained; the surplus was dropped, not queued -- and the
+  // late description still completed the rendezvous.
+  expect(peer.remoteCandidates).toHaveLength(MAX_PENDING_REMOTE_CANDIDATES);
+  peer.channels[0].open();
+  await session;
+});
+
+test("two answers delivered in one tick set the remote description once", async () => {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+  });
+  const answer = {
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  };
+  // Same tick, before the first setRemoteDescription resolves: the synchronous
+  // latch must stop the second from re-applying and failing the rendezvous.
+  socket.deliver(answer);
+  socket.deliver(answer);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(peer.remoteDescriptions).toHaveLength(1);
+  peer.channels[0].open();
+  await session;
+});
+
 test("the partner leaving the broker fails the rendezvous", async () => {
   const { socket, session, inviterId } = await startRendezvous({
     role: "acceptor",
   });
   socket.deliver({ type: BROKER_MESSAGE.leave, src: inviterId, payload: {} });
   await expect(session).rejects.toThrow(/left the signaling server/);
+});
+
+// --- broker traffic after the session is established ------------------------
+
+test("broker signaling after the channel opens is ignored", async () => {
+  const { socket, peer, session, acceptorId } = await startRendezvous({
+    role: "inviter",
+  });
+  const offer = {
+    type: BROKER_MESSAGE.offer,
+    src: acceptorId,
+    payload: {
+      sdp: { type: "offer", sdp: "v=0\r\noffer\r\n" },
+      type: "data",
+      connectionId: "dc_open",
+    },
+  };
+  socket.deliver(offer);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const channel = new FakeChannel("dc_open");
+  peer.ondatachannel?.({ channel });
+  channel.open();
+  await session;
+
+  const answersBefore = socket.ofType(BROKER_MESSAGE.answer).length;
+  // Post-open, a repeated offer is not reflected as a fresh full-SDP answer
+  // through the broker, and a late candidate is not fed to the peer.
+  socket.deliver(offer);
+  socket.deliver({
+    type: BROKER_MESSAGE.candidate,
+    src: acceptorId,
+    payload: { candidate: CANDIDATE_A },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(socket.ofType(BROKER_MESSAGE.answer)).toHaveLength(answersBefore);
+  expect(peer.remoteCandidates).toHaveLength(0);
 });

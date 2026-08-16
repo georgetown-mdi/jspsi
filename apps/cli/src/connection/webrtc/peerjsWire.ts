@@ -74,18 +74,30 @@ function malformedFrameError(detail: string): ConnectionError {
 }
 
 /**
- * Coerce whatever the data channel handed us to a `Uint8Array` view without
- * copying. werift's `onmessage` delivers a Node `Buffer` for a binary message,
- * but a string arrives for a peer that opened a text-mode channel; a string is
- * not a PeerJS binary frame at all, so it yields an empty view the caller refuses
- * as malformed rather than being silently reinterpreted.
+ * Coerce a binary data-channel message to a `Uint8Array` view without copying.
+ * werift's `onmessage` delivers a Node `Buffer` for a binary message; a string
+ * arrives for a peer that opened a text-mode channel, and a zero-length binary
+ * message carries nothing. Neither is a PeerJS binary frame, and each is refused
+ * as malformed rather than reinterpreted: an empty view unpacks to the number
+ * `0` (measured), which would otherwise be delivered as a bogus application
+ * frame `0`. A WebRTC data channel carries a per-message type, so a peer can
+ * choose either shape at will.
+ *
+ * @throws {ConnectionError} of kind `protocol` on a non-binary or empty datagram.
  */
 export function toFrameBytes(data: unknown): Uint8Array {
-  if (typeof data === "string") return new Uint8Array(0);
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  if (ArrayBuffer.isView(data))
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  return new Uint8Array(0);
+  let view: Uint8Array;
+  if (data instanceof ArrayBuffer) {
+    view = new Uint8Array(data);
+  } else if (ArrayBuffer.isView(data)) {
+    view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  } else {
+    throw malformedFrameError("it is not a binary datagram");
+  }
+  if (view.byteLength === 0) {
+    throw malformedFrameError("it is an empty datagram");
+  }
+  return view;
 }
 
 /**

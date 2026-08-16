@@ -204,9 +204,20 @@ test("toFrameBytes views a Buffer, a view and an ArrayBuffer without copying", (
   expect(hex(toFrameBytes(new Uint8Array([1, 2, 3]).buffer))).toBe("010203");
 });
 
-test("toFrameBytes yields nothing for a text-mode payload", () => {
-  // A string is not a PeerJS binary frame; an empty view is what the caller
-  // refuses as malformed rather than reinterpreting the text as bytes.
-  expect(toFrameBytes("not bytes").byteLength).toBe(0);
-  expect(toFrameBytes(undefined).byteLength).toBe(0);
+test.each([
+  ["a text-mode payload", "not bytes"],
+  ["an undefined payload", undefined],
+  ["a plain object", {}],
+  ["an empty binary view", new Uint8Array(0)],
+  ["an empty ArrayBuffer", new ArrayBuffer(0)],
+])("toFrameBytes refuses %s as malformed", (_label, value) => {
+  // A string or object is not a PeerJS binary frame, and an empty binary message
+  // unpacks to the number 0 -- both are refused rather than reinterpreted, since
+  // delivering a bogus frame 0 is what the old empty-view return produced.
+  expect(() => toFrameBytes(value)).toThrow(ConnectionError);
+  try {
+    toFrameBytes(value);
+  } catch (err) {
+    expect((err as ConnectionError).kind).toBe("protocol");
+  }
 });

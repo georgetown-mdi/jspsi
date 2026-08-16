@@ -312,9 +312,26 @@ export function connectToBroker(
   } = options;
 
   return new Promise<BrokerClient>((resolve, reject) => {
-    const socket = (socketFactory ?? ((url) => new WebSocket(url)))(
-      brokerUrl(location, id, registrationToken()),
-    );
+    let socket: WebSocket;
+    try {
+      socket = (socketFactory ?? ((url) => new WebSocket(url)))(
+        brokerUrl(location, id, registrationToken()),
+      );
+    } catch {
+      // `new WebSocket` throws a DOMException synchronously on a host or port
+      // that does not form a valid URL. Replaced rather than wrapped: it escapes
+      // this module's ConnectionError taxonomy, and its message can embed the
+      // URL (which carries the peer id), so the cause is dropped and the
+      // operator is pointed at the fields they control.
+      reject(
+        new ConnectionError(
+          "the signaling server address is not a valid WebSocket URL; check " +
+            "the webrtc connection's `host`, `port`, and `path`",
+          "usage",
+        ),
+      );
+      return;
+    }
     // Registration and steady state are one socket with two phases; `opened`
     // switches which of the two settlement paths a failure takes, so a failure
     // can never both reject the registration and report through onClose.

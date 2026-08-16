@@ -51,6 +51,30 @@ const log = getLogger("webrtc");
 /** Prefix PeerJS gives a DataConnection id, matched so a browser peer's logs read normally. */
 const CONNECTION_ID_PREFIX = "dc_";
 
+/**
+ * Longest connectionId this side adopts from an offer. A real PeerJS
+ * DataConnection id is a short `dc_<random>` string; this side echoes the
+ * adopted id on every ANSWER and CANDIDATE it sends, so an over-long one from a
+ * counterparty would push those outbound frames past the broker's inbound
+ * `maxPayload` and get this side's socket closed -- a remote-triggered
+ * rendezvous failure. An offered id that is not this short shape is not a PeerJS
+ * peer's, so it is ignored and this side keeps the id it generated.
+ */
+export const MAX_CONNECTION_ID_LENGTH = 64;
+
+/**
+ * How many remote candidates are held while this side's description is not yet
+ * applied. A candidate that arrives early is queued until the description can
+ * apply it; a peer -- or a hostile broker registered under the derived id --
+ * that never sends its OFFER/ANSWER could otherwise stream CANDIDATE frames for
+ * the whole rendezvous budget and have every one retained, the one inbound
+ * signaling path with no memory envelope. A real negotiation trickles at most a
+ * few dozen candidates (one per interface, per address family, per configured
+ * STUN/TURN), so this sits comfortably above any legitimate volume and bites
+ * only a flood.
+ */
+export const MAX_PENDING_REMOTE_CANDIDATES = 128;
+
 /** How often the dialer re-sends its offer while the peer has not answered. */
 export const DEFAULT_OFFER_RETRY_INTERVAL_MS = 1_000;
 
@@ -277,6 +301,20 @@ function newConnectionId(): string {
   return `${CONNECTION_ID_PREFIX}${Math.random().toString(36).slice(2)}`;
 }
 
+/**
+ * The connectionId this side adopts from an offer, or `undefined` to keep its
+ * own. A PeerJS id is a short run of URL-safe characters; anything longer than
+ * {@link MAX_CONNECTION_ID_LENGTH} or outside that alphabet is not one, and is
+ * refused rather than echoed back on every outbound frame.
+ */
+function adoptableConnectionId(offered: unknown): string | undefined {
+  if (typeof offered !== "string") return undefined;
+  if (offered.length === 0 || offered.length > MAX_CONNECTION_ID_LENGTH)
+    return undefined;
+  if (!/^[A-Za-z0-9_-]+$/.test(offered)) return undefined;
+  return offered;
+}
+
 /** The `{type, sdp}` a broker payload carries, if it carries one. */
 function sessionDescriptionFrom(
   payload: unknown,
@@ -434,6 +472,7 @@ class Negotiation {
   private localDescriptionSent = false;
   private remoteDescriptionSet = false;
   private answered = false;
+  private answerAccepted = false;
   private channel: RTCDataChannel | undefined;
   private channelOpenTimer: ReturnType<typeof setTimeout> | undefined;
   /** Set once the run has settled, after which nothing is left to time out. */
@@ -527,13 +566,19 @@ class Negotiation {
   }
 
   onBrokerMessage(message: BrokerMessage): void {
-    if (this.failure !== undefined) return;
-    // Only the derived peer id is a legitimate source. A third party would have
-    // to know an id derived from the invitation secret to reach here at all, so
-    // this is depth rather than the primary control -- but it means a stray or
-    // planted frame cannot perturb a live negotiation.
-    if (message.src !== undefined && message.src !== this.options.remoteId)
-      return;
+    // Once the run has settled -- the channel opened, or a terminal failure was
+    // latched -- the negotiation has no further use for broker traffic. Dropping
+    // it here stops a post-open OFFER from reflecting a fresh full-SDP ANSWER
+    // back through the broker, and a post-open CANDIDATE from being fed to the
+    // peer, for the remaining lifetime of the session.
+    if (this.finished || this.failure !== undefined) return;
+    // Only the derived peer id is a legitimate source, and the honest broker
+    // always stamps `src` on a relayed frame, so a frame carrying none is not
+    // peer traffic and is dropped. A third party would have to know an id
+    // derived from the invitation secret to reach here at all, so this is depth
+    // rather than the primary control -- but it means a stray, planted, or
+    // src-less frame cannot perturb a live negotiation.
+    if (message.src !== this.options.remoteId) return;
     void this.handle(message).catch((err: unknown) =>
       this.fail(
         err instanceof ConnectionError
@@ -584,9 +629,10 @@ class Negotiation {
       return;
     }
     this.answered = true;
-    const offeredId = (message.payload as { connectionId?: unknown })
-      .connectionId;
-    if (typeof offeredId === "string") this.connectionId = offeredId;
+    const offeredId = adoptableConnectionId(
+      (message.payload as { connectionId?: unknown }).connectionId,
+    );
+    if (offeredId !== undefined) this.connectionId = offeredId;
     const { peer } = this.options;
     await peer.setRemoteDescription({ type: "offer", sdp: description.sdp });
     this.markRemoteDescriptionSet();
@@ -597,9 +643,21 @@ class Negotiation {
   }
 
   private async onAnswer(message: BrokerMessage): Promise<void> {
-    if (this.options.role !== "acceptor" || this.remoteDescriptionSet) return;
+    if (
+      this.options.role !== "acceptor" ||
+      this.answerAccepted ||
+      this.remoteDescriptionSet
+    )
+      return;
     const description = sessionDescriptionFrom(message.payload);
     if (description === undefined || description.type !== "answer") return;
+    // Latch synchronously before the first await, mirroring onOffer's
+    // `answered`. `remoteDescriptionSet` is only set after setRemoteDescription
+    // resolves, so without this latch two ANSWERs delivered in one tick both
+    // pass the guard and both call setRemoteDescription; werift's throw on the
+    // second is caught as a terminal failure, letting a counterparty fail the
+    // acceptor's rendezvous by answering twice.
+    this.answerAccepted = true;
     this.stopOfferRetries();
     await this.options.peer.setRemoteDescription({
       type: "answer",
@@ -622,7 +680,14 @@ class Negotiation {
     const candidate = candidateFrom(message.payload);
     if (candidate === undefined) return;
     if (!this.remoteDescriptionSet) {
-      this.pendingRemoteCandidates.push(candidate);
+      // Bounded, and past the cap the surplus is dropped rather than failing the
+      // rendezvous: a legitimate late description still applies the ones held,
+      // and a peer that only floods candidates cannot grow this without bound.
+      // Dropping is silent -- logging per candidate would itself be a log-flood
+      // vector, the same reason inboundBounds.ts evicts silently.
+      if (this.pendingRemoteCandidates.length < MAX_PENDING_REMOTE_CANDIDATES) {
+        this.pendingRemoteCandidates.push(candidate);
+      }
       return;
     }
     await this.addRemoteCandidate(candidate);
