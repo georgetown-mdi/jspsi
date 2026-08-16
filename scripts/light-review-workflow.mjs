@@ -208,6 +208,9 @@ if (input.role !== undefined && input.role !== null) {
       .trim()
       .replace(/^([-*+]|\d+[.)])(\s+|$)/, "")
       .trim();
+  // Pairing compares on this further-collapsed form, so an echo the model re-wrapped
+  // pairs with the contract line it differs from only in runs of whitespace.
+  const pairingKey = (claim) => normalizeClaim(claim).replace(/\s+/g, " ");
   const ROLES = ["security-reviewer", "adversarial-verifier"];
   if (!ROLES.includes(input.role)) {
     throw new Error(
@@ -250,29 +253,81 @@ Anything else you find in this diff that is worth the caller knowing goes in fin
   if (!result) throw new Error(salvage(input.role));
 
   const answered = result.claims.map((entry) =>
-    normalizeClaim(String(entry.claim ?? "")),
+    pairingKey(String(entry.claim ?? "")),
   );
   const unpairable = (detail) =>
     new Error(
       `${input.role} ${detail}\nIts verdicts in full, so the completed analysis is not lost with the round:\n${JSON.stringify(result.claims, null, 1)}`,
     );
-  const paired = [];
-  for (const claim of claims) {
-    const matches = result.claims.filter((entry, i) => answered[i] === claim);
-    if (matches.length !== 1) {
+  const count = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  if (result.claims.length !== claims.length) {
+    throw unpairable(
+      `returned ${count(result.claims.length, "verdict")} for ${count(claims.length, "claim")}; the contract needs exactly one verdict per claim.`,
+    );
+  }
+
+  // A role agent echoing a long claim back drops its trailing clause -- and closes the
+  // sentence where it cut -- often enough to cost whole rounds at this step, so an echo
+  // that only truncates or extends a single unmatched claim pairs with it once the
+  // shorter side's tail punctuation is off. The contract's own text then replaces the
+  // lossy echo, and echoInexact tells the caller the substitution happened.
+  const withoutTail = (text) => text.replace(/[\s.,;:!?]+$/, "");
+  const truncatesOrExtends = (echo, key) => {
+    const echoIsShorter = echo.length <= key.length;
+    const shorter = withoutTail(echoIsShorter ? echo : key);
+    return (
+      shorter.length > 0 && (echoIsShorter ? key : echo).startsWith(shorter)
+    );
+  };
+  const keys = claims.map(pairingKey);
+  const paired = new Array(claims.length);
+  const taken = result.claims.map(() => false);
+  const candidates = (matches) =>
+    [...result.claims.keys()].filter(
+      (entry) => !taken[entry] && matches(entry),
+    );
+
+  claims.forEach((claim, index) => {
+    const exact = candidates((entry) => answered[entry] === keys[index]);
+    if (exact.length > 1) {
       throw unpairable(
-        `returned ${matches.length} verdicts for the claim "${claim}"; the contract needs exactly one per claim.`,
+        `returned ${count(exact.length, "verdict")} for the claim "${claim}"; the contract needs exactly one per claim.`,
       );
     }
-    paired.push({ ...matches[0], claim });
-  }
-  for (const claim of answered) {
-    if (!claims.includes(claim)) {
+    if (exact.length === 1) {
+      paired[index] = { ...result.claims[exact[0]], claim };
+      taken[exact[0]] = true;
+    }
+  });
+
+  claims.forEach((claim, index) => {
+    if (paired[index]) return;
+    const near = candidates((entry) =>
+      truncatesOrExtends(answered[entry], keys[index]),
+    );
+    if (near.length !== 1) {
       throw unpairable(
-        `returned a verdict for "${claim}", which is not one of the claims it was given.`,
+        `returned ${count(near.length, "verdict")} for the claim "${claim}"; the contract needs exactly one per claim.`,
       );
     }
-  }
+    const rival = claims.findIndex(
+      (_, i) =>
+        i !== index &&
+        !paired[i] &&
+        truncatesOrExtends(answered[near[0]], keys[i]),
+    );
+    if (rival !== -1) {
+      throw unpairable(
+        `echoed "${answered[near[0]]}", which pairs with more than one unmatched claim: "${claim}" and "${claims[rival]}".`,
+      );
+    }
+    paired[index] = {
+      ...result.claims[near[0]],
+      claim,
+      echoInexact: true,
+    };
+    taken[near[0]] = true;
+  });
 
   return {
     claims: paired,

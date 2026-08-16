@@ -173,7 +173,10 @@ number you asked for.
 
 Each returned entry's `claim` is the contract's own text -- the Workflow paired the
 role's answer back to the claim as asked. Write it verbatim into the table and the
-ledger; a paraphrase makes the round untraceable to the contract it ran under.
+ledger; a paraphrase makes the round untraceable to the contract it ran under. An entry
+also carrying `echoInexact` came back with a truncated or extended echo of its claim,
+over which the Workflow restored the contract's text -- write that restored text like
+any other.
 
 ## Authoring a Workflow schema
 

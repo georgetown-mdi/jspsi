@@ -169,14 +169,71 @@ describe.each(SHAPES)("light-review role mode ($shape args)", ({ deliver }) => {
     expect(result.claims).toHaveLength(1);
     expect(result.claims[0].claim).toBe("a claim");
     expect(result.claims[0].evidence).toBe("ran it");
+    expect(result.claims[0].echoInexact).toBeUndefined();
+  });
+
+  it("restores the contract's text over a truncated, extended, or re-wrapped echo", async () => {
+    const claim =
+      "the module's surface is bounded (its export list plus its module-private helpers); the web-remaining half is claimed separately.";
+    for (const echo of [
+      "the module's surface is bounded (its export list plus its module-private helpers).",
+      `${claim} Nothing else was read.`,
+      claim.replace("bounded (its", "bounded\n  (its"),
+    ]) {
+      const result = await run(roleArgs([claim]), () =>
+        roleReply([verdict(echo)]),
+      );
+      expect(result.claims, echo).toHaveLength(1);
+      expect(result.claims[0].claim, echo).toBe(claim);
+      expect(result.claims[0].evidence, echo).toBe("ran it");
+    }
+  });
+
+  it("marks the claim whose echo it had to restore, and only that one", async () => {
+    const truncated = "the bound holds for every measured delivery";
+    const result = await run(
+      roleArgs([
+        `${truncated}; the unmeasured rest is a stated limit`,
+        "a claim",
+      ]),
+      () => roleReply([verdict(truncated), verdict("a claim")]),
+    );
+    expect(result.claims[0].echoInexact).toBe(true);
+    expect(result.claims[1].echoInexact).toBeUndefined();
+  });
+
+  it("refuses an echo that pairs with two unmatched claims alike", async () => {
+    const shared = "the parser rejects an oversize frame";
+    await expect(
+      run(
+        roleArgs([`${shared} on the read path`, `${shared} on the write path`]),
+        () => roleReply([verdict(shared), verdict("an unrelated echo")]),
+      ),
+    ).rejects.toThrow(
+      /pairs with more than one unmatched claim[\s\S]*on the read path[\s\S]*on the write path/,
+    );
+  });
+
+  it("refuses an empty echo instead of pairing it with any claim", async () => {
+    await expect(
+      run(roleArgs(["a claim"]), () => roleReply([verdict("  ")])),
+    ).rejects.toThrow(/returned 0 verdicts for the claim "a claim"/);
+  });
+
+  it("refuses a verdict list that is not one per claim", async () => {
+    await expect(
+      run(roleArgs(["a claim", "another claim"]), () =>
+        roleReply([verdict("a claim")]),
+      ),
+    ).rejects.toThrow(/returned 1 verdict for 2 claims/);
   });
 
   it("throws with the full verdict list when a claim cannot be paired", async () => {
     await expect(
       run(roleArgs(["a claim"]), () =>
-        roleReply([verdict("a claim from somewhere else")]),
+        roleReply([verdict("some wholly other claim")]),
       ),
-    ).rejects.toThrow(/a claim from somewhere else/);
+    ).rejects.toThrow(/some wholly other claim/);
 
     const twice = run(roleArgs(["a claim"]), () =>
       roleReply([
