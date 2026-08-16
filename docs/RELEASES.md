@@ -185,6 +185,8 @@ For security fixes or critical bugs in an already-released version:
 3. Follow steps 3 through 11 above, incrementing only the PATCH component.
 4. If the vulnerability affects the previous major version as well (see [SECURITY.md](../SECURITY.md)), apply the fix there too before proceeding.
 
+For a hotfix answering a privately reported vulnerability, this section is the mechanics only. The sequencing around it -- keeping the fix out of public view until the release and the advisory land together, and what publishes alongside them -- is in [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md#4-fix-privately-then-release).
+
 ## Verifying a Release
 
 ### Container image
