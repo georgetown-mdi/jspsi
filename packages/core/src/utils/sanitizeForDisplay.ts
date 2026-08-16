@@ -156,6 +156,23 @@ export function sanitizeForDisplay(
 }
 
 /**
+ * What a RAW fragment costs once a display boundary escapes it, which is not its
+ * own length: {@link sanitizeForDisplay} expands a code point outside printable
+ * ASCII to as many as ten characters and doubles a literal backslash, so budget
+ * arithmetic done on raw lengths under-counts.
+ *
+ * A composition site that fits its message to a display budget has to keep its
+ * fragments RAW, since the sink is the one altitude that escapes; this is how it
+ * measures what a fragment will cost there without escaping it itself. Measuring
+ * is not escaping -- the caller keeps the raw fragment -- and it lives beside the
+ * escape it measures so a change to the escape policy cannot leave a fitting
+ * caller counting the old one.
+ */
+export function renderedDisplayCost(fragment: string): number {
+  return sanitizeForDisplay(fragment, { maxLength: Infinity }).length;
+}
+
+/**
  * Compose fixed first-party copy with already-sanitized values into a
  * {@link Displayable}, as a tagged template:
  * ``displayText`${fieldLabel} (${marker})` ``. Its result is exactly the string

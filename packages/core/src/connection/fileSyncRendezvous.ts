@@ -34,7 +34,7 @@ import * as z from "zod";
 import { NIL as NIL_UUID } from "uuid";
 
 import {
-  sanitizeForDisplay,
+  renderedDisplayCost,
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
 } from "../utils/sanitizeForDisplay";
@@ -422,14 +422,6 @@ const entryHelloAckWindowMs = (options: RendezvousOptions): number => {
     ),
   );
 };
-
-// What a fragment costs in the RENDERED detail link, which is not its own
-// length: the link is composed from raw fragments and sanitizeErrorForDisplay
-// escapes it once when it shows it, expanding a code point outside printable
-// ASCII to as many as ten characters and doubling a literal backslash.
-// Arithmetic done on raw lengths under-counts.
-const renderedDisplayCost = (fragment: string): number =>
-  sanitizeForDisplay(fragment, { maxLength: Infinity }).length;
 
 // The longest filename the protocol's own constructors build from UUID
 // identities: a retain-mode message ack over a timestamped message at the

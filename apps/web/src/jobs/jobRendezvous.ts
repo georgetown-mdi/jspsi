@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { DEFAULT_MAX_DISPLAY_LENGTH, sanitizeForDisplay } from "@psilink/core";
+import { DEFAULT_MAX_DISPLAY_LENGTH, renderedDisplayCost } from "@psilink/core";
 
 import { JOB_DATA_ROOT_ENV } from "./gate";
 import { browseSegment } from "./workInputName";
@@ -175,16 +175,32 @@ function containsOrEqual(parent: string, child: string): boolean {
 export const MAX_NAMED_RENDEZVOUS_ENTRIES = 10;
 
 /**
- * What a fragment costs in the RENDERED warning, which is not its own length: a
- * warning message is composed raw here and escaped once where it is shown, which
- * expands a code point outside printable ASCII to as many as ten characters and
- * doubles a literal backslash. Arithmetic on raw lengths under-counts.
+ * Every preflight notice below is fitted to this budget where it is composed,
+ * rather than to the wider whole-warning cap the seat that renders it applies.
+ * Fitting at composition is what keeps the clause a notice ENDS on -- its recovery
+ * step, or the reason the overlap matters -- from being the part a cap eats, and
+ * the tighter of the two budgets is the one that makes the fit hold at either.
  *
- * Measuring is not escaping: what the composition keeps is the raw fragment, so the
- * console's display sink stays the one and only altitude that escapes it.
+ * @internal exported for testing
  */
-function renderedDisplayCost(fragment: string): number {
-  return sanitizeForDisplay(fragment, { maxLength: Infinity }).length;
+export const RENDEZVOUS_NOTICE_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
+
+/**
+ * A preflight notice with its interpolated paths, or the pathless wording when the
+ * first does not fit {@link RENDEZVOUS_NOTICE_BUDGET} once rendered.
+ *
+ * All-or-nothing rather than clipped: a clipped path reads like a whole path the
+ * operator could go and look at, and the paths are the only unbounded part of
+ * every notice here -- the operator's own server-side configuration for the
+ * console's single rendezvous mount, which they can read off their own launcher.
+ * The sentence around them is what they cannot reconstruct, so the sentence is what
+ * survives. A notice whose pathless wording is itself over budget is a first-party
+ * copy overrun rather than a fit failure, and the checks fail on it.
+ */
+function fitNotice(withPaths: string, withoutPaths: string): string {
+  return renderedDisplayCost(withPaths) <= RENDEZVOUS_NOTICE_BUDGET
+    ? withPaths
+    : withoutPaths;
 }
 
 /** The suffix that absorbs the entries a listing does not name. */
@@ -197,14 +213,9 @@ function andMoreSuffix(count: number): string {
  * exchange does about it, the step that clears it, and the files the operator must
  * NOT be read as being told to delete.
  *
- * The sink escapes and CAPS what it renders, so the whole sentence has to fit the
- * budget this composition is measured against ({@link DEFAULT_MAX_DISPLAY_LENGTH},
- * at or under the sink's own) or the clause that neutralizes the delete instruction
- * is what falls off the end. The rendezvous path is the one unbounded part, and it is
- * the operator's own server-side configuration for the console's single rendezvous
- * mount, so a path too long to fit beside the sentence is left out rather than
- * allowed to crowd out the recovery. What this measures at the rendered boundary is
- * pinned by a test.
+ * The sink escapes and CAPS what it renders, so the whole sentence has to fit
+ * {@link RENDEZVOUS_NOTICE_BUDGET} or the clause that neutralizes the delete
+ * instruction is what falls off the end.
  *
  * @internal exported for testing
  */
@@ -213,10 +224,10 @@ export function notEmptyLead(rendezvousDir: string): string {
     " is not empty; an exchange refuses to start on files an earlier " +
     "exchange left there, so delete those on the host first. Your own " +
     "input and results are not what it refuses over.";
-  const withPath = `the rendezvous directory ${rendezvousDir}${recovery}`;
-  return renderedDisplayCost(withPath) <= DEFAULT_MAX_DISPLAY_LENGTH
-    ? withPath
-    : `the rendezvous directory${recovery}`;
+  return fitNotice(
+    `the rendezvous directory ${rendezvousDir}${recovery}`,
+    `the rendezvous directory${recovery}`,
+  );
 }
 
 /**
@@ -235,7 +246,7 @@ export function notEmptyLead(rendezvousDir: string): string {
  */
 function describeRendezvousEntries(entries: Array<string>): string {
   const head = "the rendezvous directory holds ";
-  const budget = DEFAULT_MAX_DISPLAY_LENGTH - renderedDisplayCost(head);
+  const budget = RENDEZVOUS_NOTICE_BUDGET - renderedDisplayCost(head);
   let listed = "";
   let listedCost = 0;
   let shown = 0;
@@ -288,6 +299,12 @@ function describeRendezvousEntries(entries: Array<string>): string {
  * from foreign ones: that grammar is the exchange's, and predicting the guard's
  * verdict here would be a second implementation of it.
  *
+ * Every notice raised here is fitted to {@link RENDEZVOUS_NOTICE_BUDGET} where it is
+ * composed, so no clause an operator acts on can be the part the seat's cap eats;
+ * what gives way is an interpolated path (see {@link fitNotice}), and the entry
+ * listing gives way by name (see {@link describeRendezvousEntries}). What the whole
+ * set measures at the rendered boundary is pinned by tests.
+ *
  * This does not create the directory, canonicalize it, reject a symlinked mount, or
  * enforce a mode.
  */
@@ -302,21 +319,36 @@ export function rendezvousStartupWarnings(
   try {
     stat = fs.statSync(rendezvousDir);
   } catch {
+    const missing =
+      " does not exist yet; the exchange cannot rendezvous until both " +
+      "parties can reach it";
     warnings.push(
-      `the rendezvous directory ${rendezvousDir} does not exist yet; ` +
-        "the exchange cannot rendezvous until both parties can reach it",
+      fitNotice(
+        `the rendezvous directory ${rendezvousDir}${missing}`,
+        `the rendezvous directory${missing}`,
+      ),
     );
   }
   if (stat !== undefined) {
     if (!stat.isDirectory())
-      warnings.push(`the rendezvous path ${rendezvousDir} is not a directory`);
+      warnings.push(
+        fitNotice(
+          `the rendezvous path ${rendezvousDir} is not a directory`,
+          "the rendezvous path is not a directory",
+        ),
+      );
     else {
       try {
         fs.accessSync(rendezvousDir, fs.constants.W_OK);
       } catch {
+        const unwritable =
+          " is not writable; the exchange writes its half of the " +
+          "rendezvous there";
         warnings.push(
-          `the rendezvous directory ${rendezvousDir} is not writable; ` +
-            "the exchange writes its half of the rendezvous there",
+          fitNotice(
+            `the rendezvous directory ${rendezvousDir}${unwritable}`,
+            `the rendezvous directory${unwritable}`,
+          ),
         );
       }
       let entries: Array<string> | undefined;
@@ -329,10 +361,14 @@ export function rendezvousStartupWarnings(
           )
           .sort();
       } catch {
+        const unlistable =
+          " cannot be listed, so whether an earlier exchange left files " +
+          "there is unknown until the exchange runs";
         warnings.push(
-          `the rendezvous directory ${rendezvousDir} cannot be listed, so ` +
-            "whether an earlier exchange left files there is unknown until " +
-            "the exchange runs",
+          fitNotice(
+            `the rendezvous directory ${rendezvousDir}${unlistable}`,
+            `the rendezvous directory${unlistable}`,
+          ),
         );
       }
       if (entries !== undefined && entries.length > 0)
@@ -355,8 +391,12 @@ export function rendezvousStartupWarnings(
       containsOrEqual(rendezvousDir, other)
     )
       warnings.push(
-        `the rendezvous directory ${rendezvousDir} overlaps ${label} ` +
-          `(${other}); a partner's sync writes would reach it`,
+        fitNotice(
+          `the rendezvous directory ${rendezvousDir} overlaps ${label} ` +
+            `(${other}); a partner's sync writes would reach it`,
+          `the rendezvous directory overlaps ${label}; a partner's sync ` +
+            "writes would reach it",
+        ),
       );
   }
   return warnings;

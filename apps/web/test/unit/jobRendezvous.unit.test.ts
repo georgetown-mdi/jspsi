@@ -8,13 +8,17 @@ import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   MAX_ENDPOINT_PATH_LENGTH,
+  WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+  renderedDisplayCost,
   sanitizeForDisplay,
 } from "@psilink/core";
 
 import { MAX_INPUT_NAME_LENGTH } from "@jobs/workInputName";
+import { appendSanitizedRunWarning } from "@bench/runWarnings";
 
 import {
   MAX_NAMED_RENDEZVOUS_ENTRIES,
+  RENDEZVOUS_NOTICE_BUDGET,
   notEmptyLead,
   rendezvousStartupWarnings,
   resolveJobRendezvousDir,
@@ -353,12 +357,20 @@ function contentWarnings(entries: Array<string>): Array<string> {
   ).filter(isContentWarning);
 }
 
-/** The same warnings as the operator reads them: each console warning sink stores
- * `sanitizeForDisplay(message)`, so this is core's real display transform -- escaping
- * and 256-character cap both -- applied once to what the preflight composed. Every
- * assertion about what the operator sees is made on this side of it. */
+/** Whatever the preflight composed, as the operator reads it: folded through the
+ * seat's real display boundary, which is the one and only altitude that escapes
+ * these messages. Every assertion about what the operator sees is made on this side
+ * of it. */
+function renderedAtSeat(warnings: Array<string>): Array<string> {
+  return warnings.reduce<Array<string>>(
+    (accumulated, warning) => appendSanitizedRunWarning(accumulated, warning),
+    [],
+  );
+}
+
+/** The content warnings as the operator reads them. */
 function renderedContentWarnings(entries: Array<string>): Array<string> {
-  return contentWarnings(entries).map((warning) => sanitizeForDisplay(warning));
+  return renderedAtSeat(contentWarnings(entries));
 }
 
 /** The transcript a completed retain-mode run leaves in the mount. */
@@ -569,5 +581,270 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     } finally {
       fs.chmodSync(rendezvous, 0o700);
     }
+  });
+});
+
+// Every notice the preflight can raise, driven through the branch that raises it
+// and then through the seat's real display boundary. The mount path is the one
+// unbounded fragment in all of them -- it is the operator's own server-side
+// configuration, and nothing caps its length -- so each shape is driven twice: once
+// at an ordinary path, where the notice must NAME the mount, and once at a path far
+// past the budget, where the notice must still deliver the clause the operator acts
+// on. Truncation cutting a warning's final clause is the failure this table exists
+// to catch, and it is invisible to a check that reads only the composed string:
+// composing is where the fit is decided, but the seat is where the cut would land.
+
+/** One preflight notice shape: the branch that raises it, and the clause its copy
+ * ends on -- the part a cap eats first. */
+interface NoticeShape {
+  label: string;
+  /** Set the mount up so this branch is the one that fires, and hand back the
+   * preflight's four arguments plus any mode to restore. */
+  arrange: (mount: string) => {
+    args: [string, string | undefined, string, string];
+    restore?: () => void;
+  };
+  /** Selects this shape's notice out of the warnings the call raised. */
+  match: RegExp;
+  /** The clause the notice must still end on at the seat. */
+  tail: string;
+  /** Whether the notice interpolates the mount path at all. The listing names the
+   * mount's ENTRIES instead, and gives way by name rather than by path. */
+  namesMount: boolean;
+  /** Skipped as root, whose access checks ignore the mode bits. */
+  unprivilegedOnly?: boolean;
+}
+
+/** A mount path whose own rendered cost is far past the notice budget, under a
+ * fresh temp root. Nothing is created: each shape creates what its branch needs. */
+function overlongMount(segment: string): string {
+  return path.join(tempDir("rendezvous"), segment, segment);
+}
+
+/** Fixtures that keep every branch except this shape's own quiet: a data root and a
+ * work-input directory that are siblings of the mount, never its ancestors. */
+function isolatedArgs(
+  mount: string,
+): [string, string | undefined, string, string] {
+  const dataRoot = tempDir("data");
+  return [
+    mount,
+    tempDir("input"),
+    dataRoot,
+    path.join(dataRoot, "current-job"),
+  ];
+}
+
+const NOTICE_SHAPES: Array<NoticeShape> = [
+  {
+    label: "a mount that does not exist yet",
+    arrange: (mount) => ({ args: isolatedArgs(mount) }),
+    match: /does not exist yet/,
+    tail: "the exchange cannot rendezvous until both parties can reach it",
+    namesMount: true,
+  },
+  {
+    label: "a mount that is not a directory",
+    arrange: (mount) => {
+      fs.mkdirSync(path.dirname(mount), { recursive: true });
+      fs.writeFileSync(mount, "");
+      return { args: isolatedArgs(mount) };
+    },
+    match: /is not a directory/,
+    tail: "is not a directory",
+    namesMount: true,
+  },
+  {
+    label: "a mount this process cannot write",
+    unprivilegedOnly: true,
+    arrange: (mount) => {
+      fs.mkdirSync(mount, { recursive: true });
+      fs.chmodSync(mount, 0o500);
+      return {
+        args: isolatedArgs(mount),
+        restore: () => fs.chmodSync(mount, 0o700),
+      };
+    },
+    match: /is not writable/,
+    tail: "the exchange writes its half of the rendezvous there",
+    namesMount: true,
+  },
+  {
+    label: "a mount this process cannot list",
+    unprivilegedOnly: true,
+    arrange: (mount) => {
+      fs.mkdirSync(mount, { recursive: true });
+      fs.chmodSync(mount, 0o300);
+      return {
+        args: isolatedArgs(mount),
+        restore: () => fs.chmodSync(mount, 0o700),
+      };
+    },
+    match: /cannot be listed/,
+    tail: "is unknown until the exchange runs",
+    namesMount: true,
+  },
+  {
+    label: "the lead of a mount that is not empty",
+    arrange: (mount) => {
+      fs.mkdirSync(mount, { recursive: true });
+      fs.writeFileSync(path.join(mount, "console-hello.json"), "");
+      return { args: isolatedArgs(mount) };
+    },
+    match: /is not empty/,
+    tail: "Your own input and results are not what it refuses over.",
+    namesMount: true,
+  },
+  {
+    label: "the listing of what a mount holds",
+    arrange: (mount) => {
+      fs.mkdirSync(mount, { recursive: true });
+      fs.writeFileSync(path.join(mount, "console-hello.json"), "");
+      return { args: isolatedArgs(mount) };
+    },
+    match: /holds/,
+    tail: "console-hello.json",
+    namesMount: false,
+  },
+  {
+    label: "a mount overlapping the job data root",
+    arrange: (mount) => {
+      fs.mkdirSync(mount, { recursive: true });
+      // The mount's own parent is the data root, so BOTH unbounded fragments the
+      // overlap notice interpolates grow together, as an operator's nested layout
+      // makes them.
+      const dataRoot = path.dirname(mount);
+      return {
+        args: [
+          mount,
+          undefined,
+          dataRoot,
+          path.join(dataRoot, "current-job"),
+        ] as [string, string | undefined, string, string],
+      };
+    },
+    match: /overlaps/,
+    tail: "a partner's sync writes would reach it",
+    namesMount: true,
+  },
+];
+
+/** The one notice `shape` raises for `mount`, raw and as the seat renders it,
+ * alongside every warning the same call raised. */
+function noticeFor(
+  shape: NoticeShape,
+  mount: string,
+): { raw: string; rendered: string; allRendered: Array<string> } {
+  const { args, restore } = shape.arrange(mount);
+  try {
+    const warnings = rendezvousStartupWarnings(...args);
+    const raw = warnings.find((warning) => shape.match.test(warning));
+    expect(
+      raw,
+      `${shape.label}: the branch raised no matching notice`,
+    ).toBeDefined();
+    return {
+      raw: raw!,
+      rendered: renderedAtSeat([raw!])[0],
+      allRendered: renderedAtSeat(warnings),
+    };
+  } finally {
+    restore?.();
+  }
+}
+
+describe("every preflight notice fits its budget once rendered", () => {
+  test("the composition budget is at or under the budget the seat applies", () => {
+    // The two are what make fitting at composition sufficient: fit to the tighter
+    // one and the wider one cannot cut. Were this to flip, every notice below would
+    // pass its composition check and still be cut at the seat.
+    expect(RENDEZVOUS_NOTICE_BUDGET).toBeLessThanOrEqual(
+      WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+    );
+  });
+
+  for (const shape of NOTICE_SHAPES) {
+    const run =
+      shape.unprivilegedOnly && process.getuid?.() === 0 ? test.skip : test;
+
+    run(`${shape.label} gives nothing up at an ordinary mount`, () => {
+      const mount = path.join(tempDir("rendezvous"), "drops");
+      const { raw, rendered } = noticeFor(shape, mount);
+      // The residual: at an ordinary path nothing is given up, so a fit that
+      // started dropping its fragment unconditionally would redden here rather
+      // than pass quietly.
+      const kept = shape.namesMount ? mount : shape.tail;
+      expect(raw).toContain(kept);
+      expect(rendered).toContain(kept);
+      expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    });
+
+    for (const [pathLabel, segment] of [
+      ["past the budget on its own length", "d".repeat(200)],
+      ["past the budget once escaped", "é".repeat(100)],
+    ] as const) {
+      run(
+        `${shape.label} keeps its closing clause at a mount ${pathLabel}`,
+        () => {
+          const mount = overlongMount(segment);
+          const { raw, rendered, allRendered } = noticeFor(shape, mount);
+
+          // The case is only worth driving if the mount really is past the budget:
+          // a path that fits proves nothing about the fit.
+          expect(renderedDisplayCost(mount)).toBeGreaterThan(
+            RENDEZVOUS_NOTICE_BUDGET,
+          );
+
+          expect(renderedDisplayCost(raw)).toBeLessThanOrEqual(
+            RENDEZVOUS_NOTICE_BUDGET,
+          );
+          // The mount is what gives way, and it gives way WHOLE: a clipped path
+          // reads like a path the operator could go and look at.
+          if (shape.namesMount) expect(raw).not.toContain(mount);
+          expect(rendered).toContain(shape.tail);
+          expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+          expect(rendered.length).toBeLessThanOrEqual(
+            WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+          );
+          // Not just this shape's own notice: a branch that raises several must
+          // deliver all of them whole.
+          for (const other of allRendered)
+            expect(other).not.toContain(DISPLAY_TRUNCATION_MARKER);
+        },
+      );
+    }
+  }
+
+  test("the overlap notice gives way to a long directory on either side", () => {
+    // The only notice naming TWO operator-configured paths, and containment is
+    // symmetric: a work-input directory nested deep under a short mount runs the
+    // notice past its budget from the other side. Both go together, and the
+    // first-party label is what still names which directory was overlapped.
+    const mount = tempDir("rendezvous");
+    const jobInput = path.join(mount, "d".repeat(200), "d".repeat(200));
+    fs.mkdirSync(jobInput, { recursive: true });
+    const dataRoot = tempDir("data");
+
+    const warnings = rendezvousStartupWarnings(
+      mount,
+      jobInput,
+      dataRoot,
+      path.join(dataRoot, "current-job"),
+    );
+    const overlap = warnings.find((warning) =>
+      warning.includes("the work-input directory"),
+    );
+    expect(overlap).toBeDefined();
+    expect(renderedDisplayCost(jobInput)).toBeGreaterThan(
+      RENDEZVOUS_NOTICE_BUDGET,
+    );
+    expect(overlap).not.toContain(jobInput);
+    expect(overlap).not.toContain(mount);
+
+    for (const rendered of renderedAtSeat(warnings))
+      expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(renderedAtSeat([overlap!])[0]).toContain(
+      "a partner's sync writes would reach it",
+    );
   });
 });
