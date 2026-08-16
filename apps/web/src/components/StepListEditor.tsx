@@ -26,7 +26,7 @@ import { useIsomorphicEffect } from "@mantine/hooks";
 import { sanitizeForDisplay } from "@psilink/core";
 
 import {
-  STANDARDIZATION_EXPERT_FUNCTION_GROUPS,
+  OFFERED_EXPERT_FUNCTION_GROUPS,
   STANDARDIZATION_FUNCTION_GROUPS,
   describeParamFields,
   descriptorFor,
@@ -310,7 +310,7 @@ export function StepListEditor({
   addStepLabel?: string;
   /** Hint shown when the list is empty. */
   emptyHint?: ReactNode;
-  /** When set, the raw-pattern ({@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS})
+  /** When set, the raw-pattern ({@link OFFERED_EXPERT_FUNCTION_GROUPS})
    * functions appear in the add menu and existing regex steps' patterns become
    * editable. Defaults to OFF so the cross-party element-transform editor (a
    * token-embedded transform that runs on the partner's data) keeps regex steps
@@ -439,6 +439,12 @@ export function StepListEditor({
       }),
     );
 
+  // The expert section renders only where the host enables it AND some raw-pattern
+  // function is still offered, so a family entirely withheld leaves no dangling
+  // divider under an empty heading.
+  const showExpertGroups =
+    allowRawPatterns && OFFERED_EXPERT_FUNCTION_GROUPS.length > 0;
+
   // Shared by the standard and the gated expert groups so both render identically.
   const renderMenuGroup = (group: StandardizationFunctionGroup) => (
     <div key={group.label}>
@@ -518,10 +524,11 @@ export function StepListEditor({
           {/* The raw-pattern (regex) family appears after a divider, only where the
               host enables it, so it is never mixed into the standard menu or offered
               as a recommended step (and never offered at all in the cross-party
-              element-transform editor). */}
-          {allowRawPatterns && <Menu.Divider />}
-          {allowRawPatterns &&
-            STANDARDIZATION_EXPERT_FUNCTION_GROUPS.map(renderMenuGroup)}
+              element-transform editor). The offered set withholds the fan-out
+              family core refuses to run; see OFFERED_EXPERT_FUNCTION_GROUPS. */}
+          {showExpertGroups && <Menu.Divider />}
+          {showExpertGroups &&
+            OFFERED_EXPERT_FUNCTION_GROUPS.map(renderMenuGroup)}
         </Menu.Dropdown>
       </Menu>
     </Stack>

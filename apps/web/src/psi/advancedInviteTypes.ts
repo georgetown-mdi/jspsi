@@ -30,7 +30,12 @@ import type {
  * no-fuzzy) while their `APPLIED_SETTINGS` flag is false, the editor controls are
  * disabled to match, and an import that turns one on is refused -- so the editor
  * can never mint an invitation whose headline behavior silently does not happen
- * (psi-c being the privacy footgun). No payload block is authored into the terms.
+ * (psi-c being the privacy footgun). A fan-out transform step is held back the
+ * same way against core's own list rather than an `APPLIED_SETTINGS` flag: the
+ * step editor does not offer the family, and a document that carries one -- in a
+ * cleaning step or a linkage-key element transform -- blocks generation and is
+ * refused at the mint, since core refuses the run it commits to.
+ * No payload block is authored into the terms.
  * The output direction is settable now that one-sided output is honored
  * end-to-end (the acceptor mirrors the inviter's output and the exchange withholds
  * the result from a non-receiving party). The column METADATA is editable and

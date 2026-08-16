@@ -1572,6 +1572,22 @@ function swapElements(
   return swapped;
 }
 
+/**
+ * The key-string count at which one row's cross-product earns an operator
+ * warning: a wide fan-out in a dual-party-output exchange weakens the privacy
+ * guarantee the protocol otherwise gives, which is the operator's call to make
+ * rather than a refusal. Advisory only -- {@link MAX_KEY_STRINGS_PER_ROW} is the
+ * resource bound underneath it that does refuse.
+ *
+ * Both expansions this measures are gated: {@link assertFanOutImplemented}
+ * refuses a declared fan-out step, and `APPLIED_SETTINGS.fuzzyComparisons` holds
+ * the fuzzy expansion inert. The threshold is kept through that rather than
+ * retired alongside them, because the fan-out matching work reconciles its own
+ * per-row width bound against this advisory: retiring it would mean re-deriving
+ * both the number and the privacy rationale behind it. What those gates leave
+ * the warning unable to reach is pinned by a test, which fails when either
+ * opens.
+ */
 const KEY_STRING_WARN_THRESHOLD = 20;
 
 /**

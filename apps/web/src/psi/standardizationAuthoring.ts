@@ -8,6 +8,7 @@
  */
 
 import {
+  FAN_OUT_FUNCTION_NAMES,
   STANDARDIZATION_FUNCTION_DESCRIPTORS,
   sanitizeForDisplay,
 } from "@psilink/core";
@@ -199,6 +200,31 @@ export const expertFunctionNames: ReadonlySet<string> = new Set(
     (group) => group.functionNames,
   ),
 );
+
+/**
+ * The advanced groups as the add-step menu offers them: the raw-pattern family
+ * minus every function core classes as fan-out (`FAN_OUT_FUNCTION_NAMES`). Core
+ * refuses an exchange whose standardization or element transforms declare one
+ * (`assertFanOutImplemented`) because matching runs on a single value per record,
+ * so offering the step would let an operator author -- and mint -- a pipeline the
+ * run cannot honor. The same gating shape as the `APPLIED_SETTINGS` controls: the
+ * schema admits the step, the implementation does not yet, so the control is
+ * withheld until it does.
+ *
+ * Derived from core's list rather than a second web-side one, so the menu follows
+ * whatever core refuses; a fan-out function that ships (or a refusal that lifts)
+ * moves this without a web edit. An imported document's fan-out step still
+ * RENDERS -- {@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS} keeps the full family
+ * for the descriptor-backed read-only row and its parity test -- so the operator
+ * can see and remove it rather than meet an unlabeled step.
+ */
+export const OFFERED_EXPERT_FUNCTION_GROUPS: Array<StandardizationFunctionGroup> =
+  STANDARDIZATION_EXPERT_FUNCTION_GROUPS.map((group) => ({
+    ...group,
+    functionNames: group.functionNames.filter(
+      (name) => !FAN_OUT_FUNCTION_NAMES.includes(name),
+    ),
+  })).filter((group) => group.functionNames.length > 0);
 
 /**
  * The editor-facing label and one-line blurb for a function, taken from its

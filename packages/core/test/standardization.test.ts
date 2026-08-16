@@ -24,6 +24,7 @@ import {
   UsageError,
 } from "../src/errors";
 import * as linearRegex from "../src/utils/linearRegex";
+import { getLogger } from "../src/utils/logger";
 import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { inferMetadata } from "../src/config/metadata";
@@ -1746,6 +1747,10 @@ describe("buildKeyStrings", () => {
     elements: [{ field: "last_name" }, { field: "date_of_birth" }],
   };
 
+  const logger = getLogger("cleaning");
+
+  afterEach(() => vi.restoreAllMocks());
+
   test("single-value fields concatenate", () => {
     const dataset = makeDataset({
       last_name: "SMITH",
@@ -1815,6 +1820,30 @@ describe("buildKeyStrings", () => {
     };
     expect(() => buildKeyStrings(filteringKey, dataset, 0)).toThrow(UsageError);
     expect(() => buildKeyStrings(filteringKey, dataset, 0)).toThrow(/fan-out/);
+  });
+
+  test("a fan-out whose candidates standardize to the same string is refused too", () => {
+    // The second collapsing shape, and the one no transform drops a candidate in:
+    // both candidates survive their element transform and standardize to the SAME
+    // string, which the key-string Set reduces to one key. Counting the assembled
+    // key strings would read that row as ordinary; the candidate count read before
+    // the transform is what still refuses it.
+    const dataset = makeDataset({
+      last_name: ["Smith", "SMITH"],
+      date_of_birth: "19750716",
+    });
+    const foldingKey = {
+      name: "LN+DOB",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "to_upper_case" }],
+        },
+        { field: "date_of_birth" },
+      ],
+    };
+    expect(() => buildKeyStrings(foldingKey, dataset, 0)).toThrow(UsageError);
+    expect(() => buildKeyStrings(foldingKey, dataset, 0)).toThrow(/fan-out/);
   });
 
   test("a field whose fan-out step yields one candidate builds its key", () => {
@@ -2043,6 +2072,33 @@ describe("buildKeyStrings", () => {
     expect(buildKeyStrings(key, dataset, 1)).toEqual(
       new Set(["JONES19850701"]),
     );
+  });
+
+  test("no key this build admits reaches the cross-product warning", () => {
+    // The executable form of the claim the retained KEY_STRING_WARN_THRESHOLD
+    // rests on. Both expansions the warning measures are gated -- a row carrying
+    // several candidates is refused where they are read, and a fuzzy element does
+    // not expand while APPLIED_SETTINGS.fuzzyComparisons is false -- so every
+    // element contributes exactly one value and the cross-product is 1, however
+    // many fuzzy elements a key declares. Three edit-distance elements over
+    // eight-character values would assemble 9 x 9 x 9 = 729 key strings once
+    // either gate opens, so this fails there rather than leaving the threshold to
+    // be reconciled with the fan-out width bound unnoticed.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dataset = makeDataset({
+      last_name: "ABCDEFGH",
+      first_name: "JKLMNOPQ",
+      street_address: "RSTUVWXY",
+    });
+    const fuzzyKey = {
+      name: "LN+FN+ADDR",
+      elements: ["last_name", "first_name", "street_address"].map((field) => ({
+        field,
+        generateFuzzyComparisons: "edit_distances" as const,
+      })),
+    };
+    expect(buildKeyStrings(fuzzyKey, dataset, 0)?.size).toBe(1);
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

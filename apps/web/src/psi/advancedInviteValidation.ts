@@ -1,6 +1,7 @@
 import {
   APPLIED_SETTINGS,
   CanonicalEncodingError,
+  FAN_OUT_FUNCTION_NAMES,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
   assessLinkageSatisfiability,
@@ -59,6 +60,31 @@ const UNSUPPLYABLE_KEY_MESSAGE =
   "A linkage key needs a field your columns cannot supply. Add a column of that " +
   "type, or turn that key off.";
 
+/** Whether a step list declares a function core classes as fan-out -- one that
+ * expands a value into several match candidates. Read from core's
+ * `FAN_OUT_FUNCTION_NAMES` rather than a second web-side list, so this gate
+ * follows exactly what `assertFanOutImplemented` refuses. */
+function declaresFanOut(
+  steps: ReadonlyArray<{ function: string }> | undefined,
+): boolean {
+  return (steps ?? []).some((step) =>
+    FAN_OUT_FUNCTION_NAMES.includes(step.function),
+  );
+}
+
+/** Shown when a cleaning step or a linkage-key transform splits one value into
+ * several match candidates. Matching runs on a single value per record, so core
+ * refuses such an exchange before it runs; blocking here names the missing
+ * capability at the moment of choice rather than leaving the operator to author
+ * and mint an invitation whose run is already refused. Names the unbuilt
+ * capability, not the offending step: the step's function name can arrive on an
+ * imported document, which is partner-influenceable, the same reason
+ * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field. */
+const FAN_OUT_MESSAGE_BODY =
+  "splits one value into several values to match on. Matching on several " +
+  "values per record is not built yet, so an exchange that asks for it is " +
+  "refused before it runs. Remove that step before generating.";
+
 /**
  * Validate a draft for the Generate gate. The core schema
  * ({@link safeParseLinkageTerms}) is the single source for everything it covers
@@ -67,9 +93,10 @@ const UNSUPPLYABLE_KEY_MESSAGE =
  * bounds (not part of the terms), a not-yet-passed legal-agreement expiry (the
  * schema checks format, not that the date is still current -- the exchange
  * rejects an already-passed date later, so refuse it up front), at least one
- * column-satisfiable linkage key, and a
+ * column-satisfiable linkage key, a
  * canonical-encode dry run (the byte form both parties hash; refuse a value that
- * cannot encode rather than fail cross-party).
+ * cannot encode rather than fail cross-party), and a declared fan-out step, which
+ * the schema admits and the run refuses.
  *
  * Schema errors are mapped back to the offending control by their issue path --
  * the editor re-derives the control because the referential-integrity refines
@@ -252,6 +279,27 @@ export function validateAdvancedInvite(
     errors.standardization =
       "Finish or fix the highlighted cleaning steps before generating.";
   }
+
+  // The fan-out gate, at the same altitude as core's own refusal
+  // (`assertFanOutImplemented`, which the mint boundary applies again) and read
+  // from the same list. Both surfaces a fan-out can reach are checked: an
+  // authored cleaning step, and a linkage-key element transform, which an
+  // imported document carries (the step editor offers the family on neither).
+  // Written last and unconditionally -- a fan-out step blocks generation whatever
+  // else the control reports, and removing it is the only fix, so it is the
+  // message worth showing.
+  if (
+    draft.standardization.some((transformation) =>
+      declaresFanOut(transformation.steps),
+    )
+  )
+    errors.standardization = `A cleaning step ${FAN_OUT_MESSAGE_BODY}`;
+  if (
+    terms.linkageKeys.some((key) =>
+      key.elements.some((element) => declaresFanOut(element.transform)),
+    )
+  )
+    errors.keys = `A linkage key's transform ${FAN_OUT_MESSAGE_BODY}`;
 
   const canGenerate =
     parsed.success && encodable && Object.keys(errors).length === 0;

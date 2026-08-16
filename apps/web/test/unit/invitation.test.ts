@@ -3,6 +3,7 @@ import { Readable } from "node:stream";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
+  FAN_OUT_FUNCTION_NAMES,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
   MAX_NAME_LENGTH,
@@ -438,6 +439,59 @@ describe("generateInvitation", () => {
         metadata,
       }),
     ).rejects.toThrow(/does not transmit/);
+  });
+
+  // The mint-boundary fan-out backstop. The editor's Generate gate names the
+  // missing capability on the offending control, so these hand-built shapes stand
+  // in for a caller that reaches the mint without it -- and pin that the refusal
+  // is the mint's, not the run's, so no invitation for an exchange core already
+  // refuses ever reaches a partner. The declaring function comes from core's list
+  // rather than a literal, so a fan-out function added there is covered here.
+  const [fanOutFunction] = FAN_OUT_FUNCTION_NAMES;
+  const fanOutStep = { function: fanOutFunction, params: { delimiter: "-" } };
+
+  test("refuses to mint when a linkage-key element transform fans out", async () => {
+    const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    const base = getDefaultLinkageTerms("Org", metadata);
+    const fanning = {
+      ...base,
+      linkageKeys: base.linkageKeys.map((key, i) =>
+        i === 0
+          ? {
+              ...key,
+              elements: key.elements.map((element, j) =>
+                j === 0 ? { ...element, transform: [fanOutStep] } : element,
+              ),
+            }
+          : key,
+      ),
+    };
+
+    await expect(
+      generateInvitation({
+        inviterName: "Org",
+        file: csvStream(PARTIAL_CSV),
+        location,
+        linkageTerms: fanning,
+        metadata,
+      }),
+    ).rejects.toThrow(/fan-out matching is not yet implemented/);
+  });
+
+  test("refuses to mint when the authored standardization fans out", async () => {
+    const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    await expect(
+      generateInvitation({
+        inviterName: "Org",
+        file: csvStream(PARTIAL_CSV),
+        location,
+        linkageTerms: getDefaultLinkageTerms("Org", metadata),
+        metadata,
+        standardization: [
+          { output: "last_name", input: "last_name", steps: [fanOutStep] },
+        ],
+      }),
+    ).rejects.toThrow(/fan-out matching is not yet implemented/);
   });
 
   // A linkable CSV (ssn + names + dob give satisfiable keys) that ALSO carries
