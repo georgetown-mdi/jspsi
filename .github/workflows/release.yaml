@@ -39,9 +39,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # actions/attest-build-provenance below: the OIDC token Sigstore signs the
-      # provenance against, and the write to this repository's attestation store.
+      # The OIDC token Sigstore signs against, for both the keyless cosign
+      # signature and the provenance attestation below.
       id-token: write
+      # actions/attest-build-provenance's write to this repository's
+      # attestation store.
       attestations: write
     outputs:
       # The manifest-list digest, carried to the launcher job so the reference it
@@ -185,19 +187,23 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
 
+      # Keyless: no key is passed, so Fulcio issues the signing certificate
+      # against this job's OIDC identity and the signature is recorded in
+      # Rekor's public transparency log. What a partner pins is therefore this
+      # workflow's identity, which is this file's path plus the pushed tag ref
+      # -- renaming this file or widening the tag filter above invalidates the
+      # verification command docs/RELEASES.md publishes.
       - name: Sign image
-        env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: |
-          cosign sign --yes --key env://COSIGN_PRIVATE_KEY \
+          cosign sign --yes \
             vdorie/psi-link@${{ steps.build.outputs.digest }}
 
-      # Answers a different question from the signature above -- how the image
-      # was built, not who published it -- so it adds to the Cosign signature
-      # rather than replacing it. Its subject is the same manifest-list digest
-      # cosign signs and the launchers job stamps, so one manifest carries both
-      # claims. The attestation is left in this repository's store rather than
+      # Answers a different question from the signature above -- what the build
+      # consumed, not that this manifest is what the release published -- and is
+      # held somewhere else, so it adds to the Cosign signature rather than
+      # replacing it. Its subject is the same manifest-list digest cosign signs
+      # and the launchers job stamps, so one manifest carries both claims.
+      # The attestation is left in this repository's store rather than
       # pushed to Docker Hub as an OCI referrer (push-to-registry defaults to
       # false), so verifying it does not depend on what the registry can hold;
       # docs/RELEASES.md carries the matching verification command.
