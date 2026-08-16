@@ -138,7 +138,7 @@ test("assertDisclosedNamesCarriable: refuses as a UsageError naming positions, n
   }
   expect(thrown).toBeInstanceOf(UsageError);
   const message = String(thrown);
-  expect(message).toMatch(/input column 2 /);
+  expect(message).toMatch(/metadata column 2 /);
   expect(message).toContain(`${MAX_NAME_LENGTH}-character limit`);
   // The offending name is longer than any message that would carry it, so it is
   // located rather than echoed.
@@ -169,7 +169,7 @@ test("assertDisclosedNamesCarriable: pluralizes for several offending columns", 
   } catch (err) {
     thrown = err;
   }
-  expect(String(thrown)).toMatch(/input columns 1, 2 are sent/);
+  expect(String(thrown)).toMatch(/metadata columns 1, 2 .*are sent/);
 });
 
 test("assertDisclosedNamesCarriable: says nothing when the partner is entitled to no result", () => {
@@ -199,7 +199,7 @@ test("prepareForExchange: refuses an oversized disclosed CSV header before it pr
     thrown = err;
   }
   expect(thrown).toBeInstanceOf(UsageError);
-  expect(String(thrown)).toMatch(/input column 2 /);
+  expect(String(thrown)).toMatch(/metadata column 2 /);
 });
 
 test("prepareForExchange: accepts a disclosed header at the ceiling", () => {

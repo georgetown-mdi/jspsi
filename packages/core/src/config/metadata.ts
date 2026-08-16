@@ -116,9 +116,11 @@ export function disclosedColumnNames(metadata: Metadata): Array<string> {
  * astral characters that those bounds refuse.
  *
  * Positions rather than names: an offending name is by construction longer than
- * any message wants to carry, and the operator locates the column by its position
- * in their own header -- the same treatment {@link inferMetadata} gives an unnamed
- * column.
+ * any message wants to carry. The position is the entry's 1-based place in the
+ * METADATA, not in any file header. Metadata inferred from a header preserves the
+ * header's order, so the two agree on that path; a hand-authored metadata block
+ * is matched to columns by name and may list entries in any order, so there the
+ * position locates the entry in the block itself.
  */
 export function overlongDisclosedColumnPositions(
   metadata: Metadata,

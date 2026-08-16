@@ -363,7 +363,9 @@ export function assertDisclosedNamesCarriable(
   if (positions.length === 0) return;
   const plural = positions.length > 1;
   throw new UsageError(
-    `input column${plural ? "s" : ""} ${positions.join(", ")} ` +
+    `metadata column${plural ? "s" : ""} ${positions.join(", ")} ` +
+      `(counted in the metadata's own order, which is the file's header order ` +
+      `when the metadata was inferred) ` +
       `${plural ? "are" : "is"} sent to the partner, but ` +
       `${plural ? "their names are" : "its name is"} longer than the ` +
       `${MAX_NAME_LENGTH}-character limit on a column name (counted in UTF-16 ` +
