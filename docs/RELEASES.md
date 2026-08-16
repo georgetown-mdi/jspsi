@@ -217,7 +217,7 @@ cosign verify \
 Both `--certificate-` arguments are required, and each carries its own weight:
 
 - `--certificate-identity-regexp` pins the signer. The certificate's identity is the workflow file's path in this repository plus the ref it ran from, so an anchored pattern refuses a signature produced by a different workflow here, by a branch run of this one, or by a fork.
-- `--certificate-oidc-issuer` pins who vouched for that identity to GitHub Actions, so a certificate naming a similar identity from another issuer does not satisfy the check.
+- `--certificate-oidc-issuer` pins who vouched for that identity to GitHub Actions: verification compares the certificate's issuer for equality and refuses any mismatch, so a certificate from another issuer does not satisfy the check.
 
 Omitting either, or loosening the pattern to something unanchored, accepts signatures a release did not produce.
 

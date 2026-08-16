@@ -20,9 +20,12 @@ a short-lived certificate against the release job's GitHub Actions OIDC
 identity, the signature is recorded in Rekor's public transparency log, and a
 verifier pins the workflow identity instead of fetching a public key.
 
-The corollary is that the project holds no signing key at all. There is no
-private key in repository secrets, no public key in the repository root, and no
-rotation, expiry, or revocation procedure to write, staff, and remember.
+The corollary is that no signing key is used anywhere: no workflow step reads a
+private key, no public key sits in the repository root, and there is no
+rotation, expiry, or revocation procedure to write, staff, and remember. The
+now-unused `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD` repository secrets remain
+configured until the maintainer deletes them -- a settings change no commit can
+make -- deferred until a keyless-signed image has verified end to end.
 
 ## Why this, and why before the first release
 
@@ -88,17 +91,27 @@ What the runs established:
   on a tag push, the same with `@refs/tags/<tag>`. The tag form is the one a
   release produces, and it was driven, not inferred.
 - An anchored `--certificate-identity-regexp` over that identity verifies the
-  signature, and the negative controls fail closed: a version-tag pattern
-  refuses a signature from a differently tagged run of the same workflow, and a
-  foreign `--certificate-oidc-issuer` refuses the signature outright. Both
-  arguments are load-bearing.
+  signature, and three negative controls fail closed: the exact published
+  pattern refuses the branch-form certificate (run 31931204906), a version-tag
+  pattern refuses a signature from a differently tagged run of the same
+  workflow (run 31931280133), and verification against a different pinned
+  issuer (`https://accounts.google.com`) refuses the signature outright. Both
+  arguments are load-bearing. The issuer control was driven in that mirror
+  direction only -- the probe's Actions-issued certificate against a command
+  pinning a foreign issuer; presenting a certificate actually issued elsewhere
+  to the published command was not driven, and the refusal of that direction
+  rests on the same issuer-equality comparison the mirror measured.
 - The signature lands at the conventional `sha256-<digest>.sig` tag beside the
   image, not as an OCI referrer, so it needs nothing of a registry that the
   key-based signature did not already need.
 
-The Rekor entries the probe wrote are permanent and public -- log indices
-2484702205 and 2484703379 -- and outlive both the branch, which was deleted, and
-the Actions run logs, which expire.
+The probe's durable evidence is Actions runs 31931204906 (branch push) and
+31931280133 (tag push) and the Rekor entries the probe wrote, which are
+permanent and public and outlive both the branch, which was deleted, and the
+Actions run logs, which expire. Log indices 2484702205 and 2484703379 are the
+two runs' sign-blob bundle entries; the keyless image signings in the same runs
+wrote their own transparency-log entries, which cosign reported verified but
+which are not indexed here.
 
 ## What this does not settle
 
