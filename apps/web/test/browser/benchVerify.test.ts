@@ -7,9 +7,16 @@ import { page, userEvent } from "vitest/browser";
 import { createElement } from "react";
 
 import {
+  SIGNED_RECEIPT_VERSION,
   buildExchangeRecord,
+  computeCertificateFingerprint,
+  generateSigningIdentity,
+  serializeCertificate,
+  serializeDualSignedRecord,
   serializeExchangeRecord,
+  serializeSigningIdentity,
   serializeVerificationKeys,
+  signReceiptContent,
 } from "@psilink/core";
 
 import { VerifyReceiptBench } from "@bench/VerifyReceiptBench";
@@ -19,8 +26,12 @@ import { createAppMount } from "./renderApp";
 import type {
   AssociationTable,
   CommittedPayload,
+  DualSignedRecord,
   ExchangeRecord,
   LinkageTerms,
+  ReceiptContent,
+  SigningCertificate,
+  SigningIdentity,
   VerificationKeys,
 } from "@psilink/core";
 
@@ -68,6 +79,44 @@ async function buildFixture(): Promise<{
   });
 }
 
+// A dual-signed record over the same exchange the fixture above describes: this
+// party holds the initiator's slot, the partner the responder's, and the receipt
+// content carries that record's agreed-terms hash.
+async function buildSignedFixture(record: ExchangeRecord): Promise<{
+  signed: DualSignedRecord;
+  ourIdentity: SigningIdentity;
+  ourCertificate: SigningCertificate;
+  partnerFingerprint: string;
+}> {
+  const us = await generateSigningIdentity(LOCAL_TERMS.identity);
+  const partner = await generateSigningIdentity(PARTNER_TERMS.identity);
+  const content: ReceiptContent = {
+    termsHash: record.termsHash,
+    initiatorToResponderPayload: "aTJyUGF5bG9hZA",
+    responderToInitiatorPayload: "cjJpUGF5bG9hZA",
+    binder: "YmluZGVy",
+  };
+  return {
+    signed: {
+      version: SIGNED_RECEIPT_VERSION,
+      content,
+      initiator: {
+        certificate: us.certificate,
+        signature: await signReceiptContent(us, content, "initiator"),
+      },
+      responder: {
+        certificate: partner.certificate,
+        signature: await signReceiptContent(partner, content, "responder"),
+      },
+    },
+    ourIdentity: us,
+    ourCertificate: us.certificate,
+    partnerFingerprint: await computeCertificateFingerprint(
+      partner.certificate,
+    ),
+  };
+}
+
 function jsonFile(name: string, content: string): File {
   return new File([content], name, { type: "application/json" });
 }
@@ -83,6 +132,15 @@ const app = createAppMount();
 function fileInputAt(index: number): HTMLElement {
   const inputs = document.querySelectorAll('input[type="file"]');
   return inputs[index] as HTMLElement;
+}
+
+// The signed leg's dropzones are addressed by their label rather than by index:
+// how many inputs precede them depends on which disclosure panels are mounted,
+// and Mantine's Collapse decides that from motion preference and environment
+// (see DisclosureSection).
+function fileInputFor(label: string): HTMLElement {
+  const zone = document.querySelector(`[aria-label="${label}"]`);
+  return zone?.querySelector('input[type="file"]') as HTMLElement;
 }
 
 // The page mounts its dropzones after the first render; wait for the heading so
@@ -451,5 +509,165 @@ describe("verify receipt bench", () => {
     );
     await expect.element(page.getByText("input.csv")).not.toBeInTheDocument();
     await expect.element(page.getByText("result.csv")).not.toBeInTheDocument();
+  });
+
+  test("a dual-signed record with both certificates anchored reaches the signed verified verdict", async () => {
+    const { record, keys } = await buildFixture();
+    const { signed, ourCertificate, partnerFingerprint } =
+      await buildSignedFixture(record);
+    await mountVerifyBench();
+
+    // The exchange record states who this exchange was between and what terms
+    // it agreed, which the signature checks are held against.
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec.json", serializeExchangeRecord(record)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(1)),
+      jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Check the partner's signatures with the dual-signed record",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputFor("Dual-signed record")),
+      jsonFile("psilink-receipt-x.json", serializeDualSignedRecord(signed)),
+    );
+    await userEvent.fill(
+      page.getByLabelText("Your partner's certificate fingerprint"),
+      partnerFingerprint,
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputFor("Your exported certificate")),
+      jsonFile("certificate.json", serializeCertificate(ourCertificate)),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Verify with the signed record" }),
+    );
+
+    await expect
+      .element(page.getByText("Signed receipt verified"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Matches the fingerprint you pinned out-of-band"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Is the certificate you supplied as your own"))
+      .toBeInTheDocument();
+    // The record's own section stops claiming signatures went unchecked when a
+    // dual-signed verdict is on screen beside it.
+    await expect
+      .element(
+        page.getByText("checked separately below", { exact: false }).first(),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("an unanchored partner leaves the signed verdict incomplete, naming the slot", async () => {
+    const { record, keys } = await buildFixture();
+    const { signed, ourCertificate } = await buildSignedFixture(record);
+    await mountVerifyBench();
+
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec.json", serializeExchangeRecord(record)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(1)),
+      jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Check the partner's signatures with the dual-signed record",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputFor("Dual-signed record")),
+      jsonFile("receipt.json", serializeDualSignedRecord(signed)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputFor("Your exported certificate")),
+      jsonFile("certificate.json", serializeCertificate(ourCertificate)),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Verify with the signed record" }),
+    );
+
+    await expect
+      .element(page.getByText("Signed receipt incomplete"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          "Nothing outside the record anchors the responder's certificate",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("the signing identity file is refused where the exported certificate belongs", async () => {
+    const { record } = await buildFixture();
+    const { ourIdentity } = await buildSignedFixture(record);
+    await mountVerifyBench();
+
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Check the partner's signatures with the dual-signed record",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputFor("Your exported certificate")),
+      jsonFile("signing-identity.json", serializeSigningIdentity(ourIdentity)),
+    );
+
+    await expect
+      .element(page.getByText("This certificate could not be used"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("private signing key", { exact: false }))
+      .toBeInTheDocument();
+    // The file card stays: the input was not cleared, so the user can swap it.
+    await expect
+      .element(page.getByText("signing-identity.json"))
+      .toBeInTheDocument();
+  });
+
+  test("a fingerprint that is not a fingerprint gates the run rather than reaching it", async () => {
+    const { record, keys } = await buildFixture();
+    await mountVerifyBench();
+
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec.json", serializeExchangeRecord(record)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(1)),
+      jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Verify", exact: true }))
+      .toBeEnabled();
+
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Check the partner's signatures with the dual-signed record",
+      }),
+    );
+    await userEvent.fill(
+      page.getByLabelText("Your partner's certificate fingerprint"),
+      "not-a-fingerprint",
+    );
+    // A malformed pin is reported as its own fault, and no run can turn it into
+    // "the partner's certificate does not match".
+    await expect
+      .element(page.getByText("43 characters", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Verify", exact: true }))
+      .toBeDisabled();
   });
 });
