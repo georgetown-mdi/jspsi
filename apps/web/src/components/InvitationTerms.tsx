@@ -489,16 +489,21 @@ function CondensableDetails({
  * data (membership) -- distinct from, and deliberately not conflated with, the
  * cooperative caveat about a dishonest partner keeping the result table. It is
  * stated as an accepted, documented property -- a non-receiving partner learns its
- * own membership in every one-sided exchange today: intrinsically under the cascade,
- * and under single-pass because the receiver currently returns it its matched rows
- * (which it needs whenever it discloses payload for the overlap, and which are
- * returned even when it does not, pending the hardening task in
- * docs/notes/one-sided-disclosure.md) -- bounded so it does not overstate: the helper
- * learns membership of its own records, never which of the viewer's records they
- * matched, nor anything about the rest of the set beyond its size. The viewer's own
- * "Yes" is left unqualified; the partner's "Yes" -- the accountable disclosure of
- * the result to them -- carries a brief pointer that the agreement, not this tool,
- * governs its use once the result is out.
+ * own membership in a one-sided `psi` exchange under either linkage strategy:
+ * intrinsically under the cascade, and under single-pass because the receiver
+ * currently returns it its matched rows (which it needs whenever it discloses
+ * payload for the overlap, and which are returned even when it does not, pending the
+ * hardening task in docs/notes/one-sided-disclosure.md) -- bounded so it does not
+ * overstate: the helper learns membership of its own records, never which of the
+ * viewer's records they matched, nor anything about the rest of the set beyond its
+ * size. It is scoped by the ALGORITHM rather than by the strategy, and so is
+ * withheld for a `psi-c` invitation: the role rule puts the non-receiving party of a
+ * count-only round in the sender seat, which computes nothing from the round and is
+ * sent no count-report frame (docs/spec/PROTOCOL.md, PSI-C), so it learns no
+ * membership to state -- what such a round does disclose is the count-only tier's.
+ * The viewer's own "Yes" is left unqualified; the partner's "Yes" -- the
+ * accountable disclosure of the result to them -- carries a brief pointer that the
+ * agreement, not this tool, governs its use once the result is out.
  *
  * `perspective` selects the heading and intro copy for the three contexts this
  * renders in -- the acceptor `review`ing a partner's proposal (pre-consent), the
