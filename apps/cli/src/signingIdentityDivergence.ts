@@ -43,8 +43,10 @@ export function warnOnIdentityDivergence(
       `differs from linkage_terms.identity "${termsIdentity}" in the config. ` +
       "Your partner verifies a receipt against the identity in the agreed " +
       "terms, so they will reject a receipt signed under this certificate. " +
-      "Make the two match: regenerate the identity with 'psilink fingerprint " +
-      "--force --identity' naming the terms identity, or set " +
-      "linkage_terms.identity to the bound identity.",
+      "Make the two match: set linkage_terms.identity to the bound identity " +
+      "(a local config edit), or regenerate the identity with 'psilink " +
+      "fingerprint --force --identity' naming the terms identity -- " +
+      "regeneration changes the fingerprint your partner pins, so it needs " +
+      "a coordinated re-pin.",
   );
 }

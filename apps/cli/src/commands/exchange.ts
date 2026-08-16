@@ -891,10 +891,11 @@ export async function handler(argv: Arguments): Promise<void> {
     }
 
     // termsIdentity is the identity this run PUTS IN THE AGREED TERMS, which is
-    // what a partner verifies a signed receipt's certificate against. It is left
-    // undefined where neither the flag nor the config supplies one: `identity`
-    // then falls back to the local account name purely to label the record, and
-    // there is no configured value for a certificate to diverge from.
+    // what a partner verifies a signed receipt's certificate against. On this
+    // path it is always set: loadConfig parses through ExchangeSpecSchema, which
+    // requires linkage_terms, and LinkageTermsSchema requires a non-empty
+    // identity. The fallback below discharges ExchangeDataSpec's optional type,
+    // not a live case.
     let identity: string;
     let termsIdentity: string | undefined;
     if (options.identity) {
