@@ -1,6 +1,7 @@
 import {
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
+  assertFanOutImplemented,
   assertPayloadSendDisclosed,
   assessLinkageSatisfiability,
   disclosedColumnNames,
@@ -337,6 +338,10 @@ function resolveConnectionEndpoint(
  *                      the token and the partner's consent screen cannot misstate
  *                      what is sent. A mint-boundary backstop -- `prepareForExchange`'s
  *                      identical check runs too late for the consent surface.
+ * @throws {UsageError} (from core) when the terms' element transforms or the
+ *                      authored standardization declare a step that expands one
+ *                      value into several match candidates, which the run refuses
+ *                      -- likewise before any secret is minted.
  */
 export async function generateInvitation(params: {
   inviterName: string;
@@ -579,6 +584,18 @@ export async function generateInvitation(params: {
       kind: "overlong",
       positions: overlongPositions,
     });
+
+  // Fail closed, before the token is minted, on terms or a standardization that
+  // declares a step expanding one value into several match candidates: matching
+  // runs on a single value per record, so the run this invitation commits to is
+  // already refused (assertFanOutImplemented, which prepareForExchange applies at
+  // exchange time -- too late for an invitation the partner has been sent). The
+  // CLI's config-source mint runs the same check for the same reason. The editor's
+  // Generate gate names the missing capability on the offending control, so this
+  // is the mint-boundary backstop the quick path and any non-editor caller reach,
+  // covering both surfaces at once: the embedded terms' element transforms and
+  // this party's own authored cleaning.
+  assertFanOutImplemented(linkageTerms, params.standardization);
 
   // Bound the token's lifetime so an intercepted invitation cannot be accepted
   // indefinitely. Measured from the current instant, so the lifetime clock starts
