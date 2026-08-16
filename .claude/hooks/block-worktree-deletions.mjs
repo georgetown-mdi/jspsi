@@ -69,7 +69,13 @@
 // call reaches neither. A repository probe that cannot answer leaves the
 // directory treated as unresolved, so the tree stays guarded; a config probe that
 // cannot answer leaves git's default in place, which is the requirement of a
-// force this hook assumed before it asked.
+// force this hook assumed before it asked. The config probe runs under the
+// environment assignments this hook collects off the command -- a leading `VAR=`
+// on the git stage, or an `export` stage before it -- so an inline
+// `GIT_CONFIG_GLOBAL=`, `HOME=` or other `GIT_CONFIG_*` spelling moves the files
+// the probe reads exactly as it moves the ones the guarded command reads. A
+// collected PATH is the one assignment held back: the probe is answered by the
+// git this hook itself runs, never by a binary the inspected command line names.
 //
 // STATED LIMITS. Beyond the two questions above, this hook reads a plain command
 // line and nothing more, so each of the following reaches a worktree past it.
@@ -133,11 +139,11 @@
 //     (false, no, off, 0, empty), the last such `-c` winning and any `-c` setting
 //     of the key winning over the files, as real git resolves it; the persisted
 //     value is asked of `git config` in the directory being cleaned rather than
-//     resolved here. That probe runs in this hook's own environment, so a spelling
-//     that moves which files git reads for the command alone -- an inline
-//     `GIT_CONFIG_GLOBAL=`, `HOME=` or `GIT_CONFIG_*` assignment, or a
-//     `--config-env` naming an environment variable -- sets the key from a value
-//     the probe does not see.
+//     resolved here, under the assignments described above. What stays unread is
+//     what the plain command line does not carry: a `--config-env` names an
+//     environment variable whose value stands nowhere on the line, so it sets the
+//     key from a value the probe cannot see, as does any assignment reaching git
+//     by a route the stage splitting above does not surface.
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude. Any
 // unexpected failure here falls through to exit 0 (fail open) so a bug in this
@@ -167,14 +173,28 @@ function mentionsDeletion(command) {
 
 // Put a read-only question to real git and return its answer, or null when it
 // gave none: no git on PATH, a directory that is gone, a non-zero exit, or a run
-// that outlived the timeout.
-function askGit(args, cwd) {
+// that outlived the timeout. `environment` carries the assignments the guarded
+// command runs git under, so a probe whose answer depends on which files git
+// reads resolves them from where that command would; they are passed as an
+// object to the spawn rather than through a shell, so a value carrying quotes or
+// spaces reaches git as it stands. The three settings below are the probe's own
+// contract and are not the command's to move: which git answers it -- a spawn
+// resolves the program from the CHILD's PATH, so a collected PATH would have
+// this hook execute a binary the command line named -- and the shape the answer
+// is read in.
+function askGit(args, cwd, environment = new Map()) {
   const probe = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
     timeout: GIT_PROBE_TIMEOUT_MS,
     stdio: ["ignore", "pipe", "ignore"],
-    env: { ...process.env, LC_ALL: "C", GIT_PAGER: "cat" },
+    env: {
+      ...process.env,
+      ...Object.fromEntries(environment),
+      PATH: process.env.PATH,
+      LC_ALL: "C",
+      GIT_PAGER: "cat",
+    },
   });
   return probe.status === 0 ? (probe.stdout ?? "").trim() : null;
 }
@@ -532,16 +552,25 @@ function commandLineRequireForce(configSettings) {
 // Whether git's own requirement of a force is lifted for this clean. A `-c` on
 // the command line settles it, winning over the config files as real git resolves
 // it; otherwise the persisted value is asked of git in the directory being
-// cleaned rather than resolved here. A doubled flag force has already carried the
-// command past every threshold this config could move it to, so the probe is
-// skipped there.
-function forceRequirementLifted(directory, configSettings, flagForce) {
+// cleaned rather than resolved here, under the environment assignments the
+// command carries, which are what decide the set of files git reads it from. A
+// doubled flag force has already carried the command past every threshold this
+// config could move it to, so the probe is skipped there.
+function forceRequirementLifted(
+  directory,
+  configSettings,
+  flagForce,
+  environment,
+) {
   const fromCommandLine = commandLineRequireForce(configSettings);
   if (fromCommandLine !== null) return fromCommandLine;
   if (flagForce >= 2) return false;
   return (
-    askGit(["config", "--type=bool", "--get", REQUIRE_FORCE_KEY], directory) ===
-    "false"
+    askGit(
+      ["config", "--type=bool", "--get", REQUIRE_FORCE_KEY],
+      directory,
+      environment,
+    ) === "false"
   );
 }
 
@@ -582,6 +611,7 @@ function gitCleanVerdict(
   ownTrees,
   knownRoots,
   configSettings,
+  environment,
 ) {
   if (isDryRun(args)) return null;
   const flagForce = forceCount(args);
@@ -590,7 +620,7 @@ function gitCleanVerdict(
     if (owns(directory, ownTrees)) return null;
     if (
       flagForce === 0 &&
-      !forceRequirementLifted(directory, configSettings, flagForce)
+      !forceRequirementLifted(directory, configSettings, flagForce, environment)
     ) {
       return null;
     }
@@ -615,7 +645,9 @@ function gitCleanVerdict(
   // across it (the 2.44/2.45 versions), not by reading git.
   const force =
     flagForce +
-    (forceRequirementLifted(directory, configSettings, flagForce) ? 1 : 0);
+    (forceRequirementLifted(directory, configSettings, flagForce, environment)
+      ? 1
+      : 0);
   if (force === 0) return null;
   if (force >= 2) {
     const [root] = roots;
@@ -652,6 +684,7 @@ function gitVerdict(args, cwd, ownTrees, knownRoots, environment) {
       ownTrees,
       knownRoots,
       git.configSettings,
+      environment,
     );
   }
   if (git.subcommand !== "worktree" || git.args[0] !== "remove") return null;

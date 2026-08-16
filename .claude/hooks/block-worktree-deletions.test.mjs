@@ -57,6 +57,19 @@ function makeRepoWithWorktree() {
   return { dir, git, tree, own, precious: join(tree, "uncommitted.txt") };
 }
 
+// A home directory holding a git config file that sets clean.requireForce, for
+// the inline environment spellings that move which files git reads for a single
+// command.
+function makeGitConfigHome(requireForce) {
+  const home = mkdtempSync(join(tmpdir(), "block-worktree-deletions-home-"));
+  fixtures.push(home);
+  writeFileSync(
+    join(home, ".gitconfig"),
+    `[clean]\n\trequireForce = ${requireForce}\n`,
+  );
+  return home;
+}
+
 // The two ways an agent worktree goes orphaned in practice: its superproject's
 // admin directory removed, and its gitlink left pointing at a gitdir that is
 // gone. Either one stops real git reading the tree as a repository to skip.
@@ -566,6 +579,75 @@ describe("block-worktree-deletions hook", () => {
         expect(existsSync(precious), label).toBe(!blocked);
       }
     }
+  });
+
+  // An inline `GIT_CONFIG_GLOBAL=` or `HOME=` moves which files git resolves
+  // clean.requireForce from for the command alone, and the hook's probe runs
+  // under the same assignments, so both read the key from the same file. Which
+  // value git ends up with is git's own resolution, asked of it rather than
+  // reimplemented here, so each row is put to a real repo whose sibling tree
+  // holds uncommitted work: the hook must refuse exactly the rows that destroy
+  // it. A failure means git's behavior moved and the hook's reading of it has to
+  // move too.
+  it("blocks exactly the cleans an inline config environment turns destructive", () => {
+    for (const { spelling, requireForce } of [
+      {
+        spelling: "GIT_CONFIG_GLOBAL=CONFIG_FILE git clean -d",
+        requireForce: "false",
+      },
+      { spelling: "HOME=HOME_DIR git clean -d", requireForce: "false" },
+      {
+        spelling: "export GIT_CONFIG_GLOBAL=CONFIG_FILE; git clean -d",
+        requireForce: "false",
+      },
+      // A file that leaves requireForce on leaves git's refusal in place, and a
+      // command-line `-c` wins over whichever file the assignment points at.
+      {
+        spelling: "GIT_CONFIG_GLOBAL=CONFIG_FILE git clean -d",
+        requireForce: "true",
+      },
+      { spelling: "HOME=HOME_DIR git clean -d", requireForce: "true" },
+      {
+        spelling:
+          "GIT_CONFIG_GLOBAL=CONFIG_FILE git -c clean.requireForce=true clean -d",
+        requireForce: "false",
+      },
+    ]) {
+      const { dir, tree, precious } = makeRepoWithWorktree();
+      const home = makeGitConfigHome(requireForce);
+      const command = spelling
+        .replaceAll("HOME_DIR", home)
+        .replaceAll("CONFIG_FILE", join(home, ".gitconfig"));
+      const label = `${spelling}, requireForce ${requireForce}`;
+      const blocked =
+        verdict(command, { cwd: tree, projectDir: dir }).status === 2;
+      spawnSync("bash", ["-c", command], { cwd: tree });
+      expect(existsSync(precious), label).toBe(!blocked);
+    }
+  });
+
+  // The config probe reads the environment assignments a command carries, and a
+  // spawn resolves its program from the child's PATH, so a collected PATH would
+  // have this hook execute a git the inspected command line named. A logging shim
+  // that answers every question with git's force-disabling value turns "the probe
+  // is answered by the git this hook runs" into a check: a hook that reached the
+  // shim would block on its answer and leave the shim's log behind it.
+  it("answers the config probe with its own git, not one a PATH assignment names", () => {
+    const shim = mkdtempSync(join(tmpdir(), "block-worktree-deletions-path-"));
+    fixtures.push(shim);
+    const log = join(shim, "calls.log");
+    writeFileSync(
+      join(shim, "git"),
+      `#!/bin/sh\necho "$@" >> "${log}"\necho false\n`,
+      { mode: 0o755 },
+    );
+    const { dir, tree } = makeRepoWithWorktree();
+    const { status } = verdict(`PATH=${shim} git clean -d`, {
+      cwd: tree,
+      projectDir: dir,
+    });
+    expect(status).toBe(0);
+    expect(existsSync(log)).toBe(false);
   });
 
   // One holder `git clean` spelling is version-dependent, so it cannot join the
