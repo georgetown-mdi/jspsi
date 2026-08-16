@@ -6,9 +6,10 @@ import {
   MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   MAX_WEBRTC_STRING_BYTES,
   WEBRTC_VALUE_WEIGHTS,
-  boundChunkReassembly,
   structureOverBudget,
-} from "../../src/psi/boundedReassembly.js";
+} from "@psilink/core";
+
+import { boundChunkReassembly } from "../../src/psi/boundedReassembly.js";
 
 import type { Packable, Unpackable } from "peerjs-js-binarypack";
 import type { DataConnection } from "peerjs";
@@ -18,7 +19,11 @@ import type { DataConnection } from "peerjs";
 // the REAL peerjs-js-binarypack `pack`/`unpack` (the library peerjs uses on the
 // wire), so a divergence between our defensive pre-scan and the real unpacker is
 // caught. `pack`/`unpack` are reached through apps/web's existing `peerjs`/
-// `peerjs-js-binarypack` dependency -- no new dependency is introduced.
+// `peerjs-js-binarypack` dependency -- no new dependency is introduced. The
+// pre-scan it differentiates against is core's (`connection/binaryPackBounds.ts`)
+// and is imported, never mocked, so this suite exercises the shipped scan; it
+// lives here rather than beside that module because only this workspace declares
+// the real packer.
 
 /** The real PeerJS chunk MTU (peerjs/dist/bundler chunker), the boundary at which
  * a packed frame is split into `_handleChunk` slices on the wire. */

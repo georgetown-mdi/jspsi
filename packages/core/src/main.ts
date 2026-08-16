@@ -19,6 +19,11 @@ export {
   EncryptedMessageConnection,
   AEAD_ENVELOPE_VERSION,
 } from "./connection/encryptedMessageConnection";
+// The transport-agnostic half of the WebRTC data-channel inbound bound. Barrelled
+// because the enforcement point is per-transport and lives outside this package
+// (the web app's PeerJS reassembly wrapper), while the constants and the
+// structural pre-scan they parameterize must stay one implementation.
+export * from "./connection/binaryPackBounds";
 export {
   getLogger,
   getLoggerForVerbosity,
