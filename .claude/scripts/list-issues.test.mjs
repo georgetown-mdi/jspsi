@@ -17,21 +17,47 @@ function item(id, status) {
 }
 
 describe("parseArgs", () => {
-  it("defaults to no filters and reads the project number", () => {
+  it("defaults to the non-Done view and reads the project number", () => {
     const parsed = parseArgs(["9"]);
     expect(parsed).toEqual({
       ok: true,
       asJson: false,
-      open: false,
+      all: false,
       statuses: [],
       projectNumber: 9,
     });
   });
 
-  it("accepts --json in either position around the project number", () => {
+  it("accepts every flag on either side of the project number", () => {
     expect(parseArgs(["--json", "9"])).toMatchObject({
       ok: true,
       asJson: true,
+    });
+    expect(parseArgs(["9", "--json"])).toMatchObject({
+      ok: true,
+      asJson: true,
+    });
+    expect(parseArgs(["9", "--all"])).toMatchObject({ ok: true, all: true });
+    expect(parseArgs(["9", "--status", "Todo"])).toMatchObject({
+      ok: true,
+      statuses: ["todo"],
+    });
+    expect(parseArgs(["9", "--open"])).toMatchObject({ ok: true, all: false });
+  });
+
+  it("sets all on --all", () => {
+    expect(parseArgs(["--all", "9"])).toMatchObject({
+      ok: true,
+      all: true,
+      statuses: [],
+    });
+  });
+
+  it("accepts --open as the historical name for the default", () => {
+    expect(parseArgs(["--open", "9"])).toMatchObject({
+      ok: true,
+      all: false,
+      statuses: [],
     });
   });
 
@@ -49,12 +75,14 @@ describe("parseArgs", () => {
     });
   });
 
-  it("sets open on --open", () => {
-    expect(parseArgs(["--open", "9"])).toMatchObject({
-      ok: true,
-      open: true,
-      statuses: [],
-    });
+  it("rejects --all combined with --status or --open", () => {
+    const withStatus = parseArgs(["--all", "--status", "Todo", "9"]);
+    expect(withStatus.ok).toBe(false);
+    expect(withStatus.message).toMatch(/--all cannot be combined/);
+
+    const withOpen = parseArgs(["9", "--open", "--all"]);
+    expect(withOpen.ok).toBe(false);
+    expect(withOpen.message).toMatch(/--all cannot be combined/);
   });
 
   it("rejects --open combined with --status", () => {
@@ -74,6 +102,12 @@ describe("parseArgs", () => {
     expect(parsed.message).toBe("error: --status requires a value\n");
   });
 
+  it("rejects an unknown flag with the usage string", () => {
+    const parsed = parseArgs(["--bogus", "9"]);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.message).toMatch(/^Usage: node list-issues\.mjs/);
+  });
+
   it("rejects a missing or non-numeric project number with the usage string", () => {
     expect(parseArgs([]).ok).toBe(false);
     expect(parseArgs([]).message).toMatch(/^Usage: node list-issues\.mjs/);
@@ -91,25 +125,25 @@ describe("filterItems", () => {
     item(5, null), // no Status set
   ];
 
-  it("passes every item through when neither --status nor --open is given", () => {
-    expect(filterItems(items, { statuses: [], open: false })).toEqual(items);
+  it("excludes every Done item (case-insensitively) by default", () => {
+    const result = filterItems(items, { statuses: [], all: false });
+    expect(result.map((i) => i.id)).toEqual([1, 4, 5]);
+  });
+
+  it("keeps an item with no Status by default, since unset is not Done", () => {
+    const result = filterItems([item(9, null)], { statuses: [], all: false });
+    expect(result).toEqual([item(9, null)]);
+  });
+
+  it("passes every item through under --all", () => {
+    expect(filterItems(items, { statuses: [], all: true })).toEqual(items);
   });
 
   it("keeps only items whose Status matches, case-insensitively, dropping unset Status", () => {
     const result = filterItems(items, {
       statuses: ["todo", "done"],
-      open: false,
+      all: false,
     });
     expect(result.map((i) => i.id)).toEqual([1, 2, 3]);
-  });
-
-  it("excludes every Done item (case-insensitively) when --open is set", () => {
-    const result = filterItems(items, { statuses: [], open: true });
-    expect(result.map((i) => i.id)).toEqual([1, 4, 5]);
-  });
-
-  it("keeps an item with no Status under --open, since unset is not Done", () => {
-    const result = filterItems([item(9, null)], { statuses: [], open: true });
-    expect(result).toEqual([item(9, null)]);
   });
 });

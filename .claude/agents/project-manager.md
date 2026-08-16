@@ -37,7 +37,7 @@ a command that exceeds the ceiling, or hand the work back to the caller.
    or `apps/web/src/` only when the task's affected areas genuinely require it.
    Keep reads targeted -- you are a consult, not an explorer.
 3. **Classify and check for duplicates** per the ruleset (board 9 vs 10; the
-   `list-issues.mjs` whole-board skim).
+   `list-issues.mjs --all` whole-board skim).
 4. **Decide your terminal result** -- one of the five below -- and return it.
 
 ## Output contract: return exactly one of these
