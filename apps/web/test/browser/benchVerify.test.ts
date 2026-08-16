@@ -154,6 +154,72 @@ async function mountVerifyBench() {
 
 afterEach(app.unmount);
 
+// A joint run: the record's own verdict, whose standing note points the reader
+// at the signed panel, and that signed panel beside it. Returns what a test
+// needs to then edit one of the signed-leg inputs.
+async function verifyRecordAndSignedRecord(): Promise<{
+  record: ExchangeRecord;
+  signed: DualSignedRecord;
+}> {
+  const { record, keys } = await buildFixture();
+  const { signed, ourCertificate, partnerFingerprint } =
+    await buildSignedFixture(record);
+  await mountVerifyBench();
+
+  await userEvent.upload(
+    page.elementLocator(fileInputAt(0)),
+    jsonFile("rec.json", serializeExchangeRecord(record)),
+  );
+  await userEvent.upload(
+    page.elementLocator(fileInputAt(1)),
+    jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+  );
+  await userEvent.click(
+    page.getByRole("button", {
+      name: "Check the partner's signatures with the dual-signed record",
+    }),
+  );
+  await userEvent.upload(
+    page.elementLocator(fileInputFor("Dual-signed record")),
+    jsonFile("psilink-receipt-x.json", serializeDualSignedRecord(signed)),
+  );
+  await userEvent.fill(
+    page.getByLabelText("Your partner's certificate fingerprint"),
+    partnerFingerprint,
+  );
+  await userEvent.upload(
+    page.elementLocator(fileInputFor("Your exported certificate")),
+    jsonFile("certificate.json", serializeCertificate(ourCertificate)),
+  );
+  await userEvent.click(
+    page.getByRole("button", { name: "Verify with the signed record" }),
+  );
+
+  await expect
+    .element(page.getByText("Signed receipt verified"))
+    .toBeInTheDocument();
+  await expect
+    .element(
+      page.getByText("checked separately below", { exact: false }).first(),
+    )
+    .toBeInTheDocument();
+  return { record, signed };
+}
+
+// Neither verdict survives an edit to a signed-leg input: the signed panel the
+// edit invalidates, and the record verdict whose note points at that panel.
+async function expectBothVerdictsGone() {
+  await expect
+    .element(page.getByText("Signed receipt verified"))
+    .not.toBeInTheDocument();
+  await expect
+    .element(page.getByText("What was checked"))
+    .not.toBeInTheDocument();
+  await expect
+    .element(page.getByText("checked separately below", { exact: false }))
+    .not.toBeInTheDocument();
+}
+
 describe("verify receipt bench", () => {
   test("full happy path: record + keys + re-supplied files reach a verified verdict", async () => {
     const { record, keys } = await buildFixture();
@@ -666,6 +732,149 @@ describe("verify receipt bench", () => {
     await expect
       .element(page.getByText("43 characters", { exact: false }))
       .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Verify", exact: true }))
+      .toBeDisabled();
+  });
+
+  test("re-pinning the partner's fingerprint after a joint verify clears both verdicts", async () => {
+    const { signed } = await verifyRecordAndSignedRecord();
+
+    // A fingerprint that anchors nothing in the partner's slot: the signed
+    // panel goes, and the record verdict's note must not be left behind
+    // pointing at signatures checked below.
+    await userEvent.fill(
+      page.getByLabelText("Your partner's certificate fingerprint"),
+      await computeCertificateFingerprint(signed.initiator.certificate),
+    );
+
+    await expectBothVerdictsGone();
+  });
+
+  test("swapping the certificate after a joint verify clears both verdicts", async () => {
+    const { signed } = await verifyRecordAndSignedRecord();
+
+    await userEvent.upload(
+      page.elementLocator(fileInputFor("Your exported certificate")),
+      jsonFile(
+        "other-certificate.json",
+        serializeCertificate(signed.responder.certificate),
+      ),
+    );
+
+    await expectBothVerdictsGone();
+  });
+
+  test("swapping the dual-signed record after a joint verify clears both verdicts", async () => {
+    const { record } = await verifyRecordAndSignedRecord();
+    const { signed: otherSigned } = await buildSignedFixture(record);
+
+    await userEvent.upload(
+      page.elementLocator(fileInputFor("Dual-signed record")),
+      jsonFile("other-receipt.json", serializeDualSignedRecord(otherSigned)),
+    );
+
+    await expectBothVerdictsGone();
+  });
+
+  test("one re-supplied CSV does not gate a run that only checks the signed record", async () => {
+    const { record } = await buildFixture();
+    const { signed, ourCertificate, partnerFingerprint } =
+      await buildSignedFixture(record);
+    await mountVerifyBench();
+
+    // Neither the record nor its keys is loaded, so nothing this run does
+    // reads the re-supplied CSVs -- one of them dropped must not block it.
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Re-supply your files to open the commitments",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(2)),
+      csvFile("input.csv", INPUT_CSV),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Check the partner's signatures with the dual-signed record",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputFor("Dual-signed record")),
+      jsonFile("receipt.json", serializeDualSignedRecord(signed)),
+    );
+    await userEvent.fill(
+      page.getByLabelText("Your partner's certificate fingerprint"),
+      partnerFingerprint,
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputFor("Your exported certificate")),
+      jsonFile("certificate.json", serializeCertificate(ourCertificate)),
+    );
+
+    await expect
+      .element(
+        page.getByRole("button", { name: "Verify with the signed record" }),
+      )
+      .toBeEnabled();
+    await userEvent.click(
+      page.getByRole("button", { name: "Verify with the signed record" }),
+    );
+
+    // The signed leg ran: both certificates are anchored, and what holds the
+    // verdict short of verified is the absent record, not the CSV pair.
+    await expect
+      .element(page.getByText("Signed receipt incomplete"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Matches the fingerprint you pinned out-of-band"))
+      .toBeInTheDocument();
+  });
+
+  test("one re-supplied CSV gates the signed section's run once the record is loaded", async () => {
+    const { record, keys } = await buildFixture();
+    const { signed, partnerFingerprint } = await buildSignedFixture(record);
+    await mountVerifyBench();
+
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec.json", serializeExchangeRecord(record)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(1)),
+      jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Re-supply your files to open the commitments",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(2)),
+      csvFile("input.csv", INPUT_CSV),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Check the partner's signatures with the dual-signed record",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputFor("Dual-signed record")),
+      jsonFile("receipt.json", serializeDualSignedRecord(signed)),
+    );
+    await userEvent.fill(
+      page.getByLabelText("Your partner's certificate fingerprint"),
+      partnerFingerprint,
+    );
+
+    // Every button starts the same run, and this one reconstructs from the
+    // re-supplied files: starting it from the signed section would open the
+    // commitments no more than starting it from the top would.
+    await expect
+      .element(
+        page.getByRole("button", { name: "Verify with the signed record" }),
+      )
+      .toBeDisabled();
     await expect
       .element(page.getByRole("button", { name: "Verify", exact: true }))
       .toBeDisabled();

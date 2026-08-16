@@ -112,9 +112,9 @@ interface ParsedCertificateState {
   alert?: string;
 }
 
-/** The re-supply section's own re-run button gates on this, but a one-CSV state
- * also silently starves the top-level Verify button of the file it needs, so
- * both the gating and this warning are shared between the two call sites. */
+/** Shown at both call sites the one-CSV state reaches: the re-supply section
+ * that owns the two inputs, and the work foot, where it says why a run that
+ * would otherwise skip the reconstruction in silence is held back instead. */
 function OneCsvWarning() {
   return (
     <Text role="alert" c="yellow.8" size="sm">
@@ -377,9 +377,13 @@ export function VerifyReceiptBench() {
     else setKeys({ file: supplied, alert: parsed.message });
   }
 
+  // Each of the three signed-leg inputs clears the record verdict alongside the
+  // signed one: that verdict's standing note points the reader at the signed
+  // panel beside it, so it must not outlive the panel the edit removes.
   async function onSignedRecordFile(file: File) {
     const supplied = await readSupplied(file);
     const parsed = parseSignedRecordDocument(supplied.text);
+    setVerdict(undefined);
     setSignedVerdict(undefined);
     setVerifyError(undefined);
     if (parsed.kind === "ok")
@@ -390,6 +394,7 @@ export function VerifyReceiptBench() {
   async function onCertificateFile(file: File) {
     const supplied = await readSupplied(file);
     const parsed = await parseCertificateDocument(supplied.text);
+    setVerdict(undefined);
     setSignedVerdict(undefined);
     setVerifyError(undefined);
     if (parsed.kind === "ok")
@@ -399,6 +404,7 @@ export function VerifyReceiptBench() {
 
   function onPinnedFingerprint(value: string) {
     setPinnedFingerprint(value);
+    setVerdict(undefined);
     setSignedVerdict(undefined);
     setVerifyError(undefined);
   }
@@ -497,6 +503,10 @@ export function VerifyReceiptBench() {
 
   const bothCsvSupplied = inputCsv !== undefined && resultCsv !== undefined;
   const oneCsvSupplied = (inputCsv !== undefined) !== (resultCsv !== undefined);
+  // Every Verify button starts the same run, and only the record leg reads the
+  // re-supplied CSVs, so a half-supplied pair blocks a run exactly when that leg
+  // is the one that would run. A signed-record-only run never reads them.
+  const oneCsvStarvesRun = recordReady && oneCsvSupplied;
 
   return (
     <BenchShell>
@@ -542,7 +552,7 @@ export function VerifyReceiptBench() {
 
       <div className={styles.workFoot}>
         <Button
-          disabled={!canVerify || oneCsvSupplied}
+          disabled={!canVerify || oneCsvStarvesRun}
           onClick={() => void runVerify()}
         >
           Verify
@@ -554,7 +564,7 @@ export function VerifyReceiptBench() {
               ? "Ready to verify the dual-signed record."
               : "Load the record and its keys, or a dual-signed record, to verify."}
         </p>
-        {oneCsvSupplied && <OneCsvWarning />}
+        {oneCsvStarvesRun && <OneCsvWarning />}
       </div>
 
       {/* The verdict and any verify-time fault share one stable focus target. */}
@@ -681,7 +691,7 @@ export function VerifyReceiptBench() {
             <div>
               <Button
                 onClick={() => void runVerify()}
-                disabled={!canVerify || oneCsvSupplied}
+                disabled={!canVerify || oneCsvStarvesRun}
               >
                 Verify with these files
               </Button>
@@ -751,7 +761,7 @@ export function VerifyReceiptBench() {
             <div>
               <Button
                 onClick={() => void runVerify()}
-                disabled={!canVerify || oneCsvSupplied}
+                disabled={!canVerify || oneCsvStarvesRun}
               >
                 Verify with the signed record
               </Button>
