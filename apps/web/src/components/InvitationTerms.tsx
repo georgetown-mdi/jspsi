@@ -16,6 +16,7 @@ import { useReducedMotion } from "@mantine/hooks";
 
 import {
   CONSENT_FACTS,
+  COUNT_ONLY_DISCLOSURE_STATEMENT,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
   sanitizeForDisplay,
@@ -427,6 +428,15 @@ function CondensableDetails({
  * enters a caveat and neither surface can restate one. Render tests pin each caveat
  * at its headline's level against the accessibility tree.
  *
+ * The same placement rule governs the count-only tier the psi-c caveat gives way to
+ * once `psiCApplied` says the run honors the algorithm: the statement of what a
+ * count-only exchange reveals, what its rounds disclose beside the count, and the
+ * bound a partner's choice of input puts on both are always-visible with the
+ * headline, and its no-payload sentence takes the outbound-send slot ahead of every
+ * entitlement-driven block there. Every sentence, and the enforced-versus-partner
+ * basis behind it, is read from `COUNT_ONLY_DISCLOSURE_STATEMENT` and `CONSENT_FACTS`
+ * in `@psilink/core`.
+ *
  * Two payload facts whose detail lives in the "Other details" disclosure carry an
  * always-visible count in a direction tier, since each would otherwise be invisible
  * until the acceptor expands Details: the extra-payload-egress request (a count of
@@ -671,15 +681,28 @@ export function InvitationTerms({
   // acceptance mirrors the invitation's output direction into this party's terms, and
   // the compatibility check refuses a partner presenting terms that disagree with
   // that mirror.
-  const outboundNoPayloadRenders = !partnerReceivesResult;
+  //
+  // A count-only exchange answers the slot ahead of even that: it carries no payload
+  // in either direction whichever party the terms entitle to the count, so the
+  // entitlement the gate below reads does not decide the question and the sentence
+  // stating it names the algorithm instead. Gated on the run honoring the algorithm
+  // (psiCApplied), so while the exchange refuses a psi-c invitation outright the
+  // entitlement answers the slot as it does for psi, and no block here describes a
+  // run that does not happen.
+  const countOnlyApplied = summary.algorithm === "psi-c" && summary.psiCApplied;
+  const outboundNoPayloadRenders = !countOnlyApplied && !partnerReceivesResult;
   const proposingSendChipsRender =
-    perspective === "proposing" && !outboundNoPayloadRenders;
+    perspective === "proposing" &&
+    !countOnlyApplied &&
+    !outboundNoPayloadRenders;
   const outboundSendListRenders =
     perspective !== "proposing" &&
+    !countOnlyApplied &&
     !outboundNoPayloadRenders &&
     outboundColumns !== undefined;
   const outboundForwardRefRenders =
     perspective === "review" &&
+    !countOnlyApplied &&
     !outboundNoPayloadRenders &&
     outboundColumns === undefined;
   // Every block that can occupy the outbound-send slot carries the same caption, the
@@ -695,6 +718,7 @@ export function InvitationTerms({
   // for the acceptor once the gate or a chosen file answers it) and/or the egress
   // request.
   const showsDiscloseGroup =
+    countOnlyApplied ||
     proposingSendChipsRender ||
     outboundNoPayloadRenders ||
     outboundSendListRenders ||
@@ -873,6 +897,18 @@ export function InvitationTerms({
             </Term>
           )}
 
+          {/* A count-only run moves no data column in either direction, so this slot
+              states the algorithm as the reason rather than the entitlement the
+              block below reads -- under psi-c the partner may well receive the
+              count, and a sentence reasoning from receipt would be answering a
+              different question. Read from `@psilink/core` like every other block
+              in this slot; fixed first-party copy, naming no column. */}
+          {countOnlyApplied && (
+            <Term label={outboundSendSlotLabel}>
+              <Text size="sm">{CONSENT_FACTS.countOnlyNoPayload.note}</Text>
+            </Term>
+          )}
+
           {/* This viewer's partner receives no result, so the payload step sends
               nothing whatever the operator's file holds -- the case that takes the
               slot ahead of every other block in it (see the precedence above).
@@ -972,7 +1008,7 @@ export function InvitationTerms({
         <Term label="Matching method">
           <Text size="sm">
             {summary.algorithm === "psi-c" ? (
-              "Only the number of records you have in common is revealed, not which records match."
+              COUNT_ONLY_DISCLOSURE_STATEMENT
             ) : (
               <>
                 The shared identifiers of records you have in common are
@@ -992,6 +1028,27 @@ export function InvitationTerms({
             <Text size="xs" c="dimmed">
               {PROPOSED_NOT_APPLIED_NOTES.psiC}
             </Text>
+          )}
+          {/* Once the run honors the algorithm, the same placement rule keeps the
+              tier that qualifies the headline beside it rather than one expand
+              down: what the enforced half covers, what the rounds disclose past
+              the count, and -- the one a reader taking "only a number" for the
+              safe option most needs -- the bound a partner's choice of input puts
+              on all of it. Each sentence is read from the shared table with its
+              basis, so neither surface classifies a half of the count-only claim
+              for itself. */}
+          {countOnlyApplied && (
+            <>
+              <Text size="xs" c="dimmed">
+                {CONSENT_FACTS.countOnlyResult.note}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {CONSENT_FACTS.countOnlyRoundDisclosures.note}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {CONSENT_FACTS.countOnlyInputChoice.note}
+              </Text>
+            </>
           )}
         </Term>
 
@@ -1022,6 +1079,20 @@ export function InvitationTerms({
           <Text size="sm">
             {partnerReceiptLabel}: {yesNo(partnerReceivesResult)}
           </Text>
+          {/* Where a count-only run entitles BOTH parties to the count, only one of
+              them computes it and the other is sent that party's report, so one
+              side's "Yes" above is a number psilink did not check. Which side is
+              settled by the record counts the run exchanges, not by anything on this
+              screen, so the fact is stated for both. Where exactly one party is
+              entitled, that party is the receiver by the role rule and computes its
+              own count, so no report exists to caveat. */}
+          {countOnlyApplied &&
+            viewerReceivesResult &&
+            partnerReceivesResult && (
+              <Text size="xs" c="dimmed">
+                {CONSENT_FACTS.countOnlyReportedCount.note}
+              </Text>
+            )}
           {partnerReceivesResult ? (
             // The partner DOES receive: the accountable disclosure (the 164.528
             // event). A "Yes" carries no false-guarantee risk, so it stays a plain

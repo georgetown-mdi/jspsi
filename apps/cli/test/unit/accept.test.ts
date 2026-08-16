@@ -21,6 +21,7 @@ import {
 import {
   BEL,
   CONSENT_PROBE_TERMS,
+  COUNT_ONLY_PROBE_TERMS,
   ESC,
   PRINTABLE_ASCII,
   RLO,
@@ -1949,7 +1950,11 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
     { expectsOutput: false, shareWithPartner: true },
     false,
   );
-  const rendered = `${acceptorWithheld}\n${inviterWithheld}`;
+  // The count-only tier is the third rendering, because its caveats are the ones no
+  // `psi` invitation raises: a table entry the renderer never reaches is exactly
+  // what this test exists to catch, so the tier has to be rendered here rather than
+  // exempted from the sweep.
+  const rendered = `${acceptorWithheld}\n${inviterWithheld}\n${renderAppliedCountOnlyFacts()}`;
 
   // The whole table, rather than a list restated here: a caveat this renderer
   // authored for itself instead of reading is absent from the rendering and fails,
@@ -1996,6 +2001,64 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
   );
 });
 
+// The two count-only sentences spelled out rather than read from the shared table,
+// for the reason the refusal caveat below is spelled out: an acceptor can ACT on
+// either -- the first states the guarantee, the second states what it does not
+// cover -- so an edit to either has to be made here as well, on this surface,
+// rather than followed. The tier's remaining wording is read from the table, where
+// a surface restating it on its own is what fails.
+const COUNT_ONLY_STATEMENT =
+  "Only the number of records you have in common is revealed, not which " +
+  "records match.";
+const COUNT_ONLY_INPUT_CHOICE_BOUND =
+  "Not enforced against your partner's choice of input: a count-only exchange " +
+  "bounds what psilink hands your partner, not what they can learn by choosing " +
+  "which records to ask about. A crafted list, or a second run differing by one " +
+  "record, turns a count into an answer about one person.";
+
+/** Every sentence the count-only tier puts on this surface. */
+const COUNT_ONLY_TIER_COPY = [
+  COUNT_ONLY_STATEMENT,
+  CONSENT_FACTS.countOnlyResult.note,
+  CONSENT_FACTS.countOnlyRoundDisclosures.note,
+  CONSENT_FACTS.countOnlyReportedCount.note,
+  CONSENT_FACTS.countOnlyInputChoice.note,
+  CONSENT_FACTS.countOnlyNoPayload.note,
+];
+
+/**
+ * The decision block for a count-only exchange this version HONORS: the shared
+ * summary with `psiCApplied` set, which `APPLIED_SETTINGS.psiC` holds false until
+ * the count-only run path lands.
+ *
+ * The flag is set on the summary rather than mocked inside core, so what is
+ * measured is this renderer's own gate and the words it puts behind it. That the
+ * real flag keeps every one of those words off the prompt is pinned separately,
+ * through the unmodified path.
+ */
+function renderAppliedCountOnlyFacts(
+  output: LinkageTerms["output"] = {
+    expectsOutput: true,
+    shareWithPartner: true,
+  },
+): string {
+  const block: Array<string> = [];
+  logDecisionFacts(
+    (line) => {
+      block.push(line);
+    },
+    {
+      ...summarizeInvitation({
+        ...sampleToken(FUTURE()),
+        linkageTerms: { ...COUNT_ONLY_PROBE_TERMS, output },
+      }),
+      psiCApplied: true,
+    },
+    [],
+  );
+  return block.join("\n");
+}
+
 test("the psi-c caveat states the refusal, on both surfaces, from one terms document", () => {
   // psi-c is refused outright on every run path (assertAlgorithmImplemented), so
   // the exchange aborts before any identifier is revealed. A caveat saying the
@@ -2023,6 +2086,63 @@ test("the psi-c caveat states the refusal, on both surfaces, from one terms docu
   expect(countOnly).not.toContain(
     "the shared identifiers of matched records are still revealed",
   );
+  // The tier that replaces the caveat is authored and wired, and not one sentence
+  // of it may reach an operator while the run refuses these terms: a count-only
+  // guarantee stated for an exchange that aborts is the same error as the caveat
+  // saying identifiers are revealed, facing the other way. This is the gate, read
+  // through the real APPLIED_SETTINGS.psiC rather than around it.
+  const shaped = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    linkageTerms: COUNT_ONLY_PROBE_TERMS,
+  });
+  for (const copy of COUNT_ONLY_TIER_COPY) {
+    expect(countOnly).not.toContain(copy);
+    expect(shaped).not.toContain(copy);
+  }
+});
+
+test("an applied count-only exchange states its disclosure tier on the register the protocol assigns each half", () => {
+  // What the psi-c caveat above flips to. Each line's marker is the one
+  // docs/spec/PROTOCOL.md's PSI-C section assigns that row: a party's own
+  // count-only outcome and its view of what the partner receives are held by the
+  // run, the count a both-entitled party did not compute is the other's report,
+  // and the protection a chosen input set defeats rests on the partner
+  // contributing a genuine dataset. Marking any of the three the other way is the
+  // error the vocabulary exists to prevent.
+  const block = renderAppliedCountOnlyFacts();
+  expect(block).toContain("  PSI algorithm (enforced): psi-c");
+  expect(block).toContain(`    ${COUNT_ONLY_STATEMENT}`);
+  expect(block).not.toContain("does not yet apply it");
+  expect(block).toContain(
+    "  what a count-only exchange still discloses (enforced):",
+  );
+  expect(block).toContain(
+    "  how the count reaches each of you (your partner's word):",
+  );
+  expect(block).toContain(
+    "  what a count-only exchange does not bound (your partner's word):",
+  );
+  expect(block).toContain(`    ${COUNT_ONLY_INPUT_CHOICE_BOUND}`);
+  // The acceptor's own outbound line, answered by the algorithm rather than by who
+  // receives the count: both parties are entitled here, so the entitlement-driven
+  // sentence would have listed columns instead.
+  expect(block).toContain("  columns you will send (enforced): (none)");
+  expect(block).toContain(`    ${CONSENT_FACTS.countOnlyNoPayload.note}`);
+  expect(block).not.toContain("the inviting party receives no result");
+});
+
+test("the count a party did not compute is caveated only where both parties are entitled to one", () => {
+  // Where exactly one party is entitled to the count, that party is the receiver by
+  // the role rule and computes its own, so no report crosses and a line saying one
+  // does would name a frame the run does not send. The bound on the guarantee is
+  // not conditional in the same way and stays.
+  const oneSided = renderAppliedCountOnlyFacts({
+    expectsOutput: false,
+    shareWithPartner: true,
+  });
+  expect(oneSided).not.toContain("how the count reaches each of you");
+  expect(oneSided).not.toContain(CONSENT_FACTS.countOnlyReportedCount.note);
+  expect(oneSided).toContain("  what a count-only exchange does not bound");
 });
 
 /**

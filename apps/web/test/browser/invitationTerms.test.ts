@@ -6,7 +6,7 @@ import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { CONSENT_FACTS, sanitizeForDisplay } from "@psilink/core";
 
 import { InvitationTerms } from "@components/InvitationTerms";
 
@@ -91,6 +91,20 @@ const PSI_C_CAVEAT =
   "Your partner proposes a count-only exchange, but this version of the " +
   "exchange does not yet apply it and will refuse to run; ask your partner " +
   'for an invitation using the "psi" algorithm.';
+
+// The tier that caveat gives way to, authored and rendered behind `psiCApplied`.
+// Every sentence of it, so the gate is measured over the whole tier rather than
+// over a sample of it: a count-only guarantee stated for an exchange that refuses
+// to run is the same error as the caveat claiming identifiers are revealed, facing
+// the other way. Its own rendering is pinned in invitationTermsCountOnly.test.ts,
+// which is where the flag can be moved; here the real flag decides.
+const COUNT_ONLY_TIER_COPY = [
+  CONSENT_FACTS.countOnlyResult.note,
+  CONSENT_FACTS.countOnlyRoundDisclosures.note,
+  CONSENT_FACTS.countOnlyReportedCount.note,
+  CONSENT_FACTS.countOnlyInputChoice.note,
+  CONSENT_FACTS.countOnlyNoPayload.note,
+];
 
 // The whole no-payload sentence, spelled out here rather than imported from
 // OUTBOUND_SEND_NO_PAYLOAD_SENTENCE, so a copy edit that drops the reason -- or the
@@ -2024,6 +2038,19 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
     expect(app.container.textContent).not.toContain(
       "matched records are still revealed",
     );
+    // The headline the caveat qualifies renders for a proposed psi-c as well: it
+    // states what the algorithm reveals, which is what the caveat then says this
+    // version will not run. Spelled out because it is the sentence both surfaces
+    // read from one source once the tier below it applies.
+    expect(app.container.textContent).toContain(
+      "Only the number of records you have in common is revealed, not which " +
+        "records match.",
+    );
+    // The gate, read through the real APPLIED_SETTINGS.psiC rather than around it:
+    // while the exchange refuses these terms, not one sentence of the tier the
+    // caveat gives way to may reach the screen.
+    for (const copy of COUNT_ONLY_TIER_COPY)
+      expect(app.container.textContent).not.toContain(copy);
   });
 
   test("the psi-c count-only caveat is always-visible in the core, not one expand down", async () => {
