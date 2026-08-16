@@ -131,7 +131,15 @@ here as to the SFTP tree: what the CLI's hand-written signaling client and PeerJ
 framing rest on was established by driving the real broker and the real
 `peerjs`/`peerjs-js-binarypack` packages, and the premises that follow are held
 as checks -- see
-[docs/spec/DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#upgrading-the-peerjs-stack-peerjs--peerjs-js-binarypack).
+[docs/spec/DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#upgrading-the-cli-webrtc-peer-werift).
+
+One premise the live suite cannot hold, and where it lives instead: werift
+inlines its ICE candidates in the SDP, so two peers connect on loopback even
+when every trickled candidate is discarded. The candidate-queue rule the
+transport exists to honour is therefore invisible end to end and would fail only
+in the field. It is pinned in `apps/cli/test/unit/webrtcNegotiation.test.ts`,
+which drives the negotiation against a scripted broker and peer connection and
+asserts the ORDER of what goes on the wire.
 
 A standing console sentinel guards the CLI integration suite: it wraps `console`
 directly and fails a test file at `afterAll` on any `console.log`/`warn`/`error`

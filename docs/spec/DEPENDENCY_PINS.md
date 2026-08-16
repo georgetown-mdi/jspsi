@@ -38,6 +38,14 @@ freeze, pin, and install on top of that tree is in
   so the encoding is a contract, not an implementation detail. The two
   declarations must move together -- a browser peer and a CLI peer that pack
   differently cannot exchange a frame.
+- **CLI WebRTC peer (`werift`).** The CLI drives werift's `RTCPeerConnection`
+  directly rather than running PeerJS in Node
+  (`docs/notes/cli-webrtc-stack.md`), so the transport depends on behaviours
+  werift's published API does not state -- and its flushing close reaches past
+  that API into the SCTP association's send queues, because nothing public
+  reports what the peer has actually received. Exact-pinned in
+  `apps/cli/package.json`; the premises and the re-verification procedure are in
+  [Upgrading the CLI WebRTC peer (werift)](#upgrading-the-cli-webrtc-peer-werift).
 - **PSI crypto addon (`@openmined/psi.js`).** Pinned by construction: a psilink
   fork vendored as a local `file:` tarball
   (`lib/openmined-psi.js-<version>.tgz`), whose path resolves to exactly the
@@ -530,3 +538,33 @@ Dependency source files to re-read on an upgrade:
 
 `assertChunkReassemblySupported` runs at install time on every connection in `openPeerMessageConnection`, and the live browser exchange test (`apps/web/test/browser/invitedPSI.test.ts`, run in CI) installs the guard on a real `DataConnection`, so a renamed or removed internal fails the install loud rather than running with no inbound bound. The unit tests pin the marker table and the per-kind cost weights (`packages/core/test/binaryPackBounds.test.ts`), the fail-closed wrap bounds (`apps/web/test/unit/boundedReassembly.test.ts`), and the scan's agreement with the real packer/unpacker (`apps/web/test/unit/boundedReassemblyDifferential.test.ts`, which lives in the workspace that declares `peerjs-js-binarypack`). A purely BEHAVIORAL change that keeps the names -- a different chunking serializer, a renamed chunk field, a marker-format change -- is not caught by the assert or the happy-path browser test, so the by-hand premises above must be re-verified against the source files on any bump.
 
+
+## Upgrading the CLI WebRTC peer (werift)
+
+The CLI's WebRTC transport (`apps/cli/src/connection/webrtc/`) drives werift's `RTCPeerConnection` directly -- no PeerJS runs in Node -- and speaks the PeerJS DataConnection wire on the raw data channel. The library choice and the architecture are recorded in [docs/notes/cli-webrtc-stack.md](../notes/cli-webrtc-stack.md); what follows is the pin's own content: the behaviours the transport rests on that werift's published API does not state, and how to re-verify them before a bump merges. Every one was established by driving the library, not by reading it, which is also how each must be re-checked.
+
+### The internal premise: the SCTP send queues
+
+The transport's flushing close reads `peerConnection.sctp.sctp.outboundQueue` and `sentQueue` -- chunks not yet transmitted, and chunks transmitted but not yet acknowledged. Both empty is the only observable point at which tearing the connection down cannot lose data, and there is no public API for it.
+
+This is not a refinement of the data channel's `bufferedAmount`. That counter reaches zero while chunks are still unacknowledged, so a close gated on it loses them: measured at roughly one frame in three, nine datagrams of sixty-two, over a loopback channel with no packet loss at all. Gated on the queues, the same case delivered twelve times out of twelve. `assertSctpDrainSupported` checks both fields exist on every session, so a release that renames or restructures them fails loud rather than silently restoring that data loss.
+
+The close is deliberately two-phase, and an upgrade must keep both halves. The frames are drained to ACKNOWLEDGEMENT; the PeerJS close sentinel that follows is drained only to TRANSMISSION, because a peer closes the moment it reads the sentinel and therefore never acknowledges one -- waiting for that would spend the whole close budget on every clean close.
+
+### The behavioural premises
+
+- **A configured `iceServers` list REPLACES werift's built-in `stun.l.google.com:19302` default rather than adding to it.** This is what makes a deliberately configured server list the list actually used. An empty or absent list means "use the default" (it does not mean "no STUN"), and `getConfiguration()` echoes its input, so it can confirm pass-through but cannot prove suppression. The transport warns when no list is configured, naming the default it is about to use.
+- **ICE candidates begin firing during `setLocalDescription`, before the local description can have reached the broker.** Browser PeerJS has no pre-remote-description candidate queue of its own and discards a `CANDIDATE` it cannot apply, silently from the sender's side, so the transport queues its own candidates until its description is on the wire. werift also inlines its candidates in the SDP, which MASKS a trickle loss entirely -- a broken queue therefore shows up as a connection that works until the inlined candidates are not enough, never as an end-to-end test failure. That is why the queue's ordering is pinned by a unit test against a scripted peer rather than by the live suite.
+- **A peer that vanishes is detected in about thirty seconds, by consent freshness, and not before.** Until then `connectionState` still reads `connected`, the data channel still reads `open`, and `bufferedAmount` stays pinned at its peak. werift raises no data-channel `close` when the remote peer connection is torn down at all, so the transport watches `connectionState` to fail an exchange whose partner has gone; without it a party would wait out its hour-scale inactivity budget.
+- **`send` accepts a `Buffer`/`Uint8Array` and `onmessage` delivers a Node `Buffer`**, and `pack` encodes a `Uint8Array`, an `ArrayBuffer` and a `Buffer` to identical bytes, so the framing is unambiguous in both directions.
+- **`setRemoteDescription` and `addIceCandidate` accept plain objects** -- `{type, sdp}` and the browser-shaped `{candidate, sdpMid, sdpMLineIndex, usernameFragment}` -- which is what lets a broker payload be applied without reconstructing a library type. An unparseable candidate throws a `DOMException`, so a malformed one from a peer is catchable rather than fatal.
+- **The negotiated SCTP `maxMessageSize` is 65,536 bytes** between two werift peers. The transport does not rely on it: PeerJS's own 16,300-byte chunking threshold is well below it, and the inbound bound refuses an over-cap datagram regardless of what the SDP negotiated.
+- **`bytesSent` and `messagesSent` are counted at hand-off**, not as bytes leave, so neither is a progress gauge; there is no finer signal than the queues above.
+
+### Re-verification on a bump
+
+- Run `npm run test:integration -w apps/cli -- test/integration/webrtcTransport.test.ts`. It drives two real werift peers over loopback through the real vendored broker and covers the chunked round trip, the final-frame-before-close guarantee, the `iceServers` pass-through, the inbound bound, and that a close still returns when the partner has vanished.
+- Run `npm run test:unit -w apps/cli -- test/unit/webrtcNegotiation.test.ts` for the orderings the live suite cannot show: no candidate before the local description, the offer retry and its stop condition, and the answer's payload shape.
+- Re-drive the candidate-queue premise by hand against a browser peer if the negotiation changes. The unit test pins the order this side emits in; only a real PeerJS peer shows what it does with one that arrives early.
+- Confirm the install stays clean: werift declares no `preinstall`/`install`/`postinstall` script and ships no native or compiled content, so nothing compiles at install and no `allowScripts` verdict is needed (see [The install-script policy](#the-install-script-policy-allowscripts)). `mediabunny` (MPL-2.0) is installed as a transitive but never loaded by a datachannel-only peer.
+- TURN remains unverified against a real relay. The relay transports are present in the published API and the URL parser resolves the port-443 TLS case, but no relay has been driven; drive one before any deployment relies on relayed connectivity.
