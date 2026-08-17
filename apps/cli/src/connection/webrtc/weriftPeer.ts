@@ -395,12 +395,13 @@ export function buildPeerConfiguration(
  * Construct werift's peer connection, loading the library at the point of use.
  *
  * The import is deferred rather than static because it is not free: werift and
- * its dependency tree cost about 0.85 s to load, and the CLI bundles to a single
- * CommonJS file whose external `require`s all run at startup -- so a static
- * import here would put that cost on every invocation, `psilink --version`
- * included, for a channel most runs never open. Both figures are measured on the
- * built bundle rather than modelled; the deferral itself is held by a lint rule
- * banning a value import of werift across `apps/cli/src` (eslint.config.mjs).
+ * its dependency tree cost the CLI bundle roughly 0.3 s to load, and the CLI
+ * bundles to a single CommonJS file whose external `require`s all run at
+ * startup -- so a static import here would put that cost on every invocation,
+ * `psilink --version` included, for a channel most runs never open. The
+ * measurement and its basis are recorded once, at the lint rule that holds
+ * this deferral: the `no-restricted-syntax` entry banning a value import (or
+ * re-export) of werift across `apps/cli/src` (eslint.config.mjs).
  */
 async function defaultPeerConnection(configuration: {
   iceServers?: Array<RTCIceServer>;
