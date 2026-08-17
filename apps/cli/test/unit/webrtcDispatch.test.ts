@@ -27,6 +27,8 @@ const mockState = vi.hoisted(() => ({
   handshakes: [] as Array<{ role: string; requestEncryption: boolean }>,
   /** The connection each party's runExchange was handed. */
   exchangeConnections: [] as Array<unknown>,
+  /** Every `log.info` line the run emitted, with its arguments joined as a console joins them. */
+  logLines: [] as Array<string>,
 }));
 
 vi.mock("@openmined/psi.js", () => ({
@@ -34,14 +36,17 @@ vi.mock("@openmined/psi.js", () => ({
 }));
 
 // Keep the key exchange real: the role mapping is only meaningful if a genuine
-// initiator/responder handshake completes over it. Silence the logger, and stub
-// the PSI exchange, which would otherwise need the WASM stack and a dataset.
+// initiator/responder handshake completes over it. Capture the info lines (one
+// of them is asserted below), silence the rest, and stub the PSI exchange, which
+// would otherwise need the WASM stack and a dataset.
 vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
   return {
     ...actual,
     getLogger: (_name: string) => ({
-      info: () => {},
+      info: (...parts: Array<unknown>) => {
+        mockState.logLines.push(parts.map((part) => String(part)).join(" "));
+      },
       warn: () => {},
       error: () => {},
       debug: () => {},
@@ -163,6 +168,7 @@ beforeEach(() => {
   mockState.dials.length = 0;
   mockState.handshakes.length = 0;
   mockState.exchangeConnections.length = 0;
+  mockState.logLines.length = 0;
 });
 
 afterEach(() => {
@@ -170,21 +176,26 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function webrtcConnection(role: "inviter" | "acceptor") {
+const BROKER_HOST = "peers.example.org";
+
+function webrtcConnection(role: "inviter" | "acceptor", host = BROKER_HOST) {
   return {
     channel: "webrtc" as const,
-    server: { host: "peers.example.org", port: 9000, secure: false },
+    server: { host, port: 9000, secure: false },
     role,
     stun: ["stun:stun.example.org:3478"],
   };
 }
 
 /** Run one party end to end over the linked pair. */
-function runParty(role: "inviter" | "acceptor"): Promise<unknown> {
+function runParty(
+  role: "inviter" | "acceptor",
+  host = BROKER_HOST,
+): Promise<unknown> {
   const keyFilePath = path.join(tmpDir, `${role}.key`);
   saveKeyFile(keyFilePath, { sharedSecret: SECRET });
   return runProtocol(
-    webrtcConnection(role),
+    webrtcConnection(role, host),
     { sharedSecret: SECRET, keyFilePath },
     minimalPrepared,
     path.join(tmpDir, `${role}.csv`),
@@ -250,6 +261,24 @@ test("the rendezvous is dialed with the configured broker and ICE servers", asyn
   expect(mockState.dials.map((d) => d.role).sort()).toEqual([
     "acceptor",
     "inviter",
+  ]);
+});
+
+test("the rendezvous line names the authority dialed, not the configured text", async () => {
+  // The URL parser rewrites a host before anything is dialed: it lowercases,
+  // folds U+3002 onto the label separator, and deletes an ignorable such as
+  // U+200B. Logging the configured text would name a server the run never
+  // contacted -- and disagree with the socket's own authority check, which
+  // compares against exactly this parsed form. Both are written as escapes
+  // because one of the two is invisible in source.
+  const host = "PEERS\u3002Example\u200B.ORG";
+  await Promise.all([runParty("inviter", host), runParty("acceptor", host)]);
+  const rendezvousLine = "rendezvousing through the signaling server at";
+  expect(
+    mockState.logLines.filter((line) => line.startsWith(rendezvousLine)),
+  ).toEqual([
+    `${rendezvousLine} peers.example.org:9000`,
+    `${rendezvousLine} peers.example.org:9000`,
   ]);
 });
 

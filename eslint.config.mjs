@@ -103,6 +103,29 @@ const noRawErrorAtDisplaySink = SINK_VALUE_POSITIONS.map((position) => ({
     "Do not render a raw error at an operator-facing sink: pass it through sanitizeErrorForDisplay(err) (an error instance, cause chain included) or sanitizeForDisplay(text) (a single string fragment). A partner- or server-controlled error message reaches the terminal and any --log-file verbatim otherwise, carrying ANSI, CR/LF, bidi and confusable bytes. A value that is provably not error text: eslint-disable-next-line with a one-line justification.",
 }));
 
+// werift is loaded at the point of use (the deferred import in
+// apps/cli/src/connection/webrtc/weriftPeer.ts), never statically: the CLI
+// bundles to one CommonJS file whose external requires all run at startup, so
+// a static load puts werift's cost on every invocation -- `psilink --version`
+// included -- for a channel most runs never open. Measured on the built
+// bundle: `psilink --version` fell from about 551 ms to about 250 ms once the
+// import was deferred, roughly 0.3 s; re-measuring this tree's built bundle
+// with a static import restored reproduces the same roughly 0.3 s delta.
+// Type-only imports and re-exports carry no runtime cost and are exempt. A
+// value re-export (`export { X } from "werift"`, `export * from
+// "werift/nonstandard"`) reloads werift just as an import does, so the three
+// selectors below cover a static import, a named re-export, and a blanket
+// re-export alike. Subpaths are matched too: `werift/nonstandard` and its
+// siblings pull the same tree in, so banning the bare specifier alone would
+// leave the cost one specifier away.
+const WERIFT_STATIC_LOAD_MESSAGE =
+  'Import or re-export werift lazily (await import("werift")) rather than statically: a static load pulls it in on every CLI invocation, since the bundle\'s external requires all run at startup. `import type` / `export type` are exempt.';
+const weriftStaticLoadBan = [
+  'ImportDeclaration[source.value=/^werift(\\/.*)?$/][importKind!="type"]',
+  'ExportNamedDeclaration[source.value=/^werift(\\/.*)?$/][exportKind!="type"]:has(ExportSpecifier[exportKind!="type"])',
+  'ExportAllDeclaration[source.value=/^werift(\\/.*)?$/][exportKind!="type"]',
+].map((selector) => ({ selector, message: WERIFT_STATIC_LOAD_MESSAGE }));
+
 export default tseslint.config(
   {
     ignores: [
@@ -193,18 +216,7 @@ export default tseslint.config(
           message:
             "Parse credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveJson); raw JSON.parse can echo a leading span of the source. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
         },
-        {
-          // werift is loaded at the point of use (the deferred import in
-          // apps/cli/src/connection/webrtc/weriftPeer.ts), never statically: the
-          // CLI bundles to one CommonJS file whose external requires all run at
-          // startup, so a static import puts werift's ~0.85 s load on every
-          // invocation -- `psilink --version` included -- for a channel most runs
-          // never open. Type-only imports carry no runtime cost and are exempt.
-          selector:
-            'ImportDeclaration[source.value="werift"][importKind!="type"]',
-          message:
-            'Import werift lazily (await import("werift")) rather than statically: a static import loads it on every CLI invocation, since the bundle\'s external requires all run at startup. `import type` is exempt.',
-        },
+        ...weriftStaticLoadBan,
         noBareRootLoglevelEmit,
         ...noRawErrorAtDisplaySink,
       ],
