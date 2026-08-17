@@ -457,6 +457,51 @@ count-only run does disclose is the tier's to state, and it already does: the
 round disclosures beside the count, and the enforced half that hands neither
 party a pairing.
 
+## A fact that outlives the run, and the negative it does not state
+
+The retain declaration is the first entry keyed on something the token carries
+rather than on a term of the exchange: the inviting party's `retain_files`, which
+makes the rendezvous location a permanent transcript instead of emptying it as each
+message is consumed. Its wire form, the mint paths that stamp it, and why a
+declared-but-never-applied flag stays inside the transport's detect-and-fail stance
+are the spec's ([FILE_SYNC.md](../spec/FILE_SYNC.md#retain-mode-declaration-on-the-token)).
+What is this table's is the classification and the copy.
+
+The basis splits, and the split is the reason the entry carries a caveat sentence
+rather than only a marker. The mode AGREEMENT is the run's: both parties advertise
+their setting in the hello and a disagreement aborts both sides before any data
+moves, so an exchange that runs at all is one both parties ran in the declared mode
+-- an acceptor cannot be walked into a transcript they did not consent to. What
+becomes of that transcript once the run ends is not the run's at all: retain mode
+deletes nothing, the location is the inviting party's, and psilink is not in the
+decision. Marking the whole line `enforced` would let the second half read as the
+first; splitting it into two entries would put two markers on one fact and invite a
+reader to weigh them against each other. So the marker states the half the run
+holds and the note carries the half it does not, which is the shape
+`partnerReceivesResult` already uses for a disclosure that happens and a use that
+is not this tool's to govern.
+
+**The negative is deliberately unstated.** A surface renders the fact only where
+retention is declared. An invitation declaring delete mode, and one declaring
+nothing at all, render alike -- nothing -- and the two are alike for different
+reasons that land in the same place. An absent declaration has made no claim, so
+there is none to relay. A declared delete mode HAS made one, and it is a claim this
+tool cannot stand behind: delete mode deletes as a protocol step, not as a
+guarantee about the directory afterwards, and a run killed outright or one that
+fails after the handshake leaves files behind in either mode. "Your partner deletes
+the files" would be the same error the enforced marker exists to prevent, facing the
+other way -- a reassurance stated as a guarantee no check backs.
+
+That is why the summary carries `declaresRetainedFiles`, a one-way flag, rather
+than the token's three-valued field. The narrowing happens once, at the summary,
+where the reasoning is recorded; a renderer handed the raw value could reach the
+`false` and word a cleanup promise around it, and no test over one surface would
+notice the other had not. Naming the flag for the declaration rather than for the
+mode is the second half of the same move: `declaresRetainedFiles === false` reads
+as "the invitation declares no retention", which is true of every case it covers,
+where an `inviterRetainsFiles === false` on the display model would read as the
+claim itself.
+
 ## Alternatives weighed
 
 **Extend the CLI's own renderer in place.** Rejected: it would re-derive the
