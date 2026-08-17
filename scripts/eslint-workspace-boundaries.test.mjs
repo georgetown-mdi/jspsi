@@ -3,6 +3,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
+import { crossWorkspaceImportBans } from "../eslint.boundaries.mjs";
+import repoConfig from "../eslint.config.mjs";
 
 // Coverage of the cross-workspace import ban in eslint.boundaries.mjs: apps
 // consume packages, packages never consume apps, and the two apps never reach
@@ -13,32 +15,98 @@ import { describe, expect, it } from "vitest";
 // block that grows its own no-restricted-imports options can drop them with no
 // other tell.
 //
-// Nothing here names a config file: the ESLint instance resolves configuration
-// the way `npm run lint` does, from the linted path. That is load-bearing rather
-// than incidental -- ESLint resolves the nearest config file for a subtree, so
-// apps/web is governed by apps/web/eslint.config.js and a web ban written only
-// into the repo-root config would never run.
-//
-// The apps/web cases name files that exist, where the core and cli cases do not:
-// the web config parses with type information against apps/web/tsconfig.json,
-// which fails on a path that is in no TypeScript program.
-//
-// That type-aware parse is also what makes the single-run pin below load-bearing.
-// typescript-eslint infers a "single run" whenever CI=true -- which every CI
-// runner sets -- and in that mode the first parse of a path answers from the file
-// on DISK, not from the text handed to lintText. No apps/web file reaches into a
-// sibling workspace, so a case that lands on a path's first parse reports zero
-// problems with the ban fully intact: the refusals fail loudly and the
-// acceptances pass vacuously. "lints the text it is handed" is the check that the
-// pin holds, on paths no other case here touches so that it stays a first parse
-// whatever order the cases run in.
+// Each case is linted through the real repo config -- eslint.config.mjs already
+// embeds apps/web's blocks (scoped under apps/web/, see scopeToDir there), so one
+// config covers every tree this file lints -- with one transform: the type-aware
+// layer is stripped off before it is used (withoutTypeAwareLayer below). The
+// blocks that carry the ban are transformed by nothing, so the selector, the
+// per-tree `files` scoping, and flat config's replace-semantics across the five
+// blocks are the real ones.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 
-process.env.TSESTREE_SINGLE_RUN = "false";
+// The parser options that put a TypeScript program behind the lint.
+const PROJECT_PARSER_OPTIONS = [
+  "project",
+  "projectService",
+  "EXPERIMENTAL_useProjectService",
+];
 
-const eslint = new ESLint({ cwd: repoRoot });
+/** The first plugin registered under each prefix across a flat config array. */
+function pluginsByPrefix(configs) {
+  const plugins = new Map();
+  for (const entry of configs) {
+    for (const [prefix, plugin] of Object.entries(entry.plugins ?? {})) {
+      if (!plugins.has(prefix)) plugins.set(prefix, plugin);
+    }
+  }
+  return plugins;
+}
+
+/**
+ * The names in `rules` whose rule declares `requiresTypeChecking`, resolved
+ * through `pluginFor(prefix)`. Asking the plugin keeps this off a hand-kept list
+ * that a config or dependency change would silently outdate.
+ */
+function typeAwareRuleNames(rules, pluginFor) {
+  return Object.keys(rules).filter((name) => {
+    const separator = name.lastIndexOf("/");
+    if (separator === -1) return false;
+    const rule = pluginFor(name.slice(0, separator))?.rules?.[
+      name.slice(separator + 1)
+    ];
+    return rule?.meta?.docs?.requiresTypeChecking === true;
+  });
+}
+
+/**
+ * The repo's flat config with type-aware linting removed: no parser option that
+ * builds a TypeScript program, and no rule that needs one.
+ *
+ * The ban is `no-restricted-imports` -- a specifier-pattern match, and nothing a
+ * type checker knows -- so every type-aware rule the web config enables is dead
+ * weight here, and dead weight with a failure mode: a rule reading types can
+ * crash inside TypeScript's module-specifier computation on a real apps/web
+ * source, which is sensitive to the absolute path the tree sits at and so fails
+ * under CI's layout while passing here, over ground this file does not test.
+ * Deriving from the real config rather than hand-authoring a minimal one keeps
+ * the ban's own blocks exact; dropping the type-aware layer leaves what this
+ * file reports resting on the text it hands in and nothing else. A type-aware
+ * rule that survived the strip cannot lint silently: with no project configured
+ * ESLint refuses to load it and the lint throws.
+ */
+function withoutTypeAwareLayer(configs) {
+  const plugins = pluginsByPrefix(configs);
+  return configs.map((entry) => {
+    const transformed = { ...entry };
+    if (entry.languageOptions?.parserOptions) {
+      transformed.languageOptions = {
+        ...entry.languageOptions,
+        parserOptions: Object.fromEntries(
+          Object.entries(entry.languageOptions.parserOptions).filter(
+            ([option]) => !PROJECT_PARSER_OPTIONS.includes(option),
+          ),
+        ),
+      };
+    }
+    if (entry.rules) {
+      const typeAware = new Set(
+        typeAwareRuleNames(entry.rules, (prefix) => plugins.get(prefix)),
+      );
+      transformed.rules = Object.fromEntries(
+        Object.entries(entry.rules).filter(([name]) => !typeAware.has(name)),
+      );
+    }
+    return transformed;
+  });
+}
+
+const eslint = new ESLint({
+  cwd: repoRoot,
+  overrideConfigFile: true,
+  baseConfig: withoutTypeAwareLayer(repoConfig),
+});
 
 /** no-restricted-imports messages reported for `source` linted as `filePath`. */
 async function boundaryHits(filePath, source) {
@@ -62,8 +130,8 @@ const CLI_TEST = resolve(repoRoot, "apps/cli/test/unit/boundaryFixture.ts");
 const WEB_SRC = resolve(repoRoot, "apps/web/src/utils/serverConfig.ts");
 const WEB_OUTSIDE_SRC = resolve(repoRoot, "apps/web/vite.config.ts");
 
-// Reserved for the first-parse check: one apps/web path in the TypeScript
-// program on each side of src/, linted by nothing else here.
+// Reserved for the first-parse check: one apps/web path on each side of src/,
+// linted by nothing else here.
 const WEB_SRC_FIRST_PARSE = resolve(repoRoot, "apps/web/src/utils/seo.ts");
 const WEB_OUTSIDE_SRC_FIRST_PARSE = resolve(
   repoRoot,
@@ -114,10 +182,12 @@ const ACCEPTED = [
   ["apps/web", WEB_OUTSIDE_SRC, "@psilink/core"],
 ];
 
-// Whichever apps/web case runs first builds the TypeScript program the web
-// config parses against, which outruns the default per-test timeout on a CI
-// runner. The timeout rides the whole suite rather than one case because a `-t`
-// filter decides which one pays; every case is a single lint call otherwise.
+// Loading the flat config and the typescript-eslint parser for the first time is
+// the expensive part of a lintText call, independent of which file or how much
+// text it is given; under cold process/CPU load that one-time cost alone can
+// outrun the default per-test timeout on a CI runner. The timeout rides the
+// whole suite rather than one case because a `-t` filter decides which one
+// pays; every case is a single lint call otherwise.
 describe("the cross-workspace import ban", { timeout: 60_000 }, () => {
   it("lints the apps/web cases against files that exist", () => {
     for (const path of [
@@ -127,6 +197,37 @@ describe("the cross-workspace import ban", { timeout: 60_000 }, () => {
       WEB_OUTSIDE_SRC_FIRST_PARSE,
     ]) {
       expect(existsSync(path), `${path} no longer exists`).toBe(true);
+    }
+  });
+
+  it("carries the ban to every path it lints, with no type-aware rule", async () => {
+    for (const [tree, filePath, expectedPatterns] of [
+      ["packages/core/src", CORE_SRC, crossWorkspaceImportBans.core],
+      ["packages/core/test", CORE_TEST, crossWorkspaceImportBans.core],
+      ["apps/cli/src", CLI_SRC, crossWorkspaceImportBans.cli],
+      ["apps/cli/test", CLI_TEST, crossWorkspaceImportBans.cli],
+      ["apps/web/src", WEB_SRC, crossWorkspaceImportBans.web],
+      ["apps/web", WEB_OUTSIDE_SRC, crossWorkspaceImportBans.web],
+      ["apps/web/src", WEB_SRC_FIRST_PARSE, crossWorkspaceImportBans.web],
+      ["apps/web", WEB_OUTSIDE_SRC_FIRST_PARSE, crossWorkspaceImportBans.web],
+    ]) {
+      const config = await eslint.calculateConfigForFile(filePath);
+      const parserOptions = config.languageOptions?.parserOptions ?? {};
+      expect(
+        Object.keys(parserOptions).filter((option) =>
+          PROJECT_PARSER_OPTIONS.includes(option),
+        ),
+        `${filePath}: a TypeScript program is configured, so a type-aware rule can run -- and crash -- on ground this file does not test`,
+      ).toEqual([]);
+      expect(
+        typeAwareRuleNames(config.rules, (prefix) => config.plugins?.[prefix]),
+        `${filePath}: a type-aware rule survived the strip`,
+      ).toEqual([]);
+      const [, options] = config.rules["no-restricted-imports"] ?? [];
+      expect(
+        options?.patterns,
+        `${tree}: the cross-workspace import ban is not among the no-restricted-imports options at ${filePath}, so linting it reports zero however the specifier is written`,
+      ).toEqual(expectedPatterns);
     }
   });
 
