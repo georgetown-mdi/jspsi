@@ -30,6 +30,7 @@ import type {
 
 import { LocalFSClient } from "./connection/localFSClient";
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
+import { dialedBrokerAuthority } from "./connection/webrtc/brokerClient";
 import { openWebRtcMessageConnection } from "./connection/webrtc/webrtcMessageConnection";
 import {
   brokerLocationFromConnection,
@@ -1006,12 +1007,19 @@ export async function runProtocol(
         throw new Error("the webrtc rendezvous was not resolved");
       log.info(
         "rendezvousing through the signaling server at",
+        // The authority the socket dials rather than the configured `host` text:
+        // the URL parser IDNA-normalizes a host, so for one carrying uppercase,
+        // an alternative label separator, or a deleted ignorable the two differ,
+        // and only the parsed form names the server actually contacted.
+        //
         // The broker host is partner-controlled on an endpoint-seeded config, so
         // escape it before it reaches the operator's terminal, as the file-sync
         // locators below are. The rendezvous ids are NOT logged: they are derived
         // from the shared secret, and anything that reaches the terminal reaches
         // a --log-file too.
-        redactAndSanitizeForDisplay(webRtcDial.options.location.host),
+        redactAndSanitizeForDisplay(
+          dialedBrokerAuthority(webRtcDial.options.location),
+        ),
       );
       // The rendezvous is this channel's open: it registers with the broker,
       // negotiates, and resolves only once the data channel is up. Its own

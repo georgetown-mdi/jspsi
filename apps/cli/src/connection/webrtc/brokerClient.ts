@@ -218,6 +218,24 @@ function brokerAuthority(location: BrokerLocation): URL {
 }
 
 /**
+ * The authority a location dials, in the form the URL parser produces -- the
+ * value {@link assertDialsConfiguredBroker} compares a built address against.
+ *
+ * This is what an operator-facing line naming the signaling server should carry,
+ * because it is not the configured `host` text: the parser IDNA-normalizes a
+ * host, lowercasing it, folding the alternative label separators (U+3002 and its
+ * siblings) onto ".", and deleting the ignorable code points such as U+200B. A
+ * configured `PEERS<U+3002>Example.ORG` dials `peers.example.org`, so echoing
+ * the configured text would name a server the run never contacted. It carries
+ * the port too, unless that is the scheme's default.
+ *
+ * @throws {ConnectionError} of kind `usage` if `host` is not a bare authority.
+ */
+export function dialedBrokerAuthority(location: BrokerLocation): string {
+  return brokerAuthority(location).host;
+}
+
+/**
  * Refuse an address that does not dial the configured broker.
  *
  * The string is re-parsed rather than read off the builder because this is the
