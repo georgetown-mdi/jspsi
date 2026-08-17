@@ -414,6 +414,34 @@ export interface InvitationToken {
    * {@link reconcileReceivedPayload}.
    */
   disclosedPayloadColumns?: string[];
+  /**
+   * The inviting party's declaration that its exchange runs in retain mode --
+   * `connection.options.retain_files`, under which no exchange file is deleted as
+   * a protocol step and the rendezvous location becomes a permanent transcript
+   * (docs/spec/FILE_SYNC.md). Carried so an acceptor is told before it consents,
+   * rather than by a failed run or by an accept kit the inviter may not send.
+   *
+   * A DECLARATION, never a setting. Nothing on the accept path reads it into a
+   * connection: the accepting party still chooses its own half, and a
+   * disagreement fast-fails at the hello (`BilateralModeMismatchError`) exactly
+   * as it does for an invitation carrying no declaration at all. Disclosing a
+   * bilateral flag is not negotiating one; see docs/spec/FILE_SYNC.md
+   * ("Bilateral configuration: detect and fail, never negotiate").
+   *
+   * psilink's mint paths carry it only as `true`, and only from a configuration
+   * that has retain mode on. Absence is "nothing declared", not "delete mode": a
+   * mint path may have no settled connection to read (an offline invite whose
+   * connection block is still a placeholder scaffold), the channel may have no
+   * retain mode at all (`webrtc`), or the token may predate this field. A `false`
+   * from a foreign implementation decodes and states nothing, which is what both
+   * acceptance surfaces render for it -- the `retainedFiles` entry of
+   * `consentFacts.ts` carries why the negative is not a claim either.
+   *
+   * `lockless_rendezvous` is equally bilateral and equally fast-failing and is
+   * deliberately NOT carried: nothing about it changes what an acceptor consents
+   * to, and the token's declaration list is held to facts with consent weight.
+   */
+  inviterRetainsFiles?: boolean;
 }
 
 // The params width bound the decode fold carries, mirrored from linkageTerms.ts's
@@ -472,7 +500,7 @@ const InvitationLinkageTermsSchema: z.ZodType<LinkageTerms> = z.preprocess(
   LinkageTermsSchema,
 );
 
-const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
+const InvitationTokenBodySchema = z.object({
   version: z.literal("1"),
   // InvitationLinkageTermsSchema, not the bare LinkageTermsSchema: it camelizes
   // transform.params keys (and runs the length and dialect screens on the
@@ -510,7 +538,36 @@ const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
     MAX_PAYLOAD_ENTRIES,
     `disclosedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
   ).optional(),
+  // The inviter's retain-mode declaration (see the interface field). A plain
+  // optional boolean at the top level, so an older decoder's non-strict z.object
+  // ignores it rather than rejecting the token -- the backward-compatible shape
+  // the `version` policy above describes, the same one disclosedPayloadColumns
+  // took. No default is applied: absence must stay distinguishable from a
+  // declared value, since it means "nothing declared" rather than "delete mode".
+  inviterRetainsFiles: z.boolean().optional(),
 });
+
+const InvitationTokenSchema: z.ZodType<InvitationToken> =
+  InvitationTokenBodySchema
+    // A retain declaration on a webrtc endpoint is refused rather than displayed:
+    // `retain_files` is a file-sync option that the webrtc channel does not have
+    // (ConnectionConfigSchema in connection.ts rejects it on that channel for the
+    // same reason), so a token pairing the two states a mode no run of it could
+    // be in. Refusing at the schema means a mint path cannot stamp the pair by
+    // mistake and a decoder cannot surface one for consent. A token with no
+    // endpoint at all is unconstrained: the offline file-sync invite carries the
+    // declaration with no locator beside it.
+    .refine(
+      (token) =>
+        token.connectionEndpoint?.channel !== "webrtc" ||
+        token.inviterRetainsFiles !== true,
+      {
+        message:
+          "inviterRetainsFiles is not valid for a webrtc connection endpoint; " +
+          "retain mode is a file-sync setting the webrtc channel does not have",
+        path: ["inviterRetainsFiles"],
+      },
+    );
 
 // --- Lifetime policy ---------------------------------------------------------
 

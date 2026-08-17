@@ -133,3 +133,33 @@ describe("the consent summary's payload block", () => {
     expect(summary.payload).toBeUndefined();
   });
 });
+
+describe("the consent summary's retain declaration", () => {
+  const terms = getDefaultLinkageTerms(
+    "Inviter",
+    inferMetadata(LINKAGE_ONLY_COLUMNS),
+  );
+
+  test("states retention only where the token declares it", () => {
+    expect(
+      summarizeInvitation({ linkageTerms: terms, inviterRetainsFiles: true })
+        .declaresRetainedFiles,
+    ).toBe(true);
+  });
+
+  // The narrowing that keeps a renderer off the claim no surface may make. The
+  // token's field is three-valued -- declared retain, declared delete, nothing
+  // declared -- and the last two are alike here on purpose: neither is a promise
+  // that the exchange cleans up after itself (a run killed outright, or one that
+  // fails after the handshake, leaves files behind in either mode), so a surface
+  // reading this flag cannot word one.
+  test.each([
+    { case: "an explicit false", source: { inviterRetainsFiles: false } },
+    { case: "an absent declaration", source: {} },
+  ])("declares no retention for $case", ({ source }) => {
+    expect(
+      summarizeInvitation({ linkageTerms: terms, ...source })
+        .declaresRetainedFiles,
+    ).toBe(false);
+  });
+});

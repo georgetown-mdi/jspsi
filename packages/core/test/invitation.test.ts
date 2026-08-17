@@ -706,6 +706,103 @@ test("a token minted without the disclosed-columns field still decodes (top-leve
   expect(decoded.disclosedPayloadColumns).toBeUndefined();
 });
 
+// --- Retain-mode declaration -------------------------------------------------
+
+test("round-trips the inviter's retain-mode declaration on the token", async () => {
+  const decoded = await decodeInvitation(
+    await encodeInvitation({ ...baseToken, inviterRetainsFiles: true }),
+  );
+  expect(decoded.inviterRetainsFiles).toBe(true);
+  // An optional TOP-LEVEL addition does not bump the token version.
+  expect(decoded.version).toBe("1");
+});
+
+test("a token minted without the retain declaration still decodes (top-level back-compat)", async () => {
+  // The case an invitation minted before the field existed presents: no such
+  // key at all. The non-strict token schema ignores its absence, and the field
+  // arrives undefined -- "nothing declared", which is not "delete mode".
+  const decoded = await decodeInvitation(
+    await encodeRaw({
+      version: "1",
+      linkageTerms: baseTerms,
+      sharedSecret: VALID_SECRET,
+    }),
+  );
+  expect(decoded.inviterRetainsFiles).toBeUndefined();
+});
+
+test("decodeInvitation carries a declared-false retain mode verbatim", async () => {
+  // A foreign implementation may state the negative. It decodes rather than
+  // being rejected, and stays distinguishable from an absent declaration on the
+  // token; what neither states on a consent surface is the summary's business.
+  const decoded = await decodeInvitation(
+    await encodeRaw({ ...baseToken, inviterRetainsFiles: false }),
+  );
+  expect(decoded.inviterRetainsFiles).toBe(false);
+});
+
+test("decodeInvitation rejects a non-boolean retain declaration", async () => {
+  const encoded = await encodeRaw({
+    ...baseToken,
+    inviterRetainsFiles: "true",
+  });
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+});
+
+test.each([
+  { half: "encodeInvitation", run: encodeInvitation },
+  {
+    half: "decodeInvitation",
+    run: async (token: InvitationToken) =>
+      decodeInvitation(await encodeRaw(token)),
+  },
+])(
+  "$half refuses a retain declaration on a webrtc endpoint",
+  async ({ run }) => {
+    // retain_files is a file-sync option the webrtc channel does not have (the
+    // connection schema rejects the same pairing), so a token declaring one is
+    // stating a mode no run of it could be in. Refused at both halves, so
+    // neither a mint path nor a consent surface can carry it.
+    const token: InvitationToken = {
+      ...baseToken,
+      connectionEndpoint: { channel: "webrtc", host: "example.test" },
+      inviterRetainsFiles: true,
+    };
+    await expect(run(token)).rejects.toThrow(/not valid for a webrtc/);
+  },
+);
+
+test("a webrtc endpoint may still carry an explicit false or no declaration", async () => {
+  // The refusal is scoped to the claim, not to the field: a webrtc token that
+  // declares nothing (the ordinary web mint) and one that states the negative
+  // both encode, so the guard cannot become a reason to strip the field.
+  const withFalse = await decodeInvitation(
+    await encodeInvitation({
+      ...baseToken,
+      connectionEndpoint: { channel: "webrtc", host: "example.test" },
+      inviterRetainsFiles: false,
+    }),
+  );
+  expect(withFalse.inviterRetainsFiles).toBe(false);
+  const withNone = await decodeInvitation(
+    await encodeInvitation({
+      ...baseToken,
+      connectionEndpoint: { channel: "webrtc", host: "example.test" },
+    }),
+  );
+  expect(withNone.inviterRetainsFiles).toBeUndefined();
+});
+
+test("a file-sync invitation with no endpoint may declare retain mode", async () => {
+  // The offline invite path mints terms and a declaration with no locator
+  // beside them, so the webrtc guard must not read an absent endpoint as one.
+  const decoded = await decodeInvitation(
+    await encodeInvitation({ ...baseToken, inviterRetainsFiles: true }),
+  );
+  expect(decoded.connectionEndpoint).toBeUndefined();
+  expect(decoded.inviterRetainsFiles).toBe(true);
+});
+
 test("encodeInvitation rejects a disclosed-columns entry with an empty name", async () => {
   const token = {
     ...baseToken,

@@ -520,6 +520,24 @@ export interface InvitationSummary {
    */
   expires?: Displayable;
   /**
+   * Whether the invitation DECLARES that its exchange keeps every file it writes
+   * -- the inviter's retain mode, which leaves the rendezvous location a
+   * permanent transcript rather than deleting each file once it has been read.
+   *
+   * A one-way flag, not the inviter's setting mirrored: false means the token
+   * declares no retention, whether because it carried `inviterRetainsFiles:
+   * false`, carried nothing (an older token, a mint with no settled connection,
+   * or a channel with no retain mode), or is the inviter's own pre-mint preview.
+   * Named for the declaration rather than for the mode so a renderer cannot read
+   * a false as "your partner deletes the files" -- which is the claim the
+   * `retainedFiles` entry of `CONSENT_FACTS` records as one no surface may make.
+   * A surface therefore renders the retention fact on true and nothing on false.
+   *
+   * A schema-validated boolean, not partner free text, so it carries no display
+   * obligation.
+   */
+  declaresRetainedFiles: boolean;
+  /**
    * The partner's advisory shared-directory locator, sanitized for display: the
    * `path` a single-directory file-drop endpoint carries. Present only for such an
    * endpoint. Advisory only -- it never flows to any config, and it is the folder's
@@ -1093,6 +1111,7 @@ export function summarizeInvitation(
     | "expires"
     | "disclosedPayloadColumns"
     | "connectionEndpoint"
+    | "inviterRetainsFiles"
   >,
 ): InvitationSummary {
   const terms = source.linkageTerms;
@@ -1181,6 +1200,12 @@ export function summarizeInvitation(
     linkageKeys: terms.linkageKeys.map((key) => summarizeKey(key, fieldByName)),
     matchedFields,
     linkageFields,
+    // Narrowed to the one value a surface may state. The token's field is
+    // three-valued -- declared retain, declared delete, nothing declared -- and
+    // only the first is a fact about the run an acceptor consents to, so the
+    // other two collapse here rather than at each renderer, where a surface could
+    // otherwise reach a "false" and word a cleanup promise around it.
+    declaresRetainedFiles: source.inviterRetainsFiles === true,
   };
 
   if (terms.legalAgreement !== undefined) {

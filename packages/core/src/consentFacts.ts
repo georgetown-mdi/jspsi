@@ -321,6 +321,38 @@ export const CONSENT_FACTS = {
       "Re-checked before and after the key exchange; an expired invitation is " +
       "refused.",
   },
+  retainedFiles: {
+    basis: "enforced",
+    reason:
+      "The inviting party's declaration that its exchange runs in retain mode, " +
+      "and the mode AGREEMENT is the half the run holds: both parties advertise " +
+      "their retain_files setting in the hello and a disagreement aborts both " +
+      "sides before any data moves (BilateralModeMismatchError), so an exchange " +
+      "that runs at all is one both parties ran in the declared mode. What the " +
+      "run does not hold is what becomes of the transcript once it ends -- " +
+      "retain mode deletes nothing, and the rendezvous location is the inviting " +
+      "party's to keep or clear -- so that half is carried by the note rather " +
+      "than by the marker. Nothing applies the declaration: the accepting party " +
+      "still sets its own half, which is what leaves the mismatch to fast-fail " +
+      "(see InvitationToken.inviterRetainsFiles). " +
+      "Stated only where retain mode is declared. Delete mode is not the mirror " +
+      "claim: a run killed outright, or one that fails after the handshake, " +
+      "leaves files behind in either mode, so a stated negative would promise a " +
+      "cleanup the transport does not make -- and an invitation carrying no " +
+      "declaration has made no claim to state at all.",
+    note:
+      "Your partner runs this exchange in retain mode, so every file it writes " +
+      "stays where the two of you meet instead of being deleted once it has " +
+      "been read. What you send stays encrypted there, and nothing left behind " +
+      "is your file or the matched result; the small files the two sides meet " +
+      "through are not encrypted, so anyone who can read that location " +
+      "afterwards sees that an exchange happened, when, how many messages each " +
+      "side sent and how large they were, the name each side ran under, and the " +
+      "settings each side announced. Your side must run retain mode too or the " +
+      "two of you stop with an error when you meet, and what becomes of that " +
+      "transcript afterwards is your partner's to decide rather than something " +
+      "this tool controls.",
+  },
 } as const satisfies Record<string, ConsentFact>;
 
 /** A key of {@link CONSENT_FACTS}. */
