@@ -193,6 +193,18 @@ export default tseslint.config(
           message:
             "Parse credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveJson); raw JSON.parse can echo a leading span of the source. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
         },
+        {
+          // werift is loaded at the point of use (the deferred import in
+          // apps/cli/src/connection/webrtc/weriftPeer.ts), never statically: the
+          // CLI bundles to one CommonJS file whose external requires all run at
+          // startup, so a static import puts werift's ~0.85 s load on every
+          // invocation -- `psilink --version` included -- for a channel most runs
+          // never open. Type-only imports carry no runtime cost and are exempt.
+          selector:
+            'ImportDeclaration[source.value="werift"][importKind!="type"]',
+          message:
+            'Import werift lazily (await import("werift")) rather than statically: a static import loads it on every CLI invocation, since the bundle\'s external requires all run at startup. `import type` is exempt.',
+        },
         noBareRootLoglevelEmit,
         ...noRawErrorAtDisplaySink,
       ],

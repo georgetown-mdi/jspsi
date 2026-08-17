@@ -117,11 +117,15 @@ test("connectionFromURL: file URL maps to a filedrop connection", () => {
 });
 
 test("connectionFromURL: a webrtc (ws) URL is a usage error", () => {
+  // The CLI runs a webrtc exchange, but only from a saved connection: a URL
+  // carries neither the role each party registers under nor an endpoint an
+  // invitation could hand the partner. The refusal names the command that does
+  // run one rather than reporting the channel as unsupported.
   expect(() => connectionFromURL(new URL("ws://host/path"), {})).toThrow(
     UsageError,
   );
   expect(() => connectionFromURL(new URL("ws://host/path"), {})).toThrow(
-    "not yet supported",
+    "psilink exchange",
   );
 });
 

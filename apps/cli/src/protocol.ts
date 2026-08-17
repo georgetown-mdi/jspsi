@@ -15,17 +15,26 @@ import {
   isPeerWaitTimeout,
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
+  UsageError,
 } from "@psilink/core";
 import type {
   Authentication,
   ConnectionConfig,
+  HandshakeRole,
+  MessageConnection,
   PreparedExchange,
   ExchangeBootstrapResult,
   SigningIdentity,
+  WebRTCConnectionConfig,
 } from "@psilink/core";
 
 import { LocalFSClient } from "./connection/localFSClient";
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
+import { openWebRtcMessageConnection } from "./connection/webrtc/webrtcMessageConnection";
+import {
+  brokerLocationFromConnection,
+  iceServersFromConnection,
+} from "./connection/webrtc/weriftPeer";
 import { buildRotatedKeyFile, saveKeyFile } from "./keyFile";
 import { preflightKeyFilePath } from "./keyFilePreflight";
 import { loadCliPsiBackend } from "./psiBackend";
@@ -40,6 +49,9 @@ import {
   type ErrorPhase,
   type EventStreamEmitter,
 } from "./eventStream";
+
+import type { WebRtcMessageConnectionOptions } from "./connection/webrtc/webrtcMessageConnection";
+import type { WebRtcPeerOptions } from "./connection/webrtc/weriftPeer";
 
 /**
  * Operator guidance appended to the file-sync peer-silence timeout error.
@@ -170,17 +182,99 @@ export interface SigningPersist {
 }
 
 /**
- * The connection configs {@link runProtocol} can run: the `sftp` and `filedrop`
- * channels. `Extract` narrows {@link ConnectionConfig} to those channels so
- * passing a WebRTC config requires an explicit `as unknown as` cast and cannot
- * happen by accident. Authentication is not part of the connection union (it is
- * a top-level spec block); `runProtocol` takes it on a separate `auth`
- * parameter, so this type is just the channel-narrowed connection.
+ * The connection configs {@link runProtocol} can run. `Extract` names the
+ * channels explicitly rather than aliasing {@link ConnectionConfig}, so a
+ * channel added to the config union is rejected here until it is dispatched
+ * below (the allowlist convention in CONTRIBUTING.md). Authentication is not
+ * part of the connection union (it is a top-level spec block); `runProtocol`
+ * takes it on a separate `auth` parameter, so this type is just the
+ * channel-narrowed connection.
  */
 export type ProtocolConnectionConfig = Extract<
   ConnectionConfig,
-  { channel: "sftp" | "filedrop" }
+  { channel: "sftp" | "filedrop" | "webrtc" }
 >;
+
+/**
+ * The refusal a webrtc exchange gets when the run holds no shared secret.
+ *
+ * Both parties derive the signaling id they register under -- and the one they
+ * dial -- from the shared secret, so with no secret there is no address, and the
+ * broker has nothing to pair the two sockets by. This is why the zero-setup
+ * bootstrap, whose premise is that the parties share nothing beforehand, cannot
+ * run over this channel: the refusal names that rather than reporting the
+ * channel as unsupported, which it is not.
+ */
+export const WEBRTC_RENDEZVOUS_SECRET_REQUIRED =
+  "the webrtc channel needs a shared secret: both parties derive the " +
+  "signaling ids they meet at from it, so without one there is no address to " +
+  "dial. Establish one with 'psilink invite' and 'psilink accept', then run " +
+  "'psilink exchange'.";
+
+/**
+ * The refusal a webrtc connection with no `role` gets.
+ *
+ * The two parties register under complementary ids, so each has to know which
+ * end it is; a config missing the field is a misconfiguration that would
+ * otherwise surface as a rendezvous that never completes. `psilink invite` and
+ * `psilink accept` stamp it, so a config missing it was hand-authored.
+ */
+export const WEBRTC_ROLE_REQUIRED =
+  "this webrtc connection has no `role`: each party registers with the " +
+  "signaling server under the id its own role derives, and dials the id the " +
+  "other's does. Set `role: inviter` or `role: acceptor` on the connection " +
+  "block.";
+
+/** The webrtc rendezvous inputs, resolved before anything is dialed. */
+interface WebRtcDial {
+  /** The key-exchange role this party takes once the channel is open. */
+  handshakeRole: HandshakeRole;
+  options: WebRtcPeerOptions & WebRtcMessageConnectionOptions;
+}
+
+/**
+ * Resolve a webrtc connection and this run's shared secret into the rendezvous
+ * the transport is opened with. Every failure it can raise is locally knowable,
+ * so it runs in {@link runProtocol}'s prepare block, before any socket is
+ * opened.
+ *
+ * The rendezvous roles are asymmetric and so is the handshake: the acceptor
+ * dials the data channel and sends the first key-exchange message, the inviter
+ * listens and answers. A browser peer maps the two the same way
+ * (`apps/web/src/psi/authenticateExchange.ts`), which is what lets a CLI peer
+ * complete an exchange with one.
+ *
+ * @throws {UsageError} when the run holds no shared secret, when the connection
+ *   names no role, or when the server block cannot be resolved to a broker.
+ * @internal exported for testing
+ */
+export function webRtcDialFrom(
+  connection: WebRTCConnectionConfig,
+  sharedSecret: string | undefined,
+): WebRtcDial {
+  if (sharedSecret === undefined)
+    throw new UsageError(WEBRTC_RENDEZVOUS_SECRET_REQUIRED);
+  const { role } = connection;
+  if (role === undefined) throw new UsageError(WEBRTC_ROLE_REQUIRED);
+  // peer_timeout_ms is documented as the total wait for the partner, which on a
+  // live channel is two waits: the rendezvous before the channel exists, and the
+  // parked receive after it. It bounds both, so setting it short fails fast on a
+  // partner that never arrives rather than only on one that arrives and stops.
+  const peerTimeoutMs = connection.options?.peerTimeoutMs;
+  return {
+    handshakeRole: role === "acceptor" ? "initiator" : "responder",
+    options: {
+      location: brokerLocationFromConnection(connection.server),
+      role,
+      sharedSecret,
+      iceServers: iceServersFromConnection(connection),
+      ...(peerTimeoutMs !== undefined && {
+        inactivityTimeoutMs: peerTimeoutMs,
+        rendezvousTimeoutMs: peerTimeoutMs,
+      }),
+    },
+  };
+}
 
 /**
  * CLI-only, non-persistable runtime controls for the file-sync transport's entry
@@ -379,8 +473,17 @@ export async function runProtocol(
   // block constructs it (and on the earliest prepare failures that fail before
   // construction), which the metrics helper treats as zero counts.
   let client: LocalFSClient | SSH2SFTPClientAdapter | undefined;
-  let conn: FileSyncConnection;
-  let mc: ReturnType<typeof fromEventConnection>;
+  // The file-sync connection, and so the rendezvous, abort marker and observed
+  // host key only it has. Undefined on the webrtc channel, whose transport has
+  // none of them: there are no files to sweep, no marker to write, and no server
+  // whose host key this party could pin.
+  let fileSync: FileSyncConnection | undefined;
+  // The exchange pipeline's transport, whichever channel produced it. Undefined
+  // until it exists: the file-sync bridge is built below, while the webrtc
+  // channel's rendezvous IS its open and runs in the main try.
+  let transport: MessageConnection | undefined;
+  // The resolved webrtc rendezvous, and the discriminant for the dispatch below.
+  let webRtcDial: WebRtcDial | undefined;
 
   // Per-stage wall-clock timing for the machine-interface stream. onStage marks
   // the START of each stage; a stage COMPLETES when the next one starts or when
@@ -419,12 +522,20 @@ export async function runProtocol(
   // and rethrows; the two regions are disjoint, so no failure route passes through
   // both catches and the one-terminal-event guarantee holds on every path.
   try {
-    if (connection.channel !== "filedrop" && connection.channel !== "sftp")
-      // Only reachable via an unsafe cast past ProtocolConnectionConfig.
+    if (
+      connection.channel !== "filedrop" &&
+      connection.channel !== "sftp" &&
+      connection.channel !== "webrtc"
+    ) {
+      // Only reachable via an unsafe cast past ProtocolConnectionConfig. The
+      // `never` binding holds the other half at build time: it compiles only
+      // while the dispatch below covers every channel the type admits.
+      const unsupported: never = connection;
       throw new Error(
         `unsupported channel: ` +
-          (connection as unknown as { channel: string }).channel,
+          (unsupported as unknown as { channel: string }).channel,
       );
+    }
 
     // saveIntent drives the zero-setup `--save` bootstrap, which exists only on
     // the unauthenticated path: an authenticated exchange already has a persistent
@@ -483,62 +594,72 @@ export async function runProtocol(
       // the saveKeyFile call below reuses without re-reading the caller's auth.
       trimmedKeyFilePath = preflightKeyFilePath(auth.keyFilePath, log);
     }
-    client =
-      connection.channel === "filedrop"
-        ? new LocalFSClient()
-        : new SSH2SFTPClientAdapter({
-            verbosity,
-            // connection_per_poll (SFTP-only) turns on the adapter's
-            // ephemeral-session mode: a fresh session per poll cycle, released
-            // before the idle gap. Resolved from the merged config; undefined
-            // (unset) leaves the adapter's held-session default.
-            ephemeralSessions: connection.options?.connectionPerPoll,
-          });
-    // CLI-only sweep controls are passed straight to the constructor (the
-    // verbose/joinerRecoveryMs precedent), never through config.options, so they
-    // cannot be persisted to psilink.yaml. Spread conditionally so an unset value
-    // does not clobber the constructor default.
-    conn = new FileSyncConnection(client, {
-      verbose: verbosity,
-      ...(fileSyncRuntime.sweepExchangeFiles !== undefined && {
-        sweepExchangeFiles: fileSyncRuntime.sweepExchangeFiles,
-      }),
-      ...(fileSyncRuntime.forceRetainSweep !== undefined && {
-        forceRetainSweep: fileSyncRuntime.forceRetainSweep,
-      }),
-    });
+    if (connection.channel === "webrtc") {
+      // Resolve the rendezvous -- the broker location, the ICE servers, the role,
+      // and the secret both ids derive from -- here rather than at the dial, so a
+      // misconfigured connection fails with no socket opened and no id
+      // registered. The dial itself is the main try's first step; the file-sync
+      // construction below has no webrtc counterpart, because on this channel
+      // there is no client to build and no connection to open before it.
+      webRtcDial = webRtcDialFrom(connection, auth?.sharedSecret);
+    } else {
+      client =
+        connection.channel === "filedrop"
+          ? new LocalFSClient()
+          : new SSH2SFTPClientAdapter({
+              verbosity,
+              // connection_per_poll (SFTP-only) turns on the adapter's
+              // ephemeral-session mode: a fresh session per poll cycle, released
+              // before the idle gap. Resolved from the merged config; undefined
+              // (unset) leaves the adapter's held-session default.
+              ephemeralSessions: connection.options?.connectionPerPoll,
+            });
+      // CLI-only sweep controls are passed straight to the constructor (the
+      // verbose/joinerRecoveryMs precedent), never through config.options, so they
+      // cannot be persisted to psilink.yaml. Spread conditionally so an unset value
+      // does not clobber the constructor default.
+      const fileSyncConn = new FileSyncConnection(client, {
+        verbose: verbosity,
+        ...(fileSyncRuntime.sweepExchangeFiles !== undefined && {
+          sweepExchangeFiles: fileSyncRuntime.sweepExchangeFiles,
+        }),
+        ...(fileSyncRuntime.forceRetainSweep !== undefined && {
+          forceRetainSweep: fileSyncRuntime.forceRetainSweep,
+        }),
+      });
+      fileSync = fileSyncConn;
 
-    // The PSI protocol layer (authenticateConnection / runExchange) consumes the
-    // pull-based MessageConnection interface. Bridge the event-based
-    // FileSyncConnection through fromEventConnection so its data/error events are
-    // delivered to awaited receive() calls with no per-phase listener gap. The
-    // bridge bounds a parked receive() by the peer-inactivity budget: if the peer
-    // stays silent past this window the exchange fails as a transport error
-    // rather than hanging. peerTimeoutMs (when configured) overrides the default;
-    // the same value bounds the file-sync rendezvous TTL inside conn.open().
-    const peerBudgetMs =
-      connection.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
-    // inactivityHint enriches the generic peer-silence error with file-sync
-    // operator guidance: the receiver names its own cause locally, but the sender
-    // only sees the inactivity timeout, so it points at the likely receiver-side
-    // causes and the peer's own logs (see PEER_SILENCE_GUIDANCE).
-    //
-    // Supplied as a function because which guidance is true depends on what the
-    // rendezvous observed, which happens after this bridge is built: the default
-    // text asserts the peer completed the rendezvous, and a run holding an
-    // unconfirmed entry-present hello has established no such thing. Reading the
-    // connection inside the closure is what defers the choice to the moment the
-    // deadline fires.
-    const fileSyncConn = conn;
-    mc = fromEventConnection(conn, {
-      inactivityTimeoutMs: peerBudgetMs,
-      inactivityHint: () => {
-        const leftover = fileSyncConn.unconfirmedEntryPeerHello;
-        return leftover === undefined
-          ? PEER_SILENCE_GUIDANCE
-          : entryHelloResidueGuidance(leftover);
-      },
-    });
+      // The PSI protocol layer (authenticateConnection / runExchange) consumes the
+      // pull-based MessageConnection interface. Bridge the event-based
+      // FileSyncConnection through fromEventConnection so its data/error events are
+      // delivered to awaited receive() calls with no per-phase listener gap. The
+      // bridge bounds a parked receive() by the peer-inactivity budget: if the peer
+      // stays silent past this window the exchange fails as a transport error
+      // rather than hanging. peerTimeoutMs (when configured) overrides the default;
+      // the same value bounds the file-sync rendezvous TTL inside conn.open().
+      const peerBudgetMs =
+        connection.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
+      // inactivityHint enriches the generic peer-silence error with file-sync
+      // operator guidance: the receiver names its own cause locally, but the sender
+      // only sees the inactivity timeout, so it points at the likely receiver-side
+      // causes and the peer's own logs (see PEER_SILENCE_GUIDANCE).
+      //
+      // Supplied as a function because which guidance is true depends on what the
+      // rendezvous observed, which happens after this bridge is built: the default
+      // text asserts the peer completed the rendezvous, and a run holding an
+      // unconfirmed entry-present hello has established no such thing. Reading the
+      // connection inside the closure is what defers the choice to the moment the
+      // deadline fires.
+      transport = fromEventConnection(fileSyncConn, {
+        inactivityTimeoutMs: peerBudgetMs,
+        inactivityHint: () => {
+          const leftover = fileSyncConn.unconfirmedEntryPeerHello;
+          return leftover === undefined
+            ? PEER_SILENCE_GUIDANCE
+            : entryHelloResidueGuidance(leftover);
+        },
+      });
+    }
   } catch (err) {
     emitMetrics();
     emit((e) => e.error(err, "prepare"));
@@ -604,8 +725,9 @@ export async function runProtocol(
     // teardown for the full grace window. A catch-path writeAbortMarker() (if it
     // ran) already pre-empted this, making the seal a no-op. It is a pure
     // synchronous one-shot with no transport dependency, so hoisting it to the
-    // top is safe; it is also a no-op on the unauthenticated path (never armed).
-    conn.sealAbort();
+    // top is safe; it is also a no-op on the unauthenticated path (never armed)
+    // and on webrtc, which has no marker and so no decision to seal.
+    fileSync?.sealAbort();
     if (started) log.info("stopping polling");
     if (opened) log.info("closing connection");
     // When the AEAD decorator was built (encryption negotiated), close it: its
@@ -624,21 +746,27 @@ export async function runProtocol(
         );
       });
     }
-    // mc.close() detaches the bridge's data/error listeners and then closes the
-    // underlying FileSyncConnection, which stops the poller, sweeps the
-    // responsible files, and ends the client (all idempotent, so this is safe
-    // even when open() never ran, and a near no-op after secure.close() already
-    // closed it via the same delegation).
-    await mc.close().catch((err: unknown) => {
-      log.debug("mc.close() during cleanup:", sanitizeErrorForDisplay(err));
+    // Closing the transport detaches the file-sync bridge's data/error listeners
+    // and closes the underlying FileSyncConnection -- stopping the poller,
+    // sweeping the responsible files, and ending the client -- or, on webrtc,
+    // flushes the outbound queue and tears the data channel, peer connection and
+    // broker socket down. All idempotent, so this is safe even when open() never
+    // ran, and a near no-op after secure.close() already closed it via the same
+    // delegation. Undefined only when the webrtc rendezvous never produced a
+    // connection, where there is nothing to close.
+    await transport?.close().catch((err: unknown) => {
+      log.debug(
+        "transport close during cleanup:",
+        sanitizeErrorForDisplay(err),
+      );
     });
-    // If an earlier transport failure already terminated mc, its close()
+    // If an earlier transport failure already terminated the bridge, its close()
     // returns immediately without re-closing conn (and the close it triggered
     // on failure was fire-and-forget, hence unawaited). Close conn directly to
     // guarantee the poller is stopped, the responsible files are swept, and the
     // client is ended before doCleanup returns. close() is idempotent, so in
-    // the normal path this is a near no-op after mc.close() already closed it.
-    await conn.close().catch((err: unknown) => {
+    // the normal path this is a near no-op after the bridge already closed it.
+    await fileSync?.close().catch((err: unknown) => {
       // When the connection was open, a close failure is user-visible: the
       // transport may not have terminated cleanly (e.g. SSH session timeout).
       // close() is idempotent and does not throw on an unopened instance, so
@@ -853,79 +981,121 @@ export async function runProtocol(
   let onAuthenticatedError: unknown;
 
   try {
-    if (connection.channel === "filedrop") {
+    let role: HandshakeRole;
+    if (connection.channel === "webrtc") {
+      // Resolved by the prepare block for exactly this channel; the check is what
+      // lets the dial be read as present.
+      if (webRtcDial === undefined)
+        throw new Error("the webrtc rendezvous was not resolved");
       log.info(
-        "opening local path",
-        // The filedrop path is partner-seeded on an offline-accept config (it
-        // comes from the invitation's filedrop endpoint, charset-unconstrained),
-        // so escape it before it reaches the operator's terminal -- the filedrop
-        // twin of the SFTP host below. A split config has no single `path`; show
-        // the inbound directory it reads the peer's files from instead.
-        redactAndSanitizeForDisplay(
-          connection.path ?? connection.inboundPath ?? "",
-        ),
+        "rendezvousing through the signaling server at",
+        // The broker host is partner-controlled on an endpoint-seeded config, so
+        // escape it before it reaches the operator's terminal, as the file-sync
+        // locators below are. The rendezvous ids are NOT logged: they are derived
+        // from the shared secret, and anything that reaches the terminal reaches
+        // a --log-file too.
+        redactAndSanitizeForDisplay(webRtcDial.options.location.host),
       );
+      // The rendezvous is this channel's open: it registers with the broker,
+      // negotiates, and resolves only once the data channel is up. Its own
+      // budgets bound it (rendezvous, channel-open), so a partner that never
+      // arrives fails here rather than hanging.
+      transport = await openWebRtcMessageConnection(webRtcDial.options);
+      opened = true;
+      // Fixed by the connection's role rather than negotiated at the transport:
+      // the two parties already had to disagree about which end they are to find
+      // each other at all, so the handshake inherits that instead of running a
+      // second tiebreaker.
+      role = webRtcDial.handshakeRole;
     } else {
-      log.info(
-        "opening connection to",
-        // The SFTP host is partner-controlled on an offline-accept-seeded config
-        // (it comes from the invitation endpoint, charset-unconstrained), so
-        // escape it before it reaches the operator's terminal.
-        redactAndSanitizeForDisplay(connection.server.host),
-        "with options",
-        connection.options,
-      );
-    }
-    await conn.open(connection);
-    opened = true;
-
-    // If a signal fired while `conn.open()` was awaiting, the signal handler
-    // already ran doCleanup -- including a conn.close() that no-op'd because
-    // `connected` was still false at that moment. Now that open() has
-    // resolved (`connected === true`), close the freshly-opened connection
-    // explicitly and short-circuit so the catch's signalReceived branch
-    // resolves runProtocol cleanly. Without this, the connection would
-    // remain open until process termination, which is a non-issue in
-    // production (process.exit follows the handler) but leaks state in
-    // tests that mock process.exit.
-    if (signalReceived !== undefined) {
-      try {
-        await conn.close();
-      } catch (err) {
-        log.debug(
-          "post-open signal close failed:",
-          sanitizeErrorForDisplay(err),
+      if (connection.channel === "filedrop") {
+        log.info(
+          "opening local path",
+          // The filedrop path is partner-seeded on an offline-accept config (it
+          // comes from the invitation's filedrop endpoint, charset-unconstrained),
+          // so escape it before it reaches the operator's terminal -- the filedrop
+          // twin of the SFTP host below. A split config has no single `path`; show
+          // the inbound directory it reads the peer's files from instead.
+          redactAndSanitizeForDisplay(
+            connection.path ?? connection.inboundPath ?? "",
+          ),
+        );
+      } else if (connection.channel === "sftp") {
+        log.info(
+          "opening connection to",
+          // The SFTP host is partner-controlled on an offline-accept-seeded config
+          // (it comes from the invitation endpoint, charset-unconstrained), so
+          // escape it before it reaches the operator's terminal.
+          redactAndSanitizeForDisplay(connection.server.host),
+          "with options",
+          connection.options,
         );
       }
-      throw new Error(
-        `interrupted by ${signalReceived} during connection open`,
-      );
+      // The prepare block builds the connection and its bridge together on every
+      // file-sync channel; the check is what lets the rest of the block read
+      // them as present.
+      if (fileSync === undefined || transport === undefined)
+        throw new Error("the file-sync transport was not constructed");
+      const fileSyncConn = fileSync;
+      await fileSyncConn.open(connection);
+      opened = true;
+
+      // If a signal fired while `conn.open()` was awaiting, the signal handler
+      // already ran doCleanup -- including a conn.close() that no-op'd because
+      // `connected` was still false at that moment. Now that open() has
+      // resolved (`connected === true`), close the freshly-opened connection
+      // explicitly and short-circuit so the catch's signalReceived branch
+      // resolves runProtocol cleanly. Without this, the connection would
+      // remain open until process termination, which is a non-issue in
+      // production (process.exit follows the handler) but leaks state in
+      // tests that mock process.exit.
+      if (signalReceived !== undefined) {
+        try {
+          await fileSyncConn.close();
+        } catch (err) {
+          log.debug(
+            "post-open signal close failed:",
+            sanitizeErrorForDisplay(err),
+          );
+        }
+        throw new Error(
+          `interrupted by ${signalReceived} during connection open`,
+        );
+      }
+
+      log.info("synchronizing");
+      await fileSyncConn.synchronize();
+
+      // If a signal fired during the synchronize() round-trip, doCleanup already
+      // ran (closing the connection and removing our hello/lock files). Bail
+      // out before start() so the poller is not launched against a closed
+      // transport. Without this, conn.start() would schedule polls that fail
+      // when they hit the closed underlying client, producing spurious error
+      // logs even though the signal handler is already on its way to exit.
+      // The corresponding check after open() handles the open/synchronize
+      // window; this one handles the synchronize/start window.
+      if (signalReceived !== undefined) {
+        throw new Error(
+          `interrupted by ${signalReceived} during synchronization`,
+        );
+      }
+
+      const rendezvousRole = fileSyncConn.handshakeRole;
+      // Invariant: synchronize() throws on all failure paths, so role is always
+      // defined when synchronize() returns normally.
+      if (rendezvousRole === undefined)
+        throw new Error(
+          "connection did not establish a handshake role after synchronization",
+        );
+      role = rendezvousRole;
+
+      log.info("starting polling");
+      // conn.start() must precede authenticateConnection: the key exchange
+      // awaits mc.receive(), which is fed by the bridge's data listener; that
+      // listener only sees inbound frames once the polling loop is running.
+      fileSyncConn.start();
+      started = true;
     }
-
-    log.info("synchronizing");
-    await conn.synchronize();
-
-    // If a signal fired during the synchronize() round-trip, doCleanup already
-    // ran (closing the connection and removing our hello/lock files). Bail
-    // out before start() so the poller is not launched against a closed
-    // transport. Without this, conn.start() would schedule polls that fail
-    // when they hit the closed underlying client, producing spurious error
-    // logs even though the signal handler is already on its way to exit.
-    // The corresponding check after open() handles the open/synchronize
-    // window; this one handles the synchronize/start window.
-    if (signalReceived !== undefined) {
-      throw new Error(
-        `interrupted by ${signalReceived} during synchronization`,
-      );
-    }
-
-    const role = conn.handshakeRole;
-    // Invariant: synchronize() throws on all failure paths, so role is always
-    // defined when synchronize() returns normally.
-    if (role === undefined)
-      throw new Error(
-        "connection did not establish a handshake role after synchronization",
-      );
 
     // Report the negotiated handshake role by what this party does next, NOT as
     // "arrived first/second". Under lockless rendezvous (which retain mode, and
@@ -941,15 +1111,14 @@ export async function runProtocol(
       log.info("sending my partner the first message");
     }
 
-    log.info("starting polling");
-    conn.start();
-    started = true;
+    // Set by the prepare block on the file-sync channels and by the rendezvous
+    // above on webrtc; either way the exchange now has a transport to run over.
+    if (transport === undefined)
+      throw new Error("no transport was established for this exchange");
+    const mc = transport;
 
     if (auth) {
       log.info("authenticating");
-      // conn.start() must precede authenticateConnection: the key exchange
-      // awaits mc.receive(), which is fed by the bridge's data listener; that
-      // listener only sees inbound frames once the polling loop is running.
       // Discard the (possibly whitespace-padded) keyFilePath from auth;
       // saveKeyFile below uses trimmedKeyFilePath, which was captured and
       // trimmed during pre-flight without mutating the caller-supplied
@@ -967,13 +1136,21 @@ export async function runProtocol(
       // same value. It keys the per-direction AEAD encryption set up below, so
       // every PSI frame after this point is opaque on the wire to an SFTP/
       // file-drop admin. rotatedSecret is the new shared secret persisted to disk.
-      // requestEncryption is true unconditionally here: this code path serves
-      // only the file-sync channels (sftp, filedrop), whose server admin can
-      // snoop the transport, so the application-encryption layer always applies.
-      // applyEncryption is the negotiated OR decision both parties agree on; it
-      // gates the EncryptedMessageConnection wrap below.
+      // requestEncryption is what this party ASKS for; applyEncryption is the
+      // negotiated OR decision both parties agree on, which gates the
+      // EncryptedMessageConnection wrap below.
+      //
+      // A file-sync channel asks for it unconditionally: the exchange sits in a
+      // server's or a share's filesystem, whose admin can read every frame. A
+      // webrtc data channel does not: it is end-to-end confidential under DTLS
+      // against the signaling server and any TURN relay, so the wrap would buy
+      // nothing and a browser peer -- which declines it and refuses a partner
+      // that asks -- could not complete the exchange at all. The only case that
+      // would flip this is a transport leg an intermediary terminates, which does
+      // not exist today (docs/spec/CHANNEL_SECURITY.md).
+      const requestEncryption = connection.channel !== "webrtc";
       const { rotatedSecret, sessionKey, applyEncryption } =
-        await authenticateConnection(mc, authParams, role, true);
+        await authenticateConnection(mc, authParams, role, requestEncryption);
       // Capture the session key for the signed-receipt step (it derives the replay
       // binder from it); only the authenticated path reaches here, so the no-auth
       // path leaves it undefined and runExchange's signing step stays skipped.
@@ -1132,12 +1309,19 @@ export async function runProtocol(
       // operator rotates or --force-retain-sweep clears the directory between
       // retain exchanges regardless. Withholding the marker in retain mode would
       // forfeit the peer fast-fail and the audit record for no cleanliness gain.
-      const peerRole = role === "initiator" ? "responder" : "initiator";
-      const [selfAbortToken, peerAbortToken] = await Promise.all([
-        deriveAbortToken(sessionKey, role),
-        deriveAbortToken(sessionKey, peerRole),
-      ]);
-      conn.armAbort(selfAbortToken, peerAbortToken);
+      //
+      // The marker is a file-sync mechanism and has no webrtc counterpart, nor
+      // does it need one: the fast-fail it buys is what a live channel already
+      // gives for free -- a party that dies drops the data channel, and the peer
+      // learns of it from the connection state rather than from an absence.
+      if (fileSync !== undefined) {
+        const peerRole = role === "initiator" ? "responder" : "initiator";
+        const [selfAbortToken, peerAbortToken] = await Promise.all([
+          deriveAbortToken(sessionKey, role),
+          deriveAbortToken(sessionKey, peerRole),
+        ]);
+        fileSync.armAbort(selfAbortToken, peerAbortToken);
+      }
     }
 
     // Select the PSI crypto backend: the CLI runs under Node, so it prefers the
@@ -1214,11 +1398,12 @@ export async function runProtocol(
         // channel (`secure` set): the value is unforgeable solely because it
         // rides that channel, so advertising it on the unencrypted no-auth
         // path -- where an active MITM could rewrite it to suppress the
-        // divergence -- would defeat the check. conn.observedHostKey is itself
-        // undefined for a file-drop or the no-pin path, so this is also a no-op
-        // there.
+        // divergence -- would defeat the check. observedHostKey is itself
+        // undefined for a file-drop or the no-pin path (and there is no
+        // file-sync connection at all on webrtc, which pins no server), so this
+        // is also a no-op there.
         observedHostKey:
-          secure !== undefined ? conn.observedHostKey : undefined,
+          secure !== undefined ? fileSync?.observedHostKey : undefined,
         onStage: (id: string) => {
           const label = stageLabels[id] ?? id;
           // The label derives from linkage-key names the partner may have
@@ -1502,6 +1687,7 @@ export async function runProtocol(
     // what the operator needs if the retry then fails authentication. Ordering
     // puts the specific likely cause first.
     if (
+      connection.channel !== "webrtc" &&
       fileSyncRuntime.sweepExchangeFiles === true &&
       connection.options?.retainFiles !== true &&
       isPeerWaitTimeout(err)
@@ -1587,12 +1773,12 @@ export async function runProtocol(
     // is principled, not incidental: only post-arm does a session key (to
     // authenticate the marker) and a waiting post-handshake peer both exist.
     if (
-      conn.abortArmed &&
+      fileSync?.abortArmed === true &&
       !exchangeComplete &&
       signalReceived === undefined &&
       !errIsPeerAbort(err)
     ) {
-      await conn.writeAbortMarker().catch(() => {
+      await fileSync.writeAbortMarker().catch(() => {
         /* best-effort; teardown proceeds regardless of write outcome */
       });
     }

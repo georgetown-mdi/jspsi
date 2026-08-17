@@ -66,6 +66,16 @@ export interface WebRTCServer {
   username?: string;
   /** PeerJS API key for private servers; omit for public PeerJS servers. */
   key?: string;
+  /**
+   * Whether the signaling socket is opened over TLS (`wss:`) rather than plain
+   * `ws:`. Defaults to `true` when unset: signaling carries the derived
+   * rendezvous ids and both parties' candidate addresses, so plaintext is a
+   * deliberate choice an operator makes for a broker they reach without a
+   * network in between (a loopback or test broker), never a default they get by
+   * omission. A browser peer has no equivalent field because it takes the
+   * scheme from the page it was served over.
+   */
+  secure?: boolean;
   provision?: ServerProvision;
 }
 
@@ -75,6 +85,7 @@ const WebRTCServerSchema: z.ZodType<WebRTCServer> = z.object({
   path: z.string().optional(),
   username: z.string().optional(),
   key: z.string().optional(),
+  secure: z.boolean().optional(),
   provision: ServerProvisionSchema.optional(),
 });
 
@@ -804,8 +815,8 @@ export interface WebRTCConnectionConfig {
    * out-of-band address exchange. A peer-addressing/transport concern -- hence
    * its home on the WebRTC connection config rather than the channel-agnostic
    * top-level `authentication` block -- and orthogonal to the PSI
-   * sender/receiver roles. Currently schema-only: not yet consumed by transport
-   * logic (see the Web Exchange Rework / CLI WebRTC Transport items).
+   * sender/receiver roles. The CLI transport reads it: the two parties must
+   * disagree on it, since each registers under the id the other dials.
    */
   role?: "inviter" | "acceptor";
   /**

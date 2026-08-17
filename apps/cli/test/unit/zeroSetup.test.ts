@@ -29,7 +29,13 @@ import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 // path can be driven to that hand-off without opening a transport. Hoisted above
 // the imports by vitest; only the @path-resolution handler test below invokes the
 // mock -- the other handler tests exit on an argument error before reaching it.
-vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
+// Only runProtocol is stubbed: the refusal messages the handler raises are real
+// constants from the same module, and asserting a copy of one would pass while
+// the operator saw something else.
+vi.mock("../../src/protocol", async (importActual) => ({
+  ...(await importActual<typeof import("../../src/protocol")>()),
+  runProtocol: vi.fn(),
+}));
 
 // First-use host-key trust runs in the connect path before runProtocol; stub it
 // out (its own behavior is covered in hostKeyTrust.test.ts) so the handler tests
@@ -200,15 +206,17 @@ test("createConnection filedrop: the non-localhost error echoes the redacted URL
   );
 });
 
-test("createConnection webrtc throws a UsageError 'not yet supported'", () => {
-  // ws:// resolves to the webrtc channel, which the CLI does not yet support;
-  // that is invalid caller input (exit 64), not a transport failure.
+test("createConnection refuses a webrtc URL, naming what does run one", () => {
+  // ws:// resolves to the webrtc channel, which the CLI runs -- but only from a
+  // saved connection, not from a URL (see connectionFromUrl.ts). That is invalid
+  // caller input (exit 64), not a transport failure, and the message says which
+  // command does run one rather than reporting the channel as unsupported.
   expect(() =>
     createConnection(new URL("ws://example.org/path"), baseOptions),
   ).toThrow(UsageError);
   expect(() =>
     createConnection(new URL("ws://example.org/path"), baseOptions),
-  ).toThrow("not yet supported");
+  ).toThrow("psilink exchange");
 });
 
 test("createConnection filedrop: file://localhost/path is accepted", () => {
@@ -702,6 +710,58 @@ test("handler: zero-setup surfaces the single-pass disclosure note at selection"
       "log-level": "info",
     } as unknown as Arguments);
     expect(stderrChunks.join("")).toContain("consented disclosure tradeoff");
+  } finally {
+    getLogger("psilink").setLevel("silent");
+    stderrSpy.mockRestore();
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- handler: webrtc is refused for the reason it cannot work ----------------
+
+test("handler refuses a webrtc URL by naming the missing rendezvous secret", async () => {
+  // Deferred deliberately rather than unimplemented: the two parties find each
+  // other at signaling ids derived from a shared secret, and a zero-setup
+  // exchange is defined by not having one. The refusal has to say that, and it
+  // has to come before any file is read or written.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerowebrtc-"));
+  vi.mocked(runProtocol).mockClear();
+  const stderrChunks: string[] = [];
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as never);
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+    await expect(
+      handler({
+        _: ["wss://peers.example.org/", input],
+        $0: "psilink",
+        "config-file": path.join(dir, "psilink.yaml"),
+        "key-file": path.join(dir, ".psilink.key"),
+        identity: "Tester",
+        record: false,
+        "log-level": "error",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    const reported = stderrChunks.join("");
+    expect(reported).toContain("shared secret");
+    expect(reported).toContain("psilink invite");
+    // Nothing was attempted: no exchange, and no config or key reserved.
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(dir, "psilink.yaml"))).toBe(false);
   } finally {
     getLogger("psilink").setLevel("silent");
     stderrSpy.mockRestore();
