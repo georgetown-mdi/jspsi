@@ -1082,7 +1082,8 @@ export interface ConfigLinkageSource {
    * unfinished or still-placeholder one does not block generating an invitation,
    * and a single boolean read keeps that contract. Anything other than a literal
    * `true` -- absent, false, a non-boolean, no connection block at all -- reads
-   * as false, which declares nothing rather than declaring delete mode.
+   * as false, which declares nothing rather than declaring delete mode, as does
+   * a `webrtc` connection, a channel with no retain mode to declare.
    */
   retainsFiles: boolean;
 }
@@ -1251,11 +1252,20 @@ export function readConfigLinkageSource(
  * false, a non-boolean, a non-object `connection` or `options` -- yields false,
  * which the invitation carries as no declaration at all rather than as a claim
  * that the exchange deletes its files.
+ *
+ * A `webrtc` connection declares nothing whatever its options say: retain mode is
+ * a file-sync setting the webrtc channel does not have, which is how
+ * `ConnectionConfigSchema` words its own refusal of the pair. The block is
+ * unvalidated here, so that refusal has not run and this path mints from a config
+ * no `psilink exchange` could run; reading the flag anyway would put a mode no
+ * run of the token could be in on a partner's consent screen.
  */
 function readRetainFilesDeclaration(config: Record<string, unknown>): boolean {
   const connection = config["connection"];
   if (connection === null || typeof connection !== "object") return false;
-  const options = (connection as Record<string, unknown>)["options"];
+  const block = connection as Record<string, unknown>;
+  if (block["channel"] === "webrtc") return false;
+  const options = block["options"];
   if (options === null || typeof options !== "object") return false;
   const entry = options as Record<string, unknown>;
   return entry["retain_files"] === true || entry["retainFiles"] === true;

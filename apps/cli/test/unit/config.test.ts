@@ -1949,6 +1949,12 @@ test("readConfigLinkageSource reads retain mode off the connection block", () =>
 // non-boolean value -- reads as no declaration rather than as a claim that the
 // exchange deletes its files, and none of those shapes is an error here: the
 // block stays unvalidated so an unfinished config can still mint an invitation.
+//
+// The webrtc case is the one that turns on the CHANNEL rather than the value:
+// retain mode is a file-sync setting that channel does not have, which is how
+// ConnectionConfigSchema words its own refusal of the pair. That refusal never
+// runs here (the block is unvalidated), so a config no `psilink exchange` could
+// run would otherwise mint a token stating a mode no run of it could be in.
 test.each([
   ["no options block", "connection:\n  channel: sftp\n"],
   [
@@ -1963,6 +1969,10 @@ test.each([
   ["options a scalar", "connection:\n  options: yes\n"],
   ["connection a scalar", "connection: sftp\n"],
   ["no connection block", ""],
+  [
+    "retain_files on a webrtc connection",
+    "connection:\n  channel: webrtc\n  options:\n    retain_files: true\n",
+  ],
 ])("readConfigLinkageSource declares no retain mode: %s", (_label, block) => {
   const configPath = path.join(dir, "psilink.yaml");
   const terms = getDefaultLinkageTerms("Agency A");

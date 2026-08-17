@@ -321,6 +321,13 @@ export const CONSENT_FACTS = {
       "Re-checked before and after the key exchange; an expired invitation is " +
       "refused.",
   },
+  // The note's "what you send stays encrypted there" is true of every path that
+  // renders this fact, and only because they are all authenticated accepts: the
+  // zero-setup exchange takes --retain-files too and runs its PSI frames over the
+  // bare transport, with no application-layer encryption to promise. It renders
+  // no consent fact at all, which is what keeps the sentence honest -- pinned by
+  // a test rather than by this comment (apps/cli/test/unit/zeroSetup.test.ts), so
+  // wiring consent facts into that path fails until the claim is re-examined.
   retainedFiles: {
     basis: "enforced",
     reason:

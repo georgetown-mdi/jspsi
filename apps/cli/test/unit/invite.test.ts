@@ -651,6 +651,42 @@ test("validateInvite: a retain-mode config declares it on the token", async () =
   expect(token.inviterRetainsFiles).toBe(true);
 });
 
+test("validateInvite: a webrtc config declares nothing, whatever its options say", async () => {
+  // The config-as-source mint reads the connection block without validating it
+  // (an unfinished one must still mint) and emits no endpoint, so neither the
+  // ConnectionConfigSchema refusal of retain_files on webrtc nor the token
+  // schema's endpoint-paired refusal stands between this config and the wire.
+  // The reader's own channel gate is what keeps a never-runnable config from
+  // stating a mode no run of the token could be in. Hand-written YAML: saveConfig
+  // validates, and this pairing is exactly what it refuses.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-webrtc-"));
+  tmpDirs.push(dir);
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    YAML.stringify({
+      connection: {
+        channel: "webrtc",
+        server: { host: "peer.example" },
+        options: { retain_files: true },
+      },
+      linkage_terms: defaultTerms(),
+    }),
+  );
+  const ready = await validateInvite({
+    resolved: { mode: "offline" },
+    options: testOptions({
+      configFile: configPath,
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  expect(ready.mode).toBe("offlineFromConfig");
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.inviterRetainsFiles).toBeUndefined();
+});
+
 test("validateInvite: a config without retain mode declares nothing", async () => {
   const { dir, configPath, keyPath } = withConfig(defaultTerms());
   try {
