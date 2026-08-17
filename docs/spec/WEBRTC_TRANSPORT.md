@@ -70,6 +70,23 @@ page it was served over and the CLI has no page for:
 | `key` | `peerjs` |
 | `secure` | `true` |
 
+The address is built through the URL API, with `path` assigned as a pathname
+rather than concatenated, so the scheme's default port is left implicit in it.
+`host` and `path` are refused for shape before anything is dialed, because both
+are partner-supplied when the connection came from an invitation endpoint and
+each can otherwise carry the delimiters that move a URL's authority:
+
+| Field | Refused |
+| ----- | ------- |
+| `host` | any of `@ / ? # \` or whitespace, and any value that does not parse as a bare authority (one contributing userinfo, a port, or a path of its own) |
+| `path` | a value not beginning with `/`, or carrying any of `@ ? # \` or whitespace |
+
+`key` takes no equivalent rule: an invitation endpoint is a strict
+`host`/`port`/`path` allowlist and carries none, and the value is encoded as a
+query parameter rather than interpolated. The finished address is checked
+against the configured host once more before the socket is constructed, so an
+address naming another authority opens nothing.
+
 The server stamps `src` itself from the connecting client's id, so an outbound
 frame carries only `type`, `payload`, and `dst`. Heartbeats (`HEARTBEAT`, no
 payload) go up every 5 s. The broker neither queues nor reports an undeliverable

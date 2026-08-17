@@ -103,6 +103,8 @@ const {
 const { WEBRTC_URL_REFUSED } = await import("../../src/connectionFromUrl");
 const { ID_TAKEN_MESSAGE } =
   await import("../../src/connection/webrtc/brokerClient");
+const { WEBRTC_BROKER_HOST_REFUSED, WEBRTC_BROKER_PATH_REFUSED } =
+  await import("../../src/connection/webrtc/weriftPeer");
 const { saveKeyFile } = await import("../../src/keyFile");
 const {
   DISPLAY_TRUNCATION_MARKER,
@@ -339,6 +341,8 @@ test("each refusal survives the display boundary whole", () => {
     WEBRTC_ROLE_REQUIRED,
     WEBRTC_URL_REFUSED,
     ID_TAKEN_MESSAGE,
+    WEBRTC_BROKER_HOST_REFUSED,
+    WEBRTC_BROKER_PATH_REFUSED,
   ]) {
     expect(sanitizeErrorForDisplay(new UsageError(message))).not.toContain(
       DISPLAY_TRUNCATION_MARKER,
@@ -394,6 +398,96 @@ test("port 0 is refused rather than dialed", () => {
       SECRET,
     ),
   ).toThrow(UsageError);
+});
+
+test("a server path that could move the signaling socket is refused", () => {
+  // Measured against Node's URL parser and WebSocket: concatenated into the
+  // address, `@attacker.example` makes the configured host the userinfo of the
+  // partner's, so the socket is dialed at the partner's host while the config --
+  // and the run's own "rendezvousing through the signaling server at ..." line --
+  // still name the legitimate broker. The path is partner-supplied on the
+  // primary route: an offline accept builds the connection from the invitation's
+  // endpoint, whose schema bounds `path` only by length.
+  for (const serverPath of [
+    "@attacker.example",
+    "peerjs",
+    "",
+    "/api?x=1",
+    "/api#f",
+    "/api\\x",
+    "/api ",
+  ]) {
+    expect(() =>
+      webRtcDialFrom(
+        {
+          channel: "webrtc",
+          server: { host: "peers.example.org", path: serverPath },
+          role: "inviter",
+        },
+        SECRET,
+      ),
+    ).toThrow(WEBRTC_BROKER_PATH_REFUSED);
+  }
+});
+
+test("a server host that could move the signaling socket is refused", () => {
+  for (const host of [
+    "broker.example:443@attacker.example",
+    "peers.example.org/x",
+    "peers.example.org?x",
+    "peers.example.org#f",
+    "peers.example.org\\x",
+    "peers example org",
+  ]) {
+    expect(() =>
+      webRtcDialFrom(
+        {
+          channel: "webrtc",
+          server: { host },
+          role: "inviter",
+        },
+        SECRET,
+      ),
+    ).toThrow(WEBRTC_BROKER_HOST_REFUSED);
+  }
+});
+
+test("a mounted broker path still resolves", () => {
+  // The refusals above bound the shape without costing the field its purpose: a
+  // deployment mounted under a sub-path is what `path` is for.
+  const { options } = webRtcDialFrom(
+    {
+      channel: "webrtc",
+      server: { host: "peers.example.org", path: "/psi/signal" },
+      role: "inviter",
+    },
+    SECRET,
+  );
+  expect(options.location.path).toBe("/psi/signal");
+});
+
+test("an injected path fails the run before anything is dialed", async () => {
+  const keyFilePath = path.join(tmpDir, "injected.key");
+  saveKeyFile(keyFilePath, { sharedSecret: SECRET });
+  await expect(
+    runProtocol(
+      {
+        ...webrtcConnection("inviter"),
+        server: {
+          host: "peers.example.org",
+          port: 9000,
+          secure: false,
+          path: "@attacker.example",
+        },
+      },
+      { sharedSecret: SECRET, keyFilePath },
+      minimalPrepared,
+      path.join(tmpDir, "injected.csv"),
+      -1,
+      "test",
+    ),
+  ).rejects.toThrow(UsageError);
+  expect(mockState.dials).toHaveLength(0);
 });
 
 test("peer_timeout_ms bounds the rendezvous as well as the parked receive", () => {
