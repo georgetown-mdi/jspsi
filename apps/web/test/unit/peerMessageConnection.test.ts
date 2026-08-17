@@ -8,8 +8,30 @@ import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.j
 
 import type { DataConnection } from "peerjs";
 
+/** The underlying `RTCDataChannel` PeerJS exposes on an open connection. A
+ * flushing close leaves it open - the PEER closes it when it reads the close
+ * sentinel (measured; see waitForPeerClose.ts) - so nothing here closes it
+ * except an explicit `closeFromPeer`. */
+class FakeDataChannel extends EventTarget {
+  readyState: RTCDataChannelState = "open";
+  closeFromPeer() {
+    this.readyState = "closed";
+    this.dispatchEvent(new Event("close"));
+  }
+}
+
+class FakePeerConnection extends EventTarget {
+  connectionState: RTCPeerConnectionState = "connected";
+  enter(state: RTCPeerConnectionState) {
+    this.connectionState = state;
+    this.dispatchEvent(new Event("connectionstatechange"));
+  }
+}
+
 class FakeDataConnection extends EventEmitter {
   open: boolean;
+  dataChannel = new FakeDataChannel();
+  peerConnection = new FakePeerConnection();
   // The remote peer id PeerJS exposes; empty by default so redaction is a no-op
   // for tests that do not set it. A real connection's `peer` is the derived
   // rendezvous id.
@@ -43,6 +65,19 @@ function makeConn(open = true): {
 } {
   const fake = new FakeDataConnection(open);
   return { fake, conn: fake as unknown as DataConnection };
+}
+
+/** Open with the clean close's wait for the peer disabled, for the tests that
+ * are about something else: the wait itself is exercised below, and left at its
+ * default a close would park until the fake peer closed the channel. */
+function openWithoutCloseWait(conn: DataConnection) {
+  return openPeerMessageConnection(conn, { closeDrainTimeoutMs: 0 });
+}
+
+/** Let pending microtasks and zero-delay timers run, so a promise that is not
+ * settled after this one is genuinely parked. */
+function drainTaskQueue(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe("openPeerMessageConnection", () => {
@@ -231,7 +266,7 @@ describe("openPeerMessageConnection", () => {
 
   test("send after close rejects and does not reach the channel", async () => {
     const { fake, conn } = makeConn();
-    const mc = await openPeerMessageConnection(conn);
+    const mc = await openWithoutCloseWait(conn);
 
     await mc.close();
 
@@ -241,7 +276,7 @@ describe("openPeerMessageConnection", () => {
 
   test("an intentional close is quiet: it closes the channel once and silences the close event", async () => {
     const { fake, conn } = makeConn();
-    const mc = await openPeerMessageConnection(conn);
+    const mc = await openWithoutCloseWait(conn);
 
     await expect(mc.close()).resolves.toBeUndefined();
     expect(fake.close).toHaveBeenCalledTimes(1);
@@ -318,11 +353,66 @@ describe("openPeerMessageConnection", () => {
 
   test("a clean close flushes buffered writes before tearing down", async () => {
     const { fake, conn } = makeConn();
-    const mc = await openPeerMessageConnection(conn);
+    const mc = await openWithoutCloseWait(conn);
 
     await mc.close();
 
     expect(fake.close).toHaveBeenCalledWith({ flush: true });
+  });
+
+  test("a clean close parks until the peer takes the final frame", async () => {
+    // The delivery guarantee: PeerJS's flush only queues its close sentinel, so
+    // a close that returned here would report delivery for a frame still in the
+    // browser's outbound buffer. The peer closing the channel - what it does on
+    // reading the sentinel, behind every frame already sent - is what ends it.
+    const { fake, conn } = makeConn();
+    const mc = await openPeerMessageConnection(conn);
+
+    let closed = false;
+    void mc.close().then(() => (closed = true));
+    await drainTaskQueue();
+    expect(closed).toBe(false);
+    expect(fake.close).toHaveBeenCalledWith({ flush: true });
+
+    fake.dataChannel.closeFromPeer();
+    await drainTaskQueue();
+    expect(closed).toBe(true);
+  });
+
+  test("a clean close does not park when the peer has already closed", async () => {
+    // A peer that closes the instant it reads the sentinel must not leave the
+    // close parked on an event that has already fired: modelled here by a
+    // channel that closes inside the PeerJS close call itself.
+    const { fake, conn } = makeConn();
+    fake.close.mockImplementation(() => fake.dataChannel.closeFromPeer());
+    const mc = await openPeerMessageConnection(conn);
+
+    await expect(mc.close()).resolves.toBeUndefined();
+  });
+
+  test("a clean close stops waiting once there is no live peer left", async () => {
+    const { fake, conn } = makeConn();
+    const mc = await openPeerMessageConnection(conn);
+
+    let closed = false;
+    void mc.close().then(() => (closed = true));
+    await drainTaskQueue();
+    expect(closed).toBe(false);
+
+    fake.peerConnection.enter("failed");
+    await drainTaskQueue();
+    expect(closed).toBe(true);
+  });
+
+  test("a clean close gives up at its ceiling rather than parking forever", async () => {
+    // A peer that answers ICE but never reads: the close returns on the ceiling
+    // instead of hanging a finished exchange on it.
+    const { conn } = makeConn();
+    const mc = await openPeerMessageConnection(conn, {
+      closeDrainTimeoutMs: 5,
+    });
+
+    await expect(mc.close()).resolves.toBeUndefined();
   });
 
   test("an error teardown closes the channel without flushing", async () => {

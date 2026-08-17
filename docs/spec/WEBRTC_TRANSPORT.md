@@ -145,10 +145,27 @@ The close sentinel is a `__peerData` close object sent through the same
 reliable, ordered channel, which necessarily places it behind every frame
 already handed to `send`. The *peer* closes on receipt.
 
-A sender that stays alive is done at that point: PeerJS's own clean close emits
-the sentinel and returns without tearing anything down, which is what the web
-app does. A CLI process cannot leave the connection standing, so it has one more
-obligation, and it is the delivery guarantee rather than hygiene:
+Queuing the sentinel is not delivering the frames in front of it. PeerJS's own
+clean close returns the moment the sentinel is queued, with the final frame
+still in the sender's outbound buffer -- measured in Chromium at 8.4 MB of a 16
+MiB frame still buffered when the close returned, and the peer reading that
+frame 1.3 s later. A close that returns there has reported delivery for bytes
+that have not left. Both implementations therefore wait, each on the strongest
+signal its stack exposes, and the wait is the delivery guarantee rather than
+hygiene.
+
+**The web app** waits for the PEER to close the data channel. The peer does that
+on reading the sentinel, and the ordered channel places the sentinel behind
+every frame already handed to `send`, so the local channel's `close` event is
+the peer's receipt of the final frame. That event is the peer's and not this
+side's: PeerJS leaves the local channel open on a flushing close (measured:
+still `open` after an eight-second window against a peer patched not to close,
+with `bufferedAmount` having reached zero early in it). Nothing is torn down
+afterwards -- a browser peer has no reason to, and no SCTP-level drain to do
+better with.
+
+**The CLI** cannot leave the connection standing, so it drains to
+acknowledgement and then tears down:
 
 1. Wait until the peer has ACKNOWLEDGED every byte already handed to the
    channel, then
@@ -165,8 +182,18 @@ of the delivery contract requires; "flush the local buffer" is not sufficient on
 this transport (see
 [COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown)).
 
-Both waits also end when there is no live peer left to drain to, so a partner
-that crashed produces a teardown rather than a wait as long as the ceiling.
+Every wait above also ends when there is no live peer left to deliver to, so a
+partner that crashed produces a teardown rather than a wait as long as the
+ceiling. For the web that is the peer connection reaching `failed` or `closed`;
+a transient `disconnected` is not terminal, because the frame is still in flight
+while ICE recovers.
+
+What no close can cover is a sender whose stack goes away before its bytes do:
+tearing the peer connection down as the close returns delivered nothing at all
+-- measured at zero frames of two received, four rounds out of four -- and a
+browser tab closed the instant the results appear does the same thing to a frame
+still buffered. Waiting narrows that window to the delivery itself rather than
+leaving it open for the length of the transfer.
 
 ## ICE
 
@@ -198,7 +225,7 @@ condition holds.
 | Offer retry interval | 1 s | How often the dialer re-offers while unanswered |
 | Channel open | 30 s | The data channel opening once both descriptions are exchanged; reaching it means the peer is present but no candidate pair worked |
 | Parked receive | 1 h | Peer silence on an open channel; it bounds the peer's single-threaded PSI compute, which sends no keepalive while it runs |
-| Close drain | 5 min | The acknowledgement wait above, sized from the largest admissible frame and the measured send rate |
+| Close drain | 5 min | The clean close's wait above -- the CLI's acknowledgement drain, the web's wait for the peer's close -- sized from the largest admissible frame and the measured send rate |
 | Sentinel hand-off | 2 s | Getting the close sentinel itself onto the wire |
 
 `connection.options.peer_timeout_ms`, when set, replaces both the rendezvous and

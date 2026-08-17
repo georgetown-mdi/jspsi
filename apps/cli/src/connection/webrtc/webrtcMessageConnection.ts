@@ -25,17 +25,19 @@ import type { RTCDataChannel } from "werift";
  * drained before the close surfaces), an error fails, and a deliberate close
  * flushes.
  *
- * Two things this side has to do that the web's does not, because it drives the
- * raw channel rather than PeerJS:
+ * Two things this side has to do differently, because it drives the raw channel
+ * rather than PeerJS:
  *
  * - Framing. Outbound values are BinaryPack-packed and chunked into the
  *   envelopes a browser peer reassembles; inbound datagrams go through the
  *   bounded reassembler (`inboundBounds.ts`) before anything is delivered.
- * - Draining. PeerJS's flushing close is just the in-band sentinel: it returns
- *   without teardown and lets the PEER close on receipt, which SCTP ordering
- *   necessarily places behind everything already handed to `send`. A CLI
- *   process cannot leave the connection standing, so it sends the same sentinel
- *   and then waits for the peer to acknowledge it before tearing down.
+ * - Draining. Both transports wait for the peer before a clean close resolves,
+ *   on the strongest signal each stack exposes: PeerJS's flushing close is just
+ *   the in-band sentinel, so the web waits for the PEER to close the channel on
+ *   reading it -- which SCTP ordering necessarily places behind everything
+ *   already handed to `send` -- and leaves the connection standing. A CLI
+ *   process cannot leave it standing, so it sends the same sentinel and waits
+ *   for the peer to ACKNOWLEDGE the bytes before tearing down.
  *
  *   That wait is load-bearing, not hygiene, and what it waits ON is the whole
  *   point: tearing the connection down while data is outstanding loses it --

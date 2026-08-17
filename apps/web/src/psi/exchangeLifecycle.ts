@@ -313,8 +313,9 @@ export async function runExchangeLifecycle<
     conn.off("data", dropBrokerOnFirstFrame);
     try {
       if (mc !== undefined) {
-        // Flushing close: drains the final outbound frame and detaches the
-        // channel listeners. This is the teardown-exclusive effect.
+        // Flushing close: waits for the peer to take the final outbound frame
+        // and detaches the channel listeners. This is the teardown-exclusive
+        // effect.
         await mc.close();
       } else {
         // The wrapper never materialized (abort/timeout before the open await
@@ -325,9 +326,10 @@ export async function runExchangeLifecycle<
       log.error("teardown: closing the connection failed:", err);
     }
     // disconnect() frees the broker id but deliberately leaves the data channel
-    // alive so the flushing close above can finish draining the final frame to
-    // the peer (the send/close delivery contract; see docs/COMMUNICATION.md and
-    // the Connection interface in core). Do NOT "upgrade" this to peer.destroy():
+    // alive: the close above waits for the peer to take the final frame, and on
+    // its ceiling path the frame can still be in flight (the send/close delivery
+    // contract; see docs/COMMUNICATION.md and the Connection interface in core).
+    // Do NOT "upgrade" this to peer.destroy():
     // destroy() routes through the abrupt RTCPeerConnection.close(), which
     // discards buffered outbound data and would drop the final frame. The local
     // connection is reaped without it - via the data channel's native onclose on

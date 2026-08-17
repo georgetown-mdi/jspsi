@@ -12,6 +12,7 @@ import {
 } from "./boundedReassembly";
 import { redactErrorIds } from "./peerLogging";
 import { waitForConnectionOpen } from "./waitForOpen";
+import { waitForPeerClose } from "./waitForPeerClose";
 
 import type { DataConnection } from "peerjs";
 import type { MessageConnection } from "@psilink/core";
@@ -40,7 +41,10 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  * already-buffered frame is drained by `receive` before the error surfaces
  * (`close` is a clean half-close, `error` an abnormal drop). `send` writes to
  * the channel; and `close` detaches the listeners and closes the channel,
- * flushing buffered writes first on a clean close.
+ * waiting on a clean close for the peer to take the final frame (see
+ * {@link waitForPeerClose}), so a resolved close means delivered rather than
+ * buffered -- except on the wait's ceiling, dead-peer, and already-not-open
+ * paths, where the frame can still be in flight (see {@link waitForPeerClose}).
  *
  * The inbound path is byte-bounded against a hostile or buggy peer: PeerJS chunk
  * reassembly is capped so an oversized PSI set frame or a flood of
@@ -62,8 +66,9 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  *                 parked-receive budget. `maxFrameBytes` /
  *                 `maxConcurrentReassemblies` override the fixed inbound bounds
  *                 (default {@link MAX_WEBRTC_FRAME_BYTES} and the concurrent
- *                 reassembly cap) for tests only -- they are not an
- *                 operator-facing knob.
+ *                 reassembly cap) and `closeDrainTimeoutMs` the ceiling on the
+ *                 clean close's wait for the peer (see {@link waitForPeerClose}),
+ *                 for tests only -- none of them is an operator-facing knob.
  */
 export async function openPeerMessageConnection(
   conn: DataConnection,
@@ -72,6 +77,7 @@ export async function openPeerMessageConnection(
     inactivityTimeoutMs?: number;
     maxFrameBytes?: number;
     maxConcurrentReassemblies?: number;
+    closeDrainTimeoutMs?: number;
   },
 ): Promise<MessageConnection> {
   const maxFrameBytes = options?.maxFrameBytes ?? MAX_WEBRTC_FRAME_BYTES;
@@ -127,17 +133,30 @@ export async function openPeerMessageConnection(
       conn.on("close", onClose);
       return {
         send: (data) => conn.send(data),
-        close: (closeOptions) => {
+        close: async (closeOptions) => {
           conn.off("data", onData);
           conn.off("error", onError);
           conn.off("close", onClose);
-          // flush drains buffered outbound writes before closing, but PeerJS's
-          // flush path is a no-op on a channel that never opened: it queues a
-          // close sentinel and returns before tearing down the
-          // RTCPeerConnection. So only flush an open channel; otherwise
-          // hard-close, or an unopened channel leaks.
+          // A flushing close is the delivery guarantee, not hygiene. PeerJS's
+          // flush is only the in-band close sentinel: it queues the sentinel
+          // and returns with the final frame still in the browser's outbound
+          // buffer, so returning here would report delivery for a frame that
+          // has not left. Wait for the peer to close the channel instead --
+          // it does that on reading the sentinel, which the ordered channel
+          // places behind every frame already sent. The listener goes on
+          // before the sentinel does, so an instant peer cannot outrun it.
+          //
+          // Only an open channel: PeerJS's flush path is a no-op on a channel
+          // that never opened (it queues the sentinel and returns without
+          // tearing down the RTCPeerConnection), so an unopened channel needs
+          // the hard close or it leaks.
           if (closeOptions?.flush && conn.open) {
+            const peerClosed = waitForPeerClose(
+              conn,
+              options?.closeDrainTimeoutMs,
+            );
             conn.close({ flush: true });
+            await peerClosed;
           } else {
             conn.close();
           }
