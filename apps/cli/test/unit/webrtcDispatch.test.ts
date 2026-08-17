@@ -293,6 +293,64 @@ test("a signal during the rendezvous closes the channel it opened", async () => 
   expect(mockState.handshakes).toHaveLength(0);
 });
 
+test("a signal cancels a rendezvous that is still in flight", async () => {
+  // The guard above can only act once the dial settles, and a rendezvous waiting
+  // for a partner settles no sooner than its own budget -- ten minutes by
+  // default -- so an interrupt during one would leave the broker socket and the
+  // half-negotiated peer connection standing until then. The transport takes an
+  // AbortSignal wired to fail-and-teardown for exactly this; what is asserted
+  // here is that the run hands it one and that firing it is what ends the dial.
+  const keyFilePath = path.join(tmpDir, "cancel.key");
+  saveKeyFile(keyFilePath, { sharedSecret: SECRET });
+  let dialSignal: AbortSignal | undefined;
+  let toreDown = false;
+  vi.mocked(openWebRtcMessageConnection).mockImplementationOnce(
+    async (options) => {
+      dialSignal = options.signal;
+      // Stands in for the transport's own abort wiring: openWebRtcPeerSession
+      // fails the negotiation and tears down what it built before rejecting.
+      const cancelled = new Promise<MessageConnection>((_resolve, reject) => {
+        // A dial handed no signal has nothing to end it, which is the defect
+        // this covers; reject rather than park on it, so that case fails here
+        // and now instead of spending the suite's timeout.
+        if (options.signal === undefined) {
+          reject(new Error("the rendezvous was handed no signal"));
+          return;
+        }
+        options.signal.addEventListener(
+          "abort",
+          () => {
+            toreDown = true;
+            reject(new Error("the WebRTC rendezvous was cancelled"));
+          },
+          { once: true },
+        );
+      });
+      process.emit("SIGINT");
+      return await cancelled;
+    },
+  );
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    await runProtocol(
+      webrtcConnection("inviter"),
+      { sharedSecret: SECRET, keyFilePath },
+      minimalPrepared,
+      path.join(tmpDir, "cancel.csv"),
+      -1,
+      "test",
+    );
+  } finally {
+    exit.mockRestore();
+  }
+  expect(dialSignal).toBeInstanceOf(AbortSignal);
+  expect(dialSignal?.aborted).toBe(true);
+  expect(toreDown).toBe(true);
+  expect(mockState.handshakes).toHaveLength(0);
+});
+
 // --- the refusals -----------------------------------------------------------
 
 test("a webrtc run with no shared secret is refused, naming the rendezvous", async () => {

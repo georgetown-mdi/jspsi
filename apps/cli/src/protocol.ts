@@ -716,6 +716,14 @@ export async function runProtocol(
   // the exit code to the signal handler -- preventing the CLI handler's
   // process.exit(69) from racing the signal handler's process.exit(130/143).
   let signalReceived: NodeJS.Signals | undefined;
+  // Cancels work that is still in flight when a signal arrives, which doCleanup
+  // cannot reach: it closes what the run already holds, and a webrtc rendezvous
+  // holds its broker socket and half-negotiated peer connection inside the dial
+  // until that dial settles. Without this an interrupt would leave both standing
+  // for the remainder of the rendezvous budget before the dispatch's post-dial
+  // close could run. Aborted only from a signal handler: the ordinary teardown
+  // path is doCleanup's own closes.
+  const interrupted = new AbortController();
   async function doCleanup() {
     if (cleaned) return;
     cleaned = true;
@@ -934,6 +942,9 @@ export async function runProtocol(
     // Must be set synchronously, before the first await, so the runProtocol
     // catch block sees it as soon as the cleanup-induced failure propagates.
     signalReceived = "SIGINT";
+    // Synchronous too, and before the cleanup it cannot substitute for: an
+    // in-flight rendezvous tears itself down on this rather than on doCleanup.
+    interrupted.abort();
     try {
       log.info("caught SIGINT, exiting");
       logRotationStateOnInterrupt("the exchange was interrupted");
@@ -950,6 +961,7 @@ export async function runProtocol(
     // Must be set synchronously, before the first await, so the runProtocol
     // catch block sees it as soon as the cleanup-induced failure propagates.
     signalReceived = "SIGTERM";
+    interrupted.abort();
     try {
       log.info("caught SIGTERM, exiting");
       logRotationStateOnInterrupt("the exchange was interrupted");
@@ -1005,7 +1017,16 @@ export async function runProtocol(
       // negotiates, and resolves only once the data channel is up. Its own
       // budgets bound it (rendezvous, channel-open), so a partner that never
       // arrives fails here rather than hanging.
-      const dialed = await openWebRtcMessageConnection(webRtcDial.options);
+      //
+      // The interrupt signal is what ends it early: the transport fails the
+      // negotiation and tears down the broker socket and peer connection on an
+      // abort, so an operator's Ctrl-C during a rendezvous does not wait out that
+      // budget. The post-dial guard below still stands, for the window between
+      // the dial settling and the transport being assigned.
+      const dialed = await openWebRtcMessageConnection({
+        ...webRtcDial.options,
+        signal: interrupted.signal,
+      });
       transport = dialed;
       opened = true;
 

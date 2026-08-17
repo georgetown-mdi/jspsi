@@ -205,6 +205,12 @@ condition holds.
 the parked-receive budgets: on this channel the documented "total wait for the
 partner" is two waits, one before the channel exists and one after.
 
+An interrupt (SIGINT or SIGTERM) does not wait any of them out. The run passes
+the transport an abort signal, and the rendezvous fails and tears down the
+broker socket and the peer connection on it, so a party that interrupts while
+waiting for its partner exits at once rather than at the end of the rendezvous
+budget.
+
 Two bounds are memory rather than time, both on inbound signaling: a signaling
 frame is refused above 256 KiB before it is parsed, and at most 128 remote
 candidates are held while this side's description is not yet applied.
