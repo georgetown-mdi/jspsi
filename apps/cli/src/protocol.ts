@@ -1007,10 +1007,8 @@ export async function runProtocol(
         throw new Error("the webrtc rendezvous was not resolved");
       log.info(
         "rendezvousing through the signaling server at",
-        // The authority the socket dials rather than the configured `host` text:
-        // the URL parser IDNA-normalizes a host, so for one carrying uppercase,
-        // an alternative label separator, or a deleted ignorable the two differ,
-        // and only the parsed form names the server actually contacted.
+        // dialedBrokerAuthority (see its doc) is what the socket actually
+        // dials, not the configured `host` text.
         //
         // The broker host is partner-controlled on an endpoint-seeded config, so
         // escape it before it reaches the operator's terminal, as the file-sync

@@ -76,14 +76,24 @@ const FLAGGED = [
   ],
   ["a bare `export *`", 'export * from "werift";'],
   ["a subpath `export *`", 'export * from "werift/nonstandard";'],
+  [
+    "a mixed named re-export (one type, one value specifier)",
+    'export { type A, B } from "werift";',
+  ],
 ];
 
 const EXEMPT = [
   ["a type-only import", 'import type { RTCPeerConnection } from "werift";'],
   [
-    "a type-only named re-export",
+    "a type-only named re-export (whole declaration)",
     'export type { RTCPeerConnection } from "werift";',
   ],
+  [
+    "a type-only named re-export (per-specifier)",
+    'export { type RTCPeerConnection } from "werift";',
+  ],
+  ["a type-only `export *`", 'export type * from "werift";'],
+  ["a type-only `export * as ns`", 'export type * as ns from "werift";'],
   [
     "a deferred dynamic import",
     'export async function load() {\n  const werift = await import("werift");\n  return werift;\n}',

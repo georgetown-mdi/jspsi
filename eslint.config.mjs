@@ -122,8 +122,8 @@ const WERIFT_STATIC_LOAD_MESSAGE =
   'Import or re-export werift lazily (await import("werift")) rather than statically: a static load pulls it in on every CLI invocation, since the bundle\'s external requires all run at startup. `import type` / `export type` are exempt.';
 const weriftStaticLoadBan = [
   'ImportDeclaration[source.value=/^werift(\\/.*)?$/][importKind!="type"]',
-  'ExportNamedDeclaration[source.value=/^werift(\\/.*)?$/][exportKind!="type"]',
-  "ExportAllDeclaration[source.value=/^werift(\\/.*)?$/]",
+  'ExportNamedDeclaration[source.value=/^werift(\\/.*)?$/][exportKind!="type"]:has(ExportSpecifier[exportKind!="type"])',
+  'ExportAllDeclaration[source.value=/^werift(\\/.*)?$/][exportKind!="type"]',
 ].map((selector) => ({ selector, message: WERIFT_STATIC_LOAD_MESSAGE }));
 
 export default tseslint.config(
