@@ -11,12 +11,12 @@ import { applyConnectionOverrides, type ConnectionOverrides } from "./config";
 import { decodeUrlComponent, redactUrlCredentials } from "./util/connectionUrl";
 
 // The connection channels a URL can be turned into here: the file-sync pair.
-// `runProtocol` also runs webrtc, but nothing in this file can produce a webrtc
-// connection an invitation flow could use -- the connection needs a role neither
-// party's URL carries, and an invitation cannot yet carry a webrtc endpoint for
-// the partner to dial (endpointFromConnection is file-sync-only). Narrowing to
-// this keeps a webrtc config from reaching runOnlineBootstrap, where it would
-// otherwise only fail at runtime.
+// `runProtocol` also runs webrtc, but a URL is not where a webrtc connection
+// comes from. It comes from an invitation endpoint (connectionFromEndpoint,
+// which the accept path stamps a role onto) -- and the CLI mints none of its
+// own, since endpointFromConnection is file-sync-only, so the endpoints that
+// exist are the web app's. Narrowing to this keeps a webrtc config from reaching
+// runOnlineBootstrap by the URL route, where it would only fail at runtime.
 export type RunnableConnectionConfig = Extract<
   ConnectionConfig,
   { channel: "sftp" | "filedrop" }
@@ -26,14 +26,15 @@ export type RunnableConnectionConfig = Extract<
  * The refusal a `ws:`/`wss:` URL gets on the invitation and zero-setup paths.
  *
  * The channel runs -- `psilink exchange` dispatches it -- but not from a URL:
- * the connection needs a `role` no URL carries, and the invitation the inviter
- * mints has no webrtc endpoint to hand the acceptor. Naming both is what keeps
- * this from reading as "the CLI cannot do WebRTC", which it can.
+ * the connection needs a `role` no URL carries. It names the two routes that do
+ * produce one, so this does not read as "the CLI cannot do WebRTC", which it
+ * can.
  */
 export const WEBRTC_URL_REFUSED =
   "a ws:// or wss:// URL cannot be used here: the CLI runs a webrtc exchange " +
-  "from a saved connection (`channel: webrtc` in psilink.yaml, run with " +
-  "'psilink exchange'). An invitation cannot yet carry a webrtc endpoint.";
+  "from a saved connection, not from a URL. Accepting a web invitation writes " +
+  "one; otherwise author `channel: webrtc` in psilink.yaml and run " +
+  "'psilink exchange'.";
 
 /**
  * Maps a server URL protocol to a connection channel identifier.
