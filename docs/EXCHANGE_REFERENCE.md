@@ -538,6 +538,8 @@ connection:
 
 Records this party as the inviter or acceptor. This is a peer-addressing concern specific to the WebRTC transport -- which is why it lives on the connection config rather than in the channel-agnostic top-level [`authentication`](#authentication) block -- and is orthogonal to the PSI protocol roles, which are determined by [`linkage_terms.output`](#linkage_termsoutput). For `sftp` and `filedrop` this field is not part of the schema and is silently dropped.
 
+`psilink invite` and `psilink accept` set the field themselves on every WebRTC connection block they write -- `inviter` from the inviting side, `acceptor` from the accepting side -- so the two parties to one exchange hold complementary roles with neither operator authoring it.
+
 The field records the role; the transport does not read it. Both parties' deterministic PeerJS peer IDs are derived from the shared secret and a per-flow `inviter`/`acceptor` label supplied by the rendezvous code, so they reach each other without an out-of-band address exchange whether or not this field is set, and editing it changes no address.
 
 ```yaml

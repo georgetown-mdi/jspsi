@@ -1696,6 +1696,48 @@ test("handler: offline-from-config removes an acceptor-era outbound consent reco
   }
 });
 
+test("handler: an offline invitation's placeholder connection carries no role", async () => {
+  // `role` is a WebRTC-only field: the placeholder block an offline invite writes
+  // is sftp, so the stamp `psilink invite` applies must leave it alone rather
+  // than write a field that channel's schema does not define.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-role-"));
+  const configFile = path.join(dir, "psilink.yaml");
+  const keyFile = path.join(dir, ".psilink.key");
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
+  );
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: [input],
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalledWith(64);
+    // Read the connection block itself: `metadata` carries a `role` of its own
+    // (the column's linkage/payload role), so a whole-file search would confuse
+    // the two.
+    const written = YAML.parse(fs.readFileSync(configFile, "utf8")) as {
+      connection: Record<string, unknown>;
+    };
+    expect(written.connection["channel"]).toBe("sftp");
+    expect(Object.keys(written.connection)).not.toContain("role");
+  } finally {
+    logSpy.mockRestore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("handler: offline infer-from-input writes the disclosed subset into the fresh config", async () => {
   // The fresh-config counterpart: `psilink invite input.csv` infers metadata,
   // mints, and writes a new config via saveConfig; disclosed_payload_columns must
