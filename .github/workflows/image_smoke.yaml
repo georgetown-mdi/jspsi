@@ -211,6 +211,52 @@ jobs:
           fi
           echo "/app: no path owned by that account or by a group it carries, and none other-writable"
 
+      # The step above skips symlinks for the reason given there; this pass
+      # closes the gap that leaves: a symlink under /app whose target
+      # resolves into a tree the runtime account can write (/work, for
+      # instance) is code that account can effectively rewrite without
+      # owning, or being granted write on, anything the walk measures.
+      #
+      # Resolved with `readlink -f`, not `realpath`: on a dangling relative
+      # target, `realpath` can resolve against the process CWD and fabricate
+      # an escape that does not exist. `readlink -f`'s result for that same
+      # case is never trusted on its own -- it is only ever read alongside
+      # the `[ -e ]` guard below. What actually classifies a dangling link
+      # correctly is the step's own construction: it never changes
+      # directory, so every command here runs at the image's WORKDIR, /work,
+      # which is empty in this ephemeral container, so a CWD-relative
+      # resolution of a dangling target has nothing there to resolve to and
+      # fails `[ -e ]`, and the guard buckets it as dangling rather than
+      # reading it as an escape.
+      #
+      # Scoped to the default image, as the two steps above are.
+      - name: Measure the container's symlink containment
+        if: matrix.fips == 'false'
+        run: |
+          set -euo pipefail
+          docker run --rm --user 0 --entrypoint sh ${{ matrix.tag }} -c '
+            set -eu
+            offenders=$(
+              find /app -type l | while IFS= read -r link; do
+                target=$(readlink "$link")
+                if resolved=$(readlink -f "$link" 2>/dev/null) && [ -e "$resolved" ]; then
+                  case "$resolved" in
+                    /app|/app/*) ;;
+                    *) echo "escapes /app: $link -> $target (resolves to $resolved)" ;;
+                  esac
+                else
+                  echo "dangling: $link -> $target"
+                fi
+              done
+            )
+            if [ -n "$offenders" ]; then
+              echo "one or more symlinks under /app do not resolve inside /app:" >&2
+              printf "%s\n" "$offenders" >&2
+              exit 1
+            fi
+            echo "/app: every symlink resolves inside /app, none dangling"
+          '
+
       # Role 1: the headless CLI still runs. `--help` is a read-only invocation
       # that exits 0 (no exchange, no key material, no network).
       - name: Smoke the CLI role
@@ -638,12 +684,19 @@ jobs:
           # to the sentinel and the first run of this step fails that leg and
           # prints the block to paste back, so the surface is enforced from the
           # start rather than left unmeasured until someone writes a list by hand.
+          #
+          # Paste-ready for the fips arm's shape above: the first line is bare,
+          # to type directly after the new arm's own `<name>) `, and the entry
+          # and terminator lines carry the run block's own ten-space indentation
+          # baked in -- column 0 once YAML has stripped it, the indentation that
+          # terminates the heredoc rather than the run block's literal scalar --
+          # so a paste at the arm's nesting needs no manual reindenting.
           if [ "$recorded" = "@unrecorded" ]; then
             echo "the ${{ matrix.variant }} image's setuid/setgid inventory is unrecorded; this run measures it as:" >&2
             {
-              echo "            recorded=\$(cat <<'INVENTORY'"
-              printf '%s\n' "$measured"
-              echo "INVENTORY"
+              echo "recorded=\$(cat <<'INVENTORY'"
+              printf '%s\n' "$measured" | sed 's/^/          /'
+              echo "          INVENTORY"
               echo "            )"
             } >&2
             exit 1
