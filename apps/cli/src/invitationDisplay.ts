@@ -423,10 +423,12 @@ export function logDecisionFacts(
   // What outlives the run, which is why it sits in the decision block rather than
   // among the terms: an acceptor is agreeing to a permanent transcript at the
   // rendezvous location, and the run is over by the time anything else would tell
-  // them. Printed only where the invitation DECLARES retain mode -- an invitation
-  // that declares delete mode, or declares nothing, prints nothing here, since
-  // neither is a cleanup this transport promises (see the shared table's entry).
-  if (summary.declaresRetainedFiles) {
+  // them. Printed wherever the invitation discloses retain mode -- declared, or
+  // entailed by a split-directory endpoint this accept would seed the mode from.
+  // An invitation that declares delete mode, or declares nothing, and names no
+  // such endpoint prints nothing here, since neither absence is a cleanup this
+  // transport promises (see the shared table's entry).
+  if (summary.disclosesRetainedFiles) {
     emit(
       `  ${marked("exchange files", "retainedFiles")}: kept as a permanent ` +
         "transcript, not deleted after the run",

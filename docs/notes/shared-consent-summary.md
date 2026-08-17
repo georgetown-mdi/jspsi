@@ -481,26 +481,41 @@ holds and the note carries the half it does not, which is the shape
 `partnerReceivesResult` already uses for a disclosure that happens and a use that
 is not this tool's to govern.
 
-**The negative is deliberately unstated.** A surface renders the fact only where
-retention is declared. An invitation declaring delete mode, and one declaring
-nothing at all, render alike -- nothing -- and the two are alike for different
-reasons that land in the same place. An absent declaration has made no claim, so
-there is none to relay. A declared delete mode HAS made one, and it is a claim this
-tool cannot stand behind: delete mode deletes as a protocol step, not as a
-guarantee about the directory afterwards, and a run killed outright or one that
-fails after the handshake leaves files behind in either mode. "Your partner deletes
-the files" would be the same error the enforced marker exists to prevent, facing the
-other way -- a reassurance stated as a guarantee no check backs.
+**The negative is deliberately unstated.** A surface renders the fact where
+retention is disclosed and nothing where it is not. An invitation declaring delete
+mode, and one declaring nothing at all, render alike -- nothing -- and the two are
+alike for different reasons that land in the same place. An absent declaration has
+made no claim, so there is none to relay. A declared delete mode HAS made one, and
+it is a claim this tool cannot stand behind: delete mode deletes as a protocol
+step, not as a guarantee about the directory afterwards, and a run killed outright
+or one that fails after the handshake leaves files behind in either mode. "Your
+partner deletes the files" would be the same error the enforced marker exists to
+prevent, facing the other way -- a reassurance stated as a guarantee no check
+backs.
 
-That is why the summary carries `declaresRetainedFiles`, a one-way flag, rather
+That is why the summary carries `disclosesRetainedFiles`, a one-way flag, rather
 than the token's three-valued field. The narrowing happens once, at the summary,
 where the reasoning is recorded; a renderer handed the raw value could reach the
 `false` and word a cleanup promise around it, and no test over one surface would
-notice the other had not. Naming the flag for the declaration rather than for the
-mode is the second half of the same move: `declaresRetainedFiles === false` reads
-as "the invitation declares no retention", which is true of every case it covers,
+notice the other had not. Naming the flag for the disclosure rather than for the
+mode is the second half of the same move: `disclosesRetainedFiles === false` reads
+as "the invitation discloses no retention", which is true of every case it covers,
 where an `inviterRetainsFiles === false` on the display model would read as the
 claim itself.
+
+**The declaration is not the only ground.** The same flag is true where the
+invitation's connection endpoint carries a split inbound/outbound directory pair,
+whose shape the accepting side's own connection is seeded from -- and a split
+directory cannot be configured without retain mode, so that acceptor runs in retain
+mode whether or not the token said so. Deriving the display from the shape as well
+as the declaration is what keeps the two halves of one acceptance from disagreeing:
+the alternative is a party seeded into a permanent transcript by the endpoint it was
+handed while the consent line, reading only the declaration, says nothing. The shape
+test is not restated here -- the summary calls the same predicate the seeding calls
+(`endpointRequiresRetainedFiles`), because a second copy of it is a copy that can
+drift. The copy stays one fixed sentence over both grounds: a split rendezvous runs
+in retain mode on both sides or not at all, so nothing in the sentence turns on
+which ground raised it.
 
 ## Alternatives weighed
 

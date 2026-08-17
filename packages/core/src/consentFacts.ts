@@ -324,22 +324,28 @@ export const CONSENT_FACTS = {
   retainedFiles: {
     basis: "enforced",
     reason:
-      "The inviting party's declaration that its exchange runs in retain mode, " +
-      "and the mode AGREEMENT is the half the run holds: both parties advertise " +
-      "their retain_files setting in the hello and a disagreement aborts both " +
-      "sides before any data moves (BilateralModeMismatchError), so an exchange " +
-      "that runs at all is one both parties ran in the declared mode. What the " +
-      "run does not hold is what becomes of the transcript once it ends -- " +
-      "retain mode deletes nothing, and the rendezvous location is the inviting " +
-      "party's to keep or clear -- so that half is carried by the note rather " +
-      "than by the marker. Nothing applies the declaration: the accepting party " +
-      "still sets its own half, which is what leaves the mismatch to fast-fail " +
-      "(see InvitationToken.inviterRetainsFiles). " +
-      "Stated only where retain mode is declared. Delete mode is not the mirror " +
-      "claim: a run killed outright, or one that fails after the handshake, " +
-      "leaves files behind in either mode, so a stated negative would promise a " +
-      "cleanup the transport does not make -- and an invitation carrying no " +
-      "declaration has made no claim to state at all.",
+      "That the exchange runs in retain mode, and the mode AGREEMENT is the " +
+      "half the run holds: both parties advertise their retain_files setting in " +
+      "the hello and a disagreement aborts both sides before any data moves " +
+      "(BilateralModeMismatchError), so an exchange that runs at all is one both " +
+      "parties ran in the stated mode. What the run does not hold is what " +
+      "becomes of the transcript once it ends -- retain mode deletes nothing, " +
+      "and the rendezvous location is the inviting party's to keep or clear -- " +
+      "so that half is carried by the note rather than by the marker. Nothing " +
+      "applies the inviter's declaration: the accepting party still sets its own " +
+      "half, which is what leaves the mismatch to fast-fail (see " +
+      "InvitationToken.inviterRetainsFiles). " +
+      "Stated on either ground that puts an acceptor's run in retain mode -- the " +
+      "inviter declaring it, or an invitation endpoint whose split-directory " +
+      "shape requires it of the connection the acceptor is seeded with, where a " +
+      "display gated on the declaration alone would say nothing to a party " +
+      "consenting to a permanent transcript. One wording covers both: a split " +
+      "rendezvous cannot be configured without retain mode on either side, so " +
+      "the inviter offering one is running the mode this states. Delete mode is " +
+      "not the mirror claim: a run killed outright, or one that fails after the " +
+      "handshake, leaves files behind in either mode, so a stated negative would " +
+      "promise a cleanup the transport does not make -- and an invitation " +
+      "carrying no declaration has made no claim to state at all.",
     note:
       "Your partner runs this exchange in retain mode, so every file it writes " +
       "stays where the two of you meet instead of being deleted once it has " +

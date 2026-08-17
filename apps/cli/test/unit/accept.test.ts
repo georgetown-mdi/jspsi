@@ -1971,7 +1971,7 @@ test("displayInvitation: a proposed setting the run does not apply is marked, no
   );
 });
 
-test("displayInvitation: the retain line is printed at both decision blocks, and only for a declaration", () => {
+test("displayInvitation: the retain line is printed at both decision blocks, and only where retention is disclosed", () => {
   const log = getLogger("accept-display-retain-test");
   log.setLevel("silent");
   const base = sampleToken(FUTURE());
@@ -2004,6 +2004,42 @@ test("displayInvitation: the retain line is printed at both decision blocks, and
     expect(rendered).not.toContain("exchange files");
     expect(rendered).not.toContain(CONSENT_FACTS.retainedFiles.note);
   }
+});
+
+test("displayInvitation: a split-directory endpoint states the retention with no declaration", () => {
+  // The seeded sub-case: this accept builds its connection from the endpoint and
+  // is put in retain mode by its shape (a split pair cannot be configured
+  // without it), so a prompt gated on the declaration alone would take consent to
+  // a permanent transcript in silence. Both the seeding and this line read
+  // core's endpointRequiresRetainedFiles, so the endpoint that seeds the mode is
+  // the endpoint that states it.
+  const log = getLogger("accept-display-retain-endpoint-test");
+  log.setLevel("silent");
+  const split: ConnectionEndpoint = {
+    channel: "filedrop",
+    inboundPath: "/mnt/share/in",
+    outboundPath: "/mnt/share/out",
+  };
+  const rendered = renderDisplayInvitation(log, sampleToken(FUTURE(), split));
+  expect(rendered).toContain(
+    "  exchange files (enforced): kept as a permanent transcript, not deleted " +
+      "after the run",
+  );
+  expect(rendered).toContain(`    ${CONSENT_FACTS.retainedFiles.note}`);
+
+  // And the shape test does not widen to "carries an endpoint": a single shared
+  // directory seeds no options, and its acceptor sets its own mode, so an
+  // invitation naming one and declaring nothing states nothing here.
+  const shared: ConnectionEndpoint = {
+    channel: "filedrop",
+    path: "/mnt/share",
+  };
+  const sharedRendered = renderDisplayInvitation(
+    log,
+    sampleToken(FUTURE(), shared),
+  );
+  expect(sharedRendered).not.toContain("exchange files");
+  expect(sharedRendered).not.toContain(CONSENT_FACTS.retainedFiles.note);
 });
 
 test("displayInvitation: every classified fact is marked, and carries core's caveat verbatim", () => {

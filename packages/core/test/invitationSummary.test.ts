@@ -4,6 +4,8 @@ import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms.js";
 import { summarizeInvitation } from "../src/invitationSummary.js";
 import { disclosedColumnNames, inferMetadata } from "../src/config/metadata.js";
 
+import type { ConnectionEndpoint } from "../src/config/invitation.js";
+
 // A linkable column set (ssn + names + dob give satisfiable keys) that ALSO
 // carries columns the inferred metadata discloses: `notes` infers as an `other`
 // column (role payload) and `member_id` as a single row-identifier left
@@ -134,17 +136,53 @@ describe("the consent summary's payload block", () => {
   });
 });
 
-describe("the consent summary's retain declaration", () => {
+describe("the consent summary's retain disclosure", () => {
   const terms = getDefaultLinkageTerms(
     "Inviter",
     inferMetadata(LINKAGE_ONLY_COLUMNS),
   );
+  const SPLIT_ENDPOINT: ConnectionEndpoint = {
+    channel: "filedrop",
+    inboundPath: "/mnt/share/in",
+    outboundPath: "/mnt/share/out",
+  };
+  const SHARED_ENDPOINT: ConnectionEndpoint = {
+    channel: "filedrop",
+    path: "/mnt/share",
+  };
 
-  test("states retention only where the token declares it", () => {
+  test("states retention where the token declares it", () => {
     expect(
       summarizeInvitation({ linkageTerms: terms, inviterRetainsFiles: true })
-        .declaresRetainedFiles,
+        .disclosesRetainedFiles,
     ).toBe(true);
+  });
+
+  // The second ground, and the gap it closes: a split-directory endpoint seeds
+  // the accepting side into retain mode whatever the token declares (a split
+  // connection cannot be configured without it), so a display reading only the
+  // declaration would leave that party consenting to a permanent transcript with
+  // nothing said. psilink's own mints do not produce this pair, but a foreign or
+  // older token can, and the shape is decidable right here at display time.
+  test("states retention for a split-directory endpoint that declares nothing", () => {
+    expect(
+      summarizeInvitation({
+        linkageTerms: terms,
+        connectionEndpoint: SPLIT_ENDPOINT,
+      }).disclosesRetainedFiles,
+    ).toBe(true);
+  });
+
+  // The shape test is the seeding's own predicate, so it must not widen to "has
+  // an endpoint": a single shared directory seeds no options at all, and its
+  // acceptor sets its own mode.
+  test("states nothing for a shared-directory endpoint that declares nothing", () => {
+    expect(
+      summarizeInvitation({
+        linkageTerms: terms,
+        connectionEndpoint: SHARED_ENDPOINT,
+      }).disclosesRetainedFiles,
+    ).toBe(false);
   });
 
   // The narrowing that keeps a renderer off the claim no surface may make. The
@@ -156,10 +194,32 @@ describe("the consent summary's retain declaration", () => {
   test.each([
     { case: "an explicit false", source: { inviterRetainsFiles: false } },
     { case: "an absent declaration", source: {} },
-  ])("declares no retention for $case", ({ source }) => {
+    {
+      case: "a webrtc endpoint, which has no retain mode",
+      source: {
+        connectionEndpoint: {
+          channel: "webrtc",
+          host: "peer.example",
+        } as ConnectionEndpoint,
+      },
+    },
+  ])("discloses no retention for $case", ({ source }) => {
     expect(
       summarizeInvitation({ linkageTerms: terms, ...source })
-        .declaresRetainedFiles,
+        .disclosesRetainedFiles,
     ).toBe(false);
+  });
+
+  // A declared delete mode does not cancel the shape: the acceptor is still
+  // seeded into retain mode by the split pair, so the line it is shown states
+  // the mode its own run would be in.
+  test("a split endpoint states retention even against a declared false", () => {
+    expect(
+      summarizeInvitation({
+        linkageTerms: terms,
+        connectionEndpoint: SPLIT_ENDPOINT,
+        inviterRetainsFiles: false,
+      }).disclosesRetainedFiles,
+    ).toBe(true);
   });
 });

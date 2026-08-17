@@ -261,6 +261,32 @@ function endpointDirMode(
   return undefined;
 }
 
+/**
+ * Whether an endpoint's SHAPE puts every connection built from it in retain mode:
+ * true for a file-sync endpoint carrying the split inbound/outbound directory
+ * pair, false for a single shared directory, a webrtc endpoint, or no endpoint
+ * at all.
+ *
+ * A split directory cannot be configured without retain mode --
+ * `ConnectionConfigSchema` (connection.ts) refuses the pair unless `retain_files`
+ * is true, so the acceptor's own accept path seeds the retain trio onto the
+ * connection it builds from such an endpoint. The derivation is from the shape,
+ * not from {@link InvitationToken.inviterRetainsFiles}: an acceptor reaching a
+ * split rendezvous runs in retain mode whether or not the token declared it,
+ * which is why the consent summary states the retention on this predicate as well
+ * as on the declaration. Both the seeding and the display read this one function,
+ * so what an acceptor is put into and what it is shown cannot drift apart.
+ */
+export function endpointRequiresRetainedFiles(
+  endpoint: ConnectionEndpoint | undefined,
+): boolean {
+  if (endpoint === undefined) return false;
+  // The pair is given whole or not at all (the refine below), so the inbound half
+  // decides for a decoded endpoint; endpointDirMode returns undefined for webrtc,
+  // which has no directory to split.
+  return endpointDirMode(endpoint)?.inboundPath !== undefined;
+}
+
 const ConnectionEndpointSchema: z.ZodType<ConnectionEndpoint> = z
   .discriminatedUnion("channel", [
     WebRTCEndpointSchema,
