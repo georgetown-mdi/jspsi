@@ -592,14 +592,15 @@ describe("boundedReassembly on the shapes the wire size understates", () => {
 
   test("fails closed on a non-string-key map a string-keyed one of the same width passes", async () => {
     // Two maps of the same pair count and near-identical wire size: one keyed by
-    // real-packed strings, one by real-packed doubles, whose coerced property names
-    // the string keys' own weight has no counterpart for. At the budget the
-    // string-keyed frame costs, the numeric-keyed frame must not get through.
+    // real-packed strings, one by real-packed doubles. The string-keyed frame is
+    // costed and passes at its own budget; the numeric-keyed one is refused for its
+    // keys, so it does not get through at that budget or at any other.
     const pairs = 100;
     const stringKeys = await keyedMapFrame(pairs, (i) => `k${i.toString()}`);
     const numericKeys = await keyedMapFrame(pairs, (i) => (i + 1) * Math.PI);
     const budget = referenceWalk(stringKeys).cost;
-    expect(referenceWalk(numericKeys).cost).toBeGreaterThan(budget);
+    expect(referenceWalk(stringKeys).nonStringKey).toBe(false);
+    expect(referenceWalk(numericKeys).nonStringKey).toBe(true);
 
     const accepting = new FakeChunkedConnection();
     const acceptFail = installAtBudget(accepting, budget);
@@ -608,12 +609,58 @@ describe("boundedReassembly on the shapes the wire size understates", () => {
     expect(acceptFail).not.toHaveBeenCalled();
     expect(accepting.delivered).toHaveLength(1);
 
-    const refusing = new FakeChunkedConnection();
-    const refuseFail = installAtBudget(refusing, budget);
-    for (const chunk of chunkAtMtu(numericKeys, 1))
-      refusing._handleChunk(chunk);
-    expect(refuseFail).toHaveBeenCalledTimes(1);
-    expect(refusing.delivered).toHaveLength(0);
+    for (const wideBudget of [budget, MAX_WEBRTC_FRAME_STRUCTURE_BYTES]) {
+      const refusing = new FakeChunkedConnection();
+      const refuseFail = installAtBudget(refusing, wideBudget);
+      for (const chunk of chunkAtMtu(numericKeys, 1))
+        refusing._handleChunk(chunk);
+      expect(refuseFail).toHaveBeenCalledTimes(1);
+      expect(refusing.delivered).toHaveLength(0);
+    }
+  });
+
+  test("fails closed on a non-string key whose subtree underruns the frame", () => {
+    // A non-string map key combined with a cursor underrun, driven through the web
+    // wrap: a map key declaring 8 levels of 20,000 children with only the innermost
+    // level on the wire, so the scan's cursor underruns inside the key subtree. The
+    // real unpacker zero-fills every declared descendant and joins the lot into one
+    // coerced property name; the wrap must refuse the frame before it unpacks.
+    const levels = 8;
+    const width = 20_000;
+    const parts: Array<Uint8Array> = [new Uint8Array([0x81])]; // fixmap(1)
+    for (let i = 0; i < levels; i++) {
+      parts.push(
+        new Uint8Array([
+          0xdd,
+          (width >>> 24) & 0xff,
+          (width >>> 16) & 0xff,
+          (width >>> 8) & 0xff,
+          width & 0xff,
+        ]),
+      );
+    }
+    parts.push(new Uint8Array(width).fill(0x01));
+    let length = 0;
+    for (const part of parts) length += part.length;
+    const frame = new Uint8Array(length);
+    let offset = 0;
+    for (const part of parts) {
+      frame.set(part, offset);
+      offset += part.length;
+    }
+
+    // Far below the wire-byte cap, and its declared descendants far outrun it, so
+    // nothing but the structural pre-scan can be what refuses it.
+    expect(frame.byteLength).toBeLessThan(1024 * 1024);
+    expect(frame.byteLength).toBeLessThan(levels * width);
+    expect(referenceWalk(frame).nonStringKey).toBe(true);
+
+    const conn = new FakeChunkedConnection();
+    const fail = installProduction(conn);
+    for (const chunk of chunkAtMtu(frame, 1)) conn._handleChunk(chunk);
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect(conn.delivered).toHaveLength(0);
   });
 });
 
@@ -631,48 +678,50 @@ function stringWeightOf(declaredBytes: number): number {
  * independent mirror of `Unpacker.unpack`'s dispatch, the ground truth) and sums
  * the retained cost the structure implies under the published `WEBRTC_VALUE_WEIGHTS`
  * -- each container its own weight plus a backing slot per declared child, each
- * string its header-plus-per-byte weight, and each non-string map key the coerced
- * property name `map[key] = value` retains. A value that allocates nothing beyond
- * its container's slot adds nothing. `cost` is the exact budget the production scan
+ * string its header-plus-per-byte weight. A value that allocates nothing beyond its
+ * container's slot adds nothing. `cost` is the exact budget the production scan
  * should charge; `endOffset` is the byte offset the real unpacker finishes at.
  * Deliberately not derived from `structureOverBudget`, so a source marker-dispatch
  * bug shows up as a boundary mismatch against this reference rather than being
  * masked by a shared walk.
  *
- * `withinKeyName` is threaded down each map's key children (and everything below
- * them), since a container key coerces to the joined forms of the values beneath it.
+ * `nonStringKey` reports the frame's map keys: the production scan refuses a frame
+ * carrying a key that is not a string on the wire, at any budget, so a frame this
+ * flags is one no `cost` comparison applies to.
  */
 function referenceWalk(bytes: Uint8Array): {
   cost: number;
   endOffset: number;
+  nonStringKey: boolean;
 } {
   let i = 0;
   let cost = 0;
+  let nonStringKey = false;
   const u8 = (): number => bytes[i++];
   const u16 = (): number => u8() * 0x100 + u8();
   const u32 = (): number =>
     u8() * 0x1000000 + u8() * 0x10000 + u8() * 0x100 + u8();
 
   /** A value that allocates nothing of its own: its cost is the slot its container
-   * already charged, plus a coerced property name if it sits under a map key. */
-  const slotOnly = (withinKeyName: boolean): void => {
-    if (withinKeyName) cost += WEBRTC_VALUE_WEIGHTS.coercedKeyName;
+   * already charged. At a key position it is a key the scan refuses. */
+  const slotOnly = (atKeyPosition: boolean): void => {
+    if (atKeyPosition) nonStringKey = true;
   };
 
-  function one(withinKeyName: boolean): void {
+  function one(atKeyPosition: boolean): void {
     const type = u8();
     if (type < 0x80) {
-      slotOnly(withinKeyName); // positive fixint
+      slotOnly(atKeyPosition); // positive fixint
       return;
     }
     if ((type ^ 0xe0) < 0x20) {
-      slotOnly(withinKeyName); // negative fixint
+      slotOnly(atKeyPosition); // negative fixint
       return;
     }
     let size: number;
     if ((size = type ^ 0xa0) <= 0x0f) {
       i += size; // fixraw
-      slotOnly(withinKeyName);
+      slotOnly(atKeyPosition);
       return;
     }
     if ((size = type ^ 0xb0) <= 0x0f) {
@@ -681,11 +730,11 @@ function referenceWalk(bytes: Uint8Array): {
       return;
     }
     if ((size = type ^ 0x90) <= 0x0f) {
-      container(size, WEBRTC_VALUE_WEIGHTS.array, false, withinKeyName); // fixarray
+      container(size, WEBRTC_VALUE_WEIGHTS.array, false, atKeyPosition); // fixarray
       return;
     }
     if ((size = type ^ 0x80) <= 0x0f) {
-      container(size * 2, WEBRTC_VALUE_WEIGHTS.object, true, withinKeyName); // fixmap
+      container(size * 2, WEBRTC_VALUE_WEIGHTS.object, true, atKeyPosition); // fixmap
       return;
     }
     switch (type) {
@@ -697,29 +746,29 @@ function referenceWalk(bytes: Uint8Array): {
       case 0xd5:
       case 0xd6:
       case 0xd7:
-        slotOnly(withinKeyName);
+        slotOnly(atKeyPosition);
         return;
       case 0xcc: // uint8
       case 0xd0: // int8
         i += 1;
-        slotOnly(withinKeyName);
+        slotOnly(atKeyPosition);
         return;
       case 0xcd: // uint16
       case 0xd1: // int16
         i += 2;
-        slotOnly(withinKeyName);
+        slotOnly(atKeyPosition);
         return;
       case 0xca: // float
       case 0xce: // uint32
       case 0xd2: // int32
         i += 4;
-        slotOnly(withinKeyName);
+        slotOnly(atKeyPosition);
         return;
       case 0xcb: // double
       case 0xcf: // uint64
       case 0xd3: // int64
         i += 8;
-        slotOnly(withinKeyName);
+        slotOnly(atKeyPosition);
         return;
       case 0xd8: {
         // str16
@@ -739,50 +788,50 @@ function referenceWalk(bytes: Uint8Array): {
         // raw16
         const size16 = u16();
         i += size16;
-        slotOnly(withinKeyName);
+        slotOnly(atKeyPosition);
         return;
       }
       case 0xdb: {
         // raw32
         const size32 = u32();
         i += size32;
-        slotOnly(withinKeyName);
+        slotOnly(atKeyPosition);
         return;
       }
       case 0xdc: // array16
-        container(u16(), WEBRTC_VALUE_WEIGHTS.array, false, withinKeyName);
+        container(u16(), WEBRTC_VALUE_WEIGHTS.array, false, atKeyPosition);
         return;
       case 0xdd: // array32
-        container(u32(), WEBRTC_VALUE_WEIGHTS.array, false, withinKeyName);
+        container(u32(), WEBRTC_VALUE_WEIGHTS.array, false, atKeyPosition);
         return;
       case 0xde: // map16
-        container(u16() * 2, WEBRTC_VALUE_WEIGHTS.object, true, withinKeyName);
+        container(u16() * 2, WEBRTC_VALUE_WEIGHTS.object, true, atKeyPosition);
         return;
       case 0xdf: // map32
-        container(u32() * 2, WEBRTC_VALUE_WEIGHTS.object, true, withinKeyName);
+        container(u32() * 2, WEBRTC_VALUE_WEIGHTS.object, true, atKeyPosition);
         return;
       default:
-        slotOnly(withinKeyName);
+        slotOnly(atKeyPosition);
         return;
     }
   }
 
   /** A container of `children` declared child values: its base weight, a backing
    * slot per declared child, then the children themselves. A map's children
-   * alternate key, value, and a key subtree carries the coerced-name charge down. */
+   * alternate key, value, so its even-indexed children are the key positions. */
   function container(
     children: number,
     base: number,
     isMap: boolean,
-    withinKeyName: boolean,
+    atKeyPosition: boolean,
   ): void {
     cost += base + children * WEBRTC_VALUE_WEIGHTS.scalar;
-    if (withinKeyName) cost += WEBRTC_VALUE_WEIGHTS.coercedKeyName;
+    if (atKeyPosition) nonStringKey = true;
     for (let k = 0; k < children; k++) {
-      one(withinKeyName || (isMap && k % 2 === 0));
+      one(isMap && k % 2 === 0);
     }
   }
 
   one(false);
-  return { cost, endOffset: i };
+  return { cost, endOffset: i, nonStringKey };
 }

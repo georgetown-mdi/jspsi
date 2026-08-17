@@ -116,7 +116,6 @@ describe("the WebRTC inbound bound constants", () => {
       scalar: 8,
       stringBase: 16,
       stringPerByte: 2,
-      coercedKeyName: 64,
     });
   });
 });
@@ -237,20 +236,9 @@ describe("structureOverBudget: the per-value cost model", () => {
     );
   });
 
-  test("charges a non-string map key the coerced property-name weight", () => {
-    // fixmap(1) keyed by a fixint: `map[key] = value` retains the key's coerced
-    // string form as the property name, which the key's own slot does not cover.
-    atBoundary(
-      new Uint8Array([0x81, 0x07, 0x08]),
-      WEBRTC_VALUE_WEIGHTS.object +
-        2 * WEBRTC_VALUE_WEIGHTS.scalar +
-        WEBRTC_VALUE_WEIGHTS.coercedKeyName,
-    );
-  });
-
   test("charges a string map key nothing beyond the string itself", () => {
-    // fixmap(1) keyed by "abc": the property name IS that string, already charged
-    // in full, so no coerced-name weight is added on top of it.
+    // fixmap(1) keyed by "abc": the property name IS that string, charged in full
+    // by the string weight and by nothing else.
     atBoundary(
       new Uint8Array([0x81, ...fixstr("abc"), 0x08]),
       WEBRTC_VALUE_WEIGHTS.object +
@@ -259,23 +247,9 @@ describe("structureOverBudget: the per-value cost model", () => {
     );
   });
 
-  test("charges every non-string value beneath a container key", () => {
-    // fixmap(1) whose key is a fixarray(2) of fixints: the key coerces to the
-    // joined string forms of the values below it, so each of them is charged a
-    // coerced-name weight as well as its slot.
-    atBoundary(
-      new Uint8Array([0x81, 0x92, 0x01, 0x02, 0x08]),
-      WEBRTC_VALUE_WEIGHTS.object +
-        2 * WEBRTC_VALUE_WEIGHTS.scalar +
-        WEBRTC_VALUE_WEIGHTS.array +
-        2 * WEBRTC_VALUE_WEIGHTS.scalar +
-        3 * WEBRTC_VALUE_WEIGHTS.coercedKeyName,
-    );
-  });
-
-  test("leaves a map's values uncharged by the coerced-name weight", () => {
-    // fixmap(1) keyed by "a" with a fixarray(2) VALUE: nothing on the value side
-    // becomes a property name, so the coerced-name weight is charged nowhere here.
+  test("charges a non-string value at a map's VALUE position nothing extra", () => {
+    // fixmap(1) keyed by "a" with a fixarray(2) VALUE: only keys are refused, so a
+    // container on the value side is charged exactly what it would cost anywhere.
     atBoundary(
       new Uint8Array([0x81, ...fixstr("a"), 0x92, 0x01, 0x02]),
       WEBRTC_VALUE_WEIGHTS.object +
@@ -314,5 +288,68 @@ describe("structureOverBudget: the per-value cost model", () => {
     expect(expectedMappedCost(4_194_304)).toBeLessThan(
       MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
     );
+  });
+});
+
+describe("structureOverBudget: the map-key rule", () => {
+  // A map key that is not a string on the wire is refused rather than costed: the
+  // property name `map[key] = value` coerces it to grows with the descendants
+  // `unpack` zero-fills past the end of the buffer, not with the bytes the frame
+  // spends declaring them, so no charge taken during the walk can bound it. The
+  // real packer emits a map only for a plain JS object, whose keys are strings, so
+  // no legitimate frame is refused here -- the differential suite holds that
+  // premise to the real packer.
+  const refuses = (frame: Uint8Array): boolean =>
+    structureOverBudget(frame, Number.MAX_SAFE_INTEGER, 256, 1 << 20);
+
+  test("refuses a map keyed by an integer, at any budget", () => {
+    expect(refuses(new Uint8Array([0x81, 0x07, 0x08]))).toBe(true); // fixmap(1), fixint key
+  });
+
+  test("refuses a map keyed by a container", () => {
+    // fixmap(1) whose key is a fixarray(2): the coerced name is the joined form of
+    // everything below it, so the whole subtree is refused at the key's marker.
+    expect(refuses(new Uint8Array([0x81, 0x92, 0x01, 0x02, 0x08]))).toBe(true);
+  });
+
+  test("refuses a map keyed by a nested map", () => {
+    expect(
+      refuses(new Uint8Array([0x81, 0x81, ...fixstr("a"), 0x01, 0x08])),
+    ).toBe(true);
+  });
+
+  test("refuses a map keyed by bin/raw, null, and a boolean alike", () => {
+    expect(refuses(new Uint8Array([0x81, 0xa1, 0x41, 0x08]))).toBe(true); // fixraw(1)
+    expect(refuses(new Uint8Array([0x81, 0xc0, 0x08]))).toBe(true); // null
+    expect(refuses(new Uint8Array([0x81, 0xc3, 0x08]))).toBe(true); // true
+    expect(
+      refuses(new Uint8Array([0x81, 0xcb, 0, 0, 0, 0, 0, 0, 0, 0, 0x08])),
+    ).toBe(true); // double
+  });
+
+  test("accepts every string marker at a key position", () => {
+    // fixstr and str16 both name a property directly; neither is refused.
+    expect(refuses(new Uint8Array([0x81, ...fixstr("abc"), 0x08]))).toBe(false);
+    expect(
+      refuses(new Uint8Array([0x81, 0xd8, 0x00, 0x03, 0x61, 0x62, 0x63, 0x08])),
+    ).toBe(false);
+  });
+
+  test("refuses a key nested in a map that is itself a map's value", () => {
+    // The rule follows the key positions of every map, not only the root's: an
+    // integer-keyed map buried on a value side is refused just the same.
+    expect(
+      refuses(new Uint8Array([0x81, ...fixstr("a"), 0x81, 0x07, 0x08])),
+    ).toBe(true);
+  });
+
+  test("leaves a map's values free to be any kind", () => {
+    // Every non-string kind that is refused at a key position passes at a value
+    // position, so the rule is scoped to keys rather than to kinds.
+    expect(refuses(new Uint8Array([0x81, ...fixstr("a"), 0x07]))).toBe(false);
+    expect(refuses(new Uint8Array([0x81, ...fixstr("a"), 0xc0]))).toBe(false);
+    expect(
+      refuses(new Uint8Array([0x81, ...fixstr("a"), 0x92, 0x01, 0x02])),
+    ).toBe(false);
   });
 });

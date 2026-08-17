@@ -484,10 +484,10 @@ function trueUnpackCost(value: unknown): number {
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value);
     // Two slots per pair, and each property name charged as the string it is. A
-    // decoded name is the key's COERCED form, so this reads the retained name for
-    // a non-string key too, which the scan bounds by its fixed coerced-name weight
-    // instead -- above this for every key BinaryPack can carry, so the two agree
-    // exactly only on the string keys a real encoder produces.
+    // decoded name is the key's COERCED form, which matters only for a key that
+    // was not a string on the wire -- and the scan refuses those outright, so on
+    // every frame this cost is compared against the decoded name IS the wire
+    // string.
     let cost =
       WEBRTC_VALUE_WEIGHTS.object +
       entries.length * 2 * WEBRTC_VALUE_WEIGHTS.scalar;
@@ -776,14 +776,13 @@ describe("structureOverBudget on the shapes the wire size understates", () => {
     ).toBe(true);
   });
 
-  test("charges a non-string map key the property name the real unpacker retains", async () => {
+  test("refuses a map whose keys the real unpacker coerces from packed doubles", async () => {
     const pairs = 500;
     const frame = await numericKeyMapFrame(pairs);
     const decoded = unpackFrame(frame) as Record<string, unknown>;
 
-    // The keys the real unpacker produced: one distinct coerced property name per
-    // packed double, so the cost below is the retained inventory and not a decode
-    // that collapsed the map.
+    // The real unpacker does retain one coerced property name per pair, so the
+    // refusal below is answering a cost this frame really would impose.
     const names = Object.keys(decoded);
     expect(
       names,
@@ -791,20 +790,13 @@ describe("structureOverBudget on the shapes the wire size understates", () => {
     ).toHaveLength(pairs);
     expect(names[0]).toBe(String(Math.PI));
 
-    const retained = trueUnpackCost(decoded);
-    expect(chargedCost(frame)).toBeGreaterThanOrEqual(retained);
     expect(
-      structureOverBudget(
-        frame,
-        retained - 1,
-        MAX_WEBRTC_REASSEMBLY_DEPTH,
-        MAX_WEBRTC_STRING_BYTES,
-      ),
-      "the scan accepted a frame at a budget its own decode exceeds",
-    ).toBe(true);
+      scanAccepts(frame, Number.MAX_SAFE_INTEGER),
+      "a non-string map key was accepted at an unbounded budget",
+    ).toBe(false);
   });
 
-  test("charges the joined property name a container key becomes", () => {
+  test("refuses a map keyed by a container, whatever the unpacker would join it into", () => {
     const elements = 50;
     const frame = concatBytes([
       new Uint8Array([0x81, 0xdc, 0x00, elements]), // fixmap(1), array16(50) key
@@ -820,16 +812,225 @@ describe("structureOverBudget on the shapes the wire size understates", () => {
       "the array key did not coerce to its joined element forms",
     ).toBe(new Array<number>(elements).fill(1).join(","));
 
-    const retained = trueUnpackCost(decoded);
-    expect(chargedCost(frame)).toBeGreaterThanOrEqual(retained);
     expect(
-      structureOverBudget(
-        frame,
-        retained - 1,
-        MAX_WEBRTC_REASSEMBLY_DEPTH,
-        MAX_WEBRTC_STRING_BYTES,
-      ),
-      "the scan accepted a frame at a budget its own decode exceeds",
-    ).toBe(true);
+      scanAccepts(frame, Number.MAX_SAFE_INTEGER),
+      "a container map key was accepted at an unbounded budget",
+    ).toBe(false);
+  });
+});
+
+/** Every top-level value psilink hands a PeerJS data connection's `send()`, which is
+ * what `pack` puts on the WebRTC wire: the kex handshake frames, the protocol-setup
+ * exchange, the PSI engine's binary frames, the association/iteration tables, the
+ * payload and receipt messages, and the CLI leg's AEAD envelope. Shapes taken from
+ * the send sites in kex.ts, protocolSetup.ts, participant.ts, link.ts,
+ * payloadExchange.ts, signedReceipt.ts, and connection/encryptedMessageConnection.ts.
+ * Field values are representative rather than real; only the SHAPES bind the key
+ * rule, since a JS object's own keys are strings whatever they hold. */
+function webrtcSendSiteValues(): Array<{ label: string; value: Packable }> {
+  const bin = (n: number): ArrayBuffer => new Uint8Array(n).fill(7).buffer;
+  return [
+    { label: "kex abort", value: { kexMsg: "abort" } },
+    { label: "kex msg1", value: { kexMsg: "1", e: "BASE64", reqEnc: false } },
+    {
+      label: "kex msg2",
+      value: { kexMsg: "2", e: "BASE64", confirm: "MAC", reqEnc: false },
+    },
+    { label: "kex msg3", value: { kexMsg: "3", confirm: "MAC" } },
+    {
+      label: "setup abort",
+      value: { decision: "abort", abortReasons: ["count mismatch"] },
+    },
+    {
+      label: "setup terms",
+      value: {
+        linkageTerms: {
+          version: 1,
+          keyColumns: [
+            {
+              name: "first_name",
+              transforms: [
+                { function: "lowercase" },
+                { function: "split_on", params: { delimiter: " " } },
+              ],
+            },
+          ],
+          payloadColumns: ["zip"],
+        },
+        recordCount: 12345,
+        protocolVersion: 1,
+        save: true,
+        disclosesPayload: false,
+        hostKey: { fingerprint: "SHA256:abcd", keyType: "ssh-ed25519" },
+        decision: "proceed",
+      },
+    },
+    { label: "setup proceed", value: { decision: "proceed" } },
+    { label: "setup shared secret", value: { sharedSecret: "BASE64" } },
+    { label: "psi engine bytes", value: bin(4096) },
+    { label: "local indices", value: [0, 3, 7, 11] },
+    {
+      label: "association table",
+      value: [
+        [0, 4, 9],
+        [1, 2, 3],
+      ],
+    },
+    { label: "iteration map", value: mappedElementFrame(64) },
+    { label: "status completed", value: { status: "completed" } },
+    { label: "payload absent", value: { hasData: false } },
+    {
+      label: "payload present",
+      value: {
+        hasData: true,
+        columns: ["zip", "sex"],
+        rowIndices: [0, 1],
+        rows: [
+          ["20001", "M"],
+          ["20002", null],
+        ],
+      },
+    },
+    {
+      label: "signed receipt",
+      value: {
+        certificate: {
+          version: 1,
+          algorithm: "ES256",
+          identity: "partner@example.org",
+          publicKey: { kty: "EC", crv: "P-256", x: "BASE64X", y: "BASE64Y" },
+          signature: "BASE64SIG",
+        },
+        signature: "BASE64SIG",
+      },
+    },
+    { label: "aead envelope", value: bin(1 + 12 + 4096 + 16) },
+  ];
+}
+
+describe("the map-key rule against the real packer", () => {
+  // The rule refuses any frame whose map key is not a string on the wire, which is
+  // safe only because no legitimate frame carries one. That is a claim about the
+  // real packer's behavior on the real send-site shapes, so it is driven here rather
+  // than asserted in prose: the scan itself is the detector, since a non-string key
+  // anywhere in a frame is the one thing that makes it refuse at every budget.
+
+  test("accepts every value psilink sends on the WebRTC data channel", async () => {
+    for (const { label, value } of webrtcSendSiteValues()) {
+      const frame = await packBytes(value);
+      expect(
+        scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES),
+        `the scan refused a real-packed ${label} frame`,
+      ).toBe(true);
+    }
+  });
+
+  test("accepts every real-packed frame in the differential corpus", async () => {
+    // The seeded nested structures and per-marker probes reach far more object
+    // shapes than the send sites do, at depth; none may trip the key rule either.
+    for (const { label, frame } of await shapeCorpus()) {
+      expect(
+        scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES),
+        `the scan refused a real-packed ${label} frame`,
+      ).toBe(true);
+    }
+  });
+
+  test("refuses to pack the JS values that would carry a non-string key", () => {
+    // A map on the wire comes only from a plain JS object, whose own keys are
+    // strings. The structures that could key one otherwise are rejected by the
+    // packer itself -- synchronously, before any wire bytes exist -- so a send
+    // site that reached for one fails at the sender rather than emitting a frame
+    // every receiver refuses.
+    for (const value of [
+      new Map([["a", 1]]),
+      new Map([[1, "one"]]),
+      new Set([1, 2, 3]),
+    ]) {
+      expect(() => pack(value as unknown as Packable)).toThrow(
+        /not yet supported/,
+      );
+    }
+  });
+});
+
+describe("a non-string map key over a cursor underrun", () => {
+  // The two properties that are dangerous together: a map key whose subtree
+  // DECLARES far more descendants than the wire backs, so the scan's cursor
+  // underruns partway through it. An underrun on its own is safe to accept -- bytes
+  // past the end unpack as zeros into slots already charged -- but under a key the
+  // real unpacker goes on materializing every declared descendant and joins the
+  // whole zero-filled structure into one coerced property name, a cost no charge
+  // taken during the walk covers. The key rule closes the combination by
+  // construction: the decision is taken on the key's own marker byte, before the
+  // scan descends, so no underrun deeper in the frame can reach it.
+
+  const LEVELS = 8;
+  const WIDTH = 20_000;
+
+  /** `levels` nested `array32` headers each declaring `width` children, with only
+   * the innermost level's children on the wire. */
+  function unbackedChain(levels: number, width: number): Uint8Array {
+    const parts: Array<Uint8Array> = [];
+    for (let i = 0; i < levels; i++) {
+      parts.push(new Uint8Array([0xdd, ...u32Bytes(width)]));
+    }
+    parts.push(new Uint8Array(width).fill(0x01));
+    return concatBytes(parts);
+  }
+
+  /** The chain at a map's KEY position, with the map's value off the end. */
+  const atKey = (): Uint8Array =>
+    concatBytes([new Uint8Array([0x81]), unbackedChain(LEVELS, WIDTH)]);
+
+  /** The same chain at a map's VALUE position, behind a real string key. */
+  const atValue = (): Uint8Array =>
+    concatBytes([
+      new Uint8Array([0x81, 0xb1, 0x6b]), // fixmap(1), fixstr "k"
+      unbackedChain(LEVELS, WIDTH),
+    ]);
+
+  test("the fixture really is the accept-on-underrun shape", () => {
+    // The control: the identical chain at a VALUE position is still accepted, and
+    // accepted through the underrun path -- so what the key-position case below
+    // refuses is the key, not some other property of these bytes.
+    const frame = atValue();
+    expect(scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES)).toBe(true);
+
+    // And the accept is sound: the scan charges at least what the real unpacker
+    // allocates for the structure those same bytes produce.
+    const decoded = unpackFrame(frame);
+    expect(chargedCost(frame)).toBeGreaterThanOrEqual(trueUnpackCost(decoded));
+
+    // The declared descendants really do outrun the wire: the innermost level is
+    // the only one the frame's bytes back, so every level above it is zero-filled.
+    const outer = (decoded as Record<string, unknown>)["k"];
+    expect(Array.isArray(outer) && outer.length).toBe(WIDTH);
+    expect(frame.byteLength).toBeLessThan(LEVELS * WIDTH);
+  });
+
+  test("refuses the same chain at a key position, at every budget", () => {
+    const frame = atKey();
+    expect(scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES)).toBe(false);
+    expect(scanAccepts(frame, Number.MAX_SAFE_INTEGER)).toBe(false);
+    expect(() => chargedCost(frame)).toThrow(
+      /rejects this frame at every budget/,
+    );
+  });
+
+  test("the real unpacker amplifies that frame into one oversized property name", () => {
+    // Driving the real unpacker on the refused bytes: they coerce a whole
+    // zero-filled key subtree into a single property name an order of magnitude
+    // larger than the wire that declared it. Measured here so the refusal is
+    // answering a real cost, and so a packer bump that stopped coercing shows up as
+    // a changed figure rather than a silently idle rule.
+    const frame = atKey();
+    const decoded = unpackFrame(frame) as Record<string, unknown>;
+    const names = Object.keys(decoded);
+    expect(names).toHaveLength(1);
+
+    const retainedBytes = names[0].length * WEBRTC_VALUE_WEIGHTS.stringPerByte;
+    expect(names[0].length).toBeGreaterThan(300_000);
+    expect(retainedBytes / frame.byteLength).toBeGreaterThan(30);
   });
 });

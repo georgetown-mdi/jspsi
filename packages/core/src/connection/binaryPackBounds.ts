@@ -13,12 +13,11 @@
 // The scan reads only the BinaryPack wire format -- the marker dispatch in
 // `peerjs-js-binarypack`'s `Unpacker.unpack`: fixint/fixraw/fixstr/fixarray/fixmap
 // and the 0xc0-0xdf markers, with maps declaring two child values per pair -- never
-// the library's API, so it carries a dependency premise on that marker table, and
-// two more on how `unpack` allocates: a container's store sized from its declared
-// count, and a map key retained as the property name `map[key] = value` coerces it
-// to (docs/spec/DEPENDENCY_PINS.md). A misparse cannot silently disable the bound:
-// it either over-charges (rejecting early, fail-closed) or runs the cursor off the
-// end, which is treated as a malformed frame and delegated to the real unpacker.
+// the library's API, so it carries a dependency premise on that marker table and one
+// more on how `unpack` allocates: a container's store sized from its declared count
+// (docs/spec/DEPENDENCY_PINS.md). A misparse cannot silently disable the bound: it
+// either over-charges (rejecting early, fail-closed) or runs the cursor off the end,
+// which is treated as a malformed frame and delegated to the real unpacker.
 //
 // This is the BinaryPack analogue of the raw-protobuf element-count scan in
 // connection/psiElementScan.ts.
@@ -132,17 +131,10 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
  *   units (~2 bytes each), so `stringBase + 2 * declaredWireBytes` upper-bounds its
  *   resident size. (A string's *build* transient -- a per-code-point cons-string
  *   tree -- is bounded separately by {@link MAX_WEBRTC_STRING_BYTES}, not here.)
- * - `coercedKeyName` (64): the property name a map key that is not already a
- *   string becomes. `unpack_map` assigns `map[key] = value`, so the key is coerced
- *   to a property name: a number reaches at most 24 UTF-16 code units
- *   (`-1.7976931348623157e+308`) and every other primitive is shorter, so
- *   `stringBase + stringPerByte * 24` upper-bounds that name. A container key
- *   coerces to the joined string forms of the values below it, each contributing
- *   at most one value's own name plus a separator, so the same weight is charged
- *   for every non-string value inside such a key. A string needs no charge here at
- *   either position: it contributes its own characters, which its `string` weight
- *   already charges in full (and at a key position it IS the property name, which
- *   V8 internalizes).
+ *
+ * A map key needs no weight of its own: the scan refuses any frame whose map key
+ * is not a string on the wire (see {@link structureOverBudget}), and a string key
+ * IS the property name, already charged in full by the `string` weight.
  *
  * The model is deliberately a *conservative* upper bound: e.g. it charges every
  * object key string in full, though V8 internalizes repeated property keys to one
@@ -159,7 +151,6 @@ export const WEBRTC_VALUE_WEIGHTS = {
   scalar: 8,
   stringBase: 16,
   stringPerByte: 2,
-  coercedKeyName: 64,
 } as const;
 
 /**
@@ -293,9 +284,9 @@ class ByteCursor {
 }
 
 /** What the scan needs to know about one BinaryPack value, beyond its cost: a
- * `map` alternates key and value children, so the scan must charge a coerced
- * property name at each key position, and a `string` is the one kind that needs no
- * such charge (see {@link WEBRTC_VALUE_WEIGHTS}). */
+ * `map` alternates key and value children, so the scan must test what kind sits at
+ * each key position, and `string` is the only kind a map key may be (see
+ * {@link structureOverBudget}). */
 type ValueKind = "map" | "string" | "plain";
 
 /** One BinaryPack value's contribution to the structural scan: `children` is the
@@ -367,8 +358,8 @@ const SCALAR: ValueHeader = {
 /** Reads one BinaryPack value's header at the cursor, skipping a scalar's
  * payload, and returns the value's {@link ValueHeader} (its declared child count,
  * its retained-byte weight including a container's declared backing slots, and the
- * kind the coerced-key-name rule dispatches on; `weight = -1` for a string whose
- * declared length exceeds `maxStringBytes`). Mirrors `peerjs-js-binarypack`'s
+ * kind the map-key rule dispatches on; `weight = -1` for a string whose declared
+ * length exceeds `maxStringBytes`). Mirrors `peerjs-js-binarypack`'s
  * `Unpacker.unpack` marker dispatch: a map of K pairs declares 2K children (K keys
  * + K values). A `bin`/`raw` value allocates nothing beyond its parent's slot, its
  * payload being ~1x wire and so bounded by the wire-byte cap. An unknown marker
@@ -461,32 +452,41 @@ function readValueHeader(
 /**
  * Whether the BinaryPack value in `buf` would deserialize to a structure whose
  * approximate retained-byte cost exceeds `maxStructureBytes`, nest deeper than
- * `maxDepth`, contain a string longer than `maxStringBytes`, or declare any
- * container with more elements than the bytes that follow it can encode. Walks the
- * structure reading only container headers and scalar lengths -- never
- * materializing the payload -- and charges each declared value its per-kind weight
+ * `maxDepth`, contain a string longer than `maxStringBytes`, declare any container
+ * with more elements than the bytes that follow it can encode, or key a map with
+ * anything but a string. Walks the structure reading only container headers and
+ * scalar lengths -- never materializing the payload -- and charges each declared
+ * value its per-kind weight
  * (see {@link WEBRTC_VALUE_WEIGHTS}), rejecting as soon as the running cost
  * breaches the budget, a container over-declares, or a string over-declares, so an
  * over-budget frame is caught before `unpack` allocates (the empty-object/array
  * amplification, the `new Array(N)`-from-a-tiny-header case, and the giant-string
  * case where `unpack_string` builds a JS string far larger than its slot).
  *
- * Two charges are made where `unpack` allocates rather than where the wire spends
- * bytes, since the two diverge:
+ * A container's backing slots are charged where `unpack` allocates them rather than
+ * where the wire spends bytes: at the container's own header, from its declared
+ * count, because `unpack_array`/`unpack_map` reserve the whole store up front and
+ * read past the end of the buffer as zero rather than throwing -- so a declared
+ * child that no wire byte backs still costs its slot.
  *
- * - A container's backing slots are charged at its own header, from its declared
- *   count, because `unpack_array`/`unpack_map` reserve the whole store up front and
- *   read past the end of the buffer as zero rather than throwing -- so a declared
- *   child that no wire byte backs still costs its slot.
- * - A map key that is not a string is charged {@link WEBRTC_VALUE_WEIGHTS}'s
- *   `coercedKeyName`, and so is every non-string value beneath such a key, because
- *   `map[key] = value` retains the key's coerced string form as the property name.
+ * A map key that is not a string on the wire is REFUSED rather than costed. The
+ * `pack` side of this dependency emits a map only for a plain JS object, whose own
+ * keys are strings by construction (and refuses a `Map` or `Set` outright), so no
+ * legitimate frame carries one -- a premise the differential suite holds the real
+ * packer to. Refusing is what makes the cost model total: `unpack_map`
+ * assigns `map[key] = value`, retaining the key's *coerced* string form as the
+ * property name, and a container key coerces to the joined forms of everything
+ * beneath it -- a cost that grows with the declared descendants `unpack` zero-fills
+ * past the end of the buffer, not with the bytes the wire actually spends, so no
+ * charge taken as the scan walks can bound it.
  *
  * A read past the end (a malformed/truncated frame) returns `false`: every value it
  * passed was within the byte budget, the bytes past the end unpack as zero-valued
  * integers into slots this scan has already charged, so the structure it commits
  * `unpack` to is already bounded, and PeerJS's own unpack handles the malformation
- * downstream.
+ * downstream. The key rule is decided on the key's own marker byte, before the scan
+ * descends into it, so an underrun deeper in the frame cannot carry a non-string key
+ * past this point.
  */
 export function structureOverBudget(
   buf: Uint8Array,
@@ -500,12 +500,9 @@ export function structureOverBudget(
   // mapLevel[d] = whether level d is a map's children, which alternate key, value,
   // key, ... so an even count still to read is a key position.
   const mapLevel: Array<boolean> = [false];
-  // The level a coerced property name's subtree begins at, or -1 outside one:
-  // `unpack_map` joins every value at or below a non-string key into that name.
-  let keyNameLevel = -1;
   // Running sum of the approximate retained bytes the structure has committed
-  // `unpack` to allocate (every value's per-kind weight: the root, every
-  // container's declared backing slots, and every coerced property name).
+  // `unpack` to allocate: every value's per-kind weight, a container's declared
+  // backing slots included.
   let cost = 0;
   try {
     while (remaining.length > 0) {
@@ -513,13 +510,11 @@ export function structureOverBudget(
       if (remaining[top] === 0) {
         remaining.pop();
         mapLevel.pop();
-        if (top === keyNameLevel) keyNameLevel = -1;
         continue;
       }
       // A map's children alternate key, value, key, ...; the keys are the ones
       // read at an even count still to read.
       const atKeyPosition = mapLevel[top] && remaining[top] % 2 === 0;
-      const withinKeyName = keyNameLevel >= 0 || atKeyPosition;
       remaining[top]--;
       const { children, weight, kind } = readValueHeader(
         cursor,
@@ -527,16 +522,17 @@ export function structureOverBudget(
       );
       // A string over the per-string byte cap (`weight = -1`) is refused outright.
       if (weight < 0) return true;
+      // A map key must be a string on the wire; anything else is refused before the
+      // scan descends into it, since the property name `map[key] = value` coerces it
+      // to is not bounded by what the frame spends to declare it.
+      if (atKeyPosition && kind !== "string") return true;
       cost += weight;
-      if (withinKeyName && kind !== "string")
-        cost += WEBRTC_VALUE_WEIGHTS.coercedKeyName;
       if (cost > maxStructureBytes) return true;
       if (children > 0) {
         // Each declared element needs at least one byte to encode, so a container
         // claiming more elements than the bytes that follow is a zero-fill lie.
         if (children > cursor.remaining()) return true;
         if (remaining.length >= maxDepth) return true;
-        if (withinKeyName && keyNameLevel < 0) keyNameLevel = remaining.length;
         remaining.push(children);
         mapLevel.push(kind === "map");
       }
