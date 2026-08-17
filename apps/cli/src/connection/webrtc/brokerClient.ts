@@ -148,20 +148,23 @@ export interface BrokerConnectOptions {
 }
 
 /**
- * The error a symmetric role misconfiguration produces. The broker cannot see
+ * The message a symmetric role misconfiguration produces. The broker cannot see
  * the mistake -- from its side a second socket simply claimed a live id -- so
  * naming the likely cause is this client's job. Without it the operator sees
  * only a dropped socket and, on the other side, a dial that never completes.
+ *
+ * Short enough to survive the display boundary whole: the remedy is its last
+ * clause, so a message over the render cap loses exactly the part the operator
+ * acts on, and only at the terminal.
  */
+export const ID_TAKEN_MESSAGE =
+  "the signaling server reports this peer id is already registered. The " +
+  "usual cause is both parties running the same connection role: check the " +
+  "`role` field on each party's webrtc connection, one inviter and one " +
+  "acceptor.";
+
 function idTakenError(): ConnectionError {
-  return new ConnectionError(
-    "the signaling server reports this peer id is already registered. The " +
-      "usual cause is both parties running the same connection role: one side " +
-      "must be the inviter and the other the acceptor, and the two derive the " +
-      "same pair of rendezvous ids from the shared secret. Check the `role` " +
-      "field on each party's webrtc connection.",
-    "usage",
-  );
+  return new ConnectionError(ID_TAKEN_MESSAGE, "usage");
 }
 
 /** Build the registration URL. Never logged or interpolated: it carries the id. */

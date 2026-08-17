@@ -101,6 +101,8 @@ const {
   WEBRTC_ROLE_REQUIRED,
 } = await import("../../src/protocol");
 const { WEBRTC_URL_REFUSED } = await import("../../src/connectionFromUrl");
+const { ID_TAKEN_MESSAGE } =
+  await import("../../src/connection/webrtc/brokerClient");
 const { saveKeyFile } = await import("../../src/keyFile");
 const {
   DISPLAY_TRUNCATION_MARKER,
@@ -336,6 +338,7 @@ test("each refusal survives the display boundary whole", () => {
     WEBRTC_RENDEZVOUS_SECRET_REQUIRED,
     WEBRTC_ROLE_REQUIRED,
     WEBRTC_URL_REFUSED,
+    ID_TAKEN_MESSAGE,
   ]) {
     expect(sanitizeErrorForDisplay(new UsageError(message))).not.toContain(
       DISPLAY_TRUNCATION_MARKER,
