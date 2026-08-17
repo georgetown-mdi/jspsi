@@ -102,12 +102,16 @@ written, and on the streamed result CSV between its `fchmod` and its truncate.
 intended, so the mode is meant to be the file's whole access story. There is no
 `--` separator: macOS's `chmod` has none and fails trying to open it as a file
 (driven on the real tool, 2026-08-17, recorded on the introducing pull
-request). The operand is resolved to an absolute path before the call --
-lexically only, so neither symlink posture below is affected -- which
-guarantees it starts with `/` and so cannot land in the option position,
-regardless of how any chmod build parses a dash-leading operand. The absolute
-`/bin/chmod` keeps the resolution off `PATH`, and there is no shell -- the
-operand is a single argument. It is a subprocess rather than a
+request). A relative operand is absolutized by prefixing the process working
+directory and nothing else -- no path join, no normalization, no resolution, so
+no `..` segment is collapsed and no separator is rewritten. The operand is thus
+the writer's own path against the same working directory, and the kernel
+resolves it exactly as it resolved the writer's open, `..` through a symlink
+included; a lexical collapse would instead aim the strip at a different file
+than the one the content lands in. It also begins with `/`, so it cannot land
+in the option position, regardless of how any chmod build parses a dash-leading
+operand. The absolute `/bin/chmod` keeps the resolution off `PATH`, and there is
+no shell -- the operand is a single argument. It is a subprocess rather than a
 syscall because Node's `fs` exposes no ACL API.
 
 Whether the strip follows a symlink at the path is per call site, and each one

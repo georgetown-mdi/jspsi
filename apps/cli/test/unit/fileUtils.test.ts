@@ -700,15 +700,20 @@ describe("extended-ACL strip symlink posture", () => {
     await writeAndClose(stream, "a,b\n1,2\n");
   });
 
-  test("resolves a relative dash-leading destination to an absolute chmod operand", () => {
+  test("absolutizes a relative dash-leading destination for the chmod operand", () => {
     // No `--` separator exists to keep a dash-leading operand out of the option
-    // position (see the comment on stripExtendedAcls); resolving the operand to
-    // an absolute path is what guarantees that instead, on a relative path too.
+    // position (see the comment on stripExtendedAcls); absolutizing the operand
+    // is what guarantees that instead, on a relative path too.
     if (process.platform === "win32") return;
     const commands = recordAclStripCommands();
     const cwd = process.cwd();
     process.chdir(dir);
+    let expected: string;
     try {
+      // Built from the working directory the writer itself prefixes, which the
+      // kernel reports canonicalized: under a symlinked TMPDIR (macOS's
+      // /var -> /private/var) it is not the mkdtemp path this test holds.
+      expected = `${process.cwd()}/-dashed-secret.tmp.${process.pid}`;
       withPlatform("darwin", () => {
         writeFileOwnerOnly("-dashed-secret", "x");
       });
@@ -719,25 +724,46 @@ describe("extended-ACL strip symlink posture", () => {
     expect(commands).toHaveLength(1);
     const operand = commands[0][commands[0].length - 1];
     expect(operand.startsWith("/")).toBe(true);
-    expect(operand).toBe(
-      path.resolve(dir, `-dashed-secret.tmp.${process.pid}`),
-    );
+    expect(operand).toBe(expected);
   });
 
-  test("resolving the do-not-follow operand does not dereference a symlink", () => {
-    // stripExtendedAcls resolves its operand with path.resolve, which is purely
-    // lexical -- unlike fs.realpathSync, it never touches the filesystem or
-    // follows a symlink -- so the -h (do-not-follow) posture the temp-file
-    // writers rely on survives the resolve: a symlink at the operand path
-    // resolves to its own absolute path, not its target's.
+  test("an operand keeps a `..` segment that only the kernel can resolve", async () => {
+    // `out/link` is a symlink to a sibling directory, so `out/link/../x` names
+    // dir/x to the kernel and dir/out/x to any lexical collapse of the `..`.
+    // Each writer's own open takes the kernel's answer, so its strip has to aim
+    // at the same file: the operand carries the `link/..` segment through
+    // verbatim rather than being normalized or realpath'd on the way to chmod.
     if (process.platform === "win32") return;
-    const target = path.join(dir, "attacker-target");
-    fs.writeFileSync(target, "target-content");
-    const link = path.join(dir, "link");
-    fs.symlinkSync(target, link);
+    const commands = recordAclStripCommands();
+    fs.mkdirSync(path.join(dir, "out"));
+    fs.mkdirSync(path.join(dir, "elsewhere"));
+    fs.symlinkSync(path.join(dir, "elsewhere"), path.join(dir, "out", "link"));
+    const streamed = `${dir}/out/link/../result.csv`;
+    const secret = `${dir}/out/link/../secret`;
 
-    expect(path.resolve(link)).toBe(link);
-    expect(path.resolve(link)).not.toBe(fs.realpathSync(target));
+    const stream = withPlatform("darwin", () =>
+      createOwnerOnlyWriteStream(streamed),
+    );
+    await writeAndClose(stream, "a,b\n1,2\n");
+    withPlatform("darwin", () => writeFileOwnerOnly(secret, "x"));
+
+    expect(commands).toEqual([
+      ["/bin/chmod", "-N", streamed],
+      ["/bin/chmod", "-h", "-N", `${secret}.tmp.${process.pid}`],
+    ]);
+    // Both writes landed where the kernel resolves their paths, and nothing
+    // landed at the lexically collapsed one.
+    expect(fs.readFileSync(path.join(dir, "result.csv"), "utf8")).toBe(
+      "a,b\n1,2\n",
+    );
+    expect(fs.readFileSync(path.join(dir, "secret"), "utf8")).toBe("x");
+    expect(fs.readdirSync(path.join(dir, "out"))).toEqual(["link"]);
+    // The streamed operand still names the file the rows went into; the temp
+    // writer's operand named a temp file the rename has since consumed.
+    const operand = commands[0][commands[0].length - 1];
+    expect(fs.statSync(operand).ino).toBe(
+      fs.statSync(path.join(dir, "result.csv")).ino,
+    );
   });
 });
 
