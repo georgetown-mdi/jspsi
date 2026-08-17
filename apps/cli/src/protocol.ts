@@ -377,7 +377,11 @@ export interface RunProtocolResult {
  *
  * When `recordOutput` is provided, the self-attested exchange record and its
  * private verification keys are written after the results (non-fatal on failure;
- * see {@link writeExchangeRecord}). Pass `undefined` to skip recording.
+ * see {@link writeExchangeRecord}). Pass `undefined` to skip recording. An audit
+ * artifact that was asked for and could not be produced never fails the
+ * exchange, but it is reported: a `warning` event on the machine-interface
+ * stream and a non-zero process exit code, so an unattended run does not read as
+ * a clean success.
  *
  * `saveIntent` carries this party's zero-setup `--save` intent into the
  * exchange's in-band bootstrap (see {@link runExchange}). Pass `undefined`
@@ -1563,33 +1567,68 @@ export async function runProtocol(
       await writeOutput(output, headers, rows, log);
     }
 
+    // Every audit artifact this run was asked for and could not produce, as the
+    // messages the machine-interface stream carries below.
+    const missingArtifacts: string[] = [];
+
     // Persist the self-attested record after the results: it is a secondary
     // audit artifact, so it is written last and its failure is non-fatal (see
-    // writeExchangeRecord). Skipped when records are disabled, or when the
-    // record could not be built (runExchange returns audit undefined and has
-    // already warned -- the exchange still succeeded). It is likewise not reached
-    // if the result-CSV write above failed (that await throws to the catch),
-    // which also avoids orphaning the private verification-keys file on a disk
-    // that just failed mid-write. A withheld result writes no CSV but still
+    // writeExchangeRecord). Skipped when records are disabled. It is likewise not
+    // reached if the result-CSV write above failed (that await throws to the
+    // catch), which also avoids orphaning the private verification-keys file on a
+    // disk that just failed mid-write. A withheld result writes no CSV but still
     // records the exchange (the record is independent of the returned table). The
     // record and its keys are a single optional field, so one check covers both.
-    if (recordOutput !== undefined && audit !== undefined)
-      writeExchangeRecord(recordOutput, audit.record, audit.keys, loggerName);
+    // An audit runExchange did not return is a record that could not be BUILT
+    // (warned there, with the cause): records were asked for and none exists, so
+    // it reports as a missing artifact exactly as a failed write does.
+    if (recordOutput !== undefined) {
+      const failure =
+        audit === undefined
+          ? "no audit record could be built for this exchange, so none was " +
+            "written; the exchange and its results succeeded and need not be " +
+            "re-run"
+          : writeExchangeRecord(
+              recordOutput,
+              audit.record,
+              audit.keys,
+              loggerName,
+            );
+      if (failure !== undefined) missingArtifacts.push(failure);
+    }
 
     // Persist the dual-signed record after the self-attested record. Written only
     // when the signing step ran and the signature exchange completed (runExchange
     // returns signedReceipt undefined otherwise, and throws to the catch on a
     // verification failure -- so no partial artifact is written for a terminated
-    // swap). Its timestamp is the record's createdAt, so the record and receipt
-    // files for one exchange share a stamp; the record is always built when a
-    // receipt exists (runExchange requires it). Non-fatal, like the record write.
-    if (signing !== null && signedReceipt !== undefined && audit !== undefined)
-      writeDualSignedRecord(
+    // swap). Independent of the self-attested record: core signs the receipt from
+    // the mutually-verifiable facts whether or not this party's local record
+    // built, and the receipt is the artifact a partner and an auditor can check,
+    // so a record-build failure must not discard it. Its timestamp is the
+    // record's createdAt when there is one, so the record and receipt files for
+    // one exchange share a stamp. Non-fatal, like the record write.
+    if (signing !== null && signedReceipt !== undefined) {
+      const failure = writeDualSignedRecord(
         signing.receiptOutput,
         signedReceipt,
-        audit.record.createdAt,
+        audit?.record.createdAt ?? new Date().toISOString(),
         loggerName,
       );
+      if (failure !== undefined) missingArtifacts.push(failure);
+    }
+
+    // A lost audit artifact is not a failed exchange -- the result is written and
+    // must not be re-run -- so the terminal event below stays `result`. But it is
+    // not a success either: an unattended supervisor that discards stderr, or an
+    // operator running at --log-level error, would otherwise read a clean exit 0
+    // for a run that produced no record. Put each failure on the machine stream
+    // as a warning and leave a non-zero exit behind, so both channels report it.
+    // EX_UNAVAILABLE (69) is the code every other local output failure exits
+    // with; process.exitCode rather than process.exit so the caller's own
+    // remaining work (a bootstrap's config write) still runs, and a later failure
+    // there still replaces this code with its own.
+    for (const missing of missingArtifacts) emit((e) => e.warning(missing));
+    if (missingArtifacts.length > 0) process.exitCode = 69;
 
     // bootstrap is undefined on every authenticated path (saveIntent unset) and
     // populated on the zero-setup --save path; the caller branches on it.
