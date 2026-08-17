@@ -896,6 +896,13 @@ export function InviterBench() {
         metadata: editor.draft.metadata,
         standardization: editor.draft.standardization,
         ...(connectionEndpoint !== undefined ? { connectionEndpoint } : {}),
+        // Declared on the token from the options block the run itself carries, the
+        // same source the accept kit's disclosure reads, so the sheet and the
+        // partner's consent display state one mode. Gated on a file-sync endpoint
+        // because retain mode is a file-sync setting; a webrtc mint declares
+        // nothing.
+        retainsFiles:
+          connectionEndpoint !== undefined && runOptions?.retainFiles === true,
       });
       setEditor(sealEditor(editor));
       setInvitation(minted);

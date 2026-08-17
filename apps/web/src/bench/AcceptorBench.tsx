@@ -1091,6 +1091,7 @@ export function AcceptorBench() {
               disclosedPayloadColumns={
                 decode.invitation.token.disclosedPayloadColumns
               }
+              inviterRetainsFiles={decode.invitation.token.inviterRetainsFiles}
               perspective="review"
               headingOrder={1}
               headingRef={termsHeadingRef}
