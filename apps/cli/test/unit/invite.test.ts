@@ -577,6 +577,119 @@ test("validateInvite: a config's single-pass strategy is preserved when no flag 
   }
 });
 
+// --- the invitation's retain-mode declaration --------------------------------
+
+test("validateInvite: an online retain-mode invite declares it on the token", async () => {
+  // The consent gap this closes: without the declaration a partner accepts, and
+  // consents, with nothing telling them the exchange leaves a permanent
+  // transcript. Read from the post-override connection, so --retain-files is
+  // reflected the way --server-port already is on the endpoint beside it.
+  const { input, options } = onlineFixture();
+  const ready = await validateInvite({
+    resolved: {
+      mode: "online",
+      url: new URL("sftp://sftp.example.org/exchanges/drop"),
+      input,
+    },
+    options: { ...options, retainFiles: true },
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.inviterRetainsFiles).toBe(true);
+});
+
+test("validateInvite: an online delete-mode invite declares nothing", async () => {
+  // The negative is not the mirror declaration: a run killed outright, or one
+  // that fails after the handshake, leaves files behind in either mode, so the
+  // ordinary invite states nothing rather than a cleanup it cannot promise.
+  const { input, options } = onlineFixture();
+  const ready = await validateInvite({
+    resolved: {
+      mode: "online",
+      url: new URL("sftp://sftp.example.org/exchanges/drop"),
+      input,
+    },
+    options,
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.inviterRetainsFiles).toBeUndefined();
+});
+
+test("validateInvite: a retain-mode config declares it on the token", async () => {
+  // The path a real retain exchange takes: retain mode needs a hand-authored
+  // config (it implies the lockless rendezvous and timestamped filenames), so an
+  // invite minted from one is where the disclosure has to land.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-retain-"));
+  tmpDirs.push(dir);
+  const configPath = path.join(dir, "psilink.yaml");
+  saveConfig(configPath, {
+    connection: {
+      channel: "filedrop",
+      path: "/mnt/share",
+      options: {
+        retainFiles: true,
+        locklessRendezvous: true,
+        timestampInFilename: true,
+      },
+    },
+    linkageTerms: defaultTerms(),
+  });
+  const ready = await validateInvite({
+    resolved: { mode: "offline" },
+    options: testOptions({
+      configFile: configPath,
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  expect(ready.mode).toBe("offlineFromConfig");
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.inviterRetainsFiles).toBe(true);
+});
+
+test("validateInvite: a config without retain mode declares nothing", async () => {
+  const { dir, configPath, keyPath } = withConfig(defaultTerms());
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    const token = await decodeInvitation(ready.invitation);
+    expect(token.inviterRetainsFiles).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: the offline-infer path declares nothing, even under --retain-files", async () => {
+  // This path writes a placeholder connection block the operator still has to
+  // fill in, and the connection-options overrides are warned-ignored on it, so
+  // there is no settled mode to declare. Declaring the flag's value here would
+  // state a mode the eventual exchange need not run in.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-infer-"));
+  tmpDirs.push(dir);
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const ready = await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+      retainFiles: true,
+    }),
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  expect(ready.mode).toBe("offline");
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.inviterRetainsFiles).toBeUndefined();
+});
+
 test("validateInvite: online filedrop emits the shared-path endpoint", async () => {
   const { input, options } = onlineFixture();
   const ready = await validateInvite({

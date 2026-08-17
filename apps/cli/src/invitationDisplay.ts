@@ -419,6 +419,20 @@ export function logDecisionFacts(
     );
     emit(`    ${CONSENT_FACTS.countOnlyInputChoice.note}`);
   }
+
+  // What outlives the run, which is why it sits in the decision block rather than
+  // among the terms: an acceptor is agreeing to a permanent transcript at the
+  // rendezvous location, and the run is over by the time anything else would tell
+  // them. Printed only where the invitation DECLARES retain mode -- an invitation
+  // that declares delete mode, or declares nothing, prints nothing here, since
+  // neither is a cleanup this transport promises (see the shared table's entry).
+  if (summary.declaresRetainedFiles) {
+    emit(
+      `  ${marked("exchange files", "retainedFiles")}: kept as a permanent ` +
+        "transcript, not deleted after the run",
+    );
+    emit(`    ${CONSENT_FACTS.retainedFiles.note}`);
+  }
 }
 
 /**

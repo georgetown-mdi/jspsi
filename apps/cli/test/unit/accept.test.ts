@@ -1971,6 +1971,41 @@ test("displayInvitation: a proposed setting the run does not apply is marked, no
   );
 });
 
+test("displayInvitation: the retain line is printed at both decision blocks, and only for a declaration", () => {
+  const log = getLogger("accept-display-retain-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  const RETAIN_LABEL = "  exchange files (enforced): ";
+
+  // The declaration is a decision fact: what outlives the run is exactly what an
+  // operator must have in front of them when the y/N question is asked, and the
+  // terms are far longer than a screen, so it prints at BOTH decision blocks --
+  // heading the terms and again above the prompt -- like every other fact there.
+  const retaining = renderDisplayInvitation(log, {
+    ...base,
+    inviterRetainsFiles: true,
+  });
+  const retainLines = retaining
+    .split("\n")
+    .filter((line) => line.startsWith(RETAIN_LABEL));
+  expect(retainLines).toHaveLength(2);
+  expect(retainLines[0]).toBe(
+    `${RETAIN_LABEL}kept as a permanent transcript, not deleted after the run`,
+  );
+  expect(retaining).toContain(`    ${CONSENT_FACTS.retainedFiles.note}`);
+
+  // Neither absence renders anything, and the two are not alike by accident: an
+  // invitation minted before the field existed made no claim, and one declaring
+  // delete mode is claiming a cleanup this transport does not promise (a run
+  // killed outright, or one failing after the handshake, leaves files in either
+  // mode). Both would mislead as a stated fact, so both print nothing.
+  for (const declaration of [{}, { inviterRetainsFiles: false }]) {
+    const rendered = renderDisplayInvitation(log, { ...base, ...declaration });
+    expect(rendered).not.toContain("exchange files");
+    expect(rendered).not.toContain(CONSENT_FACTS.retainedFiles.note);
+  }
+});
+
 test("displayInvitation: every classified fact is marked, and carries core's caveat verbatim", () => {
   // An acceptor meets two unlike kinds of fact here: ones the exchange holds
   // itself, and ones that are only what the inviting party declared. Reading a
@@ -2007,7 +2042,15 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
   // `psi` invitation raises: a table entry the renderer never reaches is exactly
   // what this test exists to catch, so the tier has to be rendered here rather than
   // exempted from the sweep.
-  const rendered = `${acceptorWithheld}\n${inviterWithheld}\n${renderAppliedCountOnlyFacts()}`;
+  //
+  // The retain declaration is the fourth, and for the same reason one step further
+  // out: it is carried on the TOKEN rather than in the terms, so no variation of
+  // `output`, `payload`, or `algorithm` above can raise its caveat.
+  const retaining = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    inviterRetainsFiles: true,
+  });
+  const rendered = `${acceptorWithheld}\n${inviterWithheld}\n${renderAppliedCountOnlyFacts()}\n${retaining}`;
 
   // The whole table, rather than a list restated here: a caveat this renderer
   // authored for itself instead of reading is absent from the rendering and fails,
@@ -2051,6 +2094,12 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
   );
   expect(rendered).toContain(
     "  allowed-character patterns (your partner's word):",
+  );
+  // The mode agreement is what the run holds, so the marker is the enforced one;
+  // what becomes of the transcript afterwards rides the caveat swept above.
+  expect(retaining).toContain(
+    "  exchange files (enforced): kept as a permanent transcript, not deleted " +
+      "after the run",
   );
 });
 

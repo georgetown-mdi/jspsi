@@ -426,6 +426,13 @@ export async function validateInvite(params: {
       // The same disclosed-columns subset persisted above: the acceptor's consent
       // screen and runtime lock-in derive from the wire's own disclosure predicate.
       disclosedPayloadColumns,
+      // Declare retain mode where this invite's own connection runs it, so the
+      // acceptor is told before consenting that the exchange leaves a permanent
+      // transcript. Read from the post-override connection, so `--retain-files`
+      // is reflected; a declaration only, never applied on the accept side.
+      ...(connection.options?.retainFiles === true
+        ? { inviterRetainsFiles: true }
+        : {}),
     });
     // prepareForOnlineExchange can throw; run it here, before the token print in
     // the caller's commit step, so a failure never follows disclosure.
@@ -608,6 +615,12 @@ export async function validateInvite(params: {
       sharedSecret,
       expires,
       disclosedPayloadColumns,
+      // The config is the connection this invitation's exchange runs on, so its
+      // retain mode is the one to declare. Taken as the single boolean the reader
+      // lifts out (the block itself stays unvalidated here, so an unfinished one
+      // still mints); a config that does not turn retain mode on declares
+      // nothing, since a placeholder connection cannot back a cleanup promise.
+      ...(configSource.retainsFiles ? { inviterRetainsFiles: true } : {}),
     });
 
     return {
@@ -658,6 +671,10 @@ export async function validateInvite(params: {
 
   const expires = expiresFromNow(lifetimeSeconds);
   const sharedSecret = generateSharedSecret();
+  // No retain declaration on this path, deliberately: the config it writes is a
+  // placeholder scaffold whose connection block the operator still has to fill in
+  // and may set either way, so this mint has no settled mode to declare. An
+  // absent declaration states nothing, which is the honest answer here.
   const invitation = await encodeInvitation({
     version: "1",
     linkageTerms: dataSpec.linkageTerms,

@@ -1054,8 +1054,9 @@ export function persistOutboundPayloadConsent(
  * invitation: the linkage terms (which the invitation carries) and the explicit
  * data standardization and metadata, if any (which the config-vs-input
  * reconciliation honors so it resolves columns to linkage fields exactly as the
- * eventual exchange does). The connection block is intentionally omitted --
- * `invite` does not use it.
+ * eventual exchange does), plus the one connection fact the invitation declares.
+ * The connection block itself is intentionally omitted -- `invite` does not build
+ * a connection from it.
  */
 export interface ConfigLinkageSource {
   linkageTerms: LinkageTerms;
@@ -1070,6 +1071,20 @@ export interface ConfigLinkageSource {
    * for an input the exchange cannot actually satisfy.
    */
   metadata?: Metadata;
+  /**
+   * Whether the config's connection block has retain mode on
+   * (`connection.options.retain_files: true`), which the minted invitation
+   * declares to the partner as a consent fact -- the exchange this config runs
+   * leaves a permanent transcript at the rendezvous location.
+   *
+   * Read as that ONE boolean at its fixed path, never by validating the
+   * connection block: the block is deliberately left unparsed here so an
+   * unfinished or still-placeholder one does not block generating an invitation,
+   * and a single boolean read keeps that contract. Anything other than a literal
+   * `true` -- absent, false, a non-boolean, no connection block at all -- reads
+   * as false, which declares nothing rather than declaring delete mode.
+   */
+  retainsFiles: boolean;
 }
 
 /**
@@ -1216,8 +1231,34 @@ export function readConfigLinkageSource(
 
   return {
     status: "loaded",
-    source: { linkageTerms: result.data, standardization, metadata },
+    source: {
+      linkageTerms: result.data,
+      standardization,
+      metadata,
+      retainsFiles: readRetainFilesDeclaration(obj),
+    },
   };
+}
+
+/**
+ * The config's `connection.options.retain_files`, read as a single boolean at its
+ * fixed path so a still-placeholder connection block is not validated on the way
+ * (see {@link ConfigLinkageSource.retainsFiles}). Both key spellings are accepted
+ * for the same reason the top-level keys above are: `saveConfig` writes
+ * snake_case, but a hand-authored config may carry either.
+ *
+ * Only a literal `true` reads as a declaration. Every other shape -- absent,
+ * false, a non-boolean, a non-object `connection` or `options` -- yields false,
+ * which the invitation carries as no declaration at all rather than as a claim
+ * that the exchange deletes its files.
+ */
+function readRetainFilesDeclaration(config: Record<string, unknown>): boolean {
+  const connection = config["connection"];
+  if (connection === null || typeof connection !== "object") return false;
+  const options = (connection as Record<string, unknown>)["options"];
+  if (options === null || typeof options !== "object") return false;
+  const entry = options as Record<string, unknown>;
+  return entry["retain_files"] === true || entry["retainFiles"] === true;
 }
 
 /**
@@ -1228,10 +1269,11 @@ export function readConfigLinkageSource(
  * A config present at the path is the authoritative source of the invitation's
  * linkage terms, so one that defines none cannot serve as that source and is a
  * {@link UsageError} rather than a silent fall-through to input inference.
- * `invite` never uses the connection block (the config persists for a later
+ * `invite` builds no connection from the block (the config persists for a later
  * `psilink exchange` to read and validate), so an unfinished one must not block
  * generating an invitation -- {@link readConfigLinkageSource}, which carries the
- * rest of the reading contract, leaves it unread.
+ * rest of the reading contract, leaves it unvalidated and takes only the single
+ * `retain_files` boolean the invitation declares.
  */
 export function loadConfigLinkageSource(
   configPath: string,

@@ -1913,7 +1913,69 @@ test("readConfigLinkageSource returns the source a config defines", () => {
       linkageTerms: terms,
       standardization: undefined,
       metadata: undefined,
+      retainsFiles: false,
     },
+  });
+});
+
+// The one connection fact the reader lifts out, for the invitation's retain
+// declaration. A `true` at the fixed path is read; nothing else about the block
+// is parsed, which is what keeps a still-placeholder connection from blocking an
+// invitation.
+test("readConfigLinkageSource reads retain mode off the connection block", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = getDefaultLinkageTerms("Agency A");
+  saveConfig(configPath, {
+    connection: {
+      channel: "filedrop",
+      path: "/mnt/share",
+      options: {
+        retainFiles: true,
+        locklessRendezvous: true,
+        timestampInFilename: true,
+      },
+    },
+    linkageTerms: terms,
+  });
+  const result = readConfigLinkageSource(configPath);
+  expect(result).toMatchObject({
+    status: "loaded",
+    source: { retainsFiles: true },
+  });
+});
+
+// Only a literal `true` is a declaration. A connection block the operator has
+// not finished -- no options at all, a non-object where one is expected, a
+// non-boolean value -- reads as no declaration rather than as a claim that the
+// exchange deletes its files, and none of those shapes is an error here: the
+// block stays unvalidated so an unfinished config can still mint an invitation.
+test.each([
+  ["no options block", "connection:\n  channel: sftp\n"],
+  [
+    "retain_files absent",
+    "connection:\n  options:\n    poll_interval_ms: 500\n",
+  ],
+  ["retain_files false", "connection:\n  options:\n    retain_files: false\n"],
+  [
+    "retain_files a string",
+    "connection:\n  options:\n    retain_files: 'true'\n",
+  ],
+  ["options a scalar", "connection:\n  options: yes\n"],
+  ["connection a scalar", "connection: sftp\n"],
+  ["no connection block", ""],
+])("readConfigLinkageSource declares no retain mode: %s", (_label, block) => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = getDefaultLinkageTerms("Agency A");
+  // The nested keys stay camelCase: safeParseLinkageTerms camelizes on the way
+  // in, so either spelling parses and the block under test is the connection.
+  fs.writeFileSync(
+    configPath,
+    `${block}${YAML.stringify({ linkage_terms: terms })}`,
+  );
+  const result = readConfigLinkageSource(configPath);
+  expect(result).toMatchObject({
+    status: "loaded",
+    source: { retainsFiles: false },
   });
 });
 
