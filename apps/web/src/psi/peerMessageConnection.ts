@@ -43,7 +43,8 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  * the channel; and `close` detaches the listeners and closes the channel,
  * waiting on a clean close for the peer to take the final frame (see
  * {@link waitForPeerClose}), so a resolved close means delivered rather than
- * buffered.
+ * buffered -- except on the wait's ceiling, dead-peer, and already-not-open
+ * paths, where the frame can still be in flight (see {@link waitForPeerClose}).
  *
  * The inbound path is byte-bounded against a hostile or buggy peer: PeerJS chunk
  * reassembly is capped so an oversized PSI set frame or a flood of

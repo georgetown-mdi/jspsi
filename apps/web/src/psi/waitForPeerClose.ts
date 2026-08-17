@@ -51,10 +51,20 @@ function transportOf(conn: DataConnection): {
  * `bufferedAmount` reaching zero, which is not delivery on this transport (see
  * docs/spec/WEBRTC_TRANSPORT.md).
  *
- * The event is the peer's, not this side's: PeerJS leaves the local channel
- * open on a flushing close, so nothing here closes it (measured: the channel
- * stayed `open` for the whole observation window against a peer patched not to
- * close, while `bufferedAmount` had reached zero early in it).
+ * The event is the peer's, not this side's, on the path this module exists
+ * for: PeerJS's flushing close leaves the local channel open and touches
+ * neither `close` nor `closing` (measured: the channel stayed `open` for the
+ * whole observation window against a peer patched not to close, while
+ * `bufferedAmount` had reached zero early in it -- see
+ * apps/web/test/browser/webrtcCloseDelivery.test.ts). That is a property of
+ * PeerJS's current flush behavior, not of the listener set below, which also
+ * settles on a LOCALLY initiated close (PeerJS transitions its own channel
+ * through `closing` too). That is the right answer in the local-close paths
+ * this code can actually reach -- PeerJS's send-failure teardown
+ * (`_trySend`'s catch closing the connection after a synchronous send error)
+ * and a peer-connection teardown (the negotiator's `failed`/`closed`
+ * `iceConnectionState` handler) -- because in both the link is already
+ * broken, so there is nothing left to wait for.
  *
  * Call this BEFORE asking PeerJS to close, so a peer that closes the instant it
  * reads the sentinel cannot beat the listener into place.

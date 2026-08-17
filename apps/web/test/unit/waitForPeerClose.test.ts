@@ -1,6 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { waitForPeerClose } from "../../src/psi/waitForPeerClose.js";
+import {
+  DEFAULT_PEER_CLOSE_TIMEOUT_MS,
+  waitForPeerClose,
+} from "../../src/psi/waitForPeerClose.js";
 
 import type { DataConnection } from "peerjs";
 
@@ -9,6 +12,10 @@ class FakeDataChannel extends EventTarget {
   closeFromPeer() {
     this.readyState = "closed";
     this.dispatchEvent(new Event("close"));
+  }
+  enterClosing() {
+    this.readyState = "closing";
+    this.dispatchEvent(new Event("closing"));
   }
 }
 
@@ -64,6 +71,21 @@ describe("waitForPeerClose", () => {
     expect(await isSettled(waiting)).toBe(false);
 
     channel?.closeFromPeer();
+
+    await expect(waiting).resolves.toBeUndefined();
+  });
+
+  test("resolves once the channel enters closing", async () => {
+    // The listener also settles on a LOCALLY initiated close, since PeerJS
+    // transitions its own channel through `closing` too (see the module
+    // comment) -- this is the reachable local-close case, not the peer-origin
+    // one the module exists for.
+    const { conn, channel } = makeConn();
+
+    const waiting = waitForPeerClose(conn);
+    expect(await isSettled(waiting)).toBe(false);
+
+    channel?.enterClosing();
 
     await expect(waiting).resolves.toBeUndefined();
   });
@@ -163,5 +185,32 @@ describe("waitForPeerClose", () => {
     // promise's teardown.
     expect(() => peerConnection?.enter("failed")).not.toThrow();
     expect(peerRemove).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("DEFAULT_PEER_CLOSE_TIMEOUT_MS", () => {
+  test("matches the spec budget table's Close drain row", () => {
+    // docs/spec/WEBRTC_TRANSPORT.md, "## Budgets": "Close drain | 5 min" --
+    // a deliberate change to either must update the other.
+    expect(DEFAULT_PEER_CLOSE_TIMEOUT_MS).toBe(5 * 60 * 1000);
+  });
+
+  test("is the ceiling waitForPeerClose applies when no timeout is passed", async () => {
+    vi.useFakeTimers();
+    try {
+      const { conn } = makeConn();
+      let settled = false;
+      void waitForPeerClose(conn).then(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(DEFAULT_PEER_CLOSE_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
