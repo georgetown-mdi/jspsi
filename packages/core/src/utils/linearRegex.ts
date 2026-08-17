@@ -74,17 +74,26 @@ function compileCached(pattern: string): RE2JS {
 
 /**
  * A compiled transform pattern, exposing exactly the operations the
- * standardization factories need, each defined to be byte-identical to the
- * JavaScript `RegExp` operation it replaced for every in-dialect pattern (pinned
- * by the cross-engine equivalence tests). Compile once via
+ * standardization factories need, each matching the JavaScript `RegExp`
+ * operation it replaced for every in-dialect pattern (pinned by the cross-engine
+ * equivalence tests). The equivalence covers the PATTERN dialect; the
+ * replacement string {@link CompiledLinearRegex.replaceAll} takes resolves under
+ * the engine's own rules, which diverge -- see there. Compile once via
  * {@link compileLinearRegex}; call per row.
  */
 export interface CompiledLinearRegex {
   /**
-   * Replace every match with `replacement`, as `String.prototype.replace` with a
-   * global regex does. `replacement` uses `$n` / `$&` / `$$` group-reference
-   * syntax identical to JavaScript's; an unknown `$n` is emitted literally.
-   * Mirrors `s.replace(new RegExp(pattern, "g"), replacement)`.
+   * Replace every match with `replacement`. The `$n` / `$nn` (numbered group),
+   * `$<name>` (named group), `$&`, `` $` ``, `$'`, and `$$` sequences carry
+   * their usual meanings, and an unrecognized sequence is emitted literally --
+   * but the engine, not `String.prototype.replace`, decides what is recognized,
+   * and two cases differ: a leading-zero reference (`$01`) and an unknown
+   * `$<name>` are emitted literally here, where JavaScript resolves the first to
+   * group 1 and substitutes the empty string for the second. The substitution
+   * rule a reimplementation owes is normative in
+   * docs/spec/PROTOCOL.md (Transform regular-expression dialect);
+   * test/linearRegex.test.ts holds
+   * both divergences as checks.
    */
   replaceAll(input: string, replacement: string): string;
   /**

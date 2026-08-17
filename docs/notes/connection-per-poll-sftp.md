@@ -362,9 +362,13 @@ release. Past its bound the release closes the transport from this side, so ever
 idle boundary ends with the session gone and every cycle begins by dialing a fresh
 one. Inside the poll loop that silence costs one release bound per cycle, an
 operator warning on the same rate-escalated cadence a chronic mid-exchange re-dial
-gets, and a total in the end-of-run summary -- rather than the exchange. A forced
-release is still this side's own deliberate boundary, so the re-dial that follows
-is neither counted as a reconnection nor reported as a dropped session.
+gets, and a total in the end-of-run summary -- rather than the exchange. Forcing
+says how the boundary concluded, not who ended the transport beneath it, so it
+does not by itself make the loss this side's: a boundary forced over a partner
+drop this side had already observed is still counted and warned as that drop,
+while one forced over an ordinary deliberate release is exempt as any release is
+([CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#sftp-mid-exchange-session-recovery)
+carries the per-outcome rule).
 
 The same partner silence at TEARDOWN is a defect of the SFTP transport itself,
 which this mode neither causes nor escapes, so it is bounded where it lives

@@ -284,9 +284,12 @@ const RESULT_VALUE_COLUMN_START = 2;
  * Reconstruction is byte-exact only from UNMODIFIED retained files. Two residual
  * edges are surfaced as warnings rather than silently mis-reconstructed: a
  * duplicate value in the identifier column makes a matched row's index ambiguous
- * (the first occurrence is used), and a result value cell cannot distinguish a
- * committed empty string from a committed null (the result wrote both as an empty
- * cell), so a genuinely-null received cell will not open. Both are documented
+ * (the first occurrence is used), and a result referencing an identifier the
+ * supplied input does not carry means the input does not match this exchange. A
+ * third has no warning to give: a result value cell cannot distinguish a
+ * committed empty string from a committed null (the result wrote both as an
+ * empty cell), so a genuinely-null received cell reproduces as an empty string
+ * and its commitment reports a mismatch with nothing naming that cause. All are
  * limitations of reproducing from the human-readable result.
  */
 export function reconstructCommittedData(

@@ -31,8 +31,9 @@ updates:
       # The WebRTC stack is grouped (not batched into non-critical) because the
       # web inbound bound drives peerjs internals and parses the peerjs-js-binarypack
       # wire format past their public APIs, so every bump must re-verify that coupling
-      # before it merges -- see the "Upgrading the PeerJS stack" checklist in
-      # CONTRIBUTING.md, mirroring the SFTP stack's exact-pin + review treatment.
+      # before it merges -- see the "Upgrading the PeerJS Stack" checklist in
+      # docs/spec/DEPENDENCY_PINS.md, mirroring the SFTP stack's exact-pin +
+      # review treatment.
       webrtc-stack:
         patterns:
           - "peerjs"

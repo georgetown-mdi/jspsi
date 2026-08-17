@@ -143,6 +143,53 @@ describe("RE2 vs JavaScript class semantics", () => {
   });
 });
 
+// --- Replacement-string semantics --------------------------------------------
+// The replacement string is not part of the pattern dialect, so the cross-engine
+// equivalence tests do not cover it, and two of its $-sequences resolve
+// differently here than under String.prototype.replace. Both parties hash the
+// same partner-authored terms into their keys, so a reimplementation that used a
+// JavaScript RegExp here would derive different keys from the same terms rather
+// than fail. PROTOCOL.md carries the normative rule; these hold it.
+
+describe("replacement-string $-sequences", () => {
+  test("a leading-zero group reference is literal", () => {
+    // JavaScript resolves "$01" to group 1: "ab".replace(/(a)(b)/g, "$01") is "a".
+    expect(compileLinearRegex("(a)(b)").replaceAll("ab", "$01")).toBe("$01");
+    expect(compileLinearRegex("(a)").replaceAll("a", "$012")).toBe("$012");
+  });
+
+  test("a $<name> naming no group in the pattern is literal", () => {
+    // JavaScript substitutes the empty string once the pattern has any named
+    // group: "a".replace(/(?<g>a)/g, "$<nope>") is "".
+    expect(compileLinearRegex("(?<g>a)").replaceAll("a", "$<nope>")).toBe(
+      "$<nope>",
+    );
+  });
+
+  test("the recognized sequences resolve as JavaScript does", () => {
+    const re = compileLinearRegex("(a)(b)");
+    expect(re.replaceAll("ab", "$1")).toBe("a");
+    expect(re.replaceAll("ab", "$2")).toBe("b");
+    expect(re.replaceAll("ab", "$&")).toBe("ab");
+    expect(re.replaceAll("xaby", "$`")).toBe("xxy");
+    expect(re.replaceAll("xaby", "$'")).toBe("xyy");
+    expect(re.replaceAll("ab", "$$")).toBe("$");
+    expect(compileLinearRegex("(?<g>a)").replaceAll("a", "$<g>")).toBe("a");
+  });
+
+  test("a numbered reference takes two digits only where the group exists", () => {
+    const twelve = compileLinearRegex(
+      "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)(l)",
+    ).replaceAll("abcdefghijkl", "$12");
+    expect(twelve).toBe("l");
+    // Two groups: "$12" is group 1 followed by a literal "2", and "$3" -- a group
+    // the pattern does not have -- stays literal.
+    const two = compileLinearRegex("(a)(b)");
+    expect(two.replaceAll("ab", "$12")).toBe("a2");
+    expect(two.replaceAll("ab", "$3")).toBe("$3");
+  });
+});
+
 // --- Unicode-property and case-folding semantics -----------------------------
 // PROTOCOL.md admits \p{...} property classes and inline (?i) into the dialect.
 // re2js bakes its Unicode property and case-folding tables into the published
