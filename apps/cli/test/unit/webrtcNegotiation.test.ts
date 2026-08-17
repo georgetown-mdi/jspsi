@@ -51,6 +51,8 @@ class ScriptedSocket {
   static readonly OPEN = 1;
   readyState = 0;
   readonly sent: Array<Record<string, unknown>> = [];
+  /** How many times the client closed this socket; the registered id's release. */
+  closeCalls = 0;
   private readonly listeners = new Map<string, Set<(event: unknown) => void>>();
 
   addEventListener(type: string, handler: (event: unknown) => void): void {
@@ -68,6 +70,7 @@ class ScriptedSocket {
   }
 
   close(): void {
+    this.closeCalls += 1;
     this.readyState = 3;
   }
 
@@ -111,6 +114,8 @@ class ScriptedPeer {
   readonly remoteDescriptions: Array<{ type: string; sdp: string }> = [];
   readonly remoteCandidates: Array<unknown> = [];
   readonly channels: Array<FakeChannel> = [];
+  /** How many times the session closed this connection. */
+  closeCalls = 0;
   // The SCTP queues the session's drain premise asserts on.
   readonly sctp = { sctp: { outboundQueue: [], sentQueue: [] } };
   /** Fired during setLocalDescription, as werift does. */
@@ -157,6 +162,7 @@ class ScriptedPeer {
   }
 
   close(): Promise<void> {
+    this.closeCalls += 1;
     this.connectionState = "closed";
     return Promise.resolve();
   }
@@ -194,6 +200,12 @@ async function startRendezvous(options: {
   offerRetryIntervalMs?: number;
   rendezvousTimeoutMs?: number;
   channelOpenTimeoutMs?: number;
+  signal?: AbortSignal;
+  /**
+   * Whether the broker confirms the registration with `OPEN`. A test of the
+   * window before registration completes says no and leaves it unconfirmed.
+   */
+  confirmRegistration?: boolean;
 }): Promise<{
   socket: ScriptedSocket;
   peer: ScriptedPeer;
@@ -223,6 +235,7 @@ async function startRendezvous(options: {
     offerRetryIntervalMs: options.offerRetryIntervalMs ?? 60_000,
     rendezvousTimeoutMs: options.rendezvousTimeoutMs ?? 10_000,
     channelOpenTimeoutMs: options.channelOpenTimeoutMs ?? 10_000,
+    signal: options.signal,
     peerConnectionFactory: () => peer as unknown as RTCPeerConnection,
     socketFactory: () => socket as unknown as WebSocket,
   });
@@ -237,7 +250,7 @@ async function startRendezvous(options: {
   for (let attempt = 0; attempt < 200 && !socket.wired(); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  socket.register();
+  if (options.confirmRegistration !== false) socket.register();
   await new Promise((resolve) => setTimeout(resolve, 10));
   return { socket, peer, session, inviterId, acceptorId };
 }
@@ -677,4 +690,60 @@ test("broker signaling after the channel opens is ignored", async () => {
   await new Promise((resolve) => setTimeout(resolve, 10));
   expect(socket.ofType(BROKER_MESSAGE.answer)).toHaveLength(answersBefore);
   expect(peer.remoteCandidates).toHaveLength(0);
+});
+
+// --- what an abort leaves behind --------------------------------------------
+
+/**
+ * The rendezvous is the only step of a webrtc run that can wait ten minutes, so
+ * `runProtocol` hands it the interrupt signal to end an operator's Ctrl-C
+ * quickly. What makes ending it early safe is the teardown underneath: the
+ * broker socket is closed, releasing the derived id the run registered, and the
+ * peer connection with it. Both are asserted against the real session rather
+ * than a mocked transport, which is the only place the wiring exists.
+ */
+
+test("an abort after registration tears down the socket and the peer connection", async () => {
+  const controller = new AbortController();
+  const { socket, peer, session } = await startRendezvous({
+    role: "acceptor",
+    signal: controller.signal,
+  });
+  // Registered and negotiating: the dialer's offer is already on the wire.
+  expect(socket.ofType(BROKER_MESSAGE.offer).length).toBeGreaterThan(0);
+  expect(socket.closeCalls).toBe(0);
+  expect(peer.closeCalls).toBe(0);
+
+  controller.abort();
+  // The registration's own abort listener is installed first and latches the
+  // failure, so its wording is the one that reaches the caller even here, where
+  // the socket is registered and the negotiation is what is waiting.
+  await expect(session).rejects.toThrow(
+    /connecting to the signaling server was cancelled/,
+  );
+  // Exactly once each: an abandoned rendezvous leaves no registered id on the
+  // broker and no half-open peer connection behind.
+  expect(socket.closeCalls).toBe(1);
+  expect(peer.closeCalls).toBe(1);
+});
+
+test("an abort before registration tears down the same, having sent nothing", async () => {
+  // The other half of the window: the socket exists but the broker has not
+  // confirmed it, so the abort is caught by the registration rather than by the
+  // negotiation. The peer connection is already built by this point, and is what
+  // would be left running if only the registration unwound itself.
+  const controller = new AbortController();
+  const { socket, peer, session } = await startRendezvous({
+    role: "acceptor",
+    signal: controller.signal,
+    confirmRegistration: false,
+  });
+
+  controller.abort();
+  await expect(session).rejects.toThrow(
+    /connecting to the signaling server was cancelled/,
+  );
+  expect(socket.sent).toHaveLength(0);
+  expect(socket.closeCalls).toBe(1);
+  expect(peer.closeCalls).toBe(1);
 });
