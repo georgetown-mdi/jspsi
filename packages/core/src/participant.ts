@@ -15,6 +15,10 @@ import {
   type PsiMessageKind,
 } from "./connection/psiElementScan";
 import { singleIssueArray } from "./utils/singleIssueArray";
+import {
+  assertPartnerIndexCount,
+  assertPartnerIndices,
+} from "./utils/partnerIndices";
 import { InProcessPsiEngine, type PsiEngine } from "./psiEngine";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
@@ -402,6 +406,32 @@ export class PSIParticipant {
       this.log.debug(`${this.id}: received association table`);
       this.setStage("processing association table");
 
+      // The round's matches, as computed by the partner: our half indexes the
+      // set we just encrypted (so `permutation` bounds it exactly), the partner
+      // half indexes the set it encrypted (bounded by the element count its
+      // masked set may declare -- authenticated session state, since it is
+      // derived from the agreed key count and the exchanged record counts). Both
+      // are checked before the remap below turns our half into this party's
+      // matched set for the round.
+      assertPartnerIndexCount(
+        this.id,
+        "the round's association table, partner half",
+        partnerIndices.length,
+        localIndices.length,
+      );
+      assertPartnerIndices(
+        this.id,
+        "the round's association table, local half",
+        localIndices,
+        permutation.length,
+      );
+      assertPartnerIndices(
+        this.id,
+        "the round's association table, partner half",
+        partnerIndices,
+        this.elementBounds.request,
+      );
+
       for (let i = 0; i < localIndices.length; ++i) {
         localIndices[i] = permutation[localIndices[i]];
       }
@@ -470,7 +500,24 @@ export class PSIParticipant {
       this.log.debug(`${this.id}: sending status completed`);
       await conn.send({ status: "completed" });
 
-      return [localIndices, parseOrProtocolError(numberArrayMessage, rawData)];
+      // The partner's own matched records, in its input order: one per pair we
+      // reported, each indexing the set it encrypted -- bounded by the element
+      // count its masked set may declare, which is authenticated session state.
+      const partnerIndices = parseOrProtocolError(numberArrayMessage, rawData);
+      assertPartnerIndexCount(
+        this.id,
+        "the partner's original-index list",
+        partnerIndices.length,
+        localIndices.length,
+      );
+      assertPartnerIndices(
+        this.id,
+        "the partner's original-index list",
+        partnerIndices,
+        this.elementBounds.setup,
+      );
+
+      return [localIndices, partnerIndices];
     }
   }
 }

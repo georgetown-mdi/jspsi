@@ -77,6 +77,7 @@ test("a worker-backed cascade exchange yields the correct result", async () => {
       server,
       serverConn,
       serverData,
+      clientData[0].length,
       -1,
     ),
     linkViaPSI(
@@ -84,6 +85,7 @@ test("a worker-backed cascade exchange yields the correct result", async () => {
       client,
       clientConn,
       clientData,
+      serverData[0].length,
       -1,
     ),
   ]);

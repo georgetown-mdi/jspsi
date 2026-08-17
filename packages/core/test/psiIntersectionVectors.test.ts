@@ -121,6 +121,7 @@ async function runLink(
       makeParticipant("starter"),
       starterConn,
       withUndefined(v.starterKeys),
+      v.joinerKeys[0].length,
       -1,
     ),
     linkViaPSI(
@@ -128,6 +129,7 @@ async function runLink(
       makeParticipant("joiner"),
       joinerConn,
       withUndefined(v.joinerKeys),
+      v.starterKeys[0].length,
       -1,
     ),
   ]);

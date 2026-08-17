@@ -86,6 +86,16 @@ The sender remaps its distinct-value index table into the setup message's sorted
 
 The reference implementation is `linkViaSinglePassPSI` (`packages/core/src/link.ts`); the four PSI base-function operations it composes are on `PSIParticipant` (`packages/core/src/participant.ts`).
 
+#### Partner-supplied index tables are checked against local state
+
+Both strategies exchange lists of indices, and every such list a party RECEIVES addresses positions that party owns: its own rows, the per-round candidate set it just encrypted, or the partner's rows as counted on the terms exchange. Each is validated before it drives the match set, the payload columns this party discloses, or its [self-attested record](#self-attested-record). The checks, all of them:
+
+- the two halves of an association table must carry the same number of entries;
+- every entry must be a whole number within the range its side authenticates -- this party's own row count, the size of the set it encrypted for that round, the element bound derived for the partner's masked set, or the partner's row count carried on the terms exchange -- and no entry may repeat, which is what caps a list's length at the count of positions it can address;
+- a returned mapped-element list must name exactly this party's own matched records, one entry each, on the round it matched them: the exchange is symmetric, so a round pairs the same number of records on both parties and pairs this party's record only if the partner's corresponding record names it in that same round.
+
+Every bound is derived from this party's own data or from a count carried on the authenticated terms exchange, never from the frame being checked. A list failing any check is a protocol violation: the exchange aborts with a classified `protocol` error and produces no result, rather than continuing on an index that addresses nothing or a record set the exchange did not produce. The reference implementation is `packages/core/src/utils/partnerIndices.ts` and its call sites in `link.ts` and `participant.ts`.
+
 #### The single-pass dataset ceiling: receiver memory and masking compute
 
 Single-pass exists to collapse a many-round-trip exchange over a minute-scale-latency channel (a 15-minute directory poll, times one dependent round per key, is hours of waiting) into one sweep, at the cost of more disclosure (the receiver sees the sender's full per-key duplicate structure and the weaker-key matches the cascade filters out, above). It is therefore an operator opt-in, agreed up front in the `linkage_strategy` term -- never a default, never selected automatically.

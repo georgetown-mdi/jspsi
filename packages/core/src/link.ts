@@ -10,6 +10,11 @@ import {
   singlePassReplyByteCap,
 } from "./connection/frameSize";
 import { singleIssueArray } from "./utils/singleIssueArray";
+import {
+  assertPartnerIndexCount,
+  assertPartnerIndices,
+  partnerProtocolError,
+} from "./utils/partnerIndices";
 
 import { getLoggerForVerbosity } from "./utils/logger";
 
@@ -143,6 +148,10 @@ function removeDuplicatesAndUndefineds(
  * @param data - One entry per linkage key. Each entry is an iterable over all
  *   local records (indexed by row position) yielding the record's value for
  *   that key, or `undefined` if the record has no value for it.
+ * @param partnerRecordCount - The partner's raw row count, exchanged over the
+ *   encrypted channel during role resolution. It is the authenticated bound the
+ *   partner-returned row indices are checked against before they reach the
+ *   returned table (see utils/partnerIndices.ts).
  * @param verbosity - Log verbosity level (default 0).
  * @param setStage - Optional callback invoked with a progress label at each
  *   key round.
@@ -158,6 +167,7 @@ export async function linkViaPSI(
   participant: PSIParticipant,
   conn: MessageConnection,
   data: Array<IndexableIterable<string | undefined>>,
+  partnerRecordCount: number,
   verbosity: number = 0,
   setStage?: (id: string) => void,
 ) {
@@ -263,8 +273,56 @@ export async function linkViaPSI(
       identifiedIndexIterationMap,
     );
 
+    // Translate the partner's list of our records through the per-round candidate
+    // sets, checking each entry against what THIS side matched before it reads a
+    // candidate set. The exchange is symmetric: a round pairs the same number of
+    // records on both parties, and it pairs our record i only if the partner's
+    // corresponding record names i in that same round. So the honest list is a
+    // permutation of our own matched records, one entry each, carrying the round
+    // we matched them on -- which is what makes every entry checkable against
+    // local state rather than merely bounded.
+    assertPartnerIndexCount(
+      participant.id,
+      "the partner's mapped-element list",
+      theirIdentifiedIndexIterationMap.length,
+      numMappedElements,
+    );
+    const translated = new Uint8Array(indexIterationMap.length);
     for (const e of theirIdentifiedIndexIterationMap) {
-      const i = unmappedIndicesByIter[e.iteration][e.theirIndex];
+      if (
+        !Number.isInteger(e.iteration) ||
+        e.iteration < 0 ||
+        e.iteration >= unmappedIndicesByIter.length
+      )
+        throw partnerProtocolError(
+          participant.id,
+          "the partner's mapped-element list names a key round this exchange " +
+            "did not run",
+        );
+      const candidates = unmappedIndicesByIter[e.iteration];
+      if (
+        !Number.isInteger(e.theirIndex) ||
+        e.theirIndex < 0 ||
+        e.theirIndex >= candidates.length
+      )
+        throw partnerProtocolError(
+          participant.id,
+          "the partner's mapped-element list names a position outside that " +
+            "round's candidate set",
+        );
+      const i = candidates[e.theirIndex];
+      if (indexIterationMap[i]?.iteration !== e.iteration)
+        throw partnerProtocolError(
+          participant.id,
+          "the partner's mapped-element list names a record this side did not " +
+            "match on that round",
+        );
+      if (translated[i] === 1)
+        throw partnerProtocolError(
+          participant.id,
+          "the partner's mapped-element list names one record twice",
+        );
+      translated[i] = 1;
       e.theirIndex = i;
     }
 
@@ -280,12 +338,23 @@ export async function linkViaPSI(
       theirIdentifiedIndexIterationMap,
     );
 
-    if (numMappedElements != identifiedIndexMap.length) {
-      throw new Error(
-        `${participant.id} protocol error: returned, unmapped association ` +
-          "table of incorrect length",
-      );
-    }
+    // Our own list, come back with each entry's index translated into the
+    // partner's row space. Its length is ours to know, and every row index it
+    // carries lands in the returned table -- the partner half of the result, the
+    // payload alignment, and the attested record -- so it is bounded by the row
+    // count the partner carried on the terms exchange.
+    assertPartnerIndexCount(
+      participant.id,
+      "the returned mapped-element list",
+      identifiedIndexMap.length,
+      numMappedElements,
+    );
+    assertPartnerIndices(
+      participant.id,
+      "the returned mapped-element list",
+      identifiedIndexMap.map((x) => x.theirIndex),
+      partnerRecordCount,
+    );
 
     return identifiedIndexMap.reduce(
       (acc, x, i) => {
@@ -553,7 +622,30 @@ export async function linkViaSinglePassPSI(
       return [[], []];
     }
 
+    // The resolved table is computed by the receiver, so this side cannot
+    // recompute it -- but every index in it addresses a row one of the two
+    // parties counted, and both counts are authenticated session state. Check the
+    // two halves against them before the table becomes this party's match set,
+    // its payload row selection, and its attested record.
     const table = await receiveParsed(conn, associationTableMessage);
+    assertPartnerIndexCount(
+      participant.id,
+      "the resolved association table's partner half",
+      table[1].length,
+      table[0].length,
+    );
+    assertPartnerIndices(
+      participant.id,
+      "the resolved association table's local half",
+      table[0],
+      numRecords,
+    );
+    assertPartnerIndices(
+      participant.id,
+      "the resolved association table's partner half",
+      table[1],
+      partnerRecordCount,
+    );
     stage("done");
     return [table[0], table[1]];
   }
