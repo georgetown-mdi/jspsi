@@ -386,6 +386,199 @@ describe("createOwnerOnlyWriteStream", () => {
   });
 });
 
+// --- macOS extended ACL ------------------------------------------------------
+
+// The extended-ACL entries `ls -le` prints under a file's mode line, each
+// numbered ("0: group:everyone allow read"). An empty array means the file
+// carries no extended ACL at all, which is what the writers must produce.
+function readExtendedAcl(filePath: string): string[] {
+  const output = execFileSync("/bin/ls", ["-le", filePath], {
+    encoding: "utf8",
+  });
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^\d+:\s/.test(line));
+}
+
+describe("macOS extended ACL", () => {
+  // A directory whose inheritable `everyone allow read` ACE every file created
+  // inside it picks up -- the configuration that leaves a 0600 artifact
+  // readable by another principal on macOS.
+  function makeAclInheritingDir(name: string): string {
+    const aclDir = path.join(dir, name);
+    fs.mkdirSync(aclDir);
+    execFileSync(
+      "/bin/chmod",
+      ["+a", "everyone allow read,file_inherit", aclDir],
+      { stdio: "ignore" },
+    );
+    return aclDir;
+  }
+
+  test("each writer clears an inherited non-owner ACE", async () => {
+    if (process.platform !== "darwin") return;
+    const aclDir = makeAclInheritingDir("inheriting");
+
+    // Pin the gap the writers close: a plain 0600 write into this directory
+    // inherits the ACE, so the assertions below are about the strip and not
+    // about a directory that failed to hand its ACE down.
+    const control = path.join(aclDir, "control");
+    fs.writeFileSync(control, "x", { mode: 0o600 });
+    fs.chmodSync(control, 0o600);
+    expect(readExtendedAcl(control)).not.toEqual([]);
+    expect(fs.statSync(control).mode & 0o777).toBe(0o600);
+
+    const secret = path.join(aclDir, "secret");
+    writeFileOwnerOnly(secret, "x");
+    expect(readExtendedAcl(secret)).toEqual([]);
+    expect(fs.statSync(secret).mode & 0o777).toBe(0o600);
+
+    const exclusive = path.join(aclDir, "exclusive");
+    writeFileOwnerOnly(exclusive, "x", { exclusive: true });
+    expect(readExtendedAcl(exclusive)).toEqual([]);
+    expect(fs.statSync(exclusive).mode & 0o777).toBe(0o600);
+
+    const atomic = path.join(aclDir, "atomic");
+    writeFileAtomic(atomic, "x", 0o600);
+    expect(readExtendedAcl(atomic)).toEqual([]);
+    expect(fs.statSync(atomic).mode & 0o777).toBe(0o600);
+
+    // writeFileAtomic strips at its public default mode too: an inherited ACE
+    // can grant write, which 0644 withholds from everyone but the owner.
+    const shared = path.join(aclDir, "cert.json");
+    writeFileAtomic(shared, "x");
+    expect(readExtendedAcl(shared)).toEqual([]);
+    expect(fs.statSync(shared).mode & 0o777).toBe(0o644);
+
+    const streamed = path.join(aclDir, "streamed.csv");
+    await writeAndClose(createOwnerOnlyWriteStream(streamed), "a,b\n1,2\n");
+    expect(readExtendedAcl(streamed)).toEqual([]);
+    expect(fs.statSync(streamed).mode & 0o777).toBe(0o600);
+  });
+
+  test("the streaming writer clears an ACE already on the destination", async () => {
+    // The stream writes the destination in place rather than renaming a fresh
+    // temp inode over it, so a foreign ACE left on a pre-existing file is the
+    // case the strip has to reach.
+    if (process.platform !== "darwin") return;
+    const p = path.join(dir, "stale.csv");
+    fs.writeFileSync(p, "stale,data\n");
+    execFileSync("/bin/chmod", ["+a", "everyone allow read", p], {
+      stdio: "ignore",
+    });
+    expect(readExtendedAcl(p)).not.toEqual([]);
+
+    await writeAndClose(createOwnerOnlyWriteStream(p), "fresh,data\n");
+
+    expect(readExtendedAcl(p)).toEqual([]);
+    expect(fs.readFileSync(p, "utf8")).toBe("fresh,data\n");
+  });
+});
+
+// --- extended-ACL strip: platform gate and fail-closed ------------------------
+
+// Run `body` with `process.platform` reporting `platform`. The strip is the
+// only platform-gated step these tests exercise, and the POSIX write path is
+// otherwise identical on darwin and linux, so this makes the darwin branch
+// reachable on any POSIX host. Restores the real descriptor afterwards.
+function withPlatform(platform: string, body: () => void): void {
+  const real = Object.getOwnPropertyDescriptor(process, "platform");
+  if (real === undefined) throw new Error("process.platform is not defined");
+  Object.defineProperty(process, "platform", {
+    ...real,
+    value: platform,
+  });
+  try {
+    body();
+  } finally {
+    Object.defineProperty(process, "platform", real);
+  }
+}
+
+// These tests reach the darwin branch on another POSIX host, where the strip
+// command cannot succeed: GNU `chmod` rejects `-N`, and a host without
+// `/bin/chmod` fails to spawn it. Either way the writer sees a failed strip,
+// which is exactly the fail-closed contract under test -- the darwin tests
+// above cover the succeeding strip. Skipped on a real darwin host, where the
+// strip would succeed and there would be no failure to observe, and on Windows,
+// whose writers take the icacls branch and whose `fs.constants` carries no
+// `O_NOFOLLOW` for the POSIX branch the stub would otherwise force them into.
+const stripFailsHere =
+  process.platform !== "darwin" && process.platform !== "win32";
+
+describe("extended-ACL strip failure", () => {
+  test("writeFileOwnerOnly writes nothing and leaves no temp file", () => {
+    if (!stripFailsHere) return;
+    const dest = path.join(dir, "secret");
+    withPlatform("darwin", () => {
+      expect(() => writeFileOwnerOnly(dest, "secret-content")).toThrow(
+        /Could not clear extended ACLs/,
+      );
+    });
+    expect(fs.existsSync(dest)).toBe(false);
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+
+  test("writeFileOwnerOnly leaves an existing destination untouched", () => {
+    if (!stripFailsHere) return;
+    const dest = path.join(dir, "secret");
+    writeFileOwnerOnly(dest, "original");
+    withPlatform("darwin", () => {
+      expect(() => writeFileOwnerOnly(dest, "rotated")).toThrow(
+        /Could not clear extended ACLs/,
+      );
+    });
+    expect(fs.readFileSync(dest, "utf8")).toBe("original");
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+
+  test("writeFileAtomic writes nothing and leaves no temp file", () => {
+    if (!stripFailsHere) return;
+    const dest = path.join(dir, "cert.json");
+    withPlatform("darwin", () => {
+      expect(() => writeFileAtomic(dest, "x")).toThrow(
+        /Could not clear extended ACLs/,
+      );
+    });
+    expect(fs.existsSync(dest)).toBe(false);
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+
+  test("createOwnerOnlyWriteStream refuses before truncating an existing file", () => {
+    if (!stripFailsHere) return;
+    const p = path.join(dir, "result.csv");
+    fs.writeFileSync(p, "original,content\n");
+    withPlatform("darwin", () => {
+      expect(() => createOwnerOnlyWriteStream(p)).toThrow(
+        /Could not clear extended ACLs/,
+      );
+    });
+    // The strip runs before the truncate, so the operator's existing rows
+    // survive a refusal rather than being emptied by a write that never landed.
+    expect(fs.readFileSync(p, "utf8")).toBe("original,content\n");
+  });
+
+  test("the same writes succeed on the host's real platform", async () => {
+    // The gate is what separates this from the four refusals above: the same
+    // writers on the same host, differing only in what process.platform
+    // reports. On Linux -- the production/Docker target -- no strip is
+    // attempted and every writer completes.
+    if (!stripFailsHere) return;
+    const secret = path.join(dir, "secret");
+    writeFileOwnerOnly(secret, "x");
+    expect(fs.readFileSync(secret, "utf8")).toBe("x");
+
+    const cert = path.join(dir, "cert.json");
+    writeFileAtomic(cert, "x");
+    expect(fs.readFileSync(cert, "utf8")).toBe("x");
+
+    const csv = path.join(dir, "result.csv");
+    await writeAndClose(createOwnerOnlyWriteStream(csv), "a,b\n1,2\n");
+    expect(fs.readFileSync(csv, "utf8")).toBe("a,b\n1,2\n");
+  });
+});
+
 // --- Windows owner-only ACL --------------------------------------------------
 
 // The current user's domain-qualified name (DOMAIN\user), the principal the

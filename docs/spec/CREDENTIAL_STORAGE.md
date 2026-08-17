@@ -7,7 +7,7 @@ title: "Credential and Result File Storage"
 This document specifies how PSI-Link writes its owner-only credential and result
 files: the POSIX exclusive-create, exact-mode, and atomic-rename discipline, the
 platform-dependent `fsync` durability and cross-write crash-ordering guarantee
-laid over it, the macOS `F_FULLFSYNC` and NFSv4-ACL caveats, the
+laid over it, the macOS `F_FULLFSYNC` caveat and NFSv4-ACL strip, the
 writable-and-readable-parent pre-flight, and the Windows ACL-narrowing and
 load-check internals. It is the implementation-level complement to the
 **Key file security** overview in
@@ -83,19 +83,48 @@ power loss may surface a later write while losing an earlier one -- which is
 recoverable by re-running. Linux, the CLI's production target (the Docker
 image), flushes durably with `fsync`, so the guarantee holds there in full.
 
-## macOS extended-ACL caveat
+## macOS extended-ACL strip
 
 On Unix the owner-only guarantee is enforced through the POSIX mode bits
 (`0600`), which is sufficient on Linux -- the production/Docker target, where
 `chmod` also collapses any POSIX ACL mask. On macOS an extended (NFSv4) ACL is
 governed separately from the mode bits, so an ACL entry a file inherits from its
-parent directory's inheritable ACEs can grant another principal access that a
-`0600` mode does not remove. This affects every owner-only artifact written into
-such a directory (the key file, the signing identity, the exchange record and
-its verification keys, the dual-signed receipt, the operator config, and the
-result CSV), since each lands either in place or on a fresh inode that still
-inherits the directory's ACEs. The operator-facing remediation (`ls -le` to
-inspect, `chmod -N` to clear) is in
+parent directory's inheritable ACEs grants another principal access that a
+`0600` mode does not remove. Every owner-only artifact written into such a
+directory would otherwise carry it, since each lands either in place or on a
+fresh inode that still inherits the directory's ACEs.
+
+Each writer therefore clears the file's extended ACL at the point where it
+enforces the mode, on macOS alone: `execFileSync("/bin/chmod", ["-h", "-N",
+"--", file])`, run on the temp file after its `fchmod` and before any content is
+written, and on the streamed result CSV between its `fchmod` and its truncate.
+`-N` deletes the ACL entirely -- on an artifact psilink writes, no ACE is
+intended, so the mode is meant to be the file's whole access story. `-h` acts on
+the named entry rather than following a symlink, so a link swapped into the
+temp path cannot redirect the strip onto another file's ACL; `--` ends the
+options so an operator-supplied path beginning with `-` is read as an operand;
+and the absolute `/bin/chmod` keeps the resolution off `PATH`. There is no
+shell -- the operand is a single argument. It is a subprocess rather than a
+syscall because Node's `fs` exposes no ACL API.
+
+The strip covers every artifact this document's write construction produces --
+the key file, the signing identity, the exchange record and its verification
+keys, the dual-signed receipt, the operator config, and the result CSV -- and
+the exported public certificate as well. It runs at any mode, including that
+certificate's public `0644`, because an inherited ACE can grant access (write
+included) that the explicit mode withholds.
+
+A failed strip is fail-closed, exactly as a failed `icacls` narrowing is on
+Windows: no content is written, and the error names the file and the `ls -le` /
+`chmod -N` remediation. The temp-file writers unlink the temp file on the way
+out, so nothing reaches the destination. The streamed CSV aborts before its
+truncate, so an existing destination keeps its rows; only a file that call
+itself created is left behind, empty, mirroring the Windows placeholder.
+
+Off macOS no strip is attempted: on Linux the numeric `chmod` already collapses
+the POSIX ACL mask, and Windows owner-only enforcement is the `icacls`
+narrowing below. The operator-facing remediation for a file psilink did not
+write (`ls -le` to inspect, `chmod -N` to clear) is in
 [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#required-permissions).
 
 ## Writable-and-readable-parent pre-flight
@@ -152,9 +181,10 @@ most sensitive artifact the tool produces -- is created owner-only on the same
 principle as the key file: `0600` on Unix and an `icacls`-narrowed ACL on
 Windows, applied before any rows are written, so the output is not left world- or
 group-readable by an inherited umask. On Windows the ACL is recreated free of
-inherited and foreign ACEs; on Unix the macOS extended-ACL caveat above applies
-to it exactly as to every other owner-only artifact (a pre-existing or
-directory-inherited extended ACL on macOS is not stripped by the `0600` mode).
+inherited and foreign ACEs; on macOS the [extended-ACL
+strip](#macos-extended-acl-strip) above clears a pre-existing or
+directory-inherited ACE that the `0600` mode would not, before the file is
+truncated.
 
 Unlike the credential writers, the CSV is streamed directly to the output path
 (the result set may be large) rather than written through the

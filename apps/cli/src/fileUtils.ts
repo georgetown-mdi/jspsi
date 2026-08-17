@@ -178,6 +178,47 @@ function warnIfWindowsAclOverPermissive(
   }
 }
 
+// macOS evaluates a file's extended (NFSv4) ACL independently of its POSIX mode
+// bits, so an ACE inherited from the parent directory grants another principal
+// access that `fchmod(0600)` does not remove -- leaving an artifact readable
+// despite an owner-only mode. Clear every ACE so the mode is the file's whole
+// access story: on an artifact psilink writes, no ACE is intended, and the
+// writers declare access through the mode alone. Node's `fs` exposes no ACL
+// API, so this shells out to macOS's own `chmod`: `-N` deletes the ACL, and
+// `-h` acts on the named entry rather than following a symlink swapped in at
+// the path, so the strip cannot reach another file's ACL through a link planted
+// in the temp-path window. The absolute `/bin/chmod` keeps the resolution off
+// `PATH`, and `--` ends the options so an operator-supplied path beginning with
+// `-` is an operand rather than a run of flags. There is no shell: the operand
+// is one `execFileSync` argument.
+//
+// A no-op off macOS: on Linux (the production/Docker target) a numeric `chmod`
+// already collapses the POSIX ACL mask, and Windows owner-only enforcement is
+// the `icacls` path. Callers place it where they enforce the mode -- on the
+// temp file before the atomic rename, on the stream's file before any row --
+// so nothing a call writes lands while a foreign ACE could still be in force.
+// `reportedPath` names the destination the operator knows in the failure
+// message, which is the temp file's destination rather than the temp file.
+function stripExtendedAcls(filePath: string, reportedPath = filePath): void {
+  if (process.platform !== "darwin") return;
+  try {
+    execFileSync("/bin/chmod", ["-h", "-N", "--", filePath], {
+      stdio: "ignore",
+      timeout: 5000,
+    });
+  } catch {
+    // Fail closed, as the Windows icacls path does: refuse to put content in a
+    // file whose extended ACL we could not clear. Each caller's own catch
+    // handles what it created -- the temp-file writers unlink the temp file,
+    // and the stream writer aborts before its truncate so an existing
+    // destination keeps its content.
+    throw new Error(
+      `Could not clear extended ACLs on ${reportedPath}; inspect them with ` +
+        "`ls -le` and clear them manually with `chmod -N`",
+    );
+  }
+}
+
 /**
  * Warn if `filePath` is readable by users other than its owner. On Unix this is
  * the POSIX-mode check (any group/other bit set); on Windows it is the ACL check
@@ -307,6 +348,12 @@ function fsyncParentDir(filePath: string): void {
  * with wrong permissions, and removes the temp file on any failure so a crashed
  * write leaves no `.tmp.<pid>` orphan. With `exclusive`, the final step is an
  * atomic create-if-absent that throws rather than overwriting an existing file.
+ *
+ * On macOS the temp file's extended (NFSv4) ACL is cleared alongside the mode,
+ * before any content is written, so an ACE inherited from the destination's
+ * directory cannot leave the artifact readable by another principal despite the
+ * `0600` mode; a strip that fails aborts the write and removes the temp file,
+ * as the Windows `icacls` failure does. Elsewhere the strip is a no-op.
  *
  * Durability: the temp file's data is `fsync`'d before the rename and the parent
  * directory is `fsync`'d after it, so a power loss cannot surface the rename
@@ -439,6 +486,7 @@ export function writeFileOwnerOnly(
       );
       try {
         fs.fchmodSync(fd, 0o600);
+        stripExtendedAcls(tmp, destPath);
         fs.writeFileSync(fd, content, "utf8");
         // Flush the temp file's data to stable storage before the rename, so a
         // power loss cannot leave the rename durable while the contents are
@@ -530,6 +578,12 @@ export function writeFileOwnerOnly(
  * `writeFileOwnerOnly` so the owner-only, ACL-hardened path -- the
  * security-sensitive one -- is not entangled with public-file semantics.
  *
+ * The macOS extended-ACL strip {@link writeFileOwnerOnly} performs runs here
+ * too, at any `mode`, because an inherited ACE can grant a principal access
+ * (write included) that the explicit mode withholds, and the point of an
+ * explicit mode is to be the file's whole access story. It is a no-op off
+ * macOS.
+ *
  * Durability matches {@link writeFileOwnerOnly}: the temp file's data is
  * `fsync`'d before the rename (on every platform -- both writers retain a write
  * fd) so a power loss cannot surface the rename with the contents lost, and the
@@ -575,6 +629,7 @@ export function writeFileAtomic(
       // read-only bit; the public default ACL already lets a partner read the
       // exported certificate.)
       fs.fchmodSync(fd, mode);
+      stripExtendedAcls(tmp, destPath);
       fs.writeFileSync(fd, content, "utf8");
       // Flush the temp file's data before the rename so a power loss cannot
       // leave the rename durable while the contents are lost; the parent
@@ -645,6 +700,13 @@ export function writeFileAtomic(
  * the `O_NOFOLLOW`/`O_EXCL` hardening those writers use for paths psilink derives
  * itself.
  *
+ * On macOS the file's extended (NFSv4) ACL is cleared between the `fchmod` and
+ * the truncate, so no row is written while an inherited or pre-existing ACE
+ * could still grant another principal the access the `0600` mode denies. A
+ * strip that fails aborts before the truncate, leaving an existing file's
+ * content intact -- the same fail-closed posture as an `fchmod` that cannot
+ * secure the mode. Elsewhere the strip is a no-op.
+ *
  * On Windows the synthetic POSIX mode bits set no ACL, so -- mirroring
  * {@link writeFileOwnerOnly}'s Windows branch -- any existing file is first
  * unlinked and recreated as a fresh inode (so the destination carries no foreign
@@ -710,14 +772,17 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
     // before createWriteStream takes ownership of the descriptor, so a failure in
     // either must close fd here rather than leak it.
     fs.fchmodSync(fd, 0o600);
+    stripExtendedAcls(destPath);
     fs.ftruncateSync(fd, 0);
   } catch (err) {
     // Refuse to write the result CSV where we cannot make it owner-only (e.g. a
-    // pre-existing file owned by another user, which fchmod rejects with EPERM):
-    // close the descriptor and let the failure propagate rather than leave PII at
-    // relaxed permissions. Because the truncate runs only after fchmod succeeds,
-    // a chmod failure leaves an existing file's content intact and no empty
-    // orphan behind.
+    // pre-existing file owned by another user, which fchmod rejects with EPERM,
+    // or a macOS extended ACL that could not be cleared): close the descriptor
+    // and let the failure propagate rather than leave PII at relaxed
+    // permissions. Because the truncate runs only after both have succeeded, a
+    // failure to secure access leaves an existing file's content intact; a file
+    // this call created is left empty, as the Windows branch leaves its
+    // placeholder, rather than deleting a destination the operator named.
     try {
       fs.closeSync(fd);
     } catch {
