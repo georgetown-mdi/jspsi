@@ -450,7 +450,8 @@ The primary server for the exchange. For WebRTC this is the PeerJS peer coordina
 | `inbound_path` | string | SFTP only | Inbound (peer-written) remote directory for a split-directory exchange; see [`connection.inbound_path` / `connection.outbound_path`](#connectioninbound_path--connectionoutbound_path). Set with `outbound_path`; mutually exclusive with `path`; requires retain mode |
 | `outbound_path` | string | SFTP only | Outbound (self-written) remote directory for a split-directory exchange; the companion to `inbound_path` |
 | `username` | string | no | Username for server authentication |
-| `key` | string | WebRTC only | PeerJS API key for private PeerJS servers; omit when using a public server |
+| `key` | string | WebRTC only | PeerJS API key for private PeerJS servers; omit when using a public server. Defaults to `peerjs`, the key a PeerJS deployment serves under unless it is configured otherwise |
+| `secure` | boolean | WebRTC only | Whether the signaling socket is opened over TLS (`wss:`) rather than plain `ws:`. Defaults to `true`; signaling carries the derived rendezvous ids and both parties' candidate addresses, so plaintext is a deliberate choice for a server reached without a network in between (a loopback or test broker), never one an omission produces. A browser peer has no equivalent field: it takes the scheme from the page it was served over. The `port` default follows it -- 443 when secure, 80 otherwise -- and `path` defaults to `/` |
 
 #### SFTP server authentication
 
@@ -538,9 +539,11 @@ connection:
 
 Records this party as the inviter or acceptor. This is a peer-addressing concern specific to the WebRTC transport -- which is why it lives on the connection config rather than in the channel-agnostic top-level [`authentication`](#authentication) block -- and is orthogonal to the PSI protocol roles, which are determined by [`linkage_terms.output`](#linkage_termsoutput). For `sftp` and `filedrop` this field is not part of the schema and is silently dropped.
 
-`psilink invite` and `psilink accept` set the field themselves on every WebRTC connection block they write -- `inviter` from the inviting side, `acceptor` from the accepting side -- so the two parties to one exchange hold complementary roles with neither operator authoring it. Today only `psilink accept` can actually write one (seeding the connection from an invitation's `webrtc` endpoint); no `psilink invite` path produces a WebRTC block until the CLI supports the channel end to end.
+**Required on a `webrtc` connection the CLI runs, and the two parties must differ.** Each party's deterministic PeerJS peer ID is derived from the shared secret and its own `inviter`/`acceptor` label, and it dials the ID the other's label derives, so this field is what tells a party which end it is. A CLI configuration missing it is a usage error before anything is dialed, and one where both parties set the same value fails at the coordination server with an ID collision. It also fixes the key-exchange role each party takes (`acceptor` -> initiator, `inviter` -> responder), so it must not be edited to "fix" a connection: swapping it swaps which peer ID this party registers under.
 
-The field records the role; the transport does not read it. Both parties' deterministic PeerJS peer IDs are derived from the shared secret and a per-flow `inviter`/`acceptor` label supplied by the rendezvous code, so they reach each other without an out-of-band address exchange whether or not this field is set, and editing it changes no address.
+`psilink invite` and `psilink accept` set the field themselves on every WebRTC connection block they write -- `inviter` from the inviting side, `acceptor` from the accepting side -- so the two parties to one exchange hold complementary roles with neither operator authoring it. Today only `psilink accept` can actually write one (seeding the connection from an invitation's `webrtc` endpoint); no `psilink invite` path produces a WebRTC block, because an invitation cannot yet carry a `webrtc` endpoint for the partner to dial. Author the block by hand for the inviting side.
+
+The web application supplies the same label from its own flow rather than from this field.
 
 ```yaml
 connection:
@@ -558,7 +561,7 @@ connection:
 
 STUN servers for ICE candidate gathering. Each entry is a string in `stun:` or `stuns:` URI format. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `stun` is invalid.
 
-> **Not yet honored:** the three ICE fields -- `stun`, `turn`, and `ice_provision` -- are validated by the schema, and their exclusivity and `@`-file rules are enforced, but no candidate gathering reads them. The shipped WebRTC client builds its peer connection with a fixed set of STUN servers and no TURN entry, so authoring these fields changes no candidate the browser gathers. Author them for the record if you wish; do not rely on them to reach a partner behind a restrictive NAT.
+> **Honored by the CLI only.** The CLI builds its peer connection from `stun` and `turn`, and a configured list replaces the built-in default rather than adding to it, so the list you author is the list used. The browser client still builds its peer connection with a fixed set of STUN servers and no TURN entry, so on a web-conducted exchange these fields change no candidate the browser gathers. See [CLI.md](CLI.md#stun-and-what-it-discloses) for the default that applies when neither is set, what it discloses, and the idiom for gathering host candidates only.
 
 ```yaml
 connection:
@@ -573,7 +576,9 @@ connection:
 *Required:* no  
 *Applies to:* `webrtc`
 
-TURN servers for the case where a direct peer-to-peer connection cannot be established. Credential type `hmac-sha1` indicates time-limited credentials generated via a shared secret rather than a static password. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `turn` is invalid. The exclusivity rule is enforced; the servers themselves are not yet honored (see [`connection.stun`](#connectionstun)).
+TURN servers for the case where a direct peer-to-peer connection cannot be established. Credential type `hmac-sha1` indicates how a deployment MINTS a time-limited credential rather than how a client presents one -- the minted value is still sent as the password -- so both types take the same shape here. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `turn` is invalid.
+
+The CLI passes these entries to its peer connection (the browser client does not -- see [`connection.stun`](#connectionstun)), but **no exchange has been driven through a real relay**: the path is configured and unproven. Do not build a deployment that depends on relayed connectivity until it has been verified in your environment.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -598,7 +603,7 @@ connection:
 
 A provisioning endpoint that returns a complete set of ICE servers -- STUN and TURN combined -- for the current exchange. Both parties name the same endpoint and call it independently, so each may receive different time-limited credentials pointing to the same infrastructure. This matches the API shape of commercial ICE credential services such as Twilio Network Traversal Service. Mutually exclusive with static `stun` and `turn`.
 
-The endpoint is not yet called by either application (see [`connection.stun`](#connectionstun)); the CLI additionally refuses a `webrtc` config outright, so this field is reachable only from a WebRTC exchange the web application conducts.
+The endpoint is not called by either application. The web client ignores it (see [`connection.stun`](#connectionstun)); the CLI refuses a connection that sets it, rather than ignoring it and silently falling back to a default the operator did not choose -- list the servers directly under `stun` and `turn` instead.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|

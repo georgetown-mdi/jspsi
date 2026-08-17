@@ -73,8 +73,10 @@ The URL scheme determines the transport channel:
 | Scheme | Channel | Description |
 |--------|---------|-------------|
 | `sftp://` or `ssh://` | `sftp` | SFTP server; SSH credentials required |
-| `ws://` or `wss://` | `webrtc` | WebRTC via PeerJS peer-coordination server (not yet available in CLI) |
+| `ws://` or `wss://` | `webrtc` | WebRTC via a PeerJS peer-coordination server (not available in a zero-setup exchange -- see below) |
 | `file://` | `filedrop` | Locally-mounted shared directory (e.g. NFS or SMB share) |
+
+A zero-setup exchange cannot run over `webrtc`, and a `ws://` or `wss://` URL is refused here with that reason (exit 64). The two parties find each other at signaling ids derived from a shared secret, and a zero-setup exchange is defined by not having one: with nothing shared beforehand there is no address to dial. Establish a secret with [`psilink invite`](#offline-invitation) and [`psilink accept`](#offline-acceptance), then run the exchange with [`psilink exchange`](#webrtc-exchanges).
 
 For SFTP, SSH credentials must be supplied in the URL or as command-line arguments. Embedding credentials in the URL is not recommended as URLs may appear in shell history and process listings; use the `@path` convention instead - see [Configuration](#configuration).
 
@@ -279,13 +281,57 @@ An exchange you accepted an invitation for has one fact no invitation settles: t
 
 Where there is no terminal to ask on -- an unattended or scheduled run, or one reading its CSV from standard input -- the run refuses instead (exit 64, before any credential, terms, or data are sent), naming the columns and how to confirm them: run it once from a terminal, or accept the invitation again naming your input file. That refusal is the point of the record. An exchange whose partner is entitled to no result is never asked about, because nothing is transmitted to it whatever your file holds; nor is an exchange you *invited* a partner to, whose outbound columns you authored yourself when you minted the invitation.
 
-The `sftp` and `filedrop` channels are currently supported; `webrtc` is not yet available in the CLI. For file-drop exchanges, the `psilink.yaml` configuration uses `channel: filedrop` and `path` in place of `channel: sftp` and `server`:
+All three channels -- `sftp`, `filedrop`, and `webrtc` -- run here. For file-drop exchanges, the `psilink.yaml` configuration uses `channel: filedrop` and `path` in place of `channel: sftp` and `server`:
 
 ```yaml
 connection:
   channel: filedrop
   path: /mnt/sftp-share/exchanges/agency-a-agency-b
 ```
+
+### WebRTC exchanges
+
+A `webrtc` connection reaches the partner directly over a peer-to-peer data channel, using a PeerJS peer-coordination server only to introduce the two parties. It is the channel the web application uses, so a CLI party and a browser party can exchange with each other.
+
+```yaml
+connection:
+  channel: webrtc
+  server:
+    host: peers.example.org
+  role: inviter
+  stun:
+    - stun:stun.example.org:3478
+```
+
+- **`role` is required** and the two parties must differ: one `inviter`, one `acceptor`. Each registers with the coordination server under the id its role derives from the shared secret and dials the id the other's derives, so neither needs the other's address. `psilink invite` and `psilink accept` stamp it; a configuration missing it is a usage error (exit 64) before anything is dialed, and one where both parties set the same value fails at the coordination server with an error naming that as the likely cause.
+- **`server.secure` defaults to `true`** (a `wss:` socket). Set `secure: false` only for a coordination server you reach without a network in between, such as one on the same machine. The port defaults to 443 or 80 to match, the path to `/`, and the API key to `peerjs`.
+- **The connection is authored, not seeded.** An invitation cannot yet carry a webrtc endpoint, so a `ws://` or `wss://` URL is refused by `psilink invite` and `psilink accept` (exit 64); fill in the `connection` block yourself, exchange the invitation as usual, and run `psilink exchange`.
+
+Nothing about the exchange itself changes: the same authentication handshake, the same linkage, the same result file and exchange record. The data channel is already end-to-end encrypted between the two parties, so this channel does not add the application-layer encryption the file-based channels apply -- the coordination server sees only that a session exists, never its content.
+
+#### STUN, and what it discloses
+
+Finding a path between two parties behind NAT needs a STUN server, which tells each party how it appears from the outside. **When a connection configures neither `stun` nor `turn`, a built-in default (`stun:stun.l.google.com:19302`) is used and a warning says so on every run**, naming what it discloses and how to override it. That disclosure is connection metadata -- this host's public address, and the fact of a session -- never exchange content. Set `stun` to your own server to avoid it.
+
+A configured list replaces the built-in default rather than adding to it, so a list you set is the list actually used. An **empty** list is not "no STUN": to the ICE layer an empty list and an absent one both mean "use the default". To gather host candidates only -- for two parties on the same network, or a VPN -- give a single unreachable entry, for example `stun:127.0.0.1:3478`. That is the supported no-STUN idiom; it costs about five seconds of gathering while the unreachable entry times out, and it works only where a direct path exists.
+
+#### TURN
+
+`turn` entries are passed through to the connection, so a deployment can configure a relay for the case where no direct path can be found:
+
+```yaml
+connection:
+  channel: webrtc
+  server:
+    host: peers.example.org
+  role: acceptor
+  turn:
+    - url: turns:relay.example.org:443?transport=tcp
+      username: psilink
+      credential: "@/run/secrets/turn"
+```
+
+**This path is configured but unproven: no exchange has been driven through a real relay.** Do not build a deployment that depends on relayed connectivity until it has been verified in your environment. `ice_provision` (an ICE-credential API) is not supported by the CLI and is refused rather than ignored, so a connection that configures it does not silently fall back to the default.
 
 ### Signing identity and the agreed terms
 
@@ -491,7 +537,7 @@ Every `psilink` command exits with one of the following codes. The two failure c
 
 64 and 69 are the classification the command error boundaries apply (a `UsageError` maps to 64, otherwise the error's own exit code or 69); 78 is `psilink doctor`'s verdict code and is set nowhere else; 130 and 143 are set by the exchange's own signal handlers; 1 is the top-level catch-all. When `--event-stream` is active a `security`-category failure exits 69 like any other transport failure -- the exit code cannot single it out, so read the terminal event's category to detect it (see [Machine-readable event stream](#machine-readable-event-stream)).
 
-For `psilink exchange`, a missing, malformed, or unreadable configuration file (`psilink.yaml`) or key file (`.psilink.key`) - including a key file whose stored token is malformed - is a usage error and exits 64. An unsupported channel or URL scheme - a `webrtc` config or `ws://` URL the CLI does not yet support, an unknown scheme, or a malformed `file://` authority - is likewise a usage error and exits 64, as is a URL carrying a malformed percent-escape such as a lone `%` (with any credential redacted from the message) or an invalid connection option or combination (for example a negative, fractional, non-numeric, or above-ceiling `--max-reconnect-attempts`, a non-numeric or out-of-range (outside `0..65535`) `--server-port`, a reserved `peer_id`, or a `retain_files`/`lockless_rendezvous` contradiction). Failures during the exchange itself - connecting to the server, the rendezvous, or the message loop - exit 69. A successful run exits 0; a run terminated by a signal exits 130 (SIGINT) or 143 (SIGTERM).
+For `psilink exchange`, a missing, malformed, or unreadable configuration file (`psilink.yaml`) or key file (`.psilink.key`) - including a key file whose stored token is malformed - is a usage error and exits 64. An unsupported channel or URL scheme - a `ws://` URL on a path that cannot use one (the zero-setup and invitation paths), a `webrtc` connection with no `role`, an unknown scheme, or a malformed `file://` authority - is likewise a usage error and exits 64, as is a URL carrying a malformed percent-escape such as a lone `%` (with any credential redacted from the message) or an invalid connection option or combination (for example a negative, fractional, non-numeric, or above-ceiling `--max-reconnect-attempts`, a non-numeric or out-of-range (outside `0..65535`) `--server-port`, a reserved `peer_id`, or a `retain_files`/`lockless_rendezvous` contradiction). Failures during the exchange itself - connecting to the server, the rendezvous, or the message loop - exit 69. A successful run exits 0; a run terminated by a signal exits 130 (SIGINT) or 143 (SIGTERM).
 
 Passing a single-value option more than once - for example `psilink invite --accept-timeout 60s --accept-timeout 120s`, or a repeated `--log-level`, `--log-file`, `--server-port`, `--peer-timeout`, or `--linkage-strategy` - is a usage error and exits 64, naming the flag (`--<flag> may be given only once`), rather than silently taking one of the values. Count flags (`-v`/`--verbose`) and boolean flags (and their `--no-` forms, such as `--record`/`--no-record`) may still be repeated and keep their accumulate / last-one-wins / negation semantics.
 

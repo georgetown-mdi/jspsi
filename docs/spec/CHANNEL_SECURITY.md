@@ -33,6 +33,19 @@ The concrete envelope the `EncryptedMessageConnection` decorator emits is a bina
 
 Because the type tag is encrypted, the file-sync transport beneath the AEAD layer cannot read it to route a frame, so it carries its own outer, cleartext discriminator: every data-plane message file is a binary envelope `version || type || seq || payload` (built and read by `send()`/`poll()` in `fileSyncMessageLoop.ts`), where `type` selects a JSON control payload (UTF-8 JSON, parsed through the `parseBoundedJson` chokepoint) or a raw binary frame (delivered as-is). This too carries the frame as raw bytes -- no base64url and no whole-frame string conversion -- so the read path never calls `Buffer.prototype.toString()` and a frame larger than Node's maximum string length can be read.
 
+## Which channels request it
+
+The wrap is applied when the key exchange's transcript-bound decision says so, and that decision is the OR of the two parties' requests: either party asking for it turns it on for both. What each party asks for is fixed by the channel, not configurable.
+
+| Channel | Requests the wrap | Why |
+| ------- | ----------------- | --- |
+| `sftp`, `filedrop` | yes | The exchange sits in a server's or a share's filesystem. Its administrator can read and alter every frame, so the confidentiality and integrity have to come from a layer above the transport. |
+| `webrtc` | no | A data channel is end-to-end confidential and integrity-protected under DTLS between the two parties. The signaling server introduces them and sees no exchange content, and a TURN relay forwards ciphertext. The wrap would protect nothing the transport has not already protected. |
+
+The `webrtc` posture is also a compatibility requirement rather than only a judgement: the web implementation declines the wrap and refuses a partner that requests it (`apps/web/src/psi/authenticateExchange.ts`), so a CLI peer that asked would abort the exchange rather than upgrade it.
+
+The one case that would change this is a transport leg an intermediary terminates -- concretely, a WebSocket-to-TCP proxy carrying a party's traffic, which would put a third party inside the confidential channel. No such transport exists. If one lands, the request bit is how the party behind it asks for the wrap, and the web side's hard refusal of a true request is what would be revisited then. No negotiation mechanism is built for that case in advance.
+
 ## IV construction and SP 800-38D conformance
 
 The 96-bit IV is the deterministic construction of [SP 800-38D](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf) (November 2007) section 8.2.1, laid out as that section suggests for the default 96-bit IV length: the leading 32 bits hold the fixed field and the trailing 64 bits hold the invocation field. Read against section 8.2.1's own stated requirements, the construction **satisfies** them, with one qualification -- stated at the end of this section -- on what the all-zero fixed field rests on.

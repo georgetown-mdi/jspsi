@@ -204,10 +204,12 @@ export function connectionFromEndpoint(
       return { connection, seeded: true };
     }
     case "webrtc": {
-      // The CLI cannot yet run a webrtc exchange, but the config is written
-      // faithfully so the locator is preserved for when it can (and for the
-      // web app). webrtc needs no credential placeholder: it authenticates
-      // from the shared secret, not a username/password.
+      // No `role` here: an invitation's locator says where the coordination
+      // server is, never which end of the rendezvous this party is. The caller
+      // stamps it (withWebRTCPeerRole), and `psilink exchange` refuses a
+      // connection that reaches it without one (see webRtcDialFrom). webrtc
+      // needs no credential placeholder either -- it authenticates from the
+      // shared secret, not a username/password.
       const connection: WebRTCConnectionConfig = {
         channel: "webrtc",
         server: {

@@ -1,0 +1,206 @@
+---
+title: "WebRTC Transport"
+---
+
+# WebRTC transport
+
+The `webrtc` channel's wire: how the two parties find each other through the
+PeerJS broker, the signaling envelopes they exchange, the framing on the data
+channel, and what a clean close has to do before it tears the channel down.
+
+Two implementations speak this wire and must agree on every line of it: the web
+app, which runs the PeerJS client in the browser (`apps/web/src/psi/`), and the
+CLI, which drives werift's `RTCPeerConnection` directly and hand-writes both the
+broker client and the framing (`apps/cli/src/connection/webrtc/`). None of it is
+psilink's own protocol to define -- it is PeerJS 1.5.5's, measured on the wire
+and recorded here because a second implementation has to match it exactly. The
+library choice and the alternatives weighed are in
+[cli-webrtc-stack.md](../notes/cli-webrtc-stack.md); the internal premises that
+pin the libraries are in [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
+
+It does not cover the rendezvous peer-id derivation (see
+[PROTOCOL.md](PROTOCOL.md#webrtc-rendezvous-peer-id-derivation), which is
+normative for it), the inbound reassembly bound and the AEAD envelope (see
+[CHANNEL_SECURITY.md](CHANNEL_SECURITY.md)), the delivery contract every channel
+owes (see [COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown)),
+or the operator-facing configuration (see
+[EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#connectionserver) and
+[CLI.md](../CLI.md#webrtc-exchanges)).
+
+## Roles
+
+The two parties take fixed, asymmetric roles, named by `connection.role`:
+
+| `role` | Rendezvous | Handshake role |
+| ------ | ---------- | -------------- |
+| `acceptor` | Dials: creates the data channel, sends the `OFFER`, and re-offers until answered | `initiator` |
+| `inviter` | Listens: waits for an `OFFER`, answers it, and takes the channel the remote created | `responder` |
+
+Each party registers with the broker under the id its own role derives and
+addresses the id the other's derives, so neither has to be told the other's
+address. Both parties must therefore hold different roles; two parties holding
+the same one collide at the broker (below).
+
+The handshake role is fixed by the rendezvous role rather than negotiated
+separately: the parties already had to disagree about which end they are in
+order to meet at all.
+
+## Broker socket
+
+The client opens
+
+```
+<ws|wss>://<host>:<port><path>/peerjs?key=<key>&id=<id>&token=<token>&version=1.5.5
+```
+
+`version` is the PeerJS client version the broker validates against (1.5.5).
+`token` is a fresh per-registration random value; it is what distinguishes a
+genuine id collision (two parties, two tokens, answered with `ID-TAKEN`) from a
+reconnect of the same client (same id and token, which the broker adopts
+silently and answers with no `OPEN`).
+
+The CLI resolves the omitted parts of `connection.server` to the same defaults a
+PeerJS client applies, except `secure`, which a browser client takes from the
+page it was served over and the CLI has no page for:
+
+| Field | Default |
+| ----- | ------- |
+| `port` | 443 when `secure`, 80 otherwise |
+| `path` | `/` |
+| `key` | `peerjs` |
+| `secure` | `true` |
+
+The server stamps `src` itself from the connecting client's id, so an outbound
+frame carries only `type`, `payload`, and `dst`. Heartbeats (`HEARTBEAT`, no
+payload) go up every 5 s. The broker neither queues nor reports an undeliverable
+`OFFER` for a peer that has not registered yet, so the dialer re-offers on a
+timer until it is answered rather than waiting for a signal that never comes.
+
+Message types acted on: `OPEN`, `OFFER`, `ANSWER`, `CANDIDATE`, `LEAVE`,
+`EXPIRE`, `ERROR`, `ID-TAKEN`, `INVALID-KEY`. Two of them carry operator
+meaning: `ID-TAKEN` is the symmetric-role misconfiguration (both parties set the
+same `role`), and an `ERROR` whose payload names an invalid key is the wrong
+`server.key`.
+
+## Negotiation envelope
+
+- **`OFFER`** payload: the SDP under `sdp`, a `type` of `data`, a
+  `connectionId`, and the DataConnection's `metadata`, `label`, `reliable`, and
+  `serialization`. `serialization` is load-bearing rather than a preference: the
+  receiving PeerJS peer selects its DataConnection subclass from it, so a
+  mismatch is a protocol break. It is `binary` (BinaryPack).
+- **`ANSWER`** payload: `sdp`, `type`, and `connectionId` only -- no `label`,
+  `reliable`, or `serialization`.
+- **`CANDIDATE`** payload: the candidate object under `candidate`, plus `type`
+  and `connectionId`.
+
+The `connectionId` is PeerJS's `dc_<random>` DataConnection id. A party echoes
+the id it adopted from an offer on every frame it sends afterwards, so an
+adopted id is bounded: at most 64 characters from `[A-Za-z0-9_-]`. An offered id
+outside that shape is not a PeerJS peer's and is ignored, the receiver keeping
+the id it generated.
+
+Candidates must be queued until this side's own description has been put on the
+broker. Both stacks fire candidates during `setLocalDescription`, before the
+description can have reached the broker, and a PeerJS peer discards a candidate
+it cannot yet apply -- silently, from the sender's side.
+
+## Framing
+
+PeerJS's chunking is a convention inside BinaryPack messages, not a protocol of
+its own. Each datagram is a BinaryPack-packed object; a truthy `__peerData`
+marks it as either a chunk envelope or the close sentinel.
+
+- A chunk envelope carries the message id (`__peerData`, starting at 1 and
+  incrementing per logical message), the chunk index, the chunk bytes, and the
+  total chunk count. Chunks accumulate by id until the count matches the total.
+- The chunking threshold is 16300 bytes, well under the SCTP ceiling.
+- The browser delivers an assembled chunked frame as a `Uint8Array` and an
+  unchunked one as an `ArrayBuffer`; a consumer must normalize both.
+
+The inbound path is bounded before anything is reassembled --
+`MAX_WEBRTC_FRAME_BYTES` and the structural scan that goes with it are specified
+in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#webrtc-data-channel-inbound-bound).
+
+## The clean close
+
+The close sentinel is a `__peerData` close object sent through the same
+reliable, ordered channel, which necessarily places it behind every frame
+already handed to `send`. The *peer* closes on receipt.
+
+A sender that stays alive is done at that point: PeerJS's own clean close emits
+the sentinel and returns without tearing anything down, which is what the web
+app does. A CLI process cannot leave the connection standing, so it has one more
+obligation, and it is the delivery guarantee rather than hygiene:
+
+1. Wait until the peer has ACKNOWLEDGED every byte already handed to the
+   channel, then
+2. send the sentinel, wait until it has been TRANSMITTED (not acknowledged -- a
+   peer closes on reading it and stops acknowledging at exactly that point), and
+   only then tear down.
+
+The condition in step 1 is the SCTP association's send and unacknowledged queues
+both being empty. It is deliberately not the channel's `bufferedAmount`: that
+counter reaches zero while chunks are still unacknowledged, and a close gated on
+it loses them -- measured at roughly one frame in three over a loopback channel
+with no packet loss at all. This is the acknowledgement the flushing-close half
+of the delivery contract requires; "flush the local buffer" is not sufficient on
+this transport (see
+[COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown)).
+
+Both waits also end when there is no live peer left to drain to, so a partner
+that crashed produces a teardown rather than a wait as long as the ceiling.
+
+## ICE
+
+A configured `iceServers` list REPLACES the built-in STUN default rather than
+adding to it, which is what makes a deliberately configured server list the list
+actually used. An empty or absent list means "use the default"; it does not mean
+"no STUN". The consequences for an operator -- the default that applies when
+nothing is configured, what it discloses, and the unreachable-entry idiom for
+gathering host candidates only -- are in [CLI.md](../CLI.md#webrtc-exchanges).
+
+## Application-layer encryption
+
+The `webrtc` channel carries `request_encryption: false`: a data channel is
+end-to-end confidential under DTLS against the signaling server and any relay,
+so the application-layer AEAD wraps nothing the transport has not already
+protected, and the web peer refuses a partner that requests it. The rationale
+and the one case that would change it are in
+[CHANNEL_SECURITY.md](CHANNEL_SECURITY.md).
+
+## Budgets
+
+Every value below is a ceiling, not a wait: each returns as soon as its
+condition holds.
+
+| Budget | Default | What it bounds |
+| ------ | ------- | -------------- |
+| Broker registration | 30 s | Opening the signaling socket and receiving `OPEN` |
+| Rendezvous | 10 min | Both parties finding each other; human-timescale, because one operator may start well before the other |
+| Offer retry interval | 1 s | How often the dialer re-offers while unanswered |
+| Channel open | 30 s | The data channel opening once both descriptions are exchanged; reaching it means the peer is present but no candidate pair worked |
+| Parked receive | 1 h | Peer silence on an open channel; it bounds the peer's single-threaded PSI compute, which sends no keepalive while it runs |
+| Close drain | 5 min | The acknowledgement wait above, sized from the largest admissible frame and the measured send rate |
+| Sentinel hand-off | 2 s | Getting the close sentinel itself onto the wire |
+
+`connection.options.peer_timeout_ms`, when set, replaces both the rendezvous and
+the parked-receive budgets: on this channel the documented "total wait for the
+partner" is two waits, one before the channel exists and one after.
+
+Two bounds are memory rather than time, both on inbound signaling: a signaling
+frame is refused above 256 KiB before it is parsed, and at most 128 remote
+candidates are held while this side's description is not yet applied.
+
+## See also
+
+- [PROTOCOL.md](PROTOCOL.md#webrtc-rendezvous-peer-id-derivation) - the
+  normative rendezvous peer-id derivation both implementations reproduce.
+- [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#webrtc-data-channel-inbound-bound) -
+  the inbound reassembly bound and the AEAD envelope.
+- [COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown) - the
+  delivery contract every channel owes.
+- [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md) - why `peerjs` and `werift` are
+  exact-pinned, the behavioural premises they rest on, and how to re-verify them.
+- [cli-webrtc-stack.md](../notes/cli-webrtc-stack.md) - the library decision and
+  the alternatives weighed.

@@ -4,17 +4,16 @@ title: "The CLI WebRTC Stack"
 
 # The CLI WebRTC stack: werift, driven directly
 
-*Status: decided, not built. This note records the Node WebRTC library and the
+*Status: decided and built. This note records the Node WebRTC library and the
 integration architecture chosen for the CLI's WebRTC transport, the validation
 spike that settled them, the alternatives weighed and declined, and the
-constraints and known costs the transport implementation inherits. Nothing here
-is normative: the rendezvous derivation the CLI must reproduce is specified in
+constraints and known costs the transport carries. Nothing here is normative:
+the wire the transport speaks is specified in
+[WEBRTC_TRANSPORT.md](../spec/WEBRTC_TRANSPORT.md), the rendezvous derivation in
 [PROTOCOL.md](../spec/PROTOCOL.md#webrtc-rendezvous-peer-id-derivation), and the
-delivery guarantee its close must honor is in
-[COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown). No run
-path implements a CLI WebRTC exchange: the CLI refuses a `ws`/`wss` URL as a
-usage error and its protocol runner is type-narrowed to the `sftp` and
-`filedrop` channels. See [docs/notes/README.md](README.md).*
+delivery guarantee its close must honor in
+[COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown). See
+[docs/notes/README.md](README.md).*
 
 The web application conducts peer-to-peer WebRTC exchanges through PeerJS.
 Letting the CLI take part in those exchanges needs a Node WebRTC library, and
@@ -192,46 +191,21 @@ production implementation at a multiple of it.
 
 ## The PeerJS wire the CLI speaks
 
-These are properties of PeerJS 1.5.5 and the vendored broker, measured on the
-wire, recorded here because the transport implementation has to match them
-exactly and they are not psilink's own protocol to specify.
+The wire itself -- the broker socket, the OFFER/ANSWER/CANDIDATE envelopes, the
+BinaryPack chunk framing, and the close sentinel -- is specified normatively in
+[WEBRTC_TRANSPORT.md](../spec/WEBRTC_TRANSPORT.md). It is not psilink's protocol
+to define, but two implementations have to match it exactly, which is what makes
+it spec material rather than a note's.
 
-**Broker socket.** The client connects to
-`<ws-or-wss>://<host>:<port><path>peerjs?key=<key>&id=<id>&token=<token>&version=1.5.5`.
-The server stamps `src` itself from the connecting client's id, so an outbound
-frame carries only `type`, `payload`, and `dst`. Heartbeats go up every five
-seconds, the cadence the web rendezvous already pins.
-
-**Negotiation envelope.** The dialer's `OFFER` payload carries the SDP, a
-`type` of `data`, a `connectionId`, and the `metadata`, `label`, `reliable`, and
-`serialization` of the DataConnection. The `ANSWER` payload carries the SDP,
-`type`, and `connectionId` only -- no `label`, `reliable`, or `serialization`.
-A `CANDIDATE` payload carries the candidate object, `type`, and `connectionId`.
-The `serialization` field on the offer is load-bearing: the receiving PeerJS
-peer uses it to select the DataConnection subclass, so a mismatch there is a
-protocol break rather than a preference.
-
-**Framing.** PeerJS's chunking is a convention inside BinaryPack messages rather
-than a protocol of its own. Each chunk is a BinaryPack-packed object carrying a
-`__peerData` message id, the chunk index, the chunk bytes, and the total count,
-with the id starting at 1 and incrementing per logical message; the chunking
-threshold is 16300 bytes, well under the SCTP ceiling. On receive, a truthy
-`__peerData` means either a chunk or the close sentinel, and chunks accumulate
-by id until the count matches the total. The browser delivers an assembled
-chunked frame as a `Uint8Array` and an unchunked one as an `ArrayBuffer`, so
-anything consuming this must normalize both.
-
-**The clean close is a sentinel, not a buffer flush.** This is the mechanism by
-which the CLI meets the flushing-close half of the delivery contract in
-[COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown), and it is
-worth stating precisely because the contract's wording invites a drain loop.
-PeerJS's clean close sends a `__peerData` close object through the same reliable
-ordered channel and returns without tearing anything down; the *peer* closes on
-receipt, which SCTP ordering necessarily places behind every frame already
-handed to `send()`. The web app's close is exactly that call. A direct-werift
-implementation therefore gets the flushing close by emitting the same sentinel,
-and does not need to consult `bufferedAmount` at all -- which is fortunate,
-given what `bufferedAmount` reports (below).
+One thing about it belongs here rather than there, because it is a decision
+rather than a fact: the clean close is a sentinel, not a buffer flush, and the
+spike measured what that costs a party that cannot stay alive. PeerJS's clean
+close sends a `__peerData` close object through the same reliable ordered channel
+and returns without tearing anything down; the *peer* closes on receipt, which
+SCTP ordering necessarily places behind every frame already handed to `send()`.
+A browser tab can stop there. A CLI process cannot -- it exits -- so it has to
+wait for the peer to acknowledge the data first, and specifically not on
+`bufferedAmount` (below).
 
 ## Constraints the transport inherits
 
@@ -251,16 +225,16 @@ The maintainer has ruled the default acceptable as the fallback for an
 operator who configures no servers of their own: it is what lets an exchange
 traverse NAT for operators without the means to run their own STUN server, and
 what it discloses is connection metadata -- the host's public IP and the fact
-of a WebRTC session -- never exchange content. What the transport still owes
-is the narrower property that a deliberately configured server list is the
-list actually used. The spike did not test a *non-empty* `iceServers` list, so
-the transport work's first measurement is whether an explicit list replaces
-the built-in default or merely adds to it. If it replaces it, nothing more is
-needed; if it adds, a vendored patch or an upstream fix covers the
-configured-servers case. Separately and optionally, an upstream issue
-proposing that an empty or undefined list mean "no STUN" (an honest
-host-candidates-only mode for VPN or LAN deployments) is worth opening only if
-a compelling case for that mode emerges.
+of a WebRTC session -- never exchange content. The narrower property the transport
+owed on top of that -- that a deliberately configured server list is the list
+actually used -- was measured after this note was written: a non-empty list
+REPLACES the built-in default rather than adding to it, so nothing further was
+needed (the premise and its check are in
+[DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md)). Separately and optionally, an
+upstream issue proposing that an empty or undefined list mean "no STUN" (an
+honest host-candidates-only mode for VPN or LAN deployments) is worth opening
+only if a compelling case for that mode emerges; the transport documents the
+unreachable-entry idiom in the meantime.
 
 **ICE candidates must be queued until the local description is on the broker.**
 werift begins firing candidate events during `setLocalDescription`, before the
@@ -338,8 +312,6 @@ certificate handling drags in, not by media.
 
 ## What stays open
 
-- Whether a non-empty `iceServers` list replaces werift's built-in STUN default.
-  This gates shipping, and it is the first measurement the transport work owes.
 - TURN over TCP and TLS driven against a real relay, before any deployment
   relies on relayed connectivity.
 - A throughput comparison against node-datachannel, if and only if throughput is
@@ -347,8 +319,11 @@ certificate handling drags in, not by media.
 
 ## See also
 
+- [WEBRTC_TRANSPORT.md](../spec/WEBRTC_TRANSPORT.md) -- the normative wire the
+  transport speaks: signaling envelopes, framing, the close obligation, and the
+  budgets.
 - [COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown) -- the
-  message-delivery and flushing-close contract the transport must honor.
+  message-delivery contract the transport must honor.
 - [PROTOCOL.md](../spec/PROTOCOL.md#webrtc-rendezvous-peer-id-derivation) -- the
   normative rendezvous peer-id derivation the CLI must reproduce to meet a web
   peer.
