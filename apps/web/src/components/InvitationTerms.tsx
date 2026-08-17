@@ -27,7 +27,11 @@ import { ColumnChips } from "@components/ColumnChips";
 
 import type { ReactNode, Ref } from "react";
 
-import type { InvitationKeySummary, LinkageTerms } from "@psilink/core";
+import type {
+  ConnectionEndpoint,
+  InvitationKeySummary,
+  LinkageTerms,
+} from "@psilink/core";
 
 function yesNo(value: boolean): string {
   return value ? "Yes" : "No";
@@ -532,6 +536,8 @@ export function InvitationTerms({
   linkageTerms,
   expires,
   disclosedPayloadColumns,
+  inviterRetainsFiles,
+  connectionEndpoint,
   outboundColumns,
   perspective = "review",
   headingOrder = 2,
@@ -548,6 +554,22 @@ export function InvitationTerms({
    * authored `payload.send`; absent for the inviter's pre-mint "proposing"
    * preview and older tokens, which fall back to `payload.send`. */
   disclosedPayloadColumns?: Array<string>;
+  /** The invitation's retain-mode declaration (its `inviterRetainsFiles`): the
+   * inviter stating that its exchange keeps every file it writes rather than
+   * deleting each one once it has been read. Rendered as a consent fact under
+   * "What the exchange produces"; nothing is rendered when it is false or absent,
+   * neither of which is a claim that files are cleaned up. Passed by the acceptor
+   * screen from the decoded token; omitted by the inviter's own preview, whose
+   * mode is its own choice rather than a partner's disclosure. */
+  inviterRetainsFiles?: boolean;
+  /** The invitation's credential-free connection endpoint, passed by the acceptor
+   * screen from the decoded token. Read for its SHAPE alone: an endpoint carrying
+   * the split inbound/outbound directory pair requires retain mode of any
+   * connection built from it, so it states the retention above even where the
+   * token declares nothing -- otherwise a party seeded into retain mode from the
+   * endpoint would consent to a permanent transcript with nothing said. Nothing
+   * else here reads it, and the inviter's own preview omits it. */
+  connectionEndpoint?: ConnectionEndpoint;
   /** This viewer's OWN outbound disclosure: the columns it will send to its
    * partner for matched records. Distinct from {@link disclosedPayloadColumns}
    * (what the INVITER sends). Rendered as a count and then chips in the
@@ -600,6 +622,8 @@ export function InvitationTerms({
     linkageTerms,
     expires,
     disclosedPayloadColumns,
+    inviterRetainsFiles,
+    connectionEndpoint,
   });
   // A count of the columns the inviter requests FROM the acceptor
   // (summary.payload.receive) -- the acceptor's own data egress. A count, not the
@@ -1042,11 +1066,12 @@ export function InvitationTerms({
 
       {/* Direction tier -- WHAT THE EXCHANGE PRODUCES: the matching method (what the
           result reveals -- identifiers or a count only) and result sharing (who
-          receives the result). Slimmed to those two facts -- the AC's produce pair --
-          with the matching mechanics (linkage strategy, matching keys) split into
-          their own "How records are matched" tier below, so this group answers the
-          single question "what does the exchange reveal, and to whom" rather than
-          overloading three unlike concerns. */}
+          receives the result), the AC's produce pair, plus the transcript a
+          declared retain mode leaves behind, which is the same question asked of
+          what outlives the run. The matching mechanics (linkage strategy, matching
+          keys) are split into their own "How records are matched" tier below, so
+          this group answers the single question "what does the exchange reveal,
+          and to whom" rather than overloading unlike concerns. */}
       <TermsTier
         heading="What the exchange produces"
         headingOrder={tierHeadingOrder}
@@ -1188,6 +1213,31 @@ export function InvitationTerms({
             </>
           )}
         </Term>
+
+        {/* What the run LEAVES BEHIND, the third thing this tier's exchange
+            produces: under retain mode nothing is deleted and the rendezvous
+            location becomes a permanent transcript. It sits always-visible with
+            the other two produce facts by the same placement rule the psi-c
+            headline takes -- it is a disclosure an acceptor could act on, and it
+            is the one fact here that outlives the run, so a reader must not have
+            to expand for it. Rendered wherever the invitation discloses the mode
+            -- declared, or entailed by a split-directory endpoint an acceptor is
+            seeded from -- and nothing where it discloses neither: an invitation
+            declaring delete mode and one declaring nothing render alike, since
+            neither is a cleanup this transport promises
+            (`CONSENT_FACTS.retainedFiles` carries why). The sentence is the
+            shared copy the CLI accept prompt renders, so the two surfaces cannot
+            word one disclosure two ways. */}
+        {summary.disclosesRetainedFiles && (
+          <Term label="Exchange files">
+            <Text size="sm">
+              Kept as a permanent transcript, not deleted after the run.
+            </Text>
+            <Text size="xs" c="dimmed">
+              {CONSENT_FACTS.retainedFiles.note}
+            </Text>
+          </Term>
+        )}
       </TermsTier>
 
       <CondensableDetails condensed={condensed}>

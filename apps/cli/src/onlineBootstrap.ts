@@ -1,6 +1,7 @@
 import type { Arguments } from "yargs";
 
 import {
+  endpointRequiresRetainedFiles,
   getLogger,
   loadCSVFile,
   prepareForExchange,
@@ -60,6 +61,11 @@ export type ResolvedDataSpec = Omit<ExchangeSpec, "connection">;
 // endpoint needs the same trio. Seeding it makes the written connection block a
 // runnable split-exchange starting point rather than one the operator must
 // remember to complete before `psilink exchange` would validate.
+//
+// Which endpoints get it is core's `endpointRequiresRetainedFiles`, the same
+// predicate the acceptance display states the retention on, so an endpoint that
+// puts this party in retain mode is never one the consent prompt was silent
+// about.
 const SPLIT_SEED_OPTIONS: FileSyncOptions = {
   retainFiles: true,
   locklessRendezvous: true,
@@ -144,7 +150,7 @@ export function connectionFromEndpoint(
 
   switch (endpoint.channel) {
     case "sftp": {
-      if (endpoint.inboundPath !== undefined) {
+      if (endpointRequiresRetainedFiles(endpoint)) {
         // Split-directory endpoint: mirror-swap the inviter's pair (inviter's
         // outbound -> this acceptor's inbound, inviter's inbound -> outbound).
         const connection: SFTPConnectionConfig = {
@@ -176,7 +182,7 @@ export function connectionFromEndpoint(
       return { connection, seeded: true };
     }
     case "filedrop": {
-      if (endpoint.inboundPath !== undefined) {
+      if (endpointRequiresRetainedFiles(endpoint)) {
         // Split-directory endpoint: mirror-swap the inviter's pair (see the sftp
         // branch). filedrop carries no credentials, so no placeholder is needed.
         const connection: FileDropConnectionConfig = {
@@ -297,11 +303,10 @@ export function applyEndpointSplitDirectories(
   urlConnection: RunnableConnectionConfig,
   endpoint: ConnectionEndpoint | undefined,
 ): EndpointSplitMerge {
-  if (
-    endpoint === undefined ||
-    endpoint.channel === "webrtc" ||
-    endpoint.inboundPath === undefined
-  )
+  // The undefined half is spelled out rather than left to the predicate (which
+  // answers false for it too) so the endpoint stays narrowed for the delegation
+  // below; the shape test itself is the predicate's alone.
+  if (endpoint === undefined || !endpointRequiresRetainedFiles(endpoint))
     return { connection: urlConnection, appliedSplitDirectories: false };
 
   // connectionFromEndpoint performs the one mirror swap; take only its swapped

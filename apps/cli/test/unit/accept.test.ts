@@ -1971,6 +1971,77 @@ test("displayInvitation: a proposed setting the run does not apply is marked, no
   );
 });
 
+test("displayInvitation: the retain line is printed at both decision blocks, and only where retention is disclosed", () => {
+  const log = getLogger("accept-display-retain-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  const RETAIN_LABEL = "  exchange files (enforced): ";
+
+  // The declaration is a decision fact: what outlives the run is exactly what an
+  // operator must have in front of them when the y/N question is asked, and the
+  // terms are far longer than a screen, so it prints at BOTH decision blocks --
+  // heading the terms and again above the prompt -- like every other fact there.
+  const retaining = renderDisplayInvitation(log, {
+    ...base,
+    inviterRetainsFiles: true,
+  });
+  const retainLines = retaining
+    .split("\n")
+    .filter((line) => line.startsWith(RETAIN_LABEL));
+  expect(retainLines).toHaveLength(2);
+  expect(retainLines[0]).toBe(
+    `${RETAIN_LABEL}kept as a permanent transcript, not deleted after the run`,
+  );
+  expect(retaining).toContain(`    ${CONSENT_FACTS.retainedFiles.note}`);
+
+  // Neither absence renders anything, and the two are not alike by accident: an
+  // invitation minted before the field existed made no claim, and one declaring
+  // delete mode is claiming a cleanup this transport does not promise (a run
+  // killed outright, or one failing after the handshake, leaves files in either
+  // mode). Both would mislead as a stated fact, so both print nothing.
+  for (const declaration of [{}, { inviterRetainsFiles: false }]) {
+    const rendered = renderDisplayInvitation(log, { ...base, ...declaration });
+    expect(rendered).not.toContain("exchange files");
+    expect(rendered).not.toContain(CONSENT_FACTS.retainedFiles.note);
+  }
+});
+
+test("displayInvitation: a split-directory endpoint states the retention with no declaration", () => {
+  // The seeded sub-case: this accept builds its connection from the endpoint and
+  // is put in retain mode by its shape (a split pair cannot be configured
+  // without it), so a prompt gated on the declaration alone would take consent to
+  // a permanent transcript in silence. Both the seeding and this line read
+  // core's endpointRequiresRetainedFiles, so the endpoint that seeds the mode is
+  // the endpoint that states it.
+  const log = getLogger("accept-display-retain-endpoint-test");
+  log.setLevel("silent");
+  const split: ConnectionEndpoint = {
+    channel: "filedrop",
+    inboundPath: "/mnt/share/in",
+    outboundPath: "/mnt/share/out",
+  };
+  const rendered = renderDisplayInvitation(log, sampleToken(FUTURE(), split));
+  expect(rendered).toContain(
+    "  exchange files (enforced): kept as a permanent transcript, not deleted " +
+      "after the run",
+  );
+  expect(rendered).toContain(`    ${CONSENT_FACTS.retainedFiles.note}`);
+
+  // And the shape test does not widen to "carries an endpoint": a single shared
+  // directory seeds no options, and its acceptor sets its own mode, so an
+  // invitation naming one and declaring nothing states nothing here.
+  const shared: ConnectionEndpoint = {
+    channel: "filedrop",
+    path: "/mnt/share",
+  };
+  const sharedRendered = renderDisplayInvitation(
+    log,
+    sampleToken(FUTURE(), shared),
+  );
+  expect(sharedRendered).not.toContain("exchange files");
+  expect(sharedRendered).not.toContain(CONSENT_FACTS.retainedFiles.note);
+});
+
 test("displayInvitation: every classified fact is marked, and carries core's caveat verbatim", () => {
   // An acceptor meets two unlike kinds of fact here: ones the exchange holds
   // itself, and ones that are only what the inviting party declared. Reading a
@@ -2007,7 +2078,15 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
   // `psi` invitation raises: a table entry the renderer never reaches is exactly
   // what this test exists to catch, so the tier has to be rendered here rather than
   // exempted from the sweep.
-  const rendered = `${acceptorWithheld}\n${inviterWithheld}\n${renderAppliedCountOnlyFacts()}`;
+  //
+  // The retain declaration is the fourth, and for the same reason one step further
+  // out: it is carried on the TOKEN rather than in the terms, so no variation of
+  // `output`, `payload`, or `algorithm` above can raise its caveat.
+  const retaining = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    inviterRetainsFiles: true,
+  });
+  const rendered = `${acceptorWithheld}\n${inviterWithheld}\n${renderAppliedCountOnlyFacts()}\n${retaining}`;
 
   // The whole table, rather than a list restated here: a caveat this renderer
   // authored for itself instead of reading is absent from the rendering and fails,
@@ -2051,6 +2130,12 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
   );
   expect(rendered).toContain(
     "  allowed-character patterns (your partner's word):",
+  );
+  // The mode agreement is what the run holds, so the marker is the enforced one;
+  // what becomes of the transcript afterwards rides the caveat swept above.
+  expect(retaining).toContain(
+    "  exchange files (enforced): kept as a permanent transcript, not deleted " +
+      "after the run",
   );
 });
 
@@ -2853,6 +2938,65 @@ test("handler: an accepted sftp invitation writes no role", async () => {
     exit.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("handler: a declared inviterRetainsFiles does not reach the acceptor's own connection options", async () => {
+  // FILE_SYNC.md states this boundary as load-bearing: a declared flag on the
+  // invitation stays disclosure-only, and an accept path that reads it into the
+  // acceptor's own configuration -- even to pre-fill it -- has crossed from
+  // disclosure into adaptation. Pin it on a non-split sftp endpoint (a single
+  // `path`, no inbound/outbound pair), so the endpoint-shape seed -- which does
+  // legitimately write the retain trio, derived from the endpoint's SHAPE rather
+  // than from the declared flag -- never fires and cannot confound the assertion.
+  const endpoint: ConnectionEndpoint = {
+    channel: "sftp",
+    host: "sftp.example.org",
+    path: "/exchange",
+  };
+  const base = sampleToken(
+    new Date(Date.now() + 3_600_000).toISOString(),
+    endpoint,
+  );
+
+  async function acceptAndReadConnection(
+    token: InvitationToken,
+  ): Promise<Record<string, unknown>> {
+    const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    try {
+      const encoded = await encodeInvitation(token);
+      await acceptHandler({
+        _: [],
+        $0: "psilink",
+        args: [encoded, input],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+      expect(exit).not.toHaveBeenCalled();
+      const raw = fs.readFileSync(configFile, "utf8");
+      const written = YAML.parse(raw) as {
+        connection: Record<string, unknown>;
+      };
+      return written.connection;
+    } finally {
+      exit.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  const declaring = await acceptAndReadConnection({
+    ...base,
+    inviterRetainsFiles: true,
+  });
+  const silent = await acceptAndReadConnection(base);
+
+  expect(Object.keys(declaring)).not.toContain("options");
+  expect(declaring).toEqual(silent);
 });
 
 test("handler: without --consent-to-terms the prompt runs and a decline writes no files", async () => {

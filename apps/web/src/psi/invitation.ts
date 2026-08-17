@@ -411,6 +411,19 @@ export async function generateInvitation(params: {
    * {@link ConnectionEndpointRequest}).
    */
   connectionEndpoint?: ConnectionEndpointRequest;
+  /**
+   * Whether the exchange this invitation is for runs in retain mode -- the
+   * inviter's own `retain_files`, under which nothing is deleted and the
+   * rendezvous location becomes a permanent transcript. Carried on the token as
+   * `inviterRetainsFiles` so the partner's acceptance display states it before
+   * they consent; a declaration only, applied by nothing on the accept side.
+   *
+   * Passed only for a file-sync exchange whose options the caller has resolved.
+   * Omitted (or false) declares nothing rather than declaring delete mode, so a
+   * webrtc mint -- a channel with no retain mode -- leaves it alone; the token
+   * schema refuses the pair outright.
+   */
+  retainsFiles?: boolean;
 }): Promise<GeneratedInvitation> {
   const {
     inviterName,
@@ -419,6 +432,7 @@ export async function generateInvitation(params: {
     location,
     lifetimeSeconds = INVITATION_LIFETIME_SECONDS,
     connectionEndpoint = { channel: "webrtc" },
+    retainsFiles = false,
   } = params;
 
   // Exactly one input source: a browser File to parse, or the console's
@@ -611,6 +625,7 @@ export async function generateInvitation(params: {
     expires,
     connectionEndpoint: resolveConnectionEndpoint(connectionEndpoint, location),
     disclosedPayloadColumns,
+    ...(retainsFiles ? { inviterRetainsFiles: true } : {}),
   };
 
   // The authored standardization is returned as-is for the inviter's own exchange;

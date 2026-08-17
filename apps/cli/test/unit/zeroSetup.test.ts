@@ -10,8 +10,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import yargs, { type Arguments } from "yargs";
-import { getLogger, sanitizeErrorForDisplay, UsageError } from "@psilink/core";
-import type { SFTPConnectionConfig } from "@psilink/core";
+import {
+  CONSENT_FACTS,
+  getLogger,
+  sanitizeErrorForDisplay,
+  UsageError,
+} from "@psilink/core";
+import type {
+  FileDropConnectionConfig,
+  SFTPConnectionConfig,
+} from "@psilink/core";
 import {
   builder,
   channelFromURL,
@@ -710,6 +718,70 @@ test("handler: zero-setup surfaces the single-pass disclosure note at selection"
       "log-level": "info",
     } as unknown as Arguments);
     expect(stderrChunks.join("")).toContain("consented disclosure tradeoff");
+  } finally {
+    getLogger("psilink").setLevel("silent");
+    stderrSpy.mockRestore();
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: a zero-setup retain run states no consent fact about the retained files", async () => {
+  // The coupling the retainedFiles consent copy rests on, pinned rather than
+  // asserted in prose. That note tells a reader "what you send stays encrypted
+  // there", which holds only on the authenticated accept paths that render it:
+  // this one takes --retain-files too and runs its PSI frames over the bare
+  // transport, with no application-layer encryption to promise, and it renders no
+  // consent fact at all. Wiring consent facts into this path trips this test,
+  // which is the point -- the note's claim has to be re-examined first.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroretain-"));
+  const stderrChunks: string[] = [];
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write);
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  getLogger("psilink").setLevel("info");
+  let ran: FileDropConnectionConfig | undefined;
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    ran = callArgs[0] as FileDropConnectionConfig;
+    return { bootstrap: { partnerSaveIntent: false } };
+  }) as never);
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+    const drop = path.join(dir, "drop");
+    fs.mkdirSync(drop);
+    await handler({
+      _: [`file://${drop}`, input],
+      $0: "psilink",
+      "retain-files": true,
+      "config-file": path.join(dir, "psilink.yaml"),
+      "key-file": path.join(dir, ".psilink.key"),
+      identity: "Tester",
+      record: false,
+      "log-level": "info",
+    } as unknown as Arguments);
+    // The run is the retain one the note would be about: the flag reached the
+    // connection (with the trio it implies), so the silence below is the
+    // rendering's rather than a run that never entered retain mode.
+    expect(ran?.options?.retainFiles).toBe(true);
+    const emitted = stderrChunks.join("");
+    expect(emitted).not.toContain(CONSENT_FACTS.retainedFiles.note);
+    // A fragment as well as the whole sentence: a surface that wrapped or
+    // re-flowed the copy would still carry this clause, and the whole-string
+    // assertion alone would pass over it.
+    expect(emitted).not.toContain("stays where the two of you meet");
+    expect(emitted).not.toContain("exchange files (enforced)");
   } finally {
     getLogger("psilink").setLevel("silent");
     stderrSpy.mockRestore();

@@ -9,6 +9,7 @@ import {
 import { displayText } from "./utils/sanitizeForDisplay.js";
 import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
 
+import { endpointRequiresRetainedFiles } from "./config/invitation.js";
 import type { InvitationToken } from "./config/invitation.js";
 import type {
   LinkageField,
@@ -519,6 +520,33 @@ export interface InvitationSummary {
    * dates.
    */
   expires?: Displayable;
+  /**
+   * Whether the invitation discloses that its exchange keeps every file it writes
+   * -- retain mode, which leaves the rendezvous location a permanent transcript
+   * rather than deleting each file once it has been read.
+   *
+   * True on either of two grounds, of which a renderer is told only the outcome:
+   * the invitation DECLARES retain mode (`inviterRetainsFiles: true`), or its
+   * connection endpoint carries the split inbound/outbound directory pair, whose
+   * shape requires retain mode of any connection built from it
+   * ({@link endpointRequiresRetainedFiles}) -- so an acceptor seeded from such an
+   * endpoint runs in retain mode whether or not the token declared it, and a
+   * display gated on the declaration alone would leave that acceptor consenting
+   * to a permanent transcript with nothing said.
+   *
+   * A one-way flag, not the inviter's setting mirrored: false means neither
+   * ground holds -- a token declaring `inviterRetainsFiles: false`, one declaring
+   * nothing (an older token, a mint with no settled connection, or a channel with
+   * no retain mode), or the inviter's own pre-mint preview. Named for the
+   * disclosure rather than for the mode so a renderer cannot read a false as
+   * "your partner deletes the files" -- the claim the `retainedFiles` entry of
+   * `CONSENT_FACTS` records as one no surface may make. A surface therefore
+   * renders the retention fact on true and nothing on false.
+   *
+   * Derived from schema-validated values, not partner free text, so it carries no
+   * display obligation.
+   */
+  disclosesRetainedFiles: boolean;
   /**
    * The partner's advisory shared-directory locator, sanitized for display: the
    * `path` a single-directory file-drop endpoint carries. Present only for such an
@@ -1077,13 +1105,16 @@ function summarizeKey(
  * Build a display-ready {@link InvitationSummary} from an invitation's linkage
  * terms, optional expiry, and optional carried disclosed-columns subset. The
  * parameter is a structural subset of {@link InvitationToken} (its
- * `linkageTerms`, `expires`, and `disclosedPayloadColumns`), so a full decoded
- * token is accepted as-is, but so is the terms/expiry pair the exchange screen
- * carries without a token. The "columns your partner will send" line derives from
- * the carried `disclosedPayloadColumns` when present (the wire's own disclosure
- * predicate), falling back to the authored `payload.send` otherwise. Pure and
- * side-effect-free: it derives only what the terms screen renders and sanitizes
- * every partner-controlled string, so it is the single tested boundary for that
+ * `linkageTerms`, `expires`, `disclosedPayloadColumns`, `connectionEndpoint`,
+ * and `inviterRetainsFiles`), so a full decoded token is accepted as-is, but so
+ * is the terms/expiry pair the exchange screen carries without a token. The
+ * "columns your partner will send" line derives from the carried
+ * `disclosedPayloadColumns` when present (the wire's own disclosure predicate),
+ * falling back to the authored `payload.send` otherwise, and the retained-files
+ * line from the declaration or the endpoint's split-directory shape (see
+ * {@link InvitationSummary.disclosesRetainedFiles}). Pure and side-effect-free:
+ * it derives only what the terms screen renders and sanitizes every
+ * partner-controlled string, so it is the single tested boundary for that
  * escaping.
  */
 export function summarizeInvitation(
@@ -1093,6 +1124,7 @@ export function summarizeInvitation(
     | "expires"
     | "disclosedPayloadColumns"
     | "connectionEndpoint"
+    | "inviterRetainsFiles"
   >,
 ): InvitationSummary {
   const terms = source.linkageTerms;
@@ -1181,6 +1213,18 @@ export function summarizeInvitation(
     linkageKeys: terms.linkageKeys.map((key) => summarizeKey(key, fieldByName)),
     matchedFields,
     linkageFields,
+    // Narrowed to the one value a surface may state, over both grounds that put
+    // an acceptor's run in retain mode: the inviter's declaration, and an
+    // endpoint whose split-directory shape the acceptor's own connection is
+    // seeded from -- read through the very predicate that seeding reads, so a
+    // second shape test cannot drift from it. The declaration itself is
+    // three-valued -- declared retain, declared delete, nothing declared -- and
+    // only the first is a fact about the run an acceptor consents to, so the
+    // other two collapse here rather than at each renderer, where a surface could
+    // otherwise reach a "false" and word a cleanup promise around it.
+    disclosesRetainedFiles:
+      source.inviterRetainsFiles === true ||
+      endpointRequiresRetainedFiles(endpoint),
   };
 
   if (terms.legalAgreement !== undefined) {

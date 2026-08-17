@@ -129,6 +129,52 @@ describe("generateInvitation", () => {
     expect(serialized).not.toContain("private_key");
   });
 
+  test("declares retain mode on the token when the exchange runs it", async () => {
+    // The console mints the file-sync invitations, so it is where the partner's
+    // consent display gets told the exchange leaves a permanent transcript.
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: csvStream(),
+      location,
+      connectionEndpoint: { channel: "filedrop", path: "/mnt/share/drop" },
+      retainsFiles: true,
+    });
+    const token = await decodeInvitation(encoded);
+    expect(token.inviterRetainsFiles).toBe(true);
+  });
+
+  test.each([
+    { label: "delete mode", params: { retainsFiles: false } },
+    { label: "an unstated mode", params: {} },
+  ])("declares nothing for $label", async ({ params }) => {
+    // Neither is a claim that the exchange cleans up after itself, so neither
+    // reaches the token: an absent field states nothing, which is the honest
+    // answer for a webrtc mint (a channel with no retain mode) as well.
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: csvStream(),
+      location,
+      connectionEndpoint: { channel: "filedrop", path: "/mnt/share/drop" },
+      ...params,
+    });
+    const token = await decodeInvitation(encoded);
+    expect(token.inviterRetainsFiles).toBeUndefined();
+  });
+
+  test("refuses a retain declaration on the default webrtc mint", async () => {
+    // The schema's guard, reached through this seam: retain mode is a file-sync
+    // setting the webrtc channel does not have, so a caller passing the pair is
+    // refused rather than minting a token stating a mode no run could be in.
+    await expect(
+      generateInvitation({
+        inviterName: "County Health Dept",
+        file: csvStream(),
+        location,
+        retainsFiles: true,
+      }),
+    ).rejects.toThrow(/not valid for a webrtc/);
+  });
+
   test("embeds a filedrop endpoint when one is requested", async () => {
     const { encoded } = await generateInvitation({
       inviterName: "County Health Dept",

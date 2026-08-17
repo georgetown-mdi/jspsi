@@ -26,7 +26,11 @@ import { createAppMount } from "./renderApp";
 
 import type { ComponentProps } from "react";
 
-import type { LinkageStrategy, LinkageTerms } from "@psilink/core";
+import type {
+  ConnectionEndpoint,
+  LinkageStrategy,
+  LinkageTerms,
+} from "@psilink/core";
 
 // Terms with two linkage keys whose breadth differs -- an exact key and a
 // first-initial-truncated one -- plus a constrained field, payload columns, and a
@@ -136,6 +140,8 @@ function renderTerms(
     perspective?: "review" | "accepted" | "proposing";
     condensed?: boolean;
     disclosedPayloadColumns?: Array<string>;
+    inviterRetainsFiles?: boolean;
+    connectionEndpoint?: ConnectionEndpoint;
     outboundColumns?: Array<string>;
     headingOrder?: 1 | 2 | 3;
   },
@@ -145,6 +151,12 @@ function renderTerms(
       linkageTerms,
       ...(options?.perspective ? { perspective: options.perspective } : {}),
       ...(options?.condensed ? { condensed: true } : {}),
+      ...(options?.inviterRetainsFiles !== undefined
+        ? { inviterRetainsFiles: options.inviterRetainsFiles }
+        : {}),
+      ...(options?.connectionEndpoint !== undefined
+        ? { connectionEndpoint: options.connectionEndpoint }
+        : {}),
       ...(options?.headingOrder !== undefined
         ? { headingOrder: options.headingOrder }
         : {}),
@@ -880,6 +892,75 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
         ) ?? []
       ).length,
     ).toBe(1);
+  });
+});
+
+describe("InvitationTerms: the exchange's retained files", () => {
+  const PRODUCES = "What the exchange produces";
+  const RETAIN_LINE =
+    "Kept as a permanent transcript, not deleted after the run.";
+  const SPLIT_ENDPOINT: ConnectionEndpoint = {
+    channel: "filedrop",
+    inboundPath: "/mnt/share/in",
+    outboundPath: "/mnt/share/out",
+  };
+
+  test("a declared retain mode is stated in the produces tier, always-visible", async () => {
+    // The fact that outlives the run, and the one an acceptor can least undo
+    // after consenting, so it is always-visible with the other produce facts
+    // rather than an expand down in "Other details".
+    renderTerms(terms, { inviterRetainsFiles: true });
+    await expect.element(group(PRODUCES)).toBeInTheDocument();
+    expect(group(PRODUCES).element().textContent).toContain("Exchange files");
+    expect(group(PRODUCES).element().textContent).toContain(RETAIN_LINE);
+    // The caveat is core's, verbatim, so this screen and the CLI accept prompt
+    // cannot word one disclosure two ways.
+    expect(group(PRODUCES).element().textContent).toContain(
+      CONSENT_FACTS.retainedFiles.note,
+    );
+  });
+
+  test("a split-directory endpoint states it with no declaration", async () => {
+    // The seeded sub-case: an acceptor taking a split inbound/outbound endpoint
+    // is put in retain mode by its shape, whatever the token declares, so a
+    // screen reading only the declaration would take consent to a permanent
+    // transcript in silence. Same fixed copy as the declared case -- a split
+    // rendezvous runs in retain mode on both sides or not at all.
+    renderTerms(terms, { connectionEndpoint: SPLIT_ENDPOINT });
+    await expect.element(group(PRODUCES)).toBeInTheDocument();
+    expect(group(PRODUCES).element().textContent).toContain("Exchange files");
+    expect(group(PRODUCES).element().textContent).toContain(RETAIN_LINE);
+    expect(group(PRODUCES).element().textContent).toContain(
+      CONSENT_FACTS.retainedFiles.note,
+    );
+  });
+
+  // An invitation that declares delete mode and one that declares nothing render
+  // alike, and deliberately: neither is a promise that the exchange cleans up
+  // after itself (a run killed outright, or one that fails after the handshake,
+  // leaves files behind in either mode), so the screen states nothing for both.
+  // A shared-directory endpoint joins them: it seeds no mode onto the acceptor,
+  // which sets its own, so the shape test does not widen to "has an endpoint".
+  test.each([
+    { label: "an explicit false", options: { inviterRetainsFiles: false } },
+    { label: "no declaration at all", options: undefined },
+    {
+      label: "a shared-directory endpoint",
+      options: {
+        connectionEndpoint: {
+          channel: "filedrop",
+          path: "/mnt/share",
+        } as ConnectionEndpoint,
+      },
+    },
+  ])("nothing is stated for $label", async ({ options }) => {
+    renderTerms(terms, options);
+    await expect.element(group(PRODUCES)).toBeInTheDocument();
+    expect(app.container.textContent).not.toContain("Exchange files");
+    expect(app.container.textContent).not.toContain(RETAIN_LINE);
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.retainedFiles.note,
+    );
   });
 });
 

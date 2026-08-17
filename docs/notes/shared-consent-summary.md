@@ -423,9 +423,10 @@ prints the algorithm and its caveat today, is the same judgment read from the
 other end: under `psi-c` what the run discloses IS the decision, so these are the
 facts an operator answering the prompt has to have in front of them rather than
 the terms they qualify. It costs length -- the block below carries a fixed budget
-of four lines plus the acceptor's own columns, and a count-only exchange adds its
-tier to that -- and the trade is taken here and not for the single-pass note,
-because these facts ARE what the count-only decision turns on rather than a
+of four lines plus the acceptor's own columns, a retain disclosure adds roughly
+eleven wrapped lines to each printing on top of that, and a count-only exchange
+adds its tier to that -- and the trade is taken here and not for the single-pass
+note, because these facts ARE what the count-only decision turns on rather than a
 qualification of a term the block already names.
 
 ### Why the own-membership fact names the algorithm too
@@ -456,6 +457,66 @@ algorithm alone is what makes the ungate a flag flip here as well. What a
 count-only run does disclose is the tier's to state, and it already does: the
 round disclosures beside the count, and the enforced half that hands neither
 party a pairing.
+
+## A fact that outlives the run, and the negative it does not state
+
+The retain declaration is the first entry keyed on something the token carries
+rather than on a term of the exchange: the inviting party's `retain_files`, which
+makes the rendezvous location a permanent transcript instead of emptying it as each
+message is consumed. Its wire form, the mint paths that stamp it, and why a
+declared-but-never-applied flag stays inside the transport's detect-and-fail stance
+are the spec's ([FILE_SYNC.md](../spec/FILE_SYNC.md#retain-mode-declaration-on-the-token)).
+What is this table's is the classification and the copy.
+
+The basis splits, and the split is the reason the entry carries a caveat sentence
+rather than only a marker. The mode AGREEMENT is the run's: both parties advertise
+their setting in the hello and a disagreement aborts both sides before any data
+moves, so an exchange that runs at all is one both parties ran in the declared mode
+-- an acceptor cannot be walked into a transcript they did not consent to. What
+becomes of that transcript once the run ends is not the run's at all: retain mode
+deletes nothing, the location is the inviting party's, and psilink is not in the
+decision. Marking the whole line `enforced` would let the second half read as the
+first; splitting it into two entries would put two markers on one fact and invite a
+reader to weigh them against each other. So the marker states the half the run
+holds and the note carries the half it does not, which is the shape
+`partnerReceivesResult` already uses for a disclosure that happens and a use that
+is not this tool's to govern.
+
+**The negative is deliberately unstated.** A surface renders the fact where
+retention is disclosed and nothing where it is not. An invitation declaring delete
+mode, and one declaring nothing at all, render alike -- nothing -- and the two are
+alike for different reasons that land in the same place. An absent declaration has
+made no claim, so there is none to relay. A declared delete mode HAS made one, and
+it is a claim this tool cannot stand behind: delete mode deletes as a protocol
+step, not as a guarantee about the directory afterwards, and a run killed outright
+or one that fails after the handshake leaves files behind in either mode. "Your
+partner deletes the files" would be the same error the enforced marker exists to
+prevent, facing the other way -- a reassurance stated as a guarantee no check
+backs.
+
+That is why the summary carries `disclosesRetainedFiles`, a one-way flag, rather
+than the token's three-valued field. The narrowing happens once, at the summary,
+where the reasoning is recorded; a renderer handed the raw value could reach the
+`false` and word a cleanup promise around it, and no test over one surface would
+notice the other had not. Naming the flag for the disclosure rather than for the
+mode is the second half of the same move: `disclosesRetainedFiles === false` reads
+as "the invitation discloses no retention", which is true of every case it covers,
+where an `inviterRetainsFiles === false` on the display model would read as the
+claim itself.
+
+**The declaration is not the only ground.** The same flag is true where the
+invitation's connection endpoint carries a split inbound/outbound directory pair,
+whose shape the accepting side's own connection is seeded from -- and a split
+directory cannot be configured without retain mode, so that acceptor runs in retain
+mode whether or not the token said so. Deriving the display from the shape as well
+as the declaration is what keeps the two halves of one acceptance from disagreeing:
+the alternative is a party seeded into a permanent transcript by the endpoint it was
+handed while the consent line, reading only the declaration, says nothing. The shape
+test is not restated here -- the summary calls the same predicate the seeding calls
+(`endpointRequiresRetainedFiles`), because a second copy of it is a copy that can
+drift. The copy stays one fixed sentence over both grounds: a split rendezvous runs
+in retain mode on both sides or not at all, so nothing in the sentence turns on
+which ground raised it.
 
 ## Alternatives weighed
 
@@ -537,12 +598,29 @@ a second wording, which is the whole thing this shape exists to avoid. So the
 repetition is seven lines at three disclosed columns, forty-four at forty, and a
 hundred and twenty-four at a hundred and twenty; past roughly nineteen columns it
 scrolls on an eighty-by-twenty-four terminal, and the first thing to go is the
-outbound-send list, which is the acceptor's hardest-to-undo consent. That count
-comes from the operator's own file and not from the partner, so it is a limit of
-the mitigation rather than something a partner can drive. No check holds a bound
+outbound-send list, which is the acceptor's hardest-to-undo consent. Where the
+invitation also discloses retained files, the `exchange files` line adds its own
+weight: the note behind it is 726 characters, roughly eleven wrapped lines with
+its label, printed at both points the decision block appears, so the fixed
+portion grows from four lines to roughly fifteen and the point past which the
+repetition scrolls drops to roughly eight disclosed columns. That count comes
+from the operator's own file and not from the partner, so it is a limit of the
+mitigation rather than something a partner can drive. No check holds a bound
 here, because there is no bound to hold: the honest reading is that the
 repetition helps most for the ordinary handful of disclosed columns and helps
 less as that list grows.
+
+That is the same tradeoff this note declined the other way just above: the
+single-pass disclosure note is 423 characters and was kept out of the repetition
+on length grounds alone, while the retain note is over half again as long and
+prints at both points the block appears, roughly twenty-two wrapped lines the
+repetition now carries unconditionally whenever retention is disclosed. The
+retain fact earns the length the single-pass note was refused because it is a
+decision the operator makes at this exact prompt, not a qualification of a term
+the block already names -- but the length is spent regardless, and what scrolls
+away first is still the acceptor's own outbound-send list. Whether the repeated
+block should carry a shortened retain rendering instead of the full note is an
+open design question this note deliberately leaves unsettled.
 
 Only the heading above the second printing depends on the path. Without
 `--consent-to-terms` a prompt follows and the heading says so; with it nothing is
