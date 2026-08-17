@@ -81,15 +81,16 @@ function stringWeightOf(byteLen: number): number {
 }
 
 /** The charged retained cost of an `n`-record mapped-element frame under the cost
- * model: a root array, plus per record one object, two key strings, two integers.
- * This is the derivation the production budget is sized against. */
+ * model: a root array, plus per record its slot in that array, one object, the
+ * object's four declared slots, and two key strings. This is the derivation the
+ * production budget is sized against. */
 function expectedMappedCost(n: number): number {
   const perRecord =
-    WEBRTC_VALUE_WEIGHTS.object +
-    stringWeightOf("theirIndex".length) +
     WEBRTC_VALUE_WEIGHTS.scalar +
-    stringWeightOf("iteration".length) +
-    WEBRTC_VALUE_WEIGHTS.scalar;
+    WEBRTC_VALUE_WEIGHTS.object +
+    4 * WEBRTC_VALUE_WEIGHTS.scalar +
+    stringWeightOf("theirIndex".length) +
+    stringWeightOf("iteration".length);
   return WEBRTC_VALUE_WEIGHTS.array + n * perRecord;
 }
 
@@ -115,6 +116,7 @@ describe("the WebRTC inbound bound constants", () => {
       scalar: 8,
       stringBase: 16,
       stringPerByte: 2,
+      coercedKeyName: 64,
     });
   });
 });
@@ -185,17 +187,102 @@ describe("structureOverBudget: the per-value cost model", () => {
     atBoundary(new Uint8Array([0x90]), WEBRTC_VALUE_WEIGHTS.array); // fixarray(0)
   });
 
-  test("charges an integer the scalar weight", () => {
-    atBoundary(new Uint8Array([0x01]), WEBRTC_VALUE_WEIGHTS.scalar); // fixint
+  test("charges an integer the one backing slot its container reserves", () => {
+    // fixarray(1) of a fixint: the element allocates nothing of its own, so the
+    // array's base weight plus its single declared slot is the whole cost.
+    atBoundary(
+      new Uint8Array([0x91, 0x01]),
+      WEBRTC_VALUE_WEIGHTS.array + WEBRTC_VALUE_WEIGHTS.scalar,
+    );
   });
 
-  test("charges a wide number marker (double) the scalar weight", () => {
+  test("charges a wide number marker (double) the same one slot", () => {
     // double (0xcb + 8 payload bytes) is a HeapNumber at runtime but is charged
-    // the scalar slot here; this pins the documented under-count -- the wire-byte
-    // cap, not the structure budget, is the backstop for a number-heavy frame.
+    // only its container's slot here; this pins the documented under-count -- the
+    // wire-byte cap, not the structure budget, is the backstop for a number-heavy
+    // frame.
     atBoundary(
-      new Uint8Array([0xcb, 0, 0, 0, 0, 0, 0, 0, 0]),
-      WEBRTC_VALUE_WEIGHTS.scalar,
+      new Uint8Array([0x91, 0xcb, 0, 0, 0, 0, 0, 0, 0, 0]),
+      WEBRTC_VALUE_WEIGHTS.array + WEBRTC_VALUE_WEIGHTS.scalar,
+    );
+  });
+
+  test("charges a container's declared slots at its own header", () => {
+    // An array16 of 40 elements backed by 40 wire bytes: the backing store is
+    // charged from the DECLARED count at the header, so the same total is reached
+    // whether or not the scan goes on to read every element.
+    atBoundary(
+      arrayOfFixints(40),
+      WEBRTC_VALUE_WEIGHTS.array + 40 * WEBRTC_VALUE_WEIGHTS.scalar,
+    );
+  });
+
+  test("charges every ancestor's declared slots in a nest, not only the innermost", () => {
+    // Three array16 headers each declaring 40 elements, with 40 wire bytes behind
+    // the innermost. Every level reserves its own 40-slot backing store, so the
+    // charge is three arrays and 120 slots even though only the innermost level's
+    // elements are on the wire.
+    const nested = new Uint8Array([
+      0xdc,
+      0x00,
+      40,
+      0xdc,
+      0x00,
+      40,
+      ...arrayOfFixints(40),
+    ]);
+    atBoundary(
+      nested,
+      3 * WEBRTC_VALUE_WEIGHTS.array + 120 * WEBRTC_VALUE_WEIGHTS.scalar,
+    );
+  });
+
+  test("charges a non-string map key the coerced property-name weight", () => {
+    // fixmap(1) keyed by a fixint: `map[key] = value` retains the key's coerced
+    // string form as the property name, which the key's own slot does not cover.
+    atBoundary(
+      new Uint8Array([0x81, 0x07, 0x08]),
+      WEBRTC_VALUE_WEIGHTS.object +
+        2 * WEBRTC_VALUE_WEIGHTS.scalar +
+        WEBRTC_VALUE_WEIGHTS.coercedKeyName,
+    );
+  });
+
+  test("charges a string map key nothing beyond the string itself", () => {
+    // fixmap(1) keyed by "abc": the property name IS that string, already charged
+    // in full, so no coerced-name weight is added on top of it.
+    atBoundary(
+      new Uint8Array([0x81, ...fixstr("abc"), 0x08]),
+      WEBRTC_VALUE_WEIGHTS.object +
+        2 * WEBRTC_VALUE_WEIGHTS.scalar +
+        stringWeightOf(3),
+    );
+  });
+
+  test("charges every non-string value beneath a container key", () => {
+    // fixmap(1) whose key is a fixarray(2) of fixints: the key coerces to the
+    // joined string forms of the values below it, so each of them is charged a
+    // coerced-name weight as well as its slot.
+    atBoundary(
+      new Uint8Array([0x81, 0x92, 0x01, 0x02, 0x08]),
+      WEBRTC_VALUE_WEIGHTS.object +
+        2 * WEBRTC_VALUE_WEIGHTS.scalar +
+        WEBRTC_VALUE_WEIGHTS.array +
+        2 * WEBRTC_VALUE_WEIGHTS.scalar +
+        3 * WEBRTC_VALUE_WEIGHTS.coercedKeyName,
+    );
+  });
+
+  test("leaves a map's values uncharged by the coerced-name weight", () => {
+    // fixmap(1) keyed by "a" with a fixarray(2) VALUE: nothing on the value side
+    // becomes a property name, so the coerced-name weight is charged nowhere here.
+    atBoundary(
+      new Uint8Array([0x81, ...fixstr("a"), 0x92, 0x01, 0x02]),
+      WEBRTC_VALUE_WEIGHTS.object +
+        2 * WEBRTC_VALUE_WEIGHTS.scalar +
+        stringWeightOf(1) +
+        WEBRTC_VALUE_WEIGHTS.array +
+        2 * WEBRTC_VALUE_WEIGHTS.scalar,
     );
   });
 
