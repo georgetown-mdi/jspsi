@@ -200,8 +200,11 @@ export default tseslint.config(
           // startup, so a static import puts werift's ~0.85 s load on every
           // invocation -- `psilink --version` included -- for a channel most runs
           // never open. Type-only imports carry no runtime cost and are exempt.
+          // Subpaths are matched too: `werift/nonstandard` and its siblings pull
+          // the same tree in, so banning the bare specifier alone would leave the
+          // cost one import specifier away.
           selector:
-            'ImportDeclaration[source.value="werift"][importKind!="type"]',
+            'ImportDeclaration[source.value=/^werift(\\/.*)?$/][importKind!="type"]',
           message:
             'Import werift lazily (await import("werift")) rather than statically: a static import loads it on every CLI invocation, since the bundle\'s external requires all run at startup. `import type` is exempt.',
         },
