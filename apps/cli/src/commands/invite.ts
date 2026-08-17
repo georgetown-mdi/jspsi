@@ -46,6 +46,7 @@ import {
   connectionFromURL,
   type RunnableConnectionConfig,
 } from "../connectionFromUrl";
+import { withWebRTCPeerRole } from "../webrtcPeerRole";
 import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
@@ -331,9 +332,12 @@ export async function validateInvite(params: {
     // Validate the URL before the token is minted, so an unusable URL (e.g. a
     // not-yet-supported webrtc scheme, or one with no host) fails before the
     // caller can disclose the token.
-    const connection = connectionFromURL(
-      url,
-      connectionOverridesFrom(options, { peerTimeout: acceptTimeout }),
+    const connection = withWebRTCPeerRole(
+      connectionFromURL(
+        url,
+        connectionOverridesFrom(options, { peerTimeout: acceptTimeout }),
+      ),
+      "inviter",
     );
     // Only on this online path -- the offline path reports the override ignored
     // (see below). connectionFromURL has already rejected a webrtc URL, so
@@ -846,8 +850,10 @@ export async function handler(argv: Arguments): Promise<void> {
 function specWithPlaceholderConnection(
   dataSpec: ResolvedDataSpec,
 ): ExchangeSpec {
-  const connection: ConnectionConfig =
-    connectionFromEndpoint(undefined).connection;
+  const connection: ConnectionConfig = withWebRTCPeerRole(
+    connectionFromEndpoint(undefined).connection,
+    "inviter",
+  );
   return { connection, ...dataSpec };
 }
 

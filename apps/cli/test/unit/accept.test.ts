@@ -1023,6 +1023,59 @@ test("validateAccept: offline split-seed accept does not warn on --no-retain-fil
   }
 });
 
+// --- the WebRTC peer-addressing role -----------------------------------------
+
+test("validateAccept: offline stamps role: acceptor onto a seeded webrtc connection", async () => {
+  // The accepting side derives its WebRTC rendezvous peer id from the `acceptor`
+  // label, and the persisted connection block is the only place a later
+  // `psilink exchange` can learn which side it is on -- the operator never
+  // authors it.
+  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  const endpoint: ConnectionEndpoint = {
+    channel: "webrtc",
+    host: "peer.example.org",
+    path: "/psi",
+  };
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE(), endpoint));
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded, input },
+      options: testOptions(),
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offline");
+    if (ready.mode !== "offline") return;
+    if (ready.connection.channel !== "webrtc")
+      throw new Error("expected webrtc");
+    expect(ready.connection.role).toBe("acceptor");
+    // The stamp rides along with the seeded locator rather than replacing it.
+    expect(ready.connection.server.host).toBe("peer.example.org");
+    expect(ready.connection.server.path).toBe("/psi");
+  } finally {
+    fs.rmSync(input, { force: true });
+  }
+});
+
+test("validateAccept: offline leaves a non-webrtc connection without a role", async () => {
+  // `role` is a WebRTC-only field, so an sftp acceptance (here the placeholder
+  // block an endpoint-less invitation seeds) carries no such key at all.
+  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded, input },
+      options: testOptions(),
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offline");
+    if (ready.mode !== "offline") return;
+    expect(ready.connection.channel).toBe("sftp");
+    expect(Object.keys(ready.connection)).not.toContain("role");
+  } finally {
+    fs.rmSync(input, { force: true });
+  }
+});
+
 // --- reconciling a pre-existing config ---------------------------------------
 
 /** Write a config whose linkage terms agree with the invitation's by default
@@ -2715,6 +2768,87 @@ test("handler: --consent-to-terms skips the confirmation prompt and writes the c
     expect(promptConfirmMock).not.toHaveBeenCalled();
     expect(fs.existsSync(configFile)).toBe(true);
     expect(fs.existsSync(keyFile)).toBe(true);
+  } finally {
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: an accepted webrtc invitation writes role: acceptor into the config", async () => {
+  // What reaches disk is what the later `psilink exchange` reads, so assert the
+  // written file rather than the in-memory connection: the field has to survive
+  // the spec's snake_case serialization and parse back off the schema.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(new Date(Date.now() + 3_600_000).toISOString(), {
+        channel: "webrtc",
+        host: "peer.example.org",
+        path: "/psi",
+      }),
+    );
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: [encoded, input],
+      "consent-to-terms": true,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+    const raw = fs.readFileSync(configFile, "utf8");
+    const parsed = parseExchangeSpec(YAML.parse(raw));
+    expect(parsed.connection.channel).toBe("webrtc");
+    if (parsed.connection.channel !== "webrtc")
+      throw new Error("expected webrtc");
+    expect(parsed.connection.role).toBe("acceptor");
+    expect(raw).toContain("role: acceptor");
+  } finally {
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: an accepted sftp invitation writes no role", async () => {
+  // The complement of the webrtc case: `role` belongs to the WebRTC channel
+  // alone, so a file-sync acceptance's connection block carries none.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(new Date(Date.now() + 3_600_000).toISOString(), {
+        channel: "sftp",
+        host: "sftp.example.org",
+        path: "/exchange",
+      }),
+    );
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: [encoded, input],
+      "consent-to-terms": true,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+    const raw = fs.readFileSync(configFile, "utf8");
+    // Read the connection block itself: `metadata` carries a `role` of its own
+    // (the column's linkage/payload role), so a whole-file search would confuse
+    // the two.
+    const written = YAML.parse(raw) as {
+      connection: Record<string, unknown>;
+    };
+    expect(written.connection["channel"]).toBe("sftp");
+    expect(Object.keys(written.connection)).not.toContain("role");
   } finally {
     exit.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });

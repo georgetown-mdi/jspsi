@@ -50,6 +50,7 @@ import {
   connectionFromURL,
   type RunnableConnectionConfig,
 } from "../connectionFromUrl";
+import { withWebRTCPeerRole } from "../webrtcPeerRole";
 import { diffConnectionAgainstTarget } from "../reconcile";
 import {
   addCommonBootstrapOptions,
@@ -281,10 +282,11 @@ export async function validateAccept(params: {
     // online counterpart to the offline path's connectionFromEndpoint. Host,
     // port, and credentials stay the URL's. A non-split (or absent) endpoint is a
     // no-op, leaving the URL connection unchanged.
-    const { connection, appliedSplitDirectories } =
+    const { connection: seededConnection, appliedSplitDirectories } =
       options.outboundPath === undefined
         ? applyEndpointSplitDirectories(urlConnection, token.connectionEndpoint)
         : { connection: urlConnection, appliedSplitDirectories: false };
+    const connection = withWebRTCPeerRole(seededConnection, "acceptor");
     if (appliedSplitDirectories)
       log.info(
         "seeding the split inbound/outbound directories (mirror-swapped) and " +
@@ -433,7 +435,7 @@ export async function validateAccept(params: {
   return {
     mode: "offline",
     token,
-    connection,
+    connection: withWebRTCPeerRole(connection, "acceptor"),
     seeded,
     dataSpec,
     reuseExistingConfig,
