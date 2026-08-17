@@ -144,6 +144,7 @@ export {
   readRowColumn,
   CSV_LINE_BYTE_CEILING,
   CsvLineByteCeilingError,
+  CsvRowParseError,
 } from "./file";
 export type { CSVRow } from "./file";
 export {

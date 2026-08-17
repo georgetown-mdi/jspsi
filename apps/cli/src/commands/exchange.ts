@@ -6,7 +6,6 @@ import {
   parseExchangeSpec,
   describeDecodeError,
   getLogger,
-  loadCSVFile,
   prepareForExchange,
   resolveExchangeInputs,
   sanitizeErrorForDisplay,
@@ -48,9 +47,9 @@ import {
   configureLogging,
   exitWithError,
   parseOrExit,
-  openInputSource,
   singleValue,
 } from "../util/cli";
+import { loadInputRows } from "../onlineBootstrap";
 import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
@@ -664,11 +663,9 @@ export async function prepareDataset(
 ): Promise<PreparedExchange> {
   const log = getLogger("exchange");
 
-  const csvResult = await loadCSVFile(
-    openInputSource(input, { allowStdin: true }),
-  );
-  const rawRows = csvResult.data;
-  const columns = csvResult.meta.fields ?? [];
+  const { rawRows, columns } = await loadInputRows(input, {
+    allowStdin: true,
+  });
 
   // Pre-flight this run's CSV against the committed linkage terms before any
   // exchange work, the same satisfiability gate accept applies. This is the only
