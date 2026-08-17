@@ -1254,11 +1254,18 @@ export function readConfigLinkageSource(
  * that the exchange deletes its files.
  *
  * A `webrtc` connection declares nothing whatever its options say: retain mode is
- * a file-sync setting the webrtc channel does not have, which is how
- * `ConnectionConfigSchema` words its own refusal of the pair. The block is
- * unvalidated here, so that refusal has not run and this path mints from a config
- * no `psilink exchange` could run; reading the flag anyway would put a mode no
- * run of the token could be in on a partner's consent screen.
+ * a file-sync setting the webrtc channel does not have, and the channel check
+ * below is the gate that keeps it off a partner's consent screen -- not a
+ * downstream schema refusal. `ConnectionConfigSchema` does not refuse the pair: a
+ * webrtc connection's `options` parses through `SharedOptionsSchema`, which
+ * declares no `retainFiles` field, so the value is silently dropped rather than
+ * rejected, and a hand-authored config pairing `channel: webrtc` with
+ * `options: {retain_files: true}` loads successfully and runs in delete mode.
+ * What blocks the pairing at psilink's own authoring sites -- `saveConfig` and
+ * every other in-repo writer of a webrtc connection -- is the type system, not a
+ * runtime check: `WebRTCConnectionConfig.options` is typed `SharedOptions`, which
+ * has no `retainFiles` member. That protection does not reach a hand-authored
+ * file, which is what this function's own gate is for.
  */
 function readRetainFilesDeclaration(config: Record<string, unknown>): boolean {
   const connection = config["connection"];

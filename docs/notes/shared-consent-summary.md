@@ -423,9 +423,10 @@ prints the algorithm and its caveat today, is the same judgment read from the
 other end: under `psi-c` what the run discloses IS the decision, so these are the
 facts an operator answering the prompt has to have in front of them rather than
 the terms they qualify. It costs length -- the block below carries a fixed budget
-of four lines plus the acceptor's own columns, and a count-only exchange adds its
-tier to that -- and the trade is taken here and not for the single-pass note,
-because these facts ARE what the count-only decision turns on rather than a
+of four lines plus the acceptor's own columns, a retain disclosure adds roughly
+eleven wrapped lines to each printing on top of that, and a count-only exchange
+adds its tier to that -- and the trade is taken here and not for the single-pass
+note, because these facts ARE what the count-only decision turns on rather than a
 qualification of a term the block already names.
 
 ### Why the own-membership fact names the algorithm too
@@ -597,12 +598,29 @@ a second wording, which is the whole thing this shape exists to avoid. So the
 repetition is seven lines at three disclosed columns, forty-four at forty, and a
 hundred and twenty-four at a hundred and twenty; past roughly nineteen columns it
 scrolls on an eighty-by-twenty-four terminal, and the first thing to go is the
-outbound-send list, which is the acceptor's hardest-to-undo consent. That count
-comes from the operator's own file and not from the partner, so it is a limit of
-the mitigation rather than something a partner can drive. No check holds a bound
+outbound-send list, which is the acceptor's hardest-to-undo consent. Where the
+invitation also discloses retained files, the `exchange files` line adds its own
+weight: the note behind it is 726 characters, roughly eleven wrapped lines with
+its label, printed at both points the decision block appears, so the fixed
+portion grows from four lines to roughly fifteen and the point past which the
+repetition scrolls drops to roughly eight disclosed columns. That count comes
+from the operator's own file and not from the partner, so it is a limit of the
+mitigation rather than something a partner can drive. No check holds a bound
 here, because there is no bound to hold: the honest reading is that the
 repetition helps most for the ordinary handful of disclosed columns and helps
 less as that list grows.
+
+That is the same tradeoff this note declined the other way just above: the
+single-pass disclosure note is 423 characters and was kept out of the repetition
+on length grounds alone, while the retain note is over half again as long and
+prints at both points the block appears, roughly twenty-two wrapped lines the
+repetition now carries unconditionally whenever retention is disclosed. The
+retain fact earns the length the single-pass note was refused because it is a
+decision the operator makes at this exact prompt, not a qualification of a term
+the block already names -- but the length is spent regardless, and what scrolls
+away first is still the acceptor's own outbound-send list. Whether the repeated
+block should carry a shortened retain rendering instead of the full note is an
+open design question this note deliberately leaves unsettled.
 
 Only the heading above the second printing depends on the path. Without
 `--consent-to-terms` a prompt follows and the heading says so; with it nothing is

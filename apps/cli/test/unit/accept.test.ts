@@ -2940,6 +2940,65 @@ test("handler: an accepted sftp invitation writes no role", async () => {
   }
 });
 
+test("handler: a declared inviterRetainsFiles does not reach the acceptor's own connection options", async () => {
+  // FILE_SYNC.md states this boundary as load-bearing: a declared flag on the
+  // invitation stays disclosure-only, and an accept path that reads it into the
+  // acceptor's own configuration -- even to pre-fill it -- has crossed from
+  // disclosure into adaptation. Pin it on a non-split sftp endpoint (a single
+  // `path`, no inbound/outbound pair), so the endpoint-shape seed -- which does
+  // legitimately write the retain trio, derived from the endpoint's SHAPE rather
+  // than from the declared flag -- never fires and cannot confound the assertion.
+  const endpoint: ConnectionEndpoint = {
+    channel: "sftp",
+    host: "sftp.example.org",
+    path: "/exchange",
+  };
+  const base = sampleToken(
+    new Date(Date.now() + 3_600_000).toISOString(),
+    endpoint,
+  );
+
+  async function acceptAndReadConnection(
+    token: InvitationToken,
+  ): Promise<Record<string, unknown>> {
+    const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    try {
+      const encoded = await encodeInvitation(token);
+      await acceptHandler({
+        _: [],
+        $0: "psilink",
+        args: [encoded, input],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+      expect(exit).not.toHaveBeenCalled();
+      const raw = fs.readFileSync(configFile, "utf8");
+      const written = YAML.parse(raw) as {
+        connection: Record<string, unknown>;
+      };
+      return written.connection;
+    } finally {
+      exit.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  const declaring = await acceptAndReadConnection({
+    ...base,
+    inviterRetainsFiles: true,
+  });
+  const silent = await acceptAndReadConnection(base);
+
+  expect(Object.keys(declaring)).not.toContain("options");
+  expect(declaring).toEqual(silent);
+});
+
 test("handler: without --consent-to-terms the prompt runs and a decline writes no files", async () => {
   // The unchanged default: the prompt runs, and a "no" (here the mocked decline,
   // which an EOF/non-TTY stdin also produces) leaves both files unwritten.

@@ -1951,10 +1951,14 @@ test("readConfigLinkageSource reads retain mode off the connection block", () =>
 // block stays unvalidated so an unfinished config can still mint an invitation.
 //
 // The webrtc case is the one that turns on the CHANNEL rather than the value:
-// retain mode is a file-sync setting that channel does not have, which is how
-// ConnectionConfigSchema words its own refusal of the pair. That refusal never
-// runs here (the block is unvalidated), so a config no `psilink exchange` could
-// run would otherwise mint a token stating a mode no run of it could be in.
+// retain mode is a file-sync setting that channel does not have. Without this
+// function's own channel check, a config carrying `channel: webrtc` and
+// `options: {retain_files: true}` would mint a token stating a mode no run of
+// it could be in -- ConnectionConfigSchema does not catch it either way: a
+// webrtc connection's options parse through SharedOptionsSchema, which has no
+// retainFiles field, so the value is silently dropped rather than refused, and
+// this same pairing loads and runs (in delete mode) through the full config
+// loader too.
 test.each([
   ["no options block", "connection:\n  channel: sftp\n"],
   [

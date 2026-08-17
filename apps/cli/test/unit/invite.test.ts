@@ -653,12 +653,19 @@ test("validateInvite: a retain-mode config declares it on the token", async () =
 
 test("validateInvite: a webrtc config declares nothing, whatever its options say", async () => {
   // The config-as-source mint reads the connection block without validating it
-  // (an unfinished one must still mint) and emits no endpoint, so neither the
-  // ConnectionConfigSchema refusal of retain_files on webrtc nor the token
-  // schema's endpoint-paired refusal stands between this config and the wire.
-  // The reader's own channel gate is what keeps a never-runnable config from
-  // stating a mode no run of the token could be in. Hand-written YAML: saveConfig
-  // validates, and this pairing is exactly what it refuses.
+  // (an unfinished one must still mint) and emits no endpoint, so the token
+  // schema's endpoint-paired refusal -- which only fires once a webrtc endpoint
+  // is on the token -- never gets a chance to run either. The reader's own
+  // channel gate is what keeps this config from stating a mode no run of the
+  // token could be in. The file is written raw, not through saveConfig: saveConfig
+  // performs no schema validation, and ConnectionConfigSchema would not refuse
+  // this pairing anyway -- a webrtc connection's options parse through
+  // SharedOptionsSchema, which has no retainFiles field, so retain_files is
+  // silently dropped rather than rejected. What blocks this pairing at psilink's
+  // own authoring sites (saveConfig's caller included) is the type system typing
+  // WebRTCConnectionConfig.options as SharedOptions, not a runtime refusal; a
+  // hand-authored file is outside that check, which is the case this test
+  // constructs directly.
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-webrtc-"));
   tmpDirs.push(dir);
   const configPath = path.join(dir, "psilink.yaml");
