@@ -9,7 +9,7 @@ Two container images are built from this repository: the shipped CLI image
 freeze their npm tree to the committed lockfile, pin their base image by digest,
 and install one reviewed set of OS packages each. This document records what
 each pins, what holds the pin, what those installs bring into the image, and the
-two properties of a built image that are measured by running it rather than by
+three properties of a built image that are measured by running it rather than by
 reading its instructions. Why the npm dependencies themselves are exact-pinned,
 and the per-stack upgrade checklists, are in
 [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
@@ -397,13 +397,15 @@ one is reached: every `crypto.subtle` AES-GCM call supplies an external IV
 
 ## The runtime posture measured on each built image
 
-Two properties are settled by running the image `image_smoke.yaml` just built,
-not by reading the Dockerfile that produced it: which trees the container can
-write, and which files carry a setuid or setgid bit. Both are outcomes rather
-than instructions -- each is decided by base-image state and by the file modes an
-OS package arrives with as much as by anything this repository writes -- so a
-static reading of the build cannot reach either, however tightly
-`scripts/dockerfile-freeze.test.mjs` holds the instructions themselves.
+Three properties are settled by running the image `image_smoke.yaml` just
+built, not by reading the Dockerfile that produced it: which trees the
+container can write, which files carry a setuid or setgid bit, and where every
+symlink under `/app` resolves. All three are outcomes rather than
+instructions -- each is decided by base-image state and by the file modes and
+targets an OS package arrives with as much as by anything this repository
+writes -- so a static reading of the build cannot reach any of them, however
+tightly `scripts/dockerfile-freeze.test.mjs` holds the instructions
+themselves.
 
 ### The writable set
 
@@ -430,6 +432,36 @@ through the directory itself.
 Both halves are scoped to the default image. The variant carries no `USER`,
 makes no unprivileged claim, and would answer the whole measurement vacuously as
 root.
+
+### The symlink containment
+
+The writable-set walk above skips symlinks, correctly: a symlink's own mode is
+always 0777 and grants nothing, so testing it proves nothing about rewriting.
+That leaves one shape the walk cannot see: a symlink under `/app` whose target
+resolves into a tree the runtime account can write, `/work` for instance, is
+code that account can effectively rewrite without owning, or being granted
+write on, anything the walk measures. This pass closes that gap directly,
+measuring every symlink found under `/app` in the built image.
+
+Each link is resolved and sorted into one of three buckets: contained (the
+resolved path is `/app` or falls under it), escaping (the resolved path exists
+but falls outside `/app`), or dangling (the target does not resolve to a path
+that exists at all).
+
+The resolution runs `readlink -f` on each link and then checks the result with
+`[ -e ]` rather than trusting it alone -- the guard is what actually settles
+the classification. The step never changes directory, so every command runs at
+the image's `WORKDIR`, `/work`, which is empty in the ephemeral container the
+step runs in; a target that does not resolve to a real path therefore fails
+the `[ -e ]` guard regardless of what string `readlink -f` produced for it, and
+is bucketed as dangling rather than misread as an escape.
+
+Any escaping or dangling link fails the step, and the offenders -- each with
+its raw target and, where one resolved, the path it resolved to -- are printed
+so the failure is diagnosable from the job log alone.
+
+Scoped to the default image, as the writable-set measurement above is: the
+variant carries no `USER` and makes no unprivileged claim.
 
 ### The setuid and setgid inventory
 
