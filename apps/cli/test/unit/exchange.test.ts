@@ -319,6 +319,39 @@ test("throws a UsageError when config file fails schema validation", () => {
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
 });
 
+// warnOnIdentityDivergence (signingIdentityDivergence.ts) returns silently when
+// termsIdentity is absent or empty. On this path that branch is unreachable only
+// because the schema refuses both shapes below; pin the refusals directly so a
+// schema change that let either through would fail here rather than leave the
+// divergence warning silently vanishing.
+
+test("a config with no linkage_terms is refused, not silently accepted", () => {
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({ connection: minimalFiledropConfig.connection }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  expect(() => loadConfig(baseOptions())).toThrow(
+    "is not a valid exchange spec",
+  );
+});
+
+test("a config with an empty linkage_terms.identity is refused, not silently accepted", () => {
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalFiledropConfig,
+      linkageTerms: { ...minimalLinkageTerms, identity: "" },
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  expect(() => loadConfig(baseOptions())).toThrow(
+    "is not a valid exchange spec",
+  );
+});
+
 test("a schema-invalid config renders readably, not as a raw ZodError blob", () => {
   // Well-formed YAML that fails schema validation (bad channel, missing
   // linkageTerms): the embedded detail must be the describeDecodeError one-liner

@@ -126,6 +126,29 @@ test("warns when the loaded identity diverges from the run's terms identity", as
   expect(message).toContain("reject");
 });
 
+test("the warning offers the local config edit before the regeneration remedy, with the re-pin caution", async () => {
+  const identityPath = path.join(dir, "signing-identity.json");
+  saveSigningIdentity(identityPath, identity, { exclusive: true });
+  const config: SigningConfig = {
+    mode: "certificate",
+    identityFile: identityPath,
+  };
+  const warn = vi.fn();
+  await resolveSigningPersist(config, "Party A, Agency A, a@agency-a.gov", {
+    warn,
+  });
+  const message = warn.mock.calls[0]?.[0] as string;
+  // The local config edit is offered before the certificate-regeneration
+  // remedy: an operator reading top to bottom sees the cheaper fix first.
+  const editIndex = message.indexOf("a local config edit");
+  const regenerateIndex = message.indexOf("regenerate the identity");
+  expect(editIndex).toBeGreaterThan(-1);
+  expect(regenerateIndex).toBeGreaterThan(editIndex);
+  // Regeneration changes the fingerprint the partner has pinned; the caution
+  // is what keeps an operator from silently breaking that pin.
+  expect(message).toContain("coordinated re-pin");
+});
+
 test("is silent when the loaded identity matches the run's terms identity", async () => {
   const identityPath = path.join(dir, "signing-identity.json");
   saveSigningIdentity(identityPath, identity, { exclusive: true });
