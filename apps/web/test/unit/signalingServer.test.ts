@@ -1,10 +1,12 @@
 import http from "node:http";
+import https from "node:https";
 
 import { afterEach, describe, expect, test } from "vitest";
 import WebSocket from "ws";
 
 import { Realm } from "@peerjs-server/models/realm";
 import { WebSocketServer } from "@peerjs-server/services/webSocketServer/index";
+import { createLoopbackTlsCert } from "../utils/loopbackTlsCert";
 import { hardenUpgradeSurface } from "../../server/upgradeHardening";
 
 import type { AddressInfo } from "node:net";
@@ -15,7 +17,8 @@ import type { IRealm } from "@peerjs-server/models/realm";
 // pre-handshake idle timeout's exemption of an established socket, and the
 // one-socket-per-registered-client invariant a re-attach holds, alongside a
 // regression check that a normal registration still answers OPEN. These drive a
-// real http.Server + `ws` on a loopback port, the same pattern
+// real http.Server -- or, where the guard turns on which socket object the HTTP
+// layer hands out, an https.Server -- plus `ws` on a loopback port, the pattern
 // test/devServer/signalingProbe.ts uses. The per-message size cap is covered in
 // signalingPayloadBound.test.ts; the pre-101 handshake timeout in
 // signalingUpgradeTimeout.test.ts, which imports no `ws` (see the note there).
@@ -35,9 +38,11 @@ afterEach(async () => {
 });
 
 async function startSignaling(
-  opts: { preHandshakeIdleMs?: number } = {},
+  opts: { preHandshakeIdleMs?: number; tls?: boolean } = {},
 ): Promise<Signaling> {
-  const server = http.createServer();
+  const server = opts.tls
+    ? https.createServer(createLoopbackTlsCert())
+    : http.createServer();
   if (opts.preHandshakeIdleMs !== undefined) {
     hardenUpgradeSurface(server, {
       preHandshakeIdleMs: opts.preHandshakeIdleMs,
@@ -68,9 +73,9 @@ async function startSignaling(
   return { port, realm, wss };
 }
 
-function signalingUrl(port: number, id: string): string {
+function signalingUrl(port: number, id: string, secure = false): string {
   return (
-    `ws://127.0.0.1:${port}/api/peerjs` +
+    `${secure ? "wss" : "ws"}://127.0.0.1:${port}/api/peerjs` +
     `?key=peerjs&id=${id}&token=tok&version=1.5.5`
   );
 }
@@ -162,6 +167,24 @@ describe("signaling socket guards", () => {
     expect(ws.readyState).toBe(WebSocket.OPEN);
     ws.close();
   });
+
+  test.skipIf(process.platform === "win32")(
+    "an established TLS connection is not cut by the pre-handshake idle timeout",
+    async () => {
+      // Over TLS the socket `ws` releases on the 101 is the TLSSocket, not the
+      // accepted socket the bound was armed on, so a bound that stayed behind on
+      // the latter would reap this peer part-way through an exchange -- silently,
+      // and only on a deployment terminating TLS in the app.
+      const sig = await startSignaling({ preHandshakeIdleMs: 500, tls: true });
+      const ws = new WebSocket(signalingUrl(sig.port, "peer-quiet-tls", true), {
+        rejectUnauthorized: false,
+      });
+      await waitForFrame(ws, "OPEN");
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      expect(ws.readyState).toBe(WebSocket.OPEN);
+      ws.close();
+    },
+  );
 
   test("re-attaching under one id and token holds one socket, not one per attach", async () => {
     // Repeated attaches under the same credentials all resolve to the one client

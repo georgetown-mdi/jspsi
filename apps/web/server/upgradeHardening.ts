@@ -37,13 +37,13 @@ export const SIGNALING_REQUEST_TIMEOUT_MS = 15_000;
  */
 export const SIGNALING_PREHANDSHAKE_IDLE_MS = 10_000;
 
-// Per-server idle reaper, tracked so a repeated harden (a test re-hardening, a
-// hot reload) replaces rather than stacks it. Unlike closeStalledHandshake, the
-// reaper closes over its per-call idle bound, so it cannot be a single shared
-// function compared by identity.
-const idleReaperByServer = new WeakMap<
+// Per-server idle hooks, tracked so a repeated harden (a test re-hardening, a
+// hot reload) replaces rather than stacks them. Unlike closeStalledHandshake,
+// they close over their per-call idle bound, so they cannot be shared functions
+// compared by identity.
+const idleHooksByServer = new WeakMap<
   HttpServer | HttpsServer,
-  (socket: Socket) => void
+  { arm: (socket: Socket) => void; handOffToTls: (socket: Socket) => void }
 >();
 
 // The reap callback armed on each socket, so releasing the bound can also detach
@@ -84,6 +84,25 @@ function closeStalledHandshake(
 }
 
 /**
+ * A socket wrapping another, as a TLS connection wraps the accepted TCP socket.
+ * `_parent` is the only link Node exposes between the two, and Node's own timer
+ * refresh walks it, so an idle bound armed on the inner socket is kept alive by
+ * traffic on the wrapper while being invisible to every release, which sees the
+ * wrapper alone. The HTTPS tests fail if a Node release drops the link.
+ */
+type WrappingSocket = Socket & { _parent?: Socket | null };
+
+/** Clear a socket's idle bound and detach its reap callback. */
+function releaseIdleBound(socket: Socket): void {
+  socket.setTimeout(0);
+  const reapCallback = idleReapCallbackBySocket.get(socket);
+  if (reapCallback) {
+    socket.removeListener("timeout", reapCallback);
+    idleReapCallbackBySocket.delete(socket);
+  }
+}
+
+/**
  * Release the pre-request idle bound on the socket a request arrived on. The
  * bound covers the window in which the socket owes the server a request; once it
  * has delivered one, the server owns the pace of what follows, so nothing about
@@ -93,13 +112,7 @@ function closeStalledHandshake(
  * {@link closeStalledHandshake}.
  */
 function releasePreRequestIdleBound(req: IncomingMessage): void {
-  const socket = req.socket;
-  socket.setTimeout(0);
-  const reapCallback = idleReapCallbackBySocket.get(socket);
-  if (reapCallback) {
-    socket.removeListener("timeout", reapCallback);
-    idleReapCallbackBySocket.delete(socket);
-  }
+  releaseIdleBound(req.socket);
 }
 
 /**
@@ -136,17 +149,35 @@ export function hardenUpgradeSurface(
   // (see SIGNALING_PREHANDSHAKE_IDLE_MS). Replace any prior reaper so a repeated
   // call does not stack a second one.
   const idleMs = options.preHandshakeIdleMs ?? SIGNALING_PREHANDSHAKE_IDLE_MS;
-  const previousReaper = idleReaperByServer.get(server);
-  if (previousReaper) server.removeListener("connection", previousReaper);
-  const reapIdlePreHandshakeSocket = (socket: Socket): void => {
+  const previousHooks = idleHooksByServer.get(server);
+  if (previousHooks) {
+    server.removeListener("connection", previousHooks.arm);
+    server.removeListener("secureConnection", previousHooks.handOffToTls);
+  }
+  const armPreHandshakeIdleBound = (socket: Socket): void => {
     const destroyIdleSocket = (): void => {
       socket.destroy();
     };
     idleReapCallbackBySocket.set(socket, destroyIdleSocket);
     socket.setTimeout(idleMs, destroyIdleSocket);
   };
-  idleReaperByServer.set(server, reapIdlePreHandshakeSocket);
-  server.on("connection", reapIdlePreHandshakeSocket);
+  // Over TLS the bound has to ride the socket the HTTP layer hands out -- the
+  // TLSSocket, which the request hook below and `ws` on the 101 each release --
+  // so hand it over once the handshake completes. Until then the accepted socket
+  // carries the only bound covering a peer that opens a connection and never
+  // starts a handshake. Inert on a plain HTTP server, which emits no
+  // `secureConnection`.
+  const handOffIdleBoundToTlsSocket = (tlsSocket: Socket): void => {
+    const wrappedSocket = (tlsSocket as WrappingSocket)._parent;
+    if (wrappedSocket) releaseIdleBound(wrappedSocket);
+    armPreHandshakeIdleBound(tlsSocket);
+  };
+  idleHooksByServer.set(server, {
+    arm: armPreHandshakeIdleBound,
+    handOffToTls: handOffIdleBoundToTlsSocket,
+  });
+  server.on("connection", armPreHandshakeIdleBound);
+  server.on("secureConnection", handOffIdleBoundToTlsSocket);
 
   // Idempotent for the same reason the clientError wiring is: the release hook
   // holds no per-call state, so removing it first keeps a repeated harden at one.

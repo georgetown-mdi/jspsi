@@ -1,13 +1,16 @@
 import http from "node:http";
+import https from "node:https";
 import net from "node:net";
+import tls from "node:tls";
 
-import { describe, expect, test, vi } from "vitest";
+import { beforeAll, describe, expect, test, vi } from "vitest";
 
 import {
   SIGNALING_HEADERS_TIMEOUT_MS,
   SIGNALING_REQUEST_TIMEOUT_MS,
   hardenUpgradeSurface,
 } from "../../server/upgradeHardening";
+import { createLoopbackTlsCert } from "../utils/loopbackTlsCert";
 
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
@@ -288,3 +291,110 @@ describe("hardenUpgradeSurface", () => {
     }
   });
 });
+
+// Over TLS the socket the HTTP layer hands out -- to the request hook, and to
+// `ws` on the 101 -- is the TLSSocket wrapping the accepted socket, a different
+// object from the one the `connection` event delivered. A bound left on the
+// wrapped socket therefore survives every release and reaps a live connection,
+// which only an HTTPS server exercises: the plain-HTTP cases above hand out the
+// same object throughout. `apps/web/server/custom-entry.ts` builds an HttpsServer
+// whenever NITRO_SSL_CERT and NITRO_SSL_KEY are set.
+describe.skipIf(process.platform === "win32")(
+  "hardenUpgradeSurface over TLS",
+  () => {
+    const idleMs = 300;
+    let credentials: ReturnType<typeof createLoopbackTlsCert>;
+
+    beforeAll(() => {
+      credentials = createLoopbackTlsCert();
+    });
+
+    async function startHardenedTlsServer(
+      handler?: http.RequestListener,
+    ): Promise<{ server: https.Server; port: number }> {
+      const server = https.createServer(credentials, handler);
+      hardenUpgradeSurface(server, { preHandshakeIdleMs: idleMs });
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
+      );
+      return { server, port: (server.address() as AddressInfo).port };
+    }
+
+    function timeToClose(
+      socket: net.Socket,
+      budgetMs: number,
+    ): Promise<number | null> {
+      return new Promise((resolve) => {
+        const start = Date.now();
+        socket.on("close", () => resolve(Date.now() - start));
+        socket.on("error", () => {});
+        setTimeout(() => resolve(null), budgetMs);
+      });
+    }
+
+    test("does not cut a TLS connection awaiting a slow response", async () => {
+      const { server, port } = await startHardenedTlsServer((_req, res) => {
+        setTimeout(() => res.end("late"), idleMs * 4);
+      });
+      try {
+        const body = await new Promise<string>((resolve, reject) => {
+          const req = https.get(
+            {
+              host: "127.0.0.1",
+              port,
+              path: "/",
+              agent: false,
+              rejectUnauthorized: false,
+            },
+            (res) => {
+              let text = "";
+              res.setEncoding("utf8");
+              res.on("data", (chunk: string) => (text += chunk));
+              res.on("end", () => resolve(text));
+            },
+          );
+          req.on("error", reject);
+        });
+        expect(body).toBe("late");
+      } finally {
+        server.closeAllConnections();
+        server.close();
+      }
+    });
+
+    test("reaps a TLS connection that hands over no request", async () => {
+      const { server, port } = await startHardenedTlsServer((_req, res) =>
+        res.end("ok"),
+      );
+      try {
+        const closedMs = await timeToClose(
+          tls.connect({ host: "127.0.0.1", port, rejectUnauthorized: false }),
+          2_000,
+        );
+        expect(closedMs).not.toBeNull();
+        expect(closedMs).toBeLessThan(1_500);
+      } finally {
+        server.closeAllConnections();
+        server.close();
+      }
+    });
+
+    test("reaps a connection that never starts its TLS handshake", async () => {
+      // The window the wrapped socket alone can cover: no TLSSocket exists yet.
+      const { server, port } = await startHardenedTlsServer((_req, res) =>
+        res.end("ok"),
+      );
+      try {
+        const closedMs = await timeToClose(
+          net.connect(port, "127.0.0.1"),
+          2_000,
+        );
+        expect(closedMs).not.toBeNull();
+        expect(closedMs).toBeLessThan(1_500);
+      } finally {
+        server.closeAllConnections();
+        server.close();
+      }
+    });
+  },
+);
