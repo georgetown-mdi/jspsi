@@ -50,7 +50,11 @@ import {
   singlePassDisclosureNotice,
   withLinkageStrategy,
 } from "../onlineBootstrap";
-import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
+import {
+  runProtocol,
+  WEBRTC_RENDEZVOUS_SECRET_REQUIRED,
+  type ProtocolConnectionConfig,
+} from "../protocol";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import { warnOnValueConstraints } from "./valueConstraintWarnings";
 
@@ -485,9 +489,9 @@ export async function handler(argv: Arguments): Promise<void> {
     const { server, input, output } = resolved;
 
     // Warn before createConnection can throw so the user sees the flag issue even
-    // if the channel is not yet supported. The channel is derived from the URL
-    // here (pre-connection); an unknown scheme is swallowed because
-    // createConnection surfaces it below.
+    // if the channel is refused. The channel is derived from the URL here
+    // (pre-connection); an unknown scheme is swallowed because createConnection
+    // surfaces it below.
     let channel: ConnectionConfig["channel"] | undefined;
     try {
       channel = channelFromURL(server);
@@ -520,6 +524,14 @@ export async function handler(argv: Arguments): Promise<void> {
       options.pollingFrequencyMs,
       log,
     );
+
+    // A zero-setup exchange over webrtc is refused for the reason it cannot
+    // work, rather than as an unsupported channel: the two parties find each
+    // other at signaling ids derived from a shared secret, and a zero-setup
+    // exchange is defined by not having one. Raised here, before any file
+    // conflict check or dataset read, so nothing is done on the way to it.
+    if (channel === "webrtc")
+      exitWithError(log, new UsageError(WEBRTC_RENDEZVOUS_SECRET_REQUIRED), 64);
 
     // Detect a pre-existing config/key before any network activity. With --save,
     // a target that already exists is an error -- a half-finished bootstrap must

@@ -148,41 +148,136 @@ export interface BrokerConnectOptions {
 }
 
 /**
- * The error a symmetric role misconfiguration produces. The broker cannot see
+ * The message a symmetric role misconfiguration produces. The broker cannot see
  * the mistake -- from its side a second socket simply claimed a live id -- so
  * naming the likely cause is this client's job. Without it the operator sees
  * only a dropped socket and, on the other side, a dial that never completes.
+ *
+ * Short enough to survive the display boundary whole: the remedy is its last
+ * clause, so a message over the render cap loses exactly the part the operator
+ * acts on, and only at the terminal.
  */
+export const ID_TAKEN_MESSAGE =
+  "the signaling server reports this peer id is already registered. The " +
+  "usual cause is both parties running the same connection role: check the " +
+  "`role` field on each party's webrtc connection, one inviter and one " +
+  "acceptor.";
+
 function idTakenError(): ConnectionError {
-  return new ConnectionError(
-    "the signaling server reports this peer id is already registered. The " +
-      "usual cause is both parties running the same connection role: one side " +
-      "must be the inviter and the other the acceptor, and the two derive the " +
-      "same pair of rendezvous ids from the shared secret. Check the `role` " +
-      "field on each party's webrtc connection.",
-    "usage",
-  );
+  return new ConnectionError(ID_TAKEN_MESSAGE, "usage");
 }
 
-/** Build the registration URL. Never logged or interpolated: it carries the id. */
+/**
+ * The refusal a broker location that does not form a dialable address gets. It
+ * names the operator's own fields and never the value: the address carries the
+ * derived peer id, and a `path` reaching this module can be kilobytes long.
+ */
+export const BROKER_ADDRESS_REFUSED =
+  "the signaling server address is not a valid WebSocket URL; check the " +
+  "webrtc connection's `host`, `port`, and `path`";
+
+/** The refusal a registration URL naming some other authority gets. */
+export const BROKER_AUTHORITY_REFUSED =
+  "the signaling server address does not name the configured host, so nothing " +
+  "was dialed; check the webrtc connection's `host` and `path`";
+
+/**
+ * The scheme, host and port a location dials, derived by the same URL parser the
+ * WebSocket constructor will run on the finished address rather than by a
+ * hostname pattern of this module's own.
+ *
+ * `host` must be a bare authority: one contributing no userinfo, no port, and no
+ * path, query or fragment. Each of those moves or reshapes the authority --
+ * `evil@attacker.example` makes the configured name the userinfo of an
+ * attacker's host, and `broker.example/x` silently drops the configured port --
+ * so a host carrying one is refused rather than dialed. The port comes from
+ * `port` alone.
+ *
+ * @throws {ConnectionError} of kind `usage` if `host` is not a bare authority.
+ */
+function brokerAuthority(location: BrokerLocation): URL {
+  const scheme = location.secure ? "wss" : "ws";
+  let authority: URL;
+  try {
+    authority = new URL(`${scheme}://${location.host}`);
+  } catch {
+    throw new ConnectionError(BROKER_ADDRESS_REFUSED, "usage");
+  }
+  if (
+    authority.username !== "" ||
+    authority.password !== "" ||
+    authority.port !== "" ||
+    authority.pathname !== "/" ||
+    authority.search !== "" ||
+    authority.hash !== ""
+  ) {
+    throw new ConnectionError(BROKER_ADDRESS_REFUSED, "usage");
+  }
+  authority.port = String(location.port);
+  return authority;
+}
+
+/**
+ * Refuse an address that does not dial the configured broker.
+ *
+ * The string is re-parsed rather than read off the builder because this is the
+ * parse the WebSocket constructor itself performs on it. A backstop rather than
+ * the primary control -- {@link brokerAuthority} and the connection resolver
+ * refuse the shapes that can move an authority in the first place -- so what it
+ * covers is a host or path shape that slipped past both and still landed
+ * userinfo, or a different host, in the address that would be dialed.
+ *
+ * @throws {ConnectionError} of kind `usage` if the address names another host.
+ * @internal exported for testing
+ */
+export function assertDialsConfiguredBroker(
+  url: string,
+  location: BrokerLocation,
+): void {
+  const dialed = new URL(url);
+  const expected = brokerAuthority(location);
+  if (
+    dialed.host === expected.host &&
+    dialed.username === "" &&
+    dialed.password === ""
+  ) {
+    return;
+  }
+  throw new ConnectionError(BROKER_AUTHORITY_REFUSED, "usage");
+}
+
+/**
+ * Build the registration URL. Never logged or interpolated: it carries the id.
+ *
+ * The path is assigned as a pathname rather than concatenated into the address.
+ * A `path` is partner-supplied on an invitation-seeded connection, and under
+ * concatenation one beginning with `@` turns the configured host into the
+ * userinfo of a host the partner chose; assigning it percent-encodes what would
+ * otherwise re-open the authority. The `key` needs no such handling: it goes
+ * through `URLSearchParams`, which encodes the delimiters that would let it
+ * reach past its own query parameter.
+ */
 function brokerUrl(
   location: BrokerLocation,
   id: string,
   token: string,
 ): string {
-  const scheme = location.secure ? "wss" : "ws";
+  const url = brokerAuthority(location);
   // A path of "/" must not produce "//peerjs"; anything else keeps its shape and
   // gains exactly one separator.
   const base = location.path.endsWith("/")
     ? location.path.slice(0, -1)
     : location.path;
-  const query = new URLSearchParams({
+  url.pathname = `${base}/peerjs`;
+  url.search = new URLSearchParams({
     key: location.key,
     id,
     token,
     version: PEERJS_CLIENT_VERSION,
-  });
-  return `${scheme}://${location.host}:${location.port}${base}/peerjs?${query.toString()}`;
+  }).toString();
+  const dialed = url.href;
+  assertDialsConfiguredBroker(dialed, location);
+  return dialed;
 }
 
 /**
@@ -312,24 +407,21 @@ export function connectToBroker(
   } = options;
 
   return new Promise<BrokerClient>((resolve, reject) => {
+    // Built before the socket exists, so an address this module refuses opens
+    // nothing. A synchronous throw in a promise executor rejects the promise,
+    // which is what keeps the refusal's own wording -- about the field at fault
+    // -- rather than the generic one the constructor's catch below applies.
+    const address = brokerUrl(location, id, registrationToken());
     let socket: WebSocket;
     try {
-      socket = (socketFactory ?? ((url) => new WebSocket(url)))(
-        brokerUrl(location, id, registrationToken()),
-      );
+      socket = (socketFactory ?? ((url) => new WebSocket(url)))(address);
     } catch {
-      // `new WebSocket` throws a DOMException synchronously on a host or port
-      // that does not form a valid URL. Replaced rather than wrapped: it escapes
-      // this module's ConnectionError taxonomy, and its message can embed the
-      // URL (which carries the peer id), so the cause is dropped and the
-      // operator is pointed at the fields they control.
-      reject(
-        new ConnectionError(
-          "the signaling server address is not a valid WebSocket URL; check " +
-            "the webrtc connection's `host`, `port`, and `path`",
-          "usage",
-        ),
-      );
+      // A WebSocket constructor may throw synchronously on an address it will
+      // not dial. Replaced rather than wrapped: the raw error escapes this
+      // module's ConnectionError taxonomy, and its message can embed the URL
+      // (which carries the peer id), so the cause is dropped and the operator is
+      // pointed at the fields they control.
+      reject(new ConnectionError(BROKER_ADDRESS_REFUSED, "usage"));
       return;
     }
     // Registration and steady state are one socket with two phases; `opened`

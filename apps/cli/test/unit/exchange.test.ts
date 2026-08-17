@@ -647,17 +647,43 @@ test("an authentication block placed under connection is ignored", () => {
 
 // --- webrtc channel ----------------------------------------------------------
 
-test("webrtc config throws a UsageError 'not yet supported'", () => {
+test("a webrtc config loads, carrying its role and server through", () => {
   fs.writeFileSync(
     configFile,
     YAML.stringify({
-      connection: { channel: "webrtc", server: { host: "api.peerjs.com" } },
+      connection: {
+        channel: "webrtc",
+        server: { host: "peers.example.org", port: 9000, secure: false },
+        role: "inviter",
+      },
       linkageTerms: minimalLinkageTerms,
     }),
   );
-  // An unsupported channel is invalid caller config (exit 64), not exit 69.
-  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
-  expect(() => loadConfig(baseOptions())).toThrow("not yet supported");
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const result = loadConfig(baseOptions());
+  // The channel allowlist admits webrtc, and the loader hands the connection on
+  // whole: the transport reads `role` and the server block to resolve the
+  // rendezvous, so a loader that dropped either would strand the exchange.
+  expect(result.connection.channel).toBe("webrtc");
+  expect(result.connection).toMatchObject({
+    role: "inviter",
+    server: { host: "peers.example.org", port: 9000, secure: false },
+  });
+});
+
+test("a webrtc config with no role still loads; the transport refuses it", () => {
+  // The role is read at dispatch, not at load: keeping the loader out of it means
+  // one refusal, in one place, for a hand-authored config and for a saved one
+  // alike (see webRtcDialFrom in protocol.ts).
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      connection: { channel: "webrtc", server: { host: "peers.example.org" } },
+      linkageTerms: minimalLinkageTerms,
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  expect(loadConfig(baseOptions()).connection.channel).toBe("webrtc");
 });
 
 // --- token_max_age_days and load-time expiry ---------------------------------

@@ -1,5 +1,3 @@
-import { RTCPeerConnection } from "werift";
-
 import {
   ConnectionError,
   UsageError,
@@ -16,7 +14,12 @@ import type {
   BrokerMessage,
 } from "./brokerClient";
 import type { RendezvousRole, WebRTCConnectionConfig } from "@psilink/core";
-import type { RTCDataChannel, RTCIceCandidate, RTCIceServer } from "werift";
+import type {
+  RTCDataChannel,
+  RTCIceCandidate,
+  RTCIceServer,
+  RTCPeerConnection,
+} from "werift";
 
 /**
  * Negotiation: a werift `RTCPeerConnection` brought to an open data channel
@@ -240,6 +243,98 @@ export interface WebRtcPeerOptions {
 }
 
 /**
+ * PeerJS API key the vendored broker (and the public PeerJS cloud) serves under,
+ * used when the connection names none.
+ */
+export const DEFAULT_BROKER_KEY = "peerjs";
+
+/**
+ * The refusal a `server.host` whose shape could move the signaling socket gets.
+ * Names the field and the class of character rather than echoing the value: the
+ * value is partner-supplied on an invitation-seeded connection and bounded only
+ * by length, so echoing it would spend the display boundary's per-link budget
+ * the remedy needs.
+ */
+export const WEBRTC_BROKER_HOST_REFUSED =
+  "this webrtc connection's server `host` could move the signaling socket to " +
+  "another server: it must carry none of @ / ? # \\ or whitespace. Set `host` " +
+  "to the hostname alone, with the port in `port` and the mount point in `path`.";
+
+/** The refusal a `server.path` whose shape could move the signaling socket gets. */
+export const WEBRTC_BROKER_PATH_REFUSED =
+  "this webrtc connection's server `path` could move the signaling socket to " +
+  'another server: it must start with "/" and carry none of @ ? # \\ or ' +
+  "whitespace. Set `path` to the broker's mount point, such as `/` or `/psi`.";
+
+/**
+ * Refused anywhere in a `host`. Each is a delimiter the URL parser acts on: `@`
+ * closes an authority's userinfo, `/` `?` and `#` end the host, `\` folds to
+ * `/`, and whitespace either ends the parse or is stripped. None of them appears
+ * in a hostname or an IP literal.
+ */
+const HOST_AUTHORITY_DELIMITERS = /[@/?#\\]|\s/;
+
+/**
+ * Refused anywhere in a `path`, which is {@link HOST_AUTHORITY_DELIMITERS} less
+ * the separator a path is made of. A leading `/` is required separately: a value
+ * without one is not a mount point, and where it lands depends on how the
+ * address is assembled rather than on what the field means.
+ */
+const PATH_AUTHORITY_DELIMITERS = /[@?#\\]|\s/;
+
+/**
+ * Resolve a webrtc connection's `server` block into the broker location the
+ * signaling socket dials.
+ *
+ * Every default here is the one a PeerJS client applies to the same omission, so
+ * a connection block authored against a PeerJS deployment's documentation
+ * reaches the same socket from the CLI: the root path, the `peerjs` API key, and
+ * the scheme's standard port. The exception is `secure`, which a browser client
+ * infers from the page it was served over and the CLI cannot -- see
+ * {@link WebRTCServer.secure} for why an omitted value is TLS.
+ *
+ * It is also where `host` and `path` are refused for shape. Both routes to a
+ * webrtc connection pass through here -- an operator's `psilink.yaml` and the
+ * invitation endpoint an offline accept persists -- and on the second the two
+ * fields are partner-supplied, bounded by the endpoint schema only in length.
+ * The socket URL is built through the URL API downstream, which contains an
+ * injected authority on its own, but a value that could move or reshape the
+ * authority is a misconfiguration or an attack either way and is refused before
+ * anything is dialed rather than quietly re-encoded. `key` needs no equivalent:
+ * it cannot appear on an invitation endpoint (whose schema is a strict
+ * host/port/path allowlist) and it is encoded as a query parameter.
+ *
+ * @throws {UsageError} if the configured port is not a dialable 1-65535 value,
+ *   or if `host` or `path` carries a shape that could move the authority.
+ */
+export function brokerLocationFromConnection(
+  server: WebRTCConnectionConfig["server"],
+): BrokerLocation {
+  const secure = server.secure ?? true;
+  // The connection schema admits port 0 (an OS-assigned ephemeral port) because
+  // it is a legal port number; nothing listens on it, so refuse it here with the
+  // field named rather than dial `:0` and report a connect failure.
+  if (server.port !== undefined && (server.port < 1 || server.port > 65535))
+    throw new UsageError(
+      `this webrtc connection's server port (${server.port}) is not a ` +
+        "dialable port; set `port` to a value between 1 and 65535, or omit it " +
+        `to use the default (${secure ? 443 : 80})`,
+    );
+  if (HOST_AUTHORITY_DELIMITERS.test(server.host))
+    throw new UsageError(WEBRTC_BROKER_HOST_REFUSED);
+  const path = server.path ?? "/";
+  if (!path.startsWith("/") || PATH_AUTHORITY_DELIMITERS.test(path))
+    throw new UsageError(WEBRTC_BROKER_PATH_REFUSED);
+  return {
+    host: server.host,
+    port: server.port ?? (secure ? 443 : 80),
+    path,
+    key: server.key ?? DEFAULT_BROKER_KEY,
+    secure,
+  };
+}
+
+/**
  * Resolve a webrtc connection's configured `stun`/`turn` entries into the ICE
  * server list the peer connection is built with.
  *
@@ -294,6 +389,24 @@ export function buildPeerConfiguration(
     return {};
   }
   return { iceServers };
+}
+
+/**
+ * Construct werift's peer connection, loading the library at the point of use.
+ *
+ * The import is deferred rather than static because it is not free: werift and
+ * its dependency tree cost about 0.85 s to load, and the CLI bundles to a single
+ * CommonJS file whose external `require`s all run at startup -- so a static
+ * import here would put that cost on every invocation, `psilink --version`
+ * included, for a channel most runs never open. Both figures are measured on the
+ * built bundle rather than modelled; the deferral itself is held by a lint rule
+ * banning a value import of werift across `apps/cli/src` (eslint.config.mjs).
+ */
+async function defaultPeerConnection(configuration: {
+  iceServers?: Array<RTCIceServer>;
+}): Promise<RTCPeerConnection> {
+  const werift = await import("werift");
+  return new werift.RTCPeerConnection(configuration);
 }
 
 /** A fresh PeerJS-shaped DataConnection id. */
@@ -370,8 +483,7 @@ export async function openWebRtcPeerSession(
     rendezvousTimeoutMs = DEFAULT_RENDEZVOUS_TIMEOUT_MS,
     channelOpenTimeoutMs = DEFAULT_CHANNEL_OPEN_TIMEOUT_MS,
     signal,
-    peerConnectionFactory = (configuration) =>
-      new RTCPeerConnection(configuration),
+    peerConnectionFactory,
     socketFactory,
   } = options;
 
@@ -382,7 +494,11 @@ export async function openWebRtcPeerSession(
   const localId = role === "inviter" ? inviterId : acceptorId;
   const remoteId = role === "inviter" ? acceptorId : inviterId;
 
-  const peer = peerConnectionFactory(buildPeerConfiguration(iceServers));
+  const configuration = buildPeerConfiguration(iceServers);
+  const peer =
+    peerConnectionFactory === undefined
+      ? await defaultPeerConnection(configuration)
+      : peerConnectionFactory(configuration);
   let broker: BrokerClient | undefined;
   let torn = false;
 

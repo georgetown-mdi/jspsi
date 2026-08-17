@@ -3,7 +3,9 @@ import { afterEach, expect, test, vi } from "vitest";
 import { ConnectionError } from "@psilink/core";
 
 import {
+  BROKER_AUTHORITY_REFUSED,
   BROKER_MESSAGE,
+  assertDialsConfiguredBroker,
   connectToBroker,
 } from "../../src/connection/webrtc/brokerClient";
 
@@ -170,6 +172,108 @@ test("a root-mounted broker does not gain a doubled path separator", async () =>
   socket.deliver({ type: BROKER_MESSAGE.open });
   await pending;
   expect(new URL(socket.url).pathname).toBe("/peerjs");
+});
+
+// --- the address dialed -----------------------------------------------------
+
+/** Register with `location`, returning the socket the client asked for. */
+async function addressFor(location: BrokerLocation): Promise<URL> {
+  sockets = [];
+  const pending = connectToBroker({
+    location,
+    id: LOCAL_ID,
+    handlers: { onMessage: () => {}, onClose: () => {} },
+    socketFactory,
+  });
+  const socket = sockets[0];
+  socket.open();
+  socket.deliver({ type: BROKER_MESSAGE.open });
+  await pending;
+  return new URL(socket.url);
+}
+
+test("a path that could move the authority stays inside the path", async () => {
+  // Measured: concatenated into the address, a path of `@attacker.example` makes
+  // the configured host the userinfo of the partner's and the socket is dialed
+  // at the partner's. Assigning it as a pathname is what contains it. The
+  // connection resolver refuses the shape outright (webrtcDispatch.test.ts);
+  // this is the layer that holds for a location reaching the client any other
+  // way.
+  const url = await addressFor({ ...LOCATION, path: "@attacker.example" });
+  expect(url.host).toBe("signal.example:9000");
+  expect(url.username).toBe("");
+  expect(url.pathname).toBe("/@attacker.example/peerjs");
+});
+
+test("a path delimiter cannot open a second query or a fragment", async () => {
+  const url = await addressFor({ ...LOCATION, path: "/api?x=1#f" });
+  expect(url.host).toBe("signal.example:9000");
+  expect(url.pathname).toBe("/api%3Fx=1%23f/peerjs");
+  expect(url.searchParams.get("x")).toBeNull();
+  expect(url.hash).toBe("");
+});
+
+test("an API key cannot reach past its own query parameter", async () => {
+  // `key` is operator-authored -- an invitation endpoint is a strict
+  // host/port/path allowlist and carries none -- and it is encoded rather than
+  // interpolated, so a delimiter in it stays a character of the key.
+  const url = await addressFor({
+    ...LOCATION,
+    key: "k&id=evil#@attacker.example",
+  });
+  expect(url.host).toBe("signal.example:9000");
+  expect(url.searchParams.get("key")).toBe("k&id=evil#@attacker.example");
+  expect(url.searchParams.get("id")).toBe(LOCAL_ID);
+});
+
+test("a host that is not a bare authority is refused, opening nothing", async () => {
+  // Each shape reaches past the field: userinfo moves the dial to another host,
+  // a `/` silently drops the configured port into the path, a `:` supplies a
+  // second port, and whitespace or an empty value does not parse at all (the
+  // connection schema requires a non-empty host, so the last is the fail-closed
+  // floor rather than a reachable config).
+  for (const host of [
+    "evil@attacker.example",
+    "signal.example/x",
+    "signal.example:99",
+    "bad host",
+    "",
+  ]) {
+    sockets = [];
+    const error = await connectToBroker({
+      location: { ...LOCATION, host },
+      id: LOCAL_ID,
+      handlers: { onMessage: () => {}, onClose: () => {} },
+      socketFactory,
+    }).then(
+      () => undefined,
+      (err: unknown) => err as ConnectionError,
+    );
+    expect(error).toBeInstanceOf(ConnectionError);
+    expect(error?.kind).toBe("usage");
+    expect(sockets).toHaveLength(0);
+  }
+});
+
+test("an address naming another host is refused rather than dialed", async () => {
+  // The string the concatenating builder produced from the injected path, held
+  // as the check's own case: it runs on the finished address, so it does not
+  // depend on which builder produced it.
+  const moved = (): void => {
+    assertDialsConfiguredBroker(
+      `ws://signal.example:9000@attacker.example/peerjs?key=peerjs&id=${LOCAL_ID}`,
+      LOCATION,
+    );
+  };
+  expect(moved).toThrow(ConnectionError);
+  expect(moved).toThrow(BROKER_AUTHORITY_REFUSED);
+  // The refusal names the fields, not the address: that carries the peer id.
+  expect(BROKER_AUTHORITY_REFUSED).not.toContain(LOCAL_ID);
+  // And the address the client itself builds passes.
+  const url = await addressFor(LOCATION);
+  expect(() => {
+    assertDialsConfiguredBroker(url.href, LOCATION);
+  }).not.toThrow();
 });
 
 test("registration resolves only on the server's OPEN, not on the socket opening", async () => {
@@ -452,9 +556,11 @@ test("an abort before registration rejects and closes the socket", async () => {
 });
 
 test("a host that does not form a valid URL is a usage error, not a raw DOMException", async () => {
-  // No socketFactory: the real `new WebSocket` throws a DOMException synchronously
-  // on this host, which without wrapping would escape the ConnectionError
-  // taxonomy the rest of the module maintains.
+  // No socketFactory, so nothing stands between this host and the real
+  // `new WebSocket`, which throws a DOMException on it -- an error outside the
+  // ConnectionError taxonomy the rest of the module maintains, carrying an
+  // address that carries the peer id. What this holds is the refusal's shape and
+  // its silence about both values, wherever in the two layers it is raised.
   const error = await connectToBroker({
     location: { ...LOCATION, host: "bad host" },
     id: LOCAL_ID,

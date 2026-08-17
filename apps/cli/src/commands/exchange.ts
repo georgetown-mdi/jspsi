@@ -401,7 +401,7 @@ export function loadConfig(options: ExchangeOptions): {
   );
 
   // The channel here comes from the loaded config (post-override); warn on the
-  // file-sync-only flags before the unsupported-channel throw below.
+  // file-sync-only flags before the channel allowlist below.
   //
   // connectionPerPoll is read from BOTH the raw CLI flag and the merged config,
   // not just one: it is the mode's documented primary home, so a persisted
@@ -433,21 +433,35 @@ export function loadConfig(options: ExchangeOptions): {
   );
   warnLowPollingFrequency(connection.channel, options.pollingFrequencyMs, log);
 
-  if (connection.channel !== "sftp" && connection.channel !== "filedrop")
+  if (
+    connection.channel !== "sftp" &&
+    connection.channel !== "filedrop" &&
+    connection.channel !== "webrtc"
+  ) {
     // An unsupported channel in the config is invalid caller configuration
-    // (exit 64), not a transport failure.
+    // (exit 64), not a transport failure. It is an allowlist, so a channel added
+    // to the config union is refused here until runProtocol learns to run it
+    // (CONTRIBUTING.md, Transport branching). The `never` binding is what makes
+    // that a check rather than a hope: it compiles only while the list above
+    // covers every channel the union carries, so adding one to core without
+    // adding it here fails the build rather than reaching an operator.
+    const unsupported: never = connection;
     throw new UsageError(
-      `the ${connection.channel} channel is not yet supported in the CLI`,
+      `the ${(unsupported as { channel: string }).channel} channel is not ` +
+        `supported in the CLI`,
     );
+  }
 
-  // Warn when connection-per-poll is paired with a short poll interval. Placed
-  // after the channel narrowing above so the effective merged FileSyncOptions
-  // read here -- so a wasteful setting persisted in psilink.yaml is flagged, not
-  // only a CLI --connection-per-poll. A no-op off sftp (the mode is SFTP-only).
+  // Warn when connection-per-poll is paired with a short poll interval, so a
+  // wasteful setting persisted in psilink.yaml is flagged, not only a CLI
+  // --connection-per-poll. Read through a FileSyncOptions cast for the same
+  // reason as the call above: the merged options are typed for every channel,
+  // and a webrtc block cannot carry either field. A no-op off sftp (the mode is
+  // SFTP-only).
   warnConnectionPerPollShortInterval(
     connection.channel,
-    connection.options?.connectionPerPoll,
-    connection.options?.pollIntervalMs,
+    (connection.options as FileSyncOptions | undefined)?.connectionPerPoll,
+    (connection.options as FileSyncOptions | undefined)?.pollIntervalMs,
     log,
   );
 
@@ -511,8 +525,9 @@ export function loadConfig(options: ExchangeOptions): {
     expires: keyData.expires,
     keyFilePath: options.keyFile,
   };
-  // The channel guard above throws on any non-sftp/filedrop channel, so the
-  // discriminated union narrows `connection` to ProtocolConnectionConfig here.
+  // The channel guard above throws on any channel runProtocol cannot run, so
+  // the discriminated union narrows `connection` to ProtocolConnectionConfig
+  // here.
   return {
     connection,
     authentication: authPersist,

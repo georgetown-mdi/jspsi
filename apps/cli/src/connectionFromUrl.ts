@@ -10,14 +10,31 @@ import type {
 import { applyConnectionOverrides, type ConnectionOverrides } from "./config";
 import { decodeUrlComponent, redactUrlCredentials } from "./util/connectionUrl";
 
-// The connection channels the CLI can actually run an exchange over: runProtocol
-// supports sftp and filedrop, and a webrtc URL is rejected upstream. Narrowing
-// to this (rather than the full ConnectionConfig) keeps a webrtc config from
-// reaching runOnlineBootstrap, where it would otherwise only fail at runtime.
+// The connection channels a URL can be turned into here: the file-sync pair.
+// `runProtocol` also runs webrtc, but a URL is not where a webrtc connection
+// comes from. It comes from an invitation endpoint (connectionFromEndpoint,
+// which the accept path stamps a role onto) -- and the CLI mints none of its
+// own, since endpointFromConnection is file-sync-only, so the endpoints that
+// exist are the web app's. Narrowing to this keeps a webrtc config from reaching
+// runOnlineBootstrap by the URL route, where it would only fail at runtime.
 export type RunnableConnectionConfig = Extract<
   ConnectionConfig,
   { channel: "sftp" | "filedrop" }
 >;
+
+/**
+ * The refusal a `ws:`/`wss:` URL gets on the invitation and zero-setup paths.
+ *
+ * The channel runs -- `psilink exchange` dispatches it -- but not from a URL:
+ * the connection needs a `role` no URL carries. It names the two routes that do
+ * produce one, so this does not read as "the CLI cannot do WebRTC", which it
+ * can.
+ */
+export const WEBRTC_URL_REFUSED =
+  "a ws:// or wss:// URL cannot be used here: the CLI runs a webrtc exchange " +
+  "from a saved connection, not from a URL. Accepting a web invitation writes " +
+  "one; otherwise author `channel: webrtc` in psilink.yaml and run " +
+  "'psilink exchange'.";
 
 /**
  * Maps a server URL protocol to a connection channel identifier.
@@ -45,10 +62,10 @@ export function channelFromURL(url: URL): ConnectionConfig["channel"] {
 /**
  * Build a connection config from a server URL, for every CLI path that maps a
  * URL to a connection (the online invite/accept paths and the zero-setup
- * exchange). Constrained to the channels the CLI can actually run: a `webrtc`
- * (ws/wss) URL or an unsupported scheme is a usage error. The returned config
- * carries no `authentication`; the caller adds the shared secret separately for
- * the handshake and never persists it to the config.
+ * exchange). Constrained to the file-sync channels: a `webrtc` (ws/wss) URL or
+ * an unsupported scheme is a usage error. The returned config carries no
+ * `authentication`; the caller adds the shared secret separately for the
+ * handshake and never persists it to the config.
  *
  * The `--server-*`/`--outbound-path`/tuning overrides arrive pre-built as
  * {@link ConnectionOverrides}: the caller fans its parsed CLI options into that
@@ -82,8 +99,7 @@ export function connectionFromURL(
     ) as RunnableConnectionConfig;
   }
 
-  if (channel !== "sftp")
-    throw new UsageError(`${channel} channel not yet supported in the CLI`);
+  if (channel !== "sftp") throw new UsageError(WEBRTC_URL_REFUSED);
 
   // Reject a credential-only or schemeless URL with no host (e.g. sftp:///path)
   // here, with a clear message, rather than passing host: "" through to a
