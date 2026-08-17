@@ -31,13 +31,15 @@ export const SIGNALING_REQUEST_TIMEOUT_MS = 15_000;
  * {@link SIGNALING_REQUEST_TIMEOUT_MS} only arm once HTTP request parsing has
  * begun, so a peer that completes the TCP handshake and then sends nothing has
  * no request for them to bound and would sit held open until the OS reaps it.
- * This per-socket idle timeout closes that hold. It binds only while the socket
- * owes the server a request, and stops reaching it once one has wholly arrived,
- * so what the server does with the connection thereafter -- however long the
- * handler takes, however quiet a long-lived response goes -- is outside its
- * reach. `ws` takes the upgrade path out from under it outright, resetting the
- * socket timeout to 0 the moment a socket completes the 101, so an established
- * WebSocket is governed by the liveness reaper rather than by this.
+ * This per-socket idle timeout closes that hold. While the socket owes the
+ * server a request it measures the client's silence; once a request has wholly
+ * arrived it measures instead whether the connection is taking the response it
+ * asked for, so the server's own pace -- however long the handler takes, however
+ * quiet a long-lived response goes between frames -- is outside its reach while
+ * a client that stops reading is not. `ws` takes the upgrade path out from under
+ * it outright, resetting the socket timeout to 0 the moment a socket completes
+ * the 101, so an established WebSocket is governed by the liveness reaper rather
+ * than by this.
  */
 export const SIGNALING_PREHANDSHAKE_IDLE_MS = 10_000;
 
@@ -119,17 +121,15 @@ function deferTimeoutToIdleReap(): void {}
 /**
  * Record the request a socket has begun delivering, for the reap below to weigh,
  * and take a timed-out socket out of Node's hands so that reap is what decides
- * its fate. This event is not itself the moment the bound comes off: it fires
- * once the headers are parsed, while the bound covers the window in which the
- * socket owes the server a request, so a client that announces a body and then
- * stalls stays under it, and only a request wholly in hand puts the connection in
- * the server's hands to pace -- a slow handler, or an event stream quiet between
- * frames, then measured against no client-idleness clock. Leaving the bound armed
- * across a response is what needs the placeholder listener: Node destroys a
- * socket that hits its timeout unless the request, the response, or the server
- * carries a `timeout` listener, and putting one on the response stays its hand
- * for exactly as long as a response is in flight. Closes over nothing, so a
- * repeated harden compares it by identity like {@link closeStalledHandshake}.
+ * its fate. This event is not itself the moment the bound changes what it
+ * measures: it fires once the headers are parsed, while the client still owes the
+ * server a request until the whole of it has arrived, so one that announces a
+ * body and then stalls stays under the silence bound. Handing a timed-out socket
+ * to the reap is what needs the placeholder listener: Node destroys a socket that
+ * hits its timeout unless the request, the response, or the server carries a
+ * `timeout` listener, and putting one on the response stays its hand for exactly
+ * as long as a response is in flight. Closes over nothing, so a repeated harden
+ * compares it by identity like {@link closeStalledHandshake}.
  */
 function trackPendingRequest(req: IncomingMessage, res: ServerResponse): void {
   pendingRequestBySocket.set(req.socket, req);
@@ -142,14 +142,15 @@ function trackPendingRequest(req: IncomingMessage, res: ServerResponse): void {
  * finishes -- its request headers is closed server-side rather than held until a
  * loose (60s) default, and one that connects and then sends nothing at all (no
  * request for the header/request timeouts to bound) is reaped on a per-socket
- * idle timeout. All three bound only the window before the server has a request
- * in hand: each stops binding once one has wholly arrived, whether that is a
- * WebSocket upgrade the signaling layer then governs (the `ws` close timer and
- * the liveness reaper) or an ordinary request whose response the server paces. A
- * client that gets as far as complete headers and then stalls the body it
- * announced has delivered no request and stays under all three. The override args
- * exist so the behavior is unit-testable on a short clock; production uses the
- * defaults.
+ * idle timeout. All three bound the window before the server has a request in
+ * hand: the header and request timeouts stop binding once one has wholly
+ * arrived, whether that is a WebSocket upgrade the signaling layer then governs
+ * (the `ws` close timer and the liveness reaper) or an ordinary request whose
+ * response the server paces, while the idle timeout turns from measuring the
+ * client's silence to measuring whether it is taking the response. A client that
+ * gets as far as complete headers and then stalls the body it announced has
+ * delivered no request and stays under all three. The override args exist so the
+ * behavior is unit-testable on a short clock; production uses the defaults.
  */
 export function hardenUpgradeSurface(
   server: HttpServer | HttpsServer,
@@ -178,17 +179,35 @@ export function hardenUpgradeSurface(
     server.removeListener("secureConnection", previousHooks.handOffToTls);
   }
   const armPreHandshakeIdleBound = (socket: Socket): void => {
-    const reapUnlessRequestIsInHand = (): void => {
+    const reapUnlessRequestIsInHandAndDraining = (): void => {
+      if (socket.destroyed) return;
       // Weighed when the socket has gone quiet, which is the moment the question
-      // has an answer: a request that has wholly arrived puts the connection in
-      // the server's hands, so this window passes without a reap and the bound
-      // stands for whatever the socket owes next. A socket with no request at
-      // all, or one whose request stopped part-way, still owes the server bytes.
-      if (pendingRequestBySocket.get(socket)?.complete) return;
-      socket.destroy();
+      // has an answer. A socket with no request at all, or one whose request
+      // stopped part-way, still owes the server bytes.
+      if (!pendingRequestBySocket.get(socket)?.complete) {
+        socket.destroy();
+        return;
+      }
+      // A request wholly in hand puts the pace of the response in the server's
+      // hands, but taking the bytes it hands over stays the client's part: a
+      // socket still holding queued bytes here is one the peer has stopped
+      // reading, and it is reaped rather than held for as long as the peer
+      // pleases. Node withholds this event while its own write queue is moving,
+      // so what reaches here has moved no bytes for the whole window; a slow
+      // handler and a stream quiet between frames hold nothing queued and pass
+      // it untouched, on this window and each one after.
+      if (socket.writableLength > 0) {
+        socket.destroy();
+        return;
+      }
+      socket.setTimeout(idleMs);
     };
-    idleReapCallbackBySocket.set(socket, reapUnlessRequestIsInHand);
-    socket.setTimeout(idleMs, reapUnlessRequestIsInHand);
+    idleReapCallbackBySocket.set(socket, reapUnlessRequestIsInHandAndDraining);
+    // Subscribed rather than passed to setTimeout, which subscribes for one
+    // firing only: a response outlives as many windows as it takes, and each is
+    // weighed.
+    socket.on("timeout", reapUnlessRequestIsInHandAndDraining);
+    socket.setTimeout(idleMs);
   };
   // Over TLS the bound has to ride the socket the HTTP layer hands out -- the
   // TLSSocket, which the request hook below keys on and `ws` releases on the 101

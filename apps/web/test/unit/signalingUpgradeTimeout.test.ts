@@ -19,16 +19,35 @@ import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 
 // gap 1: a slow or partial upgrade handshake is bounded and closed server-side
-// rather than held open. The end-to-end behavior was verified against plain Node
-// on the supported runtime (Node >= 26): the timeout fires `clientError` with
+// rather than held open. Most of what the entry installs is driven here as a
+// live-socket timing test on a short clock -- over plain TCP and, below, over
+// real TLS -- against a fake socket only where there is no live path to drive:
+// the timeout values the entry sets, and the `clientError` handler it wires.
+// One path is deliberately not live: the header and request timeouts fire on
+// Node's periodic connections sweep, and under vitest, loading `ws` anywhere in
+// the worker disrupts that path on an unrelated server, which would make such a
+// test flaky. Its end-to-end behavior was verified against plain Node on the
+// supported runtime (Node >= 26): the timeout fires `clientError` with
 // `ERR_HTTP_REQUEST_TIMEOUT` and the handler responds 408 and closes -- the close
-// landing on Node's periodic connections sweep, so headersTimeout plus up to one
-// sweep interval, not instantly. It is not reproduced here as a live-socket
-// timing test: under vitest, loading `ws` anywhere in the worker disrupts Node's
-// request-timeout path on an unrelated server, which would make such a test
-// flaky. Instead this pins the two code paths the entry owns -- the bounds are
-// set, and the wired `clientError` handler closes a stalled or malformed
-// handshake.
+// landing on that sweep, so headersTimeout plus up to one sweep interval, not
+// instantly.
+
+// How long after a connection is accepted the server's own end of it closes, or
+// null if it outlives the budget. `event` selects which socket is watched: the
+// accepted one, or -- over TLS -- the wrapper the HTTP layer writes to.
+function serverSideTimeToClose(
+  server: http.Server | https.Server,
+  event: string,
+  budgetMs: number,
+): Promise<number | null> {
+  return new Promise((resolve) => {
+    server.on(event, (socket: net.Socket) => {
+      const start = Date.now();
+      socket.on("close", () => resolve(Date.now() - start));
+      setTimeout(() => resolve(null), budgetMs);
+    });
+  });
+}
 
 function fakeSocket(writable: boolean): {
   socket: Duplex;
@@ -368,6 +387,42 @@ describe("hardenUpgradeSurface", () => {
     }
   });
 
+  test("leaves no bound of its own on a keep-alive-reaped socket", async () => {
+    // A response in flight re-arms the bound for as long as it takes, so the
+    // window after Node's keep-alive reap is the one place re-arming would be
+    // wrong: there is nothing left to weigh, and a bound put back on a reaped
+    // socket would outlive it. The bound here sits far above the keep-alive
+    // window, so the value left on the socket says which of the two armed it
+    // last.
+    const idleMs = 30_000;
+    const server = http.createServer((_req, res) => res.end("ok"));
+    server.keepAliveTimeout = 400;
+    hardenUpgradeSurface(server, { preHandshakeIdleMs: idleMs });
+    const acceptedSocket = new Promise<net.Socket>((resolve) =>
+      server.once("connection", resolve),
+    );
+    const closedMs = serverSideTimeToClose(server, "connection", 3_000);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const { port } = server.address() as AddressInfo;
+    const client = net.connect(port, "127.0.0.1", () => {
+      client.write("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+    });
+    client.on("data", () => {});
+    client.on("error", () => {});
+    try {
+      expect(await closedMs).not.toBeNull();
+      const socket = await acceptedSocket;
+      expect(socket.destroyed).toBe(true);
+      expect(socket.timeout).toBeLessThan(idleMs);
+    } finally {
+      client.destroy();
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
   test("does not cut a connection whose body arrived but went unread", async () => {
     // The other side of that line: the request is entirely in hand, so the socket
     // owes nothing, even though the handler never reads the body and nothing has
@@ -405,6 +460,44 @@ describe("hardenUpgradeSurface", () => {
       });
       expect(body).toBe("late");
     } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  test("reaps a connection that stops taking the response it asked for", async () => {
+    // The client's half of a request in hand: the server owes it a response and
+    // is writing one, but the client stops reading, so the bytes queue and the
+    // connection stops draining. Pacing the response is the server's, taking it
+    // is the client's, and a client that does neither is reaped rather than
+    // holding the socket (and the queued bytes) for as long as it pleases.
+    const idleMs = 300;
+    // Larger than the send and receive buffers an unread loopback connection can
+    // absorb, so the write queue cannot simply drain into the kernel.
+    const body = Buffer.alloc(16 * 1024 * 1024, "x");
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/octet-stream" });
+      res.end(body);
+    });
+    hardenUpgradeSurface(server, { preHandshakeIdleMs: idleMs });
+    // Watched server-side: a client holding an unread response never sees its own
+    // socket close, since a paused stream sitting on buffered bytes has no `end`
+    // to reach and so is not destroyed.
+    const closedMs = serverSideTimeToClose(server, "connection", 3_000);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const { port } = server.address() as AddressInfo;
+    const client = net.connect(port, "127.0.0.1", () => {
+      client.write("GET /big HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+      client.pause();
+    });
+    client.on("error", () => {});
+    try {
+      expect(await closedMs).not.toBeNull();
+      expect(await closedMs).toBeLessThan(2_500);
+    } finally {
+      client.destroy();
       server.closeAllConnections();
       server.close();
     }
@@ -488,6 +581,34 @@ describe.skipIf(loopbackTlsCert === null)(
         expect(closedMs).not.toBeNull();
         expect(closedMs).toBeLessThan(1_500);
       } finally {
+        server.closeAllConnections();
+        server.close();
+      }
+    });
+
+    test("reaps a TLS connection that stops taking its response", async () => {
+      // The queued bytes sit on the TLSSocket rather than the connection it
+      // wraps, so the response-phase half of the bound is only reached at all if
+      // the bound rides the socket the HTTP layer writes to.
+      const body = Buffer.alloc(16 * 1024 * 1024, "x");
+      const { server, port } = await startHardenedTlsServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "application/octet-stream" });
+        res.end(body);
+      });
+      const closedMs = serverSideTimeToClose(server, "secureConnection", 3_000);
+      const client = tls.connect(
+        { host: "127.0.0.1", port, rejectUnauthorized: false },
+        () => {
+          client.write("GET /big HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+          client.pause();
+        },
+      );
+      client.on("error", () => {});
+      try {
+        expect(await closedMs).not.toBeNull();
+        expect(await closedMs).toBeLessThan(2_500);
+      } finally {
+        client.destroy();
         server.closeAllConnections();
         server.close();
       }
