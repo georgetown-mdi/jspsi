@@ -260,7 +260,8 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
 
     // Terminate rather than close: `close()` sends a close frame and waits for
     // the peer's reply before the socket is released, so a peer that never
-    // answers keeps holding it. The detached socket is being replaced by the
+    // answers holds it until `ws` gives up on its own close timer -- 30 seconds
+    // of retained socket per detach. The detached socket is being replaced by the
     // same peer's newer one, so there is nothing to negotiate. Ordered after
     // setSocket so the detached socket's own `close` handler sees a client that
     // has moved on and leaves the registration alone.

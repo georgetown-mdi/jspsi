@@ -11,12 +11,28 @@ export interface LoopbackTlsCert {
 }
 
 /**
- * Mint a self-signed `localhost` certificate for a test HTTPS server. Node has
- * no certificate-issuing API, so this shells out to `openssl` (an EC key keeps
- * it to milliseconds); callers skip on `win32`, where openssl is not a given and
- * where this suite does not run in CI.
+ * A self-signed `localhost` certificate for this environment's test HTTPS
+ * servers, or `null` where none can be minted -- which a suite needing one skips
+ * on rather than reporting the environment as a failure of the code under test.
+ * Node has no certificate-issuing API, so minting shells out to `openssl`, making
+ * the binary a property of the environment: Windows is left out (it is not a
+ * given there, and these suites do not run on it in CI), a minimal container may
+ * ship none, and a LibreSSL `openssl` takes the flags below differently.
  */
-export function createLoopbackTlsCert(): LoopbackTlsCert {
+export const loopbackTlsCert: LoopbackTlsCert | null =
+  process.platform === "win32" ? null : mintLoopbackTlsCert();
+
+/**
+ * The credentials, for a caller that has already arranged to skip without them.
+ */
+export function requireLoopbackTlsCert(): LoopbackTlsCert {
+  if (loopbackTlsCert === null) {
+    throw new Error("no loopback TLS certificate could be minted here");
+  }
+  return loopbackTlsCert;
+}
+
+function mintLoopbackTlsCert(): LoopbackTlsCert | null {
   const dir = mkdtempSync(join(tmpdir(), "psilink-loopback-tls-"));
   try {
     execFileSync(
@@ -44,6 +60,8 @@ export function createLoopbackTlsCert(): LoopbackTlsCert {
       key: readFileSync(join(dir, "key.pem"), "utf8"),
       cert: readFileSync(join(dir, "cert.pem"), "utf8"),
     };
+  } catch {
+    return null;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

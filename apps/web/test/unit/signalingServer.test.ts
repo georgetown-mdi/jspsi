@@ -6,7 +6,11 @@ import WebSocket from "ws";
 
 import { Realm } from "@peerjs-server/models/realm";
 import { WebSocketServer } from "@peerjs-server/services/webSocketServer/index";
-import { createLoopbackTlsCert } from "../utils/loopbackTlsCert";
+
+import {
+  loopbackTlsCert,
+  requireLoopbackTlsCert,
+} from "../utils/loopbackTlsCert";
 import { hardenUpgradeSurface } from "../../server/upgradeHardening";
 
 import type { AddressInfo } from "node:net";
@@ -41,7 +45,7 @@ async function startSignaling(
   opts: { preHandshakeIdleMs?: number; tls?: boolean } = {},
 ): Promise<Signaling> {
   const server = opts.tls
-    ? https.createServer(createLoopbackTlsCert())
+    ? https.createServer(requireLoopbackTlsCert())
     : http.createServer();
   if (opts.preHandshakeIdleMs !== undefined) {
     hardenUpgradeSurface(server, {
@@ -168,7 +172,7 @@ describe("signaling socket guards", () => {
     ws.close();
   });
 
-  test.skipIf(process.platform === "win32")(
+  test.skipIf(loopbackTlsCert === null)(
     "an established TLS connection is not cut by the pre-handshake idle timeout",
     async () => {
       // Over TLS the socket `ws` releases on the 101 is the TLSSocket, not the

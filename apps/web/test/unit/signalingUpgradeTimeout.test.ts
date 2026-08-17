@@ -3,14 +3,17 @@ import https from "node:https";
 import net from "node:net";
 import tls from "node:tls";
 
-import { beforeAll, describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   SIGNALING_HEADERS_TIMEOUT_MS,
   SIGNALING_REQUEST_TIMEOUT_MS,
   hardenUpgradeSurface,
 } from "../../server/upgradeHardening";
-import { createLoopbackTlsCert } from "../utils/loopbackTlsCert";
+import {
+  loopbackTlsCert,
+  requireLoopbackTlsCert,
+} from "../utils/loopbackTlsCert";
 
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
@@ -164,6 +167,9 @@ describe("hardenUpgradeSurface", () => {
     hardenUpgradeSurface(server);
     hardenUpgradeSurface(server);
     expect(server.listenerCount("connection")).toBe(before + 1);
+    // The TLS half of the same reaper: its removal keys on the WeakMap entry
+    // being read back, so a stacked handoff would hand the bound over twice.
+    expect(server.listenerCount("secureConnection")).toBe(1);
     server.close();
   });
 
@@ -264,8 +270,8 @@ describe("hardenUpgradeSurface", () => {
 
   test("still reaps a socket that stalls part-way through its request", async () => {
     // A dawdler that has sent bytes but no complete request owes the server one,
-    // so the bound still reaches it -- the release is keyed on a request arriving,
-    // not on any byte arriving.
+    // so the bound still reaches it -- the release is keyed on a request
+    // completing, not on any byte arriving.
     const idleMs = 400;
     const server = http.createServer((_req, res) => res.end("ok"));
     hardenUpgradeSurface(server, { preHandshakeIdleMs: idleMs });
@@ -290,6 +296,119 @@ describe("hardenUpgradeSurface", () => {
       server.close();
     }
   });
+
+  test("still reaps a socket that finishes its headers and stalls its body", async () => {
+    // Complete headers are not a complete request: this client declares a body
+    // and then sends none of it, so it owes the server the rest of a request the
+    // handler is waiting on, and the bound must reach it on its own clock rather
+    // than leave it to requestTimeout on the periodic sweep.
+    const idleMs = 400;
+    const server = http.createServer((req, res) => {
+      req.on("end", () => res.end("ok"));
+      req.resume();
+    });
+    hardenUpgradeSurface(server, { preHandshakeIdleMs: idleMs });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const { port } = server.address() as AddressInfo;
+    try {
+      const closedMs = await new Promise<number | null>((resolve) => {
+        const start = Date.now();
+        const socket = net.connect(port, "127.0.0.1", () => {
+          socket.write(
+            "POST /upload HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 1000\r\n\r\n",
+          );
+        });
+        socket.on("close", () => resolve(Date.now() - start));
+        socket.on("error", () => {});
+        setTimeout(() => resolve(null), 3_000);
+      });
+      expect(closedMs).not.toBeNull();
+      expect(closedMs).toBeLessThan(2_500);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  test("leaves Node's keep-alive reaping of a finished connection in place", async () => {
+    // Staying Node's hand on a timed-out socket is what lets a slow response run,
+    // and it is scoped to the response for exactly this reason: once one has
+    // finished, an idle keep-alive connection is Node's to reap on its own
+    // (shorter) window. The idle bound here sits far above that window, so a
+    // close inside the budget can only be Node's.
+    const server = http.createServer((_req, res) => res.end("ok"));
+    server.keepAliveTimeout = 400;
+    hardenUpgradeSurface(server, { preHandshakeIdleMs: 30_000 });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const { port } = server.address() as AddressInfo;
+    try {
+      const closedAfterResponseMs = await new Promise<number | null>(
+        (resolve) => {
+          let respondedAt: number | null = null;
+          const socket = net.connect(port, "127.0.0.1", () => {
+            socket.write("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+          });
+          socket.on("data", () => (respondedAt ??= Date.now()));
+          socket.on("close", () =>
+            resolve(respondedAt === null ? null : Date.now() - respondedAt),
+          );
+          socket.on("error", () => {});
+          setTimeout(() => resolve(null), 3_000);
+        },
+      );
+      expect(closedAfterResponseMs).not.toBeNull();
+      expect(closedAfterResponseMs).toBeLessThan(2_500);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  test("does not cut a connection whose body arrived but went unread", async () => {
+    // The other side of that line: the request is entirely in hand, so the socket
+    // owes nothing, even though the handler never reads the body and nothing has
+    // drained the request stream. A bound that waited on the request stream being
+    // consumed would cut this connection mid-response.
+    const idleMs = 300;
+    const server = http.createServer((_req, res) => {
+      setTimeout(() => res.end("late"), idleMs * 4);
+    });
+    hardenUpgradeSurface(server, { preHandshakeIdleMs: idleMs });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const { port } = server.address() as AddressInfo;
+    try {
+      const body = await new Promise<string>((resolve, reject) => {
+        const req = http.request(
+          {
+            host: "127.0.0.1",
+            port,
+            path: "/upload",
+            method: "POST",
+            agent: false,
+            headers: { "content-length": "4" },
+          },
+          (res) => {
+            let text = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk: string) => (text += chunk));
+            res.on("end", () => resolve(text));
+          },
+        );
+        req.on("error", reject);
+        req.end("abcd");
+      });
+      expect(body).toBe("late");
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
 });
 
 // Over TLS the socket the HTTP layer hands out -- to the request hook, and to
@@ -299,20 +418,15 @@ describe("hardenUpgradeSurface", () => {
 // which only an HTTPS server exercises: the plain-HTTP cases above hand out the
 // same object throughout. `apps/web/server/custom-entry.ts` builds an HttpsServer
 // whenever NITRO_SSL_CERT and NITRO_SSL_KEY are set.
-describe.skipIf(process.platform === "win32")(
+describe.skipIf(loopbackTlsCert === null)(
   "hardenUpgradeSurface over TLS",
   () => {
     const idleMs = 300;
-    let credentials: ReturnType<typeof createLoopbackTlsCert>;
-
-    beforeAll(() => {
-      credentials = createLoopbackTlsCert();
-    });
 
     async function startHardenedTlsServer(
       handler?: http.RequestListener,
     ): Promise<{ server: https.Server; port: number }> {
-      const server = https.createServer(credentials, handler);
+      const server = https.createServer(requireLoopbackTlsCert(), handler);
       hardenUpgradeSurface(server, { preHandshakeIdleMs: idleMs });
       await new Promise<void>((resolve) =>
         server.listen(0, "127.0.0.1", resolve),
