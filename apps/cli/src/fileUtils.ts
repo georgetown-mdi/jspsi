@@ -187,9 +187,12 @@ function warnIfWindowsAclOverPermissive(
 // API, so this shells out to macOS's own `chmod`, whose `-N` deletes the ACL.
 // The absolute `/bin/chmod` keeps the resolution off `PATH`. There is no `--`
 // separator: macOS's chmod has none and tries to open it as a file (measured
-// on the host, 2026-08-17), and the same run showed a dash-leading operand
-// after the flags is taken as an operand, not a flag run. There is no shell:
-// the operand is one `execFileSync` argument.
+// on the host, 2026-08-17). The operand is resolved to an absolute path
+// before the call -- lexical only, no filesystem access or symlink
+// resolution, so both symlink postures below are preserved exactly -- which
+// guarantees it starts with `/` and so cannot land in the option position
+// regardless of how any chmod build parses a dash-leading operand. There is
+// no shell: the operand is one `execFileSync` argument.
 //
 // `symlinks` picks which entry the strip acts on, and each caller passes the one
 // that matches how its own write reached the file, so the ACL cleared always
@@ -220,8 +223,12 @@ function stripExtendedAcls(
   }: { symlinks: "do-not-follow" | "follow"; reportedPath?: string },
 ): void {
   if (process.platform !== "darwin") return;
+  // Resolved lexically (no filesystem access, no symlink following) so the
+  // do-not-follow/follow postures above are unaffected; this only guarantees
+  // the operand begins with `/`, see the comment above this function.
+  const resolved = path.resolve(filePath);
   const args =
-    symlinks === "do-not-follow" ? ["-h", "-N", filePath] : ["-N", filePath];
+    symlinks === "do-not-follow" ? ["-h", "-N", resolved] : ["-N", resolved];
   try {
     execFileSync("/bin/chmod", args, {
       stdio: "ignore",

@@ -100,10 +100,12 @@ file])`, run on the temp file after its `fchmod` and before any content is
 written, and on the streamed result CSV between its `fchmod` and its truncate.
 `-N` deletes the ACL entirely -- on an artifact psilink writes, no ACE is
 intended, so the mode is meant to be the file's whole access story. There is no
-`--` separator: macOS's `chmod` has none and fails trying to open it as a file,
-and the same host run measured that a dash-leading operand after the flags is
-read as an operand, not a flag run (both facts driven on the real tool,
-2026-08-17, recorded on the introducing pull request). The absolute
+`--` separator: macOS's `chmod` has none and fails trying to open it as a file
+(driven on the real tool, 2026-08-17, recorded on the introducing pull
+request). The operand is resolved to an absolute path before the call --
+lexically only, so neither symlink posture below is affected -- which
+guarantees it starts with `/` and so cannot land in the option position,
+regardless of how any chmod build parses a dash-leading operand. The absolute
 `/bin/chmod` keeps the resolution off `PATH`, and there is no shell -- the
 operand is a single argument. It is a subprocess rather than a
 syscall because Node's `fs` exposes no ACL API.

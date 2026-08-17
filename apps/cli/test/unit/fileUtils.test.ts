@@ -699,6 +699,46 @@ describe("extended-ACL strip symlink posture", () => {
     expect(commands).toEqual([["/bin/chmod", "-N", dest]]);
     await writeAndClose(stream, "a,b\n1,2\n");
   });
+
+  test("resolves a relative dash-leading destination to an absolute chmod operand", () => {
+    // No `--` separator exists to keep a dash-leading operand out of the option
+    // position (see the comment on stripExtendedAcls); resolving the operand to
+    // an absolute path is what guarantees that instead, on a relative path too.
+    if (process.platform === "win32") return;
+    const commands = recordAclStripCommands();
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      withPlatform("darwin", () => {
+        writeFileOwnerOnly("-dashed-secret", "x");
+      });
+    } finally {
+      process.chdir(cwd);
+    }
+
+    expect(commands).toHaveLength(1);
+    const operand = commands[0][commands[0].length - 1];
+    expect(operand.startsWith("/")).toBe(true);
+    expect(operand).toBe(
+      path.resolve(dir, `-dashed-secret.tmp.${process.pid}`),
+    );
+  });
+
+  test("resolving the do-not-follow operand does not dereference a symlink", () => {
+    // stripExtendedAcls resolves its operand with path.resolve, which is purely
+    // lexical -- unlike fs.realpathSync, it never touches the filesystem or
+    // follows a symlink -- so the -h (do-not-follow) posture the temp-file
+    // writers rely on survives the resolve: a symlink at the operand path
+    // resolves to its own absolute path, not its target's.
+    if (process.platform === "win32") return;
+    const target = path.join(dir, "attacker-target");
+    fs.writeFileSync(target, "target-content");
+    const link = path.join(dir, "link");
+    fs.symlinkSync(target, link);
+
+    expect(path.resolve(link)).toBe(link);
+    expect(path.resolve(link)).not.toBe(fs.realpathSync(target));
+  });
 });
 
 // --- Windows owner-only ACL --------------------------------------------------
