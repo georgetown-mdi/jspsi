@@ -2,6 +2,8 @@ import Papa from "papaparse";
 
 import type { LocalFile } from "papaparse";
 
+import { UsageError } from "./errors.js";
+
 /**
  * Per-logical-line byte ceiling for the streamed CSV reads ({@link loadCSVFile}
  * and {@link loadCSVColumnSample}). PapaParse must buffer one whole logical line
@@ -51,6 +53,58 @@ function singleLineCeilingError(byteCeiling: number): CsvLineByteCeilingError {
     `CSV input exceeded the ${byteCeiling}-byte single-line limit before a ` +
       "line terminator; the file may be malformed (no newline) or carry an " +
       "oversized header or field",
+  );
+}
+
+/**
+ * The error a row-level parse fault raises: PapaParse read the file without a
+ * stream error, but at least one row it produced does not correspond to the row
+ * in the file. A {@link UsageError} subclass, so the CLI's error boundaries
+ * classify a malformed input file as bad input (exit 64) rather than a transport
+ * failure, and a front end can tell it from a ceiling trip by `instanceof`. The
+ * message carries PapaParse's own fault description and the row number, never a
+ * cell value or a path.
+ */
+export class CsvRowParseError extends UsageError {
+  constructor(message: string) {
+    super(message);
+    this.name = "CsvRowParseError";
+  }
+}
+
+/**
+ * The PapaParse error codes that are NOT a row-level fault, as an allowlist: a
+ * code this set does not name refuses the read, so a code a later PapaParse adds
+ * fails closed rather than passing unnoticed.
+ *
+ * `UndetectableDelimiter` is the only benign one. PapaParse emits it for a
+ * legitimate single-column CSV (verified by driving the parser: a two-row `id`
+ * file yields it) and for an empty input, having defaulted to a comma, which
+ * changes nothing about the rows it produces. Every other code -- the quote and
+ * field-count faults -- means the parsed rows differ from the file's own.
+ */
+const BENIGN_CSV_PARSE_ERROR_CODES: ReadonlySet<string> = new Set([
+  "UndetectableDelimiter",
+]);
+
+/**
+ * The operator-readable refusal for one row-level parse fault, shared by both
+ * drivers over {@link runSharedCSVParse} so neither can word the same condition
+ * differently. `error.row` is PapaParse's 0-based data-row index and counts from
+ * the start of the FILE, not the chunk (verified by driving the parser across a
+ * multi-chunk read), so it is reported as a 1-based data row the operator can
+ * find; a fault PapaParse reports without a row (a delimiter-level one) is named
+ * without a position rather than given a wrong one.
+ */
+function rowParseFaultError(error: Papa.ParseError): CsvRowParseError {
+  const position =
+    typeof error.row === "number" ? `data row ${error.row + 1}` : "a data row";
+  return new CsvRowParseError(
+    `CSV parse failed at ${position}: ${error.message} (${error.code}). The ` +
+      "rows this file yields would differ from the rows it contains, so the " +
+      "read refuses rather than return them; correct the input file -- an " +
+      "unterminated quote, or a row whose field count differs from the " +
+      "header, is the usual cause.",
   );
 }
 
@@ -257,10 +311,16 @@ export function readRowColumn(row: CSVRow, column: string): string | undefined {
 
 /**
  * Normalize one raw PapaParse row to a {@link CSVRow}, dropping any non-string
- * cell -- in practice the `__parsed_extra` array PapaParse attaches to a row longer
- * than the header -- so every retained value is a genuine string. A row that is
- * already all-string (the common well-formed row) is returned by reference; only a
- * row carrying a non-string cell is rebuilt without it.
+ * cell -- the `__parsed_extra` array PapaParse attaches to a row longer than the
+ * header -- so every retained value is a genuine string. A row that is already
+ * all-string (the common well-formed row) is returned by reference; only a row
+ * carrying a non-string cell is rebuilt without it.
+ *
+ * The fault gate in {@link runSharedCSVParse} refuses an over-long row upstream of
+ * this (PapaParse reports `TooManyFields` for the same rows it attaches
+ * `__parsed_extra` to), so this stands as the structural guarantee behind the
+ * {@link CSVRow} type for whatever PapaParse hands over, not as the defense the
+ * malformed-row case rests on.
  */
 function normalizeCSVRow(row: unknown): CSVRow {
   const source = row as Record<string, unknown>;
@@ -359,6 +419,7 @@ async function runSharedCSVParse(
   await assertLeadingLineWithinByteCeiling(file, byteCeiling);
   return new Promise((resolve, reject) => {
     let meta: Papa.ParseMeta | undefined;
+    let faulted = false;
 
     // Bound a single logical line on the Node stream path (CLI file/stdin, or the
     // server's opened input file): the guard scans the source's own `data` events
@@ -371,7 +432,26 @@ async function runSharedCSVParse(
 
     Papa.parse(file, {
       ...SHARED_CSV_PARSE_CONFIG,
-      chunk: (results) => {
+      chunk: (results, parser) => {
+        // Refuse the whole read on the first row-level fault, BEFORE the chunk
+        // reaches the consumer. PapaParse reports an unterminated quote or a
+        // field-count mismatch here and parses on, having dropped, merged, or
+        // shifted the values of the rows around it, so a driver that read only
+        // `data` would return a dataset that silently differs from the file --
+        // a stray quote in an upstream export collapsing a whole file to a few
+        // rows. Aborting rather than reading to the end also stops the read at
+        // the fault. The refusal is at this shared runner rather than at each
+        // caller so no read site can forget it.
+        const fault = results.errors.find(
+          (error) => !BENIGN_CSV_PARSE_ERROR_CODES.has(error.code),
+        );
+        if (fault !== undefined) {
+          faulted = true;
+          parser.abort();
+          releaseSource(detachGuard, source);
+          reject(rowParseFaultError(fault));
+          return;
+        }
         // Spread-push would pass one argument per row and can overflow the call
         // stack for a chunk holding hundreds of thousands of short rows, so build
         // the chunk's row array in a loop (O(n) total, stack-safe), normalizing
@@ -386,6 +466,10 @@ async function runSharedCSVParse(
       },
       complete: () => {
         releaseSource(detachGuard, source);
+        // The abort above settles this promise itself and leaves `meta` unset when
+        // the fault fell in the first chunk, so stop here rather than fall into the
+        // no-chunk invariant below, which that abort would otherwise trip.
+        if (faulted) return;
         // `meta` is set by the chunk callback, which fires at least once before
         // complete for any input (PapaParse parses at least one chunk, even an
         // empty file). Rejecting on the unreachable no-chunk case makes that an
@@ -428,7 +512,11 @@ async function runSharedCSVParse(
  * Parse a CSV file to its COMPLETE row set. Resolves a {@link Papa.ParseResult}
  * whose `data` and `errors` are accumulated across every PapaParse chunk, so a
  * file larger than one `Papa.LocalChunkSize` chunk is returned whole rather than
- * truncated to its final chunk. Rejects on a read/stream error.
+ * truncated to its final chunk. Rejects on a read/stream error, and -- through the
+ * shared runner's fault gate -- on a row-level parse fault with a
+ * {@link CsvRowParseError}, so the resolved `data` is the file's own rows or
+ * nothing. The resolved `errors` therefore carries only the codes the gate
+ * classifies as benign; a caller needs no check of its own.
  *
  * The single-line `byteCeiling` and the parse semantics are the shared runner's
  * ({@link runSharedCSVParse}); this driver's whole contribution is to accumulate
@@ -469,12 +557,17 @@ export async function loadCSVFile(
  * key per-column state without a separate read.
  *
  * The SAME shared runner ({@link runSharedCSVParse}), config, single-line byte
- * ceiling, and row normalization as {@link loadCSVFile} -- one config, two drivers
- * -- so a streaming server pass and a browser worker wrapping loadCSVFile parse
- * identically. Resolves with the header column list once the parse settles;
- * rejects on a read/parse error or a ceiling trip, the same contract as
- * loadCSVFile. A ceiling trip rejects with a {@link CsvLineByteCeilingError}, so a
- * caller can tell an oversized/unterminated line from an ordinary parse fault.
+ * ceiling, row normalization, and row-level fault gate as {@link loadCSVFile} --
+ * one config, two drivers -- so a streaming server pass and a browser worker
+ * wrapping loadCSVFile parse identically. Resolves with the header column list once
+ * the parse settles; rejects on a read/parse error or a ceiling trip, the same
+ * contract as loadCSVFile. A ceiling trip rejects with a
+ * {@link CsvLineByteCeilingError} and a row-level fault with a
+ * {@link CsvRowParseError}, so a caller can tell an oversized/unterminated line
+ * from a malformed row. The fault gate refuses the read before the faulting chunk
+ * reaches `consumeChunk`, so a consumer never accumulates rows the file does not
+ * contain -- but chunks BEFORE the fault have already been handed over, so a
+ * consumer with side effects must discard its own state on a rejection.
  */
 export async function streamCSVRows(
   file: LocalFile,

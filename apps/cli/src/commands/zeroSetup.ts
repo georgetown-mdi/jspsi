@@ -2,12 +2,7 @@ import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
 import { userInfo } from "node:os";
 
-import {
-  getLogger,
-  loadCSVFile,
-  prepareForExchange,
-  UsageError,
-} from "@psilink/core";
+import { getLogger, prepareForExchange, UsageError } from "@psilink/core";
 import type {
   ConnectionConfig,
   ExchangeBootstrapResult,
@@ -27,12 +22,7 @@ import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveConnectionCredentials } from "../util/atSignRefs";
 import { establishHostKeyTrust } from "../hostKeyTrust";
-import {
-  configureLogging,
-  exitWithError,
-  parseOrExit,
-  openInputSource,
-} from "../util/cli";
+import { configureLogging, exitWithError, parseOrExit } from "../util/cli";
 import { channelFromURL, connectionFromURL } from "../connectionFromUrl";
 import {
   addCommonBootstrapOptions,
@@ -45,6 +35,7 @@ import {
   type ConnectionOverrideOptions,
 } from "../optionDefinitions";
 import {
+  loadInputRows,
   observedReceivedColumnsForSave,
   parseLinkageStrategyFlag,
   singlePassDisclosureNotice,
@@ -279,16 +270,10 @@ async function prepareDataset(
 ): Promise<PreparedExchange> {
   const log = getLogger("psilink");
 
-  const csvResult = await loadCSVFile(
-    openInputSource(input, { allowStdin: true }),
-  );
-  const rawRows = csvResult.data;
-  const prepared = prepareForExchange(
-    {},
-    identity,
-    rawRows,
-    csvResult.meta.fields ?? [],
-  );
+  const { rawRows, columns } = await loadInputRows(input, {
+    allowStdin: true,
+  });
+  const prepared = prepareForExchange({}, identity, rawRows, columns);
   // Apply the operator's --linkage-strategy onto the terms prepareForExchange
   // authored from the input (a no-op for the cascade default), so it rides into
   // both the exchange and the --save spec. The strategy does not affect the

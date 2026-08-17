@@ -5,10 +5,13 @@ import { expect, test, vi } from "vitest";
 import {
   assertLeadingLineWithinByteCeiling,
   CSV_LINE_BYTE_CEILING,
+  CsvRowParseError,
   guardStreamLineByteCeiling,
   loadCSVColumnSample,
   loadCSVFile,
+  streamCSVRows,
 } from "../src/file";
+import { UsageError } from "../src/errors";
 import { inferDateFormat, columnValues } from "../src/utils/date";
 import type { CSVRow } from "../src/file";
 
@@ -387,37 +390,132 @@ test("loadCSVFile: a well-formed input under the ceiling reads unchanged", async
   ]);
 });
 
-test("loadCSVFile: normalizes rows to an honest CSVRow shape", async () => {
-  // PapaParse (header:true) gives no per-cell string guarantee: a row longer than
-  // the header attaches a non-string `__parsed_extra` array, and a shorter row omits
-  // its trailing columns. loadCSVFile normalizes both away so every returned cell is
-  // a genuine string (a CSVRow), which the row type states honestly -- the laundering
-  // the by-name-access cleanup targets.
-  const csv =
-    "a,b,c\n" +
-    "1,2,3\n" + // well-formed
-    "4,5\n" + // short: c is absent, not undefined-typed-as-string
-    "6,7,8,9,10\n"; // over-long: 9,10 land in a non-string __parsed_extra
-  const result = await loadCSVFile(streamOf(csv), 256);
+// The row-level fault gate. Every shape below is driven through the REAL parser
+// rather than a synthesized error list: the whole finding was that PapaParse
+// reports these on `results.errors` and parses on, so what matters is what the
+// parser itself does with the bytes. Each is run through both drivers over the
+// shared runner, since a caller of either would otherwise read a dataset that
+// differs from its file.
+const rowFaultScenarios: Array<{ label: string; csv: string }> = [
+  {
+    // One unterminated quote swallows the rest of the file into a single field:
+    // PapaParse reports MissingQuotes + TooFewFields and yields ONE row for a
+    // three-row file -- the stray-quote export that collapses a nightly CSV.
+    label: "an unterminated quote",
+    csv: 'name,dob\n"Alice,1990-01-02\nBob,1985-12-31\nCarol,1979-05-06\n',
+  },
+  {
+    // A row with more fields than the header: PapaParse reports TooManyFields and
+    // parks the surplus in __parsed_extra, which normalization then drops -- the
+    // values disappear with no other trace.
+    label: "a row with more fields than the header",
+    csv: "name,dob\nAlice,1990-01-02\nBob,1985-12-31,extra\n",
+  },
+  {
+    // A row missing its last column: PapaParse reports TooFewFields and returns a
+    // row whose trailing column is simply absent, so a by-name read of it is
+    // undefined and a positional consumer reads the row's own index in its place.
+    label: "a row missing its last column",
+    csv: "name,dob,ssn\nAlice,1990-01-02,111\nBob,1985-12-31\n",
+  },
+];
 
-  expect(result.data).toEqual([
-    { a: "1", b: "2", c: "3" },
-    { a: "4", b: "5" },
-    { a: "6", b: "7", c: "8" },
-  ]);
+const faultGateDrivers: Array<{
+  label: string;
+  run: (stream: Readable) => Promise<unknown>;
+}> = [
+  { label: "loadCSVFile", run: (stream) => loadCSVFile(stream, 4096) },
+  {
+    label: "streamCSVRows",
+    run: (stream) => streamCSVRows(stream, () => undefined, 4096),
+  },
+];
 
-  // The over-long row's non-string __parsed_extra is dropped, so a generic value
-  // iteration sees only strings -- never the array the raw cast would have typed as a
-  // string.
-  const overLong = result.data[2];
-  expect("__parsed_extra" in overLong).toBe(false);
-  expect(Object.values(overLong).every((v) => typeof v === "string")).toBe(
-    true,
+for (const driver of faultGateDrivers) {
+  test.each(rowFaultScenarios)(
+    `${driver.label}: $label rejects rather than yielding altered rows`,
+    async ({ csv }) => {
+      await expect(driver.run(streamOf(csv))).rejects.toBeInstanceOf(
+        CsvRowParseError,
+      );
+    },
   );
+}
 
-  // The short row's missing column reads as undefined, not a mis-typed string.
-  expect(result.data[1].c).toBeUndefined();
-  expect("c" in result.data[1]).toBe(false);
+test("loadCSVFile: the fault refusal names the data row and the parser's reason", async () => {
+  // The operator reading an unattended run's log needs the row and the reason; the
+  // row is PapaParse's 0-based data-row index reported 1-based, so the second data
+  // row of the file reads as row 2.
+  const csv = "name,dob,ssn\nAlice,1990-01-02,111\nBob,1985-12-31\n";
+  await expect(loadCSVFile(streamOf(csv), 4096)).rejects.toThrow(
+    /data row 2: Too few fields: expected 3 fields but parsed 2 \(TooFewFields\)/,
+  );
+});
+
+test("loadCSVFile: a fault refusal is a UsageError, so the CLI exits 64", async () => {
+  // The 64-vs-69 split is by class: a malformed input file is bad input, not a
+  // transport failure.
+  const csv = 'name,dob\n"Alice,1990-01-02\nBob,1985-12-31\n';
+  await expect(loadCSVFile(streamOf(csv), 4096)).rejects.toBeInstanceOf(
+    UsageError,
+  );
+});
+
+test("loadCSVFile: a fault in a later chunk still refuses the read", async () => {
+  // The gate runs per chunk, so a fault beyond the first chunk must refuse just as
+  // one in it does -- the realistic shape, since a nightly export's stray quote is
+  // nowhere near the head of the file. Delivered in tiny pieces so the faulting row
+  // lands in a later chunk.
+  const rows = Array.from(
+    { length: 200 },
+    (_v, i) => `Person${i},1990-01-0${(i % 9) + 1}`,
+  ).join("\n");
+  const csv = `name,dob\n${rows}\nTrailing,1990-01-01,surplus\n`;
+  await expect(
+    loadCSVFile(chunkedStreamOf(csv, 32), 4096),
+  ).rejects.toBeInstanceOf(CsvRowParseError);
+});
+
+test("streamCSVRows: the faulting chunk's rows never reach the consumer", async () => {
+  // A streaming consumer accumulates as it goes, so the gate must refuse BEFORE
+  // handing over the chunk that carries the fault; the rows it would have added are
+  // exactly the altered ones.
+  const csv = "name,dob\nAlice,1990-01-02\nBob,1985-12-31,surplus\n";
+  const seen: Array<CSVRow> = [];
+  await expect(
+    streamCSVRows(streamOf(csv), (rows) => seen.push(...rows), 4096),
+  ).rejects.toBeInstanceOf(CsvRowParseError);
+  expect(seen).toEqual([]);
+});
+
+test("loadCSVFile: destroys the source stream once a row fault aborts the read", async () => {
+  // The fault path aborts the parse mid-file, so it owns releasing the source: an
+  // fs.createReadStream descriptor would otherwise linger until GC.
+  const stream = streamOf("name,dob\nAlice,1990-01-02,surplus\n");
+  const destroySpy = vi.spyOn(stream, "destroy");
+  await expect(loadCSVFile(stream, 4096)).rejects.toBeInstanceOf(
+    CsvRowParseError,
+  );
+  expect(destroySpy).toHaveBeenCalled();
+});
+
+test("loadCSVFile: a single-column file reads despite PapaParse's delimiter warning", async () => {
+  // PapaParse cannot auto-detect a delimiter in a one-column file and reports
+  // UndetectableDelimiter having defaulted to a comma -- a warning about the
+  // detection, not about the rows, and a single identifier column is an ordinary
+  // operator input. The gate's benign-code allowlist is what keeps it readable.
+  const result = await loadCSVFile(streamOf("id\n1\n2\n"), 4096);
+  expect(result.meta.fields).toEqual(["id"]);
+  expect(result.data).toEqual([{ id: "1" }, { id: "2" }]);
+});
+
+test("loadCSVFile: a header-only file parses to zero rows rather than refusing", async () => {
+  // Emptiness is not a parse fault: PapaParse reports nothing and the file is
+  // well-formed, so the loader returns the header and no rows. Refusing to RUN on
+  // an empty dataset is the CLI input loader's gate, not this one's.
+  const result = await loadCSVFile(streamOf("name,dob\n"), 4096);
+  expect(result.meta.fields).toEqual(["name", "dob"]);
+  expect(result.data).toEqual([]);
 });
 
 // The non-stream (browser File) bound. loadCSVFile's data-event counter is inert

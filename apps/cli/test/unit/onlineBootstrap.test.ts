@@ -7,6 +7,7 @@ import type { Arguments } from "yargs";
 import YAML from "yaml";
 import {
   CSV_LINE_BYTE_CEILING,
+  CsvRowParseError,
   getDefaultLinkageTerms,
   getLogger,
   inferDateInputFormatFromSource,
@@ -2990,17 +2991,57 @@ test("loadInputRows: a CSV piped via `-` yields the same rows as the equivalent 
   }
 });
 
-test("loadInputRows: empty stdin is handled like an empty file", async () => {
+test("loadInputRows: a dataset with no data rows refuses, from a file or stdin", async () => {
+  // An empty file and a header-only one are both well-formed CSV: the parser
+  // reports nothing and every stage downstream accepts the empty set, so the run
+  // would exchange nothing, write a result indistinguishable from a real
+  // non-match, and exit 0. The loader refuses instead, as a usage error (exit 64)
+  // naming the input, and identically whether the bytes came from a file or a
+  // pipe.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-empty-"));
   try {
     const empty = path.join(dir, "empty.csv");
     fs.writeFileSync(empty, "");
-    const fromFile = await loadInputRows(empty, { allowStdin: true });
-    const fromStdin = await withStdin(streamOf(""), () =>
-      loadInputRows("-", { allowStdin: true }),
+    const headerOnly = path.join(dir, "header-only.csv");
+    fs.writeFileSync(headerOnly, "first_name,last_name,dob\n");
+
+    await expect(
+      loadInputRows(empty, { allowStdin: true }),
+    ).rejects.toBeInstanceOf(UsageError);
+    await expect(
+      loadInputRows(headerOnly, { allowStdin: true }),
+    ).rejects.toThrow(
+      new RegExp(`${headerOnly.replace(/\\/g, "\\\\")} has no data rows`),
     );
-    expect(fromStdin).toEqual(fromFile);
-    expect(fromStdin.rawRows).toEqual([]);
+    await expect(
+      withStdin(streamOf("first_name,last_name,dob\n"), () =>
+        loadInputRows("-", { allowStdin: true }),
+      ),
+    ).rejects.toThrow(/stdin has no data rows/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadInputRows: a row-level parse fault refuses before any exchange work", async () => {
+  // The unattended shape: one unterminated quote in an upstream export collapses
+  // the file to a handful of rows, which every stage downstream would accept. The
+  // core loader refuses it, and the refusal is a usage error here too, so the
+  // invite / accept / exchange / zero-setup paths that share this loader all exit
+  // 64 rather than exchanging a truncated dataset.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-fault-"));
+  try {
+    const file = path.join(dir, "in.csv");
+    fs.writeFileSync(
+      file,
+      'first_name,dob\n"Alice,1990-01-02\nBob,1985-12-31\nCarol,1979-05-06\n',
+    );
+    await expect(
+      loadInputRows(file, { allowStdin: true }),
+    ).rejects.toBeInstanceOf(CsvRowParseError);
+    await expect(
+      loadInputRows(file, { allowStdin: true }),
+    ).rejects.toBeInstanceOf(UsageError);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

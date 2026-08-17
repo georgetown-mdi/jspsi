@@ -460,9 +460,11 @@ export async function generateInvitation(params: {
     );
 
   // Parse the inviter's CSV here, before anything is minted, so an unreadable
-  // file aborts with no token. loadCSVFileOffMainThread rejects only on a read/stream
-  // error (a malformed-but-readable CSV resolves with rows); wrap that into the typed
-  // user-actionable failure. On the console's profiled-columns path there is no file
+  // file aborts with no token. loadCSVFileOffMainThread rejects on a read/stream
+  // error and on a row-level parse fault (an unterminated quote, a row whose field
+  // count differs from the header -- core refuses those rather than resolve rows
+  // the file does not contain); wrap either into the typed user-actionable
+  // failure. On the console's profiled-columns path there is no file
   // to read: the columns are bound directly and no rows are produced (the
   // browser-transport run that would consume them does not exist on the console).
   let rawRows: Array<CSVRow>;

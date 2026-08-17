@@ -376,22 +376,49 @@ export function expiresFromNow(durationSeconds: number): string {
 // --- Input data --------------------------------------------------------------
 
 /**
- * Load and parse a CSV input into raw rows and column names. `input` is a file
- * path or `-` for stdin; the caller gates stdin via `allowStdin` because the two
- * commands sharing this loader differ on it -- `invite` supports `-`, and
- * `accept` rejects it unless `--consent-to-terms` skips the confirmation prompt
- * that otherwise owns stdin. Defaults to stdin disabled so the shared loader never
- * enables it unconditionally.
+ * Load and parse a CSV input into raw rows and column names -- the one loader
+ * every command that reads an exchange INPUT goes through (`invite`, `accept`,
+ * `exchange`, `zero-setup`), so the data-level gate below cannot be forgotten at a
+ * call site. `input` is a file path or `-` for stdin; the caller gates stdin via
+ * `allowStdin` because the commands sharing this loader differ on it -- `invite`,
+ * `exchange`, and `zero-setup` support `-`, and `accept` rejects it unless
+ * `--consent-to-terms` skips the confirmation prompt that otherwise owns stdin.
+ * Defaults to stdin disabled so the shared loader never enables it
+ * unconditionally.
+ *
+ * A row-level parse fault rejects inside `loadCSVFile` (a `CsvRowParseError`,
+ * which is a `UsageError` -> exit 64). A dataset with no data rows is refused
+ * here, before any exchange work: it is not a parse failure, so the parser
+ * reports nothing, and every stage downstream accepts it -- the run would mint or
+ * transmit against an empty set, write a result indistinguishable from a real
+ * non-match, attest that count, rotate the shared secret, and exit 0. That is the
+ * shape an unattended run cannot tell from a successful one, so the refusal is
+ * unconditional rather than a warning.
+ *
+ * `verify-receipt` deliberately does NOT come through here: its result CSV is
+ * legitimately empty for a zero-match exchange.
  */
 export async function loadInputRows(
   input: string,
   { allowStdin = false }: { allowStdin?: boolean } = {},
 ): Promise<{ rawRows: Array<CSVRow>; columns: string[] }> {
   const csvResult = await loadCSVFile(openInputSource(input, { allowStdin }));
+  if (csvResult.data.length === 0)
+    throw new UsageError(
+      `${describeInputSource(input)} has no data rows. An exchange over an ` +
+        "empty dataset writes an empty result indistinguishable from a real " +
+        "non-match, so it is refused here; check the export that produced the " +
+        "file.",
+    );
   return {
     rawRows: csvResult.data,
     columns: csvResult.meta.fields ?? [],
   };
+}
+
+/** Name an input in a refusal message: a path as given, or stdin as what it is. */
+function describeInputSource(input: string): string {
+  return input === "-" ? "the CSV read from stdin" : `the CSV input ${input}`;
 }
 
 // --- Linkage strategy selection ----------------------------------------------
