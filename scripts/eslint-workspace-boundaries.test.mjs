@@ -5,6 +5,11 @@ import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
 import { crossWorkspaceImportBans } from "../eslint.boundaries.mjs";
 import repoConfig from "../eslint.config.mjs";
+import {
+  PROJECT_PARSER_OPTIONS,
+  typeAwareRuleNames,
+  withoutTypeAwareLayer,
+} from "./eslint-strip-type-aware-layer.mjs";
 
 // Coverage of the cross-workspace import ban in eslint.boundaries.mjs: apps
 // consume packages, packages never consume apps, and the two apps never reach
@@ -17,90 +22,15 @@ import repoConfig from "../eslint.config.mjs";
 //
 // Each case is linted through the real repo config -- eslint.config.mjs already
 // embeds apps/web's blocks (scoped under apps/web/, see scopeToDir there), so one
-// config covers every tree this file lints -- with one transform: the type-aware
-// layer is stripped off before it is used (withoutTypeAwareLayer below). The
-// blocks that carry the ban are transformed by nothing, so the selector, the
-// per-tree `files` scoping, and flat config's replace-semantics across the five
-// blocks are the real ones.
+// config covers every tree this file lints -- with one transform: the
+// type-aware layer is stripped off before it is used (withoutTypeAwareLayer,
+// imported from ./eslint-strip-type-aware-layer.mjs). The blocks that carry the
+// ban are transformed by nothing, so the selector, the per-tree `files`
+// scoping, and flat config's replace-semantics across the five blocks are the
+// real ones.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
-
-// The parser options that put a TypeScript program behind the lint.
-const PROJECT_PARSER_OPTIONS = [
-  "project",
-  "projectService",
-  "EXPERIMENTAL_useProjectService",
-];
-
-/** The first plugin registered under each prefix across a flat config array. */
-function pluginsByPrefix(configs) {
-  const plugins = new Map();
-  for (const entry of configs) {
-    for (const [prefix, plugin] of Object.entries(entry.plugins ?? {})) {
-      if (!plugins.has(prefix)) plugins.set(prefix, plugin);
-    }
-  }
-  return plugins;
-}
-
-/**
- * The names in `rules` whose rule declares `requiresTypeChecking`, resolved
- * through `pluginFor(prefix)`. Asking the plugin keeps this off a hand-kept list
- * that a config or dependency change would silently outdate.
- */
-function typeAwareRuleNames(rules, pluginFor) {
-  return Object.keys(rules).filter((name) => {
-    const separator = name.lastIndexOf("/");
-    if (separator === -1) return false;
-    const rule = pluginFor(name.slice(0, separator))?.rules?.[
-      name.slice(separator + 1)
-    ];
-    return rule?.meta?.docs?.requiresTypeChecking === true;
-  });
-}
-
-/**
- * The repo's flat config with type-aware linting removed: no parser option that
- * builds a TypeScript program, and no rule that needs one.
- *
- * The ban is `no-restricted-imports` -- a specifier-pattern match, and nothing a
- * type checker knows -- so every type-aware rule the web config enables is dead
- * weight here, and dead weight with a failure mode: a rule reading types can
- * crash inside TypeScript's module-specifier computation on a real apps/web
- * source, which is sensitive to the absolute path the tree sits at and so fails
- * under CI's layout while passing here, over ground this file does not test.
- * Deriving from the real config rather than hand-authoring a minimal one keeps
- * the ban's own blocks exact; dropping the type-aware layer leaves what this
- * file reports resting on the text it hands in and nothing else. A type-aware
- * rule that survived the strip cannot lint silently: with no project configured
- * ESLint refuses to load it and the lint throws.
- */
-function withoutTypeAwareLayer(configs) {
-  const plugins = pluginsByPrefix(configs);
-  return configs.map((entry) => {
-    const transformed = { ...entry };
-    if (entry.languageOptions?.parserOptions) {
-      transformed.languageOptions = {
-        ...entry.languageOptions,
-        parserOptions: Object.fromEntries(
-          Object.entries(entry.languageOptions.parserOptions).filter(
-            ([option]) => !PROJECT_PARSER_OPTIONS.includes(option),
-          ),
-        ),
-      };
-    }
-    if (entry.rules) {
-      const typeAware = new Set(
-        typeAwareRuleNames(entry.rules, (prefix) => plugins.get(prefix)),
-      );
-      transformed.rules = Object.fromEntries(
-        Object.entries(entry.rules).filter(([name]) => !typeAware.has(name)),
-      );
-    }
-    return transformed;
-  });
-}
 
 const eslint = new ESLint({
   cwd: repoRoot,
