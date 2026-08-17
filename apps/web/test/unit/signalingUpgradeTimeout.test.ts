@@ -163,4 +163,128 @@ describe("hardenUpgradeSurface", () => {
     expect(server.listenerCount("connection")).toBe(before + 1);
     server.close();
   });
+
+  test("registers an idempotent idle-bound release hook", () => {
+    const server = http.createServer();
+    const before = server.listenerCount("request");
+    hardenUpgradeSurface(server);
+    hardenUpgradeSurface(server);
+    expect(server.listenerCount("request")).toBe(before + 1);
+    server.close();
+  });
+
+  test("adds no upgrade listener, leaving the signaling server the sole one", () => {
+    // The signaling server decides whether an unhandled upgrade is its to close
+    // by testing that it is the only `upgrade` listener; a listener added here
+    // would silently flip that test on the production server.
+    const server = http.createServer();
+    hardenUpgradeSurface(server);
+    expect(server.listenerCount("upgrade")).toBe(0);
+    server.close();
+  });
+
+  test("does not cut a connection awaiting a slow response", async () => {
+    // The response is withheld far longer than the idle bound, with no byte
+    // moving in either direction meanwhile: the socket is idle by any read/write
+    // measure, but it owes the server nothing, so the bound must not reach it.
+    const idleMs = 300;
+    const server = http.createServer((_req, res) => {
+      setTimeout(() => res.end("late"), idleMs * 4);
+    });
+    hardenUpgradeSurface(server, { preHandshakeIdleMs: idleMs });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const { port } = server.address() as AddressInfo;
+    try {
+      const body = await new Promise<string>((resolve, reject) => {
+        const req = http.get(
+          { host: "127.0.0.1", port, path: "/", agent: false },
+          (res) => {
+            let text = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk: string) => (text += chunk));
+            res.on("end", () => resolve(text));
+          },
+        );
+        req.on("error", reject);
+      });
+      expect(body).toBe("late");
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  test("does not cut a streaming response quiet for longer than the bound", async () => {
+    // The shape the console's job event stream takes: a long-lived response that
+    // is legitimately silent between frames while an exchange runs. Both frames
+    // must arrive on the one connection, with the quiet window between them
+    // several times the bound.
+    const idleMs = 300;
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write("data: first\n\n");
+      setTimeout(() => {
+        res.write("data: second\n\n");
+        res.end();
+      }, idleMs * 4);
+    });
+    hardenUpgradeSurface(server, { preHandshakeIdleMs: idleMs });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const { port } = server.address() as AddressInfo;
+    try {
+      const frames = await new Promise<string>((resolve, reject) => {
+        const req = http.get(
+          { host: "127.0.0.1", port, path: "/events", agent: false },
+          (res) => {
+            let text = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk: string) => (text += chunk));
+            res.on("end", () => resolve(text));
+            res.on("aborted", () =>
+              reject(new Error("stream cut before it ended")),
+            );
+          },
+        );
+        req.on("error", reject);
+      });
+      expect(frames).toContain("data: first");
+      expect(frames).toContain("data: second");
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  test("still reaps a socket that stalls part-way through its request", async () => {
+    // A dawdler that has sent bytes but no complete request owes the server one,
+    // so the bound still reaches it -- the release is keyed on a request arriving,
+    // not on any byte arriving.
+    const idleMs = 400;
+    const server = http.createServer((_req, res) => res.end("ok"));
+    hardenUpgradeSurface(server, { preHandshakeIdleMs: idleMs });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const { port } = server.address() as AddressInfo;
+    try {
+      const closedMs = await new Promise<number | null>((resolve) => {
+        const start = Date.now();
+        const socket = net.connect(port, "127.0.0.1", () => {
+          socket.write("GET /slow HTTP/1.1\r\nHost: 127.0.0.1\r\n");
+        });
+        socket.on("close", () => resolve(Date.now() - start));
+        socket.on("error", () => {});
+        setTimeout(() => resolve(null), 3_000);
+      });
+      expect(closedMs).not.toBeNull();
+      expect(closedMs).toBeLessThan(2_500);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
 });

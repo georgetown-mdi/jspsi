@@ -1,5 +1,5 @@
+import type { Server as HttpServer, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import type { Server as HttpServer } from "node:http";
 import type { Server as HttpsServer } from "node:https";
 import type { Socket } from "node:net";
 
@@ -27,9 +27,13 @@ export const SIGNALING_REQUEST_TIMEOUT_MS = 15_000;
  * {@link SIGNALING_REQUEST_TIMEOUT_MS} only arm once HTTP request parsing has
  * begun, so a peer that completes the TCP handshake and then sends nothing has
  * no request for them to bound and would sit held open until the OS reaps it.
- * This per-socket idle timeout closes that hold. `ws` resets the socket timeout
- * to 0 the moment a socket completes the 101 upgrade, so an established
- * WebSocket -- governed by the liveness reaper, not this -- is never cut by it.
+ * This per-socket idle timeout closes that hold. It binds only while the socket
+ * owes the server a request: it is released the moment one arrives, so what the
+ * server does with the connection thereafter -- however long the handler takes,
+ * however quiet a long-lived response goes -- is outside its reach. `ws` performs
+ * the same release for the upgrade path, resetting the socket timeout to 0 the
+ * moment a socket completes the 101, so an established WebSocket is governed by
+ * the liveness reaper rather than by this.
  */
 export const SIGNALING_PREHANDSHAKE_IDLE_MS = 10_000;
 
@@ -41,6 +45,13 @@ const idleReaperByServer = new WeakMap<
   HttpServer | HttpsServer,
   (socket: Socket) => void
 >();
+
+// The reap callback armed on each socket, so releasing the bound can also detach
+// it. `setTimeout(0)` alone disarms the timer but leaves the callback subscribed
+// to the socket's `timeout` event, where a re-arm by Node's own keep-alive
+// handling would later fire it; detaching leaves a released socket carrying none
+// of this module's state.
+const idleReapCallbackBySocket = new WeakMap<Socket, () => void>();
 
 /**
  * Close a stalled or malformed handshake. Node already does this from its
@@ -73,15 +84,36 @@ function closeStalledHandshake(
 }
 
 /**
+ * Release the pre-request idle bound on the socket a request arrived on. The
+ * bound covers the window in which the socket owes the server a request; once it
+ * has delivered one, the server owns the pace of what follows, so nothing about
+ * the response -- a slow handler, or an event stream that stays quiet between
+ * frames -- may be measured against a client-idleness clock. Closes over
+ * nothing, so a repeated harden compares it by identity like
+ * {@link closeStalledHandshake}.
+ */
+function releasePreRequestIdleBound(req: IncomingMessage): void {
+  const socket = req.socket;
+  socket.setTimeout(0);
+  const reapCallback = idleReapCallbackBySocket.get(socket);
+  if (reapCallback) {
+    socket.removeListener("timeout", reapCallback);
+    idleReapCallbackBySocket.delete(socket);
+  }
+}
+
+/**
  * Bound the pre-101 upgrade handshake on the shared HTTP server: an
  * unauthenticated client that opens a connection and dribbles -- or never
  * finishes -- its request headers is closed server-side rather than held until a
  * loose (60s) default, and one that connects and then sends nothing at all (no
  * request for the header/request timeouts to bound) is reaped on a per-socket
- * idle timeout. Once a socket completes the 101 it is a WebSocket the signaling
- * layer governs (the `ws` close timer and the liveness reaper), so these bound
- * only the handshake. The override args exist so the behavior is unit-testable
- * on a short clock; production uses the defaults.
+ * idle timeout. All three bound only the window before the server has a request
+ * in hand: each is released once one arrives, whether that is a WebSocket
+ * upgrade the signaling layer then governs (the `ws` close timer and the liveness
+ * reaper) or an ordinary request whose response the server paces. The override
+ * args exist so the behavior is unit-testable on a short clock; production uses
+ * the defaults.
  */
 export function hardenUpgradeSurface(
   server: HttpServer | HttpsServer,
@@ -107,8 +139,20 @@ export function hardenUpgradeSurface(
   const previousReaper = idleReaperByServer.get(server);
   if (previousReaper) server.removeListener("connection", previousReaper);
   const reapIdlePreHandshakeSocket = (socket: Socket): void => {
-    socket.setTimeout(idleMs, () => socket.destroy());
+    const destroyIdleSocket = (): void => {
+      socket.destroy();
+    };
+    idleReapCallbackBySocket.set(socket, destroyIdleSocket);
+    socket.setTimeout(idleMs, destroyIdleSocket);
   };
   idleReaperByServer.set(server, reapIdlePreHandshakeSocket);
   server.on("connection", reapIdlePreHandshakeSocket);
+
+  // Idempotent for the same reason the clientError wiring is: the release hook
+  // holds no per-call state, so removing it first keeps a repeated harden at one.
+  // No matching hook is wired on `upgrade`: `ws` releases the bound itself on the
+  // 101, and an extra `upgrade` listener would flip the signaling server's
+  // sole-listener test for whether an unhandled upgrade is its to close.
+  server.removeListener("request", releasePreRequestIdleBound);
+  server.on("request", releasePreRequestIdleBound);
 }

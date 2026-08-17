@@ -27,6 +27,7 @@ The bundled coordination server is untrusted by design: the rendezvous ids are d
 - A slow, partial, or idle upgrade handshake (a "slowloris" that dribbles, stalls, or connects and then sends nothing at all) is bounded by connection-level timeouts and closed server-side rather than held open.
 - Each signaling message is size-capped, so an unauthenticated peer cannot send an oversized frame.
 - A client that registers but never proves it is a live peer (it sends no heartbeat) is reaped within seconds, well before the liveness timeout that governs an established peer, so an abandoned or junk registration cannot squat a slot; a real peer, which heartbeats within seconds of connecting, is never cut short.
+- A registered client holds one connection at a time. A peer that connects again under credentials it has already registered attaches to that registration rather than taking a second one, and the connection it displaces is closed rather than left held.
 - The relay's hold-for-reconnect message queues are bounded in count and depth, so a client cannot drive unbounded memory by addressing messages to many made-up recipients.
 
 The constant values and rationale for these guards are in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#web-signaling-surface-bounds).
