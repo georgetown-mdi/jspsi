@@ -727,6 +727,46 @@ test("an abort after registration tears down the socket and the peer connection"
   expect(peer.closeCalls).toBe(1);
 });
 
+test("a broker failure inside the acceptor's offer rejects rather than going unhandled", async () => {
+  // The acceptor awaits its own offer before it awaits the rendezvous, so a
+  // failure latched in that window rejects a promise nothing is waiting on yet.
+  // Unhandled, that rejection terminates the process at exit 1 -- past this
+  // function's own teardown, past runProtocol's catch, and past the classified
+  // error a supervisor reads -- instead of failing the exchange the ordinary
+  // way. A terminal broker ERROR delivered while createOffer is in flight is one
+  // of the several failures that reach fail() there.
+  const unhandled: unknown[] = [];
+  const record = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on("unhandledRejection", record);
+  try {
+    const { socket, peer, session } = await startRendezvous({
+      role: "acceptor",
+      confirmRegistration: false,
+    });
+    peer.createOffer = async () => {
+      socket.deliver({ type: BROKER_MESSAGE.error, payload: "server sank" });
+      // The real offer does I/O (werift gathers as it describes), so the window
+      // it holds open spans timer turns rather than resolving in the microtask
+      // the failure landed in -- which is what leaves the rejection unhandled
+      // long enough to be reported.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { type: "offer", sdp: "v=0\r\noffer\r\n" };
+    };
+    socket.register();
+
+    await expect(session).rejects.toThrow(/signaling server reported an error/);
+    // The teardown the classified path owes, which an unhandled rejection skips.
+    expect(peer.closeCalls).toBe(1);
+    // A turn for the rejection to be reported if it was never handled.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(unhandled).toEqual([]);
+  } finally {
+    process.off("unhandledRejection", record);
+  }
+});
+
 test("an abort before registration tears down the same, having sent nothing", async () => {
   // The other half of the window: the socket exists but the broker has not
   // confirmed it, so the abort is caught by the registration rather than by the

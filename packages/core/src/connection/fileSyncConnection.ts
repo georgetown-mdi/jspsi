@@ -757,6 +757,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       role: () => this.role,
       log: () => this.log,
       options: () => this.options,
+      peerBudgetMs: () => this.peerBudgetMs(),
       path: () => this.path,
       outbound: () => this.outbound,
       peerId: () => this.peerId,
@@ -840,6 +841,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     return cancellableDelay(ms, this.abortController.signal);
   }
 
+  /**
+   * The peer-inactivity budget one await may spend, read live because open()
+   * populates the config after the constructor installs the transport wrap. Every
+   * consumer arms it FRESH per await -- see {@link boundTransport} for why a
+   * budget re-armed per step rather than an absolute deadline is what bounds
+   * silence from the peer without capping a healthy exchange's duration.
+   */
+  private peerBudgetMs(): number {
+    return this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
+  }
+
   // The whole-exchange liveness backstop (THE security control for the
   // withheld-callback DoS; see docs/spec/CHANNEL_SECURITY.md). Wraps
   // the transport so every data-plane await is raced against the peer-inactivity
@@ -880,8 +892,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // hang is never failed twice; this budget is the sole bound only where no per-op
   // bound exists (every write/stat/delete, and all LocalFSClient ops).
   private boundTransport(raw: FileTransportClient): FileTransportClient {
-    const budgetMs = (): number =>
-      this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
+    const budgetMs = (): number => this.peerBudgetMs();
     const bound = <T>(
       op: Promise<T>,
       operation: string,

@@ -6586,25 +6586,31 @@ test("retain mode: a message reprocessed after an emit failure is not acked twic
   expect(ackRenames).toHaveLength(1);
 });
 
-test("retain mode: ack-wait timeout throws a UsageError on the timeToLive budget", async () => {
+test("retain mode: ack-wait timeout throws a UsageError on the peer budget", async () => {
   const { client } = makeMockClient();
   const id = "sender-me";
   const peerId = "peer-receiver";
 
   const conn = new FileSyncConnection(client, {
     pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 100),
     verbose: -1,
     locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
-  conn.connected = true;
+  // Opened rather than hand-flagged as connected: the wait's budget is the live
+  // peer-inactivity budget, read from the config as boundTransport's is.
+  await conn.open({
+    channel: "filedrop",
+    path: "/test",
+    options: { peerTimeoutMs: 100 },
+  });
   conn.path = "/test";
   conn.id = id;
   conn.peerId = peerId;
 
-  // First send uses the budget without blocking; no ack will arrive.
+  // First send arms its own budget and does not block; no ack will arrive, so
+  // the second send spends its own whole budget waiting for one.
   await conn.send({ first: true });
 
   await expect(conn.send({ second: true })).rejects.toBeInstanceOf(UsageError);
