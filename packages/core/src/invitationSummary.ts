@@ -1095,9 +1095,9 @@ function summarizeKey(
  * Build a display-ready {@link InvitationSummary} from an invitation's linkage
  * terms, optional expiry, and optional carried disclosed-columns subset. The
  * parameter is a structural subset of {@link InvitationToken} (its
- * `linkageTerms`, `expires`, and `disclosedPayloadColumns`), so a full decoded
- * token is accepted as-is, but so is the terms/expiry pair the exchange screen
- * carries without a token. The "columns your partner will send" line derives from
+ * `linkageTerms`, `expires`, `disclosedPayloadColumns`, `connectionEndpoint`,
+ * and `inviterRetainsFiles`), so a full decoded token is accepted as-is, but so
+ * is the terms/expiry pair the exchange screen carries without a token. The "columns your partner will send" line derives from
  * the carried `disclosedPayloadColumns` when present (the wire's own disclosure
  * predicate), falling back to the authored `payload.send` otherwise. Pure and
  * side-effect-free: it derives only what the terms screen renders and sanitizes
