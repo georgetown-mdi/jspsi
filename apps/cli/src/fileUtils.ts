@@ -184,13 +184,25 @@ function warnIfWindowsAclOverPermissive(
 // despite an owner-only mode. Clear every ACE so the mode is the file's whole
 // access story: on an artifact psilink writes, no ACE is intended, and the
 // writers declare access through the mode alone. Node's `fs` exposes no ACL
-// API, so this shells out to macOS's own `chmod`: `-N` deletes the ACL, and
-// `-h` acts on the named entry rather than following a symlink swapped in at
-// the path, so the strip cannot reach another file's ACL through a link planted
-// in the temp-path window. The absolute `/bin/chmod` keeps the resolution off
-// `PATH`, and `--` ends the options so an operator-supplied path beginning with
-// `-` is an operand rather than a run of flags. There is no shell: the operand
-// is one `execFileSync` argument.
+// API, so this shells out to macOS's own `chmod`, whose `-N` deletes the ACL.
+// The absolute `/bin/chmod` keeps the resolution off `PATH`, and `--` ends the
+// options so an operator-supplied path beginning with `-` is an operand rather
+// than a run of flags. There is no shell: the operand is one `execFileSync`
+// argument.
+//
+// `symlinks` picks which entry the strip acts on, and each caller passes the one
+// that matches how its own write reached the file, so the ACL cleared always
+// belongs to the file the content lands in:
+//  - `"do-not-follow"` adds `-h`, which acts on the named entry. The temp-file
+//    writers take it: the temp path is psilink's own, opened `O_EXCL|O_NOFOLLOW`,
+//    so a symlink at it is a link planted in the create window -- following it
+//    would redirect the strip onto another file's ACL while the content goes to
+//    the temp file.
+//  - `"follow"` omits `-h`, so `chmod` resolves the path. The streaming writer
+//    takes it: its `destPath` is an operator-supplied output path opened without
+//    `O_NOFOLLOW`, and its `fchmod` acts on that descriptor, so a pre-existing
+//    symlink there is deliberately followed and the strip has to reach the same
+//    real file the rows do.
 //
 // A no-op off macOS: on Linux (the production/Docker target) a numeric `chmod`
 // already collapses the POSIX ACL mask, and Windows owner-only enforcement is
@@ -199,10 +211,20 @@ function warnIfWindowsAclOverPermissive(
 // so nothing a call writes lands while a foreign ACE could still be in force.
 // `reportedPath` names the destination the operator knows in the failure
 // message, which is the temp file's destination rather than the temp file.
-function stripExtendedAcls(filePath: string, reportedPath = filePath): void {
+function stripExtendedAcls(
+  filePath: string,
+  {
+    symlinks,
+    reportedPath = filePath,
+  }: { symlinks: "do-not-follow" | "follow"; reportedPath?: string },
+): void {
   if (process.platform !== "darwin") return;
+  const args =
+    symlinks === "do-not-follow"
+      ? ["-h", "-N", "--", filePath]
+      : ["-N", "--", filePath];
   try {
-    execFileSync("/bin/chmod", ["-h", "-N", "--", filePath], {
+    execFileSync("/bin/chmod", args, {
       stdio: "ignore",
       timeout: 5000,
     });
@@ -486,7 +508,10 @@ export function writeFileOwnerOnly(
       );
       try {
         fs.fchmodSync(fd, 0o600);
-        stripExtendedAcls(tmp, destPath);
+        stripExtendedAcls(tmp, {
+          symlinks: "do-not-follow",
+          reportedPath: destPath,
+        });
         fs.writeFileSync(fd, content, "utf8");
         // Flush the temp file's data to stable storage before the rename, so a
         // power loss cannot leave the rename durable while the contents are
@@ -578,8 +603,8 @@ export function writeFileOwnerOnly(
  * `writeFileOwnerOnly` so the owner-only, ACL-hardened path -- the
  * security-sensitive one -- is not entangled with public-file semantics.
  *
- * The macOS extended-ACL strip {@link writeFileOwnerOnly} performs runs here
- * too, at any `mode`, because an inherited ACE can grant a principal access
+ * The macOS extended-ACL strip that {@link writeFileOwnerOnly} performs runs
+ * here too, at any `mode`, because an inherited ACE can grant a principal access
  * (write included) that the explicit mode withholds, and the point of an
  * explicit mode is to be the file's whole access story. It is a no-op off
  * macOS.
@@ -629,7 +654,10 @@ export function writeFileAtomic(
       // read-only bit; the public default ACL already lets a partner read the
       // exported certificate.)
       fs.fchmodSync(fd, mode);
-      stripExtendedAcls(tmp, destPath);
+      stripExtendedAcls(tmp, {
+        symlinks: "do-not-follow",
+        reportedPath: destPath,
+      });
       fs.writeFileSync(fd, content, "utf8");
       // Flush the temp file's data before the rename so a power loss cannot
       // leave the rename durable while the contents are lost; the parent
@@ -702,10 +730,13 @@ export function writeFileAtomic(
  *
  * On macOS the file's extended (NFSv4) ACL is cleared between the `fchmod` and
  * the truncate, so no row is written while an inherited or pre-existing ACE
- * could still grant another principal the access the `0600` mode denies. A
- * strip that fails aborts before the truncate, leaving an existing file's
- * content intact -- the same fail-closed posture as an `fchmod` that cannot
- * secure the mode. Elsewhere the strip is a no-op.
+ * could still grant another principal the access the `0600` mode denies. The
+ * strip resolves a symlink at `destPath` rather than acting on the link node,
+ * so it clears the ACL of the same file the descriptor writes -- matching the
+ * `fchmod`, and the deliberately symlink-following open above. A strip that
+ * fails aborts before the truncate, leaving an existing file's content intact --
+ * the same fail-closed posture as an `fchmod` that cannot secure the mode.
+ * Elsewhere the strip is a no-op.
  *
  * On Windows the synthetic POSIX mode bits set no ACL, so -- mirroring
  * {@link writeFileOwnerOnly}'s Windows branch -- any existing file is first
@@ -772,7 +803,11 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
     // before createWriteStream takes ownership of the descriptor, so a failure in
     // either must close fd here rather than leak it.
     fs.fchmodSync(fd, 0o600);
-    stripExtendedAcls(destPath);
+    // The strip follows a symlink at destPath because everything else here
+    // does: the open carries no O_NOFOLLOW and the fchmod acts on the resolved
+    // descriptor, so acting on the link node instead would clear an ACL that
+    // governs nothing while the rows land in a file whose ACEs still stand.
+    stripExtendedAcls(destPath, { symlinks: "follow" });
     fs.ftruncateSync(fd, 0);
   } catch (err) {
     // Refuse to write the result CSV where we cannot make it owner-only (e.g. a

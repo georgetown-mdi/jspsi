@@ -95,17 +95,24 @@ directory would otherwise carry it, since each lands either in place or on a
 fresh inode that still inherits the directory's ACEs.
 
 Each writer therefore clears the file's extended ACL at the point where it
-enforces the mode, on macOS alone: `execFileSync("/bin/chmod", ["-h", "-N",
+enforces the mode, on macOS alone: `execFileSync("/bin/chmod", [...flags, "-N",
 "--", file])`, run on the temp file after its `fchmod` and before any content is
 written, and on the streamed result CSV between its `fchmod` and its truncate.
 `-N` deletes the ACL entirely -- on an artifact psilink writes, no ACE is
-intended, so the mode is meant to be the file's whole access story. `-h` acts on
-the named entry rather than following a symlink, so a link swapped into the
-temp path cannot redirect the strip onto another file's ACL; `--` ends the
-options so an operator-supplied path beginning with `-` is read as an operand;
+intended, so the mode is meant to be the file's whole access story. `--` ends the
+options so an operator-supplied path beginning with `-` is read as an operand,
 and the absolute `/bin/chmod` keeps the resolution off `PATH`. There is no
 shell -- the operand is a single argument. It is a subprocess rather than a
 syscall because Node's `fs` exposes no ACL API.
+
+Whether the strip follows a symlink at the path is per call site, and each one
+takes the posture its own write took, so the ACL cleared belongs to the file the
+content lands in:
+
+| Call site | Flags | Why |
+| --------- | ----- | --- |
+| Temp-file writers (`writeFileOwnerOnly`, `writeFileAtomic`) | `-h -N --` | The path is psilink's own temp path, opened with `O_EXCL` and `O_NOFOLLOW`; a symlink at it is one planted in the create window. `-h` acts on the named entry, so following one cannot redirect the strip onto another file's ACL while the content goes to the temp file. |
+| Streamed result CSV (`createOwnerOnlyWriteStream`) | `-N --` | The path is an operator-supplied output path, opened without `O_NOFOLLOW` and `fchmod`'d on the descriptor, so a pre-existing symlink there is deliberately followed (see [Result CSV output](#result-csv-output)). `chmod` resolves the path for the same reason: acting on the link node would clear an ACL that governs nothing while the rows landed in a target whose ACEs still stood. |
 
 The strip covers every artifact this document's write construction produces --
 the key file, the signing identity, the exchange record and its verification
@@ -184,7 +191,9 @@ group-readable by an inherited umask. On Windows the ACL is recreated free of
 inherited and foreign ACEs; on macOS the [extended-ACL
 strip](#macos-extended-acl-strip) above clears a pre-existing or
 directory-inherited ACE that the `0600` mode would not, before the file is
-truncated.
+truncated. That strip resolves the output path rather than acting on the entry
+named, so where the path is a symlink it clears the ACL of the target the rows
+go to, matching the `fchmod` on the descriptor.
 
 Unlike the credential writers, the CSV is streamed directly to the output path
 (the result set may be large) rather than written through the
