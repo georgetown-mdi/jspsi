@@ -4604,9 +4604,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // error holding this one as the `cause` (FileSyncMessageLoop's send()).
   //
   // Written to survive the display boundary, which caps each error in a rendered
-  // cause chain at DEFAULT_MAX_DISPLAY_LENGTH: the sentence the operator must act
-  // on leads, and the destination -- named because what this party published may
-  // now be in the peer's hands under it -- comes last, where the cap costs least.
+  // cause chain at COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH: the sentence the operator
+  // must act on leads, and the destination -- named because what this party
+  // published may now be in the peer's hands under it -- comes last, where the
+  // cap costs least.
   // The re-issue's own error is carried only as the `cause`, so the SFTP status
   // it names is rendered on its own line under its own cap rather than spending
   // this message's. `toPath` is partner-derived on the ack and rendezvous rename

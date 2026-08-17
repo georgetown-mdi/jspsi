@@ -23,6 +23,8 @@ import {
 } from "../src/config/linkageTerms";
 import { NestingDepthExceededError } from "../src/utils/camelizeKeys";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
+import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
+import { DISPLAY_TRUNCATION_MARKER } from "../src/utils/sanitizeForDisplay";
 
 // A SHARED_SECRET_REGEX-valid placeholder (43 base64url chars = 32 zero bytes).
 // InvitationTokenSchema now enforces that shape, so test tokens carry a real
@@ -895,6 +897,30 @@ test("escapes a hostile unrecognized endpoint key name in the rejection message"
   const messages = (err as ZodError).issues.map((i) => i.message).join("\n");
   expect(messages).not.toContain("\x1b");
   expect(messages).toContain("\\x1b");
+});
+
+test("the locator rejection's guidance survives the display boundary whole", async () => {
+  // The guidance is the whole point of this rejection: it says what a locator may
+  // carry, why every other field is refused, and what to remove. It is fixed
+  // first-party copy longer than one VALUE's budget, and the boundary an operator
+  // reads it through is sanitizeErrorForDisplay over the composed rejection --
+  // where a per-value cap would deliver a prefix of the sentence instead. Driven
+  // through the real schema and the real renderer, over the composition the CLI's
+  // decode wrapper makes, so a copy edit that outgrows the link budget fails here
+  // rather than silently landing cut in front of an operator.
+  const encoded = await encodeRaw({
+    ...baseToken,
+    connectionEndpoint: { ...CHANNEL_SHAPES.sftp.minimal, username: "alice" },
+  });
+  const err = await decodeInvitation(encoded).catch((e: unknown) => e);
+  const rendered = sanitizeErrorForDisplay(
+    new Error(`invalid invitation string: ${describeDecodeError(err)}`),
+  );
+  expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  expect(rendered).toContain("a connection endpoint may carry only a");
+  expect(rendered).toContain(
+    "can ride along. Remove unexpected field(s): username",
+  );
 });
 
 test("does not relay a hostile partner VALUE raw through describeDecodeError", async () => {

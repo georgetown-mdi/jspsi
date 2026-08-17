@@ -68,6 +68,7 @@ export {
   renderedDisplayCost,
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
 } from "./utils/sanitizeForDisplay";
 export type {
@@ -126,6 +127,7 @@ export {
   COUNT_ONLY_DISCLOSURE_STATEMENT,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
+  UNRECOGNIZED_TRANSFORM_NOTE,
 } from "./consentFacts.js";
 export type {
   ConsentFact,

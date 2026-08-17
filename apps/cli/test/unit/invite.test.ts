@@ -1934,3 +1934,60 @@ test("handler: offline infer-from-input writes the disclosed subset into the fre
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- handler: the invitation stays off the diagnostic routing ----------------
+
+test("handler: the invitation reaches stdout and never a diagnostic line", async () => {
+  // The invitation encodes the setup shared secret, and every diagnostic line
+  // this command emits goes through the process-wide sink an operator can point
+  // at a file with --log-file. So the delivery is the stdout line, and the accept
+  // template names the invitation by placeholder: a template interpolating it
+  // would put the secret wherever that routing leads. Driven through the real
+  // handler at the noisiest level, so this covers every line the run emits rather
+  // than the one printInvitation happens to compose today.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-secret-"));
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const configFile = path.join(dir, "psilink.yaml");
+  const keyFile = path.join(dir, ".psilink.key");
+  const { stderrWrites, restore } = captureStdio();
+  const printed: string[] = [];
+  const logSpy = vi.spyOn(console, "log").mockImplementation((...args) => {
+    printed.push(args.map(String).join(" "));
+  });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: [input],
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "debug",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalledWith(64);
+
+    // The stdout emission carries the invitation and nothing else, so it is what
+    // the operator copies and what a redirect captures.
+    expect(printed).toHaveLength(1);
+    const invitation = printed[0];
+    const token = await decodeInvitation(invitation);
+    expect(token.sharedSecret).toMatch(/^[A-Za-z0-9_-]+$/);
+
+    const diagnostics = stderrWrites.join("");
+    expect(diagnostics).not.toContain(invitation);
+    // The secret itself, not only the whole encoding: a later line carrying the
+    // token's fields rather than its string form would pass the check above.
+    expect(diagnostics).not.toContain(token.sharedSecret);
+    // The partner still learns what to run, with the invitation named rather
+    // than carried.
+    expect(diagnostics).toContain("psilink accept <INVITATION> <INPUT_FILE>");
+  } finally {
+    restore();
+    logSpy.mockRestore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

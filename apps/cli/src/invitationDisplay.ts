@@ -7,6 +7,7 @@ import {
   PROPOSED_NOT_APPLIED_NOTES,
   redactAndSanitizeForDisplay,
   summarizeInvitation,
+  UNRECOGNIZED_TRANSFORM_NOTE,
 } from "@psilink/core";
 
 import { singlePassDisclosureNotice } from "./onlineBootstrap";
@@ -203,11 +204,7 @@ function displayLinkageKey(
         emit(`            matches on ${transform.effect}`);
       else if (transform.description !== undefined)
         emit(`            ${transform.description}`);
-      else
-        emit(
-          "            not recognized by this version; its effect on matching " +
-            "is not shown",
-        );
+      else emit(`            ${UNRECOGNIZED_TRANSFORM_NOTE}`);
       logList(emit, "            ", transform.params);
       // The coercion note is core-derived on both halves (the function's own
       // parameter name and the value core's coercion contract runs it as), and sits

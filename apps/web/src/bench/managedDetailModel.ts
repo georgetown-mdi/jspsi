@@ -14,16 +14,20 @@
  * renders the terms; it never offers an edit control over them.
  */
 
-import { disclosedColumnNames } from "@psilink/core";
+import {
+  disclosedColumnNames,
+  displayText,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import { dateTimeLabel } from "./inviterModel";
 
+import type { Displayable, ExchangeSpec } from "@psilink/core";
 import type {
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
   ManagedExchangeSide,
 } from "@psi/managedExchangeRecord";
-import type { ExchangeSpec } from "@psilink/core";
 
 /** The operator-facing name for each side of the partnership. */
 export const SIDE_LABELS: Record<ManagedExchangeSide, string> = {
@@ -31,13 +35,25 @@ export const SIDE_LABELS: Record<ManagedExchangeSide, string> = {
   acceptor: "Your partner set up this exchange (acceptor)",
 };
 
-/** One read-only row in the configuration view: a term and its display value. A
+/**
+ * One read-only row in the configuration view: a term and its display value. A
  * `values` list renders as a list; a `muted` value renders in the empty-state
- * voice ("None"). */
+ * voice ("None").
+ *
+ * The value fields are {@link Displayable} rather than `string`, so a row built
+ * from a value somebody else chose -- a linkage-key name, a legal-agreement
+ * reference, a rendezvous locator, all of them partner-authored in the accepted
+ * document -- does not typecheck until it has passed the display boundary. This
+ * view is where a compliance user confirms the agreed terms, and the class that
+ * matters here is the one JSX escaping does not touch: a bidi override, a
+ * zero-width joiner, or a homoglyph renders as the term the reader expects while
+ * being another string entirely. `label` and `muted` stay plain `string` because
+ * both are this app's own fixed copy.
+ */
 export interface ConfigRow {
   label: string;
-  value?: string;
-  values?: ReadonlyArray<string>;
+  value?: Displayable;
+  values?: ReadonlyArray<Displayable>;
   muted?: string;
 }
 
@@ -56,22 +72,28 @@ export function linkageTermsRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
     exchangeFile.metadata !== undefined
       ? disclosedColumnNames(exchangeFile.metadata)
       : [];
-  const keys = terms.linkageKeys.map((key) => key.name);
+  const keys = terms.linkageKeys.map((key) => sanitizeForDisplay(key.name));
   return [
-    { label: "Your identity", value: terms.identity },
+    { label: "Your identity", value: sanitizeForDisplay(terms.identity) },
     keys.length > 0
       ? { label: "Matched on", values: keys }
       : { label: "Matched on", muted: "No keys" },
     sent.length > 0
-      ? { label: "You send", values: sent }
+      ? {
+          label: "You send",
+          values: sent.map((name) => sanitizeForDisplay(name)),
+        }
       : { label: "You send", muted: "Nothing - matching only" },
     {
       label: "You receive the result",
-      value: terms.output.expectsOutput ? "Yes" : "No",
+      value: terms.output.expectsOutput ? displayText`Yes` : displayText`No`,
     },
     terms.legalAgreement?.reference !== undefined &&
     terms.legalAgreement.reference !== ""
-      ? { label: "Legal agreement", value: terms.legalAgreement.reference }
+      ? {
+          label: "Legal agreement",
+          value: sanitizeForDisplay(terms.legalAgreement.reference),
+        }
       : { label: "Legal agreement", muted: "None" },
   ];
 }
@@ -87,15 +109,22 @@ export function linkageTermsRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
 export function connectionRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
   const { connection } = exchangeFile;
   const rows: Array<ConfigRow> = [
-    { label: "Channel", value: "Live (browser)" },
+    { label: "Channel", value: displayText`Live (browser)` },
   ];
   if (connection.channel === "webrtc") {
     const { server } = connection;
-    const endpoint =
-      server.port !== undefined
-        ? `${server.host}:${String(server.port)}${server.path ?? ""}`
-        : `${server.host}${server.path ?? ""}`;
-    rows.push({ label: "Rendezvous server", value: endpoint });
+    // Host and path cross the display boundary one at a time, then compose: each
+    // is separately partner-authored and separately capped, so a padded host
+    // cannot spend the whole row's budget and leave the path unread.
+    const host = sanitizeForDisplay(server.host);
+    const path = sanitizeForDisplay(server.path ?? "");
+    rows.push({
+      label: "Rendezvous server",
+      value:
+        server.port !== undefined
+          ? displayText`${host}:${server.port}${path}`
+          : displayText`${host}${path}`,
+    });
   }
   return rows;
 }

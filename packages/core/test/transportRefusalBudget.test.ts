@@ -13,7 +13,10 @@ import {
   FrameSizeExceededError,
   TransportOperationStalledError,
 } from "../src/errors";
-import { DEFAULT_MAX_DISPLAY_LENGTH } from "../src/utils/sanitizeForDisplay";
+import {
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  DEFAULT_MAX_DISPLAY_LENGTH,
+} from "../src/utils/sanitizeForDisplay";
 import {
   MAX_ERROR_CAUSE_DEPTH,
   sanitizeErrorForDisplay,
@@ -33,11 +36,13 @@ const linksOf = (rendered: string): string[] => rendered.split(CAUSE_SEPARATOR);
 // the marker by construction and would read as a truncation that never happened.
 // The two are equivalent: sanitizeForDisplay appends a code point only when its
 // whole escape fits, an escape runs to at most ten characters, so a truncated
-// link retains more than DEFAULT_MAX_DISPLAY_LENGTH - 10 characters and then
-// carries the marker on top -- longer than the cap in every case, while an
+// link retains more than COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - 10 characters and
+// then carries the marker on top -- longer than the cap in every case, while an
 // untruncated link is within it by definition.
 const truncatedLinks = (rendered: string): string[] =>
-  linksOf(rendered).filter((link) => link.length > DEFAULT_MAX_DISPLAY_LENGTH);
+  linksOf(rendered).filter(
+    (link) => link.length > COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  );
 
 // The class-uniform recovery step, read off a minimal construction of the class
 // rather than restated here: what each site is asserted to deliver is then the
@@ -294,13 +299,30 @@ test("the writing peer keeps a link of its own at the widest message filename a 
   );
   const links = linksOf(rendered);
 
-  // The peer id whole, on its own labelled link, at a filename that fills the
-  // budget of the link ahead of it.
+  // Each chooser on a labelled link of its own, and at the widest name the
+  // shipped path admits all three arrive whole -- the name included.
+  expect(links).toContain(`writing peer: ${PEER_ID}`);
+  expect(links).toContain(`rendezvous directory: ${RENDEZVOUS_PATH}`);
+  expect(links).toContain(`message file: ${WIDEST_MESSAGE_FILENAME}`);
+  expect(links).toContain(FRAME_SIZE_RECOVERY_STEP);
+  expect(truncatedLinks(rendered)).toEqual([]);
+  expect(links.length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
+});
+
+// The same site past the link budget. What the listing guard admits is not what
+// bounds this file's name -- an adapter that lists no guard of its own is the
+// reach limit the guard's own docs state -- so the width at which the cap fires
+// is driven directly here. What the wide name spends is the budget of the link
+// it sits alone on, and nothing else.
+test("a message filename past the link budget spends only its own link", async () => {
+  const flooded = `${PEER_ID}-${"w".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH)}-${OVER_CAP_BYTES}.json`;
+
+  const rendered = sanitizeErrorForDisplay(await frameGateRefusal(flooded));
+  const links = linksOf(rendered);
+
   expect(links).toContain(`writing peer: ${PEER_ID}`);
   expect(links).toContain(`rendezvous directory: ${RENDEZVOUS_PATH}`);
   expect(links).toContain(FRAME_SIZE_RECOVERY_STEP);
-  // What the wide name spends is the budget of the link it sits alone on, and
-  // nothing else: exactly one link truncates, and it is the name's own.
   const [truncated] = truncatedLinks(rendered);
   expect(truncatedLinks(rendered)).toHaveLength(1);
   expect(truncated.slice(0, "message file: ".length)).toBe("message file: ");

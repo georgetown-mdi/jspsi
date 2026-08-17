@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, expect, test } from "vitest";
 import logLibrary from "loglevel";
 import {
-  DEFAULT_MAX_DISPLAY_LENGTH,
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   getDiagnosticSink,
   keyTypeFromBlob,
@@ -521,7 +521,7 @@ const linksOf = (rendered: string): string[] => rendered.split(CAUSE_SEPARATOR);
 // The widest a single link can render: the per-link cap plus the marker the
 // sanitizer appends when it truncates.
 const MAX_RENDERED_LINK_LENGTH =
-  DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length;
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length;
 
 // The first-party copy, restated whole so a link that renders a PREFIX of it --
 // the defect this partition exists to close -- fails rather than matching a
@@ -610,12 +610,16 @@ const HOSTS: Array<[string, string, boolean]> = [
   [
     "a partner-supplied host at the invitation schema's full length",
     "h".repeat(MAX_ENDPOINT_HOST_LENGTH),
+    false,
+  ],
+  // Between the invitation bound and the flood: sized off the renderer's own
+  // link budget so it overruns that link whatever the budget is, and short
+  // enough that a config carrying it looks unremarkable.
+  [
+    "a host past a link's display budget",
+    "h".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH + 100),
     true,
   ],
-  // Between the invitation bound and the flood: long enough to overrun a link's
-  // display budget on its own, short enough that a config carrying it looks
-  // unremarkable.
-  ["a host past the invitation schema's bound", "h".repeat(412), true],
   ["a host past every budget", "h".repeat(50_000), true],
 ];
 

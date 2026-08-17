@@ -6,7 +6,11 @@ import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 
-import { CONSENT_FACTS, sanitizeForDisplay } from "@psilink/core";
+import {
+  CONSENT_FACTS,
+  UNRECOGNIZED_TRANSFORM_NOTE,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import { InvitationTerms } from "@components/InvitationTerms";
 
@@ -393,6 +397,47 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     expect(subline?.textContent).toContain(
       "Matches on SSN - first name (partial)",
     );
+  });
+
+  test("a transform this version cannot explain is marked unrecognized, not stated as applied", async () => {
+    // The function name is partner free text, so a lead composed around it states
+    // an effect on matching this version cannot know and does not perform -- and a
+    // name chosen to read as an effect is then indistinguishable from one. The
+    // shared note is what stands in the consequence's place, read from core so
+    // this screen and the CLI accept prompt cannot drift on what an unexplained
+    // rule is called; the name still renders, as technical identity beneath it.
+    const unrecognized = "org_internal_rule";
+    renderTerms({
+      ...terms,
+      linkageKeys: [
+        {
+          name: "SSN + FN1",
+          elements: [
+            { field: "ssn" },
+            {
+              field: "first_name",
+              transform: [{ function: unrecognized }],
+            },
+          ],
+        },
+      ],
+    });
+
+    await userEvent.click(toggle("Matching strategies"));
+    const panel = await readyPanel("SSN + FN1");
+    expect(panel.textContent).toContain(UNRECOGNIZED_TRANSFORM_NOTE);
+    expect(panel.textContent).toContain(unrecognized);
+    // The wording that read as an effect the run performs.
+    expect(panel.textContent).not.toContain(`Applies ${unrecognized}`);
+
+    // A recognized function keeps its plain-language consequence and carries no
+    // marker, so the note tells the two apart rather than decorating both.
+    app.unmount();
+    renderTerms();
+    await userEvent.click(toggle("Matching strategies"));
+    const recognized = await readyPanel("SSN + FN1");
+    expect(recognized.textContent).toContain("Matches on the first character");
+    expect(recognized.textContent).not.toContain(UNRECOGNIZED_TRANSFORM_NOTE);
   });
 
   // The matching-keys list is a NAMED region: its role="list" derives its accessible

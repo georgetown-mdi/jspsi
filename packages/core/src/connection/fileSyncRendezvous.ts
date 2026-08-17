@@ -483,14 +483,21 @@ const clipToRenderedCost = (value: string, budget: number): string => {
 // they share cannot drift.
 //
 // The split is what the display boundary forces. sanitizeErrorForDisplay caps
-// EACH link of a rendered cause chain at DEFAULT_MAX_DISPLAY_LENGTH, and it
-// truncates before the links are joined, so one link would have to carry the
-// refusal, the recovery step, an operator-chosen directory path, and a list of
-// filenames inside a single budget -- with the path and the names, the two parts
-// nothing here bounds, competing against the two the operator has to read.
-// Giving the detail its own link gives it a second budget, and leaves the first
-// carrying only fixed text. What each message actually measures at the rendered
-// boundary is pinned by a test rather than claimed here.
+// EACH link of a rendered cause chain independently, and it truncates before the
+// links are joined, so one link would have to carry the refusal, the recovery
+// step, an operator-chosen directory path, and a list of filenames inside a
+// single budget -- with the path and the names, the two parts nothing here
+// bounds, competing against the two the operator has to read. Giving the detail
+// its own link gives it a second budget, and leaves the first carrying only
+// fixed text. What each message actually measures at the rendered boundary is
+// pinned by a test rather than claimed here.
+//
+// The detail link is fitted to DEFAULT_MAX_DISPLAY_LENGTH rather than to the
+// wider link budget the renderer allows: what it carries is a chooser's own
+// values, and the per-value cap is the size those are budgeted at everywhere
+// else. Fitting under the renderer's cap is always safe -- it is a ceiling, not
+// a quota -- and spending the whole of it on an enumeration of partner-chosen
+// names would be the opposite of what partitioning by chooser is for.
 //
 // The enumeration is bounded by that budget rather than by a count: a protocol
 // filename runs from roughly 47 characters (a uuid-id hello) to

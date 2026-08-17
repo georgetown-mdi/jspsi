@@ -1,5 +1,10 @@
 import { expect, test } from "vitest";
-import { inferMetadata } from "@psilink/core";
+import {
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  inferMetadata,
+  MAX_NAME_LENGTH,
+  sanitizeErrorForDisplay,
+} from "@psilink/core";
 import type { getLogger, LinkageTerms } from "@psilink/core";
 
 import {
@@ -182,3 +187,45 @@ test("a key blocked for a missing column is not also warned as dead, and still t
   ).toThrow("cannot satisfy any");
   expect(warns).toEqual([]);
 });
+
+// The block names field names that are TERMS content -- the partner's, on the
+// accept path -- so each sits on a labelled link of its own and can spend no
+// budget but that link's. Driven at the widest name the terms schema admits, and
+// at a name past every budget, because what the operator has to act on is the
+// remedy behind them.
+test.each([
+  ["the widest name the terms schema admits", MAX_NAME_LENGTH],
+  ["a name past every budget", COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH * 4],
+])(
+  "the block's remedy reaches the operator whole under %s",
+  (_label, width) => {
+    const { log } = makeLogger();
+    const wide = "w".repeat(width);
+    const terms: LinkageTerms = {
+      ...dobTerms(),
+      linkageFields: [{ name: wide, type: "ssn" }],
+      linkageKeys: [{ name: "SSN", elements: [{ field: wide }] }],
+    };
+    const err = (() => {
+      try {
+        checkLinkageSatisfiability(["other_column"], terms, log, messaging);
+      } catch (e: unknown) {
+        return e;
+      }
+      throw new Error("the pre-flight did not block");
+    })();
+
+    const links = sanitizeErrorForDisplay(err).split("\ncaused by: ");
+    expect(links[0]).toContain("cannot satisfy any of the invitation's");
+    // The remedy whole, not a prefix of it: a wide name sharing its link is what
+    // would deliver one.
+    expect(links).toContain(
+      `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
+    );
+    const nameLink = links.find((link) =>
+      link.startsWith("unsatisfied field: "),
+    );
+    expect(nameLink).toBeDefined();
+    expect(nameLink).toContain("w".repeat(64));
+  },
+);

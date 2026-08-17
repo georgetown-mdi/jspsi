@@ -13,7 +13,7 @@ import {
   sanitizeErrorForDisplay,
 } from "../src/utils/sanitizeErrorForDisplay";
 import {
-  DEFAULT_MAX_DISPLAY_LENGTH,
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
 } from "../src/utils/sanitizeForDisplay";
 
@@ -190,7 +190,7 @@ const linksOf = (rendered: string): string[] => rendered.split(CAUSE_SEPARATOR);
 // The widest a single link can render: the per-link cap plus the marker the
 // sanitizer appends when it truncates.
 const MAX_RENDERED_LINK_LENGTH =
-  DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length;
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length;
 
 // Refuse a connection through the REAL open() path and render what the operator
 // sees: sanitizeErrorForDisplay over the whole ConnectionError cause chain,
@@ -287,12 +287,27 @@ for (const [label, keyType] of SERVER_CHOSEN_KEY_TYPES) {
 // invitation endpoint into the written config, and the operator-config schema
 // bounds it neither in length nor in format, so the invitation schema's own
 // MAX_ENDPOINT_HOST_LENGTH is a floor on what can arrive rather than a ceiling.
-// At that length it fills a whole display budget by itself -- which is the
-// point: the budget it fills is its own link's.
-test("a partner-supplied host at its schema's full length spends only its own link", async () => {
+// A host at that floor sits on a link of its own and is delivered whole; a host
+// past the link budget -- which nothing on this route stops arriving -- is where
+// the cap falls, and it falls on that link and no other.
+test("a partner-supplied host at its schema's full length reaches the operator whole", async () => {
   const keyType = "ssh-ed25519";
   const presented = await computeHostKeyFingerprint(hostKeyBlob(keyType));
   const host = "h".repeat(MAX_ENDPOINT_HOST_LENGTH);
+  const rendered = await renderNoPinRefusal(keyType, host);
+
+  expect(rendered).toContain(presented);
+  expect(rendered).toContain(
+    "set connection.server.host_key_fingerprint to pin it",
+  );
+  expect(linksOf(rendered)).toContain(`configured host: ${host}`);
+  expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+});
+
+test("a partner-supplied host past the link budget spends only its own link", async () => {
+  const keyType = "ssh-ed25519";
+  const presented = await computeHostKeyFingerprint(hostKeyBlob(keyType));
+  const host = "h".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH + 100);
   const rendered = await renderNoPinRefusal(keyType, host);
 
   expect(rendered).toContain(presented);

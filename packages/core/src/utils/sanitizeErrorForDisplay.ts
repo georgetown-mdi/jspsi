@@ -1,5 +1,8 @@
 import { errorMessage } from "../connection/messageConnection";
-import { sanitizeForDisplay } from "./sanitizeForDisplay";
+import {
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  sanitizeForDisplay,
+} from "./sanitizeForDisplay";
 import type {
   Displayable,
   SanitizeForDisplayOptions,
@@ -172,8 +175,10 @@ export function redactAndSanitizeForDisplay(
  *   credential-bearing field is ever rendered;
  * - it is cycle-safe (a chain that revisits a link stops) and depth-bounded (at
  *   most {@link MAX_ERROR_CAUSE_DEPTH} links, each capped by
- *   {@link sanitizeForDisplay}), so a malformed or hostile chain cannot loop or
- *   flood -- the whole output is bounded without a separate total-length cap;
+ *   {@link sanitizeForDisplay} at {@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH},
+ *   the budget for a whole composed message rather than the per-value default),
+ *   so a malformed or hostile chain cannot loop or flood -- the whole output is
+ *   bounded without a separate total-length cap;
  * - it suppresses a link whose raw message repeats the link before it -- the
  *   common case, since `asConnectionError` sets a wrapper's message to its
  *   cause's message -- so the same text is not printed twice;
@@ -182,9 +187,9 @@ export function redactAndSanitizeForDisplay(
  *   renders as `[unreadable error]` rather than propagating, since a renderer at
  *   a last-resort catch boundary must not become a second failure.
  *
- * An error with no `cause` renders exactly as
- * `sanitizeForDisplay(errorMessage(err))`, and a non-`Error` value (including
- * `null`/`undefined`) renders its `String(...)` form, matching
+ * An error with no `cause` renders exactly as `errorMessage(err)` escaped at
+ * {@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH}, and a non-`Error` value
+ * (including `null`/`undefined`) renders its `String(...)` form, matching
  * {@link errorMessage}.
  */
 export function sanitizeErrorForDisplay(err: unknown): string {
@@ -227,6 +232,10 @@ export function sanitizeErrorForDisplay(err: unknown): string {
     current = next;
   }
   return rawMessages
-    .map((message) => sanitizeForDisplay(redactPrivateKeyMaterial(message)))
+    .map((message) =>
+      sanitizeForDisplay(redactPrivateKeyMaterial(message), {
+        maxLength: COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+      }),
+    )
     .join(CAUSE_SEPARATOR);
 }

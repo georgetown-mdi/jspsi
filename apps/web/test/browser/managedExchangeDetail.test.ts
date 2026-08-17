@@ -132,6 +132,46 @@ describe("managed exchange detail configuration", () => {
     ).toBeNull();
   });
 
+  test("a value list renders one entry per item, and a hostile name reaches the DOM escaped", async () => {
+    // Two properties of the same surface, driven over one document. A key name may
+    // carry the list separator, so joined text would present one agreed term as
+    // two -- the entries are their own list items instead. And a name may carry a
+    // bidi override, which JSX escaping does not touch: it must arrive as an
+    // escape, not as a code point that reorders the term a compliance user is
+    // confirming.
+    const separatorName = "SSN, DOB";
+    const hostileName = "LN\u202eEVIL";
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter", {
+          exchangeFile: composeManagedExchangeFile({
+            connection: webrtcLocator,
+            linkageTerms: {
+              ...getDefaultLinkageTerms("County Health Dept"),
+              linkageKeys: [
+                { name: separatorName, elements: [{ field: "ssn" }] },
+                { name: hostileName, elements: [{ field: "last_name" }] },
+              ],
+            },
+          }),
+        }),
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    await expect.element(page.getByText("Matched on")).toBeInTheDocument();
+    const entries = [...app.container.querySelectorAll("li")].map(
+      (item) => item.textContent,
+    );
+    expect(entries).toContain(separatorName);
+    expect(entries).toContain("LN\\u202eEVIL");
+    expect(app.container.textContent).not.toContain("\u202e");
+  });
+
   test("a rejecting re-invite on the healthy detail surface shows the error and the button loads while pending", async () => {
     // The re-invite button lives on the healthy detail surface, where no failure
     // branch renders -- so its in-flight and failed state must be visible here, not
