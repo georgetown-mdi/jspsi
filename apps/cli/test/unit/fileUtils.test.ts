@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import * as childProcess from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +15,34 @@ import {
   writeFileOwnerOnly,
 } from "../../src/fileUtils";
 
+// The extended-ACL strip shells out to `/bin/chmod`, so which filesystem entry
+// a writer aims its strip at lives in the command line and nowhere else. This
+// records every `execFileSync` argument vector; while `stubbed` is set it also
+// answers the call instead of running it, so the symlink-posture assertions
+// hold on a host whose `chmod` rejects the macOS flags. Unstubbed -- every other
+// test in this file -- it runs the real command, so nothing else changes. A
+// `vi.spyOn` cannot do this: a builtin module's ESM namespace is not
+// configurable, which is why the module is mocked rather than patched.
+const execFile = vi.hoisted(() => ({
+  commands: [] as string[][],
+  stubbed: false,
+}));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    execFileSync: (
+      file: string,
+      args: readonly string[],
+      options?: Parameters<typeof actual.execFileSync>[2],
+    ) => {
+      execFile.commands.push([file, ...args]);
+      return execFile.stubbed ? "" : actual.execFileSync(file, args, options);
+    },
+  };
+});
+
 let dir: string;
 
 beforeEach(() => {
@@ -23,6 +51,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  execFile.commands.length = 0;
+  execFile.stubbed = false;
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -386,12 +416,363 @@ describe("createOwnerOnlyWriteStream", () => {
   });
 });
 
+// --- macOS extended ACL ------------------------------------------------------
+
+// The extended-ACL entries `ls -le` prints under a file's mode line, each
+// numbered ("0: group:everyone allow read"). An empty array means the file
+// carries no extended ACL at all, which is what the writers must produce.
+function readExtendedAcl(filePath: string): string[] {
+  const output = childProcess.execFileSync("/bin/ls", ["-le", filePath], {
+    encoding: "utf8",
+  });
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^\d+:\s/.test(line));
+}
+
+describe("macOS extended ACL", () => {
+  // A directory whose inheritable `everyone allow read` ACE every file created
+  // inside it picks up -- the configuration that leaves a 0600 artifact
+  // readable by another principal on macOS.
+  function makeAclInheritingDir(name: string): string {
+    const aclDir = path.join(dir, name);
+    fs.mkdirSync(aclDir);
+    childProcess.execFileSync(
+      "/bin/chmod",
+      ["+a", "everyone allow read,file_inherit", aclDir],
+      { stdio: "ignore" },
+    );
+    return aclDir;
+  }
+
+  test("each writer clears an inherited non-owner ACE", async () => {
+    if (process.platform !== "darwin") return;
+    const aclDir = makeAclInheritingDir("inheriting");
+
+    // Pin the gap the writers close: a plain 0600 write into this directory
+    // inherits the ACE, so the assertions below are about the strip and not
+    // about a directory that failed to hand its ACE down.
+    const control = path.join(aclDir, "control");
+    fs.writeFileSync(control, "x", { mode: 0o600 });
+    fs.chmodSync(control, 0o600);
+    expect(readExtendedAcl(control)).not.toEqual([]);
+    expect(fs.statSync(control).mode & 0o777).toBe(0o600);
+
+    const secret = path.join(aclDir, "secret");
+    writeFileOwnerOnly(secret, "x");
+    expect(readExtendedAcl(secret)).toEqual([]);
+    expect(fs.statSync(secret).mode & 0o777).toBe(0o600);
+
+    const exclusive = path.join(aclDir, "exclusive");
+    writeFileOwnerOnly(exclusive, "x", { exclusive: true });
+    expect(readExtendedAcl(exclusive)).toEqual([]);
+    expect(fs.statSync(exclusive).mode & 0o777).toBe(0o600);
+
+    const atomic = path.join(aclDir, "atomic");
+    writeFileAtomic(atomic, "x", 0o600);
+    expect(readExtendedAcl(atomic)).toEqual([]);
+    expect(fs.statSync(atomic).mode & 0o777).toBe(0o600);
+
+    // writeFileAtomic strips at its public default mode too: an inherited ACE
+    // can grant write, which 0644 withholds from everyone but the owner.
+    const shared = path.join(aclDir, "cert.json");
+    writeFileAtomic(shared, "x");
+    expect(readExtendedAcl(shared)).toEqual([]);
+    expect(fs.statSync(shared).mode & 0o777).toBe(0o644);
+
+    const streamed = path.join(aclDir, "streamed.csv");
+    await writeAndClose(createOwnerOnlyWriteStream(streamed), "a,b\n1,2\n");
+    expect(readExtendedAcl(streamed)).toEqual([]);
+    expect(fs.statSync(streamed).mode & 0o777).toBe(0o600);
+  });
+
+  test("the streaming writer clears an ACE already on the destination", async () => {
+    // The stream writes the destination in place rather than renaming a fresh
+    // temp inode over it, so a foreign ACE left on a pre-existing file is the
+    // case the strip has to reach.
+    if (process.platform !== "darwin") return;
+    const p = path.join(dir, "stale.csv");
+    fs.writeFileSync(p, "stale,data\n");
+    childProcess.execFileSync("/bin/chmod", ["+a", "everyone allow read", p], {
+      stdio: "ignore",
+    });
+    expect(readExtendedAcl(p)).not.toEqual([]);
+
+    await writeAndClose(createOwnerOnlyWriteStream(p), "fresh,data\n");
+
+    expect(readExtendedAcl(p)).toEqual([]);
+    expect(fs.readFileSync(p, "utf8")).toBe("fresh,data\n");
+  });
+
+  test("the streaming writer clears the ACE on a symlinked destination's target", async () => {
+    // An operator-supplied output path may be a symlink, and the stream follows
+    // it deliberately (no O_NOFOLLOW, fchmod on the descriptor), so the rows
+    // land in the link's target and the ACE that has to go is the target's --
+    // the strip acting on the link node instead would report success while the
+    // real file stayed readable by the inherited principal.
+    if (process.platform !== "darwin") return;
+    const targetDir = makeAclInheritingDir("stream-target");
+    const target = path.join(targetDir, "real-result.csv");
+    fs.writeFileSync(target, "stale,data\n", { mode: 0o600 });
+    expect(readExtendedAcl(target)).not.toEqual([]);
+
+    const link = path.join(dir, "result.csv");
+    fs.symlinkSync(target, link);
+
+    await writeAndClose(createOwnerOnlyWriteStream(link), "fresh,data\n");
+
+    expect(readExtendedAcl(target)).toEqual([]);
+    expect(fs.readFileSync(target, "utf8")).toBe("fresh,data\n");
+    expect(fs.statSync(target).mode & 0o777).toBe(0o600);
+    // The write goes through the link rather than replacing it.
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(link)).toBe(target);
+  });
+});
+
+// --- extended-ACL strip: platform gate and fail-closed ------------------------
+
+// Run `body` with `process.platform` reporting `platform`. The strip is the
+// only platform-gated step these tests exercise, and the POSIX write path is
+// otherwise identical on darwin and linux, so this makes the darwin branch
+// reachable on any POSIX host. Restores the real descriptor afterwards.
+function withPlatform<T>(platform: string, body: () => T): T {
+  const real = Object.getOwnPropertyDescriptor(process, "platform");
+  if (real === undefined) throw new Error("process.platform is not defined");
+  Object.defineProperty(process, "platform", {
+    ...real,
+    value: platform,
+  });
+  try {
+    return body();
+  } finally {
+    Object.defineProperty(process, "platform", real);
+  }
+}
+
+// These tests reach the darwin branch on another POSIX host, where the strip
+// command cannot succeed: GNU `chmod` rejects `-N`, and a host without
+// `/bin/chmod` fails to spawn it. Either way the writer sees a failed strip,
+// which is exactly the fail-closed contract under test -- the darwin tests
+// above cover the succeeding strip. Skipped on a real darwin host, where the
+// strip would succeed and there would be no failure to observe, and on Windows,
+// whose writers take the icacls branch and whose `fs.constants` carries no
+// `O_NOFOLLOW` for the POSIX branch the stub would otherwise force them into.
+const stripFailsHere =
+  process.platform !== "darwin" && process.platform !== "win32";
+
+describe("extended-ACL strip failure", () => {
+  test("writeFileOwnerOnly writes nothing and leaves no temp file", () => {
+    if (!stripFailsHere) return;
+    const dest = path.join(dir, "secret");
+    withPlatform("darwin", () => {
+      expect(() => writeFileOwnerOnly(dest, "secret-content")).toThrow(
+        /Could not clear extended ACLs/,
+      );
+    });
+    expect(fs.existsSync(dest)).toBe(false);
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+
+  test("writeFileOwnerOnly leaves an existing destination untouched", () => {
+    if (!stripFailsHere) return;
+    const dest = path.join(dir, "secret");
+    writeFileOwnerOnly(dest, "original");
+    withPlatform("darwin", () => {
+      expect(() => writeFileOwnerOnly(dest, "rotated")).toThrow(
+        /Could not clear extended ACLs/,
+      );
+    });
+    expect(fs.readFileSync(dest, "utf8")).toBe("original");
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+
+  test("writeFileOwnerOnly with exclusive writes nothing and leaves no temp file", () => {
+    // exclusive's final step is linkSync rather than renameSync (the
+    // signing-identity path), but the strip runs on the temp file before
+    // either commit step, so the failure has to close this out the same way.
+    if (!stripFailsHere) return;
+    const dest = path.join(dir, "identity");
+    withPlatform("darwin", () => {
+      expect(() =>
+        writeFileOwnerOnly(dest, "identity-content", { exclusive: true }),
+      ).toThrow(/Could not clear extended ACLs/);
+    });
+    expect(fs.existsSync(dest)).toBe(false);
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+
+  test("writeFileAtomic writes nothing and leaves no temp file", () => {
+    if (!stripFailsHere) return;
+    const dest = path.join(dir, "cert.json");
+    withPlatform("darwin", () => {
+      expect(() => writeFileAtomic(dest, "x")).toThrow(
+        /Could not clear extended ACLs/,
+      );
+    });
+    expect(fs.existsSync(dest)).toBe(false);
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+
+  test("createOwnerOnlyWriteStream refuses before truncating an existing file", () => {
+    if (!stripFailsHere) return;
+    const p = path.join(dir, "result.csv");
+    fs.writeFileSync(p, "original,content\n");
+    withPlatform("darwin", () => {
+      expect(() => createOwnerOnlyWriteStream(p)).toThrow(
+        /Could not clear extended ACLs/,
+      );
+    });
+    // The strip runs before the truncate, so the operator's existing rows
+    // survive a refusal rather than being emptied by a write that never landed.
+    expect(fs.readFileSync(p, "utf8")).toBe("original,content\n");
+  });
+
+  test("the same writes succeed on the host's real platform", async () => {
+    // The gate is what separates this from the four refusals above: the same
+    // writers on the same host, differing only in what process.platform
+    // reports. On Linux -- the production/Docker target -- no strip is
+    // attempted and every writer completes.
+    if (!stripFailsHere) return;
+    const secret = path.join(dir, "secret");
+    writeFileOwnerOnly(secret, "x");
+    expect(fs.readFileSync(secret, "utf8")).toBe("x");
+
+    const cert = path.join(dir, "cert.json");
+    writeFileAtomic(cert, "x");
+    expect(fs.readFileSync(cert, "utf8")).toBe("x");
+
+    const csv = path.join(dir, "result.csv");
+    await writeAndClose(createOwnerOnlyWriteStream(csv), "a,b\n1,2\n");
+    expect(fs.readFileSync(csv, "utf8")).toBe("a,b\n1,2\n");
+  });
+});
+
+// --- extended-ACL strip: symlink posture -------------------------------------
+
+// Arm the `execFileSync` recorder declared at the top of this file and hand back
+// the (empty) log the writers append to. macOS symlink-and-ACL semantics cannot
+// be observed on another host, but which entry each writer aims its strip at is
+// a property of the command line, so this pins it anywhere: without it, only a
+// macOS host with a planted symlink separates a strip on a link node from one on
+// its target.
+function recordAclStripCommands(): string[][] {
+  execFile.commands.length = 0;
+  execFile.stubbed = true;
+  return execFile.commands;
+}
+
+describe("extended-ACL strip symlink posture", () => {
+  test("the temp-file writers strip the temp path without following a symlink", () => {
+    // -h keeps the strip on the named entry: the temp path is psilink's own and
+    // a symlink at it is an attacker's, so following one would aim the strip at
+    // another file's ACL while the content went to the temp file.
+    if (process.platform === "win32") return;
+    const commands = recordAclStripCommands();
+    const secret = path.join(dir, "secret");
+    const cert = path.join(dir, "cert.json");
+
+    withPlatform("darwin", () => {
+      writeFileOwnerOnly(secret, "x");
+      writeFileAtomic(cert, "x");
+    });
+
+    expect(commands).toEqual([
+      ["/bin/chmod", "-h", "-N", `${secret}.tmp.${process.pid}`],
+      ["/bin/chmod", "-h", "-N", `${cert}.tmp.${process.pid}`],
+    ]);
+  });
+
+  test("the streaming writer strips the destination through a symlink", async () => {
+    // No -h: destPath is an operator-supplied path the open and the fchmod both
+    // resolve, so the strip has to resolve it too or it clears the ACL of a link
+    // node while the rows land in a target whose ACEs still stand.
+    if (process.platform === "win32") return;
+    const commands = recordAclStripCommands();
+    const dest = path.join(dir, "result.csv");
+
+    const stream = withPlatform("darwin", () =>
+      createOwnerOnlyWriteStream(dest),
+    );
+
+    expect(commands).toEqual([["/bin/chmod", "-N", dest]]);
+    await writeAndClose(stream, "a,b\n1,2\n");
+  });
+
+  test("absolutizes a relative dash-leading destination for the chmod operand", () => {
+    // No `--` separator exists to keep a dash-leading operand out of the option
+    // position (see the comment on stripExtendedAcls); absolutizing the operand
+    // is what guarantees that instead, on a relative path too.
+    if (process.platform === "win32") return;
+    const commands = recordAclStripCommands();
+    const cwd = process.cwd();
+    process.chdir(dir);
+    let expected: string;
+    try {
+      // Built from the working directory the writer itself prefixes, which the
+      // kernel reports canonicalized: under a symlinked TMPDIR (macOS's
+      // /var -> /private/var) it is not the mkdtemp path this test holds.
+      expected = `${process.cwd()}/-dashed-secret.tmp.${process.pid}`;
+      withPlatform("darwin", () => {
+        writeFileOwnerOnly("-dashed-secret", "x");
+      });
+    } finally {
+      process.chdir(cwd);
+    }
+
+    expect(commands).toHaveLength(1);
+    const operand = commands[0][commands[0].length - 1];
+    expect(operand.startsWith("/")).toBe(true);
+    expect(operand).toBe(expected);
+  });
+
+  test("an operand keeps a `..` segment that only the kernel can resolve", async () => {
+    // `out/link` is a symlink to a sibling directory, so `out/link/../x` names
+    // dir/x to the kernel and dir/out/x to any lexical collapse of the `..`.
+    // Each writer's own open takes the kernel's answer, so its strip has to aim
+    // at the same file: the operand carries the `link/..` segment through
+    // verbatim rather than being normalized or realpath'd on the way to chmod.
+    if (process.platform === "win32") return;
+    const commands = recordAclStripCommands();
+    fs.mkdirSync(path.join(dir, "out"));
+    fs.mkdirSync(path.join(dir, "elsewhere"));
+    fs.symlinkSync(path.join(dir, "elsewhere"), path.join(dir, "out", "link"));
+    const streamed = `${dir}/out/link/../result.csv`;
+    const secret = `${dir}/out/link/../secret`;
+
+    const stream = withPlatform("darwin", () =>
+      createOwnerOnlyWriteStream(streamed),
+    );
+    await writeAndClose(stream, "a,b\n1,2\n");
+    withPlatform("darwin", () => writeFileOwnerOnly(secret, "x"));
+
+    expect(commands).toEqual([
+      ["/bin/chmod", "-N", streamed],
+      ["/bin/chmod", "-h", "-N", `${secret}.tmp.${process.pid}`],
+    ]);
+    // Both writes landed where the kernel resolves their paths, and nothing
+    // landed at the lexically collapsed one.
+    expect(fs.readFileSync(path.join(dir, "result.csv"), "utf8")).toBe(
+      "a,b\n1,2\n",
+    );
+    expect(fs.readFileSync(path.join(dir, "secret"), "utf8")).toBe("x");
+    expect(fs.readdirSync(path.join(dir, "out"))).toEqual(["link"]);
+    // The streamed operand still names the file the rows went into; the temp
+    // writer's operand named a temp file the rename has since consumed.
+    const operand = commands[0][commands[0].length - 1];
+    expect(fs.statSync(operand).ino).toBe(
+      fs.statSync(path.join(dir, "result.csv")).ino,
+    );
+  });
+});
+
 // --- Windows owner-only ACL --------------------------------------------------
 
 // The current user's domain-qualified name (DOMAIN\user), the principal the
 // writers grant Modify and the only non-inherited ACE a narrowed file may carry.
 function currentWindowsUser(): string {
-  return execFileSync("whoami", [], { encoding: "utf8" }).trim();
+  return childProcess.execFileSync("whoami", [], { encoding: "utf8" }).trim();
 }
 
 // One parsed line of `icacls <file>` output: the principal and the raw flag/
@@ -401,7 +782,9 @@ function currentWindowsUser(): string {
 type Ace = { principal: string; rights: string };
 
 function readAcl(filePath: string): Ace[] {
-  const output = execFileSync("icacls", [filePath], { encoding: "utf8" });
+  const output = childProcess.execFileSync("icacls", [filePath], {
+    encoding: "utf8",
+  });
   const echoed = filePath.replace(/\//g, "\\");
   const aces: Ace[] = [];
   for (const rawLine of output.split(/\r?\n/)) {
@@ -459,7 +842,9 @@ describe("Windows owner-only ACL", () => {
     // Seed a pre-existing file carrying a foreign principal's explicit
     // (non-inherited) grant, the ACE an in-place narrow would miss.
     fs.writeFileSync(p, "stale\n");
-    execFileSync("icacls", [p, "/grant", "Guests:(R)"], { stdio: "ignore" });
+    childProcess.execFileSync("icacls", [p, "/grant", "Guests:(R)"], {
+      stdio: "ignore",
+    });
     expect(
       readAcl(p).some((a) => a.principal.toLowerCase().includes("guests")),
     ).toBe(true);
@@ -486,7 +871,9 @@ describe("Windows owner-only ACL", () => {
     expect(warn).not.toHaveBeenCalled();
 
     // Grant a foreign principal read, defeating owner-only; the next load warns.
-    execFileSync("icacls", [p, "/grant", "Guests:(R)"], { stdio: "ignore" });
+    childProcess.execFileSync("icacls", [p, "/grant", "Guests:(R)"], {
+      stdio: "ignore",
+    });
     warnIfFileOverPermissive(p, "shared secret");
     expect(warn).toHaveBeenCalled();
   });

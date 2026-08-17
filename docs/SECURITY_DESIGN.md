@@ -1,7 +1,7 @@
 ---
 title: "PSI-Link Security Design"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-16"
+last_reviewed: "2026-08-17"
 ---
 
 # PSI-Link security
@@ -187,7 +187,7 @@ On Windows, correct an over-permissive ACL with:
 icacls .psilink.key /inheritance:r /grant:r "%USERDOMAIN%\%USERNAME%":(M)
 ```
 
-On macOS a file can additionally inherit an extended (NFSv4) ACL that a `0600` mode does not remove, granting another principal access; this affects every owner-only artifact (the key file, signing identity, exchange records, and result CSV). Check with `ls -le` and clear an unexpected entry with `chmod -N <file>`. Before a recurring exchange the CLI verifies the key file can be written, because a write that fails after the handshake has rotated the secret can desynchronize the two parties' tokens. The byte-level write construction and the platform caveats are in [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md).
+On macOS a file can additionally inherit an extended (NFSv4) ACL that a `0600` mode does not remove, so the CLI clears the extended ACL, as part of the write and before any content reaches the file, on every artifact its write construction produces -- the owner-only set and the exported public certificate alike; if the ACL cannot be cleared, no content is written and an error is raised, as on Windows. Inspect any file's extended ACL with `ls -le`, and clear an unexpected entry on a file psilink did not write with `chmod -N <file>`. Before a recurring exchange the CLI verifies the key file can be written, because a write that fails after the handshake has rotated the secret can desynchronize the two parties' tokens. The byte-level write construction and the platform caveats are in [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md).
 
 **Result CSV output.** The matched-records CSV that `psilink exchange` writes to an output path, the most sensitive artifact the tool produces, is created owner-only on the same principle as the key file, before any rows are written. Writing the result to stdout applies no permission handling: a shell `>` redirect leaves the file at the shell umask, since the shell, not the CLI, creates it. The CLI detects a redirected-regular-file stdout and prints a notice naming the exposure and the output-path alternative (a TTY, a pipe, or `/dev/null` does not trigger it). That check sees only this process's own stdout, so a redirect applied outside it is not detected. Pass an output path to get the owner-only treatment. The CSV write construction is in [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md#result-csv-output).
 
