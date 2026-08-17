@@ -245,7 +245,8 @@ interface WebRtcDial {
  * complete an exchange with one.
  *
  * @throws {UsageError} when the run holds no shared secret, when the connection
- *   names no role, or when the server block cannot be resolved to a broker.
+ *   names no role, when the server block cannot be resolved to a broker, or
+ *   when the connection sets `ice_provision` (via `iceServersFromConnection`).
  * @internal exported for testing
  */
 export function webRtcDialFrom(
@@ -761,8 +762,9 @@ export async function runProtocol(
       );
     });
     // If an earlier transport failure already terminated the bridge, its close()
-    // returns immediately without re-closing conn (and the close it triggered
-    // on failure was fire-and-forget, hence unawaited). Close conn directly to
+    // returns immediately without re-closing fileSync (and the close it
+    // triggered on failure was fire-and-forget, hence unawaited). Close
+    // fileSync directly to
     // guarantee the poller is stopped, the responsible files are swept, and the
     // client is ended before doCleanup returns. close() is idempotent, so in
     // the normal path this is a near no-op after the bridge already closed it.
@@ -777,7 +779,10 @@ export async function runProtocol(
           sanitizeErrorForDisplay(err),
         );
       } else {
-        log.debug("conn.close() during cleanup:", sanitizeErrorForDisplay(err));
+        log.debug(
+          "fileSync.close() during cleanup:",
+          sanitizeErrorForDisplay(err),
+        );
       }
     });
     // Surface the reconnect counts at normal verbosity so the operator sees a

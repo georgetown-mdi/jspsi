@@ -288,7 +288,7 @@ test("leaves an ordinary close error message intact (only control bytes are esca
 
 test("renders a hostile close error through sanitizeErrorForDisplay in the opened===false cleanup debug sink", async () => {
   // When open() fails (connect rejects, so opened stays false) and close() then
-  // rejects, the cleanup catch takes the debug "conn.close() during cleanup"
+  // rejects, the cleanup catch takes the debug "fileSync.close() during cleanup"
   // else-branch rather than the warn branch. It must still render the sanitized
   // string. (Covers the other cleanup catch from the one the warn test above hits.)
   mockState.connectImpl = async () => {
@@ -312,7 +312,7 @@ test("renders a hostile close error through sanitizeErrorForDisplay in the opene
 
     const escaped = "teardown failed: /srv/\\x1b[31mX\\u202eY";
     const elseLine = mockState.debugs.find((m) =>
-      m.includes("conn.close() during cleanup:"),
+      m.includes("fileSync.close() during cleanup:"),
     );
     expect(elseLine).toBeDefined();
     expect(elseLine).toContain(escaped);
