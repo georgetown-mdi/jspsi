@@ -92,6 +92,8 @@ vi.mock("../../src/connection/ssh2SftpAdapter", () => ({
   }),
 }));
 
+const { openWebRtcMessageConnection } =
+  await import("../../src/connection/webrtc/webrtcMessageConnection");
 const {
   runProtocol,
   webRtcDialFrom,
@@ -245,6 +247,46 @@ test("the rendezvous is dialed with the configured broker and ICE servers", asyn
     "acceptor",
     "inviter",
   ]);
+});
+
+test("a signal during the rendezvous closes the channel it opened", async () => {
+  // The interrupt handler's cleanup runs while the dial is still in flight, so
+  // it finds no transport to close. Whatever the dial then returns would be left
+  // standing -- a registered id and an open channel -- unless the dispatch closes
+  // it itself once it has one.
+  const keyFilePath = path.join(tmpDir, "signal.key");
+  saveKeyFile(keyFilePath, { sharedSecret: SECRET });
+  let closed = 0;
+  vi.mocked(openWebRtcMessageConnection).mockImplementationOnce(async () => {
+    process.emit("SIGINT");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return {
+      ...pair.inviter,
+      close: async () => {
+        closed += 1;
+      },
+    };
+  });
+  // The signal handler exits the process on a real run; here it must return so
+  // the run under test can finish.
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    await runProtocol(
+      webrtcConnection("inviter"),
+      { sharedSecret: SECRET, keyFilePath },
+      minimalPrepared,
+      path.join(tmpDir, "signal.csv"),
+      -1,
+      "test",
+    );
+  } finally {
+    exit.mockRestore();
+  }
+  expect(closed).toBeGreaterThan(0);
+  // And no handshake was attempted over it.
+  expect(mockState.handshakes).toHaveLength(0);
 });
 
 // --- the refusals -----------------------------------------------------------

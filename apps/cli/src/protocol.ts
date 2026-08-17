@@ -1000,8 +1000,26 @@ export async function runProtocol(
       // negotiates, and resolves only once the data channel is up. Its own
       // budgets bound it (rendezvous, channel-open), so a partner that never
       // arrives fails here rather than hanging.
-      transport = await openWebRtcMessageConnection(webRtcDial.options);
+      const dialed = await openWebRtcMessageConnection(webRtcDial.options);
+      transport = dialed;
       opened = true;
+
+      // A signal that arrived while the rendezvous was in flight already ran
+      // doCleanup, which found no transport to close because there was none
+      // yet. Close the one that has just opened and short-circuit, so the
+      // channel and the broker socket are not left standing -- the twin of the
+      // post-open guard on the file-sync side, and for the same reason.
+      if (signalReceived !== undefined) {
+        try {
+          await dialed.close();
+        } catch (err) {
+          log.debug(
+            "post-rendezvous signal close failed:",
+            sanitizeErrorForDisplay(err),
+          );
+        }
+        throw new Error(`interrupted by ${signalReceived} during rendezvous`);
+      }
       // Fixed by the connection's role rather than negotiated at the transport:
       // the two parties already had to disagree about which end they are to find
       // each other at all, so the handshake inherits that instead of running a
@@ -1112,7 +1130,7 @@ export async function runProtocol(
     }
 
     // Set by the prepare block on the file-sync channels and by the rendezvous
-    // above on webrtc; either way the exchange now has a transport to run over.
+    // above on webrtc; either way the exchange has a transport to run over.
     if (transport === undefined)
       throw new Error("no transport was established for this exchange");
     const mc = transport;
