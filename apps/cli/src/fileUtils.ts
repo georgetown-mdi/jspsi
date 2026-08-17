@@ -807,6 +807,11 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
     // does: the open carries no O_NOFOLLOW and the fchmod acts on the resolved
     // descriptor, so acting on the link node instead would clear an ACL that
     // governs nothing while the rows land in a file whose ACEs still stand.
+    // Known limitation: the strip re-resolves destPath by path, while the mode
+    // above was enforced on the open descriptor, so a destPath swapped (e.g. a
+    // retargeted symlink) between the fchmod and this call would clear a
+    // different file's ACL than the one the descriptor writes to. Node's fs
+    // exposes no fd-based ACL API to close that window.
     stripExtendedAcls(destPath, { symlinks: "follow" });
     fs.ftruncateSync(fd, 0);
   } catch (err) {

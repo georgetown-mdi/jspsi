@@ -588,6 +588,21 @@ describe("extended-ACL strip failure", () => {
     expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
   });
 
+  test("writeFileOwnerOnly with exclusive writes nothing and leaves no temp file", () => {
+    // exclusive's final step is linkSync rather than renameSync (the
+    // signing-identity path), but the strip runs on the temp file before
+    // either commit step, so the failure has to close this out the same way.
+    if (!stripFailsHere) return;
+    const dest = path.join(dir, "identity");
+    withPlatform("darwin", () => {
+      expect(() =>
+        writeFileOwnerOnly(dest, "identity-content", { exclusive: true }),
+      ).toThrow(/Could not clear extended ACLs/);
+    });
+    expect(fs.existsSync(dest)).toBe(false);
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+
   test("writeFileAtomic writes nothing and leaves no temp file", () => {
     if (!stripFailsHere) return;
     const dest = path.join(dir, "cert.json");
