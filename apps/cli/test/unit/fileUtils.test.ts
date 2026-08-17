@@ -679,8 +679,8 @@ describe("extended-ACL strip symlink posture", () => {
     });
 
     expect(commands).toEqual([
-      ["/bin/chmod", "-h", "-N", "--", `${secret}.tmp.${process.pid}`],
-      ["/bin/chmod", "-h", "-N", "--", `${cert}.tmp.${process.pid}`],
+      ["/bin/chmod", "-h", "-N", `${secret}.tmp.${process.pid}`],
+      ["/bin/chmod", "-h", "-N", `${cert}.tmp.${process.pid}`],
     ]);
   });
 
@@ -696,7 +696,7 @@ describe("extended-ACL strip symlink posture", () => {
       createOwnerOnlyWriteStream(dest),
     );
 
-    expect(commands).toEqual([["/bin/chmod", "-N", "--", dest]]);
+    expect(commands).toEqual([["/bin/chmod", "-N", dest]]);
     await writeAndClose(stream, "a,b\n1,2\n");
   });
 });

@@ -185,10 +185,11 @@ function warnIfWindowsAclOverPermissive(
 // access story: on an artifact psilink writes, no ACE is intended, and the
 // writers declare access through the mode alone. Node's `fs` exposes no ACL
 // API, so this shells out to macOS's own `chmod`, whose `-N` deletes the ACL.
-// The absolute `/bin/chmod` keeps the resolution off `PATH`, and `--` ends the
-// options so an operator-supplied path beginning with `-` is an operand rather
-// than a run of flags. There is no shell: the operand is one `execFileSync`
-// argument.
+// The absolute `/bin/chmod` keeps the resolution off `PATH`. There is no `--`
+// separator: macOS's chmod has none and tries to open it as a file (measured
+// on the host, 2026-08-17), and the same run showed a dash-leading operand
+// after the flags is taken as an operand, not a flag run. There is no shell:
+// the operand is one `execFileSync` argument.
 //
 // `symlinks` picks which entry the strip acts on, and each caller passes the one
 // that matches how its own write reached the file, so the ACL cleared always
@@ -220,9 +221,7 @@ function stripExtendedAcls(
 ): void {
   if (process.platform !== "darwin") return;
   const args =
-    symlinks === "do-not-follow"
-      ? ["-h", "-N", "--", filePath]
-      : ["-N", "--", filePath];
+    symlinks === "do-not-follow" ? ["-h", "-N", filePath] : ["-N", filePath];
   try {
     execFileSync("/bin/chmod", args, {
       stdio: "ignore",

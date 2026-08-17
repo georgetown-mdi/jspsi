@@ -96,13 +96,16 @@ fresh inode that still inherits the directory's ACEs.
 
 Each writer therefore clears the file's extended ACL at the point where it
 enforces the mode, on macOS alone: `execFileSync("/bin/chmod", [...flags, "-N",
-"--", file])`, run on the temp file after its `fchmod` and before any content is
+file])`, run on the temp file after its `fchmod` and before any content is
 written, and on the streamed result CSV between its `fchmod` and its truncate.
 `-N` deletes the ACL entirely -- on an artifact psilink writes, no ACE is
-intended, so the mode is meant to be the file's whole access story. `--` ends the
-options so an operator-supplied path beginning with `-` is read as an operand,
-and the absolute `/bin/chmod` keeps the resolution off `PATH`. There is no
-shell -- the operand is a single argument. It is a subprocess rather than a
+intended, so the mode is meant to be the file's whole access story. There is no
+`--` separator: macOS's `chmod` has none and fails trying to open it as a file,
+and the same host run measured that a dash-leading operand after the flags is
+read as an operand, not a flag run (both facts driven on the real tool,
+2026-08-17, recorded on the introducing pull request). The absolute
+`/bin/chmod` keeps the resolution off `PATH`, and there is no shell -- the
+operand is a single argument. It is a subprocess rather than a
 syscall because Node's `fs` exposes no ACL API.
 
 Whether the strip follows a symlink at the path is per call site, and each one
@@ -111,8 +114,8 @@ content lands in:
 
 | Call site | Flags | Why |
 | --------- | ----- | --- |
-| Temp-file writers (`writeFileOwnerOnly`, `writeFileAtomic`) | `-h -N --` | The path is psilink's own temp path, opened with `O_EXCL` and `O_NOFOLLOW`; a symlink at it is one planted in the create window. `-h` acts on the named entry, so following one cannot redirect the strip onto another file's ACL while the content goes to the temp file. |
-| Streamed result CSV (`createOwnerOnlyWriteStream`) | `-N --` | The path is an operator-supplied output path, opened without `O_NOFOLLOW` and `fchmod`'d on the descriptor, so a pre-existing symlink there is deliberately followed (see [Result CSV output](#result-csv-output)). `chmod` resolves the path for the same reason: acting on the link node would clear an ACL that governs nothing while the rows landed in a target whose ACEs still stood. Because the strip re-resolves the path rather than acting on the already-`fchmod`'d descriptor -- Node's `fs` exposes no fd-based ACL API -- a destPath swapped between the `fchmod` and the strip aims the two at different files. |
+| Temp-file writers (`writeFileOwnerOnly`, `writeFileAtomic`) | `-h -N` | The path is psilink's own temp path, opened with `O_EXCL` and `O_NOFOLLOW`; a symlink at it is one planted in the create window. `-h` acts on the named entry, so following one cannot redirect the strip onto another file's ACL while the content goes to the temp file. |
+| Streamed result CSV (`createOwnerOnlyWriteStream`) | `-N` | The path is an operator-supplied output path, opened without `O_NOFOLLOW` and `fchmod`'d on the descriptor, so a pre-existing symlink there is deliberately followed (see [Result CSV output](#result-csv-output)). `chmod` resolves the path for the same reason: acting on the link node would clear an ACL that governs nothing while the rows landed in a target whose ACEs still stood. Because the strip re-resolves the path rather than acting on the already-`fchmod`'d descriptor -- Node's `fs` exposes no fd-based ACL API -- a destPath swapped between the `fchmod` and the strip aims the two at different files. |
 
 The strip covers every artifact this document's write construction produces --
 the key file, the signing identity, the exchange record and its verification
