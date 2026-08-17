@@ -54,6 +54,7 @@
     "@rollup/plugin-typescript": "^12.1.4",
     "@types/luxon": "^3.7.3",
     "@types/papaparse": "^5.3.16",
+    "peerjs-js-binarypack": "2.1.0",
     "rimraf": "^6.0.1",
     "rollup": "^4.62.4",
     "rollup-plugin-dts": "^6.2.3",
