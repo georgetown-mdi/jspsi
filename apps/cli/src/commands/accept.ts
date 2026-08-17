@@ -787,7 +787,7 @@ export async function handler(argv: Arguments): Promise<void> {
           // on the fresh path, where the written config's terms are the mirror's.
           outboundPayloadConsent: reuseOutboundPayloadConsent,
         });
-        logOnlineBootstrapOutcome(log, {
+        process.exitCode = logOnlineBootstrapOutcome(log, {
           configFile: options.configFile,
           keyFile: options.keyFile,
           configWriteError,

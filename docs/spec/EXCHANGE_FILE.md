@@ -103,37 +103,44 @@ compatibility axis.
 
 ### What an older CLI does with a newer file
 
-The observable outcome depends on how the field diverges, and the two cases
-differ sharply:
+The observable outcome depends on where the field diverges, and the cases differ
+sharply:
 
-- **An unknown field is silently stripped.** The spec-tier blocks
-  (`linkage_terms`, `metadata`, `standardization`, `connection`, and the
-  top-level spec object itself) all strip unrecognized keys on parse. That
-  property, not any one schema kind, is what this case rests on: the blocks are
-  built from different Zod constructs -- an object for the top-level spec and
-  `linkage_terms`, an array for `metadata` and `standardization`, a
-  discriminated union for `connection` -- and strip is the behavior they share.
-  A newer web app that adds an optional field an older CLI's schema does not know
-  drops that field on load; the exchange runs on the fields the older CLI does
-  understand. This is a silent narrowing, not a loud rejection.
+- **An unknown top-level key is rejected loudly.** `ExchangeSpecSchema` is a
+  `z.strictObject`, so a key the older CLI's schema does not know -- whether a
+  newer web app's addition or an operator's typo -- surfaces from `loadConfig` as
+  a load-time `UsageError` (CLI exit 64) naming the key, and the exchange never
+  starts. Three of the top-level keys are enforcement records whose absence is a
+  valid state (`outbound_payload_consent`, `disclosed_payload_columns`,
+  `expected_payload_columns`), so stripping a misspelling of one would silently
+  disable the control it names; that hazard governs the whole top level rather
+  than being spot-checked key by key.
+- **An unknown field INSIDE a spec block is silently stripped.** The blocks
+  themselves (`linkage_terms`, `metadata`, `standardization`, `connection`) strip
+  unrecognized keys on parse. That property, not any one schema kind, is what this
+  case rests on: the blocks are built from different Zod constructs -- an object
+  for `linkage_terms`, an array for `metadata` and `standardization`, a
+  discriminated union for `connection` -- and strip is the behavior they share. A
+  newer web app that adds an optional field within one of them drops that field on
+  load; the exchange runs on the fields the older CLI does understand. This is a
+  silent narrowing, not a loud rejection.
 - **An unknown enum value is rejected loudly.** A field whose value changed to
   one an older schema does not accept -- a new `algorithm`, a new
   `linkage_strategy`, a new semantic `type`, a new `channel` -- is a
   `z.enum`/`z.literal` the older schema rejects. `loadConfig` surfaces the
   `ZodError` as a load-time `UsageError` (CLI exit 64) naming the field. The
   exchange never starts.
-- **The `authentication` block is validated strictly.** Unlike the spec blocks,
-  `AuthenticationSchema` is a `z.strictObject`: an unrecognized key there is
-  rejected, not stripped. A minted file never carries this block, so this matters
-  only for an operator-edited config, but it is the one part of the config whose
-  unknown-key handling is fail-closed rather than fail-strip, because it alone
-  holds an operator security policy (`token_max_age_days`) a typo must not
-  silently disable.
+- **The `authentication` block is validated strictly.** Like the top level and
+  unlike the sibling spec blocks, `AuthenticationSchema` is a `z.strictObject`: an
+  unrecognized key there is rejected, not stripped, because it holds an operator
+  security policy (`token_max_age_days`) a typo must not silently disable. A
+  minted file never carries this block, so it matters only for an operator-edited
+  config.
 
-The load-bearing property across all three cases: an incompatibility surfaces as
-a loud load-time validation error (or, for a stripped unknown field, a run over
-the understood subset), never a silent reinterpretation of a value into something
-it did not mean.
+The load-bearing property across all four cases: an incompatibility surfaces as
+a loud load-time validation error (or, for a stripped unknown field within a
+block, a run over the understood subset), never a silent reinterpretation of a
+value into something it did not mean.
 
 ### What is not promised
 

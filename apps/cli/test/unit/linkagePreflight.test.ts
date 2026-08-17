@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { inferMetadata } from "@psilink/core";
+import { inferMetadata, UsageError } from "@psilink/core";
 import type { getLogger, LinkageTerms } from "@psilink/core";
 
 import {
@@ -48,10 +48,12 @@ function dobTerms(
   };
 }
 
-test("warns by name when a linkage key's parse_date drops every record", () => {
+test("refuses by name when the only linkage key's parse_date drops every record", () => {
   const { log, warns } = makeLogger();
-  // The column is present, so the column verdict passes (no block, no
-  // unsatisfied-field warn); the only warning is the dead-key one.
+  // The column is present, so the column verdict passes -- yet the one key it
+  // satisfies is dead, so the run could emit no key string and would write a
+  // guaranteed-empty result at exit 0. It is refused instead, naming the key and
+  // the terms-side remedy.
   expect(() =>
     checkLinkageSatisfiability(
       ["dob"],
@@ -59,31 +61,14 @@ test("warns by name when a linkage key's parse_date drops every record", () => {
       log,
       messaging,
     ),
-  ).not.toThrow();
-  expect(warns).toHaveLength(1);
-  expect(warns[0]).toContain("can never match");
-  expect(warns[0]).toContain("(DOB)");
-  expect(warns[0]).toContain("invitation");
-});
-
-test("does not warn for a complete parse_date input format", () => {
-  const { log, warns } = makeLogger();
-  checkLinkageSatisfiability(
-    ["dob"],
-    dobTerms([
-      { function: "parse_date", params: { inputFormat: "MM/DD/YYYY" } },
-    ]),
-    log,
-    messaging,
-  );
+  ).toThrow(/none of the invitation's linkage keys can ever match: .*DOB/);
   expect(warns).toEqual([]);
 });
 
-test("a dead key and a column-unsatisfiable key both warn (independent signals)", () => {
+test("a dead key beside a live one warns and proceeds", () => {
   const { log, warns } = makeLogger();
-  // DOB is shape-satisfiable (column present) but dead; SSN is shape-unsatisfiable
-  // (no ssn column). The dead-key warning and the partial-coverage warning are
-  // distinct signals and both fire; the run is not blocked (one key is countable).
+  // DOB is dead; SSN is satisfiable and live, so the exchange can still match on
+  // it. That is the partial case: warn by name, do not refuse.
   const terms: LinkageTerms = {
     ...dobTerms(),
     linkageFields: [
@@ -106,10 +91,65 @@ test("a dead key and a column-unsatisfiable key both warn (independent signals)"
     ],
   };
   expect(() =>
-    checkLinkageSatisfiability(["dob"], terms, log, messaging),
+    checkLinkageSatisfiability(["dob", "ssn"], terms, log, messaging),
   ).not.toThrow();
-  expect(warns.some((w) => w.includes("can never match"))).toBe(true);
-  expect(warns.some((w) => w.includes("cannot satisfy all"))).toBe(true);
+  expect(warns).toHaveLength(1);
+  expect(warns[0]).toContain("can never match");
+  expect(warns[0]).toContain("(DOB)");
+  expect(warns[0]).toContain("invitation");
+});
+
+test("does not warn for a complete parse_date input format", () => {
+  const { log, warns } = makeLogger();
+  checkLinkageSatisfiability(
+    ["dob"],
+    dobTerms([
+      { function: "parse_date", params: { inputFormat: "MM/DD/YYYY" } },
+    ]),
+    log,
+    messaging,
+  );
+  expect(warns).toEqual([]);
+});
+
+test("a dead key beside a column-unsatisfiable one is refused, naming both causes", () => {
+  const { log, warns } = makeLogger();
+  // DOB is shape-satisfiable (column present) but dead; SSN is shape-unsatisfiable
+  // (no ssn column). Every key is out, each for its own reason, so the refusal
+  // states both rather than warning twice and running to an empty result.
+  const terms: LinkageTerms = {
+    ...dobTerms(),
+    linkageFields: [
+      { name: "dob", type: "date_of_birth" },
+      { name: "ssn", type: "ssn" },
+    ],
+    linkageKeys: [
+      {
+        name: "DOB",
+        elements: [
+          {
+            field: "dob",
+            transform: [
+              { function: "parse_date", params: { inputFormat: "MM/DD" } },
+            ],
+          },
+        ],
+      },
+      { name: "SSN", elements: [{ field: "ssn" }] },
+    ],
+  };
+  let thrown: unknown;
+  try {
+    checkLinkageSatisfiability(["dob"], terms, log, messaging);
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  const message = (thrown as UsageError).message;
+  expect(message).toContain("DOB");
+  expect(message).toContain("the CSV satisfies no other key");
+  expect(message).toContain("unsatisfied fields: ssn (ssn)");
+  expect(warns).toEqual([]);
 });
 
 // --- warnColumnsTheInvitationWillNotAccept ------------------------------------

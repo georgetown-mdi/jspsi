@@ -28,13 +28,15 @@ export interface LinkagePreflightMessaging {
 /**
  * Pre-flight a CSV's `columns` against the linkage `terms` it will be exchanged
  * under, enforcing the policy both real-exchange entry points share: block
- * (throw {@link UsageError}, exit 64) when no linkage key is satisfiable -- the
- * exchange would emit no key strings and produce a result byte-indistinguishable
- * from a legitimately empty intersection -- and warn-and-proceed when only some
- * keys are unsatisfiable. The detection lives in `@psilink/core`'s
- * {@link assessLinkageSatisfiability}; this wrapper owns only the message wording
- * and partner-sourced field sanitization, kept in one copy so the accept and
- * exchange paths cannot drift apart on the threshold or the escaping.
+ * (throw {@link UsageError}, exit 64) when no linkage key can produce a key
+ * string -- whether because no key is satisfiable from the columns or because
+ * every satisfiable one declares cleaning that drops all records -- since the
+ * exchange would then produce a result byte-indistinguishable from a legitimately
+ * empty intersection, and warn-and-proceed when only some keys are lost that way.
+ * The detection lives in `@psilink/core`'s {@link assessLinkageSatisfiability};
+ * this wrapper owns only the message wording and partner-sourced field
+ * sanitization, kept in one copy so the accept and exchange paths cannot drift
+ * apart on the threshold or the escaping.
  *
  * @param standardization The committed config's explicit standardization, when
  *   any: an explicit column remap satisfies a field whose semantic type is
@@ -58,38 +60,15 @@ export function checkLinkageSatisfiability(
   const { unsatisfied, satisfiableKeyCount, deadKeys } =
     assessLinkageSatisfiability(columns, terms, standardization, metadata);
 
-  // Warn about keys whose columns are all present but whose declared cleaning can
-  // never produce a value (a self-defeating parse_date input format): they pass
-  // the column check below yet would contribute nothing, running to a silent empty
-  // result. Surfaced separately from the column block/warn -- the remedy is to fix
-  // the terms, not the CSV -- and before the all-satisfiable early return, since a
-  // dead key still counts as shape-satisfiable. Key names are partner-sourced on
-  // the accept path, so sanitize each like the unsatisfied-field names below.
-  if (deadKeys.length > 0) {
-    const names = deadKeys
-      .map((k) => redactAndSanitizeForDisplay(k.name))
-      .join(", ");
-    log.warn(
-      `${deadKeys.length} of the ${messaging.source}'s linkage keys can never ` +
-        `match -- a cleaning step drops every record (${names}); those keys ` +
-        "will contribute nothing to this exchange.",
-    );
-  }
-
-  // Gate on the key count, not on `unsatisfied.length`: a key can be unsatisfiable
-  // because it references a field the terms never declare (not just a declared
-  // field the CSV lacks), in which case `unsatisfied` is empty yet keys still
-  // collapse. satisfiableKeyCount accounts for both.
-  if (satisfiableKeyCount === terms.linkageKeys.length) return;
-
-  // The enumeration reaches the operator down two routes with different escape
-  // points, so each branch below builds it with the escape its own route needs:
-  // raw for the UsageError, whose display boundary escapes the rendered message
-  // once, and escaped for the log.warn, whose call site is the sink. f.type is a
-  // schema-validated enum literal but takes the same path as f.name, so no future
-  // edit leaves a raw token beside an escaped one. The detail is omitted when no
-  // DECLARED field is unproducible (the keys are unsatisfiable only by
-  // referencing undeclared fields), leaving the block/warn itself as the signal.
+  // Both enumerations below reach the operator down two routes with different
+  // escape points, so each is built with the escape its own route needs: raw for a
+  // UsageError, whose display boundary escapes the rendered message once, and
+  // escaped for a log.warn, whose call site is the sink. Key names are
+  // partner-sourced on the accept path, and f.type is a schema-validated enum
+  // literal that takes the same path as f.name, so no future edit leaves a raw
+  // token beside an escaped one. The detail is omitted when no DECLARED field is
+  // unproducible (the keys are unsatisfiable only by referencing undeclared
+  // fields), leaving the block/warn itself as the signal.
   const detail = (shown: (token: string) => string): string =>
     unsatisfied.length > 0
       ? " (unsatisfied fields: " +
@@ -98,6 +77,47 @@ export function checkLinkageSatisfiability(
           .join(", ") +
         ")"
       : "";
+  const deadNames = (shown: (token: string) => string): string =>
+    deadKeys.map((k) => shown(k.name)).join(", ");
+
+  // Keys whose columns are all present but whose declared cleaning can never
+  // produce a value (a self-defeating parse_date input format): they pass the
+  // column check below yet would contribute nothing. Surfaced separately from the
+  // column block/warn -- their remedy is to fix the terms, not the CSV -- and
+  // before the all-satisfiable early return, since a dead key still counts as
+  // shape-satisfiable.
+  if (deadKeys.length > 0) {
+    // deadKeys is a subset of the shape-satisfiable keys, so an equal count means
+    // every key that passed the column check is dead: the run can emit no key
+    // string at all, which is the guaranteed-empty result the column block below
+    // exists to prevent, reached by a different route. Refused rather than warned
+    // for that reason. Any remaining key is out for the column reason, so the
+    // message carries that half of the cause too.
+    if (satisfiableKeyCount === deadKeys.length)
+      throw new UsageError(
+        `none of the ${messaging.source}'s linkage keys can ever match: a ` +
+          "cleaning step drops every record for " +
+          deadNames((token) => token) +
+          (deadKeys.length < terms.linkageKeys.length
+            ? ", and the CSV satisfies no other key" + detail((token) => token)
+            : "") +
+          "; running would produce a guaranteed empty result. Correct the " +
+          "cleaning steps those keys declare, " +
+          messaging.blockRemedy,
+      );
+    log.warn(
+      `${deadKeys.length} of the ${messaging.source}'s linkage keys can never ` +
+        "match -- a cleaning step drops every record " +
+        `(${deadNames((token) => redactAndSanitizeForDisplay(token))}); those ` +
+        "keys will contribute nothing to this exchange.",
+    );
+  }
+
+  // Gate on the key count, not on `unsatisfied.length`: a key can be unsatisfiable
+  // because it references a field the terms never declare (not just a declared
+  // field the CSV lacks), in which case `unsatisfied` is empty yet keys still
+  // collapse. satisfiableKeyCount accounts for both.
+  if (satisfiableKeyCount === terms.linkageKeys.length) return;
 
   if (satisfiableKeyCount === 0)
     throw new UsageError(

@@ -1059,18 +1059,34 @@ export async function runOnlineBootstrap(params: {
 }
 
 /**
- * Log the post-exchange outcome of an online invite/accept run. On a clean run
- * both files were written. When a pre-existing config was reused
- * (`reuseExistingConfig`), the rotated key was saved and the config was kept,
- * refreshed only in its machine-managed consent records, so the message
- * reflects reuse rather than claiming a fresh write. When the config write
- * failed at acceptance (`configWriteError` set),
+ * The exit code an online invite/accept reports when the exchange completed but
+ * the configuration write did not. Not a new code: a config write that throws on
+ * any other path (the offline `invite`/`accept` provisioning, `init`) already
+ * reaches the command error boundary and exits 69, so the online path's swallowed
+ * write failure is brought onto the same code rather than under a second one.
+ */
+export const CONFIG_WRITE_FAILURE_EXIT_CODE = 69;
+
+/**
+ * Log the post-exchange outcome of an online invite/accept run and return the
+ * process exit code it implies. On a clean run both files were written. When a
+ * pre-existing config was reused (`reuseExistingConfig`), the rotated key was
+ * saved and the config was kept, refreshed only in its machine-managed consent
+ * records, so the message reflects reuse rather than claiming a fresh write.
+ * When the config write failed at acceptance (`configWriteError` set),
  * the rotated key was still saved but the config was not, so the message must
  * not claim otherwise -- the underlying error was already logged at error level
  * by `runProtocol`, so this only corrects the summary and points back to it. The
  * failure summary is logged at `error` level, not `warn`, so it (and its
  * actionable recovery instruction) stays visible at `--log-level=error`, where
  * the error it references is also shown.
+ *
+ * That failure also carries {@link CONFIG_WRITE_FAILURE_EXIT_CODE} back: a
+ * wrapper gating on exit status would otherwise read a half-provisioned setup --
+ * a rotated key with no configuration, whose recovery is hand-authoring the YAML
+ * -- as a complete one. The code is returned rather than assigned here so the
+ * command owns process state and a test can exercise the messaging without
+ * moving the runner's own exit code.
  */
 export function logOnlineBootstrapOutcome(
   log: ReturnType<typeof getLogger>,
@@ -1080,7 +1096,7 @@ export function logOnlineBootstrapOutcome(
     configWriteError?: unknown;
     reuseExistingConfig?: boolean;
   },
-): void {
+): number {
   if (params.reuseExistingConfig && params.configWriteError === undefined) {
     // Reuse skips the config write, so there is normally no configWriteError; the
     // existing config stands and only the rotated key was saved. The
@@ -1092,14 +1108,14 @@ export function logOnlineBootstrapOutcome(
         `${params.configFile} and saved the rotated key to ${params.keyFile}. ` +
         `Keep the key file private.`,
     );
-    return;
+    return 0;
   }
   if (params.configWriteError === undefined) {
     log.info(
       `exchange complete; saved config to ${params.configFile} and the ` +
         `rotated key to ${params.keyFile}. Keep the key file private.`,
     );
-    return;
+    return 0;
   }
   log.error(
     `exchange complete and the rotated key was saved to ${params.keyFile}, ` +
@@ -1109,4 +1125,5 @@ export function logOnlineBootstrapOutcome(
       `your connection and linkage settings before running a recurring ` +
       `'psilink exchange'. Keep the key file private.`,
   );
+  return CONFIG_WRITE_FAILURE_EXIT_CODE;
 }

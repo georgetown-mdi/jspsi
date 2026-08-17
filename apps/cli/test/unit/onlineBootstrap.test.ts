@@ -46,6 +46,7 @@ import {
 import {
   applyEndpointSplitDirectories,
   buildDataSpec,
+  CONFIG_WRITE_FAILURE_EXIT_CODE,
   connectionFromEndpoint,
   endpointFromConnection,
   generateSharedSecret,
@@ -2568,10 +2569,11 @@ test("logOnlineBootstrapOutcome: a clean run reports both files saved", () => {
     warn: vi.fn(),
     error: vi.fn(),
   } as unknown as ReturnType<typeof getLogger>;
-  logOnlineBootstrapOutcome(log, {
+  const exitCode = logOnlineBootstrapOutcome(log, {
     configFile: "psilink.yaml",
     keyFile: ".psilink.key",
   });
+  expect(exitCode).toBe(0);
   expect(log.warn).not.toHaveBeenCalled();
   expect(log.error).not.toHaveBeenCalled();
   expect(log.info).toHaveBeenCalledTimes(1);
@@ -2586,11 +2588,16 @@ test("logOnlineBootstrapOutcome: a config-write failure logs at error level and 
     warn: vi.fn(),
     error: vi.fn(),
   } as unknown as ReturnType<typeof getLogger>;
-  logOnlineBootstrapOutcome(log, {
+  const exitCode = logOnlineBootstrapOutcome(log, {
     configFile: "psilink.yaml",
     keyFile: ".psilink.key",
     configWriteError: new Error("permission denied"),
   });
+  // A half-provisioned setup must not report success: a wrapper gating on exit
+  // status would otherwise treat a rotated key with no configuration as a
+  // completed setup.
+  expect(exitCode).toBe(CONFIG_WRITE_FAILURE_EXIT_CODE);
+  expect(exitCode).not.toBe(0);
   expect(log.info).not.toHaveBeenCalled();
   // Logged at error level (not warn) so it stays visible at --log-level=error,
   // where the underlying hook error it references is also shown.
@@ -2609,11 +2616,12 @@ test("logOnlineBootstrapOutcome: a reused config reports the existing config and
     warn: vi.fn(),
     error: vi.fn(),
   } as unknown as ReturnType<typeof getLogger>;
-  logOnlineBootstrapOutcome(log, {
+  const exitCode = logOnlineBootstrapOutcome(log, {
     configFile: "psilink.yaml",
     keyFile: ".psilink.key",
     reuseExistingConfig: true,
   });
+  expect(exitCode).toBe(0);
   expect(log.warn).not.toHaveBeenCalled();
   expect(log.error).not.toHaveBeenCalled();
   expect(log.info).toHaveBeenCalledTimes(1);

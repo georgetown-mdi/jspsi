@@ -24,8 +24,19 @@ import { boundedArray } from "../utils/boundedArray.js";
  * Any string value that begins with `@` is read from the file at the given
  * path rather than used literally. Apply `readAtSignFile` (or equivalent) to
  * credential fields before parsing.
+ *
+ * `strictObject`: three of the top-level keys below -- `outboundPayloadConsent`,
+ * `disclosedPayloadColumns`, `expectedPayloadColumns` -- are enforcement records
+ * whose ABSENCE is a valid state (reconcile lazily, no consent on record), so a
+ * misspelled key that `strip` discards silently disables the control it names
+ * rather than failing anything. That is the same reason `AuthenticationSchema`
+ * is strict, and it applies to a machine-managed key the more sharply: an
+ * operator editing a config around one has no display that would show the
+ * control had gone missing. The nested blocks still strip -- see
+ * EXCHANGE_FILE.md ("Versioning and compatibility policy") for what that means
+ * for a file minted by a newer web app.
  */
-export const ExchangeSpecSchema = z.object({
+export const ExchangeSpecSchema = z.strictObject({
   connection: ConnectionConfigSchema,
   linkageTerms: LinkageTermsSchema,
   metadata: MetadataSchema.optional(),

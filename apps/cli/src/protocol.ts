@@ -1306,6 +1306,21 @@ export async function runProtocol(
               "the configuration) did not complete: " +
               sanitizeErrorForDisplay(hookErr),
           );
+          // A supervisor that discards stderr on a run that completes would
+          // otherwise have only the exit code to tell it the setup is half
+          // provisioned -- the exchange runs and its result is written, but what
+          // the hook persists is not on disk. The message carries the same hedge
+          // as the line above rather than naming the caller's own artifact, and
+          // the cause stays on the human log: the emitter escapes its message
+          // once, so pre-rendered error text would reach the stream
+          // double-escaped.
+          emit((e) =>
+            e.warning(
+              "the post-authentication persistence step (writing the " +
+                "configuration) did not complete; the exchange continued and " +
+                "the rotated key is saved",
+            ),
+          );
         }
       }
 

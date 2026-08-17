@@ -34,10 +34,11 @@ export const EVENT_STREAM_VERSION = 1;
  * these strings -- none is partner-derived -- so a consumer can switch on the
  * discriminant safely. `stages` is the one-shot stage-list event; `stage` marks
  * each stage transition; `stageEnd` reports a completed stage's wall-clock
- * duration; `warning` carries a non-fatal warning (a terms-exchange warning or
- * the cross-party host-key divergence notice); `metrics` is the one-shot
- * operational-counter summary emitted just before the terminal event; `result`
- * and `error` are the two terminal events (exactly one fires per run).
+ * duration; `warning` carries a non-fatal warning (a terms-exchange warning, the
+ * cross-party host-key divergence notice, or a post-authentication persistence
+ * failure); `metrics` is the one-shot operational-counter summary emitted just
+ * before the terminal event; `result` and `error` are the two terminal events
+ * (exactly one fires per run).
  */
 export type EventType =
   "stages" | "stage" | "stageEnd" | "warning" | "metrics" | "result" | "error";
@@ -112,8 +113,9 @@ export interface StageEndEvent extends EventBase {
 }
 
 /**
- * A non-fatal warning: a terms-exchange warning or the cross-party host-key
- * divergence notice.
+ * A non-fatal warning: a terms-exchange warning, the cross-party host-key
+ * divergence notice, or the post-authentication persistence failure that leaves
+ * an otherwise complete online invite/accept without its configuration.
  */
 export interface WarningEvent extends EventBase {
   type: "warning";
@@ -261,12 +263,13 @@ export function buildWarningEvent(message: string): WarningEvent {
     // sanitize before the text reaches the stream. Redaction first, mirroring
     // the log sink: this stream is a persisted machine sink too, and its error
     // event is already redacted (sanitizeErrorForDisplay), so the warning is
-    // where the stream would otherwise carry key material in the clear. Both
-    // live warning sources redact per fragment where they compose, so the
-    // fail-closed dangling rule has nothing left to consume here. The cap is the
-    // shared warning-composition budget, not the per-value default, so a
-    // consumer that re-escapes this field at the same budget delivers the whole
-    // composition rather than re-capping it.
+    // where the stream would otherwise carry key material in the clear. Every
+    // live warning source either redacts per fragment where it composes or
+    // composes first-party prose alone, so the fail-closed dangling rule has
+    // nothing left to consume here. The cap is the shared warning-composition
+    // budget, not the per-value default, so a consumer that re-escapes this
+    // field at the same budget delivers the whole composition rather than
+    // re-capping it.
     message: redactAndSanitizeForDisplay(message, {
       maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
     }),

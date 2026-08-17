@@ -779,7 +779,7 @@ export async function handler(argv: Arguments): Promise<void> {
           // from the token, so its online path does not request this.)
           persistObservedReceivedPayload: true,
         });
-        logOnlineBootstrapOutcome(log, {
+        process.exitCode = logOnlineBootstrapOutcome(log, {
           configFile: options.configFile,
           keyFile: options.keyFile,
           configWriteError,

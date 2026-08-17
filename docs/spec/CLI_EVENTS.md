@@ -71,7 +71,7 @@ Emitted when a protocol stage completes, carrying how long it ran so a superviso
 
 ### `warning`
 
-Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWarning`, and the cross-party host-key divergence notice -- a security signal a supervisor that discards stderr would otherwise never see. A warning does not end the run.
+Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWarning`, the cross-party host-key divergence notice -- a security signal a supervisor that discards stderr would otherwise never see -- and the post-authentication persistence failure of an online `invite`/`accept`, whose run completes and writes its result while the configuration a later recurring `psilink exchange` needs does not reach disk (that run also exits 69; see [Exit codes](../CLI.md#exit-codes)). A warning does not end the run.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
