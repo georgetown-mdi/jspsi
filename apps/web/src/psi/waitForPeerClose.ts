@@ -28,10 +28,12 @@ const DEAD_PEER_STATES: ReadonlySet<RTCPeerConnectionState> = new Set([
  * from "the wait gave up" branches on this rather than on the wait returning.
  */
 export type PeerCloseOutcome =
-  /** The channel closed under this side (its `close`/`closing` event): the peer
-   * read the close sentinel, which the ordered channel places behind every
-   * frame already handed to `send`, so the final frame reached it. The only
-   * exit that means delivered -- and the event is the peer's on the path this
+  /** The channel closed under this side (its `close`/`closing` event): the
+   * ordered channel places the close sentinel behind every frame already handed
+   * to `send`, so a peer that reads in order took the final frame before
+   * closing. The only exit that can mean delivered -- for a conforming peer; one
+   * that closes without draining its inbound queue is indistinguishable from
+   * one that read everything -- and the event is the peer's on the path this
    * wait exists for, since PeerJS's flushing close leaves the local channel
    * open (see the listener-set note below). */
   | "peer-closed"
