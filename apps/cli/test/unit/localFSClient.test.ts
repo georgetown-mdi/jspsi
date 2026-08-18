@@ -396,7 +396,8 @@ test("a short writev is completed rather than published truncated", async () => 
   // the byte count its filename promises and waits out its whole budget before
   // blaming the partner. The remainder must be re-offered until it lands. The
   // first call here takes 3 bytes of a 7-byte list -- a boundary INSIDE the
-  // second chunk, so the continuation must resume mid-chunk, not re-send it.
+  // first chunk, the 4-byte header, so the continuation must resume mid-chunk,
+  // not re-send it.
   const dest = path.join(dir, "short-writev.bin");
   const handle = await fs.open(dest, "w");
   const realWritev = handle.writev.bind(handle);
@@ -420,6 +421,43 @@ test("a short writev is completed rather than published truncated", async () => 
     await handle.close().catch(() => {});
   }
   expect(calls).toBeGreaterThan(1);
+  expect(await fs.readFile(dest)).toEqual(
+    Buffer.from([0x01, 0x02, 0x03, 0x04, 0xde, 0xad, 0xbe]),
+  );
+});
+
+test("a short writev past a whole chunk drops that chunk from the rest", async () => {
+  // The other boundary: the first call takes the whole 4-byte header and 2 of
+  // the 3 payload bytes. A fully written chunk must be DROPPED from what is
+  // re-offered -- re-sending it would put a second copy of the header inside the
+  // frame whose byte count the filename already promised -- so the second call
+  // sees only the payload's 1 unwritten byte.
+  const dest = path.join(dir, "short-writev-whole-chunk.bin");
+  const handle = await fs.open(dest, "w");
+  const realWritev = handle.writev.bind(handle);
+  const offeredBytes: number[] = [];
+  const writevSpy = vi
+    .spyOn(handle, "writev")
+    .mockImplementation(async (buffers: readonly NodeJS.ArrayBufferView[]) => {
+      offeredBytes.push(
+        buffers.reduce((total, chunk) => total + chunk.byteLength, 0),
+      );
+      if (offeredBytes.length > 1) return realWritev(buffers as Uint8Array[]);
+      const head = buffers[0] as Uint8Array;
+      const partialTail = (buffers[1] as Uint8Array).subarray(0, 2);
+      return realWritev([head, partialTail]);
+    });
+  const openSpy = vi.spyOn(fs, "open").mockResolvedValue(handle);
+  try {
+    const header = Buffer.from([0x01, 0x02, 0x03, 0x04]);
+    const payload = new Uint8Array([0xde, 0xad, 0xbe]);
+    await client.put([header, payload], dest);
+  } finally {
+    openSpy.mockRestore();
+    writevSpy.mockRestore();
+    await handle.close().catch(() => {});
+  }
+  expect(offeredBytes).toEqual([7, 1]);
   expect(await fs.readFile(dest)).toEqual(
     Buffer.from([0x01, 0x02, 0x03, 0x04, 0xde, 0xad, 0xbe]),
   );

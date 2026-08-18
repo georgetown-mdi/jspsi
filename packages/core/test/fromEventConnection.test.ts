@@ -109,13 +109,11 @@ function makeConnectedConn(
   client: FileTransportClient,
   opts?: Partial<{
     pollingFrequency: number;
-    timeToLiveMs: number;
     peerTimeoutMs: number;
   }>,
 ): FileSyncConnection {
   const conn = new FileSyncConnection(client, {
     pollingFrequency: opts?.pollingFrequency ?? 10,
-    timeToLive: new Date(Date.now() + (opts?.timeToLiveMs ?? 5_000)),
     verbose: -1,
   });
   conn.connected = true;

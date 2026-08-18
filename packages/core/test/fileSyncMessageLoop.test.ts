@@ -655,15 +655,26 @@ describe("FileSyncMessageLoop counter commit points", () => {
     const clock = virtualClock(f, 400);
     try {
       // The peer consumes the outstanding message on the third listing of each
-      // wait -- 800 virtual ms, inside one budget but not inside two.
+      // wait -- 800 virtual ms, inside one budget but not inside two. Each call
+      // REPLACES the previous wrapper over the clock's list() rather than
+      // nesting on top of it: a nested wrapper carries its counter over from the
+      // earlier wait, so it would fire on the next wait's very FIRST listing and
+      // that wait would never reach a third listing of its own.
+      const clockList = f.client.list.bind(f.client);
+      const consumedOnListing: number[] = [];
       const consumeOnThirdList = () => {
         let listings = 0;
-        const realList = f.client.list.bind(f.client);
+        let consumed = false;
         f.client.list = async (dir: string) => {
           listings += 1;
-          if (listings >= 3 && f.loop.lastSentFile !== undefined)
+          if (listings >= 3 && f.loop.lastSentFile !== undefined) {
+            if (!consumed) {
+              consumed = true;
+              consumedOnListing.push(listings);
+            }
             files.delete(`${DIR}/${f.loop.lastSentFile}`);
-          return realList(dir);
+          }
+          return clockList(dir);
         };
       };
 
@@ -673,6 +684,9 @@ describe("FileSyncMessageLoop counter commit points", () => {
       consumeOnThirdList();
       await expect(f.loop.send({ a: 3 })).resolves.toBeUndefined();
       expect(f.loop.seq).toBe(3);
+      // Both waits ran to their OWN third listing, which is what makes the two
+      // waits above two full waits rather than one plus a short-circuit.
+      expect(consumedOnListing).toEqual([3, 3]);
       // The exchange outlived one budget, which is the case an absolute deadline
       // fails and this one must not.
       expect(clock.elapsedMs()).toBeGreaterThan(f.budget.ms);

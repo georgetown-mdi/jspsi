@@ -1393,14 +1393,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (this.lastSentFile !== undefined && !this.options.retainFiles) {
         const path = this.path;
         const lastSentFile = this.lastSentFile;
-        const peerBudgetMs =
-          this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
         // min() so a configured peer budget smaller than the fixed drain budget
         // still caps teardown below it rather than above it (see
         // TERMINAL_FRAME_DRAIN_TIMEOUT_MS).
         const drainTimeoutMs = Math.min(
           TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
-          peerBudgetMs,
+          this.peerBudgetMs(),
         );
         const deadline = Date.now() + drainTimeoutMs;
         // Bound each drain list() by the time remaining to `deadline`, not the

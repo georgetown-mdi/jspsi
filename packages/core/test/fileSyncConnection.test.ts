@@ -1845,9 +1845,10 @@ test("send waits for a previous unconsumed message before writing the next", asy
 
 test("send times out when the previous message is never consumed", async () => {
   const { client, files } = makeMockClient();
-  // Short TTL so the test doesn't take long.
+  // Short peer budget -- what the wait for the previous message is armed with --
+  // so the test doesn't take long.
   const conn = await makeConnectedConn(client, {
-    timeToLiveMs: 150,
+    peerTimeoutMs: 150,
     pollingFrequency: 10,
   });
   conn.peerId = "stub-peer";
