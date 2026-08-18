@@ -66,9 +66,14 @@ export function assertPartnerIndexCount(
     );
 }
 
-// V8 holds a Set entry in roughly 32 bytes (measured: 2M integer entries against
-// a 62.8 MB heap delta), where a Uint8Array bitmap costs one byte per addressable
-// slot however short the list is. Below this ratio the bitmap allocates less.
+// A V8 Set entry costs about 21 bytes retained and about 40 bytes at the
+// transient rehash peak -- 2M integer entries on the pinned runtime (node
+// v26.7.0) measure ~42 MB retained after a forced gc and ~80 MB at the peak
+// before one -- where a Uint8Array bitmap costs one byte per addressable slot
+// however short the list is. Below this ratio the bitmap allocates less. The
+// constant sits between the retained and the peak cost, so the comparison stays
+// conservative whichever of the two binds, and an error in either direction
+// moves the allocation by a constant factor rather than by the partner's bound.
 const SET_ENTRY_BYTES = 32;
 
 // Duplicate detection over `[0, exclusiveBound)`, backed by whichever of the two
