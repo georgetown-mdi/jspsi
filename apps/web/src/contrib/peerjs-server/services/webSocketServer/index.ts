@@ -243,12 +243,31 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
   }
 
   private _configureWS(socket: WebSocket, client: IClient): void {
+    // A client holds exactly one socket, so attaching this one detaches whatever
+    // was there. Every in-application close path -- the liveness reaper, the
+    // `close` handler installed below -- acts on `client.getSocket()`, which
+    // makes the attach the one place that can retire the socket it replaces, and
+    // holds the realm slot this client occupies to one socket however many
+    // attaches have passed through it.
+    const detachedSocket = client.getSocket();
+
     client.setSocket(socket);
     // Each newly attached socket starts an unconfirmed session: its first inbound
     // frame re-confirms liveness. This matters on the reconnect path, where
     // `client` is reused and would otherwise carry a prior session's confirmed
     // state -- skipping the short unconfirmed window -- into the new socket.
     client.resetLiveness();
+
+    // Terminate rather than close: `close()` sends a close frame and waits for
+    // the peer's reply before the socket is released, so a peer that never
+    // answers holds it until `ws` gives up on its own close timer -- 30 seconds
+    // of retained socket per detach. The detached socket is being replaced by the
+    // same peer's newer one, so there is nothing to negotiate. Ordered after
+    // setSocket so the detached socket's own `close` handler sees a client that
+    // has moved on and leaves the registration alone.
+    if (detachedSocket && detachedSocket !== socket) {
+      detachedSocket.terminate();
+    }
 
     // Cleanup after a socket closes.
     socket.on("close", () => {
