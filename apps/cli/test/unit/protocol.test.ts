@@ -3936,6 +3936,67 @@ test("a host-key divergence under --event-stream emits a warning event and still
   expect(mockState.warnings).toContain(divergence);
 });
 
+test("a failed onAuthenticated hook under --event-stream emits a warning event before the success terminal event", async () => {
+  // The run completes and writes its result, so the terminal event is a success:
+  // a supervisor that discards stderr would read the whole stream as a clean
+  // provisioning while the configuration never reached disk. The warning event is
+  // what tells it the setup is half provisioned, and it must arrive before the
+  // terminal event like every other non-terminal line.
+  const keyFileA = path.join(tmpDir, "hook-event-a.key");
+  const keyFileB = path.join(tmpDir, "hook-event-b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  mockFd3Open();
+  try {
+    // Party A runs flag-on and carries the throwing hook; party B flag-off and
+    // hookless, so every captured fd-3 line is A's.
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        () => {
+          throw new Error("simulated config write failure");
+        },
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  // The hook runs at the moment of acceptance, before the exchange proper, so
+  // its warning precedes even the stage list.
+  const lines = takeFd3Lines();
+  expect(lines.map((l) => l.type)).toEqual([
+    "warning",
+    "stages",
+    "metrics",
+    "result",
+  ]);
+  expect(String(lines[0].message)).toContain("did not complete");
+  // The cause stays on the human log, which the warning event deliberately does
+  // not repeat (its own escape pass would double-escape rendered error text).
+  expect(String(lines[0].message)).not.toContain("simulated config write");
+  expect(
+    mockState.errors.some((m) => m.includes("simulated config write failure")),
+  ).toBe(true);
+});
+
 // --- Stage timing and operational counters -------------------------------------
 
 test("a successful run under --event-stream reports stage timing and counters", async () => {

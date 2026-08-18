@@ -18,6 +18,18 @@ import {
 } from "@psilink/core";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 
+// Mock only runOnlineBootstrap, so the online-handler wiring can be asserted
+// without opening a connection or running a real exchange; every other
+// onlineBootstrap export (connectionFromEndpoint, logOnlineBootstrapOutcome, and
+// the buildDataSpec/prepareForOnlineExchange chain validateInvite drives) is the
+// genuine implementation.
+vi.mock("../../src/onlineBootstrap", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../src/onlineBootstrap")
+  >("../../src/onlineBootstrap");
+  return { ...actual, runOnlineBootstrap: vi.fn() };
+});
+
 import {
   handler as inviteHandler,
   offlineAbandonNotice,
@@ -27,7 +39,10 @@ import {
 } from "../../src/commands/invite";
 import { saveConfig } from "../../src/config";
 import { MAX_TIMEOUT_SECONDS } from "../../src/util/cli";
-import { connectionFromEndpoint } from "../../src/onlineBootstrap";
+import {
+  connectionFromEndpoint,
+  runOnlineBootstrap,
+} from "../../src/onlineBootstrap";
 import { captureStdio } from "../loggingTestSupport";
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 
@@ -1989,5 +2004,100 @@ test("handler: the invitation reaches stdout and never a diagnostic line", async
     logSpy.mockRestore();
     exit.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- handler: a failed config write is reported in the exit status -----------
+
+test("handler: online invite whose config write failed exits 69 and says so", async () => {
+  // The unattended half of the outcome: a wrapper gating on exit status must not
+  // read a rotated key with no configuration as a completed setup, so the
+  // handler's own process.exitCode is asserted here rather than only
+  // logOnlineBootstrapOutcome's return value. runOnlineBootstrap is mocked to
+  // report the swallowed write failure (its own tests cover raising it) so no
+  // connection is opened; --log-level error is the level the summary is written
+  // at, and the level the underlying error it points back to is shown at.
+  const { input, options } = onlineFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockResolvedValue({
+    configWriteError: new Error("permission denied"),
+  });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  const previousExitCode = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: ["sftp://host/drop", input],
+      "config-file": options.configFile,
+      "key-file": options.keyFile,
+      "log-level": "error",
+      record: false,
+    } as unknown as Arguments);
+    // Read before the finally block restores the exit code and the stdio spies.
+    const exitCode = process.exitCode;
+    const stderr = stdio.stderrWrites.join("");
+    expect(exit).not.toHaveBeenCalled();
+    expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
+    expect(exitCode).toBe(69);
+    // The operator is told which half landed, at error level: the key is saved,
+    // the config is not.
+    expect(stderr).toContain("[ERROR] [invite] ");
+    expect(stderr).toContain(`could not be written to ${options.configFile}`);
+    expect(stderr).toContain(`rotated key was saved to ${options.keyFile}`);
+  } finally {
+    process.exitCode = previousExitCode;
+    stdio.restore();
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
+  }
+});
+
+test("handler: a clean config write leaves the exchange's own exit 69 in place", async () => {
+  // The exchange completed but could not write an audit artifact, so runProtocol
+  // left 69 behind; the config write that followed then succeeded. The bootstrap
+  // outcome only raises the exit code, so the run an unattended supervisor sees
+  // still reports the lost record rather than a clean 0. runOnlineBootstrap
+  // stands in for that exchange, setting the exit code the way runProtocol does
+  // and reporting a written config.
+  const { input, options } = onlineFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockImplementation(async () => {
+    process.exitCode = 69;
+    return { configWriteError: undefined };
+  });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  const previousExitCode = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: ["sftp://host/drop", input],
+      "config-file": options.configFile,
+      "key-file": options.keyFile,
+      "log-level": "info",
+      record: true,
+    } as unknown as Arguments);
+    // Read before the finally block restores the exit code and the stdio spies.
+    const exitCode = process.exitCode;
+    const stderr = stdio.stderrWrites.join("");
+    expect(exit).not.toHaveBeenCalled();
+    expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
+    expect(exitCode).toBe(69);
+    // The setup summary is still reported; only the clean exit code is withheld.
+    expect(stderr).toContain(`saved config to ${options.configFile}`);
+  } finally {
+    process.exitCode = previousExitCode;
+    stdio.restore();
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
   }
 });

@@ -6,6 +6,7 @@ import {
   MAX_ERROR_CAUSE_DEPTH,
   MAX_NAME_LENGTH,
   sanitizeErrorForDisplay,
+  UsageError,
 } from "@psilink/core";
 import type { getLogger, LinkageTerms } from "@psilink/core";
 
@@ -55,42 +56,59 @@ function dobTerms(
   };
 }
 
-test("warns by name when a linkage key's parse_date drops every record", () => {
-  const { log, warns } = makeLogger();
-  // The column is present, so the column verdict passes (no block, no
-  // unsatisfied-field warn); the only warning is the dead-key one.
-  expect(() =>
-    checkLinkageSatisfiability(
-      ["dob"],
-      dobTerms([{ function: "parse_date", params: { inputFormat: "MM/DD" } }]),
-      log,
-      messaging,
-    ),
-  ).not.toThrow();
-  expect(warns).toHaveLength(1);
-  expect(warns[0]).toContain("can never match");
-  expect(warns[0]).toContain("(DOB)");
-  expect(warns[0]).toContain("invitation");
-});
+function refusalRenderedForDisplay(
+  columns: string[],
+  terms: LinkageTerms,
+  log: ReturnType<typeof getLogger>,
+): string {
+  let thrown: unknown;
+  try {
+    checkLinkageSatisfiability(columns, terms, log, messaging);
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  // The refusal composes its tokens RAW, so the escape it relies on is the one
+  // the CLI's error boundary applies (`sanitizeErrorForDisplay` in `runOrExit`
+  // and `exitWithError`). Reading `.message` would measure a different string
+  // than the operator sees; render it the way the boundary does.
+  return sanitizeErrorForDisplay(thrown);
+}
 
-test("does not warn for a complete parse_date input format", () => {
+// The rendered refusal split into the cause links the operator reads, in order.
+function refusalLinks(
+  columns: string[],
+  terms: LinkageTerms,
+  log: ReturnType<typeof getLogger>,
+): string[] {
+  return refusalRenderedForDisplay(columns, terms, log).split("\ncaused by: ");
+}
+
+test("refuses by name when the only linkage key's parse_date drops every record", () => {
   const { log, warns } = makeLogger();
-  checkLinkageSatisfiability(
+  // The column is present, so the column verdict passes -- yet the one key it
+  // satisfies is dead, so the run could emit no key string and would write a
+  // guaranteed-empty result at exit 0. It is refused instead, naming the key on a
+  // link of its own behind the terms-side remedy.
+  const links = refusalLinks(
     ["dob"],
-    dobTerms([
-      { function: "parse_date", params: { inputFormat: "MM/DD/YYYY" } },
-    ]),
+    dobTerms([{ function: "parse_date", params: { inputFormat: "MM/DD" } }]),
     log,
-    messaging,
   );
+  expect(links[0]).toContain(
+    "none of the invitation's linkage keys can ever match",
+  );
+  expect(links[1]).toBe(
+    `Correct the cleaning steps those keys declare, ${messaging.blockRemedy}`,
+  );
+  expect(links).toContain("linkage key that drops every record: DOB");
   expect(warns).toEqual([]);
 });
 
-test("a dead key and a column-unsatisfiable key both warn (independent signals)", () => {
+test("a dead key beside a live one warns and proceeds", () => {
   const { log, warns } = makeLogger();
-  // DOB is shape-satisfiable (column present) but dead; SSN is shape-unsatisfiable
-  // (no ssn column). The dead-key warning and the partial-coverage warning are
-  // distinct signals and both fire; the run is not blocked (one key is countable).
+  // DOB is dead; SSN is satisfiable and live, so the exchange can still match on
+  // it. That is the partial case: warn by name, do not refuse.
   const terms: LinkageTerms = {
     ...dobTerms(),
     linkageFields: [
@@ -113,10 +131,212 @@ test("a dead key and a column-unsatisfiable key both warn (independent signals)"
     ],
   };
   expect(() =>
-    checkLinkageSatisfiability(["dob"], terms, log, messaging),
+    checkLinkageSatisfiability(["dob", "ssn"], terms, log, messaging),
   ).not.toThrow();
-  expect(warns.some((w) => w.includes("can never match"))).toBe(true);
-  expect(warns.some((w) => w.includes("cannot satisfy all"))).toBe(true);
+  expect(warns).toHaveLength(1);
+  expect(warns[0]).toContain("can never match");
+  expect(warns[0]).toContain("(DOB)");
+  expect(warns[0]).toContain("invitation");
+});
+
+test("does not warn for a complete parse_date input format", () => {
+  const { log, warns } = makeLogger();
+  checkLinkageSatisfiability(
+    ["dob"],
+    dobTerms([
+      { function: "parse_date", params: { inputFormat: "MM/DD/YYYY" } },
+    ]),
+    log,
+    messaging,
+  );
+  expect(warns).toEqual([]);
+});
+
+test("a dead key beside a column-unsatisfiable one is refused, naming both causes", () => {
+  const { log, warns } = makeLogger();
+  // DOB is shape-satisfiable (column present) but dead; SSN is shape-unsatisfiable
+  // (no ssn column). Every key is out, each for its own reason, so the refusal
+  // states both rather than warning twice and running to an empty result.
+  const terms: LinkageTerms = {
+    ...dobTerms(),
+    linkageFields: [
+      { name: "dob", type: "date_of_birth" },
+      { name: "ssn", type: "ssn" },
+    ],
+    linkageKeys: [
+      {
+        name: "DOB",
+        elements: [
+          {
+            field: "dob",
+            transform: [
+              { function: "parse_date", params: { inputFormat: "MM/DD" } },
+            ],
+          },
+        ],
+      },
+      { name: "SSN", elements: [{ field: "ssn" }] },
+    ],
+  };
+  const links = refusalLinks(["dob"], terms, log);
+  expect(links[0]).toContain("the CSV satisfies no other key");
+  expect(links[1]).toBe(
+    `Correct the cleaning steps those keys declare, ${messaging.blockRemedy}`,
+  );
+  expect(links).toContain("linkage key that drops every record: DOB");
+  expect(links).toContain("unsatisfied field: ssn (ssn)");
+  expect(warns).toEqual([]);
+});
+
+// linkageKeys is bounded only at MAX_LINKAGE_ENTRIES, so the dead-key
+// enumeration can ask for more cause links than the renderer walks, exactly as
+// the column block's field enumeration can. The remedy must still arrive whole,
+// and the keys past the depth bound must be counted rather than dropped into a
+// list that reads as complete.
+test("the dead-key refusal reports the keys it could not name, with the total", () => {
+  const { log } = makeLogger();
+  const total = 20;
+  const terms: LinkageTerms = {
+    ...dobTerms(),
+    linkageKeys: Array.from({ length: total }, (_, index) => ({
+      name: `KEY_${index}`,
+      elements: [
+        {
+          field: "dob",
+          transform: [
+            { function: "parse_date", params: { inputFormat: "MM/DD" } },
+          ],
+        },
+      ],
+    })),
+  };
+  const links = refusalLinks(["dob"], terms, log);
+
+  expect(links.length).toBe(MAX_ERROR_CAUSE_DEPTH);
+  expect(links[0]).toContain(
+    "none of the invitation's linkage keys can ever match",
+  );
+  expect(links[1]).toBe(
+    `Correct the cleaning steps those keys declare, ${messaging.blockRemedy}`,
+  );
+
+  const named = links.slice(2, -1);
+  expect(named.length).toBeGreaterThan(0);
+  named.forEach((link, index) =>
+    expect(link).toBe(`linkage key that drops every record: KEY_${index}`),
+  );
+  expect(links[links.length - 1]).toBe(
+    `and ${total - named.length} more details of the keys that cannot match ` +
+      `(${total} in total)`,
+  );
+
+  const rendered = links.join("\n");
+  for (let index = named.length; index < total; index++)
+    expect(rendered).not.toContain(`record: KEY_${index}`);
+  // The composition fits the depth bound, so the renderer's generic marker --
+  // which cannot report a count -- never has to stand in for it.
+  expect(rendered).not.toContain(CAUSE_DEPTH_ELISION_MARKER);
+});
+
+// --- escaping ----------------------------------------------------------------
+
+// A partner-authored name carrying the two bytes the escape exists for: a literal
+// backslash, which every sanitizing pass doubles (so a second pass is visible in
+// the output), and an ESC, which opens an ANSI sequence on a terminal. Key names
+// come from the invitation on the accept path and field names from its terms, so
+// both are partner-controlled.
+const ESC = "\u001b";
+const HOSTILE_KEY_NAME = `DOB\\evil${ESC}[31m`;
+const HOSTILE_KEY_ESCAPED_ONCE = String.raw`DOB\\evil\x1b[31m`;
+const HOSTILE_KEY_ESCAPED_TWICE = String.raw`DOB\\\\evil\\x1b[31m`;
+const HOSTILE_FIELD_NAME = `ssn\\evil${ESC}[31m`;
+const HOSTILE_FIELD_ESCAPED_ONCE = String.raw`ssn\\evil\x1b[31m`;
+const HOSTILE_FIELD_ESCAPED_TWICE = String.raw`ssn\\\\evil\\x1b[31m`;
+
+const deadDobElement = {
+  field: "dob",
+  transform: [{ function: "parse_date", params: { inputFormat: "MM/DD" } }],
+};
+
+// The only key is dead and hostile-named: the all-keys-dead refusal, naming it.
+function hostileDeadKeyTerms(): LinkageTerms {
+  return {
+    ...dobTerms(),
+    linkageKeys: [{ name: HOSTILE_KEY_NAME, elements: [deadDobElement] }],
+  };
+}
+
+// The only key needs a hostile-named field no column satisfies: the column
+// refusal, whose detail names the field.
+function hostileUnsatisfiedFieldTerms(): LinkageTerms {
+  return {
+    ...dobTerms(),
+    linkageFields: [{ name: HOSTILE_FIELD_NAME, type: "ssn" }],
+    linkageKeys: [{ name: "SSN", elements: [{ field: HOSTILE_FIELD_NAME }] }],
+  };
+}
+
+// A hostile-named dead key, a live key, and a key needing a hostile-named field
+// the CSV lacks: one call that reaches both warn routes, neither refused.
+function hostileWarnedTerms(): LinkageTerms {
+  return {
+    ...dobTerms(),
+    linkageFields: [
+      { name: "dob", type: "date_of_birth" },
+      { name: "ssn", type: "ssn" },
+      { name: HOSTILE_FIELD_NAME, type: "email_address" },
+    ],
+    linkageKeys: [
+      { name: HOSTILE_KEY_NAME, elements: [deadDobElement] },
+      { name: "SSN", elements: [{ field: "ssn" }] },
+      { name: "EMAIL", elements: [{ field: HOSTILE_FIELD_NAME }] },
+    ],
+  };
+}
+
+test("a refusal escapes a hostile key or field name exactly once end to end", () => {
+  const { log, warns } = makeLogger();
+
+  const deadKeyRefusal = refusalRenderedForDisplay(
+    ["dob"],
+    hostileDeadKeyTerms(),
+    log,
+  );
+  expect(deadKeyRefusal).toContain(HOSTILE_KEY_ESCAPED_ONCE);
+  expect(deadKeyRefusal).not.toContain(HOSTILE_KEY_ESCAPED_TWICE);
+  expect(deadKeyRefusal).not.toContain(ESC);
+
+  const columnRefusal = refusalRenderedForDisplay(
+    ["dob"],
+    hostileUnsatisfiedFieldTerms(),
+    log,
+  );
+  expect(columnRefusal).toContain(HOSTILE_FIELD_ESCAPED_ONCE);
+  expect(columnRefusal).not.toContain(HOSTILE_FIELD_ESCAPED_TWICE);
+  expect(columnRefusal).not.toContain(ESC);
+
+  expect(warns).toEqual([]);
+});
+
+test("a warning escapes a hostile key or field name exactly once end to end", () => {
+  const { log, warns } = makeLogger();
+  // The warn call site is the sink: nothing escapes downstream of it, so the
+  // escaped form has to be what the sink already received.
+  checkLinkageSatisfiability(
+    ["dob", "ssn"],
+    hostileWarnedTerms(),
+    log,
+    messaging,
+  );
+
+  expect(warns).toHaveLength(2);
+  const [deadKeyWarning, unsatisfiedFieldWarning] = warns;
+  expect(deadKeyWarning).toContain(HOSTILE_KEY_ESCAPED_ONCE);
+  expect(deadKeyWarning).not.toContain(HOSTILE_KEY_ESCAPED_TWICE);
+  expect(deadKeyWarning).not.toContain(ESC);
+  expect(unsatisfiedFieldWarning).toContain(HOSTILE_FIELD_ESCAPED_ONCE);
+  expect(unsatisfiedFieldWarning).not.toContain(HOSTILE_FIELD_ESCAPED_TWICE);
+  expect(unsatisfiedFieldWarning).not.toContain(ESC);
 });
 
 // --- warnColumnsTheInvitationWillNotAccept ------------------------------------

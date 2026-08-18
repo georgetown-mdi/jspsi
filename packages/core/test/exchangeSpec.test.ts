@@ -272,6 +272,34 @@ test("rejects a token_max_age_days above the maximum", () => {
   ).toBe(false);
 });
 
+// --- Unrecognized top-level keys (strict) ------------------------------------
+
+test("rejects a misspelled top-level enforcement key rather than dropping it", () => {
+  // The three machine-managed enforcement records are optional and their absence
+  // is a valid state, so a stripped typo would silently disable the control it
+  // names: an unconsented outbound payload, an unenforced receive lock-in, or an
+  // unchecked disclosure commitment, all with no signal to the operator.
+  for (const misspelled of [
+    "outbound_payload_consnet",
+    "disclosed_payload_column",
+    "expected_payload_colums",
+  ]) {
+    const result = safeParseExchangeSpec({ ...minimalSpec, [misspelled]: [] });
+    expect(result.success).toBe(false);
+  }
+});
+
+test("rejects an unrecognized top-level key from disk in either casing", () => {
+  // camelizeKeys runs before the schema, so a snake_case typo on disk and its
+  // camelCase form are the same rejection; neither reaches the spec as a
+  // silently dropped key.
+  for (const key of ["retention_dispositon", "retentionDispositon"])
+    expect(
+      safeParseExchangeSpec({ ...minimalSpec, [key]: "shredded at 90 days" })
+        .success,
+    ).toBe(false);
+});
+
 test("rejects an unrecognized key in the authentication block (strict)", () => {
   // The authentication block is strictObject: a misspelled policy key is rejected
   // at parse time rather than silently dropped, so a typo cannot disable the

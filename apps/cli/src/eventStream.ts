@@ -34,8 +34,9 @@ export const EVENT_STREAM_VERSION = 1;
  * these strings -- none is partner-derived -- so a consumer can switch on the
  * discriminant safely. `stages` is the one-shot stage-list event; `stage` marks
  * each stage transition; `stageEnd` reports a completed stage's wall-clock
- * duration; `warning` carries a non-fatal warning (a terms-exchange warning or
- * the cross-party host-key divergence notice); `metrics` is the one-shot
+ * duration; `warning` carries a non-fatal warning (a terms-exchange warning, the
+ * cross-party host-key divergence notice, a missing audit artifact, or a
+ * post-authentication persistence failure); `metrics` is the one-shot
  * operational-counter summary emitted just before the terminal event; `result`
  * and `error` are the two terminal events (exactly one fires per run).
  */
@@ -112,8 +113,10 @@ export interface StageEndEvent extends EventBase {
 }
 
 /**
- * A non-fatal warning: a terms-exchange warning or the cross-party host-key
- * divergence notice.
+ * A non-fatal warning: a terms-exchange warning, the cross-party host-key
+ * divergence notice, an audit artifact the run was asked for and could not
+ * produce, or the post-authentication persistence failure that leaves an
+ * otherwise complete online invite/accept without its configuration.
  */
 export interface WarningEvent extends EventBase {
   type: "warning";
@@ -266,7 +269,8 @@ export function buildWarningEvent(message: string): WarningEvent {
     // fragment where they compose, so the fail-closed dangling rule has nothing
     // left to consume here; the audit-artifact notices carry only an
     // operator-configured path and compose raw, taking their whole escape from
-    // this one pass. The cap is the shared warning-composition budget, not the
+    // this one pass, and the persistence-failure notice composes first-party
+    // prose alone. The cap is the shared warning-composition budget, not the
     // per-value default, so a consumer that re-escapes this field at the same
     // budget delivers the whole composition rather than re-capping it.
     message: redactAndSanitizeForDisplay(message, {

@@ -28,25 +28,50 @@ export interface LinkagePreflightMessaging {
 }
 
 /**
- * How many cause links the block's unsatisfied-field enumeration may occupy. The
- * display boundary walks at most {@link MAX_ERROR_CAUSE_DEPTH} links of a
- * rendered chain, and this refusal spends two of them before any name: the
- * summary on the error's own message, and the remedy chained ahead of the names.
- * A name beyond this budget would be walked past and never rendered, so the last
- * of these links reports the overflow instead of naming one more field.
+ * How many cause links a block's name enumeration may occupy. The display
+ * boundary walks at most {@link MAX_ERROR_CAUSE_DEPTH} links of a rendered
+ * chain, and each block {@link checkLinkageSatisfiability} raises spends two of
+ * them before any name: the summary on the error's own message, and the remedy
+ * chained ahead of the names. A name beyond this budget would be walked past and
+ * never rendered, so the last of these links reports the overflow instead of
+ * naming one more.
  */
-const UNSATISFIED_FIELD_LINK_BUDGET = MAX_ERROR_CAUSE_DEPTH - 2;
+const REFUSAL_DETAIL_LINK_BUDGET = MAX_ERROR_CAUSE_DEPTH - 2;
+
+/**
+ * Fit an ordered enumeration of labelled detail fragments to
+ * {@link REFUSAL_DETAIL_LINK_BUDGET}, replacing the tail the renderer would walk
+ * past with one link reporting how many entries stand behind it.
+ *
+ * The enumerations are terms content and are bounded only at
+ * `MAX_LINKAGE_ENTRIES`, so one can ask for more links than the renderer walks.
+ * What overflows is counted here rather than left to the renderer's generic
+ * elision marker: this is where the count is known, and the count is what tells
+ * the operator how much of the mismatch they are not reading. `overflowNoun`
+ * names what those unread entries are.
+ */
+function fitDetailLinks(details: string[], overflowNoun: string): string[] {
+  if (details.length <= REFUSAL_DETAIL_LINK_BUDGET) return details;
+  const shown = REFUSAL_DETAIL_LINK_BUDGET - 1;
+  return [
+    ...details.slice(0, shown),
+    `and ${details.length - shown} more ${overflowNoun} ` +
+      `(${details.length} in total)`,
+  ];
+}
 
 /**
  * Pre-flight a CSV's `columns` against the linkage `terms` it will be exchanged
  * under, enforcing the policy both real-exchange entry points share: block
- * (throw {@link UsageError}, exit 64) when no linkage key is satisfiable -- the
- * exchange would emit no key strings and produce a result byte-indistinguishable
- * from a legitimately empty intersection -- and warn-and-proceed when only some
- * keys are unsatisfiable. The detection lives in `@psilink/core`'s
- * {@link assessLinkageSatisfiability}; this wrapper owns only the message wording
- * and partner-sourced field sanitization, kept in one copy so the accept and
- * exchange paths cannot drift apart on the threshold or the escaping.
+ * (throw {@link UsageError}, exit 64) when no linkage key can produce a key
+ * string -- whether because no key is satisfiable from the columns or because
+ * every satisfiable one declares cleaning that drops all records -- since the
+ * exchange would then produce a result byte-indistinguishable from a legitimately
+ * empty intersection, and warn-and-proceed when only some keys are lost that way.
+ * The detection lives in `@psilink/core`'s {@link assessLinkageSatisfiability};
+ * this wrapper owns only the message wording and partner-sourced field
+ * sanitization, kept in one copy so the accept and exchange paths cannot drift
+ * apart on the threshold or the escaping.
  *
  * @param standardization The committed config's explicit standardization, when
  *   any: an explicit column remap satisfies a field whose semantic type is
@@ -70,20 +95,65 @@ export function checkLinkageSatisfiability(
   const { unsatisfied, satisfiableKeyCount, deadKeys } =
     assessLinkageSatisfiability(columns, terms, standardization, metadata);
 
-  // Warn about keys whose columns are all present but whose declared cleaning can
-  // never produce a value (a self-defeating parse_date input format): they pass
-  // the column check below yet would contribute nothing, running to a silent empty
-  // result. Surfaced separately from the column block/warn -- the remedy is to fix
-  // the terms, not the CSV -- and before the all-satisfiable early return, since a
-  // dead key still counts as shape-satisfiable. Key names are partner-sourced on
-  // the accept path, so sanitize each like the unsatisfied-field names below.
+  // Both refusals below partition by WHO CHOSE THE BYTES rather than composing
+  // one sentence: the names are terms content -- partner-authored on the accept
+  // path -- and the display boundary caps each cause link independently, so names
+  // sharing the operative sentence's link can spend its budget and delete the step
+  // the operator has to act on. Each name gets a labelled link of its own, raw,
+  // since the boundary that renders the chain is the one altitude that escapes it.
+  // The remedy is chained ahead of the names for the reason the transport refusals
+  // chain theirs first: the renderer's depth bound reaches it before any detail.
+  // With no DECLARED field unproducible -- the keys are unsatisfiable only by
+  // referencing undeclared fields -- there is no field link at all, leaving the
+  // summary and its remedy to stand alone.
+  const fieldDetails = unsatisfied.map(
+    (field) => `unsatisfied field: ${field.name} (${field.type})`,
+  );
+
+  // Keys whose columns are all present but whose declared cleaning can never
+  // produce a value (a self-defeating parse_date input format): they pass the
+  // column check below yet would contribute nothing. Surfaced separately from the
+  // column block/warn -- their remedy is to fix the terms, not the CSV -- and
+  // before the all-satisfiable early return, since a dead key still counts as
+  // shape-satisfiable.
   if (deadKeys.length > 0) {
-    const names = deadKeys
-      .map((k) => redactAndSanitizeForDisplay(k.name))
+    // deadKeys is a subset of the shape-satisfiable keys, so an equal count means
+    // every key that passed the column check is dead: the run can emit no key
+    // string at all, which is the guaranteed-empty result the column block below
+    // exists to prevent, reached by a different route. Refused rather than warned
+    // for that reason. Any remaining key is out for the column reason, so the
+    // chain carries that half of the cause too.
+    if (satisfiableKeyCount === deadKeys.length) {
+      const noOtherKeySatisfied = deadKeys.length < terms.linkageKeys.length;
+      throw new UsageError(
+        `none of the ${messaging.source}'s linkage keys can ever match: a ` +
+          "cleaning step drops every record for every key the CSV satisfies" +
+          (noOtherKeySatisfied ? ", and the CSV satisfies no other key" : "") +
+          "; running would produce a guaranteed empty result.",
+        {
+          cause: chainDetailCauses([
+            `Correct the cleaning steps those keys declare, ${messaging.blockRemedy}`,
+            ...fitDetailLinks(
+              [
+                ...deadKeys.map(
+                  (key) => `linkage key that drops every record: ${key.name}`,
+                ),
+                ...(noOtherKeySatisfied ? fieldDetails : []),
+              ],
+              "details of the keys that cannot match",
+            ),
+          ]),
+        },
+      );
+    }
+    // The warn route escapes at its own call site, because a log.warn IS the
+    // sink: nothing downstream of it escapes again.
+    const deadNames = deadKeys
+      .map((key) => redactAndSanitizeForDisplay(key.name))
       .join(", ");
     log.warn(
       `${deadKeys.length} of the ${messaging.source}'s linkage keys can never ` +
-        `match -- a cleaning step drops every record (${names}); those keys ` +
+        `match -- a cleaning step drops every record (${deadNames}); those keys ` +
         "will contribute nothing to this exchange.",
     );
   }
@@ -94,55 +164,23 @@ export function checkLinkageSatisfiability(
   // collapse. satisfiableKeyCount accounts for both.
   if (satisfiableKeyCount === terms.linkageKeys.length) return;
 
-  // The block partitions by WHO CHOSE THE BYTES rather than composing one
-  // sentence: the field names are terms content -- partner-authored on the accept
-  // path -- and the display boundary caps each cause link independently, so names
-  // sharing the operative sentence's link can spend its budget and delete the step
-  // the operator has to act on. Each name gets a labelled link of its own, raw,
-  // since the boundary that renders the chain is the one altitude that escapes it.
-  // The remedy is chained ahead of the names for the reason the transport refusals
-  // chain theirs first: the renderer's depth bound reaches it before any detail.
-  // With no DECLARED field unproducible -- the keys are unsatisfiable only by
-  // referencing undeclared fields -- there is no name link at all, and the summary
-  // and its remedy stand alone.
-  //
-  // The number of names is the terms' to choose and is bounded only at
-  // MAX_LINKAGE_ENTRIES, so the enumeration can ask for more links than the
-  // renderer walks. What overflows is stated here rather than left to the
-  // renderer's generic elision marker: this is where the count is known, and the
-  // count is what tells the operator how much of the mismatch they are not
-  // reading.
-  if (satisfiableKeyCount === 0) {
-    const fieldDetails = unsatisfied.map(
-      (field) => `unsatisfied field: ${field.name} (${field.type})`,
-    );
-    const shown =
-      fieldDetails.length > UNSATISFIED_FIELD_LINK_BUDGET
-        ? UNSATISFIED_FIELD_LINK_BUDGET - 1
-        : fieldDetails.length;
+  if (satisfiableKeyCount === 0)
     throw new UsageError(
       `the CSV cannot satisfy any of the ${messaging.source}'s linkage keys; ` +
         "running would produce a silent empty result.",
       {
         cause: chainDetailCauses([
           `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
-          ...fieldDetails.slice(0, shown),
-          ...(shown < fieldDetails.length
-            ? [
-                `and ${fieldDetails.length - shown} more unsatisfied fields ` +
-                  `(${fieldDetails.length} in total)`,
-              ]
-            : []),
+          ...fitDetailLinks(fieldDetails, "unsatisfied fields"),
         ]),
       },
     );
-  }
 
-  // The warn route escapes at its own call site, because a log.warn IS the sink.
-  // `type` is a schema-validated enum literal but takes the same path as `name`,
-  // so no later edit leaves a raw token beside an escaped one. The enumeration is
-  // omitted on the same no-declared-field condition as the block above, leaving
-  // the warning itself as the signal.
+  // This warn route escapes at its own call site for the same reason as the
+  // dead-key one above. `type` is a schema-validated enum literal but takes the
+  // same path as `name`, so no later edit leaves a raw token beside an escaped
+  // one. The enumeration is omitted on the same no-declared-field condition as
+  // the blocks above, leaving the warning itself as the signal.
   const detail =
     unsatisfied.length > 0
       ? " (unsatisfied fields: " +

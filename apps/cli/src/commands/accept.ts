@@ -787,12 +787,19 @@ export async function handler(argv: Arguments): Promise<void> {
           // on the fresh path, where the written config's terms are the mirror's.
           outboundPayloadConsent: reuseOutboundPayloadConsent,
         });
-        logOnlineBootstrapOutcome(log, {
+        const bootstrapExitCode = logOnlineBootstrapOutcome(log, {
           configFile: options.configFile,
           keyFile: options.keyFile,
           configWriteError,
           reuseExistingConfig: ready.reuseExistingConfig,
         });
+        // The exchange this bootstrap ran may already have left a failure code
+        // behind (an audit artifact it could not produce), so the outcome of the
+        // config write only ever raises the exit code: assigning it
+        // unconditionally would report a clean 0 for a run that lost its record.
+        if (process.exitCode === undefined || process.exitCode === 0) {
+          process.exitCode = bootstrapExitCode;
+        }
         return;
       }
 
