@@ -52,12 +52,12 @@
     "@rollup/plugin-commonjs": "^29.0.3",
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@rollup/plugin-typescript": "^12.1.4",
-    "@types/luxon": "^3.7.3",
+    "@types/luxon": "^3.7.4",
     "@types/papaparse": "^5.3.16",
     "peerjs-js-binarypack": "2.1.0",
     "rimraf": "^6.0.1",
     "rollup": "^4.62.4",
-    "rollup-plugin-dts": "^6.2.3",
+    "rollup-plugin-dts": "^6.5.1",
     "tslib": "^2.8.1",
     "vitest": "^4.1.9"
   }
