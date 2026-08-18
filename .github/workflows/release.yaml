@@ -86,7 +86,11 @@ jobs:
       # whose image carries a fixable HIGH or CRITICAL OS-layer vulnerability
       # never reaches Docker Hub at all, rather than being pushed under `latest`
       # and then withheld from signing. Nothing in this job has authenticated to
-      # the registry yet when it runs.
+      # the registry yet when it runs. The publish sequence below holds the same
+      # property once the gate is past: each image is signed and attested
+      # immediately after its own push, so the window in which a published image
+      # is unsigned is that image's own signing step and nothing else -- never
+      # another artifact's build.
       #
       # The scan needs an image to read, so this builds one single-arch and
       # loads it -- the same shape image_smoke.yaml uses for its pre-merge scan.
@@ -118,9 +122,17 @@ jobs:
       # so one unscoped cache would have them evicting each other, and the scope
       # matches image_smoke.yaml's variant leg so a release reuses what the pull
       # request already built.
+      #
+      # Keyed to the default build having run rather than to `!cancelled()`
+      # alone: a failure in an earlier gate -- the tarball integrity check, the
+      # version check, the buildx setup this step needs a builder from -- leaves
+      # default_build skipped, and this build skips with it instead of burning a
+      # two-architecture build and reporting a second, spurious failure beside
+      # the real one. A default build that ran and failed is the case the
+      # sibling should survive, so both of its outcomes let this one through.
       - name: Build the FIPS variant image for scanning (amd64, load into local Docker)
         id: fips_build
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && (steps.default_build.outcome == 'success' || steps.default_build.outcome == 'failure') }}
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -243,12 +255,25 @@ jobs:
             echo "PSILINK_FIPS_TAGS"
           } >>"$GITHUB_OUTPUT"
 
+      # Ahead of the first push rather than after the last one: every step after
+      # a failed step is skipped, so an installer that fails behind a push is a
+      # published image this job can no longer sign. Installing the tool while
+      # nothing is published yet turns that case into a release that publishes
+      # nothing at all.
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
+      # Each image is pushed, signed and attested as a unit before the next one
+      # is built, so a failure in the variant's build cannot leave the default
+      # image published -- under `latest`, which this push moves -- and unsigned,
+      # which is the state docs/RELEASES.md's verification commands report as a
+      # release that cannot be trusted.
       - name: Build and push
         id: build
         uses: docker/build-push-action@v7
@@ -260,6 +285,40 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Keyless: no key is passed, so Fulcio issues the signing certificate
+      # against this job's OIDC identity and the signature is recorded in
+      # Rekor's public transparency log. What a partner pins is therefore this
+      # workflow's identity, which is this file's path plus the pushed tag ref
+      # -- renaming this file or widening the tag filter above invalidates the
+      # verification commands docs/RELEASES.md publishes.
+      #
+      # Both published manifests are signed under that one identity, in their
+      # own steps below, so the verification command an operator runs differs
+      # only in the reference. Each is signed by digest rather than by tag, so
+      # what carries the signature is the manifest this run built rather than
+      # whatever the tag resolves to later.
+      - name: Sign the image
+        run: |
+          set -euo pipefail
+          cosign sign --yes \
+            vdorie/psi-link@${{ steps.build.outputs.digest }}
+
+      # Answers a different question from the signature above -- what the build
+      # consumed, not that this manifest is what the release published -- and is
+      # held somewhere else, so it adds to the Cosign signature rather than
+      # replacing it. Each subject is the same manifest-list digest cosign signs,
+      # and the default image's is the one the launchers job stamps, so one
+      # manifest carries both claims.
+      # The attestation is left in this repository's store rather than
+      # pushed to Docker Hub as an OCI referrer (push-to-registry defaults to
+      # false), so verifying it does not depend on what the registry can hold;
+      # docs/RELEASES.md carries the matching verification command.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: docker.io/vdorie/psi-link
+          subject-digest: ${{ steps.build.outputs.digest }}
 
       - name: Build and push the FIPS variant
         id: build_fips
@@ -277,44 +336,11 @@ jobs:
           cache-from: type=gha,scope=fips
           cache-to: type=gha,mode=max,scope=fips
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.2
-
-      # Keyless: no key is passed, so Fulcio issues the signing certificate
-      # against this job's OIDC identity and the signature is recorded in
-      # Rekor's public transparency log. What a partner pins is therefore this
-      # workflow's identity, which is this file's path plus the pushed tag ref
-      # -- renaming this file or widening the tag filter above invalidates the
-      # verification commands docs/RELEASES.md publishes.
-      #
-      # Both published manifests are signed here, under one identity, so the
-      # verification command an operator runs differs only in the reference.
-      # Each is signed by digest rather than by tag, so what carries the
-      # signature is the manifest this run built rather than whatever the tag
-      # resolves to later.
-      - name: Sign images
+      - name: Sign the FIPS variant image
         run: |
           set -euo pipefail
           cosign sign --yes \
-            vdorie/psi-link@${{ steps.build.outputs.digest }}
-          cosign sign --yes \
             vdorie/psi-link@${{ steps.build_fips.outputs.digest }}
-
-      # Answers a different question from the signatures above -- what the build
-      # consumed, not that this manifest is what the release published -- and is
-      # held somewhere else, so it adds to the Cosign signature rather than
-      # replacing it. Each subject is the same manifest-list digest cosign signs,
-      # and the default image's is the one the launchers job stamps, so one
-      # manifest carries both claims.
-      # The attestation is left in this repository's store rather than
-      # pushed to Docker Hub as an OCI referrer (push-to-registry defaults to
-      # false), so verifying it does not depend on what the registry can hold;
-      # docs/RELEASES.md carries the matching verification command.
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-name: docker.io/vdorie/psi-link
-          subject-digest: ${{ steps.build.outputs.digest }}
 
       - name: Attest the FIPS variant's build provenance
         uses: actions/attest-build-provenance@v4
