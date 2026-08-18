@@ -1,5 +1,9 @@
 import { expect, test } from "vitest";
-import { inferMetadata, UsageError } from "@psilink/core";
+import {
+  inferMetadata,
+  sanitizeErrorForDisplay,
+  UsageError,
+} from "@psilink/core";
 import type { getLogger, LinkageTerms } from "@psilink/core";
 
 import {
@@ -150,6 +154,126 @@ test("a dead key beside a column-unsatisfiable one is refused, naming both cause
   expect(message).toContain("the CSV satisfies no other key");
   expect(message).toContain("unsatisfied fields: ssn (ssn)");
   expect(warns).toEqual([]);
+});
+
+// --- escaping ----------------------------------------------------------------
+
+// A partner-authored name carrying the two bytes the escape exists for: a literal
+// backslash, which every sanitizing pass doubles (so a second pass is visible in
+// the output), and an ESC, which opens an ANSI sequence on a terminal. Key names
+// come from the invitation on the accept path and field names from its terms, so
+// both are partner-controlled.
+const ESC = "\u001b";
+const HOSTILE_KEY_NAME = `DOB\\evil${ESC}[31m`;
+const HOSTILE_KEY_ESCAPED_ONCE = String.raw`DOB\\evil\x1b[31m`;
+const HOSTILE_KEY_ESCAPED_TWICE = String.raw`DOB\\\\evil\\x1b[31m`;
+const HOSTILE_FIELD_NAME = `ssn\\evil${ESC}[31m`;
+const HOSTILE_FIELD_ESCAPED_ONCE = String.raw`ssn\\evil\x1b[31m`;
+const HOSTILE_FIELD_ESCAPED_TWICE = String.raw`ssn\\\\evil\\x1b[31m`;
+
+const deadDobElement = {
+  field: "dob",
+  transform: [{ function: "parse_date", params: { inputFormat: "MM/DD" } }],
+};
+
+// The only key is dead and hostile-named: the all-keys-dead refusal, naming it.
+function hostileDeadKeyTerms(): LinkageTerms {
+  return {
+    ...dobTerms(),
+    linkageKeys: [{ name: HOSTILE_KEY_NAME, elements: [deadDobElement] }],
+  };
+}
+
+// The only key needs a hostile-named field no column satisfies: the column
+// refusal, whose detail names the field.
+function hostileUnsatisfiedFieldTerms(): LinkageTerms {
+  return {
+    ...dobTerms(),
+    linkageFields: [{ name: HOSTILE_FIELD_NAME, type: "ssn" }],
+    linkageKeys: [{ name: "SSN", elements: [{ field: HOSTILE_FIELD_NAME }] }],
+  };
+}
+
+// A hostile-named dead key, a live key, and a key needing a hostile-named field
+// the CSV lacks: one call that reaches both warn routes, neither refused.
+function hostileWarnedTerms(): LinkageTerms {
+  return {
+    ...dobTerms(),
+    linkageFields: [
+      { name: "dob", type: "date_of_birth" },
+      { name: "ssn", type: "ssn" },
+      { name: HOSTILE_FIELD_NAME, type: "email_address" },
+    ],
+    linkageKeys: [
+      { name: HOSTILE_KEY_NAME, elements: [deadDobElement] },
+      { name: "SSN", elements: [{ field: "ssn" }] },
+      { name: "EMAIL", elements: [{ field: HOSTILE_FIELD_NAME }] },
+    ],
+  };
+}
+
+function refusalRenderedForDisplay(
+  columns: string[],
+  terms: LinkageTerms,
+  log: ReturnType<typeof getLogger>,
+): string {
+  let thrown: unknown;
+  try {
+    checkLinkageSatisfiability(columns, terms, log, messaging);
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  // The refusal composes its tokens RAW, so the escape it relies on is the one
+  // the CLI's error boundary applies (`sanitizeErrorForDisplay` in `runOrExit`
+  // and `exitWithError`). Reading `.message` would measure a different string
+  // than the operator sees; render it the way the boundary does.
+  return sanitizeErrorForDisplay(thrown);
+}
+
+test("a refusal escapes a hostile key or field name exactly once end to end", () => {
+  const { log, warns } = makeLogger();
+
+  const deadKeyRefusal = refusalRenderedForDisplay(
+    ["dob"],
+    hostileDeadKeyTerms(),
+    log,
+  );
+  expect(deadKeyRefusal).toContain(HOSTILE_KEY_ESCAPED_ONCE);
+  expect(deadKeyRefusal).not.toContain(HOSTILE_KEY_ESCAPED_TWICE);
+  expect(deadKeyRefusal).not.toContain(ESC);
+
+  const columnRefusal = refusalRenderedForDisplay(
+    ["dob"],
+    hostileUnsatisfiedFieldTerms(),
+    log,
+  );
+  expect(columnRefusal).toContain(HOSTILE_FIELD_ESCAPED_ONCE);
+  expect(columnRefusal).not.toContain(HOSTILE_FIELD_ESCAPED_TWICE);
+  expect(columnRefusal).not.toContain(ESC);
+
+  expect(warns).toEqual([]);
+});
+
+test("a warning escapes a hostile key or field name exactly once end to end", () => {
+  const { log, warns } = makeLogger();
+  // The warn call site is the sink: nothing escapes downstream of it, so the
+  // escaped form has to be what the sink already received.
+  checkLinkageSatisfiability(
+    ["dob", "ssn"],
+    hostileWarnedTerms(),
+    log,
+    messaging,
+  );
+
+  expect(warns).toHaveLength(2);
+  const [deadKeyWarning, unsatisfiedFieldWarning] = warns;
+  expect(deadKeyWarning).toContain(HOSTILE_KEY_ESCAPED_ONCE);
+  expect(deadKeyWarning).not.toContain(HOSTILE_KEY_ESCAPED_TWICE);
+  expect(deadKeyWarning).not.toContain(ESC);
+  expect(unsatisfiedFieldWarning).toContain(HOSTILE_FIELD_ESCAPED_ONCE);
+  expect(unsatisfiedFieldWarning).not.toContain(HOSTILE_FIELD_ESCAPED_TWICE);
+  expect(unsatisfiedFieldWarning).not.toContain(ESC);
 });
 
 // --- warnColumnsTheInvitationWillNotAccept ------------------------------------

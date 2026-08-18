@@ -139,7 +139,9 @@ The process exit code cannot distinguish a `security` failure from an ordinary o
 
 ## Terminal-event guarantees
 
-Exactly one terminal event -- a `result` on success, or one classified `error` on an organic failure -- is emitted per run. It is the last event on the stream. The `stages`, `stage`, `stageEnd`, `warning`, and `metrics` events that precede it are progress and summary, not outcome. The one `metrics` event is emitted immediately before the terminal event, so a supervisor reads the run's operational counters on the line just above the outcome.
+Exactly one terminal event -- a `result` when the exchange and the local output stage completed, or one classified `error` on an organic failure -- is emitted per run. It is the last event on the stream. The `stages`, `stage`, `stageEnd`, `warning`, and `metrics` events that precede it are progress and summary, not outcome. The one `metrics` event is emitted immediately before the terminal event, so a supervisor reads the run's operational counters on the line just above the outcome.
+
+A `result` says the exchange completed, which is not the same as a zero exit: an online `invite`/`accept` whose post-exchange configuration write failed emits a `warning` for that failure, then its `result`, and exits 69 (see [Exit codes](../CLI.md#exit-codes)). The pair is the signal -- the exit code alone cannot separate that run from a transport failure, and the terminal event alone cannot separate it from a fully provisioned success -- so a supervisor keying success off the terminal event reads the exit code with it.
 
 The classified terminal `error` category is the machine-readable abort reason: it names a `security`, `output`, `config`, or `exchange` failure independently of the free-text `message` (the same text stderr logs) and of the exit code. A supervisor keys the abort decision off that category, not off the human log line.
 
