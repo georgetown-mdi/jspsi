@@ -86,10 +86,11 @@ export interface InboundBoundOptions {
 }
 
 /**
- * A terminal refusal of one frame, worded identically to the web half's so an
- * operator reading either transport's failure sees one control: `predicate` says
- * what the frame did, so the message names the rule that fired rather than one
- * standing in for the rest. Kind `protocol`: every bound sits far above any
+ * A terminal refusal of one frame: `predicate` says what the frame did, so the
+ * message names the rule that fired rather than one standing in for the rest.
+ * For the five pre-scan rules the predicate comes from core's one renderer, so
+ * both transports word those identically; the wire-byte and chunk-cap
+ * predicates are composed here, from this side's own fixed limits. Kind `protocol`: every bound sits far above any
  * legitimate frame, so meeting one is the peer violating the message contract,
  * never benign. It carries only the fixed limits, no peer-controlled bytes, so it
  * needs no redaction.
