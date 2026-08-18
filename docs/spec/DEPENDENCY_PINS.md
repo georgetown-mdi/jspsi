@@ -649,14 +649,16 @@ step, and the inventory is re-recorded in the same diff.
 
 Two limits sit between a green run there and a bump being proved:
 
-- **No vulnerability scan runs against the variant.** The Trivy OS-layer scan in
-  that workflow is scoped to the default image (`matrix.fips == 'false'`): the
-  variant is published nowhere, so nothing its package closure carries reaches an
-  operator, and gating a merge on it would block one over an image no one can
-  pull. A base bump taken in order to clear an OS-layer finding is therefore
-  confirmed by no gate in this repository. Scan the built variant by hand to
-  confirm it, at the scope and threshold the default leg sets -- OS-layer, `vuln`
-  scanner, HIGH and above, fixable only, against `.github/trivyignore`.
+- **The variant's PR-time scan is temporarily scoped out.** The Trivy OS-layer
+  scan in that workflow runs on the default leg only (`matrix.fips == 'false'`)
+  while the variant's pinned base rootfs carries fixable findings no pin
+  movement can reach -- a check red on every product PR for weeks teaches
+  reviewers to ignore it. The release workflow still gates BOTH images on the
+  same scanner ahead of publishing, so nothing unscanned ships. A base bump
+  taken in order to clear an OS-layer finding is therefore confirmed at pull
+  request time by scanning the built variant by hand -- OS-layer, `vuln`
+  scanner, HIGH and above, fixable only, against `.github/trivyignore` -- and
+  the re-widening to both legs travels in the bump's own diff.
 - **The build is single-arch.** That workflow builds native `amd64` with no
   QEMU, and no release workflow builds this image at all, so the release
   assertion speaks for the `amd64` rootfs at the new digest and not for the
