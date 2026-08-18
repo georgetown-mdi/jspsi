@@ -38,15 +38,26 @@ ARG FIPS_PROVIDER_VERSION=3.0.8-1.amzn2023.0.1
 ARG FIPS_MODULE_VERSION=3.0.8-d694bfa693b76001
 
 # The multi-arch index digest, not a platform-specific manifest digest, so both
-# architectures resolve. The rootfs at this digest reports
-# PRETTY_NAME="Amazon Linux 2023.12.20260727" on each of them -- the release
-# AL2023_RELEASEVER names -- so the base and the package snapshot are one
-# release rather than two compatible ones, which is the coupling this pin is
-# for. Where it was resolved and how to re-resolve it on a bump are in
+# architectures resolve. The rootfs it names carries the release
+# AL2023_RELEASEVER names, which is the coupling this pin is for and which the
+# assertion in the stage below holds rather than this comment. Where the digest
+# was resolved, and the checklist a bump of it works through, are in
 # docs/spec/DEPENDENCY_PINS.md.
 FROM amazonlinux:2023@sha256:694092ae18877ed4e3cb9b643759ba95df1f12af12528fefa18f60f79d4c1568 AS nodebase
 ARG NODE_VERSION
 ARG AL2023_RELEASEVER
+# The coupling the digest above is pinned for, asserted rather than described:
+# the rootfs this stage runs on and the snapshot every dnf transaction below
+# resolves against must be one Amazon Linux release. A digest bump moves the
+# rootfs and nothing else, so without this the userland comes from one release
+# and the package layer from another in a build that stays green. Both stages
+# below build FROM this one, so the assertion covers the whole image, and it
+# fails the build until AL2023_RELEASEVER moves in the same diff. It speaks for
+# the architecture being built only, each of which has its own rootfs.
+RUN set -eux; \
+  base_release="$(rpm -q --qf '%{VERSION}' system-release)"; \
+  echo "base rootfs release: ${base_release}"; \
+  test "${base_release}" = "${AL2023_RELEASEVER}"
 # libatomic is the one shared library the stock Amazon Linux 2023 image lacks for
 # the official Node binary: without it node exits 127 on a missing
 # libatomic.so.1. tar, gzip and xz unpack the tarball below.

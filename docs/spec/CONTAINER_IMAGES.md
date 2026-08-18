@@ -148,11 +148,11 @@ the npm freeze applies to it unchanged -- same lockfile, same `npm ci`, same
 `--omit=dev` runtime tree, same freeze test. What follows is what it pins
 beyond that, and the second OS-package inventory that comes with it.
 
-**Six pins, four of them compared against the artifact inside the build.**
+**Six pins, five of them compared against the artifact inside the build.**
 
 | Pin | Value | How it is held |
 | --- | --- | --- |
-| Release snapshot | `--releasever=2023.12.20260727` on every `dnf` transaction | Shape-checked as a dated snapshot in `scripts/dockerfile-freeze.test.mjs` |
+| Release snapshot | `--releasever=2023.12.20260727` on every `dnf` transaction | Shape-checked as a dated snapshot in `scripts/dockerfile-freeze.test.mjs`; compared against the base rootfs's own `system-release` version, asserted in the build |
 | Provider package and version | `openssl-fips-provider-certified` at `3.0.8-1.amzn2023.0.1` | `rpm -qf` on the installed `fips.so`, asserted in the build |
 | Module version string | `3.0.8-d694bfa693b76001` | `openssl list -providers` read back, asserted in the build |
 | Base image | `amazonlinux:2023@sha256:694092ae18877ed4e3cb9b643759ba95df1f12af12528fefa18f60f79d4c1568`, the multi-arch index digest | Named in the `FROM` instead of the tag; the literal held in `scripts/dockerfile-freeze.test.mjs` |
@@ -198,11 +198,12 @@ AWS retains superseded NVRs, and a dated snapshot is immutable while
 `--releasever=latest` accumulates. That is why the freeze test holds its shape
 rather than its value: the property worth guarding is that the build names a
 dated snapshot at all, and a deliberate bump to a newer one should not have to
-edit the test. Unlike the rows below it, then, this pin's exact value is held by
-review rather than by a check. Sampled across AWS's published snapshots,
-every snapshot from the packages' first appearance (between `2023.6.20250107`
-and `2023.7.20250428`) onward still resolves and still serves both certified
-NVRs, from a content-addressed blobstore.
+edit the test. Which snapshot it names is held by review, but not independently
+of the base: the build asserts the two are the same release, so review decides
+the pair and a check keeps them from parting company. Sampled across AWS's
+published snapshots, every snapshot from the packages' first appearance (between
+`2023.6.20250107` and `2023.7.20250428`) onward still resolves and still serves
+both certified NVRs, from a content-addressed blobstore.
 
 The module-version pin is the one that cannot be skipped. Ten NVRs share the
 `openssl-fips-provider-latest` package name and carry ten different modules with
@@ -241,11 +242,20 @@ architecture and fails on the other -- and it was resolved on 2026-08-06 with
 manifests carry `org.opencontainers.image.created: 2026-08-04`. The rootfs at
 that digest reports `PRETTY_NAME="Amazon Linux 2023.12.20260727"` on `amd64` and
 `arm64` alike, which is the release `AL2023_RELEASEVER` names, so the base and
-the packages are the same snapshot rather than two compatible ones. Bumping the
-base means re-resolving the digest and re-reading that release out of each
-architecture's rootfs -- `docker create` plus `docker cp` of `/etc/os-release`
-reads the foreign architecture without emulating or executing it -- and moving
-`AL2023_RELEASEVER` to match.
+the packages are the same snapshot rather than two compatible ones.
+
+That equality is asserted in the build rather than left to the bumper: the
+`nodebase` stage reads `system-release`'s version out of the rootfs and fails
+unless it is what `AL2023_RELEASEVER` names, so a digest moved on its own reddens
+the image build instead of producing a green one whose userland and package layer
+came from different releases. Its reach is the architecture being built, each
+having a rootfs of its own, and `image_smoke.yaml` builds `amd64` alone. So
+bumping the base still means re-resolving the digest and reading that release out
+of each architecture's rootfs -- `docker create` plus `docker cp` of
+`/etc/os-release` reads the foreign architecture without emulating or executing
+it -- with the assertion holding the value that reading produces. The rest of
+that procedure, and what a green smoke run does and does not prove about a bump,
+are in [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md#bumping-the-fips-base-image).
 
 **What the build fetches, beyond the npm tree.** Two mirrors rather than the
 default image's one:
