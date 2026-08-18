@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { pack, unpack } from "peerjs-js-binarypack";
 
 import {
+  MAX_WEBRTC_FRAME_BYTES,
   MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
@@ -30,8 +31,7 @@ import type { Packable, Unpackable } from "peerjs-js-binarypack";
 // it charges at LEAST the published weights' cost for the structure the real
 // unpacker builds; the exact-agreement test beside it is the drift detector that
 // fails loudly when a bump moves the marker table. Both compare the scan against
-// that weight model, so neither is a measurement of the heap, and the kind the model
-// admits it does not capture is named where the oracle scores it.
+// that weight model, so neither is a measurement of the heap.
 
 /** The trailing value every probe frame carries after the marker under test. Both
  * the real unpacker and the scan must land on it at the same offset, so a marker
@@ -400,6 +400,16 @@ async function wideArrayFrame(count: number): Promise<Uint8Array> {
   return concatBytes([new Uint8Array([0xdd, ...u32Bytes(count)]), body]);
 }
 
+/** An `array32` declaring `count` elements, each the real packer's encoding of an
+ * empty binary value, so a frame's declared `bin`/`raw` inventory is driven at a
+ * count no `array16` header can express and every element byte is the encoder's. */
+async function binaryArrayFrame(count: number): Promise<Uint8Array> {
+  const element = await packBytes(new ArrayBuffer(0));
+  const body = new Uint8Array(count * element.length);
+  for (let i = 0; i < count; i++) body.set(element, i * element.length);
+  return concatBytes([new Uint8Array([0xdd, ...u32Bytes(count)]), body]);
+}
+
 /** Whole-frame shapes, at the root rather than wrapped in a probe array. */
 async function shapeCorpus(): Promise<
   Array<{ label: string; frame: Uint8Array }>
@@ -463,11 +473,10 @@ function stringWeightOf(wireBytes: number): number {
  * what each decoded value COSTS is the published model, never a measurement of the
  * heap, so every comparison below is only as strong as the model is.
  *
- * The model's coverage is not uniform, and one kind sits outside it: a decoded
- * `bin`/`raw` value scores 0 here because the weights charge it only the backing slot
- * its container already reserved, and that slot charge is a known gap in the model
- * rather than a mirror of what `unpack` retains per such value. An equality on a frame
- * carrying one therefore pins the scan to the model, not to the real allocation.
+ * A decoded `bin`/`raw` value scores the `binary` weight: the fixed per-value overhead
+ * of the view the unpacker returned, and nothing for the payload that view wraps,
+ * which is ~1x the value's wire bytes and bounded by the wire-byte cap rather than by
+ * the structural budget.
  *
  * The one place the wire is inferred rather than observed is a string's declared
  * byte length, recovered by re-encoding the decoded string; the round trip that makes
@@ -479,11 +488,9 @@ function modelledUnpackCost(value: unknown): number {
   if (typeof value === "string") {
     return stringWeightOf(utf8.encode(value).length);
   }
-  // The published weights charge a bin/raw value only its container's slot: its
-  // payload is ~1x its wire bytes and bounded by the wire-byte cap, and what it
-  // retains past that payload the model does not capture (see above), so this 0 is
-  // the model's figure rather than a claim about the allocation.
-  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return 0;
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+    return WEBRTC_VALUE_WEIGHTS.binary;
+  }
   if (Array.isArray(value)) {
     // The decoded array's own length is the count `unpack_array` sized the backing
     // store from, so the slots are read off the value the library returned -- an
@@ -713,13 +720,8 @@ describe("structureOverBudget against the real unpacker", () => {
     // over-approximation -- the assertion above is the one the bound rests on -- but
     // today it charges the decoded inventory's modelled cost exactly, so any
     // divergence is a change worth seeing: a marker whose payload width or child
-    // count the scan reads differently than the library moves this off.
-    //
-    // What it does NOT pin is the model itself. A decoded `bin`/`raw` value is scored
-    // by the same slot charge on both sides (see `modelledUnpackCost`), so on a frame
-    // carrying one this equality says the scan agrees with the weights, not that the
-    // weights mirror what `unpack` retains -- that kind is a known gap in the model
-    // and is outside what the exactness here claims.
+    // count the scan reads differently than the library moves this off. Every kind
+    // the decoded inventory can hold is scored here, `bin`/`raw` included.
     for (const { label, frame } of await allFrames()) {
       const charged = chargedCost(frame);
       const modelled = modelledUnpackCost(unpackFrame(frame));
@@ -834,6 +836,55 @@ describe("structureOverBudget on the shapes the wire size understates", () => {
       scanAccepts(frame, Number.MAX_SAFE_INTEGER),
       "a container map key was accepted at an unbounded budget",
     ).toBe(false);
+  });
+});
+
+describe("structureOverBudget on a frame of bin/raw values", () => {
+  // A `bin`/`raw` element is one wire byte at its shortest and decodes to a view of
+  // its own, so a frame of them is where the wire size says least about what
+  // `unpack` commits: the structural budget is what bounds how many such views a
+  // frame can declare, while the wire-byte cap bounds the payloads they wrap.
+
+  test("the real unpacker retains one view per declared element", async () => {
+    const count = 2_000;
+    const frame = await binaryArrayFrame(count);
+    const decoded = unpackFrame(frame) as Array<unknown>;
+
+    expect(
+      decoded,
+      "the frame did not decode to one value per declared element",
+    ).toHaveLength(count);
+    const buffers = new Set<ArrayBufferLike>();
+    for (const value of decoded) {
+      expect(
+        ArrayBuffer.isView(value),
+        "an element did not decode to a binary view",
+      ).toBe(true);
+      buffers.add((value as Uint8Array).buffer);
+    }
+    // Each view holds a buffer of its own rather than a window onto the frame, so
+    // the per-value charge is answering a cost the decode really imposes.
+    expect(buffers.size, "the decoded views share their backing buffer").toBe(
+      count,
+    );
+
+    expect(chargedCost(frame)).toBe(modelledUnpackCost(decoded));
+  });
+
+  test("refuses a frame whose declared views exceed the production budget", async () => {
+    const frame = await binaryArrayFrame(5_000_000);
+    // One wire byte per element, so the frame sits far under the wire-byte cap and
+    // nothing but the structural budget can be what refuses it.
+    expect(frame.byteLength).toBeLessThan(MAX_WEBRTC_FRAME_BYTES);
+    expect(scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES)).toBe(false);
+  });
+
+  test("admits a frame whose declared views stay within the budget", async () => {
+    // The refusal above is the budget acting on the declared count, not a blanket
+    // refusal of a binary-heavy frame: the same shape an order of magnitude smaller
+    // is accepted at the production budget.
+    const frame = await binaryArrayFrame(500_000);
+    expect(scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES)).toBe(true);
   });
 });
 

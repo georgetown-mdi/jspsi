@@ -116,6 +116,7 @@ describe("the WebRTC inbound bound constants", () => {
       scalar: 8,
       stringBase: 16,
       stringPerByte: 2,
+      binary: 256,
     });
   });
 });
@@ -204,6 +205,34 @@ describe("structureOverBudget: the per-value cost model", () => {
       new Uint8Array([0x91, 0xcb, 0, 0, 0, 0, 0, 0, 0, 0]),
       WEBRTC_VALUE_WEIGHTS.array + WEBRTC_VALUE_WEIGHTS.scalar,
     );
+  });
+
+  test("charges a bin/raw value its view overhead above the container's slot", () => {
+    // fixarray(1) of a fixraw(0): the element decodes to a Uint8Array of its own, so
+    // the frame costs the array's base weight, the slot the array reserved for that
+    // element, and the per-value binary weight on top of it.
+    atBoundary(
+      new Uint8Array([0x91, 0xa0]),
+      WEBRTC_VALUE_WEIGHTS.array +
+        WEBRTC_VALUE_WEIGHTS.scalar +
+        WEBRTC_VALUE_WEIGHTS.binary,
+    );
+  });
+
+  test("charges every bin/raw marker alike, whatever payload it declares", () => {
+    // One value each, charged the same per-value weight: what varies with the
+    // declared length is the payload, which is ~1x the wire bytes and so bounded by
+    // the wire-byte cap rather than by this budget.
+    const payload = (n: number): Array<number> =>
+      new Array<number>(n).fill(0x41);
+    for (const frame of [
+      new Uint8Array([0xa0]), // fixraw(0)
+      new Uint8Array([0xaa, ...payload(10)]), // fixraw(10)
+      new Uint8Array([0xda, 0x01, 0x2c, ...payload(300)]), // raw16(300)
+      new Uint8Array([0xdb, 0, 0, 0x01, 0x2c, ...payload(300)]), // raw32(300)
+    ]) {
+      atBoundary(frame, WEBRTC_VALUE_WEIGHTS.binary);
+    }
   });
 
   test("charges a container's declared slots at its own header", () => {

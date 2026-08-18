@@ -483,13 +483,13 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
     expect(conn.delivered).toHaveLength(1);
   });
 
-  test("charges a large binary payload only its slot weight, not its bytes", () => {
+  test("charges a binary value its view overhead, not its payload bytes", () => {
     const conn = new FakeChunkedConnection();
-    // Budget at exactly one scalar weight: a raw value passes, proving its 10-byte
-    // payload is skipped (not charged) -- a real binary set frame is the wire
-    // cap's concern, not this structural budget's.
+    // Budget at exactly the per-value binary weight: a raw value declaring a 10-byte
+    // payload passes, so the payload is skipped rather than charged -- a real binary
+    // set frame is the wire cap's concern, not this structural budget's.
     const fail = install(conn, {
-      maxStructureBytes: WEBRTC_VALUE_WEIGHTS.scalar,
+      maxStructureBytes: WEBRTC_VALUE_WEIGHTS.binary,
     });
 
     const raw = new Uint8Array(13);
@@ -500,6 +500,20 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
 
     expect(fail).not.toHaveBeenCalled();
     expect(conn.delivered).toHaveLength(1);
+  });
+
+  test("refuses a binary value one byte below its view overhead", () => {
+    // The other side of that boundary: the view a `bin`/`raw` value decodes to is
+    // charged, so a budget below it refuses the same frame the budget above admits.
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, {
+      maxStructureBytes: WEBRTC_VALUE_WEIGHTS.binary - 1,
+    });
+
+    conn._handleDataMessage({ data: new Uint8Array([0xa0]) }); // fixraw(0)
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect(conn.delivered).toEqual([]);
   });
 
   test("scans the reassembled frame on the chunked-completion path too", () => {
