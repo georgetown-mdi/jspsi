@@ -334,8 +334,10 @@ and writes a text summary to the terminal plus a browsable HTML report and an
 The denominator is scoped to product source under each `src/` tree, with the
 generated route tree and vendored `apps/web/src/contrib` excluded, so the numbers
 reflect hand-written product code. The report runs `core` unit, `cli`
-unit and integration (the SFTP adapter is exercised only by the integration
-suite), and `web` unit plus `web` browser (real Chromium via Playwright). The web
+unit, integration, and webrtc (the SFTP adapter is exercised only by the
+integration suite and the WebRTC transport only by the webrtc suite, so dropping
+either would read its adapter as near-uncovered), and `web` unit plus `web`
+browser (real Chromium via Playwright). The web
 unit and browser projects run together and their coverage is merged, so the
 component, live-exchange, and consent-gate paths exercised only in the browser
 are reflected instead of reading as near-zero; running `npm run coverage` for the
