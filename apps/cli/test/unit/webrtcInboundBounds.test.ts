@@ -17,6 +17,8 @@ import {
   toFrameBytes,
 } from "../../src/connection/webrtc/peerjsWire";
 
+import type { InboundBoundOptions } from "../../src/connection/webrtc/inboundBounds";
+
 /** One chunk envelope, built directly so a test can choose every field. */
 function chunk(
   messageId: number,
@@ -225,6 +227,71 @@ test("a refusal carries the limit and no peer-supplied bytes", () => {
   expect(
     refusal(() => bounds.accept(packValue({ marker }))).message,
   ).not.toContain(marker);
+});
+
+test("a pre-scan refusal names the rule that fired", () => {
+  // One frame per rule the pre-scan enforces, each refused with the rule named, so
+  // an operator (and any support thread reading the failure) sees the control that
+  // refused the frame. The first three frames come from the real encoder; the last
+  // two are assembled, since that encoder emits neither a container it does not
+  // fill nor a map key that is not a string.
+  const spine: unknown = Array.from({ length: 12 }).reduce<unknown>(
+    (inner) => [inner],
+    1,
+  );
+  const cases: Array<{
+    rule: string;
+    frame: Uint8Array;
+    options: InboundBoundOptions;
+    message: string;
+  }> = [
+    {
+      rule: "the retained-byte budget",
+      frame: packValue(
+        Array.from({ length: 200 }, (_, i) => ({
+          theirIndex: i,
+          iteration: 0,
+        })),
+      ),
+      options: { maxStructureBytes: 1000 },
+      message: "inbound WebRTC frame exceeds its 1000-byte structure limit",
+    },
+    {
+      rule: "the nesting-depth cap",
+      frame: packValue(spine),
+      options: { maxReassemblyDepth: 4 },
+      message: "inbound WebRTC frame exceeds its 4-level nesting limit",
+    },
+    {
+      rule: "the per-string cap",
+      frame: packValue("x".repeat(4096)),
+      options: { maxStringBytes: 1024 },
+      message: "inbound WebRTC frame exceeds its 1024-byte string limit",
+    },
+    {
+      rule: "the byte-backed-elements check",
+      // array32 declaring 1,000,000 elements with no bytes behind it.
+      frame: new Uint8Array([0xdd, 0x00, 0x0f, 0x42, 0x40]),
+      options: {},
+      message:
+        "inbound WebRTC frame declares a container with more elements than " +
+        "the bytes behind it can encode",
+    },
+    {
+      rule: "the map-key rule",
+      frame: new Uint8Array([0x81, 0x07, 0x08]), // fixmap(1) keyed by a fixint
+      options: {},
+      message:
+        "inbound WebRTC frame keys a map with a value that is not a string",
+    },
+  ];
+
+  for (const { rule, frame, options, message } of cases) {
+    const bounds = new BoundedInboundFrames(options);
+    const { kind, message: reported } = refusal(() => bounds.accept(frame));
+    expect(kind, rule).toBe("protocol");
+    expect(reported, rule).toBe(message);
+  }
 });
 
 // --- the defaults are core's constants, not a per-transport re-derivation ----

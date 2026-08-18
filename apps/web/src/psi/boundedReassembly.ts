@@ -15,7 +15,8 @@ import {
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
   MIN_CHUNK_RESIDENT_BYTES,
-  structureOverBudget,
+  describeFrameStructureRefusal,
+  scanFrameStructure,
 } from "@psilink/core";
 
 import type { DataConnection } from "peerjs";
@@ -80,21 +81,20 @@ function toUint8(data: PeerDataMessage["data"]): Uint8Array {
   return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 }
 
-/** A terminal bound-exceeded error, shared by every enforcement point. Kind
- * `protocol`: an over-bound frame is the peer violating the message contract
- * (the same class as core's inbound-buffer overflow), never benign, since every
- * bound sits far above any legitimate frame. It carries no peer-controlled bytes
- * (only the fixed limit), so it needs no redaction. */
-function frameBoundError(detail: string): ConnectionError {
-  return new ConnectionError(
-    `inbound WebRTC frame exceeds its ${detail}`,
-    "protocol",
-  );
+/** A terminal refusal, shared by every enforcement point: `predicate` says what
+ * the frame did, so the message names the rule that fired rather than one
+ * standing in for the rest. Kind `protocol`: a refused frame is the peer
+ * violating the message contract (the same class as core's inbound-buffer
+ * overflow), never benign, since every bound sits far above any legitimate frame.
+ * It carries no peer-controlled bytes (only the fixed limits), so it needs no
+ * redaction. */
+function frameRefusalError(predicate: string): ConnectionError {
+  return new ConnectionError(`inbound WebRTC frame ${predicate}`, "protocol");
 }
 
 /**
  * The delivered-frame half of the inbound byte bound: returns the terminal
- * {@link frameBoundError} if `data` is a binary frame larger than `maxBytes`,
+ * {@link frameRefusalError} if `data` is a binary frame larger than `maxBytes`,
  * otherwise `undefined`. This runs at the stable `data` event -- a backstop, at
  * the public layer, for the reassembly guard at the fragile internal layer: an
  * over-cap `Uint8Array` is refused as delivered regardless of how (or whether)
@@ -111,7 +111,7 @@ export function checkDeliveredFrameBound(
       ? data.byteLength
       : undefined;
   return size !== undefined && size > maxBytes
-    ? frameBoundError(`${maxBytes}-byte size limit`)
+    ? frameRefusalError(`exceeds its ${maxBytes}-byte size limit`)
     : undefined;
 }
 
@@ -172,7 +172,9 @@ export function assertChunkReassemblySupported(conn: DataConnection): void {
  *   an unchunked frame and the reassembled-completion path flow through): the
  *   frame's BinaryPack structure is scanned and each declared value charged its
  *   per-kind weight before PeerJS unpacks it, since `unpack` can allocate far more
- *   than the wire bytes.
+ *   than the wire bytes. The same walk enforces the nesting depth, the per-string
+ *   cap, the byte-backed-elements check and the map-key rule, and the refusal names
+ *   whichever of them fired.
  *
  * @param conn   The PeerJS data connection (open or not yet open).
  * @param fail   Latches a terminal failure (the connection's `controls.fail`).
@@ -243,12 +245,16 @@ export function boundChunkReassembly(
       while (inFlight.size >= maxConcurrent) evictOldest();
     }
     if (bytesInFlight + bytes > maxFrameBytes) {
-      failClosed(frameBoundError(`${maxFrameBytes}-byte size limit`));
+      failClosed(
+        frameRefusalError(`exceeds its ${maxFrameBytes}-byte size limit`),
+      );
       return;
     }
     const chunks = (entry?.chunks ?? 0) + 1;
     if (chunks > maxChunks) {
-      failClosed(frameBoundError(`${maxChunks}-chunk reassembly limit`));
+      failClosed(
+        frameRefusalError(`exceeds its ${maxChunks}-chunk reassembly limit`),
+      );
       return;
     }
 
@@ -271,15 +277,14 @@ export function boundChunkReassembly(
   // covers a tiny unchunked frame that never reaches `_handleChunk` at all.
   internals._handleDataMessage = (message: PeerDataMessage): void => {
     if (failed) return;
-    if (
-      structureOverBudget(
-        toUint8(message.data),
-        maxStructureBytes,
-        maxDepth,
-        maxStringBytes,
-      )
-    ) {
-      failClosed(frameBoundError(`${maxStructureBytes}-byte structure limit`));
+    const refusal = scanFrameStructure(
+      toUint8(message.data),
+      maxStructureBytes,
+      maxDepth,
+      maxStringBytes,
+    );
+    if (refusal !== undefined) {
+      failClosed(frameRefusalError(describeFrameStructureRefusal(refusal)));
       return;
     }
     originalHandleDataMessage(message);

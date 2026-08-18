@@ -381,7 +381,24 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
     expect(fail).toHaveBeenCalledTimes(1);
     const err = fail.mock.calls[0][0] as ConnectionError;
     expect(err.kind).toBe("protocol");
-    expect(err.message).toContain("structure limit");
+    expect(err.message).toBe(
+      "inbound WebRTC frame exceeds its 100-byte structure limit",
+    );
+    expect(conn.delivered).toEqual([]);
+  });
+
+  test("rejects a map keyed by a non-string, naming the map-key rule", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, { maxStructureBytes: 1_000_000 });
+
+    // fixmap(1) keyed by a fixint: refused at any budget, since the property name
+    // `unpack_map` coerces such a key to is not bounded by what declares it.
+    conn._handleDataMessage({ data: new Uint8Array([0x81, 0x07, 0x08]) });
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toBe(
+      "inbound WebRTC frame keys a map with a value that is not a string",
+    );
     expect(conn.delivered).toEqual([]);
   });
 
@@ -404,14 +421,39 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
 
   test("rejects a deep nested-array spine by the bytes-that-follow check", () => {
     const conn = new FakeChunkedConnection();
-    const fail = install(conn, { maxStructureBytes: 1_000_000 });
+    // Byte budget generous, so the bytes-that-follow check is what decides and the
+    // refusal names it rather than the budget.
+    const fail = install(conn, { maxStructureBytes: 1_000_000_000 });
 
     // Eight nested array32 each declaring 999000: each header declares far more
-    // elements than the bytes that follow it, so the first is refused before the
-    // byte budget even comes into play.
+    // elements than the bytes that follow it, so the first is refused.
     conn._handleDataMessage({ data: nestedArrayHeaders(999000, 8) });
 
     expect(fail).toHaveBeenCalledTimes(1);
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toBe(
+      "inbound WebRTC frame declares a container with more elements than the " +
+        "bytes behind it can encode",
+    );
+    expect(conn.delivered).toEqual([]);
+  });
+
+  test("rejects a spine nested deeper than the depth cap, naming that cap", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, {
+      maxStructureBytes: 1_000_000,
+      maxReassemblyDepth: 4,
+    });
+
+    // Ten fixarray(1) levels over one fixint leaf: every level is byte-backed and
+    // the whole frame costs 10*(40+8) retained bytes, so only the depth cap can
+    // refuse it.
+    const spine = new Uint8Array([...new Array<number>(10).fill(0x91), 0x01]);
+    conn._handleDataMessage({ data: spine });
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toBe(
+      "inbound WebRTC frame exceeds its 4-level nesting limit",
+    );
     expect(conn.delivered).toEqual([]);
   });
 
@@ -444,6 +486,10 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
     conn._handleDataMessage({ data: array32Header(1_000_000) });
 
     expect(fail).toHaveBeenCalledTimes(1);
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toBe(
+      "inbound WebRTC frame declares a container with more elements than the " +
+        "bytes behind it can encode",
+    );
     expect(conn.delivered).toEqual([]);
   });
 
@@ -452,12 +498,16 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
     const fail = install(conn, { maxStringBytes: 100 });
 
     // One value whose resident weight is small, but a 1000-byte string's build
-    // transient dwarfs that slot -- refused by the per-string cap, not the budget.
+    // transient dwarfs that slot -- refused by the per-string cap, not the budget,
+    // which the refusal names.
     conn._handleDataMessage({ data: str32Header(1000) });
 
     expect(fail).toHaveBeenCalledTimes(1);
     const err = fail.mock.calls[0][0] as ConnectionError;
     expect(err.kind).toBe("protocol");
+    expect(err.message).toBe(
+      "inbound WebRTC frame exceeds its 100-byte string limit",
+    );
     expect(conn.delivered).toEqual([]);
   });
 

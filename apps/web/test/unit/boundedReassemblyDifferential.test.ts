@@ -7,12 +7,13 @@ import {
   MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   MAX_WEBRTC_STRING_BYTES,
   WEBRTC_VALUE_WEIGHTS,
-  structureOverBudget,
+  scanFrameStructure,
 } from "@psilink/core";
 
 import { boundChunkReassembly } from "../../src/psi/boundedReassembly.js";
 
 import type { Packable, Unpackable } from "peerjs-js-binarypack";
+import type { ConnectionError } from "@psilink/core";
 import type { DataConnection } from "peerjs";
 
 // This suite is the differential counterpart to boundedReassembly.test.ts: rather
@@ -529,23 +530,23 @@ describe("boundedReassembly differential: real peerjs-js-binarypack", () => {
   });
 });
 
-describe("structureOverBudget differential: agrees with the real unpacker", () => {
+describe("scanFrameStructure differential: agrees with the real unpacker", () => {
   test("never rejects a real-encoded corpus frame under the production budget", async () => {
     // The pre-scan is a defensive superset of the real unpacker's marker dispatch:
-    // for any frame the real unpacker accepts within the memory envelope, the scan
-    // must return false (no false rejection). Every corpus value is a legitimate,
-    // small frame far under the production budget, so a `true` here is a divergence
-    // -- a marker the scan mis-reads relative to `Unpacker.unpack`.
+    // any frame the real unpacker accepts within the memory envelope, the scan must
+    // admit (no false rejection). Every corpus value is a legitimate, small frame far
+    // under the production budget, so a refusal here is a divergence -- a marker the
+    // scan mis-reads relative to `Unpacker.unpack`.
     for (const { label, packed } of await corpus()) {
       expect(
-        structureOverBudget(
+        scanFrameStructure(
           packed,
           MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
           256,
           MAX_WEBRTC_STRING_BYTES,
         ),
         `${label}: scan rejected a frame the real unpacker accepts`,
-      ).toBe(false);
+      ).toBeUndefined();
     }
   });
 
@@ -554,7 +555,7 @@ describe("structureOverBudget differential: agrees with the real unpacker", () =
     // boundary must sit at the exact cost the frame's real marker inventory implies
     // under the published weights. An independent walk (referenceWalk, mirroring the
     // real Unpacker.unpack dispatch) sums each value's WEBRTC_VALUE_WEIGHTS cost from
-    // the real-encoded bytes; the source structureOverBudget must then accept at
+    // the real-encoded bytes; the source scanFrameStructure must then accept at
     // exactly that budget and reject one byte below it. A marker the scan dispatched
     // differently than the real unpacker -- mis-skipping a length prefix, miscounting
     // a container's children, mis-charging a kind -- would shift the source's computed
@@ -579,13 +580,13 @@ describe("structureOverBudget differential: agrees with the real unpacker", () =
         `${label}: the real packer emitted a non-string map key`,
       ).toBe(false);
       expect(
-        structureOverBudget(packed, cost, 256, MAX_WEBRTC_STRING_BYTES),
+        scanFrameStructure(packed, cost, 256, MAX_WEBRTC_STRING_BYTES),
         `${label}: scan rejected at its own reference cost`,
-      ).toBe(false);
+      ).toBeUndefined();
       expect(
-        structureOverBudget(packed, cost - 1, 256, MAX_WEBRTC_STRING_BYTES),
+        scanFrameStructure(packed, cost - 1, 256, MAX_WEBRTC_STRING_BYTES),
         `${label}: scan accepted one byte below its reference cost`,
-      ).toBe(true);
+      ).toEqual({ rule: "structure-bytes", limit: cost - 1 });
     }
   });
 });
@@ -674,6 +675,10 @@ describe("boundedReassembly on the shapes the wire size understates", () => {
       for (const chunk of chunkAtMtu(numericKeys, 1))
         refusing._handleChunk(chunk);
       expect(refuseFail).toHaveBeenCalledTimes(1);
+      // The failure names the key rule rather than the budget it was not over.
+      expect((refuseFail.mock.calls[0][0] as ConnectionError).message).toBe(
+        "inbound WebRTC frame keys a map with a value that is not a string",
+      );
       expect(refusing.delivered).toHaveLength(0);
     }
   });
@@ -742,7 +747,7 @@ function stringWeightOf(declaredBytes: number): number {
  * slot adds nothing here. This walk reports the modelled cost and never a measured
  * allocation. `cost` is the exact budget the production scan should charge;
  * `endOffset` is the byte offset the real unpacker finishes at.
- * Deliberately not derived from `structureOverBudget`, so a source marker-dispatch
+ * Deliberately not derived from `scanFrameStructure`, so a source marker-dispatch
  * bug shows up as a boundary mismatch against this reference rather than being
  * masked by a shared walk.
  *
