@@ -356,8 +356,8 @@ function wideContainerFrame(marker: number, count: number, body: Uint8Array) {
 /** Wire frames for the wide BinaryPack container/scalar markers the size-bounded
  * corpus above never crosses (`map16`, `map32`, `array32`, `str32`, `raw32`). The
  * `array32`/`map32` amplification vectors are exactly what the structural budget
- * exists to bound, so the differential must charge them the same way the real
- * unpacker allocates. `map16`, `str32`, and `raw32` are packed from real values;
+ * exists to bound, so the differential must charge them the same inventory the real
+ * unpacker builds. `map16`, `str32`, and `raw32` are packed from real values;
  * `array32`/`map32` are assembled by {@link wideContainerFrame} because the pinned
  * packer cannot emit them. All content is deterministic. */
 async function wideMarkerCorpus(): Promise<
@@ -538,24 +538,36 @@ describe("structureOverBudget differential: agrees with the real unpacker", () =
     }
   });
 
-  test("charges exactly the marker inventory the real unpacker would allocate", async () => {
+  test("charges exactly the modelled cost of the frame's real marker inventory", async () => {
     // A stronger differential than "does not reject": the pre-scan's accept/reject
-    // boundary must sit at the exact retained cost the frame's real marker inventory
-    // implies. An independent walk (referenceWalk, mirroring the real
-    // Unpacker.unpack dispatch) sums each value's published WEBRTC_VALUE_WEIGHTS
-    // cost from the real-encoded bytes; the source structureOverBudget must then
-    // accept at exactly that budget and reject one byte below it. A marker the scan
-    // dispatched differently than the real unpacker -- mis-skipping a length prefix,
-    // miscounting a container's children, mis-charging a kind -- would shift the
-    // source's computed cost off this reference and flip one side of the boundary.
+    // boundary must sit at the exact cost the frame's real marker inventory implies
+    // under the published weights. An independent walk (referenceWalk, mirroring the
+    // real Unpacker.unpack dispatch) sums each value's WEBRTC_VALUE_WEIGHTS cost from
+    // the real-encoded bytes; the source structureOverBudget must then accept at
+    // exactly that budget and reject one byte below it. A marker the scan dispatched
+    // differently than the real unpacker -- mis-skipping a length prefix, miscounting
+    // a container's children, mis-charging a kind -- would shift the source's computed
+    // cost off this reference and flip one side of the boundary.
+    //
+    // Both sides score by the same weight model, so this pins the scan to the model
+    // and not the model to the heap: a decoded `bin`/`raw` value is charged only its
+    // container's slot on either side, a known gap in the weights (see referenceWalk)
+    // that the exactness here does not speak to.
     for (const { label, packed } of await corpus()) {
-      const { cost, endOffset } = referenceWalk(packed);
+      const { cost, endOffset, nonStringKey } = referenceWalk(packed);
       // The reference walk must consume the whole real-encoded frame; a short read
       // would mean the reference itself mis-modeled a marker, invalidating `cost`.
       expect(
         endOffset,
         `${label}: reference walk did not consume the frame`,
       ).toBe(packed.length);
+      // The premise the cost comparison rests on -- no corpus frame the real packer
+      // emits carries a map key the scan refuses -- established on this independent
+      // oracle rather than only through the scan accepting the frame.
+      expect(
+        nonStringKey,
+        `${label}: the real packer emitted a non-string map key`,
+      ).toBe(false);
       expect(
         structureOverBudget(packed, cost, 256, MAX_WEBRTC_STRING_BYTES),
         `${label}: scan rejected at its own reference cost`,
@@ -678,9 +690,12 @@ function stringWeightOf(declaredBytes: number): number {
  * independent mirror of `Unpacker.unpack`'s dispatch, the ground truth) and sums
  * the retained cost the structure implies under the published `WEBRTC_VALUE_WEIGHTS`
  * -- each container its own weight plus a backing slot per declared child, each
- * string its header-plus-per-byte weight. A value that allocates nothing beyond its
- * container's slot adds nothing. `cost` is the exact budget the production scan
- * should charge; `endOffset` is the byte offset the real unpacker finishes at.
+ * string its header-plus-per-byte weight. A value the weights charge no more than its
+ * container's slot adds nothing here; for a `bin`/`raw` value that slot charge is a
+ * known gap in the model rather than a mirror of what `unpack` retains, so this walk
+ * reports the modelled cost and never a measured allocation. `cost` is the exact
+ * budget the production scan should charge; `endOffset` is the byte offset the real
+ * unpacker finishes at.
  * Deliberately not derived from `structureOverBudget`, so a source marker-dispatch
  * bug shows up as a boundary mismatch against this reference rather than being
  * masked by a shared walk.
@@ -702,8 +717,8 @@ function referenceWalk(bytes: Uint8Array): {
   const u32 = (): number =>
     u8() * 0x1000000 + u8() * 0x10000 + u8() * 0x100 + u8();
 
-  /** A value that allocates nothing of its own: its cost is the slot its container
-   * already charged. At a key position it is a key the scan refuses. */
+  /** A value the weights charge no more than the slot its container already charged.
+   * At a key position it is a key the scan refuses. */
   const slotOnly = (atKeyPosition: boolean): void => {
     if (atKeyPosition) nonStringKey = true;
   };

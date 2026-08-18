@@ -27,9 +27,11 @@ import type { Packable, Unpackable } from "peerjs-js-binarypack";
 // (docs/spec/DEPENDENCY_PINS.md).
 //
 // The scan is a defensive over-approximation, so the load-bearing assertion is that
-// it charges at LEAST what the real unpacker allocates; the exact-agreement test
-// beside it is the drift detector that fails loudly when a bump moves the marker
-// table.
+// it charges at LEAST the published weights' cost for the structure the real
+// unpacker builds; the exact-agreement test beside it is the drift detector that
+// fails loudly when a bump moves the marker table. Both compare the scan against
+// that weight model, so neither is a measurement of the heap, and the kind the model
+// admits it does not capture is named where the oracle scores it.
 
 /** The trailing value every probe frame carries after the marker under test. Both
  * the real unpacker and the scan must land on it at the same offset, so a marker
@@ -455,9 +457,17 @@ function stringWeightOf(wireBytes: number): number {
 
 /**
  * The retained cost the value the real unpacker RETURNED implies under the published
- * {@link WEBRTC_VALUE_WEIGHTS} -- the true unpack cost the scan's charge is compared
- * against. It reads the decoded JS value, so it rests on the real library's dispatch
- * rather than on a second reading of the marker table.
+ * {@link WEBRTC_VALUE_WEIGHTS} -- the modelled cost the scan's charge is compared
+ * against. What inventory it walks comes from the decoded JS value, so it rests on
+ * the real library's dispatch rather than on a second reading of the marker table;
+ * what each decoded value COSTS is the published model, never a measurement of the
+ * heap, so every comparison below is only as strong as the model is.
+ *
+ * The model's coverage is not uniform, and one kind sits outside it: a decoded
+ * `bin`/`raw` value scores 0 here because the weights charge it only the backing slot
+ * its container already reserved, and that slot charge is a known gap in the model
+ * rather than a mirror of what `unpack` retains per such value. An equality on a frame
+ * carrying one therefore pins the scan to the model, not to the real allocation.
  *
  * The one place the wire is inferred rather than observed is a string's declared
  * byte length, recovered by re-encoding the decoded string; the round trip that makes
@@ -465,12 +475,14 @@ function stringWeightOf(wireBytes: number): number {
  * under-count relative to the wire (a map with repeated keys collapses to one
  * property), which is the safe direction for the "charges at least" assertion.
  */
-function trueUnpackCost(value: unknown): number {
+function modelledUnpackCost(value: unknown): number {
   if (typeof value === "string") {
     return stringWeightOf(utf8.encode(value).length);
   }
-  // A bin/raw payload is ~1x its wire bytes, so it is bounded by the wire-byte cap
-  // and costs nothing beyond the slot its container already reserved.
+  // The published weights charge a bin/raw value only its container's slot: its
+  // payload is ~1x its wire bytes and bounded by the wire-byte cap, and what it
+  // retains past that payload the model does not capture (see above), so this 0 is
+  // the model's figure rather than a claim about the allocation.
   if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return 0;
   if (Array.isArray(value)) {
     // The decoded array's own length is the count `unpack_array` sized the backing
@@ -478,7 +490,7 @@ function trueUnpackCost(value: unknown): number {
     // element the wire never carried still occupies one.
     let cost =
       WEBRTC_VALUE_WEIGHTS.array + value.length * WEBRTC_VALUE_WEIGHTS.scalar;
-    for (let i = 0; i < value.length; i++) cost += trueUnpackCost(value[i]);
+    for (let i = 0; i < value.length; i++) cost += modelledUnpackCost(value[i]);
     return cost;
   }
   if (value !== null && typeof value === "object") {
@@ -493,7 +505,7 @@ function trueUnpackCost(value: unknown): number {
       entries.length * 2 * WEBRTC_VALUE_WEIGHTS.scalar;
     for (const [key, inner] of entries) {
       cost += stringWeightOf(utf8.encode(key).length);
-      cost += trueUnpackCost(inner);
+      cost += modelledUnpackCost(inner);
     }
     return cost;
   }
@@ -651,8 +663,8 @@ describe("the real packer's marker table", () => {
   });
 
   test("round-trips a string's declared wire byte length", async () => {
-    // `trueUnpackCost` recovers a string's declared wire length by re-encoding the
-    // decoded string, its one inference about the wire. That is exact while the
+    // `modelledUnpackCost` recovers a string's declared wire length by re-encoding
+    // the decoded string, its one inference about the wire. That is exact while the
     // unpacker's UTF-8 decode is faithful -- the first assertion -- and it is the
     // byte length, not the identity, that the inference actually needs, so both are
     // checks here rather than an assumption.
@@ -680,35 +692,41 @@ describe("the real packer's marker table", () => {
 });
 
 describe("structureOverBudget against the real unpacker", () => {
-  test("charges at least what the real unpacker allocates", async () => {
-    // The security direction, and the reason the scan can be trusted as a bound: for
-    // every frame the real unpacker decodes, the cost the scan sums must be no less
-    // than the cost of the structure the unpacker actually built. A scan that
-    // under-charged any marker would admit a frame whose unpack exceeds the memory
-    // envelope the budget exists to hold.
+  test("charges at least the modelled cost of the structure the unpacker built", async () => {
+    // The security direction, and the reason the scan can be trusted as a bound
+    // within the model's coverage: for every frame the real unpacker decodes, the
+    // cost the scan sums must be no less than the published weights' cost for the
+    // structure the unpacker actually built. A scan that under-charged any marker
+    // relative to that inventory would admit a frame the budget means to reject.
     for (const { label, frame } of await allFrames()) {
       const charged = chargedCost(frame);
-      const actual = trueUnpackCost(unpackFrame(frame));
+      const modelled = modelledUnpackCost(unpackFrame(frame));
       expect(
         charged,
-        `${label}: scan charged ${charged}, below the real unpacker's ${actual}`,
-      ).toBeGreaterThanOrEqual(actual);
+        `${label}: scan charged ${charged}, below the modelled ${modelled}`,
+      ).toBeGreaterThanOrEqual(modelled);
     }
   });
 
-  test("charges exactly what the real unpacker allocates", async () => {
+  test("charges exactly the modelled cost, for the kinds the model covers", async () => {
     // The drift detector. The scan is permitted to be a conservative
     // over-approximation -- the assertion above is the one the bound rests on -- but
-    // today it charges the real unpacker's inventory exactly, so any divergence is a
-    // change worth seeing: a marker whose payload width or child count the scan reads
-    // differently than the library moves this off.
+    // today it charges the decoded inventory's modelled cost exactly, so any
+    // divergence is a change worth seeing: a marker whose payload width or child
+    // count the scan reads differently than the library moves this off.
+    //
+    // What it does NOT pin is the model itself. A decoded `bin`/`raw` value is scored
+    // by the same slot charge on both sides (see `modelledUnpackCost`), so on a frame
+    // carrying one this equality says the scan agrees with the weights, not that the
+    // weights mirror what `unpack` retains -- that kind is a known gap in the model
+    // and is outside what the exactness here claims.
     for (const { label, frame } of await allFrames()) {
       const charged = chargedCost(frame);
-      const actual = trueUnpackCost(unpackFrame(frame));
+      const modelled = modelledUnpackCost(unpackFrame(frame));
       expect(
         charged,
-        `${label}: scan charged ${charged}, the real unpacker ${actual}`,
-      ).toBe(actual);
+        `${label}: scan charged ${charged}, the model ${modelled}`,
+      ).toBe(modelled);
     }
   });
 
@@ -757,7 +775,7 @@ describe("structureOverBudget on the shapes the wire size understates", () => {
       "the innermost level did not decode the wire's elements",
     ).toBe(1);
 
-    expect(chargedCost(frame)).toBe(trueUnpackCost(decoded));
+    expect(chargedCost(frame)).toBe(modelledUnpackCost(decoded));
   });
 
   test("refuses a nested chain whose reserved stores exceed the production budget", () => {
@@ -997,10 +1015,12 @@ describe("a non-string map key over a cursor underrun", () => {
     const frame = atValue();
     expect(scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES)).toBe(true);
 
-    // And the accept is sound: the scan charges at least what the real unpacker
-    // allocates for the structure those same bytes produce.
+    // And the accept is sound: the scan charges at least the modelled cost of the
+    // structure those same bytes produce.
     const decoded = unpackFrame(frame);
-    expect(chargedCost(frame)).toBeGreaterThanOrEqual(trueUnpackCost(decoded));
+    expect(chargedCost(frame)).toBeGreaterThanOrEqual(
+      modelledUnpackCost(decoded),
+    );
 
     // The declared descendants really do outrun the wire: the innermost level is
     // the only one the frame's bytes back, so every level above it is zero-filled.
