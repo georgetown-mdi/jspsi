@@ -7,7 +7,8 @@ import {
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
   MIN_CHUNK_RESIDENT_BYTES,
-  structureOverBudget,
+  describeFrameStructureRefusal,
+  scanFrameStructure,
 } from "@psilink/core";
 
 import { classifyInboundValue, concatChunks, unpackFrame } from "./peerjsWire";
@@ -59,7 +60,9 @@ import { classifyInboundValue, concatChunks, unpackFrame } from "./peerjsWire";
  *    `unpack`.
  *
  * Every breach is terminal and fail-closed: the offending bytes are never
- * unpacked and never delivered.
+ * unpacked and never delivered, and the failure names the rule that refused them
+ * -- the pre-scan enforces the retained-byte budget, the nesting depth, the
+ * per-string cap, the byte-backed-elements check and the map-key rule on one walk.
  */
 
 /** What one accepted datagram produced. */
@@ -83,23 +86,23 @@ export interface InboundBoundOptions {
 }
 
 /**
- * A terminal bound-exceeded error, worded identically to the web half's so an
- * operator reading either transport's failure sees one control. Kind `protocol`:
- * every bound sits far above any legitimate frame, so exceeding one is the peer
- * violating the message contract, never benign. It carries only the fixed limit,
- * no peer-controlled bytes, so it needs no redaction.
+ * A terminal refusal of one frame, worded identically to the web half's so an
+ * operator reading either transport's failure sees one control: `predicate` says
+ * what the frame did, so the message names the rule that fired rather than one
+ * standing in for the rest. Kind `protocol`: every bound sits far above any
+ * legitimate frame, so meeting one is the peer violating the message contract,
+ * never benign. It carries only the fixed limits, no peer-controlled bytes, so it
+ * needs no redaction.
  */
-function frameBoundError(detail: string): ConnectionError {
-  return new ConnectionError(
-    `inbound WebRTC frame exceeds its ${detail}`,
-    "protocol",
-  );
+function frameRefusalError(predicate: string): ConnectionError {
+  return new ConnectionError(`inbound WebRTC frame ${predicate}`, "protocol");
 }
 
 /**
  * A reassembly the peer framed in a way no PeerJS sender produces. Distinct from
- * {@link frameBoundError}: nothing here is over a limit, the stream is simply not
- * the wire. Also `protocol`, and likewise carries no peer-controlled bytes.
+ * {@link frameRefusalError}: the fault is in the chunk stream around the frames
+ * rather than in a frame the scan read. Also `protocol`, and likewise carries no
+ * peer-controlled bytes.
  */
 function reassemblyProtocolError(detail: string): ConnectionError {
   return new ConnectionError(
@@ -198,17 +201,18 @@ export class BoundedInboundFrames {
   /** Wire-byte cap, then structural pre-scan, then `unpack`. In that order. */
   private decodeBounded(bytes: Uint8Array): unknown {
     if (bytes.byteLength > this.maxFrameBytes) {
-      throw frameBoundError(`${this.maxFrameBytes}-byte size limit`);
+      throw frameRefusalError(
+        `exceeds its ${this.maxFrameBytes}-byte size limit`,
+      );
     }
-    if (
-      structureOverBudget(
-        bytes,
-        this.maxStructureBytes,
-        this.maxDepth,
-        this.maxStringBytes,
-      )
-    ) {
-      throw frameBoundError(`${this.maxStructureBytes}-byte structure limit`);
+    const refusal = scanFrameStructure(
+      bytes,
+      this.maxStructureBytes,
+      this.maxDepth,
+      this.maxStringBytes,
+    );
+    if (refusal !== undefined) {
+      throw frameRefusalError(describeFrameStructureRefusal(refusal));
     }
     return unpackFrame(bytes);
   }
@@ -227,7 +231,9 @@ export class BoundedInboundFrames {
     wireBytes: number,
   ): Uint8Array | undefined {
     if (total > this.maxChunks) {
-      throw frameBoundError(`${this.maxChunks}-chunk reassembly limit`);
+      throw frameRefusalError(
+        `exceeds its ${this.maxChunks}-chunk reassembly limit`,
+      );
     }
     let entry = this.inFlight.get(messageId);
     if (entry !== undefined && entry.total !== total) {
@@ -241,10 +247,14 @@ export class BoundedInboundFrames {
 
     const charge = Math.max(wireBytes, this.minChunkBytes);
     if (this.bytesInFlight + charge > this.maxFrameBytes) {
-      throw frameBoundError(`${this.maxFrameBytes}-byte size limit`);
+      throw frameRefusalError(
+        `exceeds its ${this.maxFrameBytes}-byte size limit`,
+      );
     }
     if ((entry?.charged ?? 0) + 1 > this.maxChunks) {
-      throw frameBoundError(`${this.maxChunks}-chunk reassembly limit`);
+      throw frameRefusalError(
+        `exceeds its ${this.maxChunks}-chunk reassembly limit`,
+      );
     }
 
     if (entry === undefined) {

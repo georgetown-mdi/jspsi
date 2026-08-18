@@ -142,7 +142,7 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
  *   {@link MAX_WEBRTC_FRAME_BYTES} rather than by this structural budget.
  *
  * A map key needs no weight of its own: the scan refuses any frame whose map key
- * is not a string on the wire (see {@link structureOverBudget}), and a string key
+ * is not a string on the wire (see {@link scanFrameStructure}), and a string key
  * IS the property name, already charged in full by the `string` weight.
  *
  * The model is deliberately a *conservative* upper bound for the kinds it charges
@@ -178,7 +178,7 @@ export const WEBRTC_VALUE_WEIGHTS = {
  * a tiny wire frame of array/object headers -- an in-protocol shape, since the
  * association-table and mapped-element frames are arrays of numbers/objects --
  * could deserialize to many GiB. A structural pre-scan (see
- * {@link structureOverBudget}, run at the unpack chokepoint) sums each declared
+ * {@link scanFrameStructure}, run at the unpack chokepoint) sums each declared
  * value's per-kind weight -- a container's backing slots at its own header, so an
  * ancestor's reserved store is charged whether or not its children are on the wire
  * -- and rejects the frame *before* `unpack` allocates if the running cost would
@@ -263,6 +263,63 @@ export const MIN_CHUNK_RESIDENT_BYTES = 256;
  */
 export const MAX_WEBRTC_STRING_BYTES = 1024 * 1024;
 
+/**
+ * Which pre-scan rule refused a frame, with the fixed limit that rule enforces
+ * where it has one. {@link scanFrameStructure} returns one of these instead of a
+ * bare verdict so the failure an operator (or a support thread) reads names the
+ * control that fired rather than one standing in for the rest, and so a caller
+ * cannot pair a refusal with the wrong limit.
+ *
+ * A refusal carries the LIMIT and never the measurement that met it: every field
+ * here is a value the receiving side fixed, so nothing the peer chose reaches the
+ * rendered message (see {@link describeFrameStructureRefusal}).
+ *
+ * - `structure-bytes`: the running retained-byte cost passed
+ *   `maxStructureBytes` (the budget every per-kind weight is charged against, so
+ *   a frame of any one kind -- objects, arrays, strings, `bin`/`raw` views --
+ *   meets it here).
+ * - `nesting-depth`: the structure nests deeper than `maxDepth`.
+ * - `string-bytes`: a string declares more wire bytes than `maxStringBytes`.
+ * - `unbacked-elements`: a container declares more elements than the bytes that
+ *   follow it can encode (each element needs at least one byte), so its declared
+ *   count is one `unpack` would zero-fill rather than read.
+ * - `map-key`: a map key that is not a string on the wire, refused rather than
+ *   costed (see {@link scanFrameStructure}).
+ */
+export type FrameStructureRefusal =
+  | { readonly rule: "structure-bytes"; readonly limit: number }
+  | { readonly rule: "nesting-depth"; readonly limit: number }
+  | { readonly rule: "string-bytes"; readonly limit: number }
+  | { readonly rule: "unbacked-elements" }
+  | { readonly rule: "map-key" };
+
+/**
+ * The predicate a transport puts after "inbound WebRTC frame" to say why the scan
+ * refused it -- one wording for every transport, so an operator reading either
+ * half of the control sees one message for one rule.
+ *
+ * Composed from the refusal's fixed limit alone: no length, count, depth, or byte
+ * the peer chose is interpolated, so the rendered text is one of a fixed set of
+ * strings whatever the frame carried (a unit test holds that by rendering
+ * wildly different frames per rule and requiring identical text).
+ */
+export function describeFrameStructureRefusal(
+  refusal: FrameStructureRefusal,
+): string {
+  switch (refusal.rule) {
+    case "structure-bytes":
+      return `exceeds its ${refusal.limit}-byte structure limit`;
+    case "nesting-depth":
+      return `exceeds its ${refusal.limit}-level nesting limit`;
+    case "string-bytes":
+      return `exceeds its ${refusal.limit}-byte string limit`;
+    case "unbacked-elements":
+      return "declares a container with more elements than the bytes behind it can encode";
+    case "map-key":
+      return "keys a map with a value that is not a string";
+  }
+}
+
 /** A forward-only cursor over one BinaryPack buffer; every read throws
  * `RangeError` past the end, which the scan treats as a malformed/truncated
  * frame. */
@@ -302,7 +359,7 @@ class ByteCursor {
 /** What the scan needs to know about one BinaryPack value, beyond its cost: a
  * `map` alternates key and value children, so the scan must test what kind sits at
  * each key position, and `string` is the only kind a map key may be (see
- * {@link structureOverBudget}). */
+ * {@link scanFrameStructure}). */
 type ValueKind = "map" | "string" | "plain";
 
 /** One BinaryPack value's contribution to the structural scan: `children` is the
@@ -481,11 +538,13 @@ function readValueHeader(
 }
 
 /**
- * Whether the BinaryPack value in `buf` would deserialize to a structure whose
- * approximate retained-byte cost exceeds `maxStructureBytes`, nest deeper than
- * `maxDepth`, contain a string longer than `maxStringBytes`, declare any container
- * with more elements than the bytes that follow it can encode, or key a map with
- * anything but a string. Walks the structure reading only container headers and
+ * Scans the BinaryPack value in `buf`, returning the {@link FrameStructureRefusal}
+ * of the first rule that fires -- or `undefined` if the frame is admitted. A frame
+ * is refused when it would deserialize to a structure whose approximate
+ * retained-byte cost exceeds `maxStructureBytes`, nest deeper than `maxDepth`,
+ * contain a string longer than `maxStringBytes`, declare any container with more
+ * elements than the bytes that follow it can encode, or key a map with anything but
+ * a string. Walks the structure reading only container headers and
  * scalar lengths -- never materializing the payload -- and charges each declared
  * value its per-kind weight
  * (see {@link WEBRTC_VALUE_WEIGHTS}), rejecting as soon as the running cost
@@ -513,7 +572,7 @@ function readValueHeader(
  * past the end of the buffer, not with the bytes the wire actually spends, so no
  * charge taken as the scan walks can bound it.
  *
- * A read past the end (a malformed/truncated frame) returns `false`: every value it
+ * A read past the end (a malformed/truncated frame) is admitted: every value it
  * passed was within the byte budget, the bytes past the end unpack as zero-valued
  * integers into slots this scan has already charged, so the structure it commits
  * `unpack` to is already bounded, and PeerJS's own unpack handles the malformation
@@ -521,12 +580,12 @@ function readValueHeader(
  * descends into it, so an underrun deeper in the frame cannot carry a non-string key
  * past this point.
  */
-export function structureOverBudget(
+export function scanFrameStructure(
   buf: Uint8Array,
   maxStructureBytes: number,
   maxDepth: number,
   maxStringBytes: number = MAX_WEBRTC_STRING_BYTES,
-): boolean {
+): FrameStructureRefusal | undefined {
   const cursor = new ByteCursor(buf);
   // remaining[d] = child values still to read at nesting level d; one root value.
   const remaining: Array<number> = [1];
@@ -554,24 +613,26 @@ export function structureOverBudget(
         maxStringBytes,
       );
       // A string over the per-string byte cap (`weight = -1`) is refused outright.
-      if (weight < 0) return true;
+      if (weight < 0) return { rule: "string-bytes", limit: maxStringBytes };
       // A map key must be a string on the wire; anything else is refused before the
       // scan descends into it, since the property name `map[key] = value` coerces it
       // to is not bounded by what the frame spends to declare it.
-      if (atKeyPosition && kind !== "string") return true;
+      if (atKeyPosition && kind !== "string") return { rule: "map-key" };
       cost += weight;
-      if (cost > maxStructureBytes) return true;
+      if (cost > maxStructureBytes)
+        return { rule: "structure-bytes", limit: maxStructureBytes };
       if (children > 0) {
         // Each declared element needs at least one byte to encode, so a container
         // claiming more elements than the bytes that follow is a zero-fill lie.
-        if (children > cursor.remaining()) return true;
-        if (remaining.length >= maxDepth) return true;
+        if (children > cursor.remaining()) return { rule: "unbacked-elements" };
+        if (remaining.length >= maxDepth)
+          return { rule: "nesting-depth", limit: maxDepth };
         remaining.push(children);
         mapLevel.push(kind === "map");
       }
     }
   } catch {
-    return false;
+    return undefined;
   }
-  return false;
+  return undefined;
 }

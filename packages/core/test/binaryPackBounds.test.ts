@@ -1,3 +1,4 @@
+import { pack } from "peerjs-js-binarypack";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -9,8 +10,19 @@ import {
   MAX_WEBRTC_STRING_BYTES,
   MIN_CHUNK_RESIDENT_BYTES,
   WEBRTC_VALUE_WEIGHTS,
-  structureOverBudget,
+  describeFrameStructureRefusal,
+  scanFrameStructure,
 } from "../src/connection/binaryPackBounds";
+
+import type { FrameStructureRefusal } from "../src/connection/binaryPackBounds";
+import type { Packable } from "peerjs-js-binarypack";
+
+/** Whether the scan refuses `frame` under the given limits, for the tests that
+ * assert only the verdict; the rule each refusal names is asserted separately (see
+ * "the rule a refusal names"). */
+function scanRefuses(...args: Parameters<typeof scanFrameStructure>): boolean {
+  return scanFrameStructure(...args) !== undefined;
+}
 
 /** A BinaryPack array32 header declaring `count` elements (no element bytes). */
 function array32Header(count: number): Uint8Array {
@@ -121,44 +133,37 @@ describe("the WebRTC inbound bound constants", () => {
   });
 });
 
-describe("structureOverBudget", () => {
+describe("scanFrameStructure", () => {
   test("flags a flat array over the byte budget", () => {
     // 40 + 50*8 = 440 retained bytes, over a 100-byte budget.
-    expect(structureOverBudget(arrayOfFixints(50), 100, 256)).toBe(true);
+    expect(scanRefuses(arrayOfFixints(50), 100, 256)).toBe(true);
   });
 
   test("passes a flat array under the byte budget", () => {
-    expect(structureOverBudget(arrayOfFixints(50), 1000, 256)).toBe(false);
+    expect(scanRefuses(arrayOfFixints(50), 1000, 256)).toBe(false);
   });
 
   test("flags an array declaring more than the bytes that follow", () => {
-    expect(structureOverBudget(array32Header(1000), 1_000_000, 256)).toBe(true);
+    expect(scanRefuses(array32Header(1000), 1_000_000, 256)).toBe(true);
   });
 
   test("flags a string longer than the per-string byte cap", () => {
-    expect(structureOverBudget(str32Header(1000), 1_000_000, 256, 100)).toBe(
-      true,
-    );
+    expect(scanRefuses(str32Header(1000), 1_000_000, 256, 100)).toBe(true);
   });
 
   test("passes a short fixstr under the per-string cap", () => {
     // fixstr "abc" (0xb3 + 3 bytes) is one value and well under any string cap.
     expect(
-      structureOverBudget(
-        new Uint8Array([0xb3, 0x61, 0x62, 0x63]),
-        100,
-        256,
-        100,
-      ),
+      scanRefuses(new Uint8Array([0xb3, 0x61, 0x62, 0x63]), 100, 256, 100),
     ).toBe(false);
   });
 
   test("flags a fixstr over the per-string cap, uniformly with the wide markers", () => {
     // fixstr "abcd" (4 bytes) against a 2-byte cap: the cap fires on fixstr too,
     // not only str16/str32, so the marker dispatch is one rule.
-    expect(
-      structureOverBudget(new Uint8Array(fixstr("abcd")), 1000, 256, 2),
-    ).toBe(true);
+    expect(scanRefuses(new Uint8Array(fixstr("abcd")), 1000, 256, 2)).toBe(
+      true,
+    );
   });
 
   test("flags excessive nesting depth", () => {
@@ -166,17 +171,17 @@ describe("structureOverBudget", () => {
     const out: Array<number> = [];
     for (let d = 0; d < 10; d++) out.push(0x91); // fixarray(1)
     out.push(0x01); // a fixint leaf
-    expect(structureOverBudget(new Uint8Array(out), 1000, 4)).toBe(true);
+    expect(scanRefuses(new Uint8Array(out), 1000, 4)).toBe(true);
   });
 });
 
-describe("structureOverBudget: the per-value cost model", () => {
+describe("scanFrameStructure: the per-value cost model", () => {
   // Each value kind is a single-value frame charged exactly its documented weight:
   // a budget one byte below the weight rejects, a budget at the weight accepts. The
   // string cap is left wide so only the structural weight is under test.
   const atBoundary = (frame: Uint8Array, weight: number): void => {
-    expect(structureOverBudget(frame, weight - 1, 256, 1 << 20)).toBe(true);
-    expect(structureOverBudget(frame, weight, 256, 1 << 20)).toBe(false);
+    expect(scanRefuses(frame, weight - 1, 256, 1 << 20)).toBe(true);
+    expect(scanRefuses(frame, weight, 256, 1 << 20)).toBe(false);
   };
 
   test("charges an empty object the object weight", () => {
@@ -297,15 +302,11 @@ describe("structureOverBudget: the per-value cost model", () => {
   test("the cost is additive across a mapped-element record", () => {
     // One record charges object + two key strings + two scalars; the array root
     // adds the array weight. Pinned against the real BinaryPack-encoded shape.
+    expect(scanRefuses(mappedElementFrame(1), expectedMappedCost(1), 256)).toBe(
+      false,
+    );
     expect(
-      structureOverBudget(mappedElementFrame(1), expectedMappedCost(1), 256),
-    ).toBe(false);
-    expect(
-      structureOverBudget(
-        mappedElementFrame(1),
-        expectedMappedCost(1) - 1,
-        256,
-      ),
+      scanRefuses(mappedElementFrame(1), expectedMappedCost(1) - 1, 256),
     ).toBe(true);
   });
 
@@ -320,7 +321,7 @@ describe("structureOverBudget: the per-value cost model", () => {
   });
 });
 
-describe("structureOverBudget: the map-key rule", () => {
+describe("scanFrameStructure: the map-key rule", () => {
   // A map key that is not a string on the wire is refused rather than costed: the
   // property name `map[key] = value` coerces it to grows with the descendants
   // `unpack` zero-fills past the end of the buffer, not with the bytes the frame
@@ -329,7 +330,7 @@ describe("structureOverBudget: the map-key rule", () => {
   // no legitimate frame is refused here -- the differential suite holds that
   // premise to the real packer.
   const refuses = (frame: Uint8Array): boolean =>
-    structureOverBudget(frame, Number.MAX_SAFE_INTEGER, 256, 1 << 20);
+    scanRefuses(frame, Number.MAX_SAFE_INTEGER, 256, 1 << 20);
 
   test("refuses a map keyed by an integer, at any budget", () => {
     expect(refuses(new Uint8Array([0x81, 0x07, 0x08]))).toBe(true); // fixmap(1), fixint key
@@ -380,5 +381,180 @@ describe("structureOverBudget: the map-key rule", () => {
     expect(
       refuses(new Uint8Array([0x81, ...fixstr("a"), 0x92, 0x01, 0x02])),
     ).toBe(false);
+  });
+});
+
+/** Encode a value with the real BinaryPack packer and return the wire bytes. The
+ * packer resolves synchronously for everything but a `Blob`, which nothing here
+ * packs; the await keeps the declared type honest. */
+async function packFrame(value: Packable): Promise<Uint8Array> {
+  return new Uint8Array(await pack(value));
+}
+
+/** `n` mapped-element records, the shape of the largest legitimate frame. */
+function records(n: number): Packable {
+  return Array.from({ length: n }, (_, i) => ({
+    theirIndex: i,
+    iteration: 0,
+  })) as Packable;
+}
+
+/** `n` binary values of `bytes` each: the kind charged the `binary` weight on top
+ * of its container's slot, so a frame of them meets the retained-byte budget on
+ * that weight rather than on its containers. */
+function binaryValues(n: number, bytes: number): Packable {
+  return Array.from({ length: n }, () => new ArrayBuffer(bytes)) as Packable;
+}
+
+/** A single value wrapped in `levels` arrays. */
+function nestedArrays(levels: number): Packable {
+  let value: Packable = 1;
+  for (let d = 0; d < levels; d += 1) value = [value] as Packable;
+  return value;
+}
+
+describe("scanFrameStructure: the rule a refusal names", () => {
+  // A refusal names the rule that fired, so an operator (and any support thread
+  // reading the failure) sees the control that refused the frame rather than one
+  // standing in for the rest. Each rule is driven by a frame the REAL packer
+  // produced, bar the two whose shapes it never emits -- a container declaring more
+  // elements than the bytes behind it, and a non-string map key -- which are
+  // assembled here, the concession the differential suite makes for the markers the
+  // packer never reaches.
+  const wideBudget = Number.MAX_SAFE_INTEGER;
+  const wideStringCap = 1 << 20;
+
+  /** The refusal `frame` draws under these limits; a frame the scan admits fails
+   * the test here rather than at a confusing assertion downstream. */
+  function refusalFor(
+    frame: Uint8Array,
+    maxStructureBytes: number,
+    maxDepth = 256,
+    maxStringBytes = wideStringCap,
+  ): FrameStructureRefusal {
+    const refusal = scanFrameStructure(
+      frame,
+      maxStructureBytes,
+      maxDepth,
+      maxStringBytes,
+    );
+    if (refusal === undefined) throw new Error("the scan admitted the frame");
+    return refusal;
+  }
+
+  test("names the retained-byte budget for a frame of packed records", async () => {
+    const frame = await packFrame(records(200));
+    expect(refusalFor(frame, 1000)).toEqual({
+      rule: "structure-bytes",
+      limit: 1000,
+    });
+  });
+
+  test("names the retained-byte budget for a frame of packed binary values", async () => {
+    // The `binary` weight has no rule of its own: a frame of `bin`/`raw` values
+    // meets the same budget every other kind is charged against. The boundary is
+    // pinned so the refusal is that weight's doing and not the root array's -- the
+    // array and its slots alone are 200 of the 5,320 charged bytes.
+    const frame = await packFrame(binaryValues(20, 4));
+    const cost =
+      WEBRTC_VALUE_WEIGHTS.array +
+      20 * (WEBRTC_VALUE_WEIGHTS.scalar + WEBRTC_VALUE_WEIGHTS.binary);
+    expect(scanFrameStructure(frame, cost, 256, wideStringCap)).toBeUndefined();
+    expect(refusalFor(frame, cost - 1)).toEqual({
+      rule: "structure-bytes",
+      limit: cost - 1,
+    });
+  });
+
+  test("names the nesting-depth cap", async () => {
+    const frame = await packFrame(nestedArrays(12));
+    expect(refusalFor(frame, wideBudget, 4)).toEqual({
+      rule: "nesting-depth",
+      limit: 4,
+    });
+  });
+
+  test("names the per-string cap", async () => {
+    const frame = await packFrame("x".repeat(4096));
+    expect(refusalFor(frame, wideBudget, 256, 1024)).toEqual({
+      rule: "string-bytes",
+      limit: 1024,
+    });
+  });
+
+  test("names the byte-backed-elements check", () => {
+    // An array32 declaring 1,000 elements with no bytes behind it: the packer emits
+    // the elements it declares, so this shape is assembled.
+    expect(refusalFor(array32Header(1000), wideBudget)).toEqual({
+      rule: "unbacked-elements",
+    });
+  });
+
+  test("names the map-key rule", () => {
+    // A fixmap keyed by a fixint, likewise assembled: the packer emits a map only
+    // for a plain JS object, whose keys are strings.
+    expect(refusalFor(new Uint8Array([0x81, 0x07, 0x08]), wideBudget)).toEqual({
+      rule: "map-key",
+    });
+  });
+
+  test("renders one fixed message per rule, whatever the refused frame declares", async () => {
+    // The rendered text is composed from the receiving side's own limits alone, so
+    // no length, count, depth, or byte the peer chose reaches an operator through
+    // it. Each rule is put to two frames differing in every quantity the peer
+    // controls, and both must render the same message.
+    const cases: Array<{
+      message: string;
+      limits: [number, number, number];
+      frames: Array<Uint8Array>;
+    }> = [
+      {
+        message: "exceeds its 1000-byte structure limit",
+        limits: [1000, 256, wideStringCap],
+        frames: [
+          await packFrame(records(200)),
+          await packFrame(binaryValues(300, 4096)),
+        ],
+      },
+      {
+        message: "exceeds its 4-level nesting limit",
+        limits: [wideBudget, 4, wideStringCap],
+        frames: [
+          await packFrame(nestedArrays(12)),
+          await packFrame(nestedArrays(200)),
+        ],
+      },
+      {
+        message: "exceeds its 1024-byte string limit",
+        limits: [wideBudget, 256, 1024],
+        frames: [
+          await packFrame("x".repeat(2048)),
+          await packFrame("y".repeat(200_000)),
+        ],
+      },
+      {
+        message:
+          "declares a container with more elements than the bytes behind it can encode",
+        limits: [wideBudget, 256, wideStringCap],
+        frames: [array32Header(1000), array32Header(0xffffffff)],
+      },
+      {
+        message: "keys a map with a value that is not a string",
+        limits: [wideBudget, 256, wideStringCap],
+        frames: [
+          new Uint8Array([0x81, 0x07, 0x08]), // fixint key
+          new Uint8Array([0x81, ...array32Header(0xffffffff), 0x08]), // array32 key
+        ],
+      },
+    ];
+
+    for (const { message, limits, frames } of cases) {
+      for (const frame of frames) {
+        expect(
+          describeFrameStructureRefusal(refusalFor(frame, ...limits)),
+          `a ${frame.byteLength}-byte frame rendered another message`,
+        ).toBe(message);
+      }
+    }
   });
 });

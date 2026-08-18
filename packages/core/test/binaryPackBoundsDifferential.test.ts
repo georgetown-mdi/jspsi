@@ -8,7 +8,7 @@ import {
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
   WEBRTC_VALUE_WEIGHTS,
-  structureOverBudget,
+  scanFrameStructure,
 } from "../src/connection/binaryPackBounds";
 
 import type { Packable, Unpackable } from "peerjs-js-binarypack";
@@ -522,16 +522,18 @@ function modelledUnpackCost(value: unknown): number {
 /** Whether the scan accepts `frame` at `budget` retained bytes, with the depth and
  * per-string caps held at their production values so only the byte budget varies. */
 function scanAccepts(frame: Uint8Array, budget: number): boolean {
-  return !structureOverBudget(
-    frame,
-    budget,
-    MAX_WEBRTC_REASSEMBLY_DEPTH,
-    MAX_WEBRTC_STRING_BYTES,
+  return (
+    scanFrameStructure(
+      frame,
+      budget,
+      MAX_WEBRTC_REASSEMBLY_DEPTH,
+      MAX_WEBRTC_STRING_BYTES,
+    ) === undefined
   );
 }
 
 /**
- * The exact retained cost `structureOverBudget` charges `frame`, recovered from the
+ * The exact retained cost `scanFrameStructure` charges `frame`, recovered from the
  * scan's own accept/reject boundary: it rejects as soon as the running sum exceeds
  * the budget, so it accepts exactly the budgets at or above that sum, and the least
  * accepted budget IS the sum. Reading the charge as a number -- rather than only
@@ -698,7 +700,7 @@ describe("the real packer's marker table", () => {
   });
 });
 
-describe("structureOverBudget against the real unpacker", () => {
+describe("scanFrameStructure against the real unpacker", () => {
   test("charges at least the modelled cost of the structure the unpacker built", async () => {
     // The security direction, and the reason the scan can be trusted as a bound
     // within the model's coverage: for every frame the real unpacker decodes, the
@@ -738,19 +740,19 @@ describe("structureOverBudget against the real unpacker", () => {
     // not a deliberately tight test budget firing.
     for (const { label, frame } of await allFrames()) {
       expect(
-        structureOverBudget(
+        scanFrameStructure(
           frame,
           MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
           MAX_WEBRTC_REASSEMBLY_DEPTH,
           MAX_WEBRTC_STRING_BYTES,
         ),
         `${label}: the scan rejected a frame the real unpacker accepts`,
-      ).toBe(false);
+      ).toBeUndefined();
     }
   });
 });
 
-describe("structureOverBudget on the shapes the wire size understates", () => {
+describe("scanFrameStructure on the shapes the wire size understates", () => {
   // The corpus above is every frame a real encoder produces, and in all of them the
   // wire carries each declared value. These are the two shapes where what `unpack`
   // retains is decided by something other than the bytes it reads: a declared count
@@ -787,13 +789,16 @@ describe("structureOverBudget on the shapes the wire size understates", () => {
     const frame = wideNestedArrayFrame(200, 700_000, 700_000);
     expect(frame.byteLength).toBeLessThan(1024 * 1024);
     expect(
-      structureOverBudget(
+      scanFrameStructure(
         frame,
         MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
         MAX_WEBRTC_REASSEMBLY_DEPTH,
         MAX_WEBRTC_STRING_BYTES,
       ),
-    ).toBe(true);
+    ).toEqual({
+      rule: "structure-bytes",
+      limit: MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
+    });
   });
 
   test("refuses a map whose keys the real unpacker coerces from packed doubles", async () => {
@@ -839,7 +844,7 @@ describe("structureOverBudget on the shapes the wire size understates", () => {
   });
 });
 
-describe("structureOverBudget on a frame of bin/raw values", () => {
+describe("scanFrameStructure on a frame of bin/raw values", () => {
   // A `bin`/`raw` element is one wire byte at its shortest and decodes to a view of
   // its own, so a frame of them is where the wire size says least about what
   // `unpack` commits: the structural budget is what bounds how many such views a
