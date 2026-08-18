@@ -141,8 +141,9 @@ operator's setup run.
 
 `Dockerfile.fips` builds a second image on Amazon Linux 2023 carrying the
 CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution. It is
-not published; why it exists, what may be claimed of it, and what stops working
-inside it are in
+published from the same release workflow under the default image's tags with
+`-fips` appended ([RELEASES.md](../RELEASES.md#which-image-carries-which-posture));
+why it exists, what may be claimed of it, and what stops working inside it are in
 [fips-variant-image.md](../notes/fips-variant-image.md). Everything above about
 the npm freeze applies to it unchanged -- same lockfile, same `npm ci`, same
 `--omit=dev` runtime tree, same freeze test. What follows is what it pins
@@ -283,6 +284,26 @@ with this certificate, what a claim about the image may say, and the conditions
 the policy attaches to three of the algorithm rows are in
 [fips-variant-image.md](../notes/fips-variant-image.md).
 
+### The Caveat
+
+The certificate carries one Caveat, quoted here verbatim:
+
+> When operated in approved mode. No assurance of minimum security of SSPs
+> (e.g., keys, bit strings) that are externally loaded, or of SSPs established
+> with externally loaded SSPs.
+
+Provenance differs from every other row in this section. The Caveat is a field
+of the certificate detail page itself, an HTML page carrying no page numbers,
+rather than of the 71-page security policy that sources the tables below; there
+is accordingly no page citation for it and none is fabricated.
+
+`SSP` is the FIPS 140-3 term for a sensitive security parameter: a key, a seed,
+or any other value whose disclosure or modification compromises the module. The
+sentence reaches this project's composition directly -- the key schedule mixes a
+pre-shared secret the module did not generate -- and
+[COMPLIANCE.md](../COMPLIANCE.md#fips-140) is where what follows from that is
+stated.
+
 ### The tested operational environments
 
 Section 2.2, Table 3 (pp. 8-9), complete -- three hardware platforms, each
@@ -409,7 +430,7 @@ themselves.
 
 ### The writable set
 
-The default image's container writes `/work` and
+Either image's container writes `/work` and
 `/run/psilink/sftp-credentials`, and no path under `/app`. The measurement
 creates a file in each of the two writable directories under the account the
 image runs as and requires the same write under `/app` to be refused; a write is
@@ -429,9 +450,10 @@ image while none of them is rewritable through that mode. What re-points a link
 is write permission on the directory holding it, which the walk already reaches
 through the directory itself.
 
-Both halves are scoped to the default image. The variant carries no `USER`,
-makes no unprivileged claim, and would answer the whole measurement vacuously as
-root.
+Both halves run on both images. They differ in where the account comes from --
+the default image inherits `node` from `node:26-alpine`, the variant creates it
+at the same uid and gid, Amazon Linux 2023 carrying no such account -- and in
+nothing this measurement reads.
 
 ### The symlink containment
 
@@ -460,8 +482,7 @@ Any escaping or dangling link fails the step, and the offenders -- each with
 its raw target and, where one resolved, the path it resolved to -- are printed
 so the failure is diagnosable from the job log alone.
 
-Scoped to the default image, as the writable-set measurement above is: the
-variant carries no `USER` and makes no unprivileged claim.
+Run on both images, as the writable-set measurement above is.
 
 ### The setuid and setgid inventory
 
@@ -478,26 +499,32 @@ difference in either direction.
 | Image | Recorded inventory |
 | --- | --- |
 | `Dockerfile` | empty -- no setuid or setgid file |
-| `Dockerfile.fips` | `/usr/bin/chage`, `/usr/bin/gpasswd`, `/usr/bin/mount`, `/usr/bin/newgrp`, `/usr/bin/su`, `/usr/bin/umount`, `/usr/bin/write`, `/usr/libexec/utempter/utempter`, `/usr/sbin/pam_timestamp_check`, `/usr/sbin/unix_chkpwd` |
+| `Dockerfile.fips` | empty -- no setuid or setgid file |
 
-The default image's inventory is empty because the runtime stage takes off the
-one setgid bit its OS install brings in. `samba-client` pulls in `linux-pam`,
-whose `/usr/sbin/unix_chkpwd` lands setgid `shadow`, and `chmod g-s` in the
-runtime stage removes it; neither stage's base carries another bit of either
-kind. `scripts/dockerfile-freeze.test.mjs` holds that instruction as one of the
-two mode changes it permits outside the writable trees, and the measurement holds
-the outcome, which is the half that also sees the base image's own files.
+Both inventories are empty because each runtime stage takes off every bit its
+own OS install brings in, and neither stage's base carries another. Both images
+declare `USER node`, so a bit left in place would be a boundary an unprivileged
+process could push against rather than a formality, and neither role
+authenticates a Unix account or mounts a filesystem.
 
-The variant's inventory is ten files, and it strips none of them: eight setuid
-root -- account, mount and PAM helpers -- plus `write` setgid `tty` and
-`utempter` setgid `utmp`. Where the default image has a reason to strip -- it
-declares `USER node`, so a bit left in place would be a boundary rather than a
-formality -- the variant declares no `USER` and runs as root, an account those
-bits elevate nothing for. Its Amazon Linux 2023 base and the `samba-client`
-closure recorded above carry the ten between them; that closure is materially
-larger than Alpine's, bringing `systemd`, `pam`, `cryptsetup-libs`,
-`device-mapper` and `util-linux` with it. Per-file detail behind the row is in
+The default image strips one file. `samba-client` pulls in `linux-pam`, whose
+`/usr/sbin/unix_chkpwd` lands setgid `shadow`, and `chmod g-s` in the runtime
+stage removes it.
+
+The variant strips ten, its Amazon Linux 2023 base and the `samba-client`
+closure recorded above carrying between them eight setuid root -- account, mount
+and PAM helpers -- plus `write` setgid `tty` and `utempter` setgid `utmp`. That
+closure is materially larger than Alpine's, bringing `systemd`, `pam`,
+`cryptsetup-libs`, `device-mapper` and `util-linux` with it. The ten paths are
+named as literals in one `chmod u-s,g-s`, so a path the closure stops carrying
+fails the build rather than passing unnoticed, and one it gains reddens this
+measurement. Per-file detail on what each was for is in
 [the FIPS variant's setuid and setgid files](#the-fips-variants-setuid-and-setgid-files).
+
+`scripts/dockerfile-freeze.test.mjs` holds each image's stripping instruction as
+one of the mode changes it permits outside the writable trees, and the
+measurement holds the outcome, which is the half that also sees the base image's
+own files.
 
 An image added to the matrix records its own row the same way rather than
 starting unmeasured: its arm in the step is set to the `@unrecorded` sentinel,
@@ -620,9 +647,11 @@ separately downloaded script would learn either is the open part.
 
 ### The FIPS variant's setuid and setgid files
 
-The per-file detail behind the variant's recorded row, as `image_smoke.yaml`
-measured it on the built image at the base digest pinned above (run
-31235317792, `amd64`):
+The ten files the variant's runtime stage strips, with the bits and modes they
+arrive with, as `image_smoke.yaml` measured them on a build at the base digest
+pinned above before the stripping instruction existed (run 31235317792,
+`amd64`). This is the evidence behind that instruction's literal path list, and
+the record of what an unstripped build of this closure carries:
 
     -rwsr-xr-x 1 root root 74360 Nov 20  2023 /usr/bin/chage
     -rwsr-xr-x 1 root root 78680 Nov 20  2023 /usr/bin/gpasswd
@@ -642,13 +671,12 @@ Eight are setuid root: the account helpers `chage`, `gpasswd`, `newgrp` and
 separate what the base rootfs carries from what the package closure adds; no row
 above turns on that split.
 
-Two of these names also appear in the default image's measurement above, both
-carrying a different bit there: `unix_chkpwd` lands setgid `shadow` on Alpine
-and the runtime stage strips it, while here it is setuid root; and
-`pam_timestamp_check`, which Alpine's install leaves with neither bit, is setuid
-root here. The same package name on two distributions is not the same file
-modes, which is why each image's inventory is measured rather than derived from
-the other's.
+Two of these names also appear in the default image's closure, carrying a
+different bit there: `unix_chkpwd` lands setgid `shadow` on Alpine, while here it
+is setuid root; and `pam_timestamp_check`, which Alpine's install leaves with
+neither bit, is setuid root here. The same package name on two distributions is
+not the same file modes, which is why each image's list is measured rather than
+derived from the other's.
 
 ### The FIPS reference build's inventory
 

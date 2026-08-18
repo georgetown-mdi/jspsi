@@ -169,6 +169,34 @@ RUN set -eux; \
   echo "activated FIPS provider: ${reported}"; \
   test "${reported}" = "${FIPS_MODULE_VERSION} active"
 
+# The account both roles run as, created rather than inherited: Amazon Linux
+# 2023 carries no `node` account, the runtime here coming from the official
+# tarball rather than from a package, so the uid and gid the default image gets
+# from node:26-alpine are made by hand at the same 1000:1000 docs/DEPLOYMENT.md
+# tells an operator to chown a bind mount to.
+RUN groupadd --gid 1000 node && useradd --uid 1000 --gid node --create-home --home-dir /home/node node
+
+# Every setuid and setgid bit the base and the package closure above carry
+# between them, taken off. The USER below is what makes them matter: each of
+# these account, mount and PAM helpers would otherwise be a boundary the
+# unprivileged runtime account could push against, and neither role
+# authenticates a Unix account or mounts a filesystem, so the bits buy the image
+# nothing. image_smoke.yaml measures the built image's whole setuid/setgid
+# inventory against the empty set this leaves, which is what catches a package
+# that gains a bit or a transaction that lands one after this line; see
+# docs/spec/CONTAINER_IMAGES.md.
+RUN chmod u-s,g-s \
+  /usr/bin/chage \
+  /usr/bin/gpasswd \
+  /usr/bin/mount \
+  /usr/bin/newgrp \
+  /usr/bin/su \
+  /usr/bin/umount \
+  /usr/bin/write \
+  /usr/libexec/utempter/utempter \
+  /usr/sbin/pam_timestamp_check \
+  /usr/sbin/unix_chkpwd
+
 # Activates the FIPS and base providers and NOT the default provider, with
 # fips=yes as the default property, so an algorithm the certified module does
 # not carry fails rather than falling back to an uncertified implementation.
@@ -215,6 +243,28 @@ COPY support/fips-probe/engagement.mjs support/fips-probe/image-engagement.mjs /
 
 ENV OPENSSL_CONF=/etc/psilink/fips-only.cnf
 ENV OPENSSL_MODULES=/usr/lib64/ossl-modules
+
+# Everything the container must WRITE, created and handed to the unprivileged
+# account the USER below drops to, exactly as in the root Dockerfile: /work so a
+# run with no bind mount still has somewhere to write, and /run/psilink for the
+# console's pasted-credential scratch directory, whose root-owned parent an
+# unprivileged server cannot create at boot. /app is deliberately not among
+# them, so the running process reads and executes its own code without being
+# able to rewrite it.
+RUN mkdir -p /work /run/psilink/sftp-credentials \
+  && chown -R node:node /work /run/psilink \
+  && chmod -R 700 /run/psilink
+
+# Stated rather than left to the runtime's passwd lookup, as in the root
+# Dockerfile: the CLI derives its default signing-identity directory from the
+# home directory while its module loads, ahead of any command.
+ENV HOME=/home/node
+
+# Drop to the account created above for both roles, after every COPY and RUN so
+# those still build as root and /app stays root-owned, and before the WORKDIR
+# below so the ENTRYPOINT inherits it. The preamble the ENTRYPOINT runs needs no
+# privilege either: it reads /proc/sys/crypto/fips_enabled and runs a probe.
+USER node
 
 WORKDIR /work
 

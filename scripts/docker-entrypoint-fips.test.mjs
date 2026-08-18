@@ -81,13 +81,18 @@ function runPreamble({
     chmodSync(openssl, 0o755);
   }
 
+  const env = {
+    ...process.env,
+    FIPS_MODULE_VERSION: moduleVersion,
+    PATH: `${workdir}:${process.env.PATH}`,
+  };
+  // `null` stands for the variable being absent from the environment
+  // altogether, which is a different shell case from an empty one.
+  if (moduleVersion === null) delete env.FIPS_MODULE_VERSION;
+
   const result = spawnSync(shell, [ENTRYPOINT, "--help"], {
     encoding: "utf8",
-    env: {
-      ...process.env,
-      FIPS_MODULE_VERSION: moduleVersion,
-      PATH: `${workdir}:${process.env.PATH}`,
-    },
+    env,
   });
   return result.stderr;
 }
@@ -123,6 +128,39 @@ for (const [shell, label] of SHELLS) {
       expect(stderr).toContain("module 9.9.9-baked-into-the-image");
       expect(stderr).not.toContain(CERTIFIED_MODULE);
     });
+
+    // FIPS_MODULE_VERSION reaches the preamble from the image's own ENV, which
+    // an operator can clear or override at `docker run`. The assurance line is
+    // the only per-run signal that the module the image was built around is the
+    // one serving, so a run that cannot name a module has to say that rather
+    // than emit the same sentence with nothing in the module position.
+    for (const [absentValue, label] of [
+      ["", "empty"],
+      [null, "absent from the environment"],
+    ]) {
+      it(`names no module, and says why, when FIPS_MODULE_VERSION is ${label}`, () => {
+        const stderr = run({ exitCode: 0, moduleVersion: absentValue });
+
+        expect(stderr).toContain(SERVED_SENTENCE);
+        expect(stderr).toContain("a module this run cannot name");
+        expect(stderr).toContain("FIPS_MODULE_VERSION");
+        // The failure this guards is the populated sentence emitted with
+        // nothing where the version belongs.
+        expect(stderr).not.toMatch(/\bmodule\s+\(probed/);
+      });
+
+      it(`names no module on the warning path either when FIPS_MODULE_VERSION is ${label}`, () => {
+        const stderr = run({
+          exitCode: 1,
+          moduleVersion: absentValue,
+          probeOutput: "- fips.so was not mapped into the process",
+        });
+
+        expect(stderr).toContain("[psilink] WARNING:");
+        expect(stderr).toContain("a module this run cannot name");
+        expect(stderr).not.toMatch(/\(module *\)/);
+      });
+    }
 
     it("keeps the probe's transcript off the success path", () => {
       const stderr = run({

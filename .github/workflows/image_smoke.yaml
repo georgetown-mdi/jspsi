@@ -126,15 +126,15 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 
-      # The default image runs unprivileged, and every other step here would pass
-      # just as happily as uid 0 -- so a dropped or widened USER line is invisible
-      # to all of them and needs its own assertion. The uid is not merely non-zero
-      # but the exact one docs/DEPLOYMENT.md tells operators to chown a bind mount
-      # to. The variant carries no USER and makes no such claim, so this and the
-      # bind-mount step below are the default leg's alone until it drops privilege
-      # too; dockerfile-freeze.test.mjs scopes its ownership guard the same way.
+      # Both published images run unprivileged, and every other step here would
+      # pass just as happily as uid 0 -- so a dropped or widened USER line is
+      # invisible to all of them and needs its own assertion. The uid is not
+      # merely non-zero but the exact one docs/DEPLOYMENT.md tells operators to
+      # chown a bind mount to, and it is the same pair on both legs: the default
+      # image inherits the account from node:26-alpine, the variant creates it,
+      # Amazon Linux 2023 carrying none. dockerfile-freeze.test.mjs holds the
+      # instructions behind it on both images.
       - name: Smoke the container's identity
-        if: matrix.fips == 'false'
         run: |
           set -euo pipefail
           uid=$(docker run --rm --entrypoint id ${{ matrix.tag }} -u)
@@ -166,11 +166,7 @@ jobs:
       # matches every link in the image while saying nothing about rewriting.
       # Re-pointing a link takes write permission on the directory holding it,
       # which the walk already reaches through that directory itself.
-      #
-      # Scoped to the default image, as the identity step above is: the variant
-      # carries no USER and makes no unprivileged claim.
       - name: Measure the container's writable set
-        if: matrix.fips == 'false'
         run: |
           set -euo pipefail
           docker run --rm --entrypoint sh ${{ matrix.tag }} -c '
@@ -228,10 +224,7 @@ jobs:
       # resolution of a dangling target has nothing there to resolve to and
       # fails `[ -e ]`, and the guard buckets it as dangling rather than
       # reading it as an escape.
-      #
-      # Scoped to the default image, as the two steps above are.
       - name: Measure the container's symlink containment
-        if: matrix.fips == 'false'
         run: |
           set -euo pipefail
           docker run --rm --user 0 --entrypoint sh ${{ matrix.tag }} -c '
@@ -274,6 +267,10 @@ jobs:
       # single-pass keeps the round-trip count constant instead of one round per
       # linkage key, which is what keeps this to seconds; the strategy is a
       # consented disclosure tradeoff, and these are synthetic inputs.
+      #
+      # The default leg's alone because the variant has an end-to-end exchange of
+      # its own below, over the same chowned bind mounts; a second copy of this
+      # one would measure nothing the pair does not.
       - name: Smoke the CLI role over a writable bind mount
         if: matrix.fips == 'false'
         run: |
@@ -413,13 +410,12 @@ jobs:
       # JOB_DATA_ROOT turns the job API on, which is what makes this a smoke of
       # the console appliance rather than of the web UI alone: enabling it puts
       # the fail-closed credential-scratch setup in the startup path, and that
-      # setup writes under root-owned /run. On the default image the server is
-      # unprivileged and refuses to boot there unless the image prepared the
-      # directory for it, so this step would time out rather than answer; the
-      # variant still runs as root, where the same step only exercises the path.
+      # setup writes under root-owned /run. The server is unprivileged on both
+      # images and refuses to boot there unless the image prepared the directory
+      # for it, so this step times out rather than answering when it did not.
       #
-      # The data mount goes to uid 1000 for the same reason: it is the account the
-      # default image writes as, and root on the variant leg writes there anyway.
+      # The data mount goes to uid 1000 for the same reason: it is the account
+      # both images write as.
       - name: Smoke the serve role
         run: |
           set -euo pipefail
@@ -481,9 +477,9 @@ jobs:
       # default branch on its own and runs the floating tag -- the published job
       # below is that half.
       #
-      # Scoped to the default image: it is the one published as
-      # `vdorie/psi-link`, the only one the scripts name, and the only one whose
-      # package closure their helper scripts were written against.
+      # Scoped to the default image: it is the one the scripts name, its tags
+      # being the unsuffixed ones they pull, and the only one whose package
+      # closure their helper scripts were written against.
       - name: Assert the built image answers what the setup scripts invoke
         if: matrix.fips == 'false'
         run: node scripts/assert-image-capabilities.mjs ${{ matrix.tag }}
@@ -579,6 +575,11 @@ jobs:
           mkdir -p "$work/a" "$work/b" "$work/share"
           cp test_data/fake_data_1.csv "$work/a/input.csv"
           cp test_data/fake_data_2.csv "$work/b/input.csv"
+          # The bind mounts carry their host ownership into the container and the
+          # image runs as uid 1000, so this is the chown docs/DEPLOYMENT.md asks
+          # a Linux operator for, performed literally. The parent stays the
+          # runner's, so the steps below can still stat what the containers wrote.
+          sudo chown -R 1000:1000 "$work/a" "$work/b" "$work/share"
 
           for party in a b; do
             docker run -d --name "exchange-$party" \
@@ -604,13 +605,13 @@ jobs:
           # while linking nothing is caught here rather than passing on exit 0.
           #
           # Counted from inside a container rather than on the runner: the CLI
-          # writes the result CSV owner-only (createOwnerOnlyWriteStream), this
-          # variant carries no USER so the parties ran as root, and the bind mount
-          # puts a root-owned 0600 file in front of an unprivileged runner shell.
-          # Reading it as root preserves the mode the image actually ships with,
-          # where running the parties as the runner's uid would smoke something
-          # other than the published image. The default leg's bind-mount step
-          # above reads its artifacts with sudo for the same reason, at uid 1000.
+          # writes the result CSV owner-only (createOwnerOnlyWriteStream), so the
+          # bind mount puts a uid-1000 0600 file in front of a runner shell that
+          # is neither. Reading it back through the image preserves the mode the
+          # image actually ships with, where running the parties as the runner's
+          # uid would smoke something other than the published image. The default
+          # leg's bind-mount step above reads its artifacts with sudo for the
+          # same reason.
           for party in a b; do
             lines=$(docker run --rm -v "$work/$party:/work:ro" \
               --entrypoint sh ${{ matrix.tag }} -c 'wc -l </work/output.csv')
@@ -650,30 +651,15 @@ jobs:
           measured=$(measure "$probe" | LC_ALL=C sort)
 
           case "${{ matrix.variant }}" in
-            # The runtime stage takes off the one setgid bit its OS install
-            # brings in, and neither stage's base carries another, so nothing is
-            # left for this to find.
-            default) recorded="" ;;
-            # The variant strips nothing and has no reason to: it declares no
-            # USER and runs as root, where neither bit elevates anything. What
-            # its Amazon Linux 2023 base and package closure carry between them
-            # is the list below, and a package that gains or loses a bit reddens
-            # this leg rather than shipping. The list sits at the run block's
-            # own indentation rather than the arm's, which is what leaves the
-            # heredoc terminator in column 1 once YAML has stripped it.
-            fips) recorded=$(cat <<'INVENTORY'
-          /usr/bin/chage
-          /usr/bin/gpasswd
-          /usr/bin/mount
-          /usr/bin/newgrp
-          /usr/bin/su
-          /usr/bin/umount
-          /usr/bin/write
-          /usr/libexec/utempter/utempter
-          /usr/sbin/pam_timestamp_check
-          /usr/sbin/unix_chkpwd
-          INVENTORY
-            ) ;;
+            # Each runtime stage takes off every setuid and setgid bit its own OS
+            # closure brings in -- one file on Alpine, ten on Amazon Linux 2023 --
+            # and neither stage's base carries another, so nothing is left for
+            # this to find on either. Both images declare USER node, so a bit
+            # left in place would be a boundary rather than a formality; the
+            # instructions that take them off are held by
+            # dockerfile-freeze.test.mjs, and this measures the outcome, which is
+            # the half that also sees the base image's own files.
+            default | fips) recorded="" ;;
             *)
               echo "no setuid/setgid inventory is recorded for the ${{ matrix.variant }} image" >&2
               exit 1
@@ -685,12 +671,15 @@ jobs:
           # prints the block to paste back, so the surface is enforced from the
           # start rather than left unmeasured until someone writes a list by hand.
           #
-          # Paste-ready for the fips arm's shape above: the first line is bare,
-          # to type directly after the new arm's own `<name>) `, and the entry
-          # and terminator lines carry the run block's own ten-space indentation
-          # baked in -- column 0 once YAML has stripped it, the indentation that
-          # terminates the heredoc rather than the run block's literal scalar --
-          # so a paste at the arm's nesting needs no manual reindenting.
+          # The block it prints is a heredoc arm, which is what an image carrying
+          # bits it does not strip needs. An image that strips its whole closure,
+          # as both shipped ones do, takes the empty arm above instead and pastes
+          # the measured paths into its Dockerfile's own `chmod u-s,g-s` rather
+          # than here. The printed lines carry the run block's own ten-space
+          # indentation baked in -- column 0 once YAML has stripped it, the
+          # indentation that terminates the heredoc rather than the run block's
+          # literal scalar -- so a paste at the arm's nesting needs no manual
+          # reindenting.
           if [ "$recorded" = "@unrecorded" ]; then
             echo "the ${{ matrix.variant }} image's setuid/setgid inventory is unrecorded; this run measures it as:" >&2
             {
@@ -729,19 +718,20 @@ jobs:
       #   - accepted exceptions are in .github/trivyignore, each id carrying the
       #     reason it was accepted.
       #
-      # A finding is a prompt to bump the base digest in the Dockerfile: the pin
-      # is deliberate, so nothing on the npm side resolves it, and the docker
-      # ecosystem in .github/dependabot.yml opens that bump on its own weekly
-      # schedule rather than in answer to this.
+      # A finding is a prompt to bump the pinned base -- the digest in the
+      # Dockerfile, and on the variant the Amazon Linux release snapshot its dnf
+      # transactions resolve against as well: the pins are deliberate, so nothing
+      # on the npm side resolves them, and the docker ecosystem in
+      # .github/dependabot.yml opens that bump on its own weekly schedule rather
+      # than in answer to this.
       #
-      # Scoped to the default image, as the unprivileged-account steps above
-      # are, but for a different reason: the variant is published nowhere
-      # (docs/RELEASES.md), so nothing its package closure carries reaches an
-      # operator, and gating a pull request on it would block a merge over an
-      # image no one can pull.
+      # Run on both legs, because both images are published (docs/RELEASES.md)
+      # and the release workflow gates each one's push on this same scanner at
+      # this same threshold. A pull-request finding is the cheap half of that:
+      # without it the first anyone hears of a fixable vulnerability in either
+      # package closure is a blocked release.
       - name: Scan the image for OS-layer vulnerabilities
         id: vulnerability_scan
-        if: matrix.fips == 'false'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image

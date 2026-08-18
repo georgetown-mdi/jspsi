@@ -25,15 +25,51 @@ Each release produces:
 | Artifact       | Published to                   | Tag / name                                                               |
 | -------------- | ------------------------------ | ------------------------------------------------------------------------ |
 | Docker image   | Docker Hub (`vdorie/psi-link`) | `vdorie/psi-link:X.Y.Z`, `vdorie/psi-link:X.Y`, `vdorie/psi-link:latest` |
+| FIPS variant image | Docker Hub (`vdorie/psi-link`) | `vdorie/psi-link:X.Y.Z-fips`, `vdorie/psi-link:X.Y-fips`, `vdorie/psi-link:latest-fips` |
 | GitHub Release | GitHub Releases                | Tag `vX.Y.Z`                                                             |
 | Launchers      | GitHub Release assets          | `start-psilink.sh`, `Start-Psilink.ps1`, `Setup-PsilinkFileDrop.ps1`     |
-| Build provenance | GitHub attestation store     | Subject `docker.io/vdorie/psi-link` at the released manifest digest      |
+| Build provenance | GitHub attestation store     | Subject `docker.io/vdorie/psi-link`, one attestation per released manifest digest |
 
-The single `vdorie/psi-link` image carries both the CLI and the web console appliance; which role it runs is decided by its first argument (see [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment)).
+Each image carries both the CLI and the web console appliance; which role it runs is decided by its first argument (see [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment)). Both run unprivileged as uid 1000, take the same arguments, and speak the same protocol, so a partner on one can exchange with a partner on the other.
 
 The hosted web deployment (`apps/web`) is a separate deployment to its hosting environment as part of CI/CD; it is not this image and is not distributed as a versioned artifact.
 
-A FIPS variant image (`Dockerfile.fips`) is built and smoke-tested on every pull request that can affect it and is published nowhere, so no `-fips` tag exists to pull. What it is, what may be claimed of it, and what has to land before it is published are in [fips-variant-image.md](notes/fips-variant-image.md).
+## Which image carries which posture
+
+The two tags differ in one thing: what serves the cryptography underneath `crypto.subtle`.
+
+- **`vdorie/psi-link:X.Y.Z`** -- the default artifact, built on `node:26-alpine`. It embeds no validated cryptographic module and the project claims none for it. Take this one unless a FIPS obligation says otherwise: it is smaller, its SFTP support is unrestricted, and it is the image the launchers and the Windows file-drop setup scripts pull.
+- **`vdorie/psi-link:X.Y.Z-fips`** -- built on Amazon Linux 2023 and carrying the CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution, so PSI-Link's `crypto.subtle` calls dispatch into that module. It costs roughly 1.8x the size, and by default it cannot reach an SFTP server that offers only `curve25519` key exchange, only the `chacha20-poly1305@openssh.com` cipher, or only an Ed25519 host key.
+
+**What the FIPS variant does and does not support a claim of** is in [COMPLIANCE.md](COMPLIANCE.md#fips-140), which is the single place this project states it: the certificate, the module version, the environments that certificate covers, and what stays outside the module either way. Two bounds are worth carrying here as well, because they decide whether pulling this tag is worth anything to a given deployment:
+
+- The image does not put the host in FIPS mode and cannot. The operational environment is the host plus the runtime plus the image together, and supplying a host in FIPS mode is the operator's.
+- The PSI masking itself runs in BoringSSL inside a vendored WebAssembly module, which no OpenSSL provider reaches. That is permanent rather than a gap this image closes.
+
+The variant reports both facts it can observe -- whether its own crypto is being served by that module, and what the host kernel's FIPS mode is -- on stderr at every container start, and warns rather than refusing when either answer is not what a claim needs.
+
+**Pulling and verifying it.** The variant is signed by the same release workflow, under the same Sigstore identity, so verification differs only in the reference:
+
+```sh
+docker pull vdorie/psi-link:X.Y.Z-fips
+docker inspect --format '{{index .RepoDigests 0}}' vdorie/psi-link:X.Y.Z-fips
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  vdorie/psi-link:X.Y.Z-fips
+```
+
+Both `--certificate-` arguments are required and each carries its own weight; [Verifying a Release](#verifying-a-release) explains what they pin and how to verify the build provenance attestation, which the variant also gets.
+
+**Confirming the module inside it.** A signature says which build this is, not what is running in it. Run the image and read its first two stderr lines:
+
+```sh
+docker run --rm vdorie/psi-link:X.Y.Z-fips --help
+```
+
+A run whose crypto is being served by the module reports `FIPS provider active` and names the module version; anything else is a warning naming what the startup probe found instead. The host kernel's FIPS-mode line is separate and is reported the same way. Neither line is parsed from `openssl list`: the probe is a Node process making PSI-Link's own call shapes under the image's configuration, and its exit status is the whole verdict.
+
+What the variant is, what may and may not be said about it, the three deployment tiers a claim has to keep apart, and the measured list of what does not work in it are in [fips-variant-image.md](notes/fips-variant-image.md); its pins and the checks that hold them are in [CONTAINER_IMAGES.md](spec/CONTAINER_IMAGES.md).
 
 The three launcher files are the host-side front door an operator runs to open the console: `start-psilink.sh` for macOS and Linux, `Start-Psilink.ps1` for Windows, and `Setup-PsilinkFileDrop.ps1`, which the Windows one dot-sources for its path resolution, credential prompts and network-share volume, and which must sit beside it. They travel as one unit; see [Stamped launchers](#stamped-launchers) for what a release does to them.
 
@@ -70,17 +106,17 @@ A digest that verifies is the image the official release workflow published. The
 
 ## Image vulnerability scan
 
-Every release image is scanned for OS-layer vulnerabilities before it is published. The release workflow builds the image single-arch, scans it, and only then authenticates to Docker Hub and pushes, so an image the workflow published is an image that passed the scan. The hand-built push in [step 8](#8-build-and-publish-the-container-image-ci) is the one path around that.
+Every release image is scanned for OS-layer vulnerabilities before it is published. The release workflow builds each image single-arch, scans it, and only then authenticates to Docker Hub and pushes, so an image the workflow published is an image that passed the scan. Both gates sit ahead of the login, so a finding against either image stops the whole release rather than publishing one artifact and withholding the other. The hand-built push in [step 8](#8-build-and-publish-the-container-image-ci) is the one path around that.
 
 **What the gate is.** Trivy, over the image's OS package layer, failing the release on a vulnerability that is HIGH or CRITICAL _and_ has a fix available. An unfixable finding does not block a release: a gate that fires on something no bump can resolve is unactionable and ends up switched off. The npm dependency tree is covered separately -- by Dependabot, the [dependency review workflow](../.github/workflows/dependency_review.yaml), and [step 4](#4-review-and-audit-dependencies) below -- so this gate deliberately does not reach it.
 
 **Where the threshold lives.** On the scan step itself, as literal inputs: `.github/workflows/release.yaml` for this gate and `.github/workflows/image_smoke.yaml` for the pre-merge one. Accepted exceptions are in `.github/trivyignore`, each vulnerability id carrying the reason it was accepted and the date.
 
-**What a finding means.** The base image is pinned by digest deliberately (see [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md)), so a finding is a prompt to bump that pin rather than something a dependency update resolves. Edit the digest in `Dockerfile`, let the pre-merge scan confirm the new base on that pull request, then tag.
+**What a finding means.** Each base image is pinned by digest deliberately (see [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md)), so a finding is a prompt to bump that pin rather than something a dependency update resolves. Edit the digest in `Dockerfile` or `Dockerfile.fips` -- on the variant, its Amazon Linux release snapshot moves with the digest, the two being one release rather than two compatible ones -- let the pre-merge scan confirm the new base on that pull request, then tag.
 
-**When it runs.** On every pull request that can change the image, on a weekly schedule against a refreshed vulnerability database, and again in the release workflow ahead of the push. The scheduled run is the one that catches a vulnerability published against a base image nothing in this repository has touched. Pull-request and scheduled findings surface as code-scanning alerts in the repository Security tab; the release gate reports on the run's summary page.
+**When it runs.** On every pull request that can change either image, on a weekly schedule against a refreshed vulnerability database, and again in the release workflow ahead of the push. The scheduled run is the one that catches a vulnerability published against a base image nothing in this repository has touched. Pull-request and scheduled findings surface as code-scanning alerts in the repository Security tab, one category per image; the release gate reports on the run's summary page, one section per image.
 
-**What it does not cover.** It reads the amd64 build, while a release publishes amd64 and arm64; both come from the same digest-pinned base and the same committed lockfile, so the package set it reads is the one that ships, but a vulnerability in an architecture-specific binary alone is outside it. The FIPS variant is not scanned -- it is published nowhere, so nothing its package closure carries reaches an operator.
+**What it does not cover.** It reads the amd64 build, while a release publishes amd64 and arm64 for both images; each comes from the same digest-pinned base and the same committed lockfile, so the package set it reads is the one that ships, but a vulnerability in an architecture-specific binary alone is outside it.
 
 ## Release Checklist
 
@@ -141,9 +177,9 @@ git push origin vX.Y.Z
 
 ### 8. Build and publish the container image `[CI]`
 
-The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds the multi-platform image and pushes it to Docker Hub, signs it with Cosign, attests its build provenance (see [Build provenance](#build-provenance)), and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). Ahead of the build it checks the pushed tag against the version step 2 set in `apps/cli/package.json` and fails the release when the two disagree: the image build bakes that version into the console's partner accept kit, so a tag pushed ahead of the bump would publish an image telling the partner to run the release before it. It then builds the image single-arch and scans it, and pushes nothing if the scan fails (see [Image vulnerability scan](#image-vulnerability-scan)). Ensure the `DOCKER_USERNAME` and `DOCKER_TOKEN` repository secrets are set before tagging.
+The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds both multi-platform images and pushes them to Docker Hub, signs each with Cosign, attests each one's build provenance (see [Build provenance](#build-provenance)), and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). The FIPS variant's three tags are the default image's three with `-fips` appended, derived from the pushed tag in the workflow itself. Ahead of the build it checks the pushed tag against the version step 2 set in `apps/cli/package.json` and fails the release when the two disagree: the image build bakes that version into the console's partner accept kit, so a tag pushed ahead of the bump would publish an image telling the partner to run the release before it. It then builds each image single-arch and scans it, and pushes neither if either scan fails (see [Image vulnerability scan](#image-vulnerability-scan)). Ensure the `DOCKER_USERNAME` and `DOCKER_TOKEN` repository secrets are set before tagging.
 
-If you must build and push by hand -- for a workflow outage or a local test -- follow the multi-platform buildx instructions in `apps/cli/README.md` (creating `multiarch-builder` and running `docker buildx build --push` from the repository root). A hand-built push bypasses the [image vulnerability scan](#image-vulnerability-scan) the workflow runs ahead of its own; scan the image yourself before pushing it, at the threshold the workflow sets.
+If you must build and push by hand -- for a workflow outage or a local test -- follow the multi-platform buildx instructions in `apps/cli/README.md` (creating `multiarch-builder` and running `docker buildx build --push` from the repository root; the variant adds `-f Dockerfile.fips` and the `-fips` tags). A hand-built push bypasses the [image vulnerability scan](#image-vulnerability-scan) the workflow runs ahead of its own, and it bypasses Cosign: scan the image yourself before pushing it, at the threshold the workflow sets, and expect a hand-pushed tag to fail the verification commands below.
 
 ### 9. Generate and attach the SBOM
 
@@ -169,7 +205,7 @@ Do not reach for `@cyclonedx/cyclonedx-npm --ignore-npm-errors` as the workaroun
 
 ### 10. Publish the GitHub Release
 
-Step 8 leaves a draft release for tag `vX.Y.Z` carrying the stamped launchers. Open it, copy the CHANGELOG section for this version as the release body, attach `psilink-X.Y.Z.cdx.json`, record the Docker image digest from step 8 in the release notes, and publish. Leave the launcher assets in place: they are the copy an operator downloads.
+Step 8 leaves a draft release for tag `vX.Y.Z` carrying the stamped launchers. Open it, copy the CHANGELOG section for this version as the release body, attach `psilink-X.Y.Z.cdx.json`, record both Docker image digests from step 8 in the release notes -- the default image's and the FIPS variant's, each beside its tag -- and publish. Leave the launcher assets in place: they are the copy an operator downloads.
 
 ### 11. Merge back to staging
 
@@ -194,14 +230,14 @@ For a hotfix answering a privately reported vulnerability, this section is the m
 
 ### Container image
 
-The container image digest for each release is recorded in the GitHub Release notes. Verify with:
+Both container image digests for each release are recorded in the GitHub Release notes. Verify with:
 
 ```sh
 docker pull vdorie/psi-link:X.Y.Z
 docker inspect --format '{{index .RepoDigests 0}}' vdorie/psi-link:X.Y.Z
 ```
 
-Compare the digest against the value in the release notes.
+Compare the digest against the value in the release notes. The FIPS variant is verified the same way, at `vdorie/psi-link:X.Y.Z-fips`; every command in this section takes either reference.
 
 Each release image is also signed with Cosign, keylessly through Sigstore. The signature carries a short-lived certificate Fulcio issued against the release workflow's OIDC identity, and it is recorded in Rekor's public transparency log. There is no project-held signing key and no public key to fetch: what a verifier pins is the workflow that produced the signature. Why the signature is arranged that way, and what it does not settle, are in [cosign-keyless-signing.md](notes/cosign-keyless-signing.md).
 
@@ -227,7 +263,7 @@ Install Cosign before running this command (see the Cosign documentation for you
 
 The Cosign signature and the SLSA build provenance attestation are complementary rather than alternatives, so verify both. The signature establishes that the release workflow published this exact manifest, and travels with the image in the registry. The attestation establishes what the build consumed -- which source repository and commit it ran from, and which workflow produced it -- and is held by GitHub rather than by the registry.
 
-The release workflow attests the manifest-list digest, the same digest Cosign signs and the launchers carry, and stores the attestation against this repository. Verify by digest:
+The release workflow attests each manifest-list digest, the same digests Cosign signs and, for the default image, the one the launchers carry, and stores both attestations against this repository. Verify by digest:
 
 ```sh
 docker pull vdorie/psi-link:X.Y.Z
@@ -237,7 +273,7 @@ gh attestation verify oci://docker.io/vdorie/psi-link@sha256:... \
   --signer-workflow georgetown-mdi/jspsi/.github/workflows/release.yaml
 ```
 
-The subject is recorded as `docker.io/vdorie/psi-link`, the same reference the Cosign step signs under. Neither the attest step nor this verify command has been driven against a published release yet, and reference canonicalization is the untested edge: if verification reports no matching attestation for an image that is certainly attested, check the reference host first -- Docker Hub's OCI-canonical name is `index.docker.io`, and the first real release is what settles whether the alias matches.
+Both subjects are recorded as `docker.io/vdorie/psi-link`, the same reference the Cosign step signs under; the two attestations are told apart by their digests, not by their subject names. Neither the attest step nor this verify command has been driven against a published release yet, and reference canonicalization is the untested edge: if verification reports no matching attestation for an image that is certainly attested, check the reference host first -- Docker Hub's OCI-canonical name is `index.docker.io`, and the first real release is what settles whether the alias matches.
 
 Notes on the command:
 
@@ -264,4 +300,4 @@ git verify-tag vX.Y.Z
 
 ## Software Bill of Materials (SBOM)
 
-An SBOM in CycloneDX format is generated as part of the release checklist (step 9) and attached to each GitHub Release. The `--omit=dev -w packages/core -w apps/cli -w apps/web` scoping covers everything the shipped image runs rather than the whole workspace: the CLI role's production tree (`packages/core` and `apps/cli`, matching the Dockerfile's runtime `npm ci --omit=dev -w packages/core -w apps/cli`) plus the web console's runtime dependencies, which ship bundled into the Nitro `.output` the image copies. `--omit=dev` excludes devDependencies (`apps/web`'s build tools among them), which the image does not ship. Because the `.output` is tree-shaken, the `apps/web` entry is a superset of what actually ships -- acceptable for a security SBOM. Because both the SBOM and the image resolve from the same committed lockfile, every dependency it does list appears at the exact resolved version the image runs. The one known residual: `npm sbom` omits a small number of packages that are hoisted to a single `node_modules` entry shared with a dev-only consumer elsewhere in the workspace (for example `yaml` and `tslib`, both installed in the shipped tree but currently absent from the SBOM's component list) -- confirm against `npm ls <pkg> --omit=dev -w packages/core -w apps/cli -w apps/web` if a specific package's presence in the image needs checking and it is missing from the SBOM. See `docs/spec/DEPENDENCY_PINS.md`.
+An SBOM in CycloneDX format is generated as part of the release checklist (step 9) and attached to each GitHub Release. One BOM covers both published images: they resolve the same committed lockfile through the same `npm ci --omit=dev` invocation, so their npm trees are identical and only their OS package layers differ -- which no `npm sbom` run reaches on either image, and which the [image vulnerability scan](#image-vulnerability-scan) covers separately. The `--omit=dev -w packages/core -w apps/cli -w apps/web` scoping covers everything a shipped image runs rather than the whole workspace: the CLI role's production tree (`packages/core` and `apps/cli`, matching the Dockerfile's runtime `npm ci --omit=dev -w packages/core -w apps/cli`) plus the web console's runtime dependencies, which ship bundled into the Nitro `.output` the image copies. `--omit=dev` excludes devDependencies (`apps/web`'s build tools among them), which the image does not ship. Because the `.output` is tree-shaken, the `apps/web` entry is a superset of what actually ships -- acceptable for a security SBOM. Because both the SBOM and the image resolve from the same committed lockfile, every dependency it does list appears at the exact resolved version the image runs. The one known residual: `npm sbom` omits a small number of packages that are hoisted to a single `node_modules` entry shared with a dev-only consumer elsewhere in the workspace (for example `yaml` and `tslib`, both installed in the shipped tree but currently absent from the SBOM's component list) -- confirm against `npm ls <pkg> --omit=dev -w packages/core -w apps/cli -w apps/web` if a specific package's presence in the image needs checking and it is missing from the SBOM. See `docs/spec/DEPENDENCY_PINS.md`.
