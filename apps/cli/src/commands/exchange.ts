@@ -45,6 +45,7 @@ import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
 import {
   configureLogging,
+  exitCodeForError,
   exitWithError,
   parseOrExit,
   singleValue,
@@ -933,14 +934,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // A usage error (exit 64) -- the `-`-at-an-interactive-terminal rejection
       // openInputSource raises is a UsageError carrying no exitCode -- must map to
       // 64, not collapse to 69; a missing input file carries its own exitCode 69.
-      // Mirrors zeroSetup's prepareDataset boundary.
-      exitWithError(
-        log,
-        err,
-        err instanceof UsageError
-          ? 64
-          : ((err as { exitCode?: number }).exitCode ?? 69),
-      );
+      exitWithError(log, err, exitCodeForError(err));
     }
 
     const recordOutput = resolveRecordOutput({
@@ -1018,11 +1012,7 @@ export async function handler(argv: Arguments): Promise<void> {
     if (advisory !== undefined) log.warn(advisory);
 
     if (exchangeError !== undefined)
-      exitWithError(
-        log,
-        exchangeError,
-        exchangeError instanceof UsageError ? 64 : 69,
-      );
+      exitWithError(log, exchangeError, exitCodeForError(exchangeError));
   } finally {
     // Restore the loglevel factory (and close the log-file descriptor, for the
     // file sink) on the normal exit path. Writes are synchronous and already

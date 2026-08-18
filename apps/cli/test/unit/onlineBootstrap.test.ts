@@ -1649,7 +1649,12 @@ function soleFunctionArg(callArgs: unknown[]): () => void | Promise<void> {
 /** Locate the trailing FileSyncRuntimeOptions among runProtocol's call arguments
  *  by the key under test rather than by position, and assert it is the only
  *  argument carrying one. */
-function runtimeOptionsArg(callArgs: unknown[]): { eventStream?: unknown } {
+function runtimeOptionsArg(callArgs: unknown[]): {
+  eventStream?: unknown;
+  onOutputComplete?: (context: {
+    observedReceivedPayloadColumns: string[];
+  }) => void | Promise<void>;
+} {
   const runtimeArgs = callArgs.filter(
     (a): a is Record<string, unknown> =>
       typeof a === "object" && a !== null && "eventStream" in a,
@@ -1771,14 +1776,29 @@ test("observedReceivedColumnsForSave drops an over-cap observation (stays loadab
 
 // --- runOnlineBootstrap: observe-then-persist received-payload lock-in --------
 
-/** Mock runProtocol as a successful exchange: invoke the onAuthenticated hook
- *  (so the config is written at acceptance) and resolve with the given observed
- *  received-payload columns. */
-function mockSuccessfulExchange(observed: string[] | undefined): void {
+/** Mock runProtocol as a successful exchange, in its real order: invoke the
+ *  onAuthenticated hook (so the config is written at acceptance), then run
+ *  `betweenStages` for whatever the test needs to happen during the exchange,
+ *  then invoke the pre-terminal onOutputComplete hook with the observed
+ *  received-payload columns -- where the bootstrap's crystallization runs, and
+ *  the only place a mock can reach it. `observed` is also the resolved value, as
+ *  the real runProtocol reports both from one observation.
+ *
+ *  An absent observation stands for a caller that learns nothing by observation;
+ *  the real hook is always handed the partner's column array, empty at its
+ *  emptiest, so that is what the hook sees here. */
+function mockSuccessfulExchange(
+  observed: string[] | undefined,
+  betweenStages?: () => void,
+): void {
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     const onAuthenticated = callArgs.find((a) => typeof a === "function") as
       (() => void | Promise<void>) | undefined;
     await onAuthenticated?.();
+    betweenStages?.();
+    await runtimeOptionsArg(callArgs).onOutputComplete?.({
+      observedReceivedPayloadColumns: observed ?? [],
+    });
     return { observedReceivedPayloadColumns: observed };
   }) as never);
 }
@@ -1797,6 +1817,36 @@ test("runOnlineBootstrap crystallizes the observed received set when the inviter
     });
     const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
     expect(written.expected_payload_columns).toEqual(["dob", "zip"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap crystallizes from the pre-terminal hook, not after runProtocol returns", async () => {
+  // WHERE the write happens is the contract, not just that it happens. Run after
+  // runProtocol returns, the warning naming a failed crystallization lands behind
+  // the run's terminal event -- which the stream spec forbids and the repo's own
+  // job supervisor discards outright. So the write rides runProtocol's
+  // pre-terminal hook, and a runProtocol that resolves with the observation
+  // without ever invoking that hook must leave the config exactly as the
+  // acceptance write left it. This is the one test the hook's invocation is
+  // visible to: every other crystallization test drives the hook and would pass
+  // just as well with the write back on the post-return path.
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
+      (() => void | Promise<void>) | undefined;
+    await onAuthenticated?.();
+    return { observedReceivedPayloadColumns: ["dob", "zip"] };
+  }) as never);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      persistObservedReceivedPayload: true,
+    });
+    const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    expect(written.expected_payload_columns).toBeUndefined();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1866,14 +1916,10 @@ test("runOnlineBootstrap keeps a failed observed-payload write non-fatal", async
   // above, so the catch's warn does not print.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
   const configPath = path.join(dir, "psilink.yaml");
-  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
-      (() => void | Promise<void>) | undefined;
-    await onAuthenticated?.(); // hook writes configPath as a file
-    fs.rmSync(configPath); // swap it for a directory so the second
-    fs.mkdirSync(configPath); // saveConfig's rename throws (EISDIR)
-    return { observedReceivedPayloadColumns: ["dob", "zip"] };
-  }) as never);
+  mockSuccessfulExchange(["dob", "zip"], () => {
+    fs.rmSync(configPath); // swap the acceptance hook's file for a directory
+    fs.mkdirSync(configPath); // so the second saveConfig's rename throws (EISDIR)
+  });
   try {
     const { configWriteError } = await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
@@ -1898,14 +1944,10 @@ test("runOnlineBootstrap reports a lost observed-payload write on fd 3 and in th
   // happened.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
   const configPath = path.join(dir, "psilink.yaml");
-  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
-      (() => void | Promise<void>) | undefined;
-    await onAuthenticated?.(); // hook writes configPath as a file
-    fs.rmSync(configPath); // swap it for a directory so the second
-    fs.mkdirSync(configPath); // saveConfig's rename throws (EISDIR)
-    return { observedReceivedPayloadColumns: ["dob", "zip"] };
-  }) as never);
+  mockSuccessfulExchange(["dob", "zip"], () => {
+    fs.rmSync(configPath); // swap the acceptance hook's file for a directory
+    fs.mkdirSync(configPath); // so the second saveConfig's rename throws (EISDIR)
+  });
   try {
     const { value, lines } = await captureFd3(() =>
       runOnlineBootstrap({

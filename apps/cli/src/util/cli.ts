@@ -240,13 +240,37 @@ export function parseOrExit<T>(parse: () => T): T {
 }
 
 /**
+ * The process exit code a caught command error reports: EX_USAGE (64) for a
+ * {@link UsageError}, otherwise the error's OWN numeric `exitCode` when it
+ * carries one, else EX_UNAVAILABLE (69). The single classification every
+ * error->exit boundary of an exchange-running command reads, so an error that
+ * classified itself more precisely than "the transport failed" is delivered
+ * identically whichever command caught it.
+ *
+ * The own-`exitCode` rung is load-bearing in both directions. `openInputSource`
+ * and `buildDataSpec` throw plain `Error`s carrying `exitCode`, so a missing
+ * input file keeps its own code rather than collapsing to 69; and a run whose
+ * exchange completed while its result file did not reach disk carries
+ * `PERSISTENCE_LOSS_EXIT_CODE` (73), which a boundary that hard-coded 69 would
+ * discard -- telling an unattended supervisor to retry an exchange that already
+ * happened. The rung is typed rather than `??`-defaulted so a non-numeric
+ * `exitCode` on some other object cannot reach `process.exit`.
+ */
+export function exitCodeForError(err: unknown): number {
+  if (err instanceof UsageError) return 64;
+  const own = (err as { exitCode?: unknown } | null | undefined)?.exitCode;
+  return typeof own === "number" ? own : 69;
+}
+
+/**
  * Log a caught error (sanitized) at error level and exit the process with
  * `code`. The single log-and-exit boundary the bootstrap-style command handlers
  * route a caught error through, so the error-level routing and the sanitized
  * formatting cannot drift between call sites. `code` is supplied by the caller
- * because the classification is site-specific: a {@link UsageError} is 64, a
- * transport failure 69, a missing input file its own `exitCode`. Typed `never`
- * so a caller's definite-assignment narrowing treats it like `process.exit`.
+ * because the classification is site-specific: a command whose errors are all
+ * local usage faults passes 64 outright, while an exchange-running command
+ * resolves the code through {@link exitCodeForError}. Typed `never` so a
+ * caller's definite-assignment narrowing treats it like `process.exit`.
  */
 export function exitWithError(
   log: { error: (message: string) => void },
@@ -258,15 +282,12 @@ export function exitWithError(
 }
 
 /**
- * Run a command body, mapping any thrown error to a process exit: a
- * {@link UsageError} to EX_USAGE (64), otherwise the error's own numeric
- * `exitCode` or EX_UNAVAILABLE (69). This is the single error->exit boundary for
- * the bootstrap-style commands; routing the whole handler body through it --
+ * Run a command body, mapping any thrown error to a process exit through
+ * {@link exitCodeForError}. This is the single error->exit boundary for the
+ * bootstrap-style commands; routing the whole handler body through it --
  * including option parsing and the accept confirmation prompt -- means a thrown
  * or rejected step exits cleanly rather than crashing with an unhandled
- * rejection. The `?? exitCode` rung is load-bearing: `openInputSource` and
- * `buildDataSpec` throw plain `Error`s carrying `exitCode`, so a missing input
- * file keeps its own exit code rather than collapsing to 69.
+ * rejection.
  *
  * The error logger is created from `loggerName` lazily in the catch, so it picks
  * up whatever sink and level the body installed rather than binding to the
@@ -282,11 +303,7 @@ export async function runOrExit(
     await body();
   } catch (err) {
     getLogger(loggerName).error(sanitizeErrorForDisplay(err));
-    process.exit(
-      err instanceof UsageError
-        ? 64
-        : ((err as { exitCode?: number }).exitCode ?? 69),
-    );
+    process.exit(exitCodeForError(err));
   }
 }
 

@@ -13,7 +13,6 @@ import {
 import {
   EVENT_STREAM_FD,
   EVENT_STREAM_VERSION,
-  EventStreamWriter,
   PERSISTENCE_LOSS_EXIT_CODE,
   assertEventStreamFdOpen,
   buildErrorEvent,
@@ -24,12 +23,12 @@ import {
   buildStagesEvent,
   buildWarningEvent,
   classifyTerminalError,
-  createEventStreamEmitter,
   openEventStream,
   reportPersistenceLoss,
   type ErrorPhase,
   type StreamEvent,
 } from "../../src/eventStream";
+import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -359,7 +358,7 @@ test("reportPersistenceLoss warns on the stream and sets the persistence-loss ex
   try {
     reportPersistenceLoss(
       "the record was not written",
-      createEventStreamEmitter(),
+      openEventStreamWithFdWired(),
     );
     expect(process.exitCode).toBe(73);
     expect(process.exitCode).toBe(PERSISTENCE_LOSS_EXIT_CODE);
@@ -417,7 +416,7 @@ function captureFd3Writes(): { lines: () => string[]; short?: boolean } {
 
 test("emits one NDJSON object per line to fd 3, each a valid event", () => {
   const cap = captureFd3Writes();
-  const emitter = createEventStreamEmitter();
+  const emitter = openEventStreamWithFdWired();
   emitter.stages([{ id: "confirming protocol", label: "Confirming protocol" }]);
   emitter.stage("stage 1 / 1", "Linking key 1 / 1");
   emitter.stageEnd("stage 1 / 1", 42);
@@ -455,12 +454,11 @@ test("drains a short write so a long line is never truncated", () => {
     return 1;
   }) as unknown as typeof fs.writeSync);
 
-  const writer = new EventStreamWriter();
-  const event = buildWarningEvent("x".repeat(200));
-  writer.emit(event);
+  const message = "x".repeat(200);
+  openEventStreamWithFdWired().warning(message);
   const written = Buffer.concat(chunks).toString("utf8");
   expect(written.endsWith("\n")).toBe(true);
-  expect(JSON.parse(written.trimEnd())).toEqual(event);
+  expect(JSON.parse(written.trimEnd())).toEqual(buildWarningEvent(message));
 });
 
 test("a broken pipe stops the writer without throwing into the exchange", () => {
@@ -472,9 +470,11 @@ test("a broken pipe stops the writer without throwing into the exchange", () => 
     });
   }) as unknown as typeof fs.writeSync);
 
-  const writer = new EventStreamWriter();
-  expect(() => writer.emit(buildResultEvent(true))).not.toThrow();
+  // One emitter, so one writer: the broken flag has to survive between the two
+  // emissions below for the retry to be suppressed.
+  const emitter = openEventStreamWithFdWired();
+  expect(() => emitter.result(true)).not.toThrow();
   // A later emit does not retry the write once the stream is marked broken.
-  writer.emit(buildResultEvent(false));
+  emitter.result(false);
   expect(calls).toBe(1);
 });

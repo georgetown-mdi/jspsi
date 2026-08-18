@@ -242,8 +242,10 @@ import {
   DISPLAY_TRUNCATION_MARKER,
 } from "@psilink/core";
 import type {
+  AssociationTable,
   DualSignedRecord,
   ExchangeRecord,
+  PartnerPayload,
   VerificationKeys,
 } from "@psilink/core";
 import {
@@ -254,8 +256,12 @@ import {
   type RunProtocolResult,
   type SigningPersist,
 } from "../../src/protocol";
-import type { EventStreamEmitter } from "../../src/eventStream";
-import { runOrExit } from "../../src/util/cli";
+import {
+  reportPersistenceLoss,
+  type EventStreamEmitter,
+} from "../../src/eventStream";
+import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
+import { exitCodeForError, runOrExit } from "../../src/util/cli";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { LocalFSClient } from "../../src/connection/localFSClient";
 
@@ -935,6 +941,75 @@ test("a result file that could not be written fails with the persistence-loss ex
     exitCode?: number;
   };
   expect(reason.exitCode).toBe(73);
+  // What a command boundary would actually report for it. The stamped property
+  // is only half the contract: exchange.test.ts and zeroSetup.test.ts drive the
+  // handlers to a real process exit, and this is the rule they share.
+  expect(exitCodeForError(reason)).toBe(73);
+
+  const lines = takeFd3Lines();
+  const terminal = lines[lines.length - 1];
+  expect(terminal.type).toBe("error");
+  expect(terminal.category).toBe("output");
+});
+
+test("a partner-shaped output-phase fault exits 69, not the local write-loss code", async () => {
+  // The other half of the same boundary. buildOutputTable's integrity checks run
+  // in the output phase but refuse PARTNER-controlled shapes -- here duplicate
+  // row indices in the received payload, thrown by the real core function -- and
+  // 73's published meaning is that what failed is a local write on this machine.
+  // Such a fault stays 69; only the result file failing to reach disk is stamped.
+  // The terminal event's `output` category still covers it, since the exchange
+  // did complete and must not be re-run.
+  const { buildOutputTable: coreBuildOutputTable } =
+    await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+  const duplicatedRowIndices: PartnerPayload = {
+    columns: ["dob"],
+    rowIndices: [5, 5],
+    rows: [["1990-01-02"], ["1991-02-03"]],
+  };
+  const emptyAssociation: AssociationTable = [[], []];
+  vi.mocked(buildOutputTable).mockImplementation(() =>
+    coreBuildOutputTable(emptyAssociation, [], [], duplicatedRowIndices),
+  );
+
+  mockFd3Open();
+  let outcome: PromiseSettledResult<unknown>;
+  try {
+    [outcome] = await Promise.allSettled([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+    vi.mocked(buildOutputTable).mockReturnValue({ headers: [], rows: [] });
+  }
+
+  expect(outcome.status).toBe("rejected");
+  const reason = (outcome as PromiseRejectedResult).reason as Error & {
+    exitCode?: number;
+  };
+  // The real core refusal, not a stand-in shaped like one.
+  expect(reason.message).toContain("duplicate indices");
+  expect(reason.exitCode).toBeUndefined();
+  expect(exitCodeForError(reason)).toBe(69);
 
   const lines = takeFd3Lines();
   const terminal = lines[lines.length - 1];
@@ -3817,6 +3892,137 @@ test("an emitter passed instead of the flag carries every event, and no second s
   // already-preflighted emitter was reused rather than re-opened.
   expect(fd3.preflightProbes).toBe(0);
   expect(takeFd3Lines()).toHaveLength(0);
+});
+
+// --- The caller's pre-terminal hook ------------------------------------------
+
+/** The received-payload column set the mocked exchange reports observing, so the
+ *  hook's context is measured against a value the run actually produced rather
+ *  than the empty default. */
+const OBSERVED_PARTNER_COLUMNS = ["dob", "zip"];
+
+/** Complete both parties' exchanges with a partner payload carrying `columns`,
+ *  which runProtocol then hands the pre-terminal hook and returns. */
+function mockExchangeObserving(columns: string[]): void {
+  vi.mocked(runExchange).mockImplementation((async () => {
+    const base = (await defaultRunExchange()) as Record<string, unknown>;
+    return { ...base, partnerPayload: { columns, rowIndices: [], rows: [] } };
+  }) as never);
+}
+
+test("a loss reported from the pre-terminal hook precedes the metrics and terminal events", async () => {
+  // The ordering the whole hook exists for, measured on the REAL stream. The
+  // online bootstrap's last write -- crystallizing the observed received-payload
+  // set -- can fail, and the warning naming that loss is only useful ahead of the
+  // terminal event: the spec makes the terminal event last, and a supervisor that
+  // stops there discards anything behind it (apps/web's job manager drops
+  // post-terminal events outright). Driven exactly as the bootstrap drives it:
+  // the caller opens the stream, hands runProtocol the emitter, and reports from
+  // the hook with that same object.
+  mockExchangeObserving(OBSERVED_PARTNER_COLUMNS);
+  const emitter = openEventStreamWithFdWired();
+  let seen: string[] | undefined;
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        {
+          eventStream: emitter,
+          onOutputComplete: ({ observedReceivedPayloadColumns }) => {
+            seen = observedReceivedPayloadColumns;
+            reportPersistenceLoss("the lock-in was not recorded", emitter);
+          },
+        },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+    // Reported on the exit code too, from inside the hook rather than after it.
+    expect(process.exitCode).toBe(73);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  expect(seen).toEqual(OBSERVED_PARTNER_COLUMNS);
+  expect(takeFd3Lines().map((line) => line.type)).toEqual([
+    "stages",
+    "warning",
+    "metrics",
+    "result",
+  ]);
+});
+
+test("a throw from the pre-terminal hook does not fail the completed exchange", async () => {
+  // The hook reports its own losses, so a throw escaping it is a defect -- but
+  // the exchange has already happened and cannot be undone by a local write, so
+  // it must not turn a completed run into a failure. It still reports: an
+  // unattended run that swallowed it silently would read as a clean success.
+  mockExchangeObserving(OBSERVED_PARTNER_COLUMNS);
+  const emitter = openEventStreamWithFdWired();
+  try {
+    const [resultA] = await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        {
+          eventStream: emitter,
+          onOutputComplete: () => {
+            throw new Error("the hook let one escape");
+          },
+        },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+    // The run resolved: the exchange completed and its observation is reported.
+    expect(resultA.observedReceivedPayloadColumns).toEqual(
+      OBSERVED_PARTNER_COLUMNS,
+    );
+    expect(process.exitCode).toBe(73);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const lines = takeFd3Lines();
+  expect(lines.map((line) => line.type)).toEqual([
+    "stages",
+    "warning",
+    "metrics",
+    "result",
+  ]);
+  // The cause stays on the human log; the stream warning carries first-party
+  // prose only, so no pre-rendered error text reaches it double-escaped.
+  expect(String(lines[1].message)).not.toContain("let one escape");
+  expect(mockState.errors.some((line) => line.includes("let one escape"))).toBe(
+    true,
+  );
 });
 
 // --- Stage/warning stderr sanitization -----------------------------------------

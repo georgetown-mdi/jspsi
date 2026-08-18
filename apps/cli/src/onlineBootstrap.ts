@@ -827,14 +827,16 @@ export async function runOnlineBootstrap(params: {
   // would falsely promise `psilink exchange` recovery in the latter.
   let keyPersisted = false;
   // Open the machine-interface stream here rather than leaving it to runProtocol:
-  // this bootstrap loses persistence of its own both inside the post-handshake
-  // hook and after runProtocol has returned, and those warnings must ride the
-  // same fd-3 channel as the run's terminal result event -- a supervisor should
-  // not have to parse stderr prose for the one class of failure the stream
-  // exists to carry. Opened immediately before runProtocol, with nothing
-  // fallible in between, so the fail-closed fd-3 preflight still lands at the
-  // same point of the run: after this command's host-key trust and credential
-  // resolution, before any connection of the exchange's own.
+  // this bootstrap loses persistence of its own inside both hooks below, and
+  // those warnings must ride the same fd-3 channel as the run's terminal result
+  // event -- a supervisor should not have to parse stderr prose for the one class
+  // of failure the stream exists to carry. runProtocol drives the emitter but
+  // does not hand it to a hook, so reporting a loss from one means holding the
+  // object, which means opening it here and passing it in. Opened immediately
+  // before runProtocol, with nothing fallible in between, so the fail-closed fd-3
+  // preflight still lands at the same point of the run: after this command's
+  // host-key trust and credential resolution, before any connection of the
+  // exchange's own.
   const eventStream = openEventStream(params.eventStream);
   try {
     const runResult = await runProtocol(
@@ -991,75 +993,83 @@ export async function runOnlineBootstrap(params: {
         configWritten = true;
       },
       // The online invite/accept run no file-sync entry-sweep (the sweep flags are
-      // exchange/zero-setup only), so the trailing runtime object carries only the
+      // exchange/zero-setup only), so the trailing runtime object carries the
       // machine stream this bootstrap opened above (undefined when the flag is
-      // off, which is runProtocol's own "no stream" state).
-      { eventStream },
-    );
-    // observedReceivedPayloadColumns is what this party received during the
-    // completed exchange (undefined on a signal-interrupted run); it feeds the
-    // observe-then-persist crystallization below.
-    const { onAuthenticatedError, observedReceivedPayloadColumns } = runResult;
-
-    // Crystallize the OBSERVED received-payload set into the freshly-written
-    // config so a later recurring `psilink exchange` fails closed on a divergent
-    // payload (reconcileReceivedPayload). This is a SECOND write, deliberately
-    // distinct from the hook's: the hook persists at acceptance, BEFORE the data
-    // exchange, so the received set is unknown to it; the set is known only after
-    // runProtocol returns the completed exchange's observation. Moving the whole
-    // write here instead is not an option -- it would forfeit the recovery
-    // guarantee that a handshake-then-exchange failure still leaves a config on
-    // disk. Gated on: persistObservedReceivedPayload (only the inviter, which
-    // learns its received set by observation; the online accept path knows its set
-    // up front from the token and does not pass this), configWritten (a fresh
-    // config the hook actually wrote -- never the reuse path, whose in-place
-    // consent-record refreshes leave it false, nor a hook that failed), and a non-empty
-    // observation (observedReceivedColumnsForSave drops the ambiguous empty case).
-    // Unlike the hook's first saveConfig this write is deliberately NOT preceded by
-    // a detectFileConflicts re-gate: it overwrites the config THIS run wrote at
-    // acceptance, so a conflict check would always fire on our own just-written
-    // file. The "do not clobber the operator's config" gate already ran at that
-    // first write -- configWritten is true only if it passed -- so re-gating here
-    // would add nothing but a spurious self-conflict.
-    // Non-fatal: the config is already on disk from the hook, so a failure here
-    // only leaves the recurring path reconciling lazily -- its prior behavior --
-    // and must not fail the already-completed exchange.
-    if (params.persistObservedReceivedPayload && configWritten) {
-      const observedLockIn = observedReceivedColumnsForSave(
-        observedReceivedPayloadColumns,
-      );
-      if (observedLockIn !== undefined) {
-        try {
-          saveConfig(params.configPath, {
-            connection: params.connection,
-            ...params.dataSpec,
-            expectedPayloadColumns: observedLockIn,
-            // Carried through this second full-spec write as well: it re-serializes
-            // the config the hook wrote, so omitting it would silently drop a
-            // recorded outbound consent and leave the next run ungated. No caller
-            // sets both today (this path is the inviter's), which is why it is
-            // carried rather than guarded against.
-            ...(params.outboundPayloadConsent !== undefined
-              ? { outboundPayloadConsent: params.outboundPayloadConsent }
-              : {}),
-          });
-        } catch (err) {
-          const notice =
-            `the exchange succeeded and ${params.configPath} was written, but ` +
-            "recording the observed received-payload columns for fail-closed " +
-            "recurring enforcement failed; the next 'psilink exchange' will " +
-            "reconcile the received payload lazily";
-          getLogger(params.loggerName).warn(
-            `${notice}: ${sanitizeErrorForDisplay(err)}`,
+      // off, which is runProtocol's own "no stream" state) and this bootstrap's
+      // own last write.
+      {
+        eventStream,
+        // Crystallize the OBSERVED received-payload set into the freshly-written
+        // config so a later recurring `psilink exchange` fails closed on a
+        // divergent payload (reconcileReceivedPayload). This is a SECOND write,
+        // deliberately distinct from the acceptance hook's: that one persists
+        // BEFORE the data exchange, so the received set is unknown to it, and
+        // moving the whole write here instead would forfeit the recovery
+        // guarantee that a handshake-then-exchange failure still leaves a config
+        // on disk. It rides runProtocol's pre-terminal hook rather than running
+        // after runProtocol returns so that the loss below is reported BEFORE the
+        // run's terminal event, which is the only place a supervisor reading fd 3
+        // will still see it.
+        //
+        // Gated on: persistObservedReceivedPayload (only the inviter, which
+        // learns its received set by observation; the online accept path knows
+        // its set up front from the token and does not pass this), configWritten
+        // (a fresh config the hook actually wrote -- never the reuse path, whose
+        // in-place consent-record refreshes leave it false, nor a hook that
+        // failed), and a non-empty observation (observedReceivedColumnsForSave
+        // drops the ambiguous empty case).
+        //
+        // Unlike the acceptance hook's saveConfig this write is deliberately NOT
+        // preceded by a detectFileConflicts re-gate: it overwrites the config
+        // THIS run wrote at acceptance, so a conflict check would always fire on
+        // our own just-written file. The "do not clobber the operator's config"
+        // gate already ran at that first write -- configWritten is true only if
+        // it passed -- so re-gating here would add nothing but a spurious
+        // self-conflict.
+        //
+        // Non-fatal: the config is already on disk from the acceptance hook, so a
+        // failure here only leaves the recurring path reconciling lazily -- its
+        // prior behavior -- and must not fail the already-completed exchange.
+        onOutputComplete: ({ observedReceivedPayloadColumns }) => {
+          if (!params.persistObservedReceivedPayload || !configWritten) return;
+          const observedLockIn = observedReceivedColumnsForSave(
+            observedReceivedPayloadColumns,
           );
-          reportPersistenceLoss(notice, eventStream);
-        }
-      }
-    }
+          if (observedLockIn === undefined) return;
+          try {
+            saveConfig(params.configPath, {
+              connection: params.connection,
+              ...params.dataSpec,
+              expectedPayloadColumns: observedLockIn,
+              // Carried through this second full-spec write as well: it
+              // re-serializes the config the acceptance hook wrote, so omitting
+              // it would silently drop a recorded outbound consent and leave the
+              // next run ungated. No caller sets both today (this path is the
+              // inviter's), which is why it is carried rather than guarded
+              // against.
+              ...(params.outboundPayloadConsent !== undefined
+                ? { outboundPayloadConsent: params.outboundPayloadConsent }
+                : {}),
+            });
+          } catch (err) {
+            const notice =
+              `the exchange succeeded and ${params.configPath} was written, but ` +
+              "recording the observed received-payload columns for fail-closed " +
+              "recurring enforcement failed; the next 'psilink exchange' will " +
+              "reconcile the received payload lazily";
+            getLogger(params.loggerName).warn(
+              `${notice}: ${sanitizeErrorForDisplay(err)}`,
+            );
+            reportPersistenceLoss(notice, eventStream);
+          }
+        },
+      },
+    );
 
-    // onAuthenticatedError is the config-write failure, if any: the hook is just
-    // the saveConfig call above, so surface it under a name the caller speaks.
-    return { configWriteError: onAuthenticatedError };
+    // onAuthenticatedError is the config-write failure, if any: the acceptance
+    // hook is just the saveConfig call above, so surface it under a name the
+    // caller speaks.
+    return { configWriteError: runResult.onAuthenticatedError };
   } catch (err) {
     // The exchange failed after a successful handshake. When BOTH the config and
     // the rotated key are on disk, tell the user so they retry with `psilink

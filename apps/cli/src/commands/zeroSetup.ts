@@ -22,7 +22,12 @@ import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveConnectionCredentials } from "../util/atSignRefs";
 import { establishHostKeyTrust } from "../hostKeyTrust";
-import { configureLogging, exitWithError, parseOrExit } from "../util/cli";
+import {
+  configureLogging,
+  exitCodeForError,
+  exitWithError,
+  parseOrExit,
+} from "../util/cli";
 import { channelFromURL, connectionFromURL } from "../connectionFromUrl";
 import {
   addCommonBootstrapOptions,
@@ -586,13 +591,7 @@ export async function handler(argv: Arguments): Promise<void> {
     } catch (err) {
       // A bad URL scheme or unsupported channel is a usage error (exit 64);
       // prepareDataset failures carry their own exitCode; otherwise exit 69.
-      exitWithError(
-        log,
-        err,
-        err instanceof UsageError
-          ? 64
-          : ((err as { exitCode?: number }).exitCode ?? 69),
-      );
+      exitWithError(log, err, exitCodeForError(err));
     }
 
     announceRetainMode(connection, log);
@@ -634,7 +633,7 @@ export async function handler(argv: Arguments): Promise<void> {
         { sweepExchangeFiles, forceRetainSweep, eventStream },
       );
     } catch (err) {
-      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+      exitWithError(log, err, exitCodeForError(err));
     }
 
     const { bootstrap, observedReceivedPayloadColumns } = runResult;

@@ -17,6 +17,7 @@ import type { InvitationToken, LinkageTerms } from "@psilink/core";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { saveSigningIdentity } from "../../src/signingIdentityFile";
 import { runProtocol } from "../../src/protocol";
+import { PERSISTENCE_LOSS_EXIT_CODE } from "../../src/eventStream";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 import { confirmOutboundPayloadConsent } from "../../src/outboundPayloadConsent";
 import {
@@ -972,6 +973,47 @@ test("handler warns when an expiring-soon token is not refreshed by a failed exc
     expect(mockState.warnings.some((m) => m.includes("is expiring soon"))).toBe(
       true,
     );
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: a result file the exchange could not write exits 73, not 69", async () => {
+  // The costly case docs/CLI.md publishes: the exchange completed, the result did
+  // not reach disk, and a supervisor that retries conducts a SECOND exchange with
+  // this party's data. runProtocol stamps that error with the persistence-loss
+  // code (protocol.test.ts drives the real stamp against a real write failure);
+  // what is measured here is the code the COMMAND reports, which is where the
+  // published contract is either delivered or discarded. A boundary that maps
+  // every non-usage error to 69 passes every other test in this file and fails
+  // this one.
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockRejectedValueOnce(
+    Object.assign(new Error("EACCES: permission denied, open 'results.csv'"), {
+      exitCode: PERSISTENCE_LOSS_EXIT_CODE,
+    }),
+  );
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:73");
   } finally {
     exitSpy.mockRestore();
   }

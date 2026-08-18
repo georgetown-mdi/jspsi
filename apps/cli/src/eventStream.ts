@@ -351,7 +351,7 @@ export function assertEventStreamFdOpen(): void {
  * absence of further events plus the exit code is a defined supervisor signal
  * (see docs/spec/CLI_EVENTS.md).
  */
-export class EventStreamWriter {
+class EventStreamWriter {
   private broken = false;
 
   /** Serialize `event` to one NDJSON line and flush it to fd 3. */
@@ -402,8 +402,11 @@ export interface EventStreamEmitter {
  * Build an {@link EventStreamEmitter} backed by an {@link EventStreamWriter}.
  * Each method constructs its event through the pure builder above and flushes
  * it, so the construction logic stays testable without a live descriptor.
+ *
+ * Module-private, with {@link openEventStream} its only caller: see the fusion
+ * property recorded there.
  */
-export function createEventStreamEmitter(): EventStreamEmitter {
+function createEventStreamEmitter(): EventStreamEmitter {
   const writer = new EventStreamWriter();
   return {
     stages: (stages) => writer.emit(buildStagesEvent(stages)),
@@ -428,10 +431,12 @@ export function createEventStreamEmitter(): EventStreamEmitter {
  *
  * Preflight and construction are fused here because two callers open the
  * stream: `runProtocol`, for an exchange that owns its whole run, and the
- * online bootstrap, which opens it itself because it emits persistence warnings
- * of its own from outside runProtocol's frame (see
- * {@link reportPersistenceLoss}). Fusing them means a second entry point cannot
- * acquire a writer that skipped the preflight.
+ * online bootstrap, which opens it itself because it reports persistence losses
+ * of its own from the hooks runProtocol invokes and needs the emitter object to
+ * do it (see {@link reportPersistenceLoss}). Fusing them means a second entry
+ * point cannot acquire a writer that skipped the preflight -- the writer and the
+ * emitter factory are module-private, so this is the compiler's rule rather than
+ * a convention: there is no exported route to a writer at all.
  */
 export function openEventStream(
   enabled: boolean | undefined,
@@ -468,7 +473,8 @@ export const PERSISTENCE_LOSS_EXIT_CODE = 73;
  * a new one cannot land on one channel and miss the other. The one loss that is
  * not survivable -- a result file that could not be written -- reports as the
  * terminal `error` event instead, carrying the same exit code on the error it
- * throws (`runProtocol`'s output-phase catch).
+ * throws (`runProtocol` stamps it at that write, so a partner-shaped fault
+ * elsewhere in the same output stage is not mistaken for a local write loss).
  *
  * `notice` is this party's own prose naming what was lost and what the operator
  * should do; the CAUSE stays on the human log the caller writes beside this

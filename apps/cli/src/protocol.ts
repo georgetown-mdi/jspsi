@@ -280,13 +280,15 @@ export function webRtcDialFrom(
 }
 
 /**
- * CLI-only, non-persistable runtime controls for the file-sync transport's entry
- * sweep, threaded straight to the {@link FileSyncConnection} constructor. They
- * are deliberately NOT part of {@link ProtocolConnectionConfig} / FileSyncOptions
- * / the Zod config schema: anything there is persistable in psilink.yaml, which
- * contradicts "invocation-scoped, never persisted". The CLI command layer
- * resolves these from argv and passes them here on a path separate from config
- * construction (applyConnectionOverrides).
+ * CLI-only, non-persistable runtime wiring for one invocation: the file-sync
+ * transport's entry-sweep controls (threaded straight to the
+ * {@link FileSyncConnection} constructor), the machine-interface stream, and the
+ * caller's pre-terminal hook. The sweep controls are deliberately NOT part of
+ * {@link ProtocolConnectionConfig} / FileSyncOptions / the Zod config schema:
+ * anything there is persistable in psilink.yaml, which contradicts
+ * "invocation-scoped, never persisted". The CLI command layer resolves these
+ * from argv and passes them here on a path separate from config construction
+ * (applyConnectionOverrides).
  */
 export interface FileSyncRuntimeOptions {
   /** `--sweep-exchange-files`: clear protocol files at entry (see FILE_SYNC.md). */
@@ -302,12 +304,47 @@ export interface FileSyncRuntimeOptions {
    * `true` opens the stream here, at the top of runProtocol and before any other
    * exchange work, so the fail-closed fd-3 preflight fires there. An
    * already-open {@link EventStreamEmitter} is a caller that opened the stream
-   * itself (openEventStream ran its preflight) because it emits warnings of its
-   * own outside this call: the online bootstrap reports the persistence it
-   * loses after runProtocol has returned, and both must ride the one channel
-   * that carries the terminal result event.
+   * itself (openEventStream ran its preflight) because it reports persistence
+   * losses of its own from the hooks below and needs the emitter object to do
+   * it: both sources must ride the one channel that carries the terminal event.
    */
   eventStream?: boolean | EventStreamEmitter;
+  /**
+   * The caller's own post-exchange persistence, run inside this frame: invoked
+   * once, after the output stage completed (the result CSV and every audit
+   * artifact, each loss already reported) and BEFORE the metrics and terminal
+   * events. That placement is the point of the hook. A caller doing this work
+   * after `runProtocol` returns would report what it loses AFTER the terminal
+   * event, which the stream contract forbids (docs/spec/CLI_EVENTS.md: the
+   * terminal event is last) and which a supervisor keying off the terminal event
+   * discards outright.
+   *
+   * Invoked only on the fully-completed path -- a failed exchange throws before
+   * the output stage, and a signal-interrupted run returns without a terminal
+   * event -- so a hook that ran is proof the exchange succeeded and must not be
+   * re-run. It may be synchronous or async; it is awaited, so a returned promise
+   * settles before the terminal events are emitted.
+   *
+   * A failure from the hook is non-fatal, like {@link runProtocol}'s
+   * `onAuthenticated`: the exchange has already completed and cannot be undone
+   * by a local write. It is logged at error level and reported as a persistence
+   * loss on both machine channels, so an unattended run whose caller let an
+   * error escape still does not read as a clean success.
+   */
+  onOutputComplete?: (context: OutputCompleteContext) => void | Promise<void>;
+}
+
+/** What {@link FileSyncRuntimeOptions.onOutputComplete} is handed. */
+export interface OutputCompleteContext {
+  /**
+   * The received-payload column set this party observed from the partner during
+   * the exchange, the same value {@link RunProtocolResult.observedReceivedPayloadColumns}
+   * carries -- available to the hook because it is known as soon as the exchange
+   * completes, well before this call resolves. Always an array here: the hook
+   * runs only on the completed-exchange path, where the partner's payload exists
+   * (it is empty when the partner transmitted nothing).
+   */
+  observedReceivedPayloadColumns: string[];
 }
 
 /** The value {@link runProtocol} resolves with. */
@@ -421,7 +458,9 @@ export interface RunProtocolResult {
  * controls (`--sweep-exchange-files` / `--force-retain-sweep`) straight to the
  * {@link FileSyncConnection} constructor, bypassing config construction so they
  * can never be persisted to psilink.yaml. Defaults to `{}` (no sweep) and is
- * inert on any non-file-sync transport.
+ * inert on any non-file-sync transport. It also carries the run's
+ * machine-interface stream and the caller's pre-terminal
+ * {@link FileSyncRuntimeOptions.onOutputComplete} hook -- see that interface.
  *
  * `signing` carries the signed-receipt inputs (this party's signing identity, the
  * pinned partner fingerprint, and where to write the dual-signed record). Pass
@@ -1581,13 +1620,41 @@ export async function runProtocol(
           "agreed terms you receive no result, so no result file was written.",
       );
     } else {
+      // buildOutputTable is OUTSIDE the stamp below on purpose: its integrity
+      // throws (duplicate partner row indices, rows missing for association
+      // indices, a length mismatch) are partner-shaped faults, and 73's published
+      // meaning is that what failed is a local write on this machine. They stay
+      // 69 and are distinguished by the terminal event's `output` category, which
+      // covers the whole stage.
       const { headers, rows } = buildOutputTable(
         associationTable,
         prepared.rawRows,
         prepared.metadata,
         partnerPayload,
       );
-      await writeOutput(output, headers, rows, log);
+      try {
+        await writeOutput(output, headers, rows, log);
+      } catch (err) {
+        // The result file did not reach disk. This is the terminal form of the
+        // same loss the persistence-loss reports carry: the exchange completed,
+        // only local generation failed, and re-running would re-send this party's
+        // data for an exchange that already happened. Carry the persistence-loss
+        // code on the error so a command boundary reports it instead of the 69 it
+        // gives a transport fault. Every boundary resolves the code through
+        // exitCodeForError (util/cli.ts), which prefers an error's own; whether
+        // the stamped code survives to the process exit is measured rather than
+        // asserted here -- exchange.test.ts and zeroSetup.test.ts drive each
+        // handler to a trapped process.exit and read the code off it. An error
+        // that already carries an exit code keeps it: its thrower classified it
+        // more precisely.
+        if (
+          typeof err === "object" &&
+          err !== null &&
+          (err as { exitCode?: number }).exitCode === undefined
+        )
+          Object.assign(err, { exitCode: PERSISTENCE_LOSS_EXIT_CODE });
+        throw err;
+      }
     }
 
     // Every audit artifact this run was asked for and could not produce, as the
@@ -1651,6 +1718,34 @@ export async function runProtocol(
     // config write) still runs and still reports what it loses.
     for (const missing of missingArtifacts)
       reportPersistenceLoss(missing, eventStream);
+
+    // The caller's own last persistence, run here rather than after this function
+    // returns so that whatever it loses is reported BEFORE the terminal event
+    // below -- the stream's terminal-is-last guarantee, and the only ordering a
+    // supervisor that stops reading at the terminal event can observe.
+    if (fileSyncRuntime.onOutputComplete !== undefined) {
+      try {
+        await fileSyncRuntime.onOutputComplete({
+          observedReceivedPayloadColumns: partnerPayload.columns,
+        });
+      } catch (hookErr) {
+        // The hook reports its own losses; reaching here means one escaped it.
+        // The exchange is already complete and cannot be undone by a local
+        // write, so this is non-fatal -- but a run that silently swallowed it
+        // would read as a clean success to the supervisor the stream exists for.
+        log.error(
+          "the post-exchange persistence step failed after the exchange and " +
+            "its results completed; what that step writes did not reach disk: " +
+            sanitizeErrorForDisplay(hookErr),
+        );
+        reportPersistenceLoss(
+          "a post-exchange persistence step did not complete; the exchange " +
+            "and its results succeeded and must not be re-run, and the error " +
+            "logged beside this notice names the step",
+          eventStream,
+        );
+      }
+    }
 
     // bootstrap is undefined on every authenticated path (saveIntent unset) and
     // populated on the zero-setup --save path; the caller branches on it.
@@ -1924,22 +2019,13 @@ export async function runProtocol(
     // precedes it so the terminal event stays last on the stream.
     emitMetrics();
     emit((e) => e.error(err, terminalPhase));
-    // An output-phase fault is the terminal form of the same loss the
-    // persistence-loss reports carry: the exchange completed, only local
-    // generation failed, and re-running would re-send this party's data for an
-    // exchange that already happened. Carry the persistence-loss code on the
-    // error so the command error boundaries report it instead of the 69 they
-    // give a transport fault -- each prefers an error's own exitCode -- while
-    // the `output` category on the terminal event above stays the finer-grained
-    // discriminator for a supervisor that reads fd 3. An error that already
-    // carries an exit code keeps it: its thrower classified it more precisely.
-    if (
-      terminalPhase === "output" &&
-      typeof err === "object" &&
-      err !== null &&
-      (err as { exitCode?: number }).exitCode === undefined
-    )
-      Object.assign(err, { exitCode: PERSISTENCE_LOSS_EXIT_CODE });
+    // The error is rethrown carrying whatever exit code its own thrower gave it,
+    // and nothing is stamped here: only the result-file write above is the local
+    // write loss 73 names, while the rest of the output stage -- core's refusal
+    // of a partner payload that does not fit the association table -- is not.
+    // Those keep no code and land on the boundaries' 69. The `output` category on
+    // the terminal event stays the finer-grained discriminator for a supervisor
+    // that reads fd 3, covering the whole stage either way.
     throw err;
   } finally {
     await doCleanup();

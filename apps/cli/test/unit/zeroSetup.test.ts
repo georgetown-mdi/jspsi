@@ -31,6 +31,7 @@ import type { ConnectionOverrideOptions } from "../../src/optionDefinitions";
 import { resolveConnectionCredentials } from "../../src/util/atSignRefs";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
+import { PERSISTENCE_LOSS_EXIT_CODE } from "../../src/eventStream";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 
 // The handler hands the resolved connection to runProtocol; mock it so the happy
@@ -530,6 +531,51 @@ test("handler hands the resolved credential to the exchange while persisting not
       expect.objectContaining({ channel: "sftp" }),
       expect.objectContaining({ persistence: { mode: "ephemeral" } }),
     );
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: a result file the exchange could not write exits 73, not 69", async () => {
+  // The zero-setup half of the published contract (docs/CLI.md, Exit codes): a
+  // retried zero-setup run conducts a second exchange, re-sending this party's
+  // data, so the code that says "do not re-run" has to survive this boundary.
+  // runProtocol stamps the error at the failed result write (protocol.test.ts
+  // drives the real stamp); measured here is what the COMMAND reports. A boundary
+  // mapping every non-usage error to 69 fails only this.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroexit-"));
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+    vi.mocked(runProtocol).mockRejectedValueOnce(
+      Object.assign(
+        new Error("EACCES: permission denied, open 'results.csv'"),
+        {
+          exitCode: PERSISTENCE_LOSS_EXIT_CODE,
+        },
+      ),
+    );
+
+    await expect(
+      handler({
+        _: ["sftp://userb@localhost:2222/drop", input],
+        $0: "psilink",
+        "config-file": path.join(dir, "psilink.yaml"),
+        "key-file": path.join(dir, ".psilink.key"),
+        identity: "Tester",
+        record: false,
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:73");
   } finally {
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
