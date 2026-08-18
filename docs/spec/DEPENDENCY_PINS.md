@@ -26,6 +26,13 @@ routine batch where the checklist is skimmed rather than worked through. A new
 section follows the same heading form; the check's header states what else it
 reads and what it does not.
 
+That form is for npm packages only, because every name in such a heading is read
+as one and looked up in the npm groups. A checklist for a pin in another
+ecosystem therefore carries a heading of another shape -- "Bumping the FIPS base
+image" below is a docker-ecosystem pin, whose bumps that config never batches --
+and renaming one of those to `Upgrading ...` fails the check with a message
+asking for an npm exclude entry that would be false.
+
 ## Why these are exact-pinned
 
 - **SFTP stack (`ssh2` / `ssh2-sftp-client`).** The CLI's SFTP adapter
@@ -591,3 +598,67 @@ The close is deliberately two-phase, and an upgrade must keep both halves. The f
 - Re-drive the candidate-queue premise by hand against a browser peer if the negotiation changes. The unit test pins the order this side emits in; only a real PeerJS peer shows what it does with one that arrives early.
 - Confirm the install stays clean: werift declares no `preinstall`/`install`/`postinstall` script and ships no native or compiled content, so nothing compiles at install and no `allowScripts` verdict is needed (see [The install-script policy](#the-install-script-policy-allowscripts)). `mediabunny` (MPL-2.0) is installed as a transitive but never loaded by a datachannel-only peer.
 - TURN remains unverified against a real relay. The relay transports are present in the published API and the URL parser resolves the port-443 TLS case, but no relay has been driven; drive one before any deployment relies on relayed connectivity.
+
+## Bumping the FIPS base image
+
+`Dockerfile.fips` pins its Amazon Linux 2023 rootfs by multi-arch index digest,
+so the base moves only when someone edits that digest. Three committed values
+name one release between them, and a bump that moves fewer than all three builds
+an image whose userland and package layer came from different snapshots. What
+each of those pins is, and how the current values were resolved, is in
+[CONTAINER_IMAGES.md](CONTAINER_IMAGES.md#the-fips-variant-images-pins); what
+follows is the procedure that keeps them together.
+
+**The arrival signal.** Dependabot's docker ecosystem (`.github/dependabot.yml`,
+weekly on Monday, targeting `staging`) tracks the digest in the `FROM` and opens
+a pull request of its own when the `amazonlinux:2023` tag is rebuilt onto a newer
+rootfs. That block declares no groups, so such a bump is never batched. Its
+weekly cadence is the accepted latency -- nothing polls the registry more often,
+and a rebuild is what this waits for rather than something this repository can
+provoke.
+
+**The same-diff trio.** A digest bump lands with all three of these or not at
+all:
+
+1. The digest in `Dockerfile.fips`'s `FROM`. This is what the Dependabot pull
+   request edits, and the only one of the three it moves on its own.
+2. The `FIPS_BASE` literal in `scripts/dockerfile-freeze.test.mjs`.
+   `npm run test:scripts` stays red until it matches, so the reconciliation is
+   forced rather than remembered.
+3. `ARG AL2023_RELEASEVER` in `Dockerfile.fips`, the snapshot every `dnf`
+   transaction resolves against. The `nodebase` stage compares it against the
+   `system-release` version the rootfs reports and fails the build when the two
+   differ, so a digest that moves without it reddens the image build.
+
+Read the release out of the new rootfs to learn what to write in (3):
+`rpm -q --qf '%{VERSION}' system-release` inside it, or `docker create` plus
+`docker cp` of `/etc/os-release` to read the other architecture's rootfs without
+emulating or executing it. Moving the releasever also moves what the package
+layer resolves, the certified provider's NVR included: a snapshot no longer
+serving that NVR fails the `dnf swap` itself, and one serving a different module
+under it fails the `rpm -qf` and `openssl list` assertions that follow.
+
+**What re-proves the result.** `image_smoke.yaml` builds `Dockerfile.fips` on
+every pull request touching it, which is where all of those build-time assertions
+run, and follows the build with the variant's entrypoint report, the engagement
+probe, an end-to-end two-party exchange between two containers of the built
+image, and the setuid/setgid inventory recorded in
+[CONTAINER_IMAGES.md](CONTAINER_IMAGES.md#the-fips-variants-setuid-and-setgid-files)
+-- a new base whose package closure gains or loses one of those bits reddens that
+step, and the inventory is re-recorded in the same diff.
+
+Two limits sit between a green run there and a bump being proved:
+
+- **No vulnerability scan runs against the variant.** The Trivy OS-layer scan in
+  that workflow is scoped to the default image (`matrix.fips == 'false'`): the
+  variant is published nowhere, so nothing its package closure carries reaches an
+  operator, and gating a merge on it would block one over an image no one can
+  pull. A base bump taken in order to clear an OS-layer finding is therefore
+  confirmed by no gate in this repository. Scan the built variant by hand to
+  confirm it, at the scope and threshold the default leg sets -- OS-layer, `vuln`
+  scanner, HIGH and above, fixable only, against `.github/trivyignore`.
+- **The build is single-arch.** That workflow builds native `amd64` with no
+  QEMU, and no release workflow builds this image at all, so the release
+  assertion speaks for the `amd64` rootfs at the new digest and not for the
+  `arm64` one. Reading the other architecture's release by hand, as above, is
+  what covers it.
