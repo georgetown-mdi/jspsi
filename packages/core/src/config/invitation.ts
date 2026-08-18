@@ -461,7 +461,9 @@ export interface InvitationToken {
    * retain mode at all (`webrtc`), or the token may predate this field. A `false`
    * from a foreign implementation decodes and states nothing, which is what both
    * acceptance surfaces render for it -- the `retainedFiles` entry of
-   * `consentFacts.ts` carries why the negative is not a claim either.
+   * `consentFacts.ts` carries why the negative is not a claim either. The one
+   * `false` the schema refuses outright sits beside a split-directory endpoint,
+   * whose shape ({@link endpointRequiresRetainedFiles}) contradicts it.
    *
    * `lockless_rendezvous` is equally bilateral and equally fast-failing and is
    * deliberately NOT carried: nothing about it changes what an acceptor consents
@@ -591,6 +593,28 @@ const InvitationTokenSchema: z.ZodType<InvitationToken> =
         message:
           "inviterRetainsFiles is not valid for a webrtc connection endpoint; " +
           "retain mode is a file-sync setting the webrtc channel does not have",
+        path: ["inviterRetainsFiles"],
+      },
+    )
+    // The mirror refusal on the file-sync side. A split inbound/outbound endpoint
+    // requires retain mode of every connection built from it -- read through
+    // `endpointRequiresRetainedFiles`, the same predicate the accept path's own
+    // seeding reads -- so a token pairing that endpoint with an explicit `false`
+    // states a mode no run of it could be in, exactly as a `true` on webrtc does.
+    // Refusing here keeps a mint path from stamping the pair and a decoder from
+    // surfacing one, rather than leaving the consent summary's OR to render the
+    // safe side over a declaration the shape contradicts. Scoped to the explicit
+    // negative: an omitted field on the same endpoint is "nothing declared", the
+    // case the summary's second ground exists to cover, so it stays valid.
+    .refine(
+      (token) =>
+        !endpointRequiresRetainedFiles(token.connectionEndpoint) ||
+        token.inviterRetainsFiles !== false,
+      {
+        message:
+          "inviterRetainsFiles cannot be false for a connection endpoint " +
+          "carrying the inbound_path/outbound_path pair; a split directory " +
+          "requires retain mode of every connection built from it",
         path: ["inviterRetainsFiles"],
       },
     );
