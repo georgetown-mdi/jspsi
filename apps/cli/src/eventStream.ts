@@ -261,12 +261,14 @@ export function buildWarningEvent(message: string): WarningEvent {
     // sanitize before the text reaches the stream. Redaction first, mirroring
     // the log sink: this stream is a persisted machine sink too, and its error
     // event is already redacted (sanitizeErrorForDisplay), so the warning is
-    // where the stream would otherwise carry key material in the clear. Both
-    // live warning sources redact per fragment where they compose, so the
-    // fail-closed dangling rule has nothing left to consume here. The cap is the
-    // shared warning-composition budget, not the per-value default, so a
-    // consumer that re-escapes this field at the same budget delivers the whole
-    // composition rather than re-capping it.
+    // where the stream would otherwise carry key material in the clear. The
+    // warning sources that carry partner- or server-controlled text redact per
+    // fragment where they compose, so the fail-closed dangling rule has nothing
+    // left to consume here; the audit-artifact notices carry only an
+    // operator-configured path and compose raw, taking their whole escape from
+    // this one pass. The cap is the shared warning-composition budget, not the
+    // per-value default, so a consumer that re-escapes this field at the same
+    // budget delivers the whole composition rather than re-capping it.
     message: redactAndSanitizeForDisplay(message, {
       maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
     }),

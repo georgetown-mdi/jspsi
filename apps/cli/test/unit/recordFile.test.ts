@@ -141,7 +141,9 @@ test("recordPathsFor stamps the default path with the record's createdAt", () =>
 test("writeExchangeRecord writes both files, parseable and owner-only", () => {
   const recordFilePath = path.join(dir, "rec.json");
   const keysFilePath = keysPathFor(recordFilePath);
-  writeExchangeRecord({ recordFile: recordFilePath }, record, keys, "test");
+  expect(
+    writeExchangeRecord({ recordFile: recordFilePath }, record, keys, "test"),
+  ).toBeUndefined();
 
   // Both files exist and round-trip through the schema parsers.
   expect(
@@ -161,13 +163,27 @@ test("writeExchangeRecord writes both files, parseable and owner-only", () => {
 test("writeExchangeRecord is non-fatal when the destination is unwritable", () => {
   // A record path whose parent is a regular file cannot be created; the helper
   // must warn rather than throw, so a successful exchange is never failed by an
-  // audit-write problem.
+  // audit-write problem. It still reports the loss to its caller: the returned
+  // message is what reaches the machine-interface stream and the exit code on an
+  // unattended run whose stderr nobody reads, so a silent undefined here would
+  // be the failure this return value exists to prevent. It names the
+  // destination, and no cause -- the caller's sink escapes it once, so the
+  // already-escaped cause in the log line above must not be folded into it.
   const blocker = path.join(dir, "blocker");
   fs.writeFileSync(blocker, "x");
   const recordFilePath = path.join(blocker, "rec.json"); // parent is a file
-  expect(() =>
-    writeExchangeRecord({ recordFile: recordFilePath }, record, keys, "test"),
-  ).not.toThrow();
+  let failure: string | undefined;
+  expect(() => {
+    failure = writeExchangeRecord(
+      { recordFile: recordFilePath },
+      record,
+      keys,
+      "test",
+    );
+  }).not.toThrow();
+  expect(failure).toContain("the audit record could not be written to");
+  expect(failure).toContain(recordFilePath);
+  expect(failure).toContain("need not be re-run");
   expect(fs.existsSync(recordFilePath)).toBe(false);
   // The non-fatal failure is surfaced as a WARN (asserting it both proves the
   // diagnostic fired and keeps it off the suite output).

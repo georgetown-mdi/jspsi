@@ -675,6 +675,54 @@ test("writeOutput: a mid-write stream error rejects rather than crashing", async
   }
 });
 
+test("writeOutput: a close-time failure rejects rather than reporting success", async () => {
+  // A networked or userspace filesystem (NFS/CIFS/FUSE) and a full disk both
+  // defer their error to the close(2) after the last flushed write -- after
+  // 'finish', which every row having been handed to the stream fires regardless.
+  // Resolving there would report a truncated result CSV as written, and the
+  // attested resultSize is computed in memory, so nothing downstream would catch
+  // it. The substitute models exactly that: writes succeed, the destroy that
+  // follows end() fails, so 'finish' fires and then 'error'. The rejection is
+  // the proof the promise waits for the close.
+  if (process.platform === "win32") return;
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "psilink-writeoutput-close-"),
+  );
+  try {
+    let finished = false;
+    vi.spyOn(fs, "createWriteStream").mockImplementation((...args) => {
+      const fd = (args[1] as { fd?: number } | undefined)?.fd;
+      if (typeof fd === "number") fs.closeSync(fd);
+      const stream = new Writable({
+        write(_chunk, _enc, cb) {
+          cb();
+        },
+        destroy(_err, cb) {
+          cb(new Error("no space left on device"));
+        },
+      });
+      stream.on("finish", () => {
+        finished = true;
+      });
+      return stream as unknown as fs.WriteStream;
+    });
+    await expect(
+      writeOutput(
+        path.join(dir, "results.csv"),
+        ["a"],
+        [["1"]],
+        logCollector(),
+      ),
+    ).rejects.toThrow("no space left on device");
+    // 'finish' did fire: the rejection came from the close that followed it, not
+    // from a stream that never flushed.
+    expect(finished).toBe(true);
+  } finally {
+    vi.restoreAllMocks();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("writeOutput: the stdout branch writes to process.stdout unchanged", async () => {
   // No output path: the rows go to process.stdout with no file and no permission
   // handling, exactly as before.

@@ -220,6 +220,7 @@ vi.mock("../../src/connection/ssh2SftpAdapter", () => {
 
 import {
   buildOutputTable,
+  parseDualSignedRecord,
   parseExchangeRecord,
   parseVerificationKeys,
   runExchange,
@@ -240,7 +241,11 @@ import {
   sanitizeForDisplay,
   DISPLAY_TRUNCATION_MARKER,
 } from "@psilink/core";
-import type { ExchangeRecord, VerificationKeys } from "@psilink/core";
+import type {
+  DualSignedRecord,
+  ExchangeRecord,
+  VerificationKeys,
+} from "@psilink/core";
 import {
   runProtocol,
   PEER_SILENCE_GUIDANCE,
@@ -657,47 +662,48 @@ test("authentication=null runs the exchange without authentication and without e
 
 // --- Self-attested record persistence via runProtocol ------------------------
 
+const sampleRecord: ExchangeRecord = {
+  version: "psilink-exchange-record/v1",
+  createdAt: "2026-01-02T03:04:05.000Z",
+  termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
+  localIdentity: "Party A",
+  partnerIdentity: "Party B",
+  governance: {
+    algorithm: "psi",
+    matchingBasis: [{ name: "ssn", type: "ssn" }],
+    payloadSent: [],
+    payloadReceived: [],
+  },
+  recordsExposed: 5,
+  bindingNonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  commitments: {
+    localPayloadSent: "We5eIlrtkWBUe1uSGrla5rvLs0YhGFPPVDjk4EPX2k8",
+    partnerPayloadReceived: "IFfNSyYoX8tKe2k-o6TjmrS1sW1ndtpZjexzR-fZa5g",
+  },
+};
+const sampleKeys: VerificationKeys = {
+  version: "psilink-exchange-keys/v1",
+  salts: {
+    localPayloadSent: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+    partnerPayloadReceived: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+  },
+};
+const audit = { record: sampleRecord, keys: sampleKeys };
+
+// Drain the drop directory exactly as the default mock does (so neither party's
+// cleanup races the other's poller), then return the audit alongside the usual
+// fields.
+async function runExchangeWithAudit(): Promise<unknown> {
+  const base = (await defaultRunExchange()) as Record<string, unknown>;
+  return { ...base, audit };
+}
+
 test("writes the self-attested record and verification keys when runExchange returns an audit", async () => {
   // Covers the record-write wiring in runProtocol (the runExchange audit ->
   // writeExchangeRecord call), which the default mock leaves unexercised by
   // returning no audit. Each party's runExchange returns a built audit and is
   // given its own record output paths; both the record and its keys must land
   // on disk and round-trip the schema parsers.
-  const sampleRecord: ExchangeRecord = {
-    version: "psilink-exchange-record/v1",
-    createdAt: "2026-01-02T03:04:05.000Z",
-    termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
-    localIdentity: "Party A",
-    partnerIdentity: "Party B",
-    governance: {
-      algorithm: "psi",
-      matchingBasis: [{ name: "ssn", type: "ssn" }],
-      payloadSent: [],
-      payloadReceived: [],
-    },
-    recordsExposed: 5,
-    bindingNonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    commitments: {
-      localPayloadSent: "We5eIlrtkWBUe1uSGrla5rvLs0YhGFPPVDjk4EPX2k8",
-      partnerPayloadReceived: "IFfNSyYoX8tKe2k-o6TjmrS1sW1ndtpZjexzR-fZa5g",
-    },
-  };
-  const sampleKeys: VerificationKeys = {
-    version: "psilink-exchange-keys/v1",
-    salts: {
-      localPayloadSent: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-      partnerPayloadReceived: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
-    },
-  };
-  const audit = { record: sampleRecord, keys: sampleKeys };
-
-  // Drain the drop directory exactly as the default mock does (so neither
-  // party's cleanup races the other's poller), then return the audit alongside
-  // the usual fields.
-  async function runExchangeWithAudit(): Promise<unknown> {
-    const base = (await defaultRunExchange()) as Record<string, unknown>;
-    return { ...base, audit };
-  }
   vi.mocked(runExchange).mockImplementation(runExchangeWithAudit as never);
 
   const recordA = path.join(tmpDir, "rec-a.json");
@@ -746,6 +752,137 @@ test("writes the self-attested record and verification keys when runExchange ret
     ).toEqual(sampleKeys);
   }
 });
+
+test("a record the run was asked for and could not write warns on fd 3 and exits non-zero", async () => {
+  // The unattended case: records are enabled, the exchange and its results
+  // succeed, and the record write fails (here on a path whose parent is a
+  // regular file). A supervisor that discards stderr -- or an operator at
+  // --log-level error, which suppresses the warn -- would otherwise read a clean
+  // exit 0 for a run that produced no audit artifact. Both machine channels must
+  // carry it: a warning event ahead of the terminal event, and a non-zero exit
+  // code. The terminal event stays `result`: the exchange succeeded and must not
+  // be re-run.
+  const blocker = path.join(tmpDir, "blocker");
+  fs.writeFileSync(blocker, "x");
+  vi.mocked(runExchange).mockImplementation(runExchangeWithAudit as never);
+  const exitCodeBefore = process.exitCode;
+  mockFd3Open();
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        { recordFile: path.join(blocker, "rec-a.json") },
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+        { recordFile: path.join(tmpDir, "rec-b.json") },
+      ),
+    ]);
+    expect(process.exitCode).toBe(69);
+  } finally {
+    process.exitCode = exitCodeBefore;
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  // Only party A ran under --event-stream, so every captured line is its own.
+  const lines = takeFd3Lines();
+  expect(lines.map((l) => l.type)).toEqual([
+    "stages",
+    "warning",
+    "metrics",
+    "result",
+  ]);
+  expect(String(lines[1].message)).toContain(
+    "the audit record could not be written to",
+  );
+  // The successful party is untouched: its record landed and its exit is clean.
+  expect(fs.existsSync(path.join(tmpDir, "rec-b.json"))).toBe(true);
+});
+
+// The fixed text runProtocol reports when records were asked for and runExchange
+// returned no audit. It names no destination -- none was ever resolved -- so it
+// says instead that nothing was written and that the run must not be re-run.
+const NO_RECORD_BUILT_WARNING =
+  "no audit record could be built for this exchange, so none was written; " +
+  "the exchange and its results succeeded and need not be re-run";
+
+test(
+  "a record that could not be built warns and exits non-zero",
+  { timeout: 10_000 },
+  async () => {
+    // The other missing-artifact shape: records are enabled, the exchange and its
+    // results succeed, and runExchange returns no audit at all -- the record could
+    // not be BUILT, warned with its cause inside runExchange, which a supervisor
+    // that discards stderr never sees. The default runExchange mock returns
+    // exactly that shape. Party B is asked for no record, so the single warning
+    // and the non-zero exit are provably party A's.
+    const recordA = path.join(tmpDir, "rec-a.json");
+    const exitCodeBefore = process.exitCode;
+    mockFd3Open();
+    try {
+      await Promise.all([
+        runProtocol(
+          {
+            channel: "filedrop",
+            path: dropDir,
+            options: { pollIntervalMs: 1 },
+          },
+          null,
+          minimalPrepared,
+          undefined,
+          -1,
+          "test-a",
+          { recordFile: recordA },
+          undefined,
+          undefined,
+          { eventStream: true },
+        ),
+        runProtocol(
+          {
+            channel: "filedrop",
+            path: dropDir,
+            options: { pollIntervalMs: 1 },
+          },
+          null,
+          minimalPrepared,
+          undefined,
+          -1,
+          "test-b",
+        ),
+      ]);
+      expect(process.exitCode).toBe(69);
+    } finally {
+      process.exitCode = exitCodeBefore;
+      vi.mocked(fs.fstatSync).mockRestore();
+    }
+
+    const lines = takeFd3Lines();
+    expect(lines.map((l) => l.type)).toEqual([
+      "stages",
+      "warning",
+      "metrics",
+      "result",
+    ]);
+    expect(lines[1].message).toBe(NO_RECORD_BUILT_WARNING);
+    expect(lines[3].resultWritten).toBe(true);
+    // What the warning asserts: neither the record nor its keys reached disk.
+    expect(fs.existsSync(recordA)).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, "rec-a.keys.json"))).toBe(false);
+  },
+);
 
 // --- One-sided result withholding via runProtocol ----------------------------
 
@@ -1604,6 +1741,74 @@ test("a completed signed run does not warn about a non-signing partner", async (
   expect(
     mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
   ).toBe(false);
+});
+
+// A minimal schema-valid dual-signed record: the receipt an exchange that
+// completed its signature swap returns. Its certificates are the checked-in
+// signing-cert vectors' identities, reused here for a valid shape -- nothing
+// verifies them on the write path.
+const signedReceiptCertificate = {
+  version: "psilink-signing-cert/v2" as const,
+  algorithm: "ecdsa-p256-sha256" as const,
+  identity: "Party A",
+  publicKey: {
+    kty: "EC" as const,
+    crv: "P-256" as const,
+    x: "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
+    y: "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q",
+  },
+  signature:
+    "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g",
+};
+const signedReceiptFixture: DualSignedRecord = {
+  version: "psilink-signed-receipt/v2",
+  content: {
+    termsHash: "dGVybXNIYXNo",
+    initiatorToResponderPayload: "aTJyUGF5bG9hZA",
+    responderToInitiatorPayload: "cjJpUGF5bG9hZA",
+    binder: "YmluZGVy",
+  },
+  initiator: {
+    certificate: signedReceiptCertificate,
+    signature: "AAAA",
+  },
+  responder: {
+    certificate: { ...signedReceiptCertificate, identity: "Party B" },
+    signature: "AAAA",
+  },
+};
+
+test("writes the dual-signed receipt when no audit record was built", async () => {
+  // The two artifacts are independent: core signs the receipt from the
+  // mutually-verifiable facts whether or not this party's local record built, so
+  // a record-build failure (which leaves audit undefined, warned and swallowed
+  // inside runExchange) must not discard a completed dual-signed receipt -- the
+  // one artifact a partner and an auditor can check. This models that return
+  // shape exactly: a signed receipt with no audit beside it.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  vi.mocked(runExchange).mockImplementation((async () => {
+    const base = (await defaultRunExchange()) as Record<string, unknown>;
+    return { ...base, signedReceipt: signedReceiptFixture };
+  }) as never);
+
+  const receiptA = path.join(tmpDir, "receipt-a.json");
+  const receiptB = path.join(tmpDir, "receipt-b.json");
+  const [resultA, resultB] = await Promise.allSettled([
+    runSigningParty(keyFileA, "test-a", receiptA),
+    runSigningParty(keyFileB, "test-b", receiptB),
+  ]);
+  expect(resultA.status).toBe("fulfilled");
+  expect(resultB.status).toBe("fulfilled");
+
+  for (const receipt of [receiptA, receiptB]) {
+    expect(
+      parseDualSignedRecord(JSON.parse(fs.readFileSync(receipt, "utf8"))),
+    ).toEqual(signedReceiptFixture);
+  }
 });
 
 test(
@@ -4452,67 +4657,91 @@ test("logs no reconnect or per-cycle boundary summary of any kind on a clean run
   );
 });
 
-test("an aborted run under --event-stream reports metrics then the classified reason", async () => {
-  // A mid-run fault after a stage started: the completed stage's timing is
-  // already on the stream, and the terminal sequence is the metrics summary
-  // followed by the classified error -- the machine-readable abort reason,
-  // distinct from the free-text stderr log. No stageEnd fires for the in-flight
-  // stage (only completed stages are timed).
-  const preparedWithRows = { rowCount: 4 } as unknown as PreparedExchange;
-  vi.mocked(runExchange).mockImplementation((async (...args: unknown[]) => {
-    const options = args[3] as { onStage?: (id: string) => void };
-    options.onStage?.("stage 1 / 1");
-    throw new Error("simulated mid-run transport fault");
-  }) as never);
+test(
+  "an aborted run under --event-stream reports metrics then the classified reason",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    // A mid-run fault after a stage started: the completed stage's timing is
+    // already on the stream, and the terminal sequence is the metrics summary
+    // followed by the classified error -- the machine-readable abort reason,
+    // distinct from the free-text stderr log. No stageEnd fires for the in-flight
+    // stage (only completed stages are timed).
+    const preparedWithRows = { rowCount: 4 } as unknown as PreparedExchange;
+    vi.mocked(runExchange).mockImplementation((async (...args: unknown[]) => {
+      // Hold both parties here before either fault fires: the lock winner reaches
+      // runExchange the moment it creates the lock, while the loser is still
+      // between its EEXIST and the exists(lock) check that tells a live winner
+      // from a departed one. Without the barrier the winner's teardown deletes
+      // the lock inside that gap, and the loser -- which may be party A, the one
+      // asserted below -- fails with "peer appears to have abandoned the
+      // handshake" instead of the fault this test injects.
+      await awaitBothArmed();
+      const options = args[3] as { onStage?: (id: string) => void };
+      options.onStage?.("stage 1 / 1");
+      throw new Error("simulated mid-run transport fault");
+    }) as never);
 
-  // Two parties complete the real rendezvous before either reaches the mocked
-  // runExchange, where both then throw. Only party A is flag-on; its outcome is
-  // the one asserted (party B's is not).
-  mockFd3Open();
-  let resA: PromiseSettledResult<unknown>;
-  try {
-    [resA] = await Promise.allSettled([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
-        null,
-        preparedWithRows,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
-        null,
-        preparedWithRows,
-        undefined,
-        -1,
-        "test-b",
-      ),
+    // Two parties complete the real rendezvous before either reaches the mocked
+    // runExchange, where both then throw. Only party A is flag-on; its outcome is
+    // the one asserted (party B's is not). Each carries an explicit peer wait: it
+    // bounds every pre-exchange wait, and the default (one hour) would let a party
+    // left waiting on a peer that failed its own rendezvous run past this test's
+    // budget and be killed by vitest with a generic message instead of the core
+    // layer's own diagnosable timeout.
+    const partyOptions = {
+      pollIntervalMs: 1,
+      peerTimeoutMs: PEER_WAIT_HANG_BACKSTOP_MS,
+    };
+    mockFd3Open();
+    let resA: PromiseSettledResult<unknown>;
+    try {
+      [resA] = await Promise.allSettled([
+        runProtocol(
+          { channel: "filedrop", path: dropDir, options: partyOptions },
+          null,
+          preparedWithRows,
+          undefined,
+          -1,
+          "test-a",
+          undefined,
+          undefined,
+          undefined,
+          { eventStream: true },
+        ),
+        runProtocol(
+          { channel: "filedrop", path: dropDir, options: partyOptions },
+          null,
+          preparedWithRows,
+          undefined,
+          -1,
+          "test-b",
+        ),
+      ]);
+    } finally {
+      vi.mocked(fs.fstatSync).mockRestore();
+    }
+    // Both parties reached the mocked runExchange, so the barrier above held
+    // rather than expiring: a run where one party never arrives still reports the
+    // injected fault on the other, which would read green without this.
+    expect(mockState.runExchangeEntries).toBe(2);
+    expect(resA.status).toBe("rejected");
+    expect(String((resA as PromiseRejectedResult).reason)).toContain(
+      "simulated mid-run transport fault",
+    );
+
+    const lines = takeFd3Lines();
+    // stages, stage(1) -- no stageEnd for the aborted in-flight stage -- metrics,
+    // then the classified terminal error.
+    expect(lines.map((l) => l.type)).toEqual([
+      "stages",
+      "stage",
+      "metrics",
+      "error",
     ]);
-  } finally {
-    vi.mocked(fs.fstatSync).mockRestore();
-  }
-  expect(resA.status).toBe("rejected");
-  expect(String((resA as PromiseRejectedResult).reason)).toContain(
-    "simulated mid-run transport fault",
-  );
-
-  const lines = takeFd3Lines();
-  // stages, stage(1) -- no stageEnd for the aborted in-flight stage -- metrics,
-  // then the classified terminal error.
-  expect(lines.map((l) => l.type)).toEqual([
-    "stages",
-    "stage",
-    "metrics",
-    "error",
-  ]);
-  const metrics = lines.find((l) => l.type === "metrics")!;
-  expect(metrics.recordsProcessed).toBe(4);
-  const errorLine = lines.find((l) => l.type === "error")!;
-  expect(errorLine.category).toBe("exchange");
-  expect(String(errorLine.message)).toContain("simulated mid-run transport");
-});
+    const metrics = lines.find((l) => l.type === "metrics")!;
+    expect(metrics.recordsProcessed).toBe(4);
+    const errorLine = lines.find((l) => l.type === "error")!;
+    expect(errorLine.category).toBe("exchange");
+    expect(String(errorLine.message)).toContain("simulated mid-run transport");
+  },
+);

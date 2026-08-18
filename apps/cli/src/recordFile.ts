@@ -112,7 +112,14 @@ export function recordPathsFor(
  * Non-fatal by design: the privacy-sensitive exchange and the results file have
  * already succeeded by the time this runs, so a record-write failure is logged
  * as a warning rather than thrown -- the user is never told to re-run a
- * successful exchange because an audit artifact could not be saved.
+ * successful exchange because an audit artifact could not be saved. It is not
+ * silent, though: the failure is returned as a message for the caller to put on
+ * the machine-readable event stream and to leave a non-zero exit behind, so an
+ * unattended run whose stderr is discarded (or whose `--log-level` suppresses a
+ * warning) still reports that the exchange produced no audit artifact. The
+ * returned message names the destination but not the cause, and is composed RAW
+ * for that stream's own escape; the logged line below carries the cause and is
+ * escaped where it composes.
  *
  * The verification keys are written first (they are the material verification
  * needs; if the process dies between the two writes, the salts are preserved and
@@ -130,7 +137,7 @@ export function writeExchangeRecord(
   record: ExchangeRecord,
   keys: VerificationKeys,
   loggerName: string,
-): void {
+): string | undefined {
   const log = getLogger(loggerName);
   // Resolve the concrete paths now: the default path's timestamp is the record's
   // own createdAt, so the filename matches the timestamp inside the file.
@@ -158,6 +165,7 @@ export function writeExchangeRecord(
       "wrote self-attested exchange record (a local audit artifact, NOT a " +
         `signed or non-repudiable receipt) to ${recordFilePath}`,
     );
+    return undefined;
   } catch (err) {
     log.warn(
       "the exchange and results succeeded but the audit record could not be " +
@@ -175,5 +183,10 @@ export function writeExchangeRecord(
           "still private -- delete them or keep them private",
       );
     }
+    return (
+      `the audit record could not be written to ${recordFilePath}; the ` +
+      "exchange and its results succeeded and need not be re-run, so this " +
+      "exchange has no record"
+    );
   }
 }
