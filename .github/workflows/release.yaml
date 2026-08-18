@@ -254,6 +254,7 @@ jobs:
       - name: Assert the release FIPS variant image engages the FIPS provider
         if: ${{ !cancelled() && steps.fips_build.outcome == 'success' }}
         run: |
+          set -euo pipefail
           docker run --rm --entrypoint node \
             psi-link:fips-release-candidate /app/fips-probe/image-engagement.mjs
 
