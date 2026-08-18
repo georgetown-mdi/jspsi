@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import YAML from "yaml";
 import {
@@ -46,7 +46,6 @@ import {
 import {
   applyEndpointSplitDirectories,
   buildDataSpec,
-  CONFIG_WRITE_FAILURE_EXIT_CODE,
   connectionFromEndpoint,
   endpointFromConnection,
   generateSharedSecret,
@@ -78,6 +77,21 @@ vi.mock("../../src/protocol", () => ({
 // runOrExit creates its error logger by name; silence that name so the
 // error-path tests below don't print to the console.
 getLogger("bootstrap-test").setLevel("silent");
+
+// A persistence the bootstrap loses without losing the exchange moves the REAL
+// process.exitCode (that is the contract an unattended supervisor reads), so
+// every test here is fenced: the value is snapshotted before each test and put
+// back after, and a test that expects a loss asserts the code in its own body,
+// before this fires.
+let exitCodeBeforeTest: typeof process.exitCode;
+
+beforeEach(() => {
+  exitCodeBeforeTest = process.exitCode;
+});
+
+afterEach(() => {
+  process.exitCode = exitCodeBeforeTest;
+});
 
 // --- looksLikeUrl ------------------------------------------------------------
 
@@ -1561,6 +1575,56 @@ function onlineBootstrapParams(
   };
 }
 
+/** The machine-interface descriptor the bootstrap's warnings are written to. */
+const EVENT_STREAM_FD = 3;
+
+/** Run `body` with fd 3 captured, returning the events it wrote there parsed one
+ *  per line. `fstatSync` answers for fd 3 so the fail-closed preflight passes,
+ *  and `writeSync` diverts fd 3 into the buffer -- the descriptor is never
+ *  written for real, since the test process does not own it -- while every other
+ *  descriptor passes through. runProtocol is mocked in this file, so the only
+ *  events captured are the bootstrap's own.
+ */
+async function captureFd3<T>(
+  body: () => Promise<T>,
+): Promise<{ value: T; lines: Array<Record<string, unknown>> }> {
+  const chunks: Buffer[] = [];
+  const realWriteSync = fs.writeSync;
+  const realFstatSync = fs.fstatSync;
+  vi.spyOn(fs, "fstatSync").mockImplementation(((
+    fd: number,
+    ...rest: unknown[]
+  ) => {
+    if (fd === EVENT_STREAM_FD) return {} as fs.Stats;
+    return (realFstatSync as (...a: unknown[]) => fs.Stats)(fd, ...rest);
+  }) as typeof fs.fstatSync);
+  vi.spyOn(fs, "writeSync").mockImplementation(((
+    fd: number,
+    ...args: unknown[]
+  ) => {
+    if (fd === EVENT_STREAM_FD) {
+      const [buffer, offset, length] = args as [Buffer, number, number];
+      chunks.push(Buffer.from(buffer.subarray(offset, offset + length)));
+      return length;
+    }
+    return (realWriteSync as (...a: unknown[]) => number)(fd, ...args);
+  }) as typeof fs.writeSync);
+  try {
+    const value = await body();
+    return {
+      value,
+      lines: Buffer.concat(chunks)
+        .toString("utf8")
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as Record<string, unknown>),
+    };
+  } finally {
+    vi.mocked(fs.writeSync).mockRestore();
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+}
+
 /** Locate the onAuthenticated hook among runProtocol's call arguments by type,
  *  not position. Asserting exactly one function argument makes the mock fail
  *  loudly if a second function-typed parameter is ever added to runProtocol (in
@@ -1797,6 +1861,47 @@ test("runOnlineBootstrap keeps a failed observed-payload write non-fatal", async
     // The second write genuinely failed (the swapped-in directory is intact),
     // proving the non-fatal catch fired rather than the write silently succeeding.
     expect(fs.statSync(configPath).isDirectory()).toBe(true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap reports a lost observed-payload write on fd 3 and in the exit code", async () => {
+  // The same loss as the test above, seen by an unattended supervisor: the
+  // configuration the run left behind is missing the lock-in a later recurring
+  // exchange would have been held to. Nothing about the completed exchange
+  // changes -- it is not to be re-run -- so the report is a `warning` on the
+  // machine-interface stream plus the persistence-loss exit code (73), never a
+  // rejection. 69 would tell a supervisor to retry an exchange that already
+  // happened.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
+      (() => void | Promise<void>) | undefined;
+    await onAuthenticated?.(); // hook writes configPath as a file
+    fs.rmSync(configPath); // swap it for a directory so the second
+    fs.mkdirSync(configPath); // saveConfig's rename throws (EISDIR)
+    return { observedReceivedPayloadColumns: ["dob", "zip"] };
+  }) as never);
+  try {
+    const { value, lines } = await captureFd3(() =>
+      runOnlineBootstrap({
+        ...onlineBootstrapParams(configPath),
+        eventStream: true,
+        persistObservedReceivedPayload: true,
+      }),
+    );
+    expect(value.configWriteError).toBeUndefined();
+    expect(process.exitCode).toBe(73);
+    expect(lines.map((l) => l.type)).toEqual(["warning"]);
+    expect(String(lines[0].message)).toContain(
+      "recording the observed received-payload columns",
+    );
+    // The cause stays on the human log beside this: the emitter escapes its
+    // message exactly once, so pre-rendered error text would reach a supervisor
+    // double-escaped.
+    expect(String(lines[0].message)).not.toContain("EISDIR");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -2213,6 +2318,42 @@ test("runOnlineBootstrap keeps a failed reuse-path lock-in refresh non-fatal and
   }
 });
 
+test("runOnlineBootstrap reports both lost reuse-path refreshes on fd 3 and in the exit code", async () => {
+  // The unattended half of the two surgical refreshes: the kept configuration
+  // stands, the exchange completed and must not be re-run, but the consent
+  // records the operator just consented to are not in it. Each failure puts its
+  // own `warning` on the machine-interface stream -- two lines, which is also
+  // what proves the two writes stay independently caught once they report -- and
+  // the run carries the persistence-loss exit code rather than a clean 0.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.mkdirSync(configPath); // a directory: both refreshes' reads throw
+  try {
+    const { value, lines } = await captureFd3(() =>
+      runOnlineBootstrap({
+        ...onlineBootstrapParams(configPath),
+        eventStream: true,
+        reuseExistingConfig: true,
+        receivedPayloadLockIn: { consentedColumns: ["diagnosis"] },
+        outboundPayloadConsent: { status: "confirmed", columns: ["dob"] },
+      }),
+    );
+    expect(value.configWriteError).toBeUndefined();
+    expect(process.exitCode).toBe(73);
+    const messages = lines.map((l) => String(l.message));
+    expect(lines.map((l) => l.type)).toEqual(["warning", "warning"]);
+    expect(
+      messages.filter((m) => m.includes("consented to receive")),
+    ).toHaveLength(1);
+    expect(
+      messages.filter((m) => m.includes("outbound-column confirmation")),
+    ).toHaveLength(1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the persisted empty online-accept lock-in aborts a later non-empty payload", async () => {
   // The write-side test above proves an empty token set survives to disk as []; this
   // closes the loop at ENFORCEMENT time: a recurring exchange reloads that strict
@@ -2569,11 +2710,10 @@ test("logOnlineBootstrapOutcome: a clean run reports both files saved", () => {
     warn: vi.fn(),
     error: vi.fn(),
   } as unknown as ReturnType<typeof getLogger>;
-  const exitCode = logOnlineBootstrapOutcome(log, {
+  logOnlineBootstrapOutcome(log, {
     configFile: "psilink.yaml",
     keyFile: ".psilink.key",
   });
-  expect(exitCode).toBe(0);
   expect(log.warn).not.toHaveBeenCalled();
   expect(log.error).not.toHaveBeenCalled();
   expect(log.info).toHaveBeenCalledTimes(1);
@@ -2588,16 +2728,16 @@ test("logOnlineBootstrapOutcome: a config-write failure logs at error level and 
     warn: vi.fn(),
     error: vi.fn(),
   } as unknown as ReturnType<typeof getLogger>;
-  const exitCode = logOnlineBootstrapOutcome(log, {
+  const exitCodeBefore = process.exitCode;
+  logOnlineBootstrapOutcome(log, {
     configFile: "psilink.yaml",
     keyFile: ".psilink.key",
     configWriteError: new Error("permission denied"),
   });
-  // A half-provisioned setup must not report success: a wrapper gating on exit
-  // status would otherwise treat a rotated key with no configuration as a
-  // completed setup.
-  expect(exitCode).toBe(CONFIG_WRITE_FAILURE_EXIT_CODE);
-  expect(exitCode).not.toBe(0);
+  // The summary moves no process state: the exit code that keeps a wrapper
+  // gating on exit status from reading a rotated key with no configuration as a
+  // completed setup is set where the write failed, not here.
+  expect(process.exitCode).toBe(exitCodeBefore);
   expect(log.info).not.toHaveBeenCalled();
   // Logged at error level (not warn) so it stays visible at --log-level=error,
   // where the underlying hook error it references is also shown.
@@ -2616,12 +2756,11 @@ test("logOnlineBootstrapOutcome: a reused config reports the existing config and
     warn: vi.fn(),
     error: vi.fn(),
   } as unknown as ReturnType<typeof getLogger>;
-  const exitCode = logOnlineBootstrapOutcome(log, {
+  logOnlineBootstrapOutcome(log, {
     configFile: "psilink.yaml",
     keyFile: ".psilink.key",
     reuseExistingConfig: true,
   });
-  expect(exitCode).toBe(0);
   expect(log.warn).not.toHaveBeenCalled();
   expect(log.error).not.toHaveBeenCalled();
   expect(log.info).toHaveBeenCalledTimes(1);

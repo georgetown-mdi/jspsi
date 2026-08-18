@@ -45,8 +45,9 @@ import { writeDualSignedRecord, type ReceiptOutput } from "./receiptFile";
 import { writeOutput } from "./util/cli";
 import { logRuntimeEnv } from "./util/runtimeEnv";
 import {
-  assertEventStreamFdOpen,
-  createEventStreamEmitter,
+  PERSISTENCE_LOSS_EXIT_CODE,
+  openEventStream,
+  reportPersistenceLoss,
   type ErrorPhase,
   type EventStreamEmitter,
 } from "./eventStream";
@@ -296,11 +297,17 @@ export interface FileSyncRuntimeOptions {
    * `--event-stream`: emit the opt-in NDJSON machine-interface stream on fd 3
    * (see eventStream.ts and docs/spec/CLI_EVENTS.md). When unset (the default)
    * no emitter is constructed and nothing is ever written to fd 3, so the run is
-   * byte-identical to one without the flag. The fail-closed fd-3 preflight
-   * (assertEventStreamFdOpen) runs at the top of runProtocol, before any other
-   * exchange work.
+   * byte-identical to one without the flag.
+   *
+   * `true` opens the stream here, at the top of runProtocol and before any other
+   * exchange work, so the fail-closed fd-3 preflight fires there. An
+   * already-open {@link EventStreamEmitter} is a caller that opened the stream
+   * itself (openEventStream ran its preflight) because it emits warnings of its
+   * own outside this call: the online bootstrap reports the persistence it
+   * loses after runProtocol has returned, and both must ride the one channel
+   * that carries the terminal result event.
    */
-  eventStream?: boolean;
+  eventStream?: boolean | EventStreamEmitter;
 }
 
 /** The value {@link runProtocol} resolves with. */
@@ -380,8 +387,8 @@ export interface RunProtocolResult {
  * see {@link writeExchangeRecord}). Pass `undefined` to skip recording. An audit
  * artifact that was asked for and could not be produced never fails the
  * exchange, but it is reported: a `warning` event on the machine-interface
- * stream and a non-zero process exit code, so an unattended run does not read as
- * a clean success.
+ * stream and `PERSISTENCE_LOSS_EXIT_CODE`, so an unattended run does not read as
+ * a clean success and is not retried as a transport failure.
  *
  * `saveIntent` carries this party's zero-setup `--save` intent into the
  * exchange's in-band bootstrap (see {@link runExchange}). Pass `undefined`
@@ -401,7 +408,9 @@ export interface RunProtocolResult {
  * -- is non-fatal: it is logged at error level (so it survives
  * `--log-level=error`) and the exchange still runs, because the data exchange is
  * the irreplaceable two-party operation and must not be aborted by a failure to
- * persist the recoverable config. The failure is also reported in
+ * persist the recoverable config. It is a persistence loss on a completed run,
+ * so it also takes that report -- a `warning` event and
+ * `PERSISTENCE_LOSS_EXIT_CODE` -- and is reported in
  * {@link RunProtocolResult.onAuthenticatedError} so the caller can correct its
  * own messaging. Pass `undefined` (the default) on the no-auth path and from
  * callers that need no post-handshake step (zero-setup, exchange); passing a
@@ -449,11 +458,12 @@ export async function runProtocol(
   // silently dropping every event or crashing mid-run on the first write. This is
   // the top of the protocol lifecycle every exchange-running command reaches, so
   // the one check covers exchange, zero-setup, and the online invite/accept alike.
-  let eventStream: EventStreamEmitter | undefined;
-  if (fileSyncRuntime.eventStream) {
-    assertEventStreamFdOpen();
-    eventStream = createEventStreamEmitter();
-  }
+  // A caller that opened the stream itself passes the emitter instead, having
+  // taken that same preflight at its own construction (openEventStream).
+  const eventStream =
+    typeof fileSyncRuntime.eventStream === "object"
+      ? fileSyncRuntime.eventStream
+      : openEventStream(fileSyncRuntime.eventStream);
 
   // Best-effort: a failure to probe the runtime warns and is swallowed, never
   // aborting the exchange.
@@ -1311,19 +1321,17 @@ export async function runProtocol(
               sanitizeErrorForDisplay(hookErr),
           );
           // A supervisor that discards stderr on a run that completes would
-          // otherwise have only the exit code to tell it the setup is half
-          // provisioned -- the exchange runs and its result is written, but what
-          // the hook persists is not on disk. The message carries the same hedge
-          // as the line above rather than naming the caller's own artifact, and
-          // the cause stays on the human log: the emitter escapes its message
-          // once, so pre-rendered error text would reach the stream
-          // double-escaped.
-          emit((e) =>
-            e.warning(
-              "the post-authentication persistence step (writing the " +
-                "configuration) did not complete; the exchange continued and " +
-                "the rotated key is saved",
-            ),
+          // otherwise have nothing to tell it the setup is half provisioned --
+          // the exchange runs and its result is written, but what the hook
+          // persists is not on disk. Reported on both machine channels at the
+          // loss itself, so no caller's own wiring can drop it. The message
+          // carries the same hedge as the line above rather than naming the
+          // caller's own artifact.
+          reportPersistenceLoss(
+            "the post-authentication persistence step (writing the " +
+              "configuration) did not complete; the exchange continued and " +
+              "the rotated key is saved",
+            eventStream,
           );
         }
       }
@@ -1636,15 +1644,13 @@ export async function runProtocol(
     // must not be re-run -- so the terminal event below stays `result`. But it is
     // not a success either: an unattended supervisor that discards stderr, or an
     // operator running at --log-level error, would otherwise read a clean exit 0
-    // for a run that produced no record. Put each failure on the machine stream
-    // as a warning and leave a non-zero exit behind, so both channels report it.
-    // EX_UNAVAILABLE (69) is the code every other local output failure exits
-    // with; process.exitCode rather than process.exit so the caller's own
-    // remaining work (a bootstrap's config write) still runs and still reports
-    // its own failure -- the caller raises this code rather than replacing it,
-    // so its success cannot erase what was lost here.
-    for (const missing of missingArtifacts) emit((e) => e.warning(missing));
-    if (missingArtifacts.length > 0) process.exitCode = 69;
+    // for a run that produced no record. Each failure therefore takes the same
+    // persistence-loss report every other completed-run loss takes: a warning on
+    // the machine stream and the exit code that separates "do not re-run this"
+    // from a transport failure. The caller's own remaining work (a bootstrap's
+    // config write) still runs and still reports what it loses.
+    for (const missing of missingArtifacts)
+      reportPersistenceLoss(missing, eventStream);
 
     // bootstrap is undefined on every authenticated path (saveIntent unset) and
     // populated on the zero-setup --save path; the caller branches on it.
@@ -1918,6 +1924,22 @@ export async function runProtocol(
     // precedes it so the terminal event stays last on the stream.
     emitMetrics();
     emit((e) => e.error(err, terminalPhase));
+    // An output-phase fault is the terminal form of the same loss the
+    // persistence-loss reports carry: the exchange completed, only local
+    // generation failed, and re-running would re-send this party's data for an
+    // exchange that already happened. Carry the persistence-loss code on the
+    // error so the command error boundaries report it instead of the 69 they
+    // give a transport fault -- each prefers an error's own exitCode -- while
+    // the `output` category on the terminal event above stays the finer-grained
+    // discriminator for a supervisor that reads fd 3. An error that already
+    // carries an exit code keeps it: its thrower classified it more precisely.
+    if (
+      terminalPhase === "output" &&
+      typeof err === "object" &&
+      err !== null &&
+      (err as { exitCode?: number }).exitCode === undefined
+    )
+      Object.assign(err, { exitCode: PERSISTENCE_LOSS_EXIT_CODE });
     throw err;
   } finally {
     await doCleanup();

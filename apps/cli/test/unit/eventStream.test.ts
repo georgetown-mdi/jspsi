@@ -14,6 +14,7 @@ import {
   EVENT_STREAM_FD,
   EVENT_STREAM_VERSION,
   EventStreamWriter,
+  PERSISTENCE_LOSS_EXIT_CODE,
   assertEventStreamFdOpen,
   buildErrorEvent,
   buildMetricsEvent,
@@ -24,6 +25,8 @@ import {
   buildWarningEvent,
   classifyTerminalError,
   createEventStreamEmitter,
+  openEventStream,
+  reportPersistenceLoss,
   type ErrorPhase,
   type StreamEvent,
 } from "../../src/eventStream";
@@ -319,6 +322,71 @@ test("assertEventStreamFdOpen throws a UsageError when fd 3 is not open", () => 
 test("assertEventStreamFdOpen succeeds when fd 3 stats cleanly", () => {
   vi.spyOn(fs, "fstatSync").mockReturnValue({} as fs.Stats);
   expect(() => assertEventStreamFdOpen()).not.toThrow();
+});
+
+test("openEventStream builds no emitter, and never stats fd 3, when the flag is off", () => {
+  const spy = vi.spyOn(fs, "fstatSync");
+  expect(openEventStream(undefined)).toBeUndefined();
+  expect(openEventStream(false)).toBeUndefined();
+  expect(spy).not.toHaveBeenCalled();
+});
+
+test("openEventStream takes the fail-closed preflight before it hands back an emitter", () => {
+  // Preflight and construction are fused so a second opener cannot acquire a
+  // writer that skipped the check: an unwired fd 3 yields the usage error, never
+  // an emitter that would drop every event it is later given.
+  vi.spyOn(fs, "fstatSync").mockImplementation(((fd: number) => {
+    throw Object.assign(new Error("EBADF: bad file descriptor, fstat"), {
+      code: "EBADF",
+    });
+    void fd;
+  }) as typeof fs.fstatSync);
+  expect(() => openEventStream(true)).toThrow(UsageError);
+
+  vi.mocked(fs.fstatSync).mockReturnValue({} as fs.Stats);
+  expect(openEventStream(true)).toBeDefined();
+});
+
+// --- persistence loss on a completed run --------------------------------------
+
+test("reportPersistenceLoss warns on the stream and sets the persistence-loss exit code", () => {
+  // Both machine channels at once: a supervisor reading fd 3 gets the warning, a
+  // supervisor reading only exit status gets 73 (EX_CANTCREAT) -- the literal the
+  // exit-code contract in docs/CLI.md publishes, and deliberately not the 69 that
+  // says the exchange did not happen and may be retried.
+  const cap = captureFd3Writes();
+  const exitCodeBefore = process.exitCode;
+  try {
+    reportPersistenceLoss(
+      "the record was not written",
+      createEventStreamEmitter(),
+    );
+    expect(process.exitCode).toBe(73);
+    expect(process.exitCode).toBe(PERSISTENCE_LOSS_EXIT_CODE);
+  } finally {
+    process.exitCode = exitCodeBefore;
+  }
+  const lines = cap.lines();
+  expect(lines).toHaveLength(1);
+  const event = JSON.parse(lines[0]) as StreamEvent;
+  expect(event.type).toBe("warning");
+  expect((event as { message: string }).message).toBe(
+    "the record was not written",
+  );
+});
+
+test("reportPersistenceLoss still moves the exit code with no stream open", () => {
+  // The default run: --event-stream is off, so there is no emitter and nothing
+  // reaches fd 3 -- but the loss must still be visible to a bare supervisor.
+  const writeSync = vi.spyOn(fs, "writeSync");
+  const exitCodeBefore = process.exitCode;
+  try {
+    reportPersistenceLoss("the configuration was not written", undefined);
+    expect(process.exitCode).toBe(PERSISTENCE_LOSS_EXIT_CODE);
+  } finally {
+    process.exitCode = exitCodeBefore;
+  }
+  expect(writeSync).not.toHaveBeenCalled();
 });
 
 // --- NDJSON writer framing ----------------------------------------------------

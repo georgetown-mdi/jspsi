@@ -71,11 +71,9 @@ Emitted when a protocol stage completes, carrying how long it ran so a superviso
 
 ### `warning`
 
-Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWarning`, the cross-party host-key divergence notice -- a security signal a supervisor that discards stderr would otherwise never see -- one per audit artifact the run was asked for and could not produce (the self-attested exchange record, or the dual-signed receipt), and the post-authentication persistence failure of an online `invite`/`accept`, whose run completes and writes its result while the configuration a later recurring `psilink exchange` needs does not reach disk. A warning does not end the run.
+Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWarning`, the cross-party host-key divergence notice -- a security signal a supervisor that discards stderr would otherwise never see -- and one per **persistence loss**, the class defined below (an audit artifact the run was asked for and could not produce, or a configuration or consent record an online `invite`/`accept` could not write). A warning does not end the run.
 
 An audit-artifact warning takes one of two shapes: an artifact that was built but could not be written names the destination it could not be written to, while an exchange record that could not be built at all names no destination and states that none was written and that the run need not be re-run.
-
-Those two -- a missing audit artifact and a failed configuration write -- are the warnings that also move the exit code: the run exits `EX_UNAVAILABLE` (69) while its terminal event stays `result`, so a supervisor reads "the exchange succeeded and must not be re-run, and what the run was asked to persist is missing" from the pair (see [Exit codes](../CLI.md#exit-codes)). Every other warning leaves the exit code alone.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
@@ -84,6 +82,21 @@ Those two -- a missing audit artifact and a failed configuration write -- are th
 ```json
 {"v":1,"type":"warning","message":"partner disclosed a column not in the agreed set"}
 ```
+
+#### Persistence loss
+
+A persistence loss is a local write a completed run was asked to make and could not: the exchange itself succeeded, so it must not be re-run, and what is missing is on this party's own disk. Every one of them is reported on fd 3 as a `warning` -- a supervisor never has to parse stderr prose for this class -- and every one of them exits `EX_CANTCREAT` (73), while the terminal event stays `result` (see [Exit codes](../CLI.md#exit-codes)). The full set:
+
+- An audit artifact the run was asked for and could not produce: the self-attested exchange record, or the dual-signed receipt.
+- The post-authentication configuration write of an online `invite`/`accept`, whose run completes and writes its result while the configuration a later recurring `psilink exchange` needs does not reach disk.
+- Either machine-managed consent record an online `accept` refreshes in place on a configuration it reuses: the received-payload lock-in, or the outbound-payload confirmation. The reused configuration stands as it is; what is lost is this acceptance's record of what the operator consented to, so the next recurring exchange reconciles against the previous one's.
+- The observed received-payload set an online `invite` crystallizes into the configuration it just wrote, after the exchange has revealed what the partner transmits. The configuration is on disk; the next recurring exchange reconciles its received payload lazily rather than fail-closed against the observed set.
+
+A persistence-loss `warning` carries no rendered error text: the cause of the failed write goes to the human log, where it is escaped once at its own sink, so a supervisor reading this field is not handed a double-escaped copy of it.
+
+Every other warning leaves the exit code alone. A persistence-loss warning is an ordinary `warning` event under the same schema version: `v` marks a change to an event's field layout or to the classification rules, and neither the occasions a warning is emitted for nor the process exit code is either of those, so a consumer written against `v: 1` reads every warning above.
+
+The terminal counterpart of the same loss is a result file that could not be written: there the run has no result to report, so it fails with the terminal `error` event and its `output` category (see [Error categories](#error-categories)) and exits 73 alongside the losses here.
 
 ### `metrics`
 
@@ -101,7 +114,7 @@ The per-run operational-counter summary. Emitted exactly once, immediately befor
 
 ### `result`
 
-The success **terminal event**. Emitted exactly once, after the exchange completed and the local output stage (result CSV plus the non-fatal audit record) finished. It is emitted for a run whose audit artifact could not be written too -- the exchange itself succeeded -- so a `result` beside a non-zero exit code is read with the preceding [`warning`](#warning), which names what is missing.
+The success **terminal event**. Emitted exactly once, after the exchange completed and the local output stage (result CSV plus the non-fatal audit record) finished. It is emitted for a run that took a [persistence loss](#persistence-loss) too -- the exchange itself succeeded -- so a `result` beside exit 73 is read with the preceding [`warning`](#warning), which names what is missing.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
@@ -126,13 +139,13 @@ The failure **terminal event**. Emitted exactly once, for an organic (non-signal
 
 ## Error categories
 
-The four categories are lifted verbatim from the web front end's `ExchangeErrorCategory` (`apps/web/src/psi/exchangeLifecycle.ts`), so a consumer classifies a CLI failure exactly as it would a web one. The CLI's error taxonomy -- the core `UsageError`/`OperatorConfigError` hierarchy, the `ConnectionError` kinds, and the `runOrExit` 64-vs-69 exit split -- maps onto them as follows:
+The four categories are lifted verbatim from the web front end's `ExchangeErrorCategory` (`apps/web/src/psi/exchangeLifecycle.ts`), so a consumer classifies a CLI failure exactly as it would a web one. The CLI's error taxonomy -- the core `UsageError`/`OperatorConfigError` hierarchy, the `ConnectionError` kinds, and the command boundaries' 64/69/73 exit split -- maps onto them as follows:
 
 | Category | Meaning | Classification rule |
 | -------- | ------- | ------------------- |
 | `config` | A prepare-time fault composed solely of this party's own configuration -- actionable and safe to surface. | The terminal error is an `OperatorConfigError` (a `UsageError` subclass) raised in the PREPARE phase. Scoped to that exact base type, **not** any prepare-phase `UsageError`: a sibling prepare-time `UsageError` can embed partner-influenced text, so it stays `exchange` (message not surfaced as config). |
 | `security` | A trust-boundary failure: the authenticated key exchange reported a wrong secret, tamper, or replay; the SFTP host-key verification failed (a pinned-fingerprint mismatch, or an unpinned host refused fail-closed); or the post-handshake AEAD layer reported tampering. | The terminal error is a `ConnectionError` with `kind === "security"`, in any phase before `output`. |
-| `output` | The privacy-sensitive exchange already succeeded; only local result-file generation failed. The operator must **not** re-run the exchange. | The failure landed in the OUTPUT phase (after `runExchange` returned, during result-CSV or audit-record generation), regardless of the error's type. |
+| `output` | The privacy-sensitive exchange already succeeded; only local result-file generation failed. The operator must **not** re-run the exchange, and the run exits 73 rather than 69 to say so to a supervisor reading only the exit status. | The failure landed in the OUTPUT phase (after `runExchange` returned, during result-CSV or audit-record generation), regardless of the error's type. |
 | `exchange` | Every other failure -- a retryable transport or usage fault. | The default: any terminal error not matched by a rule above. |
 
 The phase advances as the run progresses: everything up to and including the handshake is `prepare`, the PSI exchange is `run`, and the local result/record generation after `runExchange` returns is `output`. The rules are checked in the order output-phase, then prepare-phase `OperatorConfigError`, then `security`-kind `ConnectionError`, else `exchange` -- both discriminants (the error's type/kind and the phase) are structural, not a claim about which check happened to fire.
@@ -145,7 +158,7 @@ The process exit code cannot distinguish a `security` failure from an ordinary o
 
 Exactly one terminal event -- a `result` when the exchange and the local output stage completed, or one classified `error` on an organic failure -- is emitted per run. It is the last event on the stream. The `stages`, `stage`, `stageEnd`, `warning`, and `metrics` events that precede it are progress and summary, not outcome. The one `metrics` event is emitted immediately before the terminal event, so a supervisor reads the run's operational counters on the line just above the outcome.
 
-A `result` says the exchange completed, which is not the same as a zero exit. A run that could not produce an audit artifact it was asked for, and an online `invite`/`accept` whose post-exchange configuration write failed, each emit a `warning` for that failure, then their `result`, and exit 69 (see [Exit codes](../CLI.md#exit-codes)). The pair is the signal -- the exit code alone cannot separate such a run from a transport failure, and the terminal event alone cannot separate it from a fully persisted success -- so a supervisor keying success off the terminal event reads the exit code with it.
+A `result` says the exchange completed, which is not the same as a zero exit. A run that took a [persistence loss](#persistence-loss) emits a `warning` for each one, then its `result`, and exits 73 (see [Exit codes](../CLI.md#exit-codes)). Either channel alone identifies it: the exit code separates it from both a clean run (0) and a transport failure (69), and the `warning` names what is missing where the code cannot. A supervisor keying success off the terminal event reads the exit code with it, because the terminal event alone cannot separate such a run from a fully persisted success.
 
 The classified terminal `error` category is the machine-readable abort reason: it names a `security`, `output`, `config`, or `exchange` failure independently of the free-text `message` (the same text stderr logs) and of the exit code. A supervisor keys the abort decision off that category, not off the human log line.
 

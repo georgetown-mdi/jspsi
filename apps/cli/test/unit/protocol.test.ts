@@ -296,6 +296,13 @@ const EVENT_STREAM_FD = 3;
 let fd3Chunks: Buffer[];
 let realWriteSync: typeof fs.writeSync;
 
+// A persistence loss on a completed run moves the REAL process.exitCode (that is
+// the contract: an unattended supervisor reads it), so every test here is fenced
+// -- the value is snapshotted before each test and put back after, and a test
+// that expects a loss asserts the code inside its own body, before this fires.
+// Without the fence one such test would hand its 73 to the whole worker.
+let exitCodeBeforeTest: typeof process.exitCode;
+
 /** Drain the captured fd-3 bytes and return them parsed, one event per line. */
 function takeFd3Lines(): Array<Record<string, unknown>> {
   const text = Buffer.concat(fd3Chunks).toString("utf8");
@@ -307,6 +314,7 @@ function takeFd3Lines(): Array<Record<string, unknown>> {
 }
 
 beforeEach(() => {
+  exitCodeBeforeTest = process.exitCode;
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-proto-integ-"));
   dropDir = path.join(tmpDir, "drop");
   mockState.dropDir = dropDir;
@@ -333,6 +341,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  process.exitCode = exitCodeBeforeTest;
   // Empty on a flag-off run (nothing may reach fd 3 without --event-stream);
   // empty after a flag-on test too, because the test must have drained and
   // asserted every line it caused via takeFd3Lines().
@@ -753,19 +762,20 @@ test("writes the self-attested record and verification keys when runExchange ret
   }
 });
 
-test("a record the run was asked for and could not write warns on fd 3 and exits non-zero", async () => {
+test("a record the run was asked for and could not write warns on fd 3 and exits 73", async () => {
   // The unattended case: records are enabled, the exchange and its results
   // succeed, and the record write fails (here on a path whose parent is a
   // regular file). A supervisor that discards stderr -- or an operator at
   // --log-level error, which suppresses the warn -- would otherwise read a clean
   // exit 0 for a run that produced no audit artifact. Both machine channels must
-  // carry it: a warning event ahead of the terminal event, and a non-zero exit
-  // code. The terminal event stays `result`: the exchange succeeded and must not
-  // be re-run.
+  // carry it: a warning event ahead of the terminal event, and the
+  // persistence-loss exit code (73, EX_CANTCREAT) -- asserted as the literal the
+  // exit-code contract in docs/CLI.md publishes, not as 69, which tells a
+  // supervisor the exchange did not happen and may be retried. The terminal
+  // event stays `result`: the exchange succeeded and must not be re-run.
   const blocker = path.join(tmpDir, "blocker");
   fs.writeFileSync(blocker, "x");
   vi.mocked(runExchange).mockImplementation(runExchangeWithAudit as never);
-  const exitCodeBefore = process.exitCode;
   mockFd3Open();
   try {
     await Promise.all([
@@ -791,9 +801,8 @@ test("a record the run was asked for and could not write warns on fd 3 and exits
         { recordFile: path.join(tmpDir, "rec-b.json") },
       ),
     ]);
-    expect(process.exitCode).toBe(69);
+    expect(process.exitCode).toBe(73);
   } finally {
-    process.exitCode = exitCodeBefore;
     vi.mocked(fs.fstatSync).mockRestore();
   }
 
@@ -830,7 +839,6 @@ test(
     // exactly that shape. Party B is asked for no record, so the single warning
     // and the non-zero exit are provably party A's.
     const recordA = path.join(tmpDir, "rec-a.json");
-    const exitCodeBefore = process.exitCode;
     mockFd3Open();
     try {
       await Promise.all([
@@ -863,9 +871,8 @@ test(
           "test-b",
         ),
       ]);
-      expect(process.exitCode).toBe(69);
+      expect(process.exitCode).toBe(73);
     } finally {
-      process.exitCode = exitCodeBefore;
       vi.mocked(fs.fstatSync).mockRestore();
     }
 
@@ -883,6 +890,56 @@ test(
     expect(fs.existsSync(path.join(tmpDir, "rec-a.keys.json"))).toBe(false);
   },
 );
+
+test("a result file that could not be written fails with the persistence-loss exit code", async () => {
+  // The terminal form of the same loss: the exchange completed and only local
+  // result generation failed (here the output path's parent is a regular file),
+  // so re-running would re-send this party's data for an exchange that already
+  // happened. The run fails -- there is no result -- but it carries 73 to the
+  // command boundary rather than the 69 a transport fault gets, and the terminal
+  // event's `output` category names the finer distinction for a reader of fd 3.
+  const blocker = path.join(tmpDir, "blocker");
+  fs.writeFileSync(blocker, "x");
+  mockFd3Open();
+  let outcome: PromiseSettledResult<unknown>;
+  try {
+    [outcome] = await Promise.allSettled([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        path.join(blocker, "out.csv"),
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  expect(outcome.status).toBe("rejected");
+  const reason = (outcome as PromiseRejectedResult).reason as {
+    exitCode?: number;
+  };
+  expect(reason.exitCode).toBe(73);
+
+  const lines = takeFd3Lines();
+  const terminal = lines[lines.length - 1];
+  expect(terminal.type).toBe("error");
+  expect(terminal.category).toBe("output");
+});
 
 // --- One-sided result withholding via runProtocol ----------------------------
 
@@ -3358,6 +3415,70 @@ test("a throw from onAuthenticated is non-fatal: the exchange still runs and the
   expect((valueA.onAuthenticatedError as Error).message).toBe(
     "simulated config write failure",
   );
+});
+
+test("a failed post-authentication hook warns on fd 3 and exits 73 with a result terminal event", async () => {
+  // The unattended half of the same non-fatal contract: the exchange completed,
+  // so the terminal event is a `result` and the run must NOT be re-run -- but
+  // what the hook was there to persist is not on disk. A supervisor that
+  // discards stderr reads that from the pair (warning + result) and, with no
+  // fd 3 at all, from the exit code alone, which is the persistence-loss 73
+  // rather than the 69 that would invite a retry of a completed exchange.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  mockFd3Open();
+  try {
+    const [resultA, resultB] = await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        () => {
+          throw new Error("simulated config write failure");
+        },
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+    // The exchange itself completed on both sides; only the hook was lost.
+    expect(resultA.onAuthenticatedError).toBeInstanceOf(Error);
+    expect(resultB.onAuthenticatedError).toBeUndefined();
+    expect(process.exitCode).toBe(73);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  // Party B ran without --event-stream, so every captured line is party A's.
+  const lines = takeFd3Lines();
+  const warnings = lines.filter((l) => l.type === "warning");
+  expect(warnings).toHaveLength(1);
+  expect(String(warnings[0].message)).toContain(
+    "the post-authentication persistence step",
+  );
+  // The cause stays on the human log: the emitter escapes its message once, so
+  // pre-rendered error text would reach a supervisor double-escaped.
+  expect(String(warnings[0].message)).not.toContain(
+    "simulated config write failure",
+  );
+  // The terminal event is the success one, and it is last: the exchange is not
+  // to be re-run.
+  expect(lines[lines.length - 1].type).toBe("result");
+  expect(lines.filter((l) => l.type === "error")).toHaveLength(0);
 });
 
 test("an async onAuthenticated that rejects is non-fatal: the exchange still runs and the rejection is logged", async () => {

@@ -35,7 +35,7 @@ export const EVENT_STREAM_VERSION = 1;
  * discriminant safely. `stages` is the one-shot stage-list event; `stage` marks
  * each stage transition; `stageEnd` reports a completed stage's wall-clock
  * duration; `warning` carries a non-fatal warning (a terms-exchange warning, the
- * cross-party host-key divergence notice, a missing audit artifact, or a
+ * cross-party host-key divergence notice, a missing audit artifact, or any
  * post-authentication persistence failure); `metrics` is the one-shot
  * operational-counter summary emitted just before the terminal event; `result`
  * and `error` are the two terminal events (exactly one fires per run).
@@ -115,8 +115,11 @@ export interface StageEndEvent extends EventBase {
 /**
  * A non-fatal warning: a terms-exchange warning, the cross-party host-key
  * divergence notice, an audit artifact the run was asked for and could not
- * produce, or the post-authentication persistence failure that leaves an
- * otherwise complete online invite/accept without its configuration.
+ * produce, or a post-authentication persistence failure that leaves an
+ * otherwise complete online invite/accept short of what it was asked to write
+ * -- its configuration, one of the acceptance's consent records on a reused
+ * configuration, or the observed received-payload set a later recurring
+ * exchange would have been held to.
  */
 export interface WarningEvent extends EventBase {
   type: "warning";
@@ -415,4 +418,71 @@ export function createEventStreamEmitter(): EventStreamEmitter {
     result: (resultWritten) => writer.emit(buildResultEvent(resultWritten)),
     error: (error, phase) => writer.emit(buildErrorEvent(error, phase)),
   };
+}
+
+/**
+ * Open the run's machine-interface stream: run the fail-closed fd-3 preflight
+ * and build the emitter when `--event-stream` is active, or return `undefined`
+ * when it is not -- in which case no writer exists and nothing is ever written
+ * to fd 3.
+ *
+ * Preflight and construction are fused here because two callers open the
+ * stream: `runProtocol`, for an exchange that owns its whole run, and the
+ * online bootstrap, which opens it itself because it emits persistence warnings
+ * of its own from outside runProtocol's frame (see
+ * {@link reportPersistenceLoss}). Fusing them means a second entry point cannot
+ * acquire a writer that skipped the preflight.
+ */
+export function openEventStream(
+  enabled: boolean | undefined,
+): EventStreamEmitter | undefined {
+  if (enabled !== true) return undefined;
+  assertEventStreamFdOpen();
+  return createEventStreamEmitter();
+}
+
+// --- Persistence loss on a completed run -------------------------------------
+
+/**
+ * The exit code a run reports when the exchange itself completed and a local
+ * write did not: the result file, an audit artifact, or the configuration and
+ * consent records an online `invite`/`accept` writes. `EX_CANTCREAT` (73) in the
+ * BSD `sysexits` convention -- an output the command was asked to create could
+ * not be created.
+ *
+ * Deliberately NOT `EX_UNAVAILABLE` (69), the transport-failure code. The two
+ * demand opposite operator responses -- re-run the exchange, versus do not
+ * re-run it and go recover what was lost -- and a bare supervisor (cron, a
+ * scheduler, the console job driver) sees only the code: with both conditions
+ * under 69 it either retries a completed exchange or never retries a failed
+ * one. The terminal `result` event distinguishes them on fd 3, but a supervisor
+ * that reads exit status has no fd 3 to read. See docs/CLI.md (Exit codes) and
+ * docs/spec/CLI_EVENTS.md.
+ */
+export const PERSISTENCE_LOSS_EXIT_CODE = 73;
+
+/**
+ * Report a persistence failure the completed exchange survives, on both machine
+ * channels at once: the fd-3 `warning` event (when the stream is open) and
+ * {@link PERSISTENCE_LOSS_EXIT_CODE}. Every non-fatal loss goes through here, so
+ * a new one cannot land on one channel and miss the other. The one loss that is
+ * not survivable -- a result file that could not be written -- reports as the
+ * terminal `error` event instead, carrying the same exit code on the error it
+ * throws (`runProtocol`'s output-phase catch).
+ *
+ * `notice` is this party's own prose naming what was lost and what the operator
+ * should do; the CAUSE stays on the human log the caller writes beside this
+ * call, because the emitter escapes its message exactly once and pre-rendered
+ * error text would reach the stream double-escaped.
+ *
+ * `process.exitCode` rather than `process.exit` so the rest of the run's own
+ * persistence still happens and still reports what it loses -- and so a signal
+ * handler's `process.exit` is never raced.
+ */
+export function reportPersistenceLoss(
+  notice: string,
+  eventStream: EventStreamEmitter | undefined,
+): void {
+  eventStream?.warning(notice);
+  process.exitCode = PERSISTENCE_LOSS_EXIT_CODE;
 }
