@@ -212,7 +212,11 @@ describe("the consent summary's retain disclosure", () => {
 
   // A declared delete mode does not cancel the shape: the acceptor is still
   // seeded into retain mode by the split pair, so the line it is shown states
-  // the mode its own run would be in.
+  // the mode its own run would be in. Through decode this pair can no longer
+  // arrive -- the token schema's refusal is pinned by invitation.test.ts's
+  // retain-declaration cases -- but summarizeInvitation also renders non-token
+  // sources, such as the inviter's own pre-mint preview, so the branch stays
+  // live rather than dead.
   test("a split endpoint states retention even against a declared false", () => {
     expect(
       summarizeInvitation({
