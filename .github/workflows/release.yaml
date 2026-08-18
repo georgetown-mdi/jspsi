@@ -53,7 +53,8 @@ jobs:
       attestations: write
     outputs:
       # The manifest-list digest, carried to the launcher job so the reference it
-      # stamps and the reference cosign signs below are the same value.
+      # stamps and the reference cosign signs below are the same value. The
+      # launchers run the default image alone, so only its digest travels.
       digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v7
@@ -91,7 +92,11 @@ jobs:
       # whose image carries a fixable HIGH or CRITICAL OS-layer vulnerability
       # never reaches Docker Hub at all, rather than being pushed under `latest`
       # and then withheld from signing. Nothing in this job has authenticated to
-      # the registry yet when it runs.
+      # the registry yet when it runs. The publish sequence below holds the same
+      # property once the gate is past: each image is signed and attested
+      # immediately after its own push, so the window in which a published image
+      # is unsigned is that image's own signing step and nothing else -- never
+      # another artifact's build.
       #
       # The scan needs an image to read, so this builds one single-arch and
       # loads it -- the same shape image_smoke.yaml uses for its pre-merge scan.
@@ -108,6 +113,7 @@ jobs:
       # ships on the other; a vulnerability in an architecture-specific binary
       # alone is outside it.
       - name: Build the release image for scanning (amd64, load into local Docker)
+        id: default_build
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -117,12 +123,48 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The FIPS variant, built and loaded for the same reason and gated by the
+      # same scanner below. Its cache is scoped: the two images share no layer,
+      # so one unscoped cache would have them evicting each other, and the scope
+      # matches image_smoke.yaml's variant leg so a release reuses what the pull
+      # request already built.
+      #
+      # Keyed to the default build having run rather than to `!cancelled()`
+      # alone: a failure in an earlier gate -- the tarball integrity check, the
+      # version check, the buildx setup this step needs a builder from -- leaves
+      # default_build skipped, and this build skips with it instead of burning a
+      # two-architecture build and reporting a second, spurious failure beside
+      # the real one. A default build that ran and failed is the case the
+      # sibling should survive, so both of its outcomes let this one through.
+      - name: Build the FIPS variant image for scanning (amd64, load into local Docker)
+        id: fips_build
+        if: ${{ !cancelled() && (steps.default_build.outcome == 'success' || steps.default_build.outcome == 'failure') }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.fips
+          load: true
+          push: false
+          tags: psi-link:fips-release-candidate
+          cache-from: type=gha,scope=fips
+          cache-to: type=gha,mode=max,scope=fips
+
       # Same scanner, threshold and exception list as the pull-request gate in
       # image_smoke.yaml, which carries why each input is set the way it is.
       # This is the ship-gate half: a base image pinned months before the tag can
       # have acquired a vulnerability since the pull request that set the pin.
+      #
+      # One gate per published image, and both ahead of the login below, so a
+      # fixable HIGH or CRITICAL in either package closure stops the whole
+      # release rather than publishing the other artifact and withholding this
+      # one. Each scan is keyed to its own build, and the variant's build runs
+      # even after a default-build failure, so a failure in either build or
+      # either gate still lets the surviving sibling build, scan, and report --
+      # a blocked release reports what both images carry and the maintainer
+      # bumps both pins in one pass instead of one per attempt.
       - name: Scan the release image for OS-layer vulnerabilities
         id: vulnerability_scan
+        if: ${{ !cancelled() && steps.default_build.outcome == 'success' }}
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
@@ -136,30 +178,55 @@ jobs:
           format: table
           output: trivy-release-image.txt
 
-      # What the gate concluded, on the run's summary page rather than only
+      - name: Scan the release FIPS variant image for OS-layer vulnerabilities
+        id: fips_vulnerability_scan
+        if: ${{ !cancelled() && steps.fips_build.outcome == 'success' }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: psi-link:fips-release-candidate
+          scanners: vuln
+          vuln-type: os
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          trivyignores: .github/trivyignore
+          exit-code: "1"
+          format: table
+          output: trivy-release-image-fips.txt
+
+      # What the gates concluded, on the run's summary page rather than only
       # inside this job's log, so a blocked release says on its own front page
-      # what blocked it. On a release that publishes, the same summary is the
-      # record that the image was scanned before it went out.
-      - name: Record the scan in the run summary
-        if: ${{ !cancelled() && steps.vulnerability_scan.outcome != 'skipped' }}
+      # what blocked it and which artifact it was. On a release that publishes,
+      # the same summary is the record that both images were scanned before they
+      # went out.
+      - name: Record the scans in the run summary
+        if: ${{ !cancelled() && (steps.vulnerability_scan.outcome != 'skipped' || steps.fips_vulnerability_scan.outcome != 'skipped') }}
         env:
           SCAN_OUTCOME: ${{ steps.vulnerability_scan.outcome }}
+          FIPS_SCAN_OUTCOME: ${{ steps.fips_vulnerability_scan.outcome }}
         run: |
           set -euo pipefail
-          {
-            echo "## Release image vulnerability scan"
+          report() {
+            echo "### $1"
             echo
-            echo "Fixable HIGH and CRITICAL vulnerabilities in the image's OS package layer, with the exceptions in \`.github/trivyignore\` applied."
+            echo "Gate outcome: **$2**."
             echo
-            echo "Gate outcome: **$SCAN_OUTCOME**."
-            echo
-            if [ -s trivy-release-image.txt ]; then
+            if [ -s "$3" ]; then
               echo '```'
-              cat trivy-release-image.txt
+              cat "$3"
               echo '```'
             else
               echo "The scanner left no report."
             fi
+            echo
+          }
+          {
+            echo "## Release image vulnerability scans"
+            echo
+            echo "Fixable HIGH and CRITICAL vulnerabilities in each image's OS package layer, with the exceptions in \`.github/trivyignore\` applied."
+            echo
+            report "Default image" "$SCAN_OUTCOME" trivy-release-image.txt
+            report "FIPS variant image" "$FIPS_SCAN_OUTCOME" trivy-release-image-fips.txt
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Extract image metadata
@@ -172,12 +239,47 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
+      # The variant's three tags: the default image's three with `-fips`
+      # appended, so an operator with a FIPS obligation pulls the same version,
+      # major.minor or floating reference under a suffix that names the posture.
+      # Derived here rather than through a second metadata-action flavor, so what
+      # the tags are is read off this file rather than off an action's rule for
+      # which of them a suffix reaches. The `on.push.tags` filter above admits
+      # only `v<major>.<minor>.<patch>`, so both strips below are total.
+      - name: Derive the FIPS variant's tags
+        id: fips_meta
+        env:
+          PSILINK_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${PSILINK_TAG#v}"
+          {
+            echo "tags<<PSILINK_FIPS_TAGS"
+            echo "vdorie/psi-link:${version}-fips"
+            echo "vdorie/psi-link:${version%.*}-fips"
+            echo "vdorie/psi-link:latest-fips"
+            echo "PSILINK_FIPS_TAGS"
+          } >>"$GITHUB_OUTPUT"
+
+      # Ahead of the first push rather than after the last one: every step after
+      # a failed step is skipped, so an installer that fails behind a push is a
+      # published image this job can no longer sign. Installing the tool while
+      # nothing is published yet turns that case into a release that publishes
+      # nothing at all.
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
+      # Each image is pushed, signed and attested as a unit before the next one
+      # is built, so a failure in the variant's build cannot leave the default
+      # image published -- under `latest`, which this push moves -- and unsigned,
+      # which is the state docs/RELEASES.md's verification commands report as a
+      # release that cannot be trusted.
       - name: Build and push
         id: build
         uses: docker/build-push-action@v7
@@ -190,25 +292,30 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.2
-
       # Keyless: no key is passed, so Fulcio issues the signing certificate
       # against this job's OIDC identity and the signature is recorded in
       # Rekor's public transparency log. What a partner pins is therefore this
       # workflow's identity, which is this file's path plus the pushed tag ref
       # -- renaming this file or widening the tag filter above invalidates the
-      # verification command docs/RELEASES.md publishes.
-      - name: Sign image
+      # verification commands docs/RELEASES.md publishes.
+      #
+      # Both published manifests are signed under that one identity, in their
+      # own steps below, so the verification command an operator runs differs
+      # only in the reference. Each is signed by digest rather than by tag, so
+      # what carries the signature is the manifest this run built rather than
+      # whatever the tag resolves to later.
+      - name: Sign the image
         run: |
+          set -euo pipefail
           cosign sign --yes \
             vdorie/psi-link@${{ steps.build.outputs.digest }}
 
       # Answers a different question from the signature above -- what the build
       # consumed, not that this manifest is what the release published -- and is
       # held somewhere else, so it adds to the Cosign signature rather than
-      # replacing it. Its subject is the same manifest-list digest cosign signs
-      # and the launchers job stamps, so one manifest carries both claims.
+      # replacing it. Each subject is the same manifest-list digest cosign signs,
+      # and the default image's is the one the launchers job stamps, so one
+      # manifest carries both claims.
       # The attestation is left in this repository's store rather than
       # pushed to Docker Hub as an OCI referrer (push-to-registry defaults to
       # false), so verifying it does not depend on what the registry can hold;
@@ -218,6 +325,34 @@ jobs:
         with:
           subject-name: docker.io/vdorie/psi-link
           subject-digest: ${{ steps.build.outputs.digest }}
+
+      - name: Build and push the FIPS variant
+        id: build_fips
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.fips
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.fips_meta.outputs.tags }}
+          # The same source, revision and version labels: both images are built
+          # from this checkout at this tag, so what the metadata step derived for
+          # one describes the other.
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=fips
+          cache-to: type=gha,mode=max,scope=fips
+
+      - name: Sign the FIPS variant image
+        run: |
+          set -euo pipefail
+          cosign sign --yes \
+            vdorie/psi-link@${{ steps.build_fips.outputs.digest }}
+
+      - name: Attest the FIPS variant's build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: docker.io/vdorie/psi-link
+          subject-digest: ${{ steps.build_fips.outputs.digest }}
 
   # The host-side launchers are handed to an operator as plaintext and pin the
   # image by digest rather than by tag, so a release copy runs exactly the

@@ -17,7 +17,9 @@
 #     nothing here consults it. WHICH module is serving is not read back at all:
 #     FIPS_MODULE_VERSION is baked into the image by a build that asserted the
 #     installed module reports exactly that string, so at run time it is a fact
-#     rather than a parse.
+#     rather than a parse. An empty value is therefore a fact about the
+#     environment rather than about the image, and the report declines to name a
+#     module instead of naming an empty one.
 #   the host kernel's FIPS mode -- /proc/sys/crypto/fips_enabled, which is the
 #     host kernel's file seen through the container's /proc. The image cannot
 #     set it: fips-mode-setup does not work inside a container, which AWS and
@@ -30,13 +32,24 @@
 # the three host tiers, is in docs/notes/fips-variant-image.md.
 set -e
 
+# How the two reports below refer to the module. The image bakes the version in
+# from a build that compared it against the module the loader activates, so an
+# empty value can only mean it was cleared or overridden when the container was
+# started -- in which case the run has nothing to name, and says so rather than
+# writing an assurance line with an empty module in it.
+if [ -n "${FIPS_MODULE_VERSION:-}" ]; then
+  module_clause="module ${FIPS_MODULE_VERSION}"
+else
+  module_clause="a module this run cannot name, FIPS_MODULE_VERSION being empty in this container's environment -- the image bakes in the version its build compared against the loaded module, so an empty value means it was cleared or overridden when this container was started"
+fi
+
 # The probe's own stdout carries the JSON transcript and the per-leg reasons,
 # which are worth showing on the failure path and noise on the success one, so
 # it is captured whole and replayed rather than read.
 if engagement_report=$(node /app/fips-probe/image-engagement.mjs 2>&1); then
-  echo "[psilink] FIPS provider active: this container's crypto is served by the Amazon Linux 2023 OpenSSL FIPS provider, module ${FIPS_MODULE_VERSION} (probed in this container at startup)" >&2
+  echo "[psilink] FIPS provider active: this container's crypto is served by the Amazon Linux 2023 OpenSSL FIPS provider, ${module_clause} (probed in this container at startup)" >&2
 else
-  echo "[psilink] WARNING: the startup probe did not find this container's crypto being served by the FIPS provider this image was built around (module ${FIPS_MODULE_VERSION}). This image's cryptography is not running in the module it was built around. The probe reported:" >&2
+  echo "[psilink] WARNING: the startup probe did not find this container's crypto being served by the FIPS provider this image was built around (${module_clause}). This image's cryptography is not running in the module it was built around. The probe reported:" >&2
   printf '%s\n' "$engagement_report" >&2
 fi
 
@@ -51,7 +64,7 @@ case "$fips_enabled" in
   echo "[psilink] host kernel FIPS mode: enabled" >&2
   ;;
 0)
-  echo "[psilink] WARNING: the host kernel is not in FIPS mode (/proc/sys/crypto/fips_enabled is 0). The validated module is loaded and serving, but the deployment does not meet the module's own operating conditions. Enable FIPS mode on the host, or treat this run as carrying no FIPS claim." >&2
+  echo "[psilink] WARNING: the host kernel is not in FIPS mode (/proc/sys/crypto/fips_enabled is 0). Whatever the provider report above says, a deployment outside host FIPS mode does not meet the module's own operating conditions. Enable FIPS mode on the host, or treat this run as carrying no FIPS claim." >&2
   ;;
 *)
   echo "[psilink] WARNING: the host kernel's FIPS mode could not be read (/proc/sys/crypto/fips_enabled is absent or unreadable), so this container cannot tell whether the host is in FIPS mode. A kernel built without CONFIG_CRYPTO_FIPS has no such file. Treat this run as carrying no FIPS claim unless you know otherwise." >&2

@@ -64,6 +64,73 @@ const REVIEWED_INSTRUCTIONS = [
 // extracted and tested against the writable trees.
 const PARSED_OWNERSHIP_VERB = /^(?:chown|chgrp|chmod)\s/;
 
+// The account verbs it reads, which hand a path to the runtime account by a
+// route no ownership verb appears on: an account's home directory is created
+// owned by that account, so `useradd --create-home --home-dir /app node` hands
+// over /app with no chown anywhere in the stage. The FIPS variant runs these --
+// Amazon Linux 2023 ships no `node` account -- so refusing them outright, the
+// way install and setfacl are refused, is not available.
+const PARSED_ACCOUNT_VERB = /^(?:useradd|adduser|usermod|groupadd)\s/;
+
+// The flags that parse understands on one of those verbs, split by whether the
+// value is the next token. Everything outside these two sets is reported rather
+// than classified: most of the rest names a path of its own (-b/--base-dir,
+// -k/--skel, -R/--root), and a walk that stepped over an unknown value-taking
+// flag would read its value as the account name. A short form that no committed
+// instruction uses is left out for the same reason the mode flags are -- the
+// build that needs one extends this, where the review reads the argv.
+const ACCOUNT_FLAG_TAKING_A_VALUE = new Set([
+  "--uid",
+  "--gid",
+  "--home",
+  "--home-dir",
+  "-d",
+]);
+const ACCOUNT_FLAG_ALONE = new Set(["--create-home", "-m"]);
+// Which of the value-taking ones names the home directory handed over.
+const ACCOUNT_HOME_FLAG = new Set(["--home", "--home-dir", "-d"]);
+
+// One account command's argv, walked token by token. `homePaths` is what the
+// home flags named, resolved against the instruction's WORKDIR the way an
+// ownership operand is; `unreadTokens` is every token the walk does not
+// understand -- an unknown flag, a flag whose value is missing, a positional
+// that is a path rather than an account name, or a second positional where
+// these verbs take one.
+function readAccountArgv(command, cwd) {
+  const argv = command.split(" ");
+  const homePaths = [];
+  const unreadTokens = [];
+  let names = 0;
+  for (let index = 1; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (!token.startsWith("-")) {
+      names += 1;
+      if (names > 1 || token.includes("/")) unreadTokens.push(token);
+      continue;
+    }
+    const equals = token.indexOf("=");
+    const flag = equals === -1 ? token : token.slice(0, equals);
+    if (equals === -1 && ACCOUNT_FLAG_ALONE.has(flag)) continue;
+    if (!ACCOUNT_FLAG_TAKING_A_VALUE.has(flag)) {
+      unreadTokens.push(token);
+      continue;
+    }
+    let value;
+    if (equals === -1) {
+      index += 1;
+      value = argv[index];
+    } else {
+      value = token.slice(equals + 1);
+    }
+    if (value === undefined || value === "") {
+      unreadTokens.push(token);
+      continue;
+    }
+    if (ACCOUNT_HOME_FLAG.has(flag)) homePaths.push(posix.resolve(cwd, value));
+  }
+  return { verb: argv[0], homePaths, unreadTokens };
+}
+
 function analyze(file) {
   const dockerfile = readRepoFile(file);
 
@@ -179,6 +246,15 @@ function analyze(file) {
           paths: pathOperands.map((path) => posix.resolve(cwd, path)),
         };
       }),
+    // The runtime stage's account commands, read the same way: the verb's argv
+    // walked token by token, so the home directory it hands the account is a
+    // path this file tests rather than a string it stepped over.
+    accountCommands: runtimeShellCommands
+      .filter(({ command }) => PARSED_ACCOUNT_VERB.test(command))
+      .map(({ command, cwd }) => ({
+        command,
+        ...readAccountArgv(command, cwd),
+      })),
     allRuntimeDests: runtimeCopies.flatMap(({ dests }) => dests),
     builderRuns: runsIn(builder),
     runtimeRuns: runsIn(runtime),
@@ -237,6 +313,13 @@ const FIPS_BASE =
 // records, and a claim prose cannot hold: a second package, or a wider spec on
 // one of these lines, ships unreviewed while the sentence still reads as the
 // reviewed set.
+//
+// `modeChangesOutside` is the other per-image literal: every mode change the
+// runtime stage makes outside the writable trees, in the order the stage runs
+// them. Neither image's list says anything about who owns a path -- the
+// entrypoint scripts have to be executable, and each image takes off the
+// setuid and setgid bits its own OS closure arrives with, which is what leaves
+// both with no such file for image_smoke.yaml's inventory step to find.
 const IMAGES = [
   {
     file: "Dockerfile",
@@ -245,6 +328,10 @@ const IMAGES = [
     // pin can move.
     externalBases: [DEFAULT_BASE, DEFAULT_BASE],
     osInstalls: ["RUN apk add --no-cache samba-client"],
+    modeChangesOutside: [
+      "chmod g-s /usr/sbin/unix_chkpwd",
+      "chmod +x /app/docker-entrypoint.sh",
+    ],
   },
   {
     file: "Dockerfile.fips",
@@ -253,6 +340,16 @@ const IMAGES = [
       "RUN dnf -y --releasever=${AL2023_RELEASEVER} install tar gzip xz findutils libatomic && dnf clean all",
       "RUN dnf -y --releasever=${AL2023_RELEASEVER} install samba-client openssl && dnf clean all",
       "RUN dnf -y --releasever=${AL2023_RELEASEVER} swap openssl-fips-provider-latest ${FIPS_PROVIDER_PACKAGE}-${FIPS_PROVIDER_VERSION} && dnf clean all",
+    ],
+    // Ten files against the default image's one: the Amazon Linux 2023 base and
+    // the samba-client closure carry account, mount and PAM helpers Alpine's
+    // busybox userland does not.
+    modeChangesOutside: [
+      "chmod u-s,g-s /usr/bin/chage /usr/bin/gpasswd /usr/bin/mount " +
+        "/usr/bin/newgrp /usr/bin/su /usr/bin/umount /usr/bin/write " +
+        "/usr/libexec/utempter/utempter /usr/sbin/pam_timestamp_check " +
+        "/usr/sbin/unix_chkpwd",
+      "chmod +x /app/docker-entrypoint.sh /app/docker-entrypoint-fips.sh",
     ],
   },
 ].map((spec) => ({ ...spec, image: analyze(spec.file) }));
@@ -451,7 +548,7 @@ for (const { file, externalBases, osInstalls, image } of IMAGES) {
   });
 }
 
-// The account both roles run as, and the one instruction that makes the image
+// The account both roles run as, and the one instruction that makes each image
 // habitable for it, frozen by literal the way the OS installs above are. Which
 // directories are handed over is the whole substance of running unprivileged:
 // /work is where the CLI writes its result and rotated key file, and the console
@@ -460,10 +557,9 @@ for (const { file, externalBases, osInstalls, image } of IMAGES) {
 // a silent change of it, or of what the account may write, is a change to
 // documented deployment behavior rather than an implementation detail.
 //
-// Scoped to the default image: the FIPS variant carries no USER and makes no
-// unprivileged claim, and its dnf transactions put the word `install` in front
-// of the refusal below, which reads that verb as an ownership assignment. A
-// variant that drops privilege later extends this block rather than widening it.
+// Held over both published images. They differ in where the account comes from
+// -- the default image inherits it from node:26-alpine, the variant creates it,
+// Amazon Linux 2023 carrying none -- and in nothing this block reads.
 const RUNTIME_USER = "node";
 const EXPECTED_WRITABLE_SETUP =
   "RUN mkdir -p /work /run/psilink/sftp-credentials " +
@@ -479,23 +575,52 @@ const WRITABLE_TREES = ["/work", "/run/psilink"];
 const withinWritableTree = (path) =>
   WRITABLE_TREES.some((tree) => path === tree || path.startsWith(`${tree}/`));
 
-// The mode changes outside those trees, frozen by literal and in the order the
-// stage runs them. Neither says anything about who owns the path: the entrypoint
-// script has to be executable, and the setgid bit that linux-pam's unix_chkpwd
-// arrives with is taken off, which is what leaves the image with no setuid or
-// setgid file for image_smoke.yaml's inventory step to find.
-const EXPECTED_MODE_CHANGES_OUTSIDE = [
-  "chmod g-s /usr/sbin/unix_chkpwd",
-  "chmod +x /app/docker-entrypoint.sh",
-];
-
 // The verbs that hand a path to an account by a route that parse does not read
 // -- install's -o/-g/-m, setfacl's ACL entry -- plus any of the parsed ones
 // reached other than as a command's leading word (`sh -c 'chown ...'`, `xargs
-// chown`, `find ... -exec chgrp`). The stage runs none of these, so they are
+// chown`, `find ... -exec chgrp`). Neither stage runs any of these, so they are
 // refused outright rather than modeled: a build that needs one has to extend
 // this test, where the review reads the argv rather than a verdict about it.
-const ANY_OWNERSHIP_VERB = /\b(?:chown|chgrp|chmod|install|setfacl)\b/;
+const OWNERSHIP_PROPER_VERB = /\b(?:chown|chgrp|chmod|setfacl)\b/;
+const INSTALL_VERB = /\binstall\b/;
+// `install` is coreutils' install(1), whose -o/-g/-m hand a path to an account.
+// A package manager's `install` is that manager's own subcommand, a different
+// program's argument that reaches nothing, so the exemption below releases the
+// first non-flag token after the manager's name -- the subcommand position in
+// every shape the committed Dockerfiles use, though a global flag carrying a
+// separate value token that is literally `install` would take the release in
+// its place. That stays harmless: a manager-led command never executes
+// install(1), and an `install` token anywhere later is still refused. Two
+// halves make the position what it says: the manager's name is the whole
+// leading token, since a trailing-boundary match reads `yum-config-manager install -o node /app/x` as
+// yum's; and the subcommand is the first token after it that is not a flag, so
+// `npm exec -- install -o node /app/x` and `npm exec install -o node /app/x`
+// are refused while `dnf -y --releasever=X install tar` passes. An install
+// token anywhere else in the command is refused whatever leads the command, as
+// a proper ownership verb already is (`npm exec -- chown ...`).
+const PACKAGE_MANAGER_NAME = /^(?:apk|apt|apt-get|dnf|microdnf|yum|npm)$/;
+// The index of the released install token, or -1. A flag carrying its value as
+// the next token rather than after an `=` pushes that value into the subcommand
+// position and takes the exemption with it; neither Dockerfile writes one, and
+// refusing that shape is this file's standing answer to an argv it cannot read.
+const releasedInstallIndex = (argv) => {
+  if (!PACKAGE_MANAGER_NAME.test(argv[0])) return -1;
+  const subcommand = argv.findIndex(
+    (token, index) => index > 0 && !token.startsWith("-"),
+  );
+  return subcommand !== -1 && argv[subcommand] === "install" ? subcommand : -1;
+};
+const reachesInstallVerb = (command) => {
+  const argv = command.split(" ");
+  const released = releasedInstallIndex(argv);
+  return argv.some(
+    (token, index) => index !== released && INSTALL_VERB.test(token),
+  );
+};
+const reachesAnyOwnershipVerb = (command) =>
+  OWNERSHIP_PROPER_VERB.test(command) || reachesInstallVerb(command);
+const reachesOwnershipOutsideTheParse = (command) =>
+  reachesAnyOwnershipVerb(command) && !PARSED_OWNERSHIP_VERB.test(command);
 // The dash-leading tokens that parse reads on one of those verbs: -R (or
 // --recursive), and --reference=FILE, which is what moves the first operand from
 // an owner or a mode to a path. Any other is refused rather than classified,
@@ -505,128 +630,276 @@ const ANY_OWNERSHIP_VERB = /\b(?:chown|chgrp|chmod|install|setfacl)\b/;
 // path set. The stage passes -R alone.
 const READ_OWNERSHIP_FLAGS = /^(?:-R|--recursive|--reference=\S+)$/;
 
-describe("the unprivileged account the default image runs as", () => {
-  const image = IMAGES.find(({ file }) => file === "Dockerfile").image;
+// An account verb reached other than as a command's leading word -- `sh -c
+// 'useradd ...'`, `xargs usermod` -- is refused rather than parsed, exactly as
+// an ownership verb in that position is.
+const ACCOUNT_VERB = /\b(?:useradd|adduser|usermod|groupadd)\b/;
+const reachesAccountVerbOutsideTheParse = (command) =>
+  ACCOUNT_VERB.test(command) && !PARSED_ACCOUNT_VERB.test(command);
+// Which of them hand the account a home directory. groupadd makes no home; the
+// other three must name theirs, since the home a bare `useradd node` creates is
+// whatever /etc/login.defs and the distribution decide, which this file would
+// have to model rather than read.
+const HOME_MAKING_ACCOUNT_VERB = /^(?:useradd|adduser|usermod)$/;
+// The home directory an image may hand its runtime account, frozen by literal
+// the way the writable trees are. The account owns its own home, so this is the
+// one path outside those trees an account command may create it under, and it
+// is where the CLI writes a long-lived signing key: the default signing-identity
+// directory is derived from HOME while the CLI's module loads, so which
+// directory that is, and who owns it, is what decides where the key lands.
+const ACCOUNT_HOME_DIRECTORIES = ["/home/node"];
 
-  it("drops to a single non-root runtime user for both roles", () => {
-    const users = image.runtime
-      .filter(({ inst }) => inst === "USER")
-      .map(({ rest }) => normalize(rest));
-    expect(users).toEqual([RUNTIME_USER]);
-  });
-
-  it("declares that user after the last build step, so the ENTRYPOINT inherits it", () => {
-    // A USER ahead of a COPY or RUN would either fail the build or leave the
-    // dropped account owning /app; one after the last of them, with no second
-    // USER to undo it, is what makes the entrypoint's node process unprivileged.
-    const userIndex = image.runtime.findIndex(({ inst }) => inst === "USER");
-    const lastBuildStep = image.runtime.reduce(
-      (last, { inst }, index) =>
-        inst === "RUN" || inst === "COPY" ? index : last,
-      -1,
+describe("the ownership-verb predicate the refusals above share", () => {
+  it("releases only a package manager's own install subcommand", () => {
+    expect(reachesAnyOwnershipVerb("dnf -y install tar && dnf clean all")).toBe(
+      false,
     );
-    expect(userIndex).toBeGreaterThan(lastBuildStep);
-  });
-
-  it("hands that user every directory the container writes", () => {
-    expect(image.runtimeRuns.map((run) => `RUN ${normalize(run)}`)).toContain(
-      EXPECTED_WRITABLE_SETUP,
-    );
-  });
-
-  it("assigns ownership only through the forms the two tests below parse", () => {
-    // The guard on those tests reads a leading chown/chgrp/chmod and its
-    // operands. Every other way an instruction can name one of those verbs --
-    // wrapped in `sh -c`, driven by xargs or find, or written as install or
-    // setfacl -- is refused here, so an ownership change cannot reach /app by
-    // taking a form the parse skips over.
     expect(
-      image.runtimeShellCommands
-        .filter(
-          ({ command }) =>
-            ANY_OWNERSHIP_VERB.test(command) &&
-            !PARSED_OWNERSHIP_VERB.test(command),
-        )
-        .map(({ command }) => command),
-    ).toEqual([]);
-    // The same refusal one altitude down, over the argv of the ones it does
-    // read: a dash-leading token outside the two the parse understands decides
-    // which operand is the mode and which are paths, so it is refused rather
-    // than guessed at.
-    expect(
-      image.ownershipCommands.flatMap(({ command }) =>
-        command
-          .split(" ")
-          .slice(1)
-          .filter(
-            (token) =>
-              token.startsWith("-") && !READ_OWNERSHIP_FLAGS.test(token),
-          )
-          .map((token) => `${token} in: ${command}`),
+      reachesAnyOwnershipVerb(
+        "dnf -y --releasever=2023.12.20260727 install samba-client openssl",
       ),
-    ).toEqual([]);
-  });
-
-  it("assigns no ownership in the builder stage, whose files the runtime copies in", () => {
-    // `COPY --from=builder` carries the builder's files into /app, and what
-    // ownership they arrive with is Docker's rule rather than this file's to
-    // model. The route is closed instead: the builder assigns no ownership at
-    // all, so nothing crosses the stage boundary already handed to an account.
-    expect(
-      image.builderShellCommands.filter((command) =>
-        ANY_OWNERSHIP_VERB.test(command),
-      ),
-    ).toEqual([]);
-    expect(
-      image.builder
-        .filter(({ inst }) => inst === "COPY")
-        .flatMap(({ rest }) => rest.split(/\s+/))
-        .filter((token) => /^--(?:chown|chmod)/.test(token)),
-    ).toEqual([]);
-  });
-
-  it("gives that user no path outside those directories, so /app stays root-owned", () => {
-    // Every chown and chgrp in the stage, and every COPY that assigns ownership
-    // as it lands. A path outside the two writable trees is code, or a mount
-    // point, that the entrypoint's own process could then rewrite -- a group
-    // handed over no less than an owner, since the account carries its group.
-    const handedOverPaths = image.ownershipCommands
-      .filter(({ command }) => /^(?:chown|chgrp) /.test(command))
-      .flatMap(({ paths }) => paths);
-    expect(handedOverPaths.length).toBeGreaterThan(0);
-    expect(handedOverPaths.filter((path) => !withinWritableTree(path))).toEqual(
-      [],
+    ).toBe(false);
+    expect(reachesAnyOwnershipVerb("apk add --no-cache samba-client")).toBe(
+      false,
     );
+    expect(reachesAnyOwnershipVerb("xargs install -o node /app/x")).toBe(true);
     expect(
-      image.runtimeCopies
-        .filter(({ flags }) => flags.some((f) => f.startsWith("--chown")))
-        .flatMap(({ dests }) => dests)
-        .filter((dest) => !withinWritableTree(dest)),
-    ).toEqual([]);
+      reachesAnyOwnershipVerb("npm exec -- chown -R 1000:1000 /build/x"),
+    ).toBe(true);
+    // coreutils' install(1) run under a package manager's leading word: the
+    // install is the pm's argument rather than its subcommand, so it reaches
+    // /app with -o and -m while starting with neither chown, chgrp nor chmod.
+    expect(
+      reachesAnyOwnershipVerb("npm exec -- install -o node -m 0777 /app/x"),
+    ).toBe(true);
+    expect(reachesAnyOwnershipVerb("npm exec install -o node /app/x")).toBe(
+      true,
+    );
+    // A hyphen continuation of a package manager's name is a different program.
+    expect(
+      reachesAnyOwnershipVerb("yum-config-manager install -o node /app/x"),
+    ).toBe(true);
+    // The exemption covers one token, so a second install in the same command
+    // is still refused -- as is one reached through a path.
+    expect(
+      reachesAnyOwnershipVerb("dnf -y install tar install -o node /app/x"),
+    ).toBe(true);
+    expect(reachesAnyOwnershipVerb("/usr/bin/install -o node /app/x")).toBe(
+      true,
+    );
   });
 
-  it("changes no mode outside those directories but the two reviewed ones", () => {
-    // A mode is the other way the account reaches what it must not write: a
-    // group- or world-writable /app needs no chown to be rewritable. Outside the
-    // writable trees the whole set of mode changes is held to the reviewed
-    // literals rather than to a reading of what each mode grants.
+  it("refuses an account verb reached other than as the leading word", () => {
     expect(
-      image.ownershipCommands
-        .filter(
-          ({ command, paths }) =>
-            command.startsWith("chmod ") &&
-            paths.some((path) => !withinWritableTree(path)),
-        )
-        .map(({ command }) => command),
-    ).toEqual(EXPECTED_MODE_CHANGES_OUTSIDE);
+      reachesAccountVerbOutsideTheParse(
+        "useradd --uid 1000 --gid node --create-home --home-dir /home/node node",
+      ),
+    ).toBe(false);
+    expect(reachesAccountVerbOutsideTheParse("sh -c useradd")).toBe(true);
     expect(
-      image.runtimeCopies
-        .filter(({ flags }) => flags.some((f) => f.startsWith("--chmod")))
-        .flatMap(({ dests }) => dests)
-        .filter((dest) => !withinWritableTree(dest)),
-    ).toEqual([]);
+      reachesAccountVerbOutsideTheParse("xargs usermod -d /app node"),
+    ).toBe(true);
+  });
+
+  it("reads the home directory an account command hands over", () => {
+    const read = (command, cwd = "/") => readAccountArgv(command, cwd);
+    expect(
+      read(
+        "useradd --uid 1000 --gid node --create-home --home-dir /home/node node",
+      ),
+    ).toEqual({ verb: "useradd", homePaths: ["/home/node"], unreadTokens: [] });
+    expect(read("groupadd --gid 1000 node")).toEqual({
+      verb: "groupadd",
+      homePaths: [],
+      unreadTokens: [],
+    });
+    // The two forms of naming the home, and a relative one resolved against the
+    // WORKDIR its instruction runs under.
+    expect(read("usermod --home-dir=/app node").homePaths).toEqual(["/app"]);
+    expect(read("useradd -d ../app node", "/work").homePaths).toEqual(["/app"]);
+    // Everything the walk does not understand, reported rather than skipped: an
+    // unknown flag that takes a path of its own, a flag with no value left, and
+    // a positional that is a path rather than an account name.
+    expect(read("useradd --base-dir /srv node").unreadTokens).toEqual([
+      "--base-dir",
+      "/srv",
+      "node",
+    ]);
+    expect(read("useradd node --home-dir").unreadTokens).toEqual([
+      "--home-dir",
+    ]);
+    expect(read("useradd /app").unreadTokens).toEqual(["/app"]);
   });
 });
+
+for (const { file, modeChangesOutside, image } of IMAGES) {
+  describe(`the unprivileged account ${file} runs as`, () => {
+    it("drops to a single non-root runtime user for both roles", () => {
+      const users = image.runtime
+        .filter(({ inst }) => inst === "USER")
+        .map(({ rest }) => normalize(rest));
+      expect(users).toEqual([RUNTIME_USER]);
+    });
+
+    it("declares that user after the last build step, so the ENTRYPOINT inherits it", () => {
+      // A USER ahead of a COPY or RUN would either fail the build or leave the
+      // dropped account owning /app; one after the last of them, with no second
+      // USER to undo it, is what makes the entrypoint's node process
+      // unprivileged.
+      const userIndex = image.runtime.findIndex(({ inst }) => inst === "USER");
+      const lastBuildStep = image.runtime.reduce(
+        (last, { inst }, index) =>
+          inst === "RUN" || inst === "COPY" ? index : last,
+        -1,
+      );
+      expect(userIndex).toBeGreaterThan(lastBuildStep);
+    });
+
+    it("hands that user every directory the container writes", () => {
+      expect(image.runtimeRuns.map((run) => `RUN ${normalize(run)}`)).toContain(
+        EXPECTED_WRITABLE_SETUP,
+      );
+    });
+
+    it("assigns ownership only through the forms the two tests below parse", () => {
+      // The guard on those tests reads a leading chown/chgrp/chmod and its
+      // operands. Every other way an instruction can name one of those verbs --
+      // wrapped in `sh -c`, driven by xargs or find, or written as install or
+      // setfacl -- is refused here, so an ownership change cannot reach /app by
+      // taking a form the parse skips over.
+      expect(
+        image.runtimeShellCommands
+          .filter(({ command }) => reachesOwnershipOutsideTheParse(command))
+          .map(({ command }) => command),
+      ).toEqual([]);
+      // The same refusal one altitude down, over the argv of the ones it does
+      // read: a dash-leading token outside the two the parse understands decides
+      // which operand is the mode and which are paths, so it is refused rather
+      // than guessed at.
+      expect(
+        image.ownershipCommands.flatMap(({ command }) =>
+          command
+            .split(" ")
+            .slice(1)
+            .filter(
+              (token) =>
+                token.startsWith("-") && !READ_OWNERSHIP_FLAGS.test(token),
+            )
+            .map((token) => `${token} in: ${command}`),
+        ),
+      ).toEqual([]);
+    });
+
+    it("creates an account only through the forms the test below parses", () => {
+      // The account verbs are the ownership set's blind spot: a home directory
+      // arrives owned by the account it is created for, so an account command
+      // hands over a path with no chown, chgrp or chmod anywhere in the stage.
+      // The same two refusals stand over them -- reached other than as a
+      // command's leading word, and carrying a token the walk cannot read --
+      // and the builder creates no account at all, since its files cross into
+      // /app carrying whatever ownership that stage left on them.
+      expect(
+        image.runtimeShellCommands
+          .filter(({ command }) => reachesAccountVerbOutsideTheParse(command))
+          .map(({ command }) => command),
+      ).toEqual([]);
+      expect(
+        image.builderShellCommands.filter((command) =>
+          ACCOUNT_VERB.test(command),
+        ),
+      ).toEqual([]);
+      expect(
+        image.accountCommands.flatMap(({ command, unreadTokens }) =>
+          unreadTokens.map((token) => `${token} in: ${command}`),
+        ),
+      ).toEqual([]);
+    });
+
+    it("gives the account the reviewed home directory and no other", () => {
+      // The home is the account's own to write, so it is a path outside the
+      // writable trees that the runtime process can rewrite: a `--home-dir
+      // /app` hands over the code the image runs. Held to the literal above
+      // rather than to a reading of which paths are safe, and each home-making
+      // verb must name its home, since an unnamed one is whatever
+      // /etc/login.defs carries -- a value this file cannot see.
+      for (const { verb, homePaths } of image.accountCommands) {
+        expect(homePaths).toHaveLength(
+          HOME_MAKING_ACCOUNT_VERB.test(verb) ? 1 : 0,
+        );
+      }
+      expect(
+        image.accountCommands
+          .flatMap(({ homePaths }) => homePaths)
+          .filter((path) => !ACCOUNT_HOME_DIRECTORIES.includes(path)),
+      ).toEqual([]);
+      // The other end of the same claim, and the whole of it for the image that
+      // inherits its account rather than creating one: the home the runtime
+      // reads from the environment is that same reviewed directory.
+      expect(ACCOUNT_HOME_DIRECTORIES).toContain(image.runtimeEnv.HOME);
+    });
+
+    it("assigns no ownership in the builder stage, whose files the runtime copies in", () => {
+      // `COPY --from=builder` carries the builder's files into /app, and what
+      // ownership they arrive with is Docker's rule rather than this file's to
+      // model. The route is closed instead: the builder assigns no ownership at
+      // all, so nothing crosses the stage boundary already handed to an account.
+      expect(
+        image.builderShellCommands.filter(reachesAnyOwnershipVerb),
+      ).toEqual([]);
+      expect(
+        image.builder
+          .filter(({ inst }) => inst === "COPY")
+          .flatMap(({ rest }) => rest.split(/\s+/))
+          .filter((token) => /^--(?:chown|chmod)/.test(token)),
+      ).toEqual([]);
+    });
+
+    it("gives that user no path outside those directories, so /app stays root-owned", () => {
+      // Every chown and chgrp in the stage, and every COPY that assigns
+      // ownership as it lands. A path outside the two writable trees is code, or
+      // a mount point, that the entrypoint's own process could then rewrite -- a
+      // group handed over no less than an owner, since the account carries its
+      // group.
+      const handedOverPaths = image.ownershipCommands
+        .filter(({ command }) => /^(?:chown|chgrp) /.test(command))
+        .flatMap(({ paths }) => paths);
+      expect(handedOverPaths.length).toBeGreaterThan(0);
+      expect(
+        handedOverPaths.filter((path) => !withinWritableTree(path)),
+      ).toEqual([]);
+      expect(
+        image.runtimeCopies
+          .filter(({ flags }) => flags.some((f) => f.startsWith("--chown")))
+          .flatMap(({ dests }) => dests)
+          .filter((dest) => !withinWritableTree(dest)),
+      ).toEqual([]);
+    });
+
+    it("changes no mode outside those directories but the reviewed ones", () => {
+      // A mode is the other way the account reaches what it must not write: a
+      // group- or world-writable /app needs no chown to be rewritable, and a
+      // setuid or setgid bit left on a helper is a boundary the account can push
+      // against. Outside the writable trees the whole set of mode changes is
+      // held to this image's reviewed literals rather than to a reading of what
+      // each mode grants.
+      expect(
+        image.ownershipCommands
+          .filter(
+            ({ command, paths }) =>
+              command.startsWith("chmod ") &&
+              paths.some((path) => !withinWritableTree(path)),
+          )
+          .map(({ command }) => command),
+      ).toEqual(modeChangesOutside);
+      expect(
+        image.runtimeCopies
+          .filter(({ flags }) => flags.some((f) => f.startsWith("--chmod")))
+          .flatMap(({ dests }) => dests)
+          .filter((dest) => !withinWritableTree(dest)),
+      ).toEqual([]);
+    });
+  });
+}
 
 // The build step that carries the release version into the client bundle, and
 // with it into every `docker run` line the partner accept kit prints
@@ -838,6 +1111,23 @@ describe("Dockerfile.fips certificate pins", () => {
     expect(lastPackageIndex).toBeLessThan(opensslConfIndex);
   });
 
+  it("strips the setuid and setgid bits after the last package transaction", () => {
+    // A dnf transaction landing after the strip puts a bit back, and the
+    // instruction ordering is the only thing in the build that decides it. CI's
+    // inventory measurement catches the outcome an hour later; this catches the
+    // instruction.
+    const stripIndex = image.runtime.findIndex(
+      ({ inst, rest }) => inst === "RUN" && /\bchmod u-s,g-s\b/.test(rest),
+    );
+    expect(stripIndex).toBeGreaterThanOrEqual(0);
+    const lastPackageIndex = image.runtime.reduce(
+      (last, { inst, rest }, index) =>
+        inst === "RUN" && OS_PACKAGE_MANAGER.test(rest) ? index : last,
+      -1,
+    );
+    expect(stripIndex).toBeGreaterThan(lastPackageIndex);
+  });
+
   it("points OPENSSL_CONF and OPENSSL_MODULES at what the image actually carries", () => {
     expect(image.allRuntimeDests).toContain(image.runtimeEnv.OPENSSL_CONF);
     expect(image.runtimeEnv.OPENSSL_MODULES).toBe("/usr/lib64/ossl-modules");
@@ -848,7 +1138,9 @@ describe("Dockerfile.fips certificate pins", () => {
     // back, which is sound only because the assertion above already compared it
     // against what the installed module reports. Both halves are needed: drop
     // the runtime stage's ARG redeclaration and the ENV expands to the empty
-    // string, leaving the per-run assurance line naming no module at all.
+    // string, at which point every run reports a provider it cannot name --
+    // which scripts/docker-entrypoint-fips.test.mjs holds the preamble to, and
+    // which is the whole of the per-run assurance the image offers.
     expect(image.runtimeEnv.FIPS_MODULE_VERSION).toBe("${FIPS_MODULE_VERSION}");
     expect(
       image.runtime.some(

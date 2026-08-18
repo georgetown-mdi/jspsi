@@ -4,7 +4,7 @@ title: "The FIPS Variant Container Image"
 
 # The FIPS variant container image: a second artifact, a vendor's validated module, and a host the operator provides
 
-*Status: decided, and built. This note records the choice to ship a separate
+*Status: decided, built, and published. This note records the choice to ship a separate
 `Dockerfile.fips` image on Amazon Linux 2023 carrying the CMVP-validated OpenSSL
 FIPS provider AWS publishes for that distribution, the alternatives weighed
 against it and rejected, what the arrangement does and does not support a claim
@@ -50,9 +50,16 @@ HKDF.
   what a claim needs.
 - **No psilink-level FIPS flag.** The FIPS-mode decision belongs to the host and
   its system-wide crypto policy.
-- **Built and smoked in CI ahead of any publication.** The claim gets written
-  once, and the release workflow's published artifacts stay as they are until it
-  is.
+- **Published as a second tag of the same repository**, `-fips` appended to each
+  of the default image's three, from the same release workflow and signed under
+  the same Sigstore identity. The claim that goes with it is written once, in
+  [COMPLIANCE.md](../COMPLIANCE.md#fips-140); the pull-and-verify mechanics are
+  in [RELEASES.md](../RELEASES.md#which-image-carries-which-posture).
+- **Unprivileged, as the default image is.** Both drop to `node` at uid 1000 and
+  gid 1000, and both strip every setuid and setgid bit their OS closure carries.
+  Amazon Linux 2023 has no `node` account, the Node runtime here coming from a
+  tarball rather than a package, so the variant creates one at the same uid and
+  gid an operator is told to chown a bind mount to.
 
 ## What was rejected, and why
 
