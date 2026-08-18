@@ -586,9 +586,13 @@ const INSTALL_VERB = /\binstall\b/;
 // `install` is coreutils' install(1), whose -o/-g/-m hand a path to an account.
 // A package manager's `install` is that manager's own subcommand, a different
 // program's argument that reaches nothing, so the exemption below releases the
-// install token in the SUBCOMMAND POSITION and no other. Two halves make that
-// position what it says: the manager's name is the whole leading token, since a
-// trailing-boundary match reads `yum-config-manager install -o node /app/x` as
+// first non-flag token after the manager's name -- the subcommand position in
+// every shape the committed Dockerfiles use, though a global flag carrying a
+// separate value token that is literally `install` would take the release in
+// its place. That stays harmless: a manager-led command never executes
+// install(1), and an `install` token anywhere later is still refused. Two
+// halves make the position what it says: the manager's name is the whole
+// leading token, since a trailing-boundary match reads `yum-config-manager install -o node /app/x` as
 // yum's; and the subcommand is the first token after it that is not a flag, so
 // `npm exec -- install -o node /app/x` and `npm exec install -o node /app/x`
 // are refused while `dnf -y --releasever=X install tar` passes. An install
