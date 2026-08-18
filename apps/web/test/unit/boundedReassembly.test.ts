@@ -504,7 +504,9 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
 
   test("refuses a binary value one byte below its view overhead", () => {
     // The other side of that boundary: the view a `bin`/`raw` value decodes to is
-    // charged, so a budget below it refuses the same frame the budget above admits.
+    // charged, so a budget below it refuses a frame carrying the same 256-byte
+    // charge the budget above admits (that test's raw16 differs in payload, not
+    // in charge).
     const conn = new FakeChunkedConnection();
     const fail = install(conn, {
       maxStructureBytes: WEBRTC_VALUE_WEIGHTS.binary - 1,

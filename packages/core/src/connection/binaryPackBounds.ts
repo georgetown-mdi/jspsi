@@ -15,7 +15,7 @@
 // and the 0xc0-0xdf markers, with maps declaring two child values per pair -- never
 // the library's API, so it carries a dependency premise on that marker table and one
 // more on how `unpack` allocates: a container's store sized from its declared count,
-// and a `bin`/`raw` value decoded into a retained view of its own
+// and a `bin`/`raw` value decoded into a retained per-value copy of its own
 // (docs/spec/DEPENDENCY_PINS.md). A misparse cannot silently disable the bound: it
 // either over-charges (rejecting early, fail-closed) or runs the cursor off the end,
 // which is treated as a malformed frame and delegated to the real unpacker.
@@ -132,10 +132,12 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
  *   tree -- is bounded separately by {@link MAX_WEBRTC_STRING_BYTES}, not here.)
  * - `binary` (256): the per-value overhead a decoded `bin`/`raw` value retains
  *   beyond its container's slot, charged on top of that slot. `unpack_raw` returns
- *   a `Uint8Array` over a buffer of its own, whose fixed cost -- the view, the
- *   buffer object and its allocation granularity -- measures ~232 bytes resident
- *   even for a one-byte payload, the same shape and the same floor as the retained
- *   chunk {@link MIN_CHUNK_RESIDENT_BYTES} charges. The payload itself is
+ *   a per-value copy sliced from its input -- a `Uint8Array` over a buffer of its
+ *   own when the frame arrives as one (the chunked-completion path and the CLI),
+ *   a bare `ArrayBuffer` on the browser's unchunked path -- whose fixed cost
+ *   measures ~232 bytes resident at its view-shape worst (~104 as a bare buffer)
+ *   even for a one-byte payload, the view shape sharing its floor with the
+ *   retained chunk {@link MIN_CHUNK_RESIDENT_BYTES} charges. The payload itself is
  *   charged nothing here: it is ~1x the value's wire bytes and so bounded by
  *   {@link MAX_WEBRTC_FRAME_BYTES} rather than by this structural budget.
  *
@@ -198,12 +200,15 @@ export const WEBRTC_VALUE_WEIGHTS = {
  * filling the 256 MiB wire cap carries about 7.67 million elements, whose
  * mapped-element frame would reach about 1.24 GiB and be rejected here.
  * Residual: the per-frame worst case for the kinds this budget charges in full is
- * the budget itself. A frame of the heaviest such kind (~4.07M declared `bin`
- * views at 264 charged bytes each with their array slot) meets the refusal at
- * ~4 MB of proportional wire while retaining ~0.79x the budget, the charge
- * exceeding the view's measured cost; an all-empty-object frame needs ~16.7M
- * elements and ~16 MiB of wire to meet the same refusal (the per-container byte
- * check ties cost to wire), freed once the schema layer rejects the frame. A tighter budget is available only by
+ * the budget itself. A frame of the heaviest such kind (~4.07M declared
+ * empty-payload `bin` views at 264 charged bytes each with their array slot)
+ * meets the refusal at ~4 MB of proportional wire while retaining ~0.79x the
+ * budget; the same count with 60-63-byte payloads is equally admitted and
+ * retains ~1.09x, its payload bytes the ~1x-wire addition the spec residual
+ * states (docs/spec/CHANNEL_SECURITY.md), held by the wire cap rather than
+ * here. An all-empty-object frame needs ~16.7M elements and ~16 MiB of wire to
+ * meet the same refusal (the per-container byte check ties cost to wire), freed
+ * once the schema layer rejects the frame. A tighter budget is available only by
  * making the weights less conservative (e.g. crediting key-string
  * internalization); that aggressiveness is a security-review judgment (see
  * docs/spec/CHANNEL_SECURITY.md). Fixed, not configurable: a configurable bound
