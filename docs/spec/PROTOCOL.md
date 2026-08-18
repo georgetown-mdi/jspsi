@@ -536,6 +536,8 @@ The result file identifies our matched record in its first column (the identifie
 
 If parties elected to transmit payload data, the relevant columns for the appropriate rows will be transmitted in-band over the secure connection and appended to the output in-the-clear, after the partner row-index column. Each partner payload column keeps its original name, prefixed `their_` only when that name equals the local first column's name (the identifier column, or `row_id` when there is none). That single local column is the whole collision set, and the prefix is never numbered -- so a partner column literally named `their_<local name>` arriving alongside `<local name>` produces two identically headed columns. Only the partner row-index column above is disambiguated by numbering.
 
+Every header and value in the result file is an RFC 4180 field: a value carrying a comma, a double quote, CR, or LF is wrapped in double quotes with its embedded quotes doubled, and any other value is written bare. Escaping happens once, where the table is formatted -- the writers that emit it (the CLI's file and stdout branches, the web app's download blob) join the formatted fields and add nothing. A matched value therefore round-trips: re-parsing the result yields the value the exchange committed to, which is what lets a holder re-supply the result to reproduce the record's commitments (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#commitment-scheme)). A committed null and a committed empty string are the one exception, both written as an empty cell and both read back as an empty string.
+
 ## See also
 
 - [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md) - exchange agreement format that parameterizes the protocol described here

@@ -721,6 +721,16 @@ function stdoutIsRedirectedFile(): boolean {
  * {@link createOwnerOnlyWriteStream}) so it does not inherit a world/group-readable
  * umask default.
  *
+ * `headers` and `rows` arrive as RFC 4180 FIELDS, not as raw values: core's
+ * `buildOutputTable` quotes any cell carrying a comma, a double quote, CR or LF
+ * and doubles that cell's embedded quotes. Both branches therefore join the
+ * fields with commas and escape nothing themselves -- a second pass here would
+ * write `"""a,b"""` for a value the reader then yields with its quotes intact,
+ * breaking the verify path's re-supply (which re-parses the result through the
+ * same `loadCSVFile`) rather than fixing anything. The division is pinned by the
+ * write-then-read round trip in `test/unit/resultCsvEscaping.test.ts`, which
+ * fails whether the escaping is dropped upstream or applied twice here.
+ *
  * The file path is owned end to end: the returned promise resolves on the
  * stream's `'close'` (all rows flushed AND the descriptor closed) and rejects on
  * any `'error'`. Awaiting it is what makes a mid-write or close failure (a full
