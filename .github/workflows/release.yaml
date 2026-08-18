@@ -229,6 +229,35 @@ jobs:
             report "FIPS variant image" "$FIPS_SCAN_OUTCOME" trivy-release-image-fips.txt
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Does the candidate's OWN shipped configuration engage the validated
+      # module? This runs the copy INSIDE the image -- the same file the
+      # variant's entrypoint runs at every container start -- against the amd64
+      # candidate loaded above, and it fails unless fips.so is mapped into the
+      # process, the five psilink call shapes (AES-256-GCM, HKDF-SHA-256,
+      # HMAC-SHA-256, SHA-256, P-256 ECDH) all succeed, and both an MD5 digest
+      # and a below-minimum RSA keygen -- which no FIPS provider serves -- fail
+      # beside them. docs/COMPLIANCE.md frames that engagement as measured
+      # rather than assumed, and image_smoke.yaml measures a pull request's
+      # build: without this step nothing measures the artifact a tag publishes.
+      #
+      # Ahead of the login below for the reason the scans are: a candidate whose
+      # crypto is not served by the module stops the release here rather than
+      # being published under `latest-fips` and then disowned.
+      #
+      # It reads amd64 while the release publishes amd64 and arm64. Both
+      # architectures resolve the same base index digest and the same committed
+      # lockfile, and the certified provider package and the module version the
+      # loader activates are pinned and asserted by the build itself, so the
+      # configuration this measures on one is the configuration that ships on
+      # the other; a failure to engage on the architecture it does not read is
+      # outside it.
+      - name: Assert the release FIPS variant image engages the FIPS provider
+        if: ${{ !cancelled() && steps.fips_build.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint node \
+            psi-link:fips-release-candidate /app/fips-probe/image-engagement.mjs
+
       - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v6
