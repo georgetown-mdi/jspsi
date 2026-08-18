@@ -280,7 +280,6 @@ export interface MessageLoopOptions {
   retainFiles: boolean;
   locklessRendezvous: boolean;
   timestampInFilename: boolean;
-  timeToLive?: Date;
   pollingFrequency: number;
   unexpectedFiles?: "error" | "warn" | "ignore";
 }
@@ -309,6 +308,7 @@ export interface MessageLoopDeps {
   role: () => string;
   log: () => ReturnType<typeof getLoggerForVerbosity>;
   options: () => MessageLoopOptions;
+  peerBudgetMs: () => number;
   path: () => string | undefined;
   outbound: () => string | undefined;
   peerId: () => string | undefined;
@@ -485,6 +485,18 @@ export class FileSyncMessageLoop {
         (file) => file.name === expectedAck,
       );
 
+    // The budget for THIS send's wait on the peer, armed here and spent only by
+    // this step. It is the peer-INACTIVITY budget, so it is re-armed per send
+    // rather than measured against one absolute deadline set at open(): an
+    // absolute deadline is spent by the exchange's own honest progress, so any
+    // healthy exchange that runs longer than peer_timeout_ms would reach its
+    // next send already expired and fail having waited no time at all -- and a
+    // back-to-back send pair with no receive between them reaches this wait on
+    // every exchange. This matches the receive side, where every transport await
+    // is raced against a fresh budget (see boundTransport's own reasoning). An
+    // unresponsive peer is still bounded: this wait ends within one budget.
+    const waitDeadlineMs = Date.now() + deps.peerBudgetMs();
+
     try {
       if (deps.options().retainFiles) {
         // First send (seq === 0) proceeds immediately; subsequent sends wait for
@@ -503,14 +515,13 @@ export class FileSyncMessageLoop {
                 `from ${redactAndSanitizeForDisplay(deps.peerId()!)}`,
             );
           // Check for the ack before the deadline, so an ack already on disk is
-          // honored even if the TTL elapsed in the same instant. This is the
+          // honored even if the budget elapsed in the same instant. This is the
           // do-while rationale readControlFileWithGate uses: re-listing for a
           // present ack costs one list(), whereas discarding it would fail a
           // live exchange with a spurious timeout.
-          // open() set timeToLive before send() can run; assertion is safe.
           while (true) {
             if (await ackForLastSentPresent(expectedAck)) break;
-            if (Date.now() > deps.options().timeToLive!.getTime()) {
+            if (Date.now() > waitDeadlineMs) {
               throw new UsageError(
                 `timed out waiting for ack ${expectedAck} from ` +
                   `${deps.peerId()!}`,
@@ -527,8 +538,7 @@ export class FileSyncMessageLoop {
               `[${deps.role()}] waiting for previous message to be consumed`,
             );
           while (await hasOutstandingMessage()) {
-            // open() set timeToLive before send() can run; assertion is safe.
-            if (Date.now() > deps.options().timeToLive!.getTime()) {
+            if (Date.now() > waitDeadlineMs) {
               throw new UsageError(
                 `timed out waiting for message from ${deps.id()} to be consumed`,
               );

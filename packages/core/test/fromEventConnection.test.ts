@@ -107,15 +107,25 @@ function makeMockClient(): {
 // handshake, so the poll/send paths can be driven directly.
 function makeConnectedConn(
   client: FileTransportClient,
-  opts?: Partial<{ pollingFrequency: number; timeToLiveMs: number }>,
+  opts?: Partial<{
+    pollingFrequency: number;
+    peerTimeoutMs: number;
+  }>,
 ): FileSyncConnection {
   const conn = new FileSyncConnection(client, {
     pollingFrequency: opts?.pollingFrequency ?? 10,
-    timeToLive: new Date(Date.now() + (opts?.timeToLiveMs ?? 5_000)),
     verbose: -1,
   });
   conn.connected = true;
   conn.path = "/test";
+  // The peer-inactivity budget send() arms per wait is read from the live
+  // config, which only open() sets; these tests stand the connection up without
+  // it, so the config is planted here for the one field they need from it.
+  if (opts?.peerTimeoutMs !== undefined) {
+    (
+      conn as unknown as { config: { options: { peerTimeoutMs: number } } }
+    ).config = { options: { peerTimeoutMs: opts.peerTimeoutMs } };
+  }
   return conn;
 }
 
@@ -210,12 +220,12 @@ test("fromEventConnection over FileSyncConnection: an error buffered before the 
 test("fromEventConnection over FileSyncConnection: a send-time transport failure becomes a sticky terminal error", async () => {
   const { client, files } = makeMockClient();
   const conn = makeConnectedConn(client, {
-    timeToLiveMs: 150,
+    peerTimeoutMs: 150,
     pollingFrequency: 10,
   });
   conn.peerId = "peer-test";
-  // A previous unconsumed message blocks send(); with a short TTL the wait
-  // times out and send() rejects, which the bridge latches as terminal. The
+  // A previous unconsumed message blocks send(); with a short peer budget the
+  // wait times out and send() rejects, which the bridge latches as terminal. The
   // drain waits for the exact lastSentFile, so point it at the planted name.
   const outName = `${conn.id}-99.json`;
   files.set(`/test/${outName}`, Buffer.from(JSON.stringify({ stale: 1 })));

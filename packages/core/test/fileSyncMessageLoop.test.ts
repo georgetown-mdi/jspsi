@@ -308,6 +308,9 @@ interface LoopFixture {
     verifyCalls: number;
     emitDataThrows: boolean;
   };
+  // The peer-inactivity budget send() arms per wait, mutable so a case can give
+  // the wait a budget it can actually spend within the test.
+  budget: { ms: number };
   // Drives one poll cycle: arms pollerActive (as start() would) then runs poll().
   pollOnce(): Promise<void>;
 }
@@ -316,7 +319,6 @@ const baseOptions = (): MessageLoopOptions => ({
   retainFiles: false,
   locklessRendezvous: false,
   timestampInFilename: false,
-  timeToLive: new Date(Date.now() + 60_000),
   // Deliberately huge so a success-path reschedule never fires during a test;
   // stop() clears the one pending timer.
   pollingFrequency: 3_600_000,
@@ -332,6 +334,7 @@ function makeLoop(
   const responsibleFiles = new Set<string>();
   const foreignFileSnapshot = new Set<string>();
   const controller = new AbortController();
+  const budget = { ms: 60_000 };
   const client = memClient(files, clientOpts);
   const log = getLoggerForVerbosity("loop-test", -1);
   const emitted: EmittedEvent[] = [];
@@ -354,6 +357,7 @@ function makeLoop(
     role: () => state.role,
     log: () => log,
     options: () => options,
+    peerBudgetMs: () => budget.ms,
     path: () => DIR,
     outbound: () => undefined,
     peerId: () => PEER,
@@ -393,6 +397,7 @@ function makeLoop(
     responsibleFiles,
     foreignFileSnapshot,
     state,
+    budget,
     pollOnce: async () => {
       internals(loop).pollerActive = true;
       await internals(loop).poll();
@@ -613,6 +618,189 @@ describe("FileSyncMessageLoop counter commit points", () => {
     expect(f.loop.lastSentFile).toBe(
       `${SELF}-${objectMessage({ a: 1 }).length}.json`,
     );
+  });
+
+  // A virtual clock for the send-wait budget cases below. send() reads the clock
+  // between transport calls, so charging each list() a fixed elapsed cost makes
+  // the budget arithmetic exact and independent of how promptly the machine runs
+  // the test -- the real poll delay stays at the fixture's 1 ms.
+  function virtualClock(f: LoopFixture, msPerList: number) {
+    const realNow = Date.now.bind(Date);
+    const origin = realNow();
+    let elapsed = 0;
+    const realList = f.client.list.bind(f.client);
+    f.client.list = async (dir: string) => {
+      elapsed += msPerList;
+      return realList(dir);
+    };
+    Date.now = () => origin + elapsed;
+    return {
+      elapsedMs: () => elapsed,
+      restore: () => {
+        Date.now = realNow;
+      },
+    };
+  }
+
+  test("each send arms its own wait budget, so a long exchange is not failed by an earlier one", async () => {
+    // The wait is on peer INACTIVITY, so it is re-armed per send. Measured
+    // against one absolute deadline instead, a healthy exchange that simply runs
+    // longer than peer_timeout_ms reaches its next send already expired and fails
+    // having waited nothing -- and a back-to-back send pair with no receive
+    // between them reaches this wait on every exchange. Here two consecutive
+    // waits each spend most of the budget, and their sum passes it.
+    const files = new Map<string, Buffer>();
+    const f = makeLoop({ pollingFrequency: 1 }, {}, files);
+    f.budget.ms = 1_000;
+    const clock = virtualClock(f, 400);
+    try {
+      // The peer consumes the outstanding message on the third listing of each
+      // wait -- 800 virtual ms, inside one budget but not inside two. Each call
+      // REPLACES the previous wrapper over the clock's list() rather than
+      // nesting on top of it: a nested wrapper carries its counter over from the
+      // earlier wait, so it would fire on the next wait's very FIRST listing and
+      // that wait would never reach a third listing of its own.
+      const clockList = f.client.list.bind(f.client);
+      const consumedOnListing: number[] = [];
+      const consumeOnThirdList = () => {
+        let listings = 0;
+        let consumed = false;
+        f.client.list = async (dir: string) => {
+          listings += 1;
+          if (listings >= 3 && f.loop.lastSentFile !== undefined) {
+            if (!consumed) {
+              consumed = true;
+              consumedOnListing.push(listings);
+            }
+            files.delete(`${DIR}/${f.loop.lastSentFile}`);
+          }
+          return clockList(dir);
+        };
+      };
+
+      await expect(f.loop.send({ a: 1 })).resolves.toBeUndefined();
+      consumeOnThirdList();
+      await expect(f.loop.send({ a: 2 })).resolves.toBeUndefined();
+      consumeOnThirdList();
+      await expect(f.loop.send({ a: 3 })).resolves.toBeUndefined();
+      expect(f.loop.seq).toBe(3);
+      // Both waits ran to their OWN third listing, which is what makes the two
+      // waits above two full waits rather than one plus a short-circuit.
+      expect(consumedOnListing).toEqual([3, 3]);
+      // The exchange outlived one budget, which is the case an absolute deadline
+      // fails and this one must not.
+      expect(clock.elapsedMs()).toBeGreaterThan(f.budget.ms);
+    } finally {
+      clock.restore();
+    }
+  });
+
+  test("a peer that never consumes still times out inside one budget", async () => {
+    // The other half of the per-send budget: re-arming it must not make the wait
+    // unbounded. A peer that consumes nothing is refused within one budget plus
+    // the poll step in flight when it expires.
+    const files = new Map<string, Buffer>();
+    const f = makeLoop({ pollingFrequency: 1 }, {}, files);
+    f.budget.ms = 1_000;
+    const clock = virtualClock(f, 400);
+    try {
+      await expect(f.loop.send({ a: 1 })).resolves.toBeUndefined();
+      await expect(f.loop.send({ a: 2 })).rejects.toThrow(
+        `timed out waiting for message from ${SELF} to be consumed`,
+      );
+      expect(clock.elapsedMs()).toBeLessThanOrEqual(f.budget.ms + 400 * 2);
+    } finally {
+      clock.restore();
+    }
+  });
+
+  test("retain: each send arms its own ack-wait budget, so a long exchange is not failed by an earlier one", async () => {
+    // The retain-mode half of the same property, on the other wait: in retain
+    // mode the peer never deletes the message, so the send gate is the ack
+    // marker's appearance rather than the message's disappearance. That wait is
+    // re-armed per send too -- here two consecutive waits each spend most of the
+    // budget and their sum passes it, which one absolute deadline would fail.
+    const files = new Map<string, Buffer>();
+    const f = makeLoop(
+      { retainFiles: true, timestampInFilename: true, pollingFrequency: 1 },
+      {},
+      files,
+    );
+    f.budget.ms = 1_000;
+    const clock = virtualClock(f, 400);
+    try {
+      // The peer acks on the SECOND listing of each wait -- 800 virtual ms,
+      // inside one budget but not inside two. (Second, where the delete-mode
+      // pair above says third, for the same number of in-loop iterations: that
+      // wait spends one extra listing on the pre-check before its loop.) Each
+      // call REPLACES the previous wrapper over the clock's list() rather than
+      // nesting on top of it: a nested wrapper carries its counter over from the
+      // earlier wait, so it would fire on the next wait's very FIRST listing and
+      // that wait would never reach a second listing of its own.
+      const clockList = f.client.list.bind(f.client);
+      const ackedOnListing: number[] = [];
+      const ackOnSecondList = () => {
+        let listings = 0;
+        let acked = false;
+        f.client.list = async (dir: string) => {
+          listings += 1;
+          if (listings >= 2 && f.loop.lastSentFile !== undefined) {
+            if (!acked) {
+              acked = true;
+              ackedOnListing.push(listings);
+            }
+            const ackName = ackMarkerName(
+              PEER,
+              f.loop.lastSentFile.slice(0, -".json".length),
+            );
+            files.set(`${DIR}/${ackName}`, Buffer.alloc(0));
+          }
+          return clockList(dir);
+        };
+      };
+
+      await expect(f.loop.send({ a: 1 })).resolves.toBeUndefined();
+      ackOnSecondList();
+      await expect(f.loop.send({ a: 2 })).resolves.toBeUndefined();
+      ackOnSecondList();
+      await expect(f.loop.send({ a: 3 })).resolves.toBeUndefined();
+      expect(f.loop.seq).toBe(3);
+      // Both waits ran to their OWN second listing, which is what makes the two
+      // waits above two full waits rather than one plus a short-circuit.
+      expect(ackedOnListing).toEqual([2, 2]);
+      // The exchange outlived one budget, which is the case an absolute deadline
+      // fails and this one must not.
+      expect(clock.elapsedMs()).toBeGreaterThan(f.budget.ms);
+    } finally {
+      clock.restore();
+    }
+  });
+
+  test("retain: a peer that never acks still times out inside one budget", async () => {
+    // The other half of the per-send ack budget: re-arming it must not make the
+    // wait unbounded. A peer that writes no ack is refused within one budget
+    // plus the poll step in flight when it expires.
+    const files = new Map<string, Buffer>();
+    const f = makeLoop(
+      { retainFiles: true, timestampInFilename: true, pollingFrequency: 1 },
+      {},
+      files,
+    );
+    f.budget.ms = 1_000;
+    const clock = virtualClock(f, 400);
+    try {
+      await expect(f.loop.send({ a: 1 })).resolves.toBeUndefined();
+      const expectedAck = ackMarkerName(
+        PEER,
+        f.loop.lastSentFile!.slice(0, -".json".length),
+      );
+      await expect(f.loop.send({ a: 2 })).rejects.toThrow(
+        `timed out waiting for ack ${expectedAck} from ${PEER}`,
+      );
+      expect(clock.elapsedMs()).toBeLessThanOrEqual(f.budget.ms + 400 * 2);
+    } finally {
+      clock.restore();
+    }
   });
 
   test("retain: writeAck then lastAckedNNN then emit(data) then recvSeq++", async () => {
