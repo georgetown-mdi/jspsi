@@ -805,6 +805,114 @@ test("a file-sync invitation with no endpoint may declare retain mode", async ()
   expect(decoded.inviterRetainsFiles).toBe(true);
 });
 
+// A split inbound/outbound endpoint on each file-sync channel: a shape that puts
+// every connection built from it in retain mode, so it is the endpoint an
+// explicit `inviterRetainsFiles: false` contradicts.
+const splitRetainEndpoints: { name: string; endpoint: ConnectionEndpoint }[] = [
+  {
+    name: "sftp",
+    endpoint: {
+      channel: "sftp",
+      host: "sftp.example",
+      inboundPath: "/exchange/in",
+      outboundPath: "/exchange/out",
+    },
+  },
+  {
+    name: "filedrop",
+    endpoint: {
+      channel: "filedrop",
+      inboundPath: "/mnt/share/from-partner",
+      outboundPath: "/mnt/share/to-partner",
+    },
+  },
+];
+
+test.each(
+  splitRetainEndpoints.flatMap(({ name, endpoint }) => [
+    { name, half: "encodeInvitation", endpoint, run: encodeInvitation },
+    {
+      name,
+      half: "decodeInvitation",
+      endpoint,
+      run: async (token: InvitationToken) =>
+        decodeInvitation(await encodeRaw(token)),
+    },
+  ]),
+)(
+  "$half refuses a declared-false retain mode on a split $name endpoint",
+  async ({ endpoint, run }) => {
+    // The endpoint's shape seeds the acceptor into retain mode whatever the
+    // token says, so the negative declares a mode no run of it could be in --
+    // refused at both halves rather than left to the consent summary to render
+    // the safe side over it.
+    const token: InvitationToken = {
+      ...baseToken,
+      connectionEndpoint: endpoint,
+      inviterRetainsFiles: false,
+    };
+    await expect(run(token)).rejects.toThrow(/cannot be false/);
+  },
+);
+
+test.each(splitRetainEndpoints)(
+  "a split $name endpoint decodes with the declaration omitted",
+  async ({ endpoint }) => {
+    // Absence is "nothing declared", not a contradicted negative -- and it is
+    // precisely the pair the summary's endpoint-shape ground exists to cover, so
+    // the refusal must not swallow it. A foreign or older mint emits it.
+    const decoded = await decodeInvitation(
+      await encodeRaw({ ...baseToken, connectionEndpoint: endpoint }),
+    );
+    expect(decoded.inviterRetainsFiles).toBeUndefined();
+    expect(decoded.connectionEndpoint).toEqual(endpoint);
+  },
+);
+
+test.each(splitRetainEndpoints)(
+  "a split $name endpoint may declare retain mode",
+  async ({ endpoint }) => {
+    const decoded = await decodeInvitation(
+      await encodeInvitation({
+        ...baseToken,
+        connectionEndpoint: endpoint,
+        inviterRetainsFiles: true,
+      }),
+    );
+    expect(decoded.inviterRetainsFiles).toBe(true);
+  },
+);
+
+// The same two channels carrying a single shared directory: a shape that
+// requires nothing of the mode, so it is the control the refusal must not catch.
+const sharedDirEndpoints: { name: string; endpoint: ConnectionEndpoint }[] = [
+  {
+    name: "sftp",
+    endpoint: { channel: "sftp", host: "sftp.example", path: "/exchange" },
+  },
+  {
+    name: "filedrop",
+    endpoint: { channel: "filedrop", path: "/mnt/share" },
+  },
+];
+
+test.each(sharedDirEndpoints)(
+  "a single-directory $name endpoint may still declare a false retain mode",
+  async ({ endpoint }) => {
+    // The refusal is keyed on the shape that requires retention, not on the
+    // channel: a shared directory runs in either mode, so the negative is a
+    // statable (if unstated) fact there and must still decode.
+    const decoded = await decodeInvitation(
+      await encodeInvitation({
+        ...baseToken,
+        connectionEndpoint: endpoint,
+        inviterRetainsFiles: false,
+      }),
+    );
+    expect(decoded.inviterRetainsFiles).toBe(false);
+  },
+);
+
 test("encodeInvitation rejects a disclosed-columns entry with an empty name", async () => {
   const token = {
     ...baseToken,
