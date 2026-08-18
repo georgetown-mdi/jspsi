@@ -9,15 +9,15 @@ import {
 import {
   BROKER_MESSAGE,
   connectToBroker,
-} from "../../src/connection/webrtc/brokerClient";
-import { startBrokerProcess } from "../signaling/brokerProcess";
+} from "../../../src/connection/webrtc/brokerClient";
+import { startBrokerProcess } from "../../signaling/brokerProcess";
 
 import type {
   BrokerClient,
   BrokerLocation,
   BrokerMessage,
-} from "../../src/connection/webrtc/brokerClient";
-import type { BrokerProcess } from "../signaling/brokerProcess";
+} from "../../../src/connection/webrtc/brokerClient";
+import type { BrokerProcess } from "../../signaling/brokerProcess";
 
 /**
  * The CLI's hand-written signaling client against the repository's REAL vendored

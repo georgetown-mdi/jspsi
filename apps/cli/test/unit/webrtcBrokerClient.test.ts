@@ -30,7 +30,7 @@ const REMOTE_ID = "bbbb1111bbbb1111bbbb1111bbbb1111";
  * A WebSocket stand-in with the surface the broker client uses. It drives the
  * client's whole state machine -- registration, refusal, steady state, teardown
  * -- with no broker, so the unit tests stay fast and hermetic; the wire itself is
- * verified against the real vendored broker in test/integration/webrtcBroker.test.ts.
+ * verified against the real vendored broker in test/integration/webrtc/broker.test.ts.
  */
 class FakeSocket {
   static readonly OPEN = 1;

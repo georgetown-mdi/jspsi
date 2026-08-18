@@ -361,7 +361,7 @@ function invalidKeyError(): ConnectionError {
  *
  * PeerJS defines an `INVALID-KEY` message type, but the vendored broker answers
  * a wrong key with a plain `ERROR` whose payload reads "Invalid key provided"
- * (measured; pinned by test/integration/webrtcBroker.test.ts against the real
+ * (measured; pinned by test/integration/webrtc/broker.test.ts against the real
  * server). Recognising it is what turns the commonest signaling misconfiguration
  * from an opaque disconnect into a fix. The match is on a lowercased substring
  * so a wording tweak degrades to the generic error rather than breaking, and the

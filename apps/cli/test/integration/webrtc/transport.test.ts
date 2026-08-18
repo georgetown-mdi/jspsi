@@ -6,13 +6,13 @@ import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
 
 import { ConnectionError, generateSharedSecret } from "@psilink/core";
 
-import { openWebRtcMessageConnection } from "../../src/connection/webrtc/webrtcMessageConnection";
-import { openWebRtcPeerSession } from "../../src/connection/webrtc/weriftPeer";
-import { PEERJS_CHUNK_MTU } from "../../src/connection/webrtc/peerjsWire";
-import { startBrokerProcess } from "../signaling/brokerProcess";
+import { openWebRtcMessageConnection } from "../../../src/connection/webrtc/webrtcMessageConnection";
+import { openWebRtcPeerSession } from "../../../src/connection/webrtc/weriftPeer";
+import { PEERJS_CHUNK_MTU } from "../../../src/connection/webrtc/peerjsWire";
+import { startBrokerProcess } from "../../signaling/brokerProcess";
 
-import type { BrokerLocation } from "../../src/connection/webrtc/brokerClient";
-import type { BrokerProcess } from "../signaling/brokerProcess";
+import type { BrokerLocation } from "../../../src/connection/webrtc/brokerClient";
+import type { BrokerProcess } from "../../signaling/brokerProcess";
 import type { MessageConnection } from "@psilink/core";
 
 /**

@@ -66,6 +66,14 @@ jobs:
         run: npm run test:integration -w apps/cli
         env:
           PSILINK_REQUIRE_WORKER_BUILD: "1"
+      # The WebRTC suite is a vitest project of its own (apps/cli/vitest.config.ts)
+      # so it runs exactly once per pull request, here. It drives two loopback
+      # werift peers through the vendored broker it spawns itself, which the SFTP
+      # backend has no bearing on, so repeating it on the native leg below and on
+      # each hardened-sshd matrix leg would buy nothing for several minutes of
+      # runner time. Those legs run the `integration` project, which excludes it.
+      - name: WebRTC integration tests (CLI)
+        run: npm run test:integration:webrtc -w apps/cli
       # A second leg runs the same suite against a native OpenSSH sshd, so the
       # adapter is also exercised against a real server. sshd ships on the Ubuntu
       # runner, but its build fatally checks for the privilege-separation

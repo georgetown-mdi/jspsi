@@ -22,7 +22,7 @@ import type { RTCPeerConnection } from "werift";
  * still connects on loopback -- the candidate-queue rule the transport exists to
  * honour is invisible to an end-to-end test and fails only in the field, on the
  * day the inlined set is not enough. The live path is exercised in
- * test/integration/webrtcTransport.test.ts; this is where the wire ORDER is
+ * test/integration/webrtc/transport.test.ts; this is where the wire ORDER is
  * held.
  */
 

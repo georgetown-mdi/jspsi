@@ -11,7 +11,7 @@ import type { MessageConnection, PreparedExchange } from "@psilink/core";
  * channel instead of a shared folder.
  *
  * The wire below it is driven for real elsewhere -- two werift peers through the
- * vendored broker in test/integration/webrtcTransport.test.ts. What is only
+ * vendored broker in test/integration/webrtc/transport.test.ts. What is only
  * observable here is what the dispatch itself decides: that it dials rather than
  * opening a file-sync connection, what it hands the rendezvous, which handshake
  * role each party takes from its configured one, and that the exchange runs

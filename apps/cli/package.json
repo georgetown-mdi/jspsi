@@ -12,7 +12,8 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test:integration:native-chroot": "node test/sftpServer/runChrootProfile.mjs",
-    "coverage": "vitest run --project unit --project integration --coverage"
+    "test:integration:webrtc": "vitest run --project webrtc",
+    "coverage": "vitest run --project unit --project integration --project webrtc --coverage"
   },
   "dependencies": {
     "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.3.tgz",
