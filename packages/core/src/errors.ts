@@ -8,6 +8,38 @@
 import { ConnectionError } from "./connection/messageConnection";
 
 /**
+ * Whether `error` or any link in its `cause` chain satisfies `predicate`.
+ *
+ * The single shared rule for asking "is this failure, anywhere under whatever
+ * wrapped it, an X?" -- a class, a property tag, or a message fragment. Asking
+ * it of the chain rather than of the value handed over keeps the answer right
+ * wherever the wrapping happens: a re-raise that replaces the message and keeps
+ * the original as its `cause` (the shape core's own diagnostics compose) stays
+ * matched.
+ *
+ * The walk follows `cause` on any non-null object link, not only an `Error`, so
+ * a plain object interposed in the chain does not truncate it; a predicate that
+ * cares narrows with its own `instanceof`. A seen-set stops a `cause` cycle
+ * from being revisited; it does not bound a chain of distinct links, and a
+ * throwing `cause` accessor propagates to the caller. Rendering an arbitrary
+ * chain is {@link sanitizeErrorForDisplay}'s job, which carries the depth
+ * bound and the guarded read this helper deliberately does not.
+ */
+export function causeChainSome(
+  error: unknown,
+  predicate: (link: object) => boolean,
+): boolean {
+  const seen = new Set<unknown>();
+  let cursor: unknown = error;
+  while (typeof cursor === "object" && cursor !== null && !seen.has(cursor)) {
+    seen.add(cursor);
+    if (predicate(cursor)) return true;
+    cursor = (cursor as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
  * Thrown by {@link FileSyncConnection} when the caller has supplied an
  * invalid configuration or attempted an operation that violates usage
  * constraints: wrong directory state, stale handshake files, multiple
@@ -549,18 +581,11 @@ export function markPeerWaitTimeout<E extends object>(error: E): E {
 
 /**
  * Whether `error`, or anything in its `cause` chain, carries the
- * {@link markPeerWaitTimeout} tag. Walking the chain keeps the answer right
- * wherever the wrapping happens -- in a consumer or a future internal path
- * alike; a seen-set guards against a pathological `cause` cycle.
+ * {@link markPeerWaitTimeout} tag.
  */
 export function isPeerWaitTimeout(error: unknown): boolean {
-  const seen = new Set<unknown>();
-  let cursor: unknown = error;
-  while (typeof cursor === "object" && cursor !== null && !seen.has(cursor)) {
-    seen.add(cursor);
-    if ((cursor as Record<string, unknown>)[PEER_WAIT_TIMEOUT_TAG] === true)
-      return true;
-    cursor = (cursor as { cause?: unknown }).cause;
-  }
-  return false;
+  return causeChainSome(
+    error,
+    (link) => (link as Record<string, unknown>)[PEER_WAIT_TIMEOUT_TAG] === true,
+  );
 }

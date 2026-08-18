@@ -998,43 +998,6 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
       ),
     { message: "iceProvision is mutually exclusive with stun and turn" },
   )
-  // Defense-in-depth: locklessRendezvous is a FileSyncOptions field and
-  // cannot be expressed on a webrtc config through the discriminated union
-  // (webrtc uses SharedOptions, not FileSyncOptions). This refine guards the
-  // path anyway so a future schema change cannot silently accept it.
-  .refine(
-    (conn) =>
-      !(
-        conn.channel === "webrtc" &&
-        (conn.options as FileSyncOptions | undefined)?.locklessRendezvous
-      ),
-    { message: "locklessRendezvous is not valid for the webrtc channel" },
-  )
-  // Defense-in-depth: peerId is a FileSyncOptions field and cannot be
-  // expressed on a webrtc config through the discriminated union (webrtc uses
-  // SharedOptions, not FileSyncOptions). This refine guards the path anyway
-  // so a future schema change cannot silently accept it.
-  .refine(
-    (conn) =>
-      !(
-        conn.channel === "webrtc" &&
-        (conn.options as FileSyncOptions | undefined)?.peerId !== undefined
-      ),
-    { message: "peer_id is not valid for the webrtc channel" },
-  )
-  // Defense-in-depth: retainFiles is a FileSyncOptions field and cannot be
-  // expressed on a webrtc config through the discriminated union (webrtc uses
-  // SharedOptions, not FileSyncOptions). This refine guards the path anyway
-  // so a future schema change cannot silently accept it; the path is not
-  // reachable through the current union.
-  .refine(
-    (conn) =>
-      !(
-        conn.channel === "webrtc" &&
-        (conn.options as FileSyncOptions | undefined)?.retainFiles
-      ),
-    { message: "retain_files is not valid for the webrtc channel" },
-  )
   // File-sync directory mode (filedrop and sftp). A directory is given either
   // as a single shared path or as a split inbound/outbound pair, never both and
   // never just one half; a configured outbound directory (split mode) requires

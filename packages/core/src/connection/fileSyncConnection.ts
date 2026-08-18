@@ -16,7 +16,7 @@ import type {
   FileDropConnectionConfig,
 } from "../config/connection";
 import type { HandshakeRole } from "../types";
-import { ConnectionError } from "./messageConnection";
+import { ConnectionError, errorMessage } from "./messageConnection";
 import {
   UsageError,
   ConnectionClosedError,
@@ -44,9 +44,6 @@ import {
   FileSyncRendezvous,
   type RendezvousScope,
 } from "./fileSyncRendezvous";
-
-const errMessage = (err: unknown) =>
-  err instanceof Error ? err.message : String(err);
 
 /**
  * Canonicalize a `filedrop` connection path to the form the connection uses on
@@ -807,7 +804,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // embeds a partner-controlled path (both the SFTP and filedrop
             // adapters concatenate the operation path into their error text), so
             // escape it before it reaches the operator's log.
-            redactAndSanitizeForDisplay(errMessage(this.bufferedError)),
+            redactAndSanitizeForDisplay(errorMessage(this.bufferedError)),
         );
         if (
           incoming instanceof Error &&
@@ -1484,7 +1481,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           // peerId), so a delete error's message can carry partner bytes via the
           // path; escape it.
           `[${this.role}] cleanup during close: ` +
-            `${redactAndSanitizeForDisplay(errMessage(err))}`,
+            `${redactAndSanitizeForDisplay(errorMessage(err))}`,
         );
       }
     }
@@ -1503,7 +1500,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         await this.client.end();
       } catch (err: unknown) {
         this.log.debug(
-          `[${this.role}] end() during close: ${redactAndSanitizeForDisplay(errMessage(err))}`,
+          `[${this.role}] end() during close: ${redactAndSanitizeForDisplay(errorMessage(err))}`,
         );
       }
     }
@@ -1666,7 +1663,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       await this.client.rename(tempPath, `${dir}/${name}`);
     } catch (err) {
       await this.client.safeDelete(tempPath);
-      throw err instanceof Error ? err : new Error(errMessage(err));
+      throw err instanceof Error ? err : new Error(errorMessage(err));
     }
     return name;
   }

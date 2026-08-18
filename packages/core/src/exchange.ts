@@ -960,7 +960,6 @@ export async function runExchange(
       psiLibrary,
       { role: psiRole, verbose: verbosity },
       elementBounds,
-      undefined,
       engine,
     );
     associationTable =

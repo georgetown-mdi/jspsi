@@ -9,6 +9,7 @@ import {
   ConnectionClosedError,
   PeerAbortError,
   TransportPublishIndeterminateError,
+  causeChainSome,
   isPeerWaitTimeout,
   markPeerWaitTimeout,
 } from "../src/errors";
@@ -116,6 +117,60 @@ describe("errors whose recovery hint is per instance, not per class", () => {
       (err as { psilinkRecoveryHintEmitted?: unknown })
         .psilinkRecoveryHintEmitted,
     ).toBeUndefined();
+  });
+});
+
+describe("causeChainSome", () => {
+  test("matches the value handed to it, with no cause to walk", () => {
+    expect(
+      causeChainSome(new TypeError("boom"), (e) => e instanceof TypeError),
+    ).toBe(true);
+  });
+
+  test("walks through a non-Error link instead of stopping at it", () => {
+    // The chain is followed on any object link, so a plain object interposed by
+    // a wrapper that is not an Error cannot hide what it wraps.
+    const inner = new TypeError("boom");
+    const outer = { cause: { cause: inner } };
+
+    expect(causeChainSome(outer, (e) => e instanceof TypeError)).toBe(true);
+  });
+
+  test("returns false for a non-object, without consulting the predicate", () => {
+    let consulted = false;
+    const predicate = (): boolean => {
+      consulted = true;
+      return true;
+    };
+
+    expect(causeChainSome("not an error", predicate)).toBe(false);
+    expect(causeChainSome(null, predicate)).toBe(false);
+    expect(causeChainSome(undefined, predicate)).toBe(false);
+    expect(consulted).toBe(false);
+  });
+
+  test("stops on a cause cycle rather than walking it forever", () => {
+    // Counting accessors rather than plain properties: without the seen-set the
+    // walk never returns, which would hang the run instead of failing it.
+    let reads = 0;
+    const outer = new Error("outer");
+    const inner = new Error("inner");
+    const link = (from: Error, to: Error): void => {
+      Object.defineProperty(from, "cause", {
+        configurable: true,
+        get() {
+          reads += 1;
+          if (reads > 8)
+            throw new Error("the cause chain was walked past its own length");
+          return to;
+        },
+      });
+    };
+    link(outer, inner);
+    link(inner, outer);
+
+    expect(causeChainSome(outer, () => false)).toBe(false);
+    expect(reads).toBe(2);
   });
 });
 

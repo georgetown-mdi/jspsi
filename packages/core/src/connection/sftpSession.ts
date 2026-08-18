@@ -47,10 +47,8 @@ import {
   SFTP_ALGORITHMS_ALLOWED_SUBKEYS,
 } from "./sftpConnect";
 import type { PresentedHostKey } from "./sftpConnect";
+import { errorMessage } from "./messageConnection";
 import type { FileTransportClient } from "./fileSyncConnection";
-
-const errMessage = (err: unknown) =>
-  err instanceof Error ? err.message : String(err);
 
 // The connection primitives the subsystem borrows from FileSyncConnection,
 // injected rather than re-derived: `log` and `role` are read live (both are
@@ -386,7 +384,7 @@ export class SftpSession {
                 `connection is refused.`,
               details: [
                 `host key verification error: ` +
-                  redactPrivateKeyMaterial(errMessage(err)),
+                  redactPrivateKeyMaterial(errorMessage(err)),
               ],
             };
             settleVerify(verify, false);
@@ -435,7 +433,7 @@ export class SftpSession {
                 `key could not be read, so the connection is refused.`,
               details: [
                 `host key read error: ` +
-                  redactPrivateKeyMaterial(errMessage(err)),
+                  redactPrivateKeyMaterial(errorMessage(err)),
               ],
             };
             settleVerify(verify, false);
@@ -517,14 +515,14 @@ export class SftpSession {
     if (captured !== undefined) return captured;
     if (captureError !== undefined)
       throw new Error(
-        `failed to read the server's host key: ${errMessage(captureError)}`,
+        `failed to read the server's host key: ${errorMessage(captureError)}`,
       );
     // The connect rejected before the verifier ever fired -- the host key was
     // never presented. Preserve the original cause so the operator can tell an
     // unreachable host from any other SSH failure.
     if (connectError !== undefined)
       throw new Error(
-        `could not read the server's host key: ${errMessage(connectError)}`,
+        `could not read the server's host key: ${errorMessage(connectError)}`,
         { cause: connectError },
       );
     // The connect resolved without the verifier firing: a completed connection
